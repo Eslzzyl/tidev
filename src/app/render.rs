@@ -1,8 +1,5 @@
 use crate::{
-    prompts::PromptPreset,
-    provider_setup::{ConnectDialog, NewProviderStep},
-    session::MessageRole,
-    theme::ThemePalette,
+    prompts::SessionMode, provider_setup::ConnectDialog, session::MessageRole, theme::ThemePalette,
 };
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Position, Rect},
@@ -136,7 +133,7 @@ impl App {
                     ),
                     Span::raw("  "),
                     Span::styled(
-                        PromptPreset::ProviderSetup.description(),
+                        "Create a new OpenAI-compatible provider",
                         Style::default().fg(palette.warning),
                     ),
                 ]))];
@@ -285,23 +282,12 @@ impl App {
                     .wrap(Wrap { trim: false });
                 frame.render_widget(input_block, lines[2]);
 
-                let prompt_line = if matches!(*step, NewProviderStep::SystemPromptPreset) {
-                    format!(
-                        "Presets: {}",
-                        PromptPreset::all()
-                            .iter()
-                            .map(|preset| preset.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )
-                } else {
-                    format!(
-                        "Next: {}",
-                        step.next()
-                            .map(|next| next.label())
-                            .unwrap_or("Save provider")
-                    )
-                };
+                let prompt_line = format!(
+                    "Next: {}",
+                    step.next()
+                        .map(|next| next.label())
+                        .unwrap_or("Save provider")
+                );
                 frame.render_widget(
                     Paragraph::new(prompt_line)
                         .alignment(Alignment::Center)
@@ -382,15 +368,17 @@ impl App {
 
         let model_line = if self.active_model.api_key_present() {
             format!(
-                "{} · {} · API key ready",
+                "{} · {} · {} mode · API key ready",
                 self.active_model.provider_display_name,
-                self.active_model.label()
+                self.active_model.label(),
+                self.mode.as_str()
             )
         } else {
             format!(
-                "{} · {} · API key missing",
+                "{} · {} · {} mode · API key missing",
                 self.active_model.provider_display_name,
-                self.active_model.label()
+                self.active_model.label(),
+                self.mode.as_str()
             )
         };
 
@@ -407,14 +395,14 @@ impl App {
         );
 
         let prompt_title = if self.pending_request {
-            "Prompt (streaming)"
+            format!("{} prompt (streaming)", self.mode.title())
         } else {
-            "Prompt"
+            format!("{} prompt", self.mode.title())
         };
         self.render_input_block(
             frame,
             sections[3],
-            prompt_title,
+            &prompt_title,
             self.composer.placeholder(),
         );
 
@@ -463,7 +451,12 @@ impl App {
 
         self.render_messages(frame, layout[0]);
         self.render_status_line(frame, layout[1]);
-        self.render_input_block(frame, layout[2], "Prompt", self.composer.placeholder());
+        let prompt_title = if self.pending_request {
+            format!("{} prompt (streaming)", self.mode.title())
+        } else {
+            format!("{} prompt", self.mode.title())
+        };
+        self.render_input_block(frame, layout[2], &prompt_title, self.composer.placeholder());
         self.render_command_palette(frame, layout[2]);
     }
 
@@ -514,6 +507,9 @@ impl App {
                 Style::default().fg(palette.accent),
             ),
             Span::raw("  "),
+            Span::styled("mode ", Style::default().fg(palette.accent_soft)),
+            Span::styled(self.mode.as_str(), Style::default().fg(palette.accent)),
+            Span::raw("  "),
             Span::styled("session ", Style::default().fg(palette.accent_soft)),
             Span::styled(
                 short_uuid(self.conversation.session_id),
@@ -557,6 +553,10 @@ impl App {
             },
         )]));
         lines.push(Line::from(vec![Span::styled(
+            format!("Mode: {}", self.mode.title()),
+            Style::default().fg(palette.text),
+        )]));
+        lines.push(Line::from(vec![Span::styled(
             format!("Theme: {}", self.theme.name()),
             Style::default().fg(palette.text),
         )]));
@@ -589,6 +589,9 @@ impl App {
                 .add_modifier(Modifier::BOLD),
         )]));
         lines.push(Line::from("/connect [provider|new]"));
+        lines.push(Line::from("/mode [plan|build]"));
+        lines.push(Line::from("/plan"));
+        lines.push(Line::from("/build"));
         lines.push(Line::from("/theme"));
         lines.push(Line::from("/help"));
         lines.push(Line::from("/model <id>"));
@@ -712,11 +715,19 @@ impl App {
                 MessageRole::Tool => palette.accent_soft,
                 MessageRole::Error => palette.error,
             };
-            let role_label = if message.streaming {
-                format!("{} · streaming", message.role.label())
-            } else {
-                message.role.label().to_string()
+            let mut role_label = match message.role {
+                MessageRole::Tool => message
+                    .tool_name
+                    .as_deref()
+                    .map(|tool_name| format!("tool · {tool_name}"))
+                    .unwrap_or_else(|| message.role.label().to_string()),
+                _ if message.streaming => format!("{} · streaming", message.role.label()),
+                _ => message.role.label().to_string(),
             };
+
+            if matches!(message.role, MessageRole::Assistant) && !message.tool_calls.is_empty() {
+                role_label.push_str(" · tool calls");
+            }
 
             lines.push(Line::from(vec![
                 Span::styled(
@@ -730,13 +741,62 @@ impl App {
                 ),
             ]));
 
+            if !message.reasoning.trim().is_empty() {
+                lines.push(Line::from(vec![Span::styled(
+                    "Thinking",
+                    Style::default()
+                        .fg(palette.muted)
+                        .add_modifier(Modifier::BOLD | Modifier::ITALIC),
+                )]));
+
+                for line in message.reasoning.lines() {
+                    lines.push(Line::from(vec![Span::styled(
+                        format!("  {line}"),
+                        Style::default()
+                            .fg(palette.muted)
+                            .add_modifier(Modifier::ITALIC),
+                    )]));
+                }
+            }
+
+            if !message.tool_calls.is_empty() {
+                lines.push(Line::from(vec![Span::styled(
+                    "Tool calls",
+                    Style::default()
+                        .fg(palette.warning)
+                        .add_modifier(Modifier::BOLD),
+                )]));
+
+                for tool_call in &message.tool_calls {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("  {}", tool_call.name),
+                            Style::default().fg(palette.accent_soft),
+                        ),
+                        Span::raw("  "),
+                        Span::styled(
+                            shorten(&tool_call.id, 24),
+                            Style::default().fg(palette.muted),
+                        ),
+                    ]));
+
+                    let arguments = pretty_tool_arguments(&tool_call.arguments);
+                    for line in arguments.lines() {
+                        lines.push(Line::from(vec![Span::styled(
+                            format!("    {line}"),
+                            Style::default().fg(palette.text),
+                        )]));
+                    }
+                }
+            }
+
             if message.content.is_empty() {
                 if message.streaming {
                     lines.push(Line::from(vec![Span::styled(
                         "▌",
                         Style::default().fg(palette.muted),
                     )]));
-                } else {
+                } else if message.reasoning.trim().is_empty() && message.tool_calls.is_empty() {
                     lines.push(Line::from(vec![Span::styled(
                         "(empty)",
                         Style::default().fg(palette.muted),
@@ -769,6 +829,9 @@ impl App {
             "/connect [provider|new] - connect to, update, or add a provider",
             "/model - list available models",
             "/model <provider:model> - switch active model",
+            "/mode [plan|build] - switch the active mode",
+            "/plan - shortcut for /mode plan",
+            "/build - shortcut for /mode build",
             "/theme [light|dark] - switch theme",
             "/clear - start a fresh session",
             "/quit - exit TiDev",
@@ -781,14 +844,14 @@ impl App {
             "Ctrl+P / Ctrl+N - navigate input history",
             "Ctrl+C - exit",
             "",
-            "Prompt presets:",
+            "Modes:",
         ]
         .into_iter()
         .map(str::to_string)
         .collect::<Vec<_>>();
 
-        for preset in PromptPreset::all() {
-            lines.push(format!("- {} - {}", preset.as_str(), preset.description()));
+        for mode in SessionMode::all() {
+            lines.push(format!("- {} - {}", mode.as_str(), mode.description()));
         }
 
         lines.join("\n")
@@ -835,4 +898,11 @@ fn shorten(value: &str, max_chars: usize) -> String {
 fn short_uuid(id: Uuid) -> String {
     let value = id.simple().to_string();
     value.chars().take(8).collect()
+}
+
+fn pretty_tool_arguments(arguments: &str) -> String {
+    match serde_json::from_str::<serde_json::Value>(arguments) {
+        Ok(value) => serde_json::to_string_pretty(&value).unwrap_or_else(|_| arguments.to_string()),
+        Err(_) => arguments.to_string(),
+    }
 }

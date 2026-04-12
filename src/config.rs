@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::prompts::{default_system_prompt, resolve_system_prompt};
+use crate::prompts::default_system_prompt;
 use crate::theme::ThemeName;
 
 #[derive(Clone, Debug)]
@@ -90,7 +90,6 @@ impl Default for AppConfig {
                 max_output_tokens: 2_048,
                 temperature: 0.7,
                 system_prompt: None,
-                system_prompt_preset: Some("tidev_default".to_string()),
                 supports_streaming: true,
             },
         );
@@ -167,8 +166,6 @@ context_window = 128000
 max_output_tokens = 2048
 temperature = 0.7
 supports_streaming = true
-# Use either `system_prompt` for custom text or `system_prompt_preset` for a built-in template.
-system_prompt_preset = "tidev_default"
 "#
     }
 
@@ -254,7 +251,6 @@ system_prompt_preset = "tidev_default"
                 .system_prompt
                 .clone()
                 .filter(|prompt| !prompt.trim().is_empty())
-                .or_else(|| resolve_system_prompt(model.system_prompt_preset.as_deref()))
                 .unwrap_or_else(default_system_prompt),
             api_key,
         })
@@ -390,8 +386,6 @@ pub struct ModelConfig {
     pub temperature: f32,
     #[serde(default)]
     pub system_prompt: Option<String>,
-    #[serde(default)]
-    pub system_prompt_preset: Option<String>,
     #[serde(default = "default_true")]
     pub supports_streaming: bool,
 }

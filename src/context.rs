@@ -34,7 +34,21 @@ impl ContextManager {
     pub fn estimate_tokens_for_messages(messages: &[Message]) -> usize {
         messages
             .iter()
-            .map(|message| Self::estimate_tokens_for_text(&message.content) + 8)
+            .map(|message| {
+                let tool_tokens: usize = message
+                    .tool_calls
+                    .iter()
+                    .map(|tool_call| {
+                        Self::estimate_tokens_for_text(&tool_call.name)
+                            + Self::estimate_tokens_for_text(&tool_call.arguments)
+                    })
+                    .sum();
+
+                Self::estimate_tokens_for_text(&message.content)
+                    + Self::estimate_tokens_for_text(&message.reasoning)
+                    + tool_tokens
+                    + 8
+            })
             .sum()
     }
 
@@ -143,6 +157,21 @@ impl ContextManager {
                 message.role.label(),
                 message.content
             ));
+
+            if !message.reasoning.trim().is_empty() {
+                prompt.push_str(&format!(
+                    "  thinking: {}\n",
+                    truncate(&message.reasoning, 240)
+                ));
+            }
+
+            for tool_call in &message.tool_calls {
+                prompt.push_str(&format!(
+                    "  tool call: {} {}\n",
+                    tool_call.name,
+                    truncate(&tool_call.arguments, 240)
+                ));
+            }
         }
 
         prompt.push_str(

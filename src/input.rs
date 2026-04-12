@@ -1,4 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone, Debug)]
 pub struct Composer {
@@ -163,17 +164,13 @@ impl Composer {
     }
 
     pub fn cursor_position(&self) -> (u16, u16) {
-        let mut line = 0u16;
-        let mut column = 0u16;
-
-        for ch in self.text[..self.cursor].chars() {
-            if ch == '\n' {
-                line += 1;
-                column = 0;
-            } else {
-                column += 1;
-            }
-        }
+        let prefix = &self.text[..self.cursor];
+        let line = prefix.chars().filter(|ch| *ch == '\n').count() as u16;
+        let column = prefix
+            .rsplit_once('\n')
+            .map(|(_, tail)| tail)
+            .unwrap_or(prefix)
+            .width() as u16;
 
         (line, column)
     }

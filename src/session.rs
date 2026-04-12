@@ -39,11 +39,38 @@ impl MessageRole {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct AssistantTurn {
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub reasoning: String,
+    #[serde(default)]
+    pub tool_calls: Vec<ToolCall>,
+    #[serde(default)]
+    pub finish_reason: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message {
     pub id: Uuid,
     pub role: MessageRole,
     pub content: String,
+    #[serde(default)]
+    pub reasoning: String,
+    #[serde(default)]
+    pub tool_calls: Vec<ToolCall>,
+    #[serde(default)]
+    pub tool_call_id: Option<String>,
+    #[serde(default)]
+    pub tool_name: Option<String>,
     pub created_at: DateTime<Utc>,
     pub streaming: bool,
 }
@@ -54,6 +81,10 @@ impl Message {
             id: Uuid::new_v4(),
             role,
             content: content.into(),
+            reasoning: String::new(),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+            tool_name: None,
             created_at: Utc::now(),
             streaming: false,
         }
@@ -64,8 +95,50 @@ impl Message {
             id: Uuid::new_v4(),
             role,
             content: content.into(),
+            reasoning: String::new(),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+            tool_name: None,
             created_at: Utc::now(),
             streaming: true,
+        }
+    }
+
+    pub fn persisted(
+        id: Uuid,
+        role: MessageRole,
+        content: impl Into<String>,
+        created_at: DateTime<Utc>,
+        streaming: bool,
+    ) -> Self {
+        Self {
+            id,
+            role,
+            content: content.into(),
+            reasoning: String::new(),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+            tool_name: None,
+            created_at,
+            streaming,
+        }
+    }
+
+    pub fn tool_result(
+        tool_call_id: impl Into<String>,
+        tool_name: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            role: MessageRole::Tool,
+            content: content.into(),
+            reasoning: String::new(),
+            tool_calls: Vec::new(),
+            tool_call_id: Some(tool_call_id.into()),
+            tool_name: Some(tool_name.into()),
+            created_at: Utc::now(),
+            streaming: false,
         }
     }
 }
@@ -133,6 +206,7 @@ impl Conversation {
 #[derive(Clone, Debug)]
 pub enum BackendEvent {
     Delta(String),
-    Finished(String),
+    ReasoningDelta(String),
+    Finished(AssistantTurn),
     Failed(String),
 }

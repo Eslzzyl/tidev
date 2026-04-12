@@ -143,18 +143,14 @@ Provider 分为 `openai` 和 `anthropic` 两类，公共配置项包括：
 
 模型配置模块负责验证配置完整性、加载默认预设，并暴露 Provider 与模型切换能力，使界面层仅关心当前模型状态。
 
-### 提示词预设
+### 模式
 
-TiDev 内置了一组可复用的 prompt preset，避免把固定行为约束散落在各个调用点：
+TiDev 使用运行时模式来控制主对话循环，而不是依赖固定的提示词预设：
 
-- `tidev_default`：默认终端编码助手行为
-- `plan`：规划模式，先拆解再实现
-- `review`：代码审查模式，优先找缺陷和回归
-- `apply_patch`：实现模式，强调最小安全改动
-- `compact`：上下文压缩模式，保留关键事实
-- `provider_setup`：provider 配置引导模式
+- `build`：默认实现模式，允许工具调用和代码修改
+- `plan`：只读规划模式，专注拆解任务、风险和假设
 
-默认模型会使用 `tidev_default`，但用户仍然可以在模型配置里直接写入 `system_prompt` 覆盖它。
+用户可以通过 `/mode build`、`/mode plan`、`/build` 或 `/plan` 切换模式。模型配置仍然可以提供自定义 `system_prompt` 作为基础提示词，运行时再叠加当前模式的提醒。
 
 ### LLM 请求层
 

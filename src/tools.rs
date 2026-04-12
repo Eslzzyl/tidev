@@ -1,14 +1,18 @@
 use anyhow::{Context, Result, bail};
+use serde_json::{Value, json};
 use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
 };
 
+use crate::session::ToolCall;
+
 #[derive(Clone, Debug)]
 pub struct ToolDefinition {
     pub name: &'static str,
     pub description: &'static str,
+    pub parameters: Value,
 }
 
 #[derive(Clone, Debug)]
@@ -27,18 +31,66 @@ impl ToolRegistry {
                 ToolDefinition {
                     name: "read_file",
                     description: "Read a text file inside the workspace",
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Path to read relative to the workspace root",
+                            }
+                        },
+                        "required": ["path"],
+                        "additionalProperties": false,
+                    }),
                 },
                 ToolDefinition {
                     name: "write_file",
                     description: "Write a text file inside the workspace",
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Path to write relative to the workspace root",
+                            },
+                            "content": {
+                                "type": "string",
+                                "description": "File contents to write",
+                            }
+                        },
+                        "required": ["path", "content"],
+                        "additionalProperties": false,
+                    }),
                 },
                 ToolDefinition {
                     name: "list_dir",
                     description: "List entries in a directory inside the workspace",
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Directory path relative to the workspace root",
+                            }
+                        },
+                        "required": ["path"],
+                        "additionalProperties": false,
+                    }),
                 },
                 ToolDefinition {
                     name: "shell",
                     description: "Run a shell command in the workspace root",
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "command": {
+                                "type": "string",
+                                "description": "Shell command to execute from the workspace root",
+                            }
+                        },
+                        "required": ["command"],
+                        "additionalProperties": false,
+                    }),
                 },
             ],
         }
@@ -55,6 +107,40 @@ impl ToolRegistry {
     pub fn max_output_bytes(&self) -> usize {
         self.max_output_bytes
     }
+
+    pub fn execute_call(&self, call: &ToolCall) -> Result<String> {
+        let arguments: Value = serde_json::from_str(&call.arguments)
+            .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
+
+        match call.name.as_str() {
+            "read_file" => {
+                let path = argument_string(&arguments, "path")?;
+                read_file(&self.workspace_root, path)
+            }
+            "write_file" => {
+                let path = argument_string(&arguments, "path")?;
+                let content = argument_string(&arguments, "content")?;
+                write_file(&self.workspace_root, path, content)?;
+                Ok(format!("Wrote {path}"))
+            }
+            "list_dir" => {
+                let path = argument_string(&arguments, "path")?;
+                list_dir(&self.workspace_root, path)
+            }
+            "shell" => {
+                let command = argument_string(&arguments, "command")?;
+                run_shell(&self.workspace_root, command, self.max_output_bytes)
+            }
+            other => bail!("unknown tool '{other}'"),
+        }
+    }
+}
+
+fn argument_string<'a>(arguments: &'a Value, key: &str) -> Result<&'a str> {
+    arguments
+        .get(key)
+        .and_then(Value::as_str)
+        .with_context(|| format!("missing string argument '{key}'"))
 }
 
 pub fn read_file(workspace_root: &Path, relative_path: impl AsRef<Path>) -> Result<String> {

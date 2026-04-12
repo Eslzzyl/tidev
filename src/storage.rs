@@ -7,9 +7,9 @@ use std::{
 };
 use uuid::Uuid;
 
-use crate::session::{Conversation, Message, MessageRole};
+use crate::session::{Conversation, Message, MessageRole, ToolCall};
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 pub struct SessionStore {
     connection: Connection,
@@ -40,6 +40,7 @@ impl SessionStore {
             .with_context(|| format!("failed to open {}", path.display()))?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
         connection.execute_batch(SCHEMA_SQL)?;
+        Self::migrate_messages_table(&connection)?;
         connection.execute(
             "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?1)",
             params![SCHEMA_VERSION.to_string()],
@@ -102,13 +103,19 @@ impl SessionStore {
     }
 
     pub fn append_message(&self, session_id: Uuid, message: &Message) -> Result<()> {
+        let tool_calls =
+            serde_json::to_string(&message.tool_calls).context("failed to serialize tool calls")?;
         self.connection.execute(
-            "INSERT INTO messages (id, session_id, role, content, created_at, streaming) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO messages (id, session_id, role, content, reasoning, tool_calls, tool_call_id, tool_name, created_at, streaming) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 message.id.to_string(),
                 session_id.to_string(),
                 message.role.db_value(),
                 message.content,
+                message.reasoning,
+                tool_calls,
+                message.tool_call_id,
+                message.tool_name,
                 message.created_at.to_rfc3339(),
                 if message.streaming { 1_i64 } else { 0_i64 },
             ],
@@ -165,27 +172,38 @@ impl SessionStore {
 
     pub fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, role, content, created_at, streaming FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
+            "SELECT id, role, content, reasoning, tool_calls, tool_call_id, tool_name, created_at, streaming FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
         )?;
 
         let rows = statement.query_map(params![session_id.to_string()], |row| {
             let id = row.get::<_, String>(0)?;
             let role = row.get::<_, String>(1)?;
             let content = row.get::<_, String>(2)?;
-            let created_at = row.get::<_, String>(3)?;
-            let streaming = row.get::<_, i64>(4)? != 0;
+            let reasoning = row.get::<_, String>(3)?;
+            let tool_calls = row.get::<_, String>(4)?;
+            let tool_call_id = row.get::<_, Option<String>>(5)?;
+            let tool_name = row.get::<_, Option<String>>(6)?;
+            let created_at = row.get::<_, String>(7)?;
+            let streaming = row.get::<_, i64>(8)? != 0;
 
-            Ok(Message {
-                id: Uuid::parse_str(&id).map_err(|error| {
+            let tool_calls: Vec<ToolCall> = serde_json::from_str(&tool_calls).unwrap_or_default();
+
+            let mut message = Message::persisted(
+                Uuid::parse_str(&id).map_err(|error| {
                     rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
                 })?,
-                role: MessageRole::from_db_value(&role),
+                MessageRole::from_db_value(&role),
                 content,
-                created_at: parse_datetime(&created_at).map_err(|error| {
-                    rusqlite::Error::FromSqlConversionFailure(3, Type::Text, Box::new(error))
+                parse_datetime(&created_at).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(7, Type::Text, Box::new(error))
                 })?,
                 streaming,
-            })
+            );
+            message.reasoning = reasoning;
+            message.tool_calls = tool_calls;
+            message.tool_call_id = tool_call_id;
+            message.tool_name = tool_name;
+            Ok(message)
         })?;
 
         let mut messages = Vec::new();
@@ -228,6 +246,40 @@ impl SessionStore {
             })?,
         })
     }
+
+    fn migrate_messages_table(connection: &Connection) -> Result<()> {
+        let mut statement = connection.prepare("PRAGMA table_info(messages)")?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+        let mut columns = std::collections::HashSet::new();
+
+        for column in rows {
+            columns.insert(column?);
+        }
+
+        if !columns.contains("reasoning") {
+            connection.execute(
+                "ALTER TABLE messages ADD COLUMN reasoning TEXT NOT NULL DEFAULT ''",
+                [],
+            )?;
+        }
+
+        if !columns.contains("tool_calls") {
+            connection.execute(
+                "ALTER TABLE messages ADD COLUMN tool_calls TEXT NOT NULL DEFAULT '[]'",
+                [],
+            )?;
+        }
+
+        if !columns.contains("tool_call_id") {
+            connection.execute("ALTER TABLE messages ADD COLUMN tool_call_id TEXT", [])?;
+        }
+
+        if !columns.contains("tool_name") {
+            connection.execute("ALTER TABLE messages ADD COLUMN tool_name TEXT", [])?;
+        }
+
+        Ok(())
+    }
 }
 
 fn parse_datetime(value: &str) -> std::result::Result<DateTime<Utc>, chrono::ParseError> {
@@ -254,6 +306,10 @@ CREATE TABLE IF NOT EXISTS messages (
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     role TEXT NOT NULL,
     content TEXT NOT NULL,
+    reasoning TEXT NOT NULL DEFAULT '',
+    tool_calls TEXT NOT NULL DEFAULT '[]',
+    tool_call_id TEXT,
+    tool_name TEXT,
     created_at TEXT NOT NULL,
     streaming INTEGER NOT NULL DEFAULT 0
 );

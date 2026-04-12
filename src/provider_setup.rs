@@ -1,16 +1,20 @@
 use anyhow::{Context, Result, bail};
 use std::collections::BTreeMap;
 
-use crate::{
-    config::{ModelConfig, ProviderConfig},
-    prompts::PromptPreset,
-};
+use crate::config::{ModelConfig, ProviderConfig};
 
 #[derive(Clone, Debug)]
 pub enum ConnectDialog {
-    ProviderPicker { selected: usize },
-    ApiKey { provider_id: String },
-    NewProvider { step: NewProviderStep, draft: NewProviderDraft },
+    ProviderPicker {
+        selected: usize,
+    },
+    ApiKey {
+        provider_id: String,
+    },
+    NewProvider {
+        step: NewProviderStep,
+        draft: NewProviderDraft,
+    },
 }
 
 impl ConnectDialog {
@@ -43,7 +47,6 @@ pub enum NewProviderStep {
     ContextWindow,
     MaxOutputTokens,
     Temperature,
-    SystemPromptPreset,
 }
 
 impl NewProviderStep {
@@ -58,7 +61,6 @@ impl NewProviderStep {
             Self::ContextWindow => "Context window",
             Self::MaxOutputTokens => "Max output tokens",
             Self::Temperature => "Temperature",
-            Self::SystemPromptPreset => "Prompt preset",
         }
     }
 
@@ -72,8 +74,7 @@ impl NewProviderStep {
             Self::ModelDisplayName => Some(Self::ContextWindow),
             Self::ContextWindow => Some(Self::MaxOutputTokens),
             Self::MaxOutputTokens => Some(Self::Temperature),
-            Self::Temperature => Some(Self::SystemPromptPreset),
-            Self::SystemPromptPreset => None,
+            Self::Temperature => None,
         }
     }
 
@@ -88,7 +89,6 @@ impl NewProviderStep {
             Self::ContextWindow => "Context window",
             Self::MaxOutputTokens => "Max output tokens",
             Self::Temperature => "Temperature",
-            Self::SystemPromptPreset => "Prompt preset",
         }
     }
 
@@ -103,7 +103,6 @@ impl NewProviderStep {
             Self::ContextWindow => "128000",
             Self::MaxOutputTokens => "2048",
             Self::Temperature => "0.7",
-            Self::SystemPromptPreset => "tidev_default, plan, review, apply_patch, compact, provider_setup",
         }
     }
 
@@ -118,7 +117,6 @@ impl NewProviderStep {
             Self::ContextWindow => "Total token budget for the model context.",
             Self::MaxOutputTokens => "Maximum tokens the model may generate per turn.",
             Self::Temperature => "Usually 0.0 to 1.0 for deterministic coding help.",
-            Self::SystemPromptPreset => "Choose one of the built-in prompt presets.",
         }
     }
 }
@@ -134,7 +132,6 @@ pub struct NewProviderDraft {
     pub context_window: usize,
     pub max_output_tokens: usize,
     pub temperature: f32,
-    pub system_prompt_preset: Option<String>,
 }
 
 impl Default for NewProviderDraft {
@@ -149,7 +146,6 @@ impl Default for NewProviderDraft {
             context_window: 128_000,
             max_output_tokens: 2_048,
             temperature: 0.7,
-            system_prompt_preset: Some(PromptPreset::TidevDefault.as_str().to_string()),
         }
     }
 }
@@ -160,16 +156,15 @@ impl NewProviderDraft {
             NewProviderStep::ProviderId => self.provider_id.clone(),
             NewProviderStep::DisplayName => self.display_name.clone(),
             NewProviderStep::BaseUrl => self.base_url.clone(),
-            NewProviderStep::ApiKeyEnv => self.api_key_env.clone().unwrap_or_else(|| "none".to_string()),
+            NewProviderStep::ApiKeyEnv => self
+                .api_key_env
+                .clone()
+                .unwrap_or_else(|| "none".to_string()),
             NewProviderStep::ModelId => self.model_id.clone(),
             NewProviderStep::ModelDisplayName => self.model_display_name.clone(),
             NewProviderStep::ContextWindow => self.context_window.to_string(),
             NewProviderStep::MaxOutputTokens => self.max_output_tokens.to_string(),
             NewProviderStep::Temperature => self.temperature.to_string(),
-            NewProviderStep::SystemPromptPreset => self
-                .system_prompt_preset
-                .clone()
-                .unwrap_or_else(|| PromptPreset::TidevDefault.as_str().to_string()),
         }
     }
 
@@ -204,9 +199,6 @@ impl NewProviderDraft {
             NewProviderStep::Temperature => {
                 self.temperature = parse_temperature(value)?;
             }
-            NewProviderStep::SystemPromptPreset => {
-                self.system_prompt_preset = Some(parse_prompt_preset(value)?);
-            }
         }
 
         Ok(())
@@ -223,7 +215,6 @@ impl NewProviderDraft {
                 max_output_tokens: self.max_output_tokens,
                 temperature: self.temperature,
                 system_prompt: None,
-                system_prompt_preset: self.system_prompt_preset,
                 supports_streaming: true,
             },
         );
@@ -259,7 +250,10 @@ fn normalize_identifier(value: &str, label: &str) -> Result<String> {
         bail!("{label} cannot be empty");
     }
 
-    if normalized.chars().all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_')) {
+    if normalized
+        .chars()
+        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_'))
+    {
         Ok(normalized)
     } else {
         bail!("{label} may only contain lowercase letters, numbers, '-' or '_'");
@@ -283,7 +277,12 @@ fn normalize_base_url(value: &str) -> Result<String> {
 fn normalize_optional_env(value: &str) -> Result<Option<String>> {
     let value = value.trim();
 
-    if value.is_empty() || matches!(value.to_ascii_lowercase().as_str(), "none" | "off" | "null" | "-") {
+    if value.is_empty()
+        || matches!(
+            value.to_ascii_lowercase().as_str(),
+            "none" | "off" | "null" | "-"
+        )
+    {
         return Ok(None);
     }
 
@@ -292,7 +291,10 @@ fn normalize_optional_env(value: &str) -> Result<Option<String>> {
         .replace('-', "_")
         .replace(' ', "_");
 
-    if normalized.chars().all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_') {
+    if normalized
+        .chars()
+        .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_')
+    {
         Ok(Some(normalized))
     } else {
         bail!("API key env var may only contain uppercase letters, numbers, and '_'");
@@ -315,29 +317,4 @@ fn parse_temperature(value: &str) -> Result<f32> {
     }
 
     Ok(temperature)
-}
-
-fn parse_prompt_preset(value: &str) -> Result<String> {
-    let value = value.trim();
-
-    if value.is_empty() {
-        return Ok(PromptPreset::TidevDefault.as_str().to_string());
-    }
-
-    let preset = PromptPreset::from_str(value).with_context(|| {
-        format!(
-            "unknown prompt preset '{value}'. Available presets: {}",
-            prompt_preset_names()
-        )
-    })?;
-
-    Ok(preset.as_str().to_string())
-}
-
-pub fn prompt_preset_names() -> String {
-    PromptPreset::all()
-        .iter()
-        .map(|preset| preset.as_str())
-        .collect::<Vec<_>>()
-        .join(", ")
 }

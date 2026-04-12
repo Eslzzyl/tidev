@@ -21,7 +21,6 @@ TiDev can connect to providers directly from the TUI.
 - Context window
 - Max output tokens
 - Temperature
-- Prompt preset
 
 The wizard is intentionally OpenAI-compatible first. That keeps the happy path simple and lines up with the current HTTP client implementation.
 
@@ -29,4 +28,4 @@ The wizard is intentionally OpenAI-compatible first. That keeps the happy path s
 
 - New providers are created in the same TUI session, without editing TOML by hand.
 - Existing providers can still be connected by selecting them in the picker.
-- The provider wizard uses the built-in provider setup prompt preset for consistent guidance.
+- Session mode is controlled separately from provider setup.

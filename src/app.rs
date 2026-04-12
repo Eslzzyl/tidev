@@ -24,8 +24,9 @@ use crate::{
     context::ContextManager,
     input::Composer,
     llm::LlmClient,
+    prompts::SessionMode,
     provider_setup::ConnectDialog,
-    session::{BackendEvent, Conversation, Message, MessageRole},
+    session::{AssistantTurn, BackendEvent, Conversation, Message, MessageRole},
     storage::SessionStore,
     theme::{ThemeManager, ThemeName},
     tools::ToolRegistry,
@@ -47,6 +48,7 @@ struct App {
     store: SessionStore,
     llm: LlmClient,
     theme: ThemeManager,
+    mode: SessionMode,
     active_model: ActiveModel,
     conversation: Conversation,
     context_manager: ContextManager,
@@ -81,6 +83,7 @@ impl App {
         let command_palette = CommandPaletteState::default();
         let composer = Composer::new("Ask TiDev about your code, task, or question...");
         let (backend_tx, backend_rx) = unbounded_channel();
+        let mode = SessionMode::Build;
 
         let fallback_model = Self::resolve_fallback_model(&config, &auth)?;
         let (mut conversation, active_model) = match store.load_latest_session()? {
@@ -154,6 +157,7 @@ impl App {
             store,
             llm,
             theme,
+            mode,
             active_model,
             conversation,
             context_manager: ContextManager::new(),
@@ -176,7 +180,7 @@ impl App {
         terminal.clear().context("failed to clear terminal")?;
 
         loop {
-            self.process_backend_events()?;
+            self.process_backend_events(runtime)?;
             terminal
                 .draw(|frame| self.render(frame))
                 .context("failed to render frame")?;
@@ -297,13 +301,14 @@ impl App {
             return Ok(());
         };
 
-        self.run_command(spec.action, &args, runtime)?;
+        self.run_command(spec.name, spec.action, &args, runtime)?;
         self.commands.mark_used(spec.name);
         Ok(())
     }
 
     fn run_command(
         &mut self,
+        command_name: &str,
         action: CommandAction,
         args: &[String],
         _runtime: &Runtime,
@@ -338,6 +343,9 @@ impl App {
                     self.last_notice = Some("Model catalog shown".to_string());
                 }
             }
+            CommandAction::Mode => {
+                self.switch_mode(command_name, args)?;
+            }
             CommandAction::Clear => {
                 self.start_new_session()?;
             }
@@ -349,6 +357,28 @@ impl App {
             }
         }
 
+        Ok(())
+    }
+
+    fn switch_mode(&mut self, command_name: &str, args: &[String]) -> Result<()> {
+        let target = if matches!(command_name, "plan" | "build") && args.is_empty() {
+            Some(command_name)
+        } else {
+            args.first().map(String::as_str)
+        };
+
+        let Some(target) = target else {
+            self.last_notice = Some("Usage: /mode [plan|build]".to_string());
+            return Ok(());
+        };
+
+        let Some(mode) = SessionMode::from_str(target) else {
+            self.last_notice = Some("Mode must be plan or build".to_string());
+            return Ok(());
+        };
+
+        self.mode = mode;
+        self.last_notice = Some(format!("Mode switched to {}", mode.as_str()));
         Ok(())
     }
 
@@ -467,20 +497,50 @@ impl App {
             }
         }
 
+        self.start_assistant_turn(runtime)
+    }
+
+    fn start_assistant_turn(&mut self, runtime: &Runtime) -> Result<()> {
         let assistant_message = Message::streaming(MessageRole::Assistant, "");
         self.conversation.push(assistant_message);
         self.pending_request = true;
-        self.last_notice = Some("Thinking...".to_string());
+        self.last_notice = Some(match self.mode {
+            SessionMode::Plan => "Planning...".to_string(),
+            SessionMode::Build => "Thinking...".to_string(),
+        });
 
         let llm = self.llm.clone();
-        let model = self.active_model.clone();
+        let model = self.request_model();
         let messages = self.conversation.messages.clone();
+        let tools = if self.mode.is_read_only() {
+            Vec::new()
+        } else {
+            self.tools.definitions().to_vec()
+        };
         let tx = self.backend_tx.clone();
+
         runtime.spawn(async move {
-            llm.stream_chat(model, messages, tx).await;
+            llm.stream_chat(model, messages, tools, tx).await;
         });
 
         Ok(())
+    }
+
+    fn request_model(&self) -> ActiveModel {
+        let mut model = self.active_model.clone();
+        model.system_prompt = self.compose_system_prompt();
+        model
+    }
+
+    fn compose_system_prompt(&self) -> String {
+        let base_prompt = self.active_model.system_prompt.trim();
+        let mode_reminder = self.mode.reminder();
+
+        if base_prompt.is_empty() {
+            mode_reminder.to_string()
+        } else {
+            format!("{base_prompt}\n\n{mode_reminder}")
+        }
     }
 
     fn push_system_message(&mut self, content: impl Into<String>) -> Result<()> {
@@ -496,15 +556,15 @@ impl App {
         Ok(())
     }
 
-    fn process_backend_events(&mut self) -> Result<()> {
+    fn process_backend_events(&mut self, runtime: &Runtime) -> Result<()> {
         while let Ok(event) = self.backend_rx.try_recv() {
-            self.handle_backend_event(event)?;
+            self.handle_backend_event(event, runtime)?;
         }
 
         Ok(())
     }
 
-    fn handle_backend_event(&mut self, event: BackendEvent) -> Result<()> {
+    fn handle_backend_event(&mut self, event: BackendEvent, runtime: &Runtime) -> Result<()> {
         match event {
             BackendEvent::Delta(delta) => {
                 if let Some(message) = self.conversation.messages.last_mut() {
@@ -513,26 +573,15 @@ impl App {
                     }
                 }
             }
-            BackendEvent::Finished(content) => {
-                self.pending_request = false;
-
+            BackendEvent::ReasoningDelta(delta) => {
                 if let Some(message) = self.conversation.messages.last_mut() {
                     if message.streaming && matches!(message.role, MessageRole::Assistant) {
-                        message.content = content;
-                        message.streaming = false;
-                        let persisted = message.clone();
-                        self.store
-                            .append_message(self.conversation.session_id, &persisted)?;
-                        self.last_notice = Some("Response complete".to_string());
-                        return Ok(());
+                        message.reasoning.push_str(&delta);
                     }
                 }
-
-                let message = Message::new(MessageRole::Assistant, content);
-                self.conversation.push(message.clone());
-                self.store
-                    .append_message(self.conversation.session_id, &message)?;
-                self.last_notice = Some("Response complete".to_string());
+            }
+            BackendEvent::Finished(turn) => {
+                self.finish_assistant_turn(turn, runtime)?;
             }
             BackendEvent::Failed(error) => {
                 self.pending_request = false;
@@ -557,6 +606,51 @@ impl App {
                 self.last_notice = Some(error);
             }
         }
+
+        Ok(())
+    }
+
+    fn finish_assistant_turn(&mut self, turn: AssistantTurn, runtime: &Runtime) -> Result<()> {
+        let mut persisted_message = None;
+
+        if let Some(message) = self.conversation.messages.last_mut() {
+            if message.streaming && matches!(message.role, MessageRole::Assistant) {
+                message.content = turn.content.clone();
+                message.reasoning = turn.reasoning.clone();
+                message.tool_calls = turn.tool_calls.clone();
+                message.streaming = false;
+                persisted_message = Some(message.clone());
+            }
+        }
+
+        if let Some(message) = persisted_message {
+            self.store
+                .append_message(self.conversation.session_id, &message)?;
+        }
+
+        if !self.mode.is_read_only() && !turn.tool_calls.is_empty() {
+            self.last_notice = Some(format!("Running {} tool call(s)...", turn.tool_calls.len()));
+
+            for tool_call in turn.tool_calls {
+                let output = self
+                    .tools
+                    .execute_call(&tool_call)
+                    .unwrap_or_else(|error| format!("Tool failed: {error}"));
+                let message = Message::tool_result(tool_call.id, tool_call.name, output);
+                self.conversation.push(message.clone());
+                self.store
+                    .append_message(self.conversation.session_id, &message)?;
+            }
+
+            self.start_assistant_turn(runtime)?;
+            return Ok(());
+        }
+
+        self.pending_request = false;
+        self.last_notice = Some(match turn.finish_reason.as_deref() {
+            Some(reason) if reason != "stop" => format!("Response finished ({reason})"),
+            _ => "Response complete".to_string(),
+        });
 
         Ok(())
     }
