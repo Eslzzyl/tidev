@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 mod connect;
 mod render;
+mod theme_panel;
 
 use crate::{
     commands::{CommandAction, CommandPaletteState, CommandRegistry},
@@ -30,6 +31,7 @@ use crate::{
     storage::SessionStore,
     theme::{ThemeManager, ThemeName},
     tools::ToolRegistry,
+    app::theme_panel::ThemePanelState,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,6 +58,7 @@ struct App {
     commands: CommandRegistry,
     command_palette: CommandPaletteState,
     connect_dialog: Option<ConnectDialog>,
+    theme_panel: Option<ThemePanelState>,
     composer: Composer,
     pending_request: bool,
     last_notice: Option<String>,
@@ -165,6 +168,7 @@ impl App {
             commands,
             command_palette,
             connect_dialog: None,
+            theme_panel: None,
             composer,
             pending_request: false,
             last_notice: None,
@@ -215,6 +219,23 @@ impl App {
         Ok(())
     }
 
+    fn handle_theme_panel_key(&mut self, key: KeyEvent) -> Result<()> {
+        if let Some(panel) = &mut self.theme_panel {
+            match key.code {
+                KeyCode::Up => panel.move_up(),
+                KeyCode::Down => panel.move_down(),
+                KeyCode::Enter => {
+                    let _ = self.close_theme_panel(true);
+                }
+                KeyCode::Esc => {
+                    let _ = self.close_theme_panel(false);
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     fn handle_key_event(&mut self, key: KeyEvent, runtime: &Runtime) -> Result<()> {
         if matches!(key.code, KeyCode::Char('c')) && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.should_quit = true;
@@ -229,6 +250,10 @@ impl App {
         if let Some(dialog) = self.connect_dialog.clone() {
             self.handle_connect_dialog_key(key, dialog)?;
             return Ok(());
+        }
+
+        if self.theme_panel.is_some() {
+            return self.handle_theme_panel_key(key);
         }
 
         if !self.command_palette.visible && key.code == KeyCode::Tab {
@@ -364,18 +389,27 @@ impl App {
     }
 
     fn apply_theme_command(&mut self, args: &[String]) -> Result<()> {
-        let theme = match args.first().map(String::as_str) {
-            Some(value) => match ThemeName::parse(value) {
-                Some(theme) => theme,
-                None => {
-                    self.last_notice = Some(self.theme_help_message());
-                    return Ok(());
-                }
-            },
-            None => self.config.theme_name().toggle(),
-        };
+        let direct_theme = args.first().and_then(|v| ThemeName::parse(v));
 
-        self.apply_theme(theme)?;
+        if let Some(theme) = direct_theme {
+            self.apply_theme(theme)?;
+            Ok(())
+        } else {
+            self.open_theme_panel();
+            Ok(())
+        }
+    }
+
+    fn open_theme_panel(&mut self) {
+        self.theme_panel = Some(ThemePanelState::new(self.theme.palette().name));
+    }
+
+    fn close_theme_panel(&mut self, apply: bool) -> Result<()> {
+        if let Some(panel) = self.theme_panel.take() {
+            if apply {
+                self.apply_theme(panel.preview_theme)?;
+            }
+        }
         Ok(())
     }
 

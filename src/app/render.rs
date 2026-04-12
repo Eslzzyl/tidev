@@ -1,5 +1,9 @@
 use crate::{
-    prompts::SessionMode, provider_setup::ConnectDialog, session::MessageRole, theme::ThemePalette,
+    app::theme_panel::ThemePanelState,
+    prompts::SessionMode,
+    provider_setup::ConnectDialog,
+    session::MessageRole,
+    theme::{ThemeManager, ThemePalette},
 };
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Position, Rect},
@@ -312,6 +316,9 @@ impl App {
         }
         let area = frame.area();
         self.render_connect_dialog(frame, area);
+        if let Some(panel) = &self.theme_panel {
+            self.render_theme_panel(frame, area, panel);
+        }
     }
 
     fn render_welcome(&self, frame: &mut Frame<'_>) {
@@ -874,6 +881,57 @@ impl App {
         }
 
         lines.join("\n")
+    }
+
+    fn render_theme_panel(&self, frame: &mut Frame<'_>, area: Rect, panel: &ThemePanelState) {
+        let preview_manager = ThemeManager::new(panel.preview_theme.as_str());
+        let preview_palette = preview_manager.palette();
+        let current_palette = self.palette();
+        let overlay = centered_rect(40, 12, area);
+        let themes = ThemePanelState::themes();
+
+        let items: Vec<ListItem> = themes
+            .iter()
+            .enumerate()
+            .map(|(i, theme)| {
+                let theme_manager = ThemeManager::new(theme.as_str());
+                let palette = theme_manager.palette();
+                let selected = i == panel.selected_index;
+                let bg = if selected {
+                    palette.selection_bg
+                } else {
+                    palette.panel_alt
+                };
+                ListItem::new(Line::from(vec![Span::styled(
+                    format!("  {}  ", theme.as_str()),
+                    Style::default()
+                        .bg(bg)
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                )]))
+            })
+            .collect();
+
+        let mut state = ListState::default();
+        state.select(Some(panel.selected_index));
+
+        let panel_block = Block::default()
+            .title(" Theme ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(current_palette.border_active()));
+
+        let list = List::new(items)
+            .style(Style::default().bg(current_palette.panel_alt).fg(current_palette.text))
+            .highlight_style(
+                Style::default()
+                    .bg(preview_palette.selection_bg)
+                    .fg(preview_palette.selection_fg)
+                    .add_modifier(Modifier::BOLD),
+            );
+
+        frame.render_widget(Clear, overlay);
+        frame.render_widget(panel_block, overlay);
+        frame.render_stateful_widget(list, overlay.inner(Margin { horizontal: 1, vertical: 1 }), &mut state);
     }
 }
 
