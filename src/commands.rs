@@ -268,10 +268,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         action: CommandAction::Help,
     },
     CommandSpec {
-        name: "quit",
-        aliases: &["exit", "q"],
+        name: "exit",
+        aliases: &["quit", "q"],
         description: "Exit TiDev",
-        usage: "/quit",
+        usage: "/exit",
         action: CommandAction::Quit,
     },
 ];
