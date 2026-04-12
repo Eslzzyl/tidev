@@ -34,13 +34,15 @@ impl App {
         }
 
         let palette = self.palette();
-        let width = area.width.min(68).max(28);
+        let width = area.width.min(72).max(28).min(area.width);
         let height = (self.command_palette.suggestions.len() as u16)
             .min(6)
             .saturating_add(2);
-        let x = area.x + 1;
-        let y = area.bottom().saturating_sub(height.saturating_add(1));
-        let rect = Rect::new(x, y, width.min(area.width.saturating_sub(2)), height);
+        let rect = Rect::new(area.x, area.y.saturating_sub(height), width, height);
+        let inner = rect.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
 
         let items = self
             .command_palette
@@ -66,13 +68,14 @@ impl App {
         let mut state = ListState::default();
         state.select(Some(self.command_palette.selected_index));
 
+        let panel = Block::default()
+            .style(Style::default().bg(palette.panel_alt))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.border_active()))
+            .title(format!("Commands · /{}", self.command_palette.query));
+
         let list = List::new(items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(palette.border_active()))
-                    .title(format!("Commands · /{}", self.command_palette.query)),
-            )
+            .style(Style::default().bg(palette.panel_alt).fg(palette.text))
             .highlight_style(
                 Style::default()
                     .bg(palette.selection_bg)
@@ -81,7 +84,8 @@ impl App {
             );
 
         frame.render_widget(Clear, rect);
-        frame.render_stateful_widget(list, rect, &mut state);
+        frame.render_widget(panel, rect);
+        frame.render_stateful_widget(list, inner, &mut state);
     }
 
     fn render_connect_dialog(&self, frame: &mut Frame<'_>, area: Rect) {
@@ -92,6 +96,33 @@ impl App {
         let palette = self.palette();
         let overlay = centered_rect(area.width.min(80), area.height.min(24), area);
         frame.render_widget(Clear, overlay);
+
+        let dialog_title = match dialog {
+            ConnectDialog::ProviderPicker { .. } => "Connect provider".to_string(),
+            ConnectDialog::ApiKey { provider_id } => {
+                let label = self
+                    .config
+                    .provider_display_name(provider_id)
+                    .unwrap_or(provider_id)
+                    .to_string();
+                format!("API key · {label}")
+            }
+            ConnectDialog::NewProvider { step, .. } => {
+                format!("Create provider · {}", step.title())
+            }
+        };
+
+        let panel = Block::default()
+            .style(Style::default().bg(palette.panel))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.border_active()))
+            .title(dialog_title);
+
+        frame.render_widget(panel, overlay);
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
 
         match dialog {
             ConnectDialog::ProviderPicker { selected } => {
@@ -144,12 +175,7 @@ impl App {
                 state.select(Some(*selected));
 
                 let list = List::new(items)
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(Style::default().fg(palette.border_active()))
-                            .title("Connect provider"),
-                    )
+                    .style(Style::default().bg(palette.panel).fg(palette.text))
                     .highlight_style(
                         Style::default()
                             .bg(palette.selection_bg)
@@ -157,7 +183,7 @@ impl App {
                             .add_modifier(Modifier::BOLD),
                     );
 
-                frame.render_stateful_widget(list, overlay, &mut state);
+                frame.render_stateful_widget(list, inner, &mut state);
             }
             ConnectDialog::ApiKey { provider_id } => {
                 let label = self
@@ -165,10 +191,6 @@ impl App {
                     .provider_display_name(provider_id)
                     .unwrap_or(provider_id)
                     .to_string();
-                let inner = overlay.inner(Margin {
-                    horizontal: 1,
-                    vertical: 1,
-                });
 
                 let lines = Layout::vertical([
                     Constraint::Length(2),
@@ -183,6 +205,7 @@ impl App {
                         .alignment(Alignment::Center)
                         .style(
                             Style::default()
+                                .bg(palette.panel)
                                 .fg(palette.text)
                                 .add_modifier(Modifier::BOLD),
                         ),
@@ -194,7 +217,7 @@ impl App {
                         "The key will be stored in auth.json and used for future requests.",
                     )
                     .alignment(Alignment::Center)
-                    .style(Style::default().fg(palette.muted)),
+                    .style(Style::default().bg(palette.panel).fg(palette.muted)),
                     lines[1],
                 );
 
@@ -211,23 +234,18 @@ impl App {
                             .border_style(Style::default().fg(palette.border_active()))
                             .title("API Key"),
                     )
-                    .style(Style::default().fg(palette.text))
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.text))
                     .wrap(Wrap { trim: false });
                 frame.render_widget(input_block, lines[2]);
 
                 frame.render_widget(
                     Paragraph::new("Enter to save · Esc to cancel")
                         .alignment(Alignment::Center)
-                        .style(Style::default().fg(palette.muted)),
+                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
                     lines[3],
                 );
             }
             ConnectDialog::NewProvider { step, draft: _ } => {
-                let inner = overlay.inner(Margin {
-                    horizontal: 1,
-                    vertical: 1,
-                });
-
                 let lines = Layout::vertical([
                     Constraint::Length(2),
                     Constraint::Length(2),
@@ -242,6 +260,7 @@ impl App {
                         .alignment(Alignment::Center)
                         .style(
                             Style::default()
+                                .bg(palette.panel)
                                 .fg(palette.text)
                                 .add_modifier(Modifier::BOLD),
                         ),
@@ -251,7 +270,7 @@ impl App {
                 frame.render_widget(
                     Paragraph::new(step.help())
                         .alignment(Alignment::Center)
-                        .style(Style::default().fg(palette.muted)),
+                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
                     lines[1],
                 );
 
@@ -262,7 +281,7 @@ impl App {
                             .border_style(Style::default().fg(palette.border_active()))
                             .title(step.label()),
                     )
-                    .style(Style::default().fg(palette.text))
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.text))
                     .wrap(Wrap { trim: false });
                 frame.render_widget(input_block, lines[2]);
 
@@ -286,14 +305,14 @@ impl App {
                 frame.render_widget(
                     Paragraph::new(prompt_line)
                         .alignment(Alignment::Center)
-                        .style(Style::default().fg(palette.accent_soft)),
+                        .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
                     lines[3],
                 );
 
                 frame.render_widget(
                     Paragraph::new("Enter to continue · Esc to cancel")
                         .alignment(Alignment::Center)
-                        .style(Style::default().fg(palette.muted)),
+                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
                     lines[4],
                 );
             }
@@ -305,9 +324,7 @@ impl App {
             Screen::Welcome => self.render_welcome(frame),
             Screen::Chat => self.render_chat(frame),
         }
-
         let area = frame.area();
-        self.render_command_palette(frame, area);
         self.render_connect_dialog(frame, area);
     }
 
@@ -407,6 +424,8 @@ impl App {
         .alignment(Alignment::Center)
         .style(Style::default().fg(palette.accent_soft));
         frame.render_widget(hint, sections[4]);
+
+        self.render_command_palette(frame, sections[3]);
     }
 
     fn render_chat(&self, frame: &mut Frame<'_>) {
@@ -445,6 +464,7 @@ impl App {
         self.render_messages(frame, layout[0]);
         self.render_status_line(frame, layout[1]);
         self.render_input_block(frame, layout[2], "Prompt", self.composer.placeholder());
+        self.render_command_palette(frame, layout[2]);
     }
 
     fn render_messages(&self, frame: &mut Frame<'_>, area: Rect) {
