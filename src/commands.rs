@@ -5,7 +5,6 @@ pub enum CommandAction {
     Help,
     Connect,
     Model,
-    Mode,
     Clear,
     Theme,
     Quit,
@@ -238,13 +237,6 @@ pub static COMMANDS: &[CommandSpec] = &[
         description: "List or switch models",
         usage: "/model [provider:model]",
         action: CommandAction::Model,
-    },
-    CommandSpec {
-        name: "mode",
-        aliases: &["plan", "build"],
-        description: "Switch between plan and build modes",
-        usage: "/mode [plan|build]",
-        action: CommandAction::Mode,
     },
     CommandSpec {
         name: "theme",

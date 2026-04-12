@@ -589,13 +589,19 @@ impl App {
                 .add_modifier(Modifier::BOLD),
         )]));
         lines.push(Line::from("/connect [provider|new]"));
-        lines.push(Line::from("/mode [plan|build]"));
-        lines.push(Line::from("/plan"));
-        lines.push(Line::from("/build"));
         lines.push(Line::from("/theme"));
         lines.push(Line::from("/help"));
         lines.push(Line::from("/model <id>"));
         lines.push(Line::from("/clear"));
+        lines.push(Line::from("/exit"));
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![Span::styled(
+            "Keyboard Shortcuts",
+            Style::default()
+                .fg(palette.accent)
+                .add_modifier(Modifier::BOLD),
+        )]));
+        lines.push(Line::from("Tab - switch mode"));
         lines.push(Line::from("/quit"));
         lines.push(Line::from(""));
         lines.push(Line::from(vec![Span::styled(
@@ -829,17 +835,14 @@ impl App {
             "/connect [provider|new] - connect to, update, or add a provider",
             "/model - list available models",
             "/model <provider:model> - switch active model",
-            "/mode [plan|build] - switch the active mode",
-            "/plan - shortcut for /mode plan",
-            "/build - shortcut for /mode build",
             "/theme [light|dark] - switch theme",
             "/clear - start a fresh session",
-            "/quit - exit TiDev",
+            "/exit - exit TiDev",
             "",
             "Keys:",
             "Enter - send prompt or execute the highlighted slash command",
             "Shift+Enter - insert newline",
-            "Tab - complete the highlighted slash command",
+            "Tab - switch mode (when no command is being entered)",
             "Up/Down - move through command suggestions",
             "Ctrl+P / Ctrl+N - navigate input history",
             "Ctrl+C - exit",

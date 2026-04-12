@@ -48,6 +48,13 @@ impl SessionMode {
             Self::Build => build_mode_reminder(),
         }
     }
+
+    pub fn toggle(self) -> Self {
+        match self {
+            Self::Plan => Self::Build,
+            Self::Build => Self::Plan,
+        }
+    }
 }
 
 pub fn default_system_prompt() -> String {

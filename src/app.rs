@@ -231,6 +231,12 @@ impl App {
             return Ok(());
         }
 
+        if !self.command_palette.visible && key.code == KeyCode::Tab {
+            self.mode = self.mode.toggle();
+            self.last_notice = Some(format!("Mode switched to {}", self.mode.as_str()));
+            return Ok(());
+        }
+
         if self.command_palette.visible {
             match key.code {
                 KeyCode::Esc => {
@@ -308,7 +314,7 @@ impl App {
 
     fn run_command(
         &mut self,
-        command_name: &str,
+        _command_name: &str,
         action: CommandAction,
         args: &[String],
         _runtime: &Runtime,
@@ -343,9 +349,6 @@ impl App {
                     self.last_notice = Some("Model catalog shown".to_string());
                 }
             }
-            CommandAction::Mode => {
-                self.switch_mode(command_name, args)?;
-            }
             CommandAction::Clear => {
                 self.start_new_session()?;
             }
@@ -357,28 +360,6 @@ impl App {
             }
         }
 
-        Ok(())
-    }
-
-    fn switch_mode(&mut self, command_name: &str, args: &[String]) -> Result<()> {
-        let target = if matches!(command_name, "plan" | "build") && args.is_empty() {
-            Some(command_name)
-        } else {
-            args.first().map(String::as_str)
-        };
-
-        let Some(target) = target else {
-            self.last_notice = Some("Usage: /mode [plan|build]".to_string());
-            return Ok(());
-        };
-
-        let Some(mode) = SessionMode::from_str(target) else {
-            self.last_notice = Some("Mode must be plan or build".to_string());
-            return Ok(());
-        };
-
-        self.mode = mode;
-        self.last_notice = Some(format!("Mode switched to {}", mode.as_str()));
         Ok(())
     }
 
