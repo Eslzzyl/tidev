@@ -4,13 +4,20 @@ use crate::theme::ThemeName;
 pub struct ThemePanelState {
     pub selected_index: usize,
     pub preview_theme: ThemeName,
+    pub original_theme: ThemeName,
 }
 
 impl ThemePanelState {
     pub fn new(current: ThemeName) -> Self {
+        let selected_index = Self::themes()
+            .iter()
+            .position(|theme| *theme == current)
+            .unwrap_or(0);
+
         Self {
-            selected_index: 0,
+            selected_index,
             preview_theme: current,
+            original_theme: current,
         }
     }
 

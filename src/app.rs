@@ -222,8 +222,20 @@ impl App {
     fn handle_theme_panel_key(&mut self, key: KeyEvent) -> Result<()> {
         if let Some(panel) = &mut self.theme_panel {
             match key.code {
-                KeyCode::Up => panel.move_up(),
-                KeyCode::Down => panel.move_down(),
+                KeyCode::Up => {
+                    let previous_theme = panel.preview_theme;
+                    panel.move_up();
+                    if panel.preview_theme != previous_theme {
+                        self.theme.set_mode(panel.preview_theme);
+                    }
+                }
+                KeyCode::Down => {
+                    let previous_theme = panel.preview_theme;
+                    panel.move_down();
+                    if panel.preview_theme != previous_theme {
+                        self.theme.set_mode(panel.preview_theme);
+                    }
+                }
                 KeyCode::Enter => {
                     let _ = self.close_theme_panel(true);
                 }
@@ -408,6 +420,8 @@ impl App {
         if let Some(panel) = self.theme_panel.take() {
             if apply {
                 self.apply_theme(panel.preview_theme)?;
+            } else {
+                self.theme.set_mode(panel.original_theme);
             }
         }
         Ok(())

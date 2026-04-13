@@ -3,7 +3,7 @@ use crate::{
     prompts::SessionMode,
     provider_setup::ConnectDialog,
     session::MessageRole,
-    theme::{ThemeManager, ThemePalette},
+    theme::ThemePalette,
 };
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Position, Rect},
@@ -875,29 +875,17 @@ impl App {
     }
 
     fn render_theme_panel(&self, frame: &mut Frame<'_>, area: Rect, panel: &ThemePanelState) {
-        let preview_manager = ThemeManager::new(panel.preview_theme.as_str());
-        let preview_palette = preview_manager.palette();
         let current_palette = self.palette();
         let overlay = centered_rect(40, 12, area);
         let themes = ThemePanelState::themes();
 
         let items: Vec<ListItem> = themes
             .iter()
-            .enumerate()
-            .map(|(i, theme)| {
-                let theme_manager = ThemeManager::new(theme.as_str());
-                let palette = theme_manager.palette();
-                let selected = i == panel.selected_index;
-                let bg = if selected {
-                    palette.selection_bg
-                } else {
-                    palette.panel_alt
-                };
+            .map(|theme| {
                 ListItem::new(Line::from(vec![Span::styled(
                     format!("  {}  ", theme.as_str()),
                     Style::default()
-                        .bg(bg)
-                        .fg(palette.text)
+                        .fg(current_palette.text)
                         .add_modifier(Modifier::BOLD),
                 )]))
             })
@@ -907,6 +895,7 @@ impl App {
         state.select(Some(panel.selected_index));
 
         let panel_block = Block::default()
+            .style(Style::default().bg(current_palette.panel_alt))
             .title(" Theme ")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(current_palette.border_active()));
@@ -919,8 +908,8 @@ impl App {
             )
             .highlight_style(
                 Style::default()
-                    .bg(preview_palette.selection_bg)
-                    .fg(preview_palette.selection_fg)
+                    .bg(current_palette.selection_bg)
+                    .fg(current_palette.selection_fg)
                     .add_modifier(Modifier::BOLD),
             );
 
