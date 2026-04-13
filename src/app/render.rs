@@ -8,6 +8,7 @@ use crate::{
     provider_setup::{ConnectDialog, EditProviderStep, NewProviderStep},
     session::MessageRole,
     theme::ThemePalette,
+    wrapping::{adaptive_wrap_lines, RtOptions},
 };
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Position, Rect},
@@ -1157,13 +1158,39 @@ impl App {
                 }
             }
 
-            if message.content.is_empty() {
-                if message.streaming {
+            let is_streaming_assistant = message.streaming && matches!(message.role, MessageRole::Assistant);
+
+            if is_streaming_assistant {
+                if !self.streaming_preview_lines.is_empty() {
+                    if let Some(width) = content_width {
+                        let wrapped_preview = adaptive_wrap_lines(
+                            self.streaming_preview_lines.iter(),
+                            RtOptions::new(width),
+                        );
+                        lines.extend(wrapped_preview);
+                    } else {
+                        lines.extend(self.streaming_preview_lines.clone());
+                    }
+                }
+
+                let tail = message
+                    .content
+                    .rsplit_once('\n')
+                    .map(|(_, tail)| tail)
+                    .unwrap_or(message.content.as_str());
+                if !tail.is_empty() {
                     lines.push(Line::from(vec![Span::styled(
-                        "▌",
-                        Style::default().fg(palette.muted),
+                        tail.to_string(),
+                        Style::default().fg(role_color),
                     )]));
-                } else if message.reasoning.trim().is_empty() && message.tool_calls.is_empty() {
+                }
+
+                lines.push(Line::from(vec![Span::styled(
+                    "▌",
+                    Style::default().fg(palette.muted),
+                )]));
+            } else if message.content.is_empty() {
+                if message.reasoning.trim().is_empty() && message.tool_calls.is_empty() {
                     lines.push(Line::from(vec![Span::styled(
                         "(empty)",
                         Style::default().fg(palette.muted),
@@ -1176,13 +1203,6 @@ impl App {
                     Some(self.workspace_root.as_path()),
                     &mut lines,
                 );
-
-                if message.streaming {
-                    lines.push(Line::from(vec![Span::styled(
-                        "▌",
-                        Style::default().fg(palette.muted),
-                    )]));
-                }
             }
 
             lines.push(Line::from(""));

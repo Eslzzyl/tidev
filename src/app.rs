@@ -8,6 +8,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
+use ratatui::text::Line;
 use std::{env, io, path::PathBuf, time::Duration};
 use tokio::{
     runtime::Runtime,
@@ -30,6 +31,7 @@ use crate::{
     context::ContextManager,
     input::Composer,
     llm::LlmClient,
+    markdown_stream::MarkdownStreamCollector,
     prompts::SessionMode,
     provider_setup::ConnectDialog,
     session::{AssistantTurn, BackendEvent, Conversation, Message, MessageRole},
@@ -71,6 +73,8 @@ struct App {
     last_notice: Option<String>,
     backend_tx: UnboundedSender<BackendEvent>,
     backend_rx: UnboundedReceiver<BackendEvent>,
+    streaming_markdown: Option<MarkdownStreamCollector>,
+    streaming_preview_lines: Vec<Line<'static>>,
 }
 
 pub fn run() -> Result<()> {
@@ -191,6 +195,8 @@ impl App {
             last_notice,
             backend_tx,
             backend_rx,
+            streaming_markdown: None,
+            streaming_preview_lines: Vec::new(),
         })
     }
 
@@ -639,6 +645,11 @@ impl App {
     fn start_assistant_turn(&mut self, runtime: &Runtime) -> Result<()> {
         let assistant_message = Message::streaming(MessageRole::Assistant, "");
         self.conversation.push(assistant_message);
+        self.streaming_markdown = Some(MarkdownStreamCollector::new(
+            None,
+            self.workspace_root.as_path(),
+        ));
+        self.streaming_preview_lines.clear();
         self.pending_request = true;
         self.last_notice = Some(match self.mode {
             SessionMode::Plan => "Planning...".to_string(),
@@ -699,6 +710,10 @@ impl App {
     fn handle_backend_event(&mut self, event: BackendEvent, runtime: &Runtime) -> Result<()> {
         match event {
             BackendEvent::Delta(delta) => {
+                if let Some(collector) = self.streaming_markdown.as_mut() {
+                    collector.push_delta(&delta);
+                    self.streaming_preview_lines.extend(collector.commit_complete_lines());
+                }
                 if let Some(message) = self.conversation.messages.last_mut() {
                     if message.streaming && matches!(message.role, MessageRole::Assistant) {
                         message.content.push_str(&delta);
@@ -719,6 +734,8 @@ impl App {
                 self.pending_request = false;
                 self.pending_tool_execution = None;
                 self.permission_dialog = None;
+                self.streaming_markdown = None;
+                self.streaming_preview_lines.clear();
 
                 if let Some(message) = self.conversation.messages.last_mut() {
                     if message.streaming && matches!(message.role, MessageRole::Assistant) {
@@ -761,6 +778,13 @@ impl App {
             self.store
                 .append_message(self.conversation.session_id, &message)?;
         }
+
+        if let Some(collector) = self.streaming_markdown.as_mut() {
+            self.streaming_preview_lines
+                .extend(collector.finalize_and_drain());
+        }
+        self.streaming_markdown = None;
+        self.streaming_preview_lines.clear();
 
         if !turn.tool_calls.is_empty() {
             self.last_notice = Some(format!("Running {} tool call(s)...", turn.tool_calls.len()));

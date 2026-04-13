@@ -1,4 +1,7 @@
 use crate::render::highlight::highlight_code_to_lines;
+use crate::render::line_utils::push_owned_lines;
+use crate::wrapping::adaptive_wrap_line;
+use crate::wrapping::RtOptions;
 use pulldown_cmark::CodeBlockKind;
 use pulldown_cmark::CowStr;
 use pulldown_cmark::Event;
@@ -95,11 +98,11 @@ pub(crate) fn render_markdown_text_with_width_and_cwd(
     width: Option<usize>,
     cwd: Option<&Path>,
 ) -> Text<'static> {
-    let _ = width;
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
     let parser = Parser::new_ext(input, options);
     let mut writer = Writer::new(parser, cwd);
+    writer.wrap_width = width;
     writer.run();
     writer.text
 }
@@ -129,6 +132,7 @@ where
     current_subsequent_indent: Vec<Span<'static>>,
     current_line_style: Style,
     current_line_in_code_block: bool,
+    wrap_width: Option<usize>,
 }
 
 impl<'a, I> Writer<'a, I>
@@ -158,6 +162,7 @@ where
             current_subsequent_indent: Vec::new(),
             current_line_style: Style::default(),
             current_line_in_code_block: false,
+            wrap_width: None,
         }
     }
 
@@ -567,10 +572,29 @@ where
     fn flush_current_line(&mut self) {
         if let Some(line) = self.current_line_content.take() {
             let style = self.current_line_style;
-            let mut spans = self.current_initial_indent.clone();
-            let mut line = line;
-            spans.append(&mut line.spans);
-            self.text.lines.push(Line::from_iter(spans).style(style));
+            let line = line.style(style);
+
+            let should_wrap = self
+                .wrap_width
+                .is_some_and(|width| width > 0)
+                && !self.current_line_in_code_block
+                && !line.spans.is_empty();
+
+            if should_wrap {
+                let width = self.wrap_width.expect("wrap_width checked above");
+                let wrapped = adaptive_wrap_line(
+                    &line,
+                    RtOptions::new(width)
+                        .initial_indent(Line::from(self.current_initial_indent.clone()))
+                        .subsequent_indent(Line::from(self.current_subsequent_indent.clone())),
+                );
+                push_owned_lines(&wrapped, &mut self.text.lines);
+            } else {
+                let mut spans = self.current_initial_indent.clone();
+                let mut line = line;
+                spans.append(&mut line.spans);
+                self.text.lines.push(Line::from_iter(spans).style(style));
+            }
             self.current_initial_indent.clear();
             self.current_subsequent_indent.clear();
             self.current_line_in_code_block = false;
