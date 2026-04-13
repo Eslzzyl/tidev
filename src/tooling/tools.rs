@@ -1,10 +1,9 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use grep::{
     regex::RegexMatcherBuilder,
-    searcher::{SearcherBuilder, sinks},
+    searcher::{sinks, SearcherBuilder},
 };
 use ignore::WalkBuilder;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -12,9 +11,11 @@ use std::{
     path::{Component, Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
-use uuid::Uuid;
 
-use crate::{prompts::SessionMode, session::ToolCall, storage::SessionStore};
+use crate::{session::ToolCall, storage::SessionStore};
+
+use super::schema::ToolArgs;
+use super::{canonical_tool_name, ToolDefinition, ToolPermission};
 
 macro_rules! tool_field_type {
     (string($desc:literal)) => {
@@ -161,269 +162,6 @@ macro_rules! tool_args {
     };
 }
 
-pub trait ToolArgs: Sized + Clone + std::fmt::Debug + Serialize + DeserializeOwned {
-    fn schema() -> Value;
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolPermission {
-    Read,
-    Search,
-    Write,
-    Edit,
-    Execute,
-    Session,
-}
-
-impl ToolPermission {
-    pub fn is_allowed_in(self, mode: SessionMode) -> bool {
-        match mode {
-            SessionMode::Plan => matches!(self, Self::Read | Self::Search | Self::Session),
-            SessionMode::Build => true,
-        }
-    }
-
-    pub fn needs_confirmation(self) -> bool {
-        matches!(
-            self,
-            Self::Write | Self::Edit | Self::Execute | Self::Session
-        )
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct ToolDefinition {
-    pub name: &'static str,
-    pub description: &'static str,
-    pub parameters: Value,
-    pub permission: ToolPermission,
-}
-
-impl ToolDefinition {
-    pub fn new<Args>(
-        name: &'static str,
-        description: &'static str,
-        permission: ToolPermission,
-    ) -> Self
-    where
-        Args: ToolArgs,
-    {
-        Self {
-            name,
-            description,
-            parameters: Args::schema(),
-            permission,
-        }
-    }
-
-    pub fn needs_confirmation(&self) -> bool {
-        self.permission.needs_confirmation()
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct ToolRegistry {
-    workspace_root: PathBuf,
-    max_output_bytes: usize,
-    definitions: Vec<ToolDefinition>,
-}
-
-impl ToolRegistry {
-    pub fn new(workspace_root: PathBuf) -> Self {
-        Self {
-            workspace_root,
-            max_output_bytes: 12_000,
-            definitions: vec![
-                ToolDefinition::new::<ReadArgs>(
-                    "read",
-                    "Read a text file inside the workspace",
-                    ToolPermission::Read,
-                ),
-                ToolDefinition::new::<WriteArgs>(
-                    "write",
-                    "Write a text file inside the workspace",
-                    ToolPermission::Write,
-                ),
-                ToolDefinition::new::<EditArgs>(
-                    "edit",
-                    "Edit a file by replacing text inside it",
-                    ToolPermission::Edit,
-                ),
-                ToolDefinition::new::<ListArgs>(
-                    "list",
-                    "List entries in a directory inside the workspace",
-                    ToolPermission::Read,
-                ),
-                ToolDefinition::new::<GlobArgs>(
-                    "glob",
-                    "Find files matching a glob pattern inside the workspace",
-                    ToolPermission::Search,
-                ),
-                ToolDefinition::new::<GrepArgs>(
-                    "grep",
-                    "Search workspace files with a regular expression",
-                    ToolPermission::Search,
-                ),
-                ToolDefinition::new::<BashArgs>(
-                    "bash",
-                    "Run a shell command in the workspace root",
-                    ToolPermission::Execute,
-                ),
-                ToolDefinition::new::<TodoWriteArgs>(
-                    "todowrite",
-                    "Update the session todo list",
-                    ToolPermission::Session,
-                ),
-            ],
-        }
-    }
-
-    pub fn workspace_root(&self) -> &Path {
-        &self.workspace_root
-    }
-
-    pub fn definitions(&self) -> &[ToolDefinition] {
-        &self.definitions
-    }
-
-    pub fn available_definitions(&self, mode: SessionMode) -> Vec<ToolDefinition> {
-        self.definitions
-            .iter()
-            .filter(|definition| definition.permission.is_allowed_in(mode))
-            .cloned()
-            .collect()
-    }
-
-    pub fn max_output_bytes(&self) -> usize {
-        self.max_output_bytes
-    }
-
-    pub fn can_execute(&self, tool_name: &str, mode: SessionMode) -> bool {
-        self.definition_for(tool_name)
-            .is_some_and(|definition| definition.permission.is_allowed_in(mode))
-    }
-
-    pub fn definition_for(&self, tool_name: &str) -> Option<&ToolDefinition> {
-        let canonical_name = canonical_tool_name(tool_name)?;
-        self.definitions
-            .iter()
-            .find(|definition| definition.name == canonical_name)
-    }
-
-    pub fn execute_call(
-        &self,
-        store: &SessionStore,
-        session_id: Uuid,
-        call: &ToolCall,
-    ) -> Result<String> {
-        let arguments: Value = serde_json::from_str(&call.arguments)
-            .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
-
-        let output = match canonical_tool_name(&call.name) {
-            Some("read") => {
-                let args = parse_arguments::<ReadArgs>(&call.name, arguments)?;
-                self.read_tool(args)
-            }
-            Some("write") => {
-                let args = parse_arguments::<WriteArgs>(&call.name, arguments)?;
-                self.write_tool(args)
-            }
-            Some("edit") => {
-                let args = parse_arguments::<EditArgs>(&call.name, arguments)?;
-                self.edit_tool(args)
-            }
-            Some("list") => {
-                let args = parse_arguments::<ListArgs>(&call.name, arguments)?;
-                self.list_tool(args)
-            }
-            Some("glob") => {
-                let args = parse_arguments::<GlobArgs>(&call.name, arguments)?;
-                self.glob_tool(args)
-            }
-            Some("grep") => {
-                let args = parse_arguments::<GrepArgs>(&call.name, arguments)?;
-                self.grep_tool(args)
-            }
-            Some("bash") => {
-                let args = parse_arguments::<BashArgs>(&call.name, arguments)?;
-                self.bash_tool(args)
-            }
-            Some("todowrite") => {
-                let args = parse_arguments::<TodoWriteArgs>(&call.name, arguments)?;
-                self.todo_write_tool(store, session_id, args)
-            }
-            None => bail!("unknown tool '{}'", call.name),
-            Some(other) => bail!("unsupported tool '{}'", other),
-        }?;
-
-        Ok(truncate_to_limit(output, self.max_output_bytes))
-    }
-
-    fn read_tool(&self, args: ReadArgs) -> Result<String> {
-        read_file(&self.workspace_root, args.path)
-    }
-
-    fn write_tool(&self, args: WriteArgs) -> Result<String> {
-        let path = args.path;
-        write_file(&self.workspace_root, &path, &args.content)?;
-        Ok(format!(
-            "Wrote {}",
-            display_workspace_relative(
-                &self.workspace_root,
-                &resolve_workspace_path(&self.workspace_root, Path::new(&path))?,
-            )
-        ))
-    }
-
-    fn edit_tool(&self, args: EditArgs) -> Result<String> {
-        let replace_all = args.replace_all.unwrap_or(false);
-        edit_file(
-            &self.workspace_root,
-            args.path,
-            &args.old_text,
-            &args.new_text,
-            replace_all,
-        )
-    }
-
-    fn list_tool(&self, args: ListArgs) -> Result<String> {
-        let path = args.path.unwrap_or_else(|| ".".to_string());
-        list_dir(&self.workspace_root, path)
-    }
-
-    fn glob_tool(&self, args: GlobArgs) -> Result<String> {
-        let path = args.path.unwrap_or_else(|| ".".to_string());
-        glob_paths(&self.workspace_root, path, &args.pattern)
-    }
-
-    fn grep_tool(&self, args: GrepArgs) -> Result<String> {
-        let path = args.path.unwrap_or_else(|| ".".to_string());
-        grep_paths(
-            &self.workspace_root,
-            path,
-            &args.pattern,
-            args.include.as_deref(),
-        )
-    }
-
-    fn bash_tool(&self, args: BashArgs) -> Result<String> {
-        run_shell(&self.workspace_root, &args.command, self.max_output_bytes)
-    }
-
-    fn todo_write_tool(
-        &self,
-        store: &SessionStore,
-        session_id: Uuid,
-        args: TodoWriteArgs,
-    ) -> Result<String> {
-        validate_todos(&args.todos)?;
-        store.replace_todos(session_id, &args.todos)?;
-        let todos = store.load_todos(session_id)?;
-        Ok(serde_json::to_string_pretty(&todos).context("failed to serialize todo list")?)
-    }
-}
-
 tool_args! {
     pub struct ReadArgs {
         path: string("Path to read relative to the workspace root"),
@@ -495,47 +233,49 @@ where
         .with_context(|| format!("failed to decode arguments for tool '{}'", tool_name))
 }
 
-pub(crate) fn canonical_tool_name(tool_name: &str) -> Option<&'static str> {
-    match tool_name {
-        "read" | "read_file" => Some("read"),
-        "write" | "write_file" => Some("write"),
-        "edit" => Some("edit"),
-        "list" | "list_dir" => Some("list"),
-        "glob" => Some("glob"),
-        "grep" => Some("grep"),
-        "bash" | "shell" => Some("bash"),
-        "todowrite" | "todo" => Some("todowrite"),
-        _ => None,
-    }
-}
-
-fn validate_todos(todos: &[TodoItem]) -> Result<()> {
-    for (index, todo) in todos.iter().enumerate() {
-        if todo.content.trim().is_empty() {
-            bail!("todo item {} has empty content", index + 1);
-        }
-
-        if !matches!(
-            todo.status.as_str(),
-            "pending" | "in_progress" | "completed" | "cancelled"
-        ) {
-            bail!(
-                "todo item {} has invalid status '{}'",
-                index + 1,
-                todo.status
-            );
-        }
-
-        if !matches!(todo.priority.as_str(), "high" | "medium" | "low") {
-            bail!(
-                "todo item {} has invalid priority '{}'",
-                index + 1,
-                todo.priority
-            );
-        }
-    }
-
-    Ok(())
+pub(super) fn tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition::new::<ReadArgs>(
+            "read",
+            "Read a text file inside the workspace",
+            ToolPermission::Read,
+        ),
+        ToolDefinition::new::<WriteArgs>(
+            "write",
+            "Write a text file inside the workspace",
+            ToolPermission::Write,
+        ),
+        ToolDefinition::new::<EditArgs>(
+            "edit",
+            "Edit a file by replacing text inside it",
+            ToolPermission::Edit,
+        ),
+        ToolDefinition::new::<ListArgs>(
+            "list",
+            "List entries in a directory inside the workspace",
+            ToolPermission::Read,
+        ),
+        ToolDefinition::new::<GlobArgs>(
+            "glob",
+            "Find files matching a glob pattern inside the workspace",
+            ToolPermission::Search,
+        ),
+        ToolDefinition::new::<GrepArgs>(
+            "grep",
+            "Search workspace files with a regular expression",
+            ToolPermission::Search,
+        ),
+        ToolDefinition::new::<BashArgs>(
+            "bash",
+            "Run a shell command in the workspace root",
+            ToolPermission::Execute,
+        ),
+        ToolDefinition::new::<TodoWriteArgs>(
+            "todowrite",
+            "Update the session todo list",
+            ToolPermission::Session,
+        ),
+    ]
 }
 
 pub fn read_file(workspace_root: &Path, relative_path: impl AsRef<Path>) -> Result<String> {
@@ -595,7 +335,7 @@ pub fn list_dir(workspace_root: &Path, relative_path: impl AsRef<Path>) -> Resul
     }
 }
 
-fn edit_file(
+pub(super) fn edit_file(
     workspace_root: &Path,
     relative_path: impl AsRef<Path>,
     old_text: &str,
@@ -634,7 +374,7 @@ fn edit_file(
     ))
 }
 
-fn glob_paths(
+pub(super) fn glob_paths(
     workspace_root: &Path,
     relative_path: impl AsRef<Path>,
     pattern: &str,
@@ -744,7 +484,7 @@ fn glob_paths(
     Ok(output.join("\n"))
 }
 
-fn grep_paths(
+pub(super) fn grep_paths(
     workspace_root: &Path,
     relative_path: impl AsRef<Path>,
     pattern: &str,
@@ -940,7 +680,36 @@ pub fn run_shell(workspace_root: &Path, command: &str, max_output_bytes: usize) 
     Ok(format!("[exit {status}]\n{combined}"))
 }
 
-fn resolve_workspace_path(workspace_root: &Path, candidate: &Path) -> Result<PathBuf> {
+pub(super) fn validate_todos(todos: &[TodoItem]) -> Result<()> {
+    for (index, todo) in todos.iter().enumerate() {
+        if todo.content.trim().is_empty() {
+            bail!("todo item {} has empty content", index + 1);
+        }
+
+        if !matches!(
+            todo.status.as_str(),
+            "pending" | "in_progress" | "completed" | "cancelled"
+        ) {
+            bail!(
+                "todo item {} has invalid status '{}'",
+                index + 1,
+                todo.status
+            );
+        }
+
+        if !matches!(todo.priority.as_str(), "high" | "medium" | "low") {
+            bail!(
+                "todo item {} has invalid priority '{}'",
+                index + 1,
+                todo.priority
+            );
+        }
+    }
+
+    Ok(())
+}
+
+pub(super) fn resolve_workspace_path(workspace_root: &Path, candidate: &Path) -> Result<PathBuf> {
     let mut resolved = if candidate.is_absolute() {
         PathBuf::new()
     } else {
@@ -966,7 +735,7 @@ fn resolve_workspace_path(workspace_root: &Path, candidate: &Path) -> Result<Pat
     Ok(resolved)
 }
 
-fn display_workspace_relative(workspace_root: &Path, path: &Path) -> String {
+pub(super) fn display_workspace_relative(workspace_root: &Path, path: &Path) -> String {
     let relative = path.strip_prefix(workspace_root).unwrap_or(path);
     if relative.as_os_str().is_empty() {
         ".".to_string()
@@ -980,7 +749,7 @@ fn truncate_to_limit(mut value: String, max_bytes: usize) -> String {
     value
 }
 
-fn truncate_in_place(value: &mut String, max_bytes: usize) {
+pub(super) fn truncate_in_place(value: &mut String, max_bytes: usize) {
     if value.len() <= max_bytes {
         return;
     }
@@ -1035,6 +804,77 @@ impl SearchHit {
                 .unwrap_or(UNIX_EPOCH),
         })
     }
+}
+
+pub(super) fn execute_tool_call(
+    workspace_root: &Path,
+    store: &SessionStore,
+    session_id: uuid::Uuid,
+    call: &ToolCall,
+    max_output_bytes: usize,
+) -> Result<String> {
+    let arguments: Value = serde_json::from_str(&call.arguments)
+        .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
+
+    let output = match canonical_tool_name(&call.name) {
+        Some("read") => {
+            let args = parse_arguments::<ReadArgs>(&call.name, arguments)?;
+            read_file(workspace_root, args.path)
+        }
+        Some("write") => {
+            let args = parse_arguments::<WriteArgs>(&call.name, arguments)?;
+            let path = args.path;
+            write_file(workspace_root, &path, &args.content)?;
+            Ok(format!(
+                "Wrote {}",
+                display_workspace_relative(
+                    workspace_root,
+                    &resolve_workspace_path(workspace_root, Path::new(&path))?,
+                )
+            ))
+        }
+        Some("edit") => {
+            let args = parse_arguments::<EditArgs>(&call.name, arguments)?;
+            let replace_all = args.replace_all.unwrap_or(false);
+            edit_file(
+                workspace_root,
+                args.path,
+                &args.old_text,
+                &args.new_text,
+                replace_all,
+            )
+        }
+        Some("list") => {
+            let args = parse_arguments::<ListArgs>(&call.name, arguments)?;
+            let path = args.path.unwrap_or_else(|| ".".to_string());
+            list_dir(workspace_root, path)
+        }
+        Some("glob") => {
+            let args = parse_arguments::<GlobArgs>(&call.name, arguments)?;
+            let path = args.path.unwrap_or_else(|| ".".to_string());
+            glob_paths(workspace_root, path, &args.pattern)
+        }
+        Some("grep") => {
+            let args = parse_arguments::<GrepArgs>(&call.name, arguments)?;
+            let path = args.path.unwrap_or_else(|| ".".to_string());
+            grep_paths(workspace_root, path, &args.pattern, args.include.as_deref())
+        }
+        Some("bash") => {
+            let args = parse_arguments::<BashArgs>(&call.name, arguments)?;
+            run_shell(workspace_root, &args.command, max_output_bytes)
+        }
+        Some("todowrite") => {
+            let args = parse_arguments::<TodoWriteArgs>(&call.name, arguments)?;
+            validate_todos(&args.todos)?;
+            store.replace_todos(session_id, &args.todos)?;
+            let todos = store.load_todos(session_id)?;
+            serde_json::to_string_pretty(&todos).context("failed to serialize todo list")
+        }
+        None => bail!("unknown tool '{}'", call.name),
+        Some(other) => bail!("unsupported tool '{}'", other),
+    }?;
+
+    Ok(truncate_to_limit(output, max_output_bytes))
 }
 
 #[cfg(test)]

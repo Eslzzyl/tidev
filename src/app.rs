@@ -20,6 +20,8 @@ mod connect;
 mod model_panel;
 mod permission;
 mod render;
+mod render_chat;
+mod render_dialog;
 mod theme_panel;
 
 use crate::{

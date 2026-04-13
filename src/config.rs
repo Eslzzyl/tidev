@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -574,6 +574,7 @@ mod tests {
             ProviderConfig {
                 display_name: "Custom DeepSeek".to_string(),
                 base_url: "https://example.com/v1".to_string(),
+                api_type: None,
                 models: BTreeMap::new(),
             },
         );
