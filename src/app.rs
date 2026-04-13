@@ -20,6 +20,7 @@ mod render;
 mod theme_panel;
 
 use crate::{
+    app::theme_panel::ThemePanelState,
     commands::{CommandAction, CommandPaletteState, CommandRegistry},
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
     context::ContextManager,
@@ -31,7 +32,6 @@ use crate::{
     storage::SessionStore,
     theme::{ThemeManager, ThemeName},
     tools::ToolRegistry,
-    app::theme_panel::ThemePanelState,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -375,7 +375,10 @@ impl App {
                 self.last_notice = Some("Help shown".to_string());
             }
             CommandAction::Connect => {
-                self.open_connect_dialog(args.first().map(String::as_str))?;
+                if !args.is_empty() {
+                    self.last_notice = Some("Ignoring arguments to /connect".to_string());
+                }
+                self.open_connect_dialog()?;
             }
             CommandAction::Model => {
                 if let Some(model_selector) = args.first() {

@@ -41,12 +41,13 @@ pub enum NewProviderStep {
     ProviderId,
     DisplayName,
     BaseUrl,
-    ApiKeyEnv,
+    ApiKey,
     ModelId,
     ModelDisplayName,
     ContextWindow,
     MaxOutputTokens,
     Temperature,
+    AddAnotherModel,
 }
 
 impl NewProviderStep {
@@ -55,12 +56,13 @@ impl NewProviderStep {
             Self::ProviderId => "Provider id",
             Self::DisplayName => "Display name",
             Self::BaseUrl => "Base URL",
-            Self::ApiKeyEnv => "API key env",
+            Self::ApiKey => "API key",
             Self::ModelId => "Model id",
             Self::ModelDisplayName => "Model display name",
             Self::ContextWindow => "Context window",
             Self::MaxOutputTokens => "Max output tokens",
             Self::Temperature => "Temperature",
+            Self::AddAnotherModel => "Add another model",
         }
     }
 
@@ -68,13 +70,14 @@ impl NewProviderStep {
         match self {
             Self::ProviderId => Some(Self::DisplayName),
             Self::DisplayName => Some(Self::BaseUrl),
-            Self::BaseUrl => Some(Self::ApiKeyEnv),
-            Self::ApiKeyEnv => Some(Self::ModelId),
+            Self::BaseUrl => Some(Self::ApiKey),
+            Self::ApiKey => Some(Self::ModelId),
             Self::ModelId => Some(Self::ModelDisplayName),
             Self::ModelDisplayName => Some(Self::ContextWindow),
             Self::ContextWindow => Some(Self::MaxOutputTokens),
             Self::MaxOutputTokens => Some(Self::Temperature),
-            Self::Temperature => None,
+            Self::Temperature => Some(Self::AddAnotherModel),
+            Self::AddAnotherModel => None,
         }
     }
 
@@ -83,26 +86,28 @@ impl NewProviderStep {
             Self::ProviderId => "Provider id",
             Self::DisplayName => "Provider display name",
             Self::BaseUrl => "Base URL",
-            Self::ApiKeyEnv => "API key env var",
+            Self::ApiKey => "API key",
             Self::ModelId => "Model id",
             Self::ModelDisplayName => "Model display name",
             Self::ContextWindow => "Context window",
             Self::MaxOutputTokens => "Max output tokens",
             Self::Temperature => "Temperature",
+            Self::AddAnotherModel => "Add another model",
         }
     }
 
     pub fn placeholder(self) -> &'static str {
         match self {
-            Self::ProviderId => "local-openai",
-            Self::DisplayName => "Local OpenAI",
+            Self::ProviderId => "provider id",
+            Self::DisplayName => "provider display name",
             Self::BaseUrl => "https://api.openai.com/v1",
-            Self::ApiKeyEnv => "OPENAI_API_KEY or none",
-            Self::ModelId => "gpt-4o-mini",
-            Self::ModelDisplayName => "GPT-4o mini",
+            Self::ApiKey => "Paste the API key",
+            Self::ModelId => "model id",
+            Self::ModelDisplayName => "model display name",
             Self::ContextWindow => "128000",
-            Self::MaxOutputTokens => "2048",
+            Self::MaxOutputTokens => "32768",
             Self::Temperature => "0.7",
+            Self::AddAnotherModel => "y or n",
         }
     }
 
@@ -111,22 +116,23 @@ impl NewProviderStep {
             Self::ProviderId => "Use lowercase letters, numbers, '-', or '_' only.",
             Self::DisplayName => "Shown in the TUI and session metadata.",
             Self::BaseUrl => "Use an OpenAI-compatible chat completions endpoint.",
-            Self::ApiKeyEnv => "Type 'none' to skip env lookup and use auth.json only.",
+            Self::ApiKey => "Stored in auth.json only.",
             Self::ModelId => "The exact model id the provider expects.",
-            Self::ModelDisplayName => "A friendly name for the model in the UI.",
+            Self::ModelDisplayName => "Shown in the TUI and session metadata.",
             Self::ContextWindow => "Total token budget for the model context.",
             Self::MaxOutputTokens => "Maximum tokens the model may generate per turn.",
             Self::Temperature => "Usually 0.0 to 1.0 for deterministic coding help.",
+            Self::AddAnotherModel => "Press y to add another model, or Enter/n to finish.",
         }
+    }
+
+    pub fn is_secret(self) -> bool {
+        matches!(self, Self::ApiKey)
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct NewProviderDraft {
-    pub provider_id: String,
-    pub display_name: String,
-    pub base_url: String,
-    pub api_key_env: Option<String>,
+pub struct NewModelDraft {
     pub model_id: String,
     pub model_display_name: String,
     pub context_window: usize,
@@ -134,58 +140,43 @@ pub struct NewProviderDraft {
     pub temperature: f32,
 }
 
-impl Default for NewProviderDraft {
+impl Default for NewModelDraft {
     fn default() -> Self {
         Self {
-            provider_id: "local-openai".to_string(),
-            display_name: "Local OpenAI".to_string(),
-            base_url: "https://api.openai.com/v1".to_string(),
-            api_key_env: Some("OPENAI_API_KEY".to_string()),
-            model_id: "gpt-4o-mini".to_string(),
-            model_display_name: "GPT-4o mini".to_string(),
+            model_id: String::new(),
+            model_display_name: String::new(),
             context_window: 128_000,
-            max_output_tokens: 2_048,
+            max_output_tokens: 32_768,
             temperature: 0.7,
         }
     }
 }
 
-impl NewProviderDraft {
-    pub fn current_value(&self, step: NewProviderStep) -> String {
+impl NewModelDraft {
+    fn current_value(&self, step: NewProviderStep) -> String {
         match step {
-            NewProviderStep::ProviderId => self.provider_id.clone(),
-            NewProviderStep::DisplayName => self.display_name.clone(),
-            NewProviderStep::BaseUrl => self.base_url.clone(),
-            NewProviderStep::ApiKeyEnv => self
-                .api_key_env
-                .clone()
-                .unwrap_or_else(|| "none".to_string()),
             NewProviderStep::ModelId => self.model_id.clone(),
-            NewProviderStep::ModelDisplayName => self.model_display_name.clone(),
+            NewProviderStep::ModelDisplayName => {
+                if self.model_display_name.is_empty() {
+                    self.model_id.clone()
+                } else {
+                    self.model_display_name.clone()
+                }
+            }
             NewProviderStep::ContextWindow => self.context_window.to_string(),
             NewProviderStep::MaxOutputTokens => self.max_output_tokens.to_string(),
             NewProviderStep::Temperature => self.temperature.to_string(),
+            _ => String::new(),
         }
     }
 
-    pub fn apply_step(&mut self, step: NewProviderStep, input: &str) -> Result<()> {
+    fn apply_step(&mut self, step: NewProviderStep, input: &str) -> Result<()> {
         let value = input.trim();
 
         match step {
-            NewProviderStep::ProviderId => {
-                self.provider_id = normalize_identifier(value, "provider id")?;
-            }
-            NewProviderStep::DisplayName => {
-                self.display_name = non_empty(value, "provider display name")?.to_string();
-            }
-            NewProviderStep::BaseUrl => {
-                self.base_url = normalize_base_url(value)?;
-            }
-            NewProviderStep::ApiKeyEnv => {
-                self.api_key_env = normalize_optional_env(value)?;
-            }
             NewProviderStep::ModelId => {
                 self.model_id = normalize_identifier(value, "model id")?;
+                self.model_display_name = self.model_id.clone();
             }
             NewProviderStep::ModelDisplayName => {
                 self.model_display_name = non_empty(value, "model display name")?.to_string();
@@ -199,16 +190,17 @@ impl NewProviderDraft {
             NewProviderStep::Temperature => {
                 self.temperature = parse_temperature(value)?;
             }
+            _ => {}
         }
 
         Ok(())
     }
 
-    pub fn into_provider_config(self) -> (String, ProviderConfig) {
-        let provider_id = self.provider_id;
-        let mut models = BTreeMap::new();
-        models.insert(
-            self.model_id.clone(),
+    fn into_model_config(self) -> (String, ModelConfig) {
+        let model_id = self.model_id;
+
+        (
+            model_id.clone(),
             ModelConfig {
                 display_name: self.model_display_name,
                 context_window: self.context_window,
@@ -217,17 +209,124 @@ impl NewProviderDraft {
                 system_prompt: None,
                 supports_streaming: true,
             },
-        );
+        )
+    }
+}
 
-        (
+#[derive(Clone, Debug)]
+pub struct NewProviderDraft {
+    pub provider_id: String,
+    pub display_name: String,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: NewModelDraft,
+    pub models: BTreeMap<String, ModelConfig>,
+}
+
+impl Default for NewProviderDraft {
+    fn default() -> Self {
+        Self {
+            provider_id: String::new(),
+            display_name: String::new(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            api_key: String::new(),
+            model: NewModelDraft::default(),
+            models: BTreeMap::new(),
+        }
+    }
+}
+
+impl NewProviderDraft {
+    pub fn current_value(&self, step: NewProviderStep) -> String {
+        match step {
+            NewProviderStep::ProviderId => self.provider_id.clone(),
+            NewProviderStep::DisplayName => {
+                if self.display_name.is_empty() {
+                    self.provider_id.clone()
+                } else {
+                    self.display_name.clone()
+                }
+            }
+            NewProviderStep::BaseUrl => self.base_url.clone(),
+            NewProviderStep::ApiKey => String::new(),
+            NewProviderStep::ModelId
+            | NewProviderStep::ModelDisplayName
+            | NewProviderStep::ContextWindow
+            | NewProviderStep::MaxOutputTokens
+            | NewProviderStep::Temperature => self.model.current_value(step),
+            NewProviderStep::AddAnotherModel => String::new(),
+        }
+    }
+
+    pub fn apply_step(&mut self, step: NewProviderStep, input: &str) -> Result<()> {
+        let value = input.trim();
+
+        match step {
+            NewProviderStep::ProviderId => {
+                self.provider_id = normalize_identifier(value, "provider id")?;
+                self.display_name = self.provider_id.clone();
+            }
+            NewProviderStep::DisplayName => {
+                self.display_name = non_empty(value, "provider display name")?.to_string();
+            }
+            NewProviderStep::BaseUrl => {
+                self.base_url = normalize_base_url(value)?;
+            }
+            NewProviderStep::ApiKey => {
+                self.api_key = non_empty(value, "API key")?.to_string();
+            }
+            NewProviderStep::ModelId
+            | NewProviderStep::ModelDisplayName
+            | NewProviderStep::ContextWindow
+            | NewProviderStep::MaxOutputTokens
+            | NewProviderStep::Temperature => self.model.apply_step(step, value)?,
+            NewProviderStep::AddAnotherModel => {}
+        }
+
+        Ok(())
+    }
+
+    pub fn finish_current_model(&mut self) -> Result<()> {
+        let (model_id, model_config) = self.model.clone().into_model_config();
+
+        if model_id.trim().is_empty() {
+            bail!("model id cannot be empty");
+        }
+
+        if self.models.contains_key(&model_id) {
+            bail!("model '{model_id}' already exists");
+        }
+
+        self.models.insert(model_id, model_config);
+        self.model = NewModelDraft::default();
+        Ok(())
+    }
+
+    pub fn into_provider_config(self) -> Result<(String, ProviderConfig, String)> {
+        if self.provider_id.trim().is_empty() {
+            bail!("provider id cannot be empty");
+        }
+
+        if self.models.is_empty() {
+            bail!("at least one model must be configured");
+        }
+
+        let provider_id = self.provider_id;
+        let display_name = if self.display_name.is_empty() {
+            provider_id.clone()
+        } else {
+            self.display_name
+        };
+
+        Ok((
             provider_id,
             ProviderConfig {
-                display_name: self.display_name,
+                display_name,
                 base_url: self.base_url,
-                api_key_env: self.api_key_env,
-                models,
+                models: self.models,
             },
-        )
+            self.api_key,
+        ))
     }
 }
 
@@ -272,33 +371,6 @@ fn normalize_base_url(value: &str) -> Result<String> {
     }
 
     Ok(value.to_string())
-}
-
-fn normalize_optional_env(value: &str) -> Result<Option<String>> {
-    let value = value.trim();
-
-    if value.is_empty()
-        || matches!(
-            value.to_ascii_lowercase().as_str(),
-            "none" | "off" | "null" | "-"
-        )
-    {
-        return Ok(None);
-    }
-
-    let normalized = value
-        .to_ascii_uppercase()
-        .replace('-', "_")
-        .replace(' ', "_");
-
-    if normalized
-        .chars()
-        .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_')
-    {
-        Ok(Some(normalized))
-    } else {
-        bail!("API key env var may only contain uppercase letters, numbers, and '_'");
-    }
 }
 
 fn parse_usize(value: &str, label: &str) -> Result<usize> {

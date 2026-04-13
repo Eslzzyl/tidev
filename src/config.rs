@@ -1,13 +1,15 @@
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
-    env, fs,
+    collections::{BTreeMap, BTreeSet},
+    fs,
     path::{Path, PathBuf},
 };
 
 use crate::prompts::default_system_prompt;
 use crate::theme::ThemeName;
+
+const BUNDLED_PRESETS_TOML: &str = include_str!("../presets.toml");
 
 #[derive(Clone, Debug)]
 pub struct ConfigPaths {
@@ -77,40 +79,25 @@ pub struct AppConfig {
     pub ui: UiConfig,
     #[serde(default)]
     pub providers: BTreeMap<String, ProviderConfig>,
+    #[serde(skip)]
+    pub bundled_providers: BTreeMap<String, ProviderConfig>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProviderSource {
+    User,
+    Bundled,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
-        let mut models = BTreeMap::new();
-        models.insert(
-            "gpt-4o-mini".to_string(),
-            ModelConfig {
-                display_name: "GPT-4o mini".to_string(),
-                context_window: 128_000,
-                max_output_tokens: 2_048,
-                temperature: 0.7,
-                system_prompt: None,
-                supports_streaming: true,
-            },
-        );
-
-        let mut providers = BTreeMap::new();
-        providers.insert(
-            "openai".to_string(),
-            ProviderConfig {
-                display_name: "OpenAI Compatible".to_string(),
-                base_url: "https://api.openai.com/v1".to_string(),
-                api_key_env: Some("OPENAI_API_KEY".to_string()),
-                models,
-            },
-        );
-
         Self {
             default_provider: "openai".to_string(),
             default_model: "gpt-4o-mini".to_string(),
             theme: ThemeName::Dark.as_str().to_string(),
             ui: UiConfig::default(),
-            providers,
+            providers: BTreeMap::new(),
+            bundled_providers: bundled_provider_catalog().unwrap_or_default(),
         }
     }
 }
@@ -123,16 +110,17 @@ impl AppConfig {
             let example = Self::example_toml();
             fs::write(&paths.config_file, example)
                 .with_context(|| format!("failed to write {}", paths.config_file.display()))?;
-            return toml::from_str(example).with_context(|| {
+            let config: Self = toml::from_str(example).with_context(|| {
                 format!("failed to parse generated {}", paths.config_file.display())
-            });
+            })?;
+            return config.attach_bundled_providers();
         }
 
         let contents = fs::read_to_string(&paths.config_file)
             .with_context(|| format!("failed to read {}", paths.config_file.display()))?;
         let config: Self = toml::from_str(&contents)
             .with_context(|| format!("failed to parse {}", paths.config_file.display()))?;
-        Ok(config)
+        config.attach_bundled_providers()
     }
 
     pub fn save(&self, paths: &ConfigPaths) -> Result<()> {
@@ -145,7 +133,9 @@ impl AppConfig {
 
     pub fn example_toml() -> &'static str {
         r#"# TiDev configuration
-# `theme` can be `dark` or `light`.
+# Bundled provider presets ship with the binary and do not need to be copied here.
+# Add your own providers below if you want custom endpoints.
+# `theme` can be dark or light.
 theme = "dark"
 default_provider = "openai"
 default_model = "gpt-4o-mini"
@@ -154,25 +144,42 @@ default_model = "gpt-4o-mini"
 sidebar_width = 30
 welcome_width = 72
 max_input_lines = 6
-
-[providers.openai]
-display_name = "OpenAI Compatible"
-base_url = "https://api.openai.com/v1"
-api_key_env = "OPENAI_API_KEY"
-
-[providers.openai.models.gpt-4o-mini]
-display_name = "GPT-4o mini"
-context_window = 128000
-max_output_tokens = 2048
-temperature = 0.7
-supports_streaming = true
 "#
+    }
+
+    fn attach_bundled_providers(mut self) -> Result<Self> {
+        self.bundled_providers = bundled_provider_catalog()?;
+        Ok(self)
+    }
+
+    fn provider(&self, provider_id: &str) -> Option<&ProviderConfig> {
+        self.providers
+            .get(provider_id)
+            .or_else(|| self.bundled_providers.get(provider_id))
+    }
+
+    pub fn provider_source(&self, provider_id: &str) -> Option<ProviderSource> {
+        if self.providers.contains_key(provider_id) {
+            Some(ProviderSource::User)
+        } else if self.bundled_providers.contains_key(provider_id) {
+            Some(ProviderSource::Bundled)
+        } else {
+            None
+        }
+    }
+
+    pub fn provider_exists(&self, provider_id: &str) -> bool {
+        self.provider_source(provider_id).is_some()
     }
 
     pub fn available_models(&self) -> Vec<ModelSummary> {
         let mut models = Vec::new();
 
-        for (provider_id, provider) in &self.providers {
+        for provider_id in self.provider_ids() {
+            let Some(provider) = self.provider(&provider_id) else {
+                continue;
+            };
+
             for (model_id, model) in &provider.models {
                 models.push(ModelSummary {
                     provider_id: provider_id.clone(),
@@ -199,8 +206,7 @@ supports_streaming = true
         provider_id: &str,
     ) -> Result<ActiveModel> {
         let provider = self
-            .providers
-            .get(provider_id)
+            .provider(provider_id)
             .with_context(|| format!("unknown provider '{provider_id}'"))?;
         let model_id = provider
             .models
@@ -228,15 +234,14 @@ supports_streaming = true
         model_id: &str,
     ) -> Result<ActiveModel> {
         let provider = self
-            .providers
-            .get(provider_id)
+            .provider(provider_id)
             .with_context(|| format!("unknown provider '{provider_id}'"))?;
         let model = provider
             .models
             .get(model_id)
             .with_context(|| format!("unknown model '{model_id}' for provider '{provider_id}'"))?;
 
-        let api_key = self.resolve_api_key(auth, provider_id, provider);
+        let api_key = self.resolve_api_key(auth, provider_id);
 
         Ok(ActiveModel {
             provider_id: provider_id.to_string(),
@@ -258,8 +263,7 @@ supports_streaming = true
 
     pub fn default_model_summary(&self) -> Result<ModelSummary> {
         let provider = self
-            .providers
-            .get(&self.default_provider)
+            .provider(&self.default_provider)
             .with_context(|| format!("unknown default provider '{}'", self.default_provider))?;
         let model = provider
             .models
@@ -291,9 +295,11 @@ supports_streaming = true
 
         let mut matches = Vec::new();
 
-        for (provider_id, provider) in &self.providers {
-            if provider.models.contains_key(query) {
-                matches.push((provider_id.clone(), query.to_string()));
+        for provider_id in self.provider_ids() {
+            if let Some(provider) = self.provider(&provider_id) {
+                if provider.models.contains_key(query) {
+                    matches.push((provider_id.clone(), query.to_string()));
+                }
             }
         }
 
@@ -311,21 +317,7 @@ supports_streaming = true
         }
     }
 
-    fn resolve_api_key(
-        &self,
-        auth: &AuthStore,
-        provider_id: &str,
-        provider: &ProviderConfig,
-    ) -> Option<String> {
-        if let Some(env_key) = provider
-            .api_key_env
-            .as_ref()
-            .and_then(|name| env::var(name).ok())
-            .filter(|value| !value.trim().is_empty())
-        {
-            return Some(env_key);
-        }
-
+    fn resolve_api_key(&self, auth: &AuthStore, provider_id: &str) -> Option<String> {
         auth.providers
             .get(provider_id)
             .and_then(|entry| entry.api_key.clone())
@@ -333,12 +325,16 @@ supports_streaming = true
     }
 
     pub fn provider_ids(&self) -> Vec<String> {
-        self.providers.keys().cloned().collect()
+        let mut provider_ids = BTreeSet::new();
+        for provider_id in self.providers.keys().chain(self.bundled_providers.keys()) {
+            provider_ids.insert(provider_id.clone());
+        }
+
+        provider_ids.into_iter().collect()
     }
 
     pub fn provider_display_name(&self, provider_id: &str) -> Option<&str> {
-        self.providers
-            .get(provider_id)
+        self.provider(provider_id)
             .map(|provider| provider.display_name.as_str())
     }
 
@@ -372,8 +368,6 @@ impl Default for UiConfig {
 pub struct ProviderConfig {
     pub display_name: String,
     pub base_url: String,
-    #[serde(default)]
-    pub api_key_env: Option<String>,
     #[serde(default)]
     pub models: BTreeMap<String, ModelConfig>,
 }
@@ -494,5 +488,67 @@ pub struct ModelSummary {
 impl ModelSummary {
     pub fn label(&self) -> String {
         format!("{}/{}", self.provider_id, self.model_id)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct BundledProviderCatalog {
+    #[serde(default)]
+    providers: BTreeMap<String, ProviderConfig>,
+}
+
+fn bundled_provider_catalog() -> Result<BTreeMap<String, ProviderConfig>> {
+    let catalog: BundledProviderCatalog =
+        toml::from_str(BUNDLED_PRESETS_TOML).context("failed to parse bundled provider catalog")?;
+    Ok(catalog.providers)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundled_provider_catalog_loads() {
+        let catalog = bundled_provider_catalog().expect("bundled catalog should parse");
+        assert!(catalog.contains_key("openai"));
+        assert!(catalog.contains_key("anthropic"));
+        assert!(catalog.contains_key("deepseek"));
+    }
+
+    #[test]
+    fn app_config_uses_bundled_provider_ids() {
+        let config = AppConfig::default();
+        assert!(config.provider_ids().contains(&"openai".to_string()));
+        assert_eq!(
+            config.provider_source("openai"),
+            Some(ProviderSource::Bundled)
+        );
+    }
+
+    #[test]
+    fn user_provider_overrides_bundled_preset() {
+        let mut config = AppConfig::default();
+        config.providers.insert(
+            "openai".to_string(),
+            ProviderConfig {
+                display_name: "Custom OpenAI".to_string(),
+                base_url: "https://example.com/v1".to_string(),
+                models: BTreeMap::new(),
+            },
+        );
+
+        assert_eq!(config.provider_source("openai"), Some(ProviderSource::User));
+        assert_eq!(
+            config.provider_display_name("openai"),
+            Some("Custom OpenAI")
+        );
+        assert_eq!(
+            config
+                .provider_ids()
+                .iter()
+                .filter(|id| *id == "openai")
+                .count(),
+            1
+        );
     }
 }

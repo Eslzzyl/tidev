@@ -1,0 +1,20 @@
+# Bundled provider presets for TiDev.
+# These are merged with user config at runtime.
+
+[providers.deepseek]
+display_name = "DeepSeek"
+base_url = "https://api.deepseek.com/v1"
+
+[providers.deepseek.models.deepseek-chat]
+display_name = "DeepSeek Chat"
+context_window = 128000
+max_output_tokens = 8192
+temperature = 0.7
+supports_streaming = true
+
+[providers.deepseek.models.deepseek-reasoner]
+display_name = "DeepSeek Reasoner"
+context_window = 128000
+max_output_tokens = 8192
+temperature = 0.2
+supports_streaming = true

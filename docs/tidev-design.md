@@ -199,7 +199,7 @@ Agent 循环采用状态机思想，常见状态包括：空闲、思考中、�
 
 ### Provider 引导
 
-`/connect` 会先打开 provider 选择器，允许用户直接连接已有 provider，也可以从同一个对话框里创建一个新的 OpenAI-compatible provider，再继续输入 API key。这样可以避免在配置文件里手工拼 TOML，也让新 provider 的接入路径保持在终端内完成。
+`/connect` 会先打开 provider 选择器，顶部提供搜索框，可按 provider id 或 display name 过滤已有 provider。列表底部始终保留 `Add new provider` 入口，选中后会进入同一个对话框里的 provider 向导。向导先收集 provider 信息和 API key，再逐个添加 model，并在每个 model 完成后询问是否继续添加。预设 provider 以 bundled catalog 的形式随二进制发布，在选择器里会标成 `preset`，用户自己创建的 provider 标成 `custom`。这样可以避免在配置文件里手工拼 TOML，也让新 provider 的接入路径保持在终端内完成。
 
 ---
 

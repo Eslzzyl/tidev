@@ -227,8 +227,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "connect",
         aliases: &["login"],
-        description: "Connect, update, or add a provider",
-        usage: "/connect [provider|new]",
+        description: "Open the provider picker",
+        usage: "/connect",
         action: CommandAction::Connect,
     },
     CommandSpec {

@@ -1,7 +1,8 @@
 use crate::{
     app::theme_panel::ThemePanelState,
+    config::ProviderSource,
     prompts::SessionMode,
-    provider_setup::ConnectDialog,
+    provider_setup::{ConnectDialog, NewProviderStep},
     session::MessageRole,
     theme::ThemePalette,
 };
@@ -13,7 +14,7 @@ use ratatui::{
 };
 use uuid::Uuid;
 
-use super::{App, Screen};
+use super::{App, Screen, connect::ProviderPickerItem};
 
 impl App {
     fn palette(&self) -> ThemePalette {
@@ -86,7 +87,11 @@ impl App {
         };
 
         let palette = self.palette();
-        let overlay = centered_rect(area.width.min(80), area.height.min(24), area);
+        let (overlay_width, overlay_height) = match dialog {
+            ConnectDialog::ProviderPicker { .. } => (area.width.min(92), area.height.min(28)),
+            _ => (area.width.min(80), area.height.min(24)),
+        };
+        let overlay = centered_rect(overlay_width, overlay_height, area);
         frame.render_widget(Clear, overlay);
 
         let dialog_title = match dialog {
@@ -118,55 +123,106 @@ impl App {
 
         match dialog {
             ConnectDialog::ProviderPicker { selected } => {
-                let providers = self.config.provider_ids();
-                let mut items = vec![ListItem::new(Line::from(vec![
-                    Span::styled(
-                        "Create new provider",
-                        Style::default()
-                            .fg(palette.accent)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw("  "),
-                    Span::styled(
-                        "Create a new OpenAI-compatible provider",
-                        Style::default().fg(palette.warning),
-                    ),
-                ]))];
+                let sections = Layout::vertical([
+                    Constraint::Length(2),
+                    Constraint::Length(3),
+                    Constraint::Min(6),
+                    Constraint::Length(1),
+                ])
+                .split(inner);
 
-                items.extend(providers.iter().map(|provider_id| {
-                    let label = self
-                        .config
-                        .provider_display_name(provider_id)
-                        .unwrap_or(provider_id)
-                        .to_string();
-                    let connected = self.auth.api_key(provider_id).is_some();
-                    ListItem::new(Line::from(vec![
-                        Span::styled(
-                            label,
-                            Style::default()
-                                .fg(palette.text)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::raw("  "),
-                        Span::styled(
-                            if connected {
-                                "connected"
-                            } else {
-                                "not connected"
-                            },
-                            if connected {
+                frame.render_widget(
+                    Paragraph::new("Type to filter by provider id or display name.")
+                        .alignment(Alignment::Center)
+                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                    sections[0],
+                );
+
+                self.render_input_block(
+                    frame,
+                    sections[1],
+                    "Search",
+                    self.composer.placeholder(),
+                    false,
+                );
+
+                let items = self.provider_picker_items();
+                let list_items = items
+                    .iter()
+                    .map(|item| match item {
+                        ProviderPickerItem::Provider {
+                            provider_id,
+                            display_name,
+                            source,
+                            connected,
+                        } => {
+                            let status_style = if *connected {
                                 Style::default().fg(palette.success)
                             } else {
                                 Style::default().fg(palette.muted)
-                            },
-                        ),
-                    ]))
-                }));
+                            };
+
+                            let source_label = match source {
+                                ProviderSource::Bundled => "preset",
+                                ProviderSource::User => "custom",
+                            };
+
+                            ListItem::new(Line::from(vec![
+                                Span::styled(
+                                    format!("{}", display_name),
+                                    Style::default()
+                                        .fg(palette.text)
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                                Span::raw("  "),
+                                Span::styled(
+                                    format!("({provider_id})"),
+                                    Style::default().fg(palette.muted),
+                                ),
+                                Span::raw("  "),
+                                Span::styled(
+                                    format!("[{source_label}]"),
+                                    Style::default().fg(palette.accent_soft),
+                                ),
+                                Span::raw("  "),
+                                Span::styled(
+                                    if *connected {
+                                        "connected"
+                                    } else {
+                                        "not connected"
+                                    },
+                                    status_style,
+                                ),
+                            ]))
+                        }
+                        ProviderPickerItem::AddNew { query } => {
+                            let label = if query.is_empty() {
+                                "Add new provider".to_string()
+                            } else {
+                                format!("Add new provider: {query}")
+                            };
+
+                            ListItem::new(Line::from(vec![
+                                Span::styled(
+                                    label,
+                                    Style::default()
+                                        .fg(palette.accent)
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                                Span::raw("  "),
+                                Span::styled(
+                                    "Create a new OpenAI-compatible provider",
+                                    Style::default().fg(palette.warning),
+                                ),
+                            ]))
+                        }
+                    })
+                    .collect::<Vec<_>>();
 
                 let mut state = ListState::default();
-                state.select(Some(*selected));
+                state.select(Some((*selected).min(items.len().saturating_sub(1))));
 
-                let list = List::new(items)
+                let list = List::new(list_items)
                     .style(Style::default().bg(palette.panel).fg(palette.text))
                     .highlight_style(
                         Style::default()
@@ -175,7 +231,14 @@ impl App {
                             .add_modifier(Modifier::BOLD),
                     );
 
-                frame.render_stateful_widget(list, inner, &mut state);
+                frame.render_stateful_widget(list, sections[2], &mut state);
+
+                frame.render_widget(
+                    Paragraph::new("Enter to connect or create · Esc to cancel")
+                        .alignment(Alignment::Center)
+                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                    sections[3],
+                );
             }
             ConnectDialog::ApiKey { provider_id } => {
                 let label = self
@@ -213,22 +276,13 @@ impl App {
                     lines[1],
                 );
 
-                let masked = if self.composer.is_empty() {
-                    self.composer.placeholder().to_string()
-                } else {
-                    "•".repeat(self.composer.text().chars().count().max(1))
-                };
-
-                let input_block = Paragraph::new(masked)
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(Style::default().fg(palette.border_active()))
-                            .title("API Key"),
-                    )
-                    .style(Style::default().bg(palette.panel_alt).fg(palette.text))
-                    .wrap(Wrap { trim: false });
-                frame.render_widget(input_block, lines[2]);
+                self.render_input_block(
+                    frame,
+                    lines[2],
+                    "API Key",
+                    self.composer.placeholder(),
+                    true,
+                );
 
                 frame.render_widget(
                     Paragraph::new("Enter to save · Esc to cancel")
@@ -266,23 +320,24 @@ impl App {
                     lines[1],
                 );
 
-                let input_block = Paragraph::new(self.composer.text().to_string())
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(Style::default().fg(palette.border_active()))
-                            .title(step.label()),
-                    )
-                    .style(Style::default().bg(palette.panel_alt).fg(palette.text))
-                    .wrap(Wrap { trim: false });
-                frame.render_widget(input_block, lines[2]);
-
-                let prompt_line = format!(
-                    "Next: {}",
-                    step.next()
-                        .map(|next| next.label())
-                        .unwrap_or("Save provider")
+                self.render_input_block(
+                    frame,
+                    lines[2],
+                    step.label(),
+                    self.composer.placeholder(),
+                    step.is_secret(),
                 );
+
+                let prompt_line = if matches!(step, NewProviderStep::AddAnotherModel) {
+                    "y to add another model · Enter to save provider".to_string()
+                } else {
+                    format!(
+                        "Next: {}",
+                        step.next()
+                            .map(|next| next.label())
+                            .unwrap_or("Save provider")
+                    )
+                };
                 frame.render_widget(
                     Paragraph::new(prompt_line)
                         .alignment(Alignment::Center)
@@ -290,8 +345,13 @@ impl App {
                     lines[3],
                 );
 
+                let footer = if matches!(step, NewProviderStep::AddAnotherModel) {
+                    "Enter to save provider · y to add another model · Esc to cancel"
+                } else {
+                    "Enter to continue · Esc to cancel"
+                };
                 frame.render_widget(
-                    Paragraph::new("Enter to continue · Esc to cancel")
+                    Paragraph::new(footer)
                         .alignment(Alignment::Center)
                         .style(Style::default().bg(palette.panel).fg(palette.muted)),
                     lines[4],
@@ -402,6 +462,7 @@ impl App {
             sections[3],
             &prompt_title,
             self.composer.placeholder(),
+            false,
         );
 
         let hint = Paragraph::new(
@@ -454,7 +515,13 @@ impl App {
         } else {
             format!("{} prompt", self.mode.title())
         };
-        self.render_input_block(frame, layout[2], &prompt_title, self.composer.placeholder());
+        self.render_input_block(
+            frame,
+            layout[2],
+            &prompt_title,
+            self.composer.placeholder(),
+            false,
+        );
         self.render_command_palette(frame, layout[2]);
     }
 
@@ -586,7 +653,7 @@ impl App {
                 .fg(palette.accent)
                 .add_modifier(Modifier::BOLD),
         )]));
-        lines.push(Line::from("/connect [provider|new]"));
+        lines.push(Line::from("/connect"));
         lines.push(Line::from("/theme"));
         lines.push(Line::from("/help"));
         lines.push(Line::from("/model <id>"));
@@ -643,6 +710,7 @@ impl App {
         area: Rect,
         title: &str,
         placeholder: &str,
+        mask_input: bool,
     ) {
         let palette = self.palette();
         let border_style = if self.pending_request {
@@ -655,6 +723,11 @@ impl App {
             Text::from(Line::from(Span::styled(
                 placeholder.to_string(),
                 Style::default().fg(palette.muted),
+            )))
+        } else if mask_input {
+            Text::from(Line::from(Span::styled(
+                "•".repeat(self.composer.text().chars().count().max(1)),
+                Style::default().fg(palette.text),
             )))
         } else {
             Text::from(self.composer.text().to_string())
@@ -684,12 +757,14 @@ impl App {
         if inner.width > 0 && inner.height > 0 {
             let (cursor_line, cursor_col) = self.composer.cursor_position();
             let cursor_line = cursor_line.saturating_sub(scroll);
-            let cursor_x = inner.x.saturating_add(cursor_col);
-            let cursor_y = inner.y.saturating_add(cursor_line);
+            let cursor_x = inner
+                .x
+                .saturating_add(cursor_col.min(inner.width.saturating_sub(1)));
+            let cursor_y = inner
+                .y
+                .saturating_add(cursor_line.min(inner.height.saturating_sub(1)));
 
-            if cursor_x < inner.x + inner.width && cursor_y < inner.y + inner.height {
-                frame.set_cursor_position(Position::new(cursor_x, cursor_y));
-            }
+            frame.set_cursor_position(Position::new(cursor_x, cursor_y));
         }
     }
 
@@ -830,7 +905,7 @@ impl App {
         let mut lines = vec![
             "Commands:",
             "/help - show this message",
-            "/connect [provider|new] - connect to, update, or add a provider",
+            "/connect - open the provider picker",
             "/model - list available models",
             "/model <provider:model> - switch active model",
             "/theme [light|dark] - switch theme",
@@ -844,6 +919,7 @@ impl App {
             "Up/Down - move through command suggestions",
             "Ctrl+P / Ctrl+N - navigate input history",
             "Ctrl+C - exit",
+            "Connect picker - type to filter providers, Enter to select, Esc to cancel",
             "",
             "Modes:",
         ]

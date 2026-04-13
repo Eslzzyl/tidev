@@ -176,7 +176,9 @@ pub fn list_dir(workspace_root: &Path, relative_path: impl AsRef<Path>) -> Resul
     let path = resolve_workspace_path(workspace_root, relative_path.as_ref())?;
 
     let mut entries = Vec::new();
-    for entry in fs::read_dir(&path).with_context(|| format!("failed to read {}", path.display()))? {
+    for entry in
+        fs::read_dir(&path).with_context(|| format!("failed to read {}", path.display()))?
+    {
         let entry = entry.with_context(|| format!("failed to read entry in {}", path.display()))?;
         let file_type = entry
             .file_type()
