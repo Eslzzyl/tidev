@@ -14,10 +14,12 @@ use crate::{
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Position, Rect},
     prelude::{Frame, Modifier, Style, Text},
+    style::Color,
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 use serde_json::Value;
+use unicode_width::UnicodeWidthStr;
 use uuid::Uuid;
 
 use super::{App, Screen, connect::ProviderPickerItem};
@@ -816,42 +818,59 @@ impl App {
 
     fn render_messages(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let palette = self.palette();
-        let inner_height = area.height.saturating_sub(2) as usize;
-        let content_width = area.width.saturating_sub(2).max(1) as usize;
-        let (text, total_lines) = self.messages_text(Some(content_width));
-
-        self.message_viewport_lines = inner_height;
-        self.message_total_lines = total_lines;
-
-        let max_scroll = total_lines.saturating_sub(inner_height);
-        let scroll = if self.message_follow_tail {
-            max_scroll
-        } else {
-            self.message_scroll_offset.min(max_scroll)
-        } as u16;
-
-        let title_suffix = if !self.message_follow_tail && max_scroll > 0 {
-            " · history"
-        } else {
-            ""
-        };
-
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(palette.border_idle()))
             .title(format!(
                 "Conversation · {}{}",
                 shorten(&self.conversation.title, 32),
-                title_suffix
+                if !self.message_follow_tail { " · history" } else { "" }
             ));
+        frame.render_widget(block, area);
+
+        let inner = area.inner(Margin {
+            horizontal: 2,
+            vertical: 1,
+        });
+
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
+
+        let scrollbar_area = if inner.width > 1 {
+            let chunks = Layout::horizontal([Constraint::Min(1), Constraint::Length(1)]).split(inner);
+            (chunks[0], Some(chunks[1]))
+        } else {
+            (inner, None)
+        };
+
+        let content_area = scrollbar_area.0;
+        let content_width = content_area.width.max(1) as usize;
+        let (text, total_lines) = self.messages_text(Some(content_width));
+
+        self.message_viewport_lines = content_area.height as usize;
+        self.message_total_lines = total_lines;
+
+        let max_scroll = total_lines.saturating_sub(self.message_viewport_lines);
+        let scroll = if self.message_follow_tail {
+            max_scroll
+        } else {
+            self.message_scroll_offset.min(max_scroll)
+        };
+
+        self.message_scroll_offset = scroll;
+        self.message_follow_tail = scroll >= max_scroll;
 
         let paragraph = Paragraph::new(text)
-            .block(block)
-            .style(Style::default().fg(palette.text))
+            .style(Style::default().bg(palette.background).fg(palette.text))
             .wrap(Wrap { trim: false })
-            .scroll((scroll, 0));
+            .scroll((scroll as u16, 0));
 
-        frame.render_widget(paragraph, area);
+        frame.render_widget(paragraph, content_area);
+
+        if let Some(scrollbar_area) = scrollbar_area.1 {
+            self.render_scrollbar(frame, scrollbar_area, scroll, max_scroll);
+        }
     }
 
     fn render_status_line(&self, frame: &mut Frame<'_>, area: Rect) {
@@ -1077,240 +1096,322 @@ impl App {
 
     fn messages_text(&self, content_width: Option<usize>) -> (Text<'static>, usize) {
         let palette = self.palette();
+        let width = content_width.unwrap_or(1).max(1);
+        let body_width = width.saturating_sub(2).max(1);
+
         if self.conversation.messages.is_empty() {
-            let lines = vec![
-                Line::from(vec![Span::styled(
-                    "No messages yet.",
-                    Style::default().fg(palette.muted),
-                )]),
-                Line::from(vec![Span::styled(
-                    "Start with a prompt in the input box below.",
-                    Style::default().fg(palette.muted),
-                )]),
-            ];
-            return (Text::from(lines.clone()), lines.len());
+            let lines = decorate_card_lines(
+                vec![
+                    line_with_style("No messages yet.", palette.muted),
+                    line_with_style(
+                        "Start with a prompt in the input box below.",
+                        palette.muted,
+                    ),
+                ],
+                width,
+                palette.panel,
+            );
+            let total_lines = lines.len().max(1);
+            return (Text::from(lines), total_lines);
         }
 
         let mut lines = Vec::new();
 
         for message in &self.conversation.messages {
-            let role_color = match message.role {
-                MessageRole::System => palette.warning,
-                MessageRole::User => palette.success,
-                MessageRole::Assistant => palette.accent,
-                MessageRole::Tool => palette.accent_soft,
-                MessageRole::Error => palette.error,
-            };
-            let mut role_label = match message.role {
-                MessageRole::Tool => message
-                    .tool_name
-                    .as_deref()
-                    .map(|tool_name| format!("tool · {}", display_tool_name(tool_name)))
-                    .unwrap_or_else(|| message.role.label().to_string()),
-                _ if message.streaming => format!("{} · streaming", message.role.label()),
-                _ => message.role.label().to_string(),
-            };
+            for (card_bg, card_lines) in self.render_message_cards(message, body_width) {
+                if card_lines.is_empty() {
+                    continue;
+                }
 
-            if matches!(message.role, MessageRole::Assistant) && !message.tool_calls.is_empty() {
-                role_label.push_str(" · tool calls");
+                lines.extend(decorate_card_lines(card_lines, width, card_bg));
+                lines.push(Line::from(""));
             }
+        }
 
-            lines.push(Line::from(vec![
-                Span::styled(
-                    role_label.to_uppercase(),
-                    Style::default().fg(role_color).add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("  "),
-                Span::styled(
-                    message.created_at.format("%H:%M:%S").to_string(),
-                    Style::default().fg(palette.muted),
-                ),
-            ]));
-
-            if !message.reasoning.trim().is_empty() {
-                lines.push(Line::from(vec![Span::styled(
-                    "Thinking",
-                    Style::default()
-                        .fg(palette.muted)
-                        .add_modifier(Modifier::BOLD | Modifier::ITALIC),
-                )]));
-
-                for line in message.reasoning.lines() {
-                    lines.push(Line::from(vec![Span::styled(
-                        format!("  {line}"),
-                        Style::default()
-                            .fg(palette.muted)
-                            .add_modifier(Modifier::ITALIC),
-                    )]));
-                }
-            }
-
-            if !message.tool_calls.is_empty() {
-                lines.push(Line::from(vec![Span::styled(
-                    "Tool calls",
-                    Style::default()
-                        .fg(palette.warning)
-                        .add_modifier(Modifier::BOLD),
-                )]));
-
-                for tool_call in &message.tool_calls {
-                    lines.extend(self.render_tool_call_lines(tool_call));
-                }
-            }
-
-            let is_streaming_assistant =
-                message.streaming && matches!(message.role, MessageRole::Assistant);
-
-            if is_streaming_assistant {
-                if !self.streaming_preview_lines.is_empty() {
-                    if let Some(width) = content_width {
-                        let wrapped_preview = adaptive_wrap_lines(
-                            self.streaming_preview_lines.iter(),
-                            RtOptions::new(width),
-                        );
-                        lines.extend(wrapped_preview);
-                    } else {
-                        lines.extend(self.streaming_preview_lines.clone());
-                    }
-                }
-
-                let tail = message
-                    .content
-                    .rsplit_once('\n')
-                    .map(|(_, tail)| tail)
-                    .unwrap_or(message.content.as_str());
-                if !tail.is_empty() {
-                    lines.push(Line::from(vec![Span::styled(
-                        tail.to_string(),
-                        Style::default().fg(role_color),
-                    )]));
-                }
-
-                lines.push(Line::from(vec![Span::styled(
-                    "▌",
-                    Style::default().fg(palette.muted),
-                )]));
-            } else if matches!(message.role, MessageRole::Tool) {
-                lines.extend(self.render_tool_result_lines(message));
-            } else if message.content.is_empty() {
-                if message.reasoning.trim().is_empty() && message.tool_calls.is_empty() {
-                    lines.push(Line::from(vec![Span::styled(
-                        "(empty)",
-                        Style::default().fg(palette.muted),
-                    )]));
-                }
-            } else {
-                append_markdown(
-                    &message.content,
-                    content_width,
-                    Some(self.workspace_root.as_path()),
-                    &mut lines,
-                );
-            }
-
-            lines.push(Line::from(""));
+        if lines.is_empty() {
+            let fallback = decorate_card_lines(
+                vec![line_with_style("(empty)", palette.muted)],
+                width,
+                palette.panel,
+            );
+            let total_lines = fallback.len().max(1);
+            return (Text::from(fallback), total_lines);
         }
 
         let total_lines = lines.len().max(1);
         (Text::from(lines), total_lines)
     }
 
-    fn find_tool_call(&self, tool_call_id: Option<&str>) -> Option<&ToolCall> {
-        let tool_call_id = tool_call_id?;
+    fn render_message_cards(
+        &self,
+        message: &Message,
+        body_width: usize,
+    ) -> Vec<(Color, Vec<Line<'static>>)> {
+        let palette = self.palette();
 
-        self.conversation.messages.iter().rev().find_map(|message| {
-            message
-                .tool_calls
-                .iter()
-                .find(|tool_call| tool_call.id == tool_call_id)
-        })
+        match message.role {
+            MessageRole::User => vec![(
+                palette.panel_alt,
+                self.render_text_body_lines(&message.content, body_width, Some(self.workspace_root.as_path())),
+            )],
+            MessageRole::Assistant => {
+                let mut cards = Vec::new();
+                let body_lines = self.render_assistant_body_lines(message, body_width);
+                if !body_lines.is_empty() {
+                    cards.push((palette.panel, body_lines));
+                }
+
+                for tool_call in &message.tool_calls {
+                    cards.push((palette.panel_alt, self.render_tool_call_lines(tool_call, body_width)));
+                }
+
+                cards
+            }
+            MessageRole::Tool => {
+                let lines = self.render_tool_result_lines(message, body_width);
+                if lines.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![(palette.panel, lines)]
+                }
+            }
+            MessageRole::System => vec![(
+                palette.background,
+                self.render_text_body_lines(&message.content, body_width, Some(self.workspace_root.as_path())),
+            )],
+            MessageRole::Error => vec![(
+                palette.panel_alt,
+                self.render_error_body_lines(message, body_width),
+            )],
+        }
     }
 
-    fn render_tool_call_lines(&self, tool_call: &ToolCall) -> Vec<Line<'static>> {
-        let palette = self.palette();
-        let mut lines = vec![Line::from(vec![
-            Span::styled(
-                format!("  {}", display_tool_name(&tool_call.name)),
-                Style::default()
-                    .fg(palette.accent_soft)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::styled(
-                shorten(&tool_call.id, 24),
-                Style::default().fg(palette.muted),
-            ),
-        ])];
+    fn render_assistant_body_lines(&self, message: &Message, body_width: usize) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
 
-        let fields = summarize_tool_arguments(&tool_call.name, &tool_call.arguments);
-        lines.extend(render_tool_fields(&fields, &palette, 4));
+        if !message.reasoning.trim().is_empty() {
+            lines.extend(self.render_reasoning_lines(&message.reasoning, body_width));
+            if !message.content.trim().is_empty() {
+                lines.push(Line::from(""));
+            }
+        }
+
+        if message.streaming && matches!(message.role, MessageRole::Assistant) {
+            if !self.streaming_preview_lines.is_empty() {
+                if let Some(width) = Some(body_width) {
+                    let wrapped_preview = adaptive_wrap_lines(
+                        self.streaming_preview_lines.iter(),
+                        RtOptions::new(width),
+                    );
+                    lines.extend(wrapped_preview);
+                } else {
+                    lines.extend(self.streaming_preview_lines.clone());
+                }
+            }
+
+            let tail = message
+                .content
+                .rsplit_once('\n')
+                .map(|(_, tail)| tail)
+                .unwrap_or(message.content.as_str());
+            if !tail.is_empty() {
+                lines.push(line_with_prefix(
+                    "▌",
+                    tail,
+                    Style::default().fg(self.palette().accent),
+                    Style::default().fg(self.palette().text),
+                ));
+            } else if lines.is_empty() {
+                lines.push(line_with_style("▌", self.palette().muted));
+            }
+        } else if !message.content.is_empty() {
+            append_markdown(
+                &message.content,
+                Some(body_width),
+                Some(self.workspace_root.as_path()),
+                &mut lines,
+            );
+        }
+
+        if lines.is_empty() && message.reasoning.trim().is_empty() && message.tool_calls.is_empty() {
+            lines.push(line_with_style("(empty)", self.palette().muted));
+        }
+
         lines
     }
 
-    fn render_tool_result_lines(&self, message: &Message) -> Vec<Line<'static>> {
-        let palette = self.palette();
-        let tool_name = message.tool_name.as_deref().unwrap_or(message.role.label());
-        let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
+    fn render_text_body_lines(
+        &self,
+        text: &str,
+        body_width: usize,
+        cwd: Option<&std::path::Path>,
+    ) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
-        let output = message.content.trim_end();
-        let output_is_error = tool_output_is_error(output);
-
-        let fields = self
-            .find_tool_call(message.tool_call_id.as_deref())
-            .map(|tool_call| summarize_tool_arguments(&tool_call.name, &tool_call.arguments))
-            .unwrap_or_default();
-
-        if !fields.is_empty() {
-            let should_show_input_heading =
-                !matches!(canonical_name, "read" | "write" | "edit") || output_is_error;
-            if should_show_input_heading {
-                lines.push(Line::from(vec![Span::styled(
-                    "Input",
-                    Style::default()
-                        .fg(palette.accent_soft)
-                        .add_modifier(Modifier::BOLD),
-                )]));
-            }
-            lines.extend(render_tool_fields(&fields, &palette, 2));
+        if text.trim().is_empty() {
+            lines.push(line_with_style("(empty)", self.palette().muted));
+        } else {
+            append_markdown(text, Some(body_width), cwd, &mut lines);
         }
+        lines
+    }
 
-        let hide_output = matches!(canonical_name, "read" | "write" | "edit") && !output_is_error;
-        let should_show_output =
-            !output.is_empty() && (!hide_output || fields.is_empty() || output_is_error);
+    fn render_reasoning_lines(&self, reasoning: &str, body_width: usize) -> Vec<Line<'static>> {
+        let palette = self.palette();
+        let mut lines = Vec::new();
 
-        if should_show_output {
-            lines.push(Line::from(vec![Span::styled(
-                "Output",
-                Style::default()
-                    .fg(if output_is_error {
-                        palette.error
-                    } else {
-                        palette.accent_soft
-                    })
-                    .add_modifier(Modifier::BOLD),
-            )]));
-            let output_style = if output_is_error {
-                Style::default().fg(palette.error)
-            } else {
-                Style::default().fg(palette.text)
-            };
-            lines.extend(render_tool_output_preview(
-                output,
-                &palette,
-                output_style,
-                6,
-                2,
+        for line in reasoning.lines() {
+            let content = shorten_single_line(line, body_width.saturating_sub(2));
+            lines.push(line_with_prefix(
+                "│",
+                &content,
+                Style::default().fg(palette.muted),
+                Style::default().fg(palette.muted),
             ));
         }
 
         if lines.is_empty() {
-            lines.push(Line::from(vec![Span::styled(
-                "(empty)",
-                Style::default().fg(palette.muted),
-            )]));
+            lines.push(line_with_style("│", palette.muted));
         }
 
         lines
+    }
+
+    fn render_error_body_lines(&self, message: &Message, body_width: usize) -> Vec<Line<'static>> {
+        let palette = self.palette();
+        let mut lines = Vec::new();
+        let error_text = if message.content.trim().is_empty() {
+            "Request failed.".to_string()
+        } else {
+            message.content.clone()
+        };
+
+        for line in error_text.lines() {
+            lines.push(line_with_prefix(
+                "!",
+                &shorten_single_line(line, body_width.saturating_sub(2)),
+                Style::default().fg(palette.error),
+                Style::default().fg(palette.error),
+            ));
+        }
+
+        if lines.is_empty() {
+            lines.push(line_with_style("! Request failed.", palette.error));
+        }
+
+        lines
+    }
+
+    fn render_tool_call_lines(&self, tool_call: &ToolCall, body_width: usize) -> Vec<Line<'static>> {
+        let summary = summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width);
+        let palette = self.palette();
+
+        vec![line_with_prefix(
+            "│",
+            &summary,
+            Style::default().fg(palette.accent_soft),
+            Style::default().fg(palette.text),
+        )]
+    }
+
+    fn render_tool_result_lines(&self, message: &Message, body_width: usize) -> Vec<Line<'static>> {
+        let tool_name = message.tool_name.as_deref().unwrap_or(message.role.label());
+        let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
+        let output = message.content.trim_end();
+
+        if output.is_empty() {
+            return Vec::new();
+        }
+
+        if matches!(canonical_name, "read" | "write" | "edit" | "list" | "todowrite") {
+            if tool_output_is_error(output) {
+                return self.render_output_preview_lines(output, body_width, true);
+            }
+
+            return Vec::new();
+        }
+
+        self.render_output_preview_lines(output, body_width, tool_output_is_error(output))
+    }
+
+    fn render_output_preview_lines(
+        &self,
+        output: &str,
+        body_width: usize,
+        is_error: bool,
+    ) -> Vec<Line<'static>> {
+        let palette = self.palette();
+        let mut lines = Vec::new();
+        let max_lines = if is_error { 4 } else { 5 };
+        let prefix = if is_error { "!" } else { "↳" };
+        let fg = if is_error { palette.error } else { palette.text };
+
+        for line in output.lines().take(max_lines) {
+            lines.push(line_with_prefix(
+                prefix,
+                &shorten_single_line(line, body_width.saturating_sub(2)),
+                Style::default().fg(if is_error { palette.error } else { palette.accent_soft }),
+                Style::default().fg(fg),
+            ));
+        }
+
+        if output.lines().count() > max_lines {
+            lines.push(line_with_prefix(
+                prefix,
+                &format!("... {} more line(s)", output.lines().count() - max_lines),
+                Style::default().fg(palette.muted),
+                Style::default().fg(palette.muted),
+            ));
+        }
+
+        if lines.is_empty() {
+            lines.push(line_with_style("(no output)", palette.muted));
+        }
+
+        lines
+    }
+
+    fn render_scrollbar(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        scroll: usize,
+        max_scroll: usize,
+    ) {
+        let palette = self.palette();
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let track_style = Style::default().bg(palette.background).fg(palette.border);
+        let thumb_style = Style::default().bg(palette.background).fg(palette.accent);
+        let height = area.height as usize;
+        let mut lines = Vec::with_capacity(height);
+
+        if max_scroll == 0 || height == 0 {
+            for _ in 0..height {
+                lines.push(Line::from(vec![Span::styled(" ", track_style)]));
+            }
+        } else {
+            let thumb_height = ((height * height) / self.message_total_lines.max(1))
+                .clamp(1, height)
+                .max(1);
+            let track_span = height.saturating_sub(thumb_height);
+            let thumb_top = if track_span == 0 {
+                0
+            } else {
+                ((scroll as f32 / max_scroll as f32) * track_span as f32).round() as usize
+            };
+
+            for row in 0..height {
+                let is_thumb = row >= thumb_top && row < thumb_top + thumb_height;
+                let style = if is_thumb { thumb_style } else { track_style };
+                let glyph = if is_thumb { "█" } else { "░" };
+                lines.push(Line::from(vec![Span::styled(glyph, style)]));
+            }
+        }
+
+        let paragraph = Paragraph::new(Text::from(lines)).style(Style::default().bg(palette.background));
+        frame.render_widget(paragraph, area);
     }
 
     pub(crate) fn help_message(&self) -> String {
@@ -1636,6 +1737,67 @@ fn display_tool_name(tool_name: &str) -> String {
         .to_string()
 }
 
+fn summarize_tool_call(tool_name: &str, arguments: &str, body_width: usize) -> String {
+    let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
+    let fields = summarize_tool_arguments(tool_name, arguments);
+
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
+    };
+
+    let summary = match canonical_name {
+        "read" => field("path")
+            .map(|path| format!("read file {path}"))
+            .unwrap_or_else(|| "read file".to_string()),
+        "write" => field("path")
+            .map(|path| format!("write file {path}"))
+            .unwrap_or_else(|| "write file".to_string()),
+        "edit" => field("path")
+            .map(|path| format!("edit file {path}"))
+            .unwrap_or_else(|| "edit file".to_string()),
+        "list" => field("path")
+            .map(|path| format!("list items under path {path}"))
+            .unwrap_or_else(|| "list items under path .".to_string()),
+        "glob" => {
+            let pattern = field("pattern").unwrap_or("*");
+            let path = field("path").unwrap_or(".");
+            format!("find {pattern} under path {path}")
+        }
+        "grep" => {
+            let pattern = field("pattern").unwrap_or("");
+            let path = field("path").unwrap_or(".");
+            if pattern.is_empty() {
+                format!("search under path {path}")
+            } else {
+                format!("grep {pattern} under path {path}")
+            }
+        }
+        "bash" => field("command")
+            .map(|command| format!("run shell command {command}"))
+            .unwrap_or_else(|| "run shell command".to_string()),
+        "todowrite" => fields
+            .iter()
+            .find(|(key, _)| key == "todos")
+            .map(|(_, value)| format!("update todo list with {value}"))
+            .unwrap_or_else(|| "update todo list".to_string()),
+        _ => {
+            let mut summary = display_tool_name(tool_name);
+            for (label, value) in fields.iter().take(2) {
+                summary.push(' ');
+                summary.push_str(label);
+                summary.push(' ');
+                summary.push_str(value);
+            }
+            summary
+        }
+    };
+
+    shorten_single_line(&summary, body_width.saturating_sub(2))
+}
+
 fn summarize_tool_arguments(tool_name: &str, arguments: &str) -> Vec<(String, String)> {
     let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
     let parsed = serde_json::from_str::<Value>(arguments).ok();
@@ -1711,68 +1873,6 @@ fn summarize_tool_arguments(tool_name: &str, arguments: &str) -> Vec<(String, St
     fields
 }
 
-fn render_tool_fields(
-    fields: &[(String, String)],
-    palette: &ThemePalette,
-    indent: usize,
-) -> Vec<Line<'static>> {
-    let prefix = " ".repeat(indent);
-    let mut lines = Vec::new();
-
-    for (label, value) in fields {
-        lines.push(Line::from(vec![
-            Span::raw(prefix.clone()),
-            Span::styled(
-                format!("{label}:"),
-                Style::default().fg(palette.accent_soft),
-            ),
-            Span::raw(" "),
-            Span::styled(value.clone(), Style::default().fg(palette.text)),
-        ]));
-    }
-
-    lines
-}
-
-fn render_tool_output_preview(
-    output: &str,
-    palette: &ThemePalette,
-    style: Style,
-    max_lines: usize,
-    indent: usize,
-) -> Vec<Line<'static>> {
-    let prefix = " ".repeat(indent);
-    let mut lines = Vec::new();
-    let preview_lines: Vec<&str> = output.lines().collect();
-
-    if preview_lines.is_empty() {
-        lines.push(Line::from(vec![
-            Span::raw(prefix),
-            Span::styled("(no output)", Style::default().fg(palette.muted)),
-        ]));
-        return lines;
-    }
-
-    for line in preview_lines.iter().take(max_lines) {
-        lines.push(Line::from(vec![
-            Span::raw(prefix.clone()),
-            Span::styled(shorten_single_line(line, 180), style),
-        ]));
-    }
-
-    if preview_lines.len() > max_lines {
-        lines.push(Line::from(vec![
-            Span::raw(prefix),
-            Span::styled(
-                format!("... {} more line(s)", preview_lines.len() - max_lines),
-                Style::default().fg(palette.muted),
-            ),
-        ]));
-    }
-
-    lines
-}
-
 fn tool_output_is_error(output: &str) -> bool {
     let first_line = output.lines().next().unwrap_or("").trim_start();
 
@@ -1785,4 +1885,55 @@ fn tool_output_is_error(output: &str) -> bool {
 fn shorten_single_line(value: &str, max_chars: usize) -> String {
     let single_line = value.replace('\n', " ").replace('\r', "");
     shorten(&single_line, max_chars)
+}
+
+fn line_with_style(text: &str, fg: Color) -> Line<'static> {
+    Line::from(vec![Span::styled(
+        text.to_string(),
+        Style::default().fg(fg),
+    )])
+}
+
+fn line_with_prefix(
+    prefix: &str,
+    text: &str,
+    prefix_style: Style,
+    text_style: Style,
+) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{prefix} "), prefix_style),
+        Span::styled(text.to_string(), text_style),
+    ])
+}
+
+fn decorate_card_lines(lines: Vec<Line<'static>>, width: usize, background: Color) -> Vec<Line<'static>> {
+    lines
+        .into_iter()
+        .map(|line| decorate_card_line(line, width, background))
+        .collect()
+}
+
+fn decorate_card_line(line: Line<'static>, width: usize, background: Color) -> Line<'static> {
+    let bg_style = Style::default().bg(background);
+    let mut spans = Vec::with_capacity(line.spans.len().saturating_add(2));
+    spans.push(Span::styled(" ", bg_style));
+
+    for mut span in line.spans {
+        span.style = span.style.patch(bg_style);
+        spans.push(span);
+    }
+
+    let used_width = line_display_width(&Line::from(spans.clone()));
+    if used_width < width {
+        spans.push(Span::styled(" ".repeat(width - used_width), bg_style));
+    }
+
+    Line::from(spans)
+}
+
+fn line_display_width(line: &Line<'static>) -> usize {
+    line.spans
+        .iter()
+        .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+        .sum()
 }
