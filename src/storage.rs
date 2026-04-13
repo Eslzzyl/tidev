@@ -140,13 +140,16 @@ impl SessionStore {
     pub fn append_message(&self, session_id: Uuid, message: &Message) -> Result<()> {
         let tool_calls =
             serde_json::to_string(&message.tool_calls).context("failed to serialize tool calls")?;
+        let attachments = serde_json::to_string(&message.attachments)
+            .context("failed to serialize attachments")?;
         self.connection.execute(
-            "INSERT INTO messages (id, session_id, role, content, reasoning, tool_calls, tool_call_id, tool_name, created_at, streaming) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, created_at, streaming) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 message.id.to_string(),
                 session_id.to_string(),
                 message.role.db_value(),
                 message.content,
+                attachments,
                 message.reasoning,
                 tool_calls,
                 message.tool_call_id,
@@ -375,20 +378,22 @@ impl SessionStore {
 
     pub fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, role, content, reasoning, tool_calls, tool_call_id, tool_name, created_at, streaming FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
+            "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, created_at, streaming FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
         )?;
 
         let rows = statement.query_map(params![session_id.to_string()], |row| {
             let id = row.get::<_, String>(0)?;
             let role = row.get::<_, String>(1)?;
             let content = row.get::<_, String>(2)?;
-            let reasoning = row.get::<_, String>(3)?;
-            let tool_calls = row.get::<_, String>(4)?;
-            let tool_call_id = row.get::<_, Option<String>>(5)?;
-            let tool_name = row.get::<_, Option<String>>(6)?;
-            let created_at = row.get::<_, String>(7)?;
-            let streaming = row.get::<_, i64>(8)? != 0;
+            let attachments = row.get::<_, String>(3)?;
+            let reasoning = row.get::<_, String>(4)?;
+            let tool_calls = row.get::<_, String>(5)?;
+            let tool_call_id = row.get::<_, Option<String>>(6)?;
+            let tool_name = row.get::<_, Option<String>>(7)?;
+            let created_at = row.get::<_, String>(8)?;
+            let streaming = row.get::<_, i64>(9)? != 0;
 
+            let attachments = serde_json::from_str(&attachments).unwrap_or_default();
             let tool_calls: Vec<ToolCall> = serde_json::from_str(&tool_calls).unwrap_or_default();
 
             let mut message = Message::persisted(
@@ -398,10 +403,11 @@ impl SessionStore {
                 MessageRole::from_db_value(&role),
                 content,
                 parse_datetime(&created_at).map_err(|error| {
-                    rusqlite::Error::FromSqlConversionFailure(7, Type::Text, Box::new(error))
+                    rusqlite::Error::FromSqlConversionFailure(8, Type::Text, Box::new(error))
                 })?,
                 streaming,
             );
+            message.attachments = attachments;
             message.reasoning = reasoning;
             message.tool_calls = tool_calls;
             message.tool_call_id = tool_call_id;
@@ -518,6 +524,7 @@ CREATE TABLE IF NOT EXISTS messages (
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     role TEXT NOT NULL,
     content TEXT NOT NULL,
+    attachments TEXT NOT NULL DEFAULT '[]',
     reasoning TEXT NOT NULL DEFAULT '',
     tool_calls TEXT NOT NULL DEFAULT '[]',
     tool_call_id TEXT,

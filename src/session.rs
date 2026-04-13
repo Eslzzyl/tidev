@@ -3,6 +3,77 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MessageAttachment {
+    FileReference {
+        path: String,
+        content: String,
+    },
+    DirectoryReference {
+        path: String,
+        tree: String,
+    },
+    Image {
+        filename: String,
+        mime: String,
+        data_url: String,
+    },
+}
+
+impl MessageAttachment {
+    pub fn is_image(&self) -> bool {
+        matches!(self, Self::Image { .. })
+    }
+
+    pub fn summary(&self) -> String {
+        match self {
+            Self::FileReference { path, content } => {
+                let preview = content.lines().take(6).collect::<Vec<_>>().join(" ");
+                if preview.trim().is_empty() {
+                    format!("[file:{}]", path)
+                } else {
+                    format!("[file:{}] {}", path, truncate_preview(&preview, 120))
+                }
+            }
+            Self::DirectoryReference { path, tree } => {
+                let preview = tree.lines().take(8).collect::<Vec<_>>().join(" ");
+                if preview.trim().is_empty() {
+                    format!("[dir:{}]", path)
+                } else {
+                    format!("[dir:{}] {}", path, truncate_preview(&preview, 120))
+                }
+            }
+            Self::Image { filename, mime, .. } => format!("[image:{} {}]", filename, mime),
+        }
+    }
+
+    pub fn prompt_text(&self) -> Option<String> {
+        match self {
+            Self::FileReference { path, content } => Some(format!(
+                "\n\nReferenced file: {}\n```text\n{}\n```",
+                path, content
+            )),
+            Self::DirectoryReference { path, tree } => Some(format!(
+                "\n\nReferenced directory: {}\n```text\n{}\n```",
+                path, tree
+            )),
+            Self::Image { .. } => None,
+        }
+    }
+}
+
+fn truncate_preview(value: &str, max_chars: usize) -> String {
+    let count = value.chars().count();
+    if count <= max_chars {
+        return value.to_string();
+    }
+
+    let mut shortened = value.chars().take(max_chars).collect::<String>();
+    shortened.push_str("...");
+    shortened
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageRole {
     System,
@@ -64,6 +135,8 @@ pub struct Message {
     pub role: MessageRole,
     pub content: String,
     #[serde(default)]
+    pub attachments: Vec<MessageAttachment>,
+    #[serde(default)]
     pub reasoning: String,
     #[serde(default)]
     pub tool_calls: Vec<ToolCall>,
@@ -81,6 +154,7 @@ impl Message {
             id: Uuid::new_v4(),
             role,
             content: content.into(),
+            attachments: Vec::new(),
             reasoning: String::new(),
             tool_calls: Vec::new(),
             tool_call_id: None,
@@ -95,6 +169,7 @@ impl Message {
             id: Uuid::new_v4(),
             role,
             content: content.into(),
+            attachments: Vec::new(),
             reasoning: String::new(),
             tool_calls: Vec::new(),
             tool_call_id: None,
@@ -115,6 +190,7 @@ impl Message {
             id,
             role,
             content: content.into(),
+            attachments: Vec::new(),
             reasoning: String::new(),
             tool_calls: Vec::new(),
             tool_call_id: None,
@@ -133,6 +209,7 @@ impl Message {
             id: Uuid::new_v4(),
             role: MessageRole::Tool,
             content: content.into(),
+            attachments: Vec::new(),
             reasoning: String::new(),
             tool_calls: Vec::new(),
             tool_call_id: Some(tool_call_id.into()),

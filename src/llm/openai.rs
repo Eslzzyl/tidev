@@ -6,11 +6,12 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{
     config::ActiveModel,
-    session::{BackendEvent, Message, MessageRole, ToolCall},
+    session::{BackendEvent, Message, MessageAttachment, MessageRole, ToolCall},
     tooling::ToolDefinition,
 };
 
-use super::think_parser::{finalize_turn, ThinkParser, ToolCallBuilder};
+use super::attachments::{image_attachments, message_text_with_file_references};
+use super::think_parser::{ThinkParser, ToolCallBuilder, finalize_turn};
 
 pub(super) async fn stream_openai(
     http: &Client,
@@ -71,8 +72,8 @@ pub(super) async fn stream_openai(
                     return Ok(());
                 }
 
-                let event: ChatCompletionStreamResponse = serde_json::from_str(payload)
-                    .context("failed to parse streaming response")?;
+                let event: ChatCompletionStreamResponse =
+                    serde_json::from_str(payload).context("failed to parse streaming response")?;
 
                 for choice in event.choices {
                     if let Some(reasoning) = choice.delta.reasoning_content {
@@ -147,15 +148,17 @@ pub(super) async fn complete_openai(
     messages: Vec<Message>,
 ) -> Result<String> {
     let request = build_openai_request(&model, messages, false, &[])?;
-    let response = http
-        .post(model.endpoint())
-        .bearer_auth(model.api_key.clone().with_context(|| {
-            format!("missing API key for provider '{}'", model.provider_id)
-        })?)
-        .json(&request)
-        .send()
-        .await?
-        .error_for_status()?;
+    let response =
+        http.post(model.endpoint())
+            .bearer_auth(
+                model.api_key.clone().with_context(|| {
+                    format!("missing API key for provider '{}'", model.provider_id)
+                })?,
+            )
+            .json(&request)
+            .send()
+            .await?
+            .error_for_status()?;
 
     let response: ChatCompletionResponse = response.json().await?;
     let content = response
@@ -185,15 +188,12 @@ fn build_openai_request(
         }
 
         match message.role {
-            MessageRole::System => {
-                request_messages.push(ChatMessagePayload::system(message.content))
-            }
-            MessageRole::User => {
-                request_messages.push(ChatMessagePayload::user(message.content))
-            }
-            MessageRole::Assistant => request_messages.push(ChatMessagePayload::assistant(
-                message.content,
-                if message.tool_calls.is_empty() {
+            MessageRole::System => request_messages.push(ChatMessagePayload::system(
+                message_text_with_file_references(&message),
+            )),
+            MessageRole::User => request_messages.push(ChatMessagePayload::user(model, &message)?),
+            MessageRole::Assistant => {
+                let tool_calls = if message.tool_calls.is_empty() {
                     None
                 } else {
                     Some(
@@ -203,10 +203,15 @@ fn build_openai_request(
                             .map(ChatToolCallPayload::from)
                             .collect(),
                     )
-                },
-            )),
+                };
+
+                request_messages.push(ChatMessagePayload::assistant(
+                    message_text_with_file_references(&message),
+                    tool_calls,
+                ))
+            }
             MessageRole::Tool => request_messages.push(ChatMessagePayload::tool(
-                message.content,
+                message_text_with_file_references(&message),
                 message.tool_call_id,
                 message.tool_name,
             )),
@@ -252,7 +257,7 @@ struct ChatCompletionRequest {
 struct ChatMessagePayload {
     role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    content: Option<String>,
+    content: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_calls: Option<Vec<ChatToolCallPayload>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -265,21 +270,22 @@ impl ChatMessagePayload {
     fn system(content: String) -> Self {
         Self {
             role: "system".to_string(),
-            content: Some(content),
+            content: Some(serde_json::Value::String(content)),
             tool_calls: None,
             tool_call_id: None,
             name: None,
         }
     }
 
-    fn user(content: String) -> Self {
-        Self {
+    fn user(model: &ActiveModel, message: &Message) -> Result<Self> {
+        let content = user_message_content(model, message)?;
+        Ok(Self {
             role: "user".to_string(),
             content: Some(content),
             tool_calls: None,
             tool_call_id: None,
             name: None,
-        }
+        })
     }
 
     fn assistant(content: String, tool_calls: Option<Vec<ChatToolCallPayload>>) -> Self {
@@ -288,7 +294,7 @@ impl ChatMessagePayload {
             content: if content.is_empty() {
                 None
             } else {
-                Some(content)
+                Some(serde_json::Value::String(content))
             },
             tool_calls,
             tool_call_id: None,
@@ -299,12 +305,51 @@ impl ChatMessagePayload {
     fn tool(content: String, tool_call_id: Option<String>, name: Option<String>) -> Self {
         Self {
             role: "tool".to_string(),
-            content: Some(content),
+            content: Some(serde_json::Value::String(content)),
             tool_calls: None,
             tool_call_id,
             name,
         }
     }
+}
+
+fn user_message_content(model: &ActiveModel, message: &Message) -> Result<serde_json::Value> {
+    let text = message_text_with_file_references(message);
+    let images: Vec<&MessageAttachment> = image_attachments(message).collect();
+
+    if images.is_empty() {
+        return Ok(serde_json::Value::String(text));
+    }
+
+    if !model.supports_images {
+        anyhow::bail!("current model does not support image attachments");
+    }
+
+    let mut parts = Vec::new();
+    if !text.trim().is_empty() {
+        parts.push(serde_json::json!({
+            "type": "text",
+            "text": text,
+        }));
+    }
+
+    for attachment in images {
+        if let MessageAttachment::Image { data_url, .. } = attachment {
+            parts.push(serde_json::json!({
+                "type": "image_url",
+                "image_url": { "url": data_url },
+            }));
+        }
+    }
+
+    if parts.is_empty() {
+        parts.push(serde_json::json!({
+            "type": "text",
+            "text": "",
+        }));
+    }
+
+    Ok(serde_json::Value::Array(parts))
 }
 
 #[derive(Clone, Debug, Deserialize)]

@@ -1,4 +1,5 @@
 mod anthropic;
+mod attachments;
 mod openai;
 mod think_parser;
 
@@ -52,9 +53,7 @@ impl LlmClient {
         messages: Vec<Message>,
     ) -> Result<String> {
         match model.api_type {
-            ApiType::Anthropic => {
-                anthropic::complete_anthropic(&self.http, model, messages).await
-            }
+            ApiType::Anthropic => anthropic::complete_anthropic(&self.http, model, messages).await,
             ApiType::OpenAi => openai::complete_openai(&self.http, model, messages).await,
         }
     }

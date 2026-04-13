@@ -4,7 +4,7 @@ use crate::{
     config::ActiveModel,
     llm::LlmClient,
     prompts::compression_system_prompt,
-    session::{Conversation, Message, MessageRole},
+    session::{Conversation, Message, MessageAttachment, MessageRole},
 };
 
 #[derive(Clone, Debug)]
@@ -50,9 +50,28 @@ impl ContextManager {
                     })
                     .sum();
 
+                let attachment_tokens: usize = message
+                    .attachments
+                    .iter()
+                    .map(|attachment| match attachment {
+                        MessageAttachment::FileReference { content, .. } => {
+                            Self::estimate_tokens_for_text(content)
+                        }
+                        MessageAttachment::DirectoryReference { tree, .. } => {
+                            Self::estimate_tokens_for_text(tree)
+                        }
+                        MessageAttachment::Image { filename, mime, .. } => {
+                            Self::estimate_tokens_for_text(filename)
+                                + Self::estimate_tokens_for_text(mime)
+                                + 128
+                        }
+                    })
+                    .sum();
+
                 Self::estimate_tokens_for_text(&message.content)
                     + Self::estimate_tokens_for_text(&message.reasoning)
                     + tool_tokens
+                    + attachment_tokens
                     + 8
             })
             .sum()
@@ -160,11 +179,24 @@ impl ContextManager {
 
         prompt.push_str("Messages to compress:\n");
         for message in messages {
+            let attachment_summary = message
+                .attachments
+                .iter()
+                .map(|attachment| attachment.summary())
+                .collect::<Vec<_>>()
+                .join(" ");
             prompt.push_str(&format!(
                 "- {}: {}\n",
                 message.role.label(),
                 message.content
             ));
+
+            if !attachment_summary.trim().is_empty() {
+                prompt.push_str(&format!(
+                    "  attachments: {}\n",
+                    truncate(&attachment_summary, 240)
+                ));
+            }
 
             if !message.reasoning.trim().is_empty() {
                 prompt.push_str(&format!(
@@ -201,6 +233,19 @@ impl ContextManager {
                 message.role.label(),
                 truncate(&message.content, 240)
             ));
+
+            if !message.attachments.is_empty() {
+                let attachment_summary = message
+                    .attachments
+                    .iter()
+                    .map(|attachment| attachment.summary())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                summary.push_str(&format!(
+                    "  attachments: {}\n",
+                    truncate(&attachment_summary, 240)
+                ));
+            }
         }
         summary
     }

@@ -218,6 +218,7 @@ max_input_lines = 6
             context_window: model.context_window,
             max_output_tokens: model.max_output_tokens,
             temperature: model.temperature,
+            supports_images: model.supports_images,
             system_prompt: model
                 .system_prompt
                 .clone()

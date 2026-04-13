@@ -27,6 +27,10 @@ impl Composer {
         &self.text
     }
 
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+
     pub fn placeholder(&self) -> &str {
         &self.placeholder
     }
@@ -184,9 +188,17 @@ impl Composer {
         self.history_cursor = None;
     }
 
-    fn insert_str(&mut self, value: &str) {
+    pub fn insert_str(&mut self, value: &str) {
         self.text.insert_str(self.cursor, value);
         self.cursor += value.len();
+        self.history_cursor = None;
+    }
+
+    pub fn replace_range(&mut self, start: usize, end: usize, replacement: &str) {
+        let start = start.min(self.text.len());
+        let end = end.min(self.text.len()).max(start);
+        self.text.replace_range(start..end, replacement);
+        self.cursor = start + replacement.len();
         self.history_cursor = None;
     }
 
@@ -228,9 +240,10 @@ impl Composer {
             self.draft = self.text.clone();
             self.history_cursor = Some(self.history.len().saturating_sub(1));
         } else if let Some(index) = self.history_cursor
-            && index > 0 {
-                self.history_cursor = Some(index - 1);
-            }
+            && index > 0
+        {
+            self.history_cursor = Some(index - 1);
+        }
 
         if let Some(index) = self.history_cursor {
             self.text = self.history[index].clone();

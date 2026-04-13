@@ -6,11 +6,12 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{
     config::ActiveModel,
-    session::{BackendEvent, Message, MessageRole},
+    session::{BackendEvent, Message, MessageAttachment, MessageRole},
     tooling::ToolDefinition,
 };
 
-use super::think_parser::{finalize_turn, ThinkParser, ToolCallBuilder};
+use super::attachments::{image_attachments, message_text_with_file_references};
+use super::think_parser::{ThinkParser, ToolCallBuilder, finalize_turn};
 
 pub(super) async fn stream_anthropic(
     http: &Client,
@@ -199,23 +200,20 @@ fn build_anthropic_request(
         match message.role {
             MessageRole::System => {
                 if system_prompt.is_empty() {
-                    system_prompt = message.content;
+                    system_prompt = message_text_with_file_references(&message);
                 }
             }
             MessageRole::User => {
                 anthropic_messages.push(AnthropicMessage {
                     role: "user".to_string(),
-                    content: vec![AnthropicContentBlock::Text {
-                        text: message.content,
-                    }],
+                    content: user_message_content(model, &message)?,
                 });
             }
             MessageRole::Assistant => {
                 let mut content = Vec::new();
-                if !message.content.is_empty() {
-                    content.push(AnthropicContentBlock::Text {
-                        text: message.content,
-                    });
+                let text = message_text_with_file_references(&message);
+                if !text.is_empty() {
+                    content.push(AnthropicContentBlock::Text { text });
                 }
                 for tool_call in &message.tool_calls {
                     content.push(AnthropicContentBlock::ToolUse {
@@ -231,11 +229,13 @@ fn build_anthropic_request(
                 });
             }
             MessageRole::Tool => {
+                let tool_call_id = message.tool_call_id.clone().unwrap_or_default();
+                let content = message_text_with_file_references(&message);
                 anthropic_messages.push(AnthropicMessage {
                     role: "user".to_string(),
                     content: vec![AnthropicContentBlock::ToolResult {
-                        tool_use_id: message.tool_call_id.unwrap_or_default(),
-                        content: message.content,
+                        tool_use_id: tool_call_id,
+                        content,
                     }],
                 });
             }
@@ -299,6 +299,9 @@ enum AnthropicContentBlock {
     Text {
         text: String,
     },
+    Image {
+        source: AnthropicImageSource,
+    },
     ToolUse {
         id: String,
         name: String,
@@ -315,6 +318,59 @@ struct AnthropicTool {
     name: String,
     description: String,
     input_schema: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct AnthropicImageSource {
+    #[serde(rename = "type")]
+    kind: String,
+    media_type: String,
+    data: String,
+}
+
+fn user_message_content(
+    model: &ActiveModel,
+    message: &Message,
+) -> Result<Vec<AnthropicContentBlock>> {
+    let text = message_text_with_file_references(message);
+    let images: Vec<&MessageAttachment> = image_attachments(message).collect();
+
+    if images.is_empty() {
+        return Ok(vec![AnthropicContentBlock::Text { text }]);
+    }
+
+    if !model.supports_images {
+        anyhow::bail!("current model does not support image attachments");
+    }
+
+    let mut content = Vec::new();
+    if !text.trim().is_empty() {
+        content.push(AnthropicContentBlock::Text { text });
+    }
+
+    for attachment in images {
+        if let MessageAttachment::Image { mime, data_url, .. } = attachment {
+            let data = data_url
+                .split_once(',')
+                .map(|(_, data)| data.to_string())
+                .unwrap_or_else(|| data_url.clone());
+            content.push(AnthropicContentBlock::Image {
+                source: AnthropicImageSource {
+                    kind: "base64".to_string(),
+                    media_type: mime.clone(),
+                    data,
+                },
+            });
+        }
+    }
+
+    if content.is_empty() {
+        content.push(AnthropicContentBlock::Text {
+            text: String::new(),
+        });
+    }
+
+    Ok(content)
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -379,8 +435,14 @@ struct AnthropicMessageInfo {
 #[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
 enum AnthropicContentBlockStart {
-    Text { #[allow(dead_code)] text: Option<String> },
-    ToolUse { id: String, name: String },
+    Text {
+        #[allow(dead_code)]
+        text: Option<String>,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize)]

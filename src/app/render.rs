@@ -103,6 +103,7 @@ impl App {
         .style(Style::default().fg(palette.accent_soft));
         frame.render_widget(hint, sections[3]);
 
+        self.render_at_mention_palette(frame, sections[2]);
         self.render_command_palette(frame, sections[2]);
     }
 
@@ -191,6 +192,7 @@ impl App {
             "PageUp / PageDown / mouse wheel - scroll conversation",
             "Tab - switch mode (when no command is being entered)",
             "Up/Down - move through command suggestions",
+                "Ctrl+V - paste clipboard text or image",
             "Ctrl+P / Ctrl+N - navigate input history",
             "Ctrl+C - exit",
             "Permission prompt - Y allow · N deny · R allow and remember · X deny and remember",

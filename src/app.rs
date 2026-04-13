@@ -1,12 +1,14 @@
 use anyhow::{Context, Result};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use crossterm::{
     cursor::Show,
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
-        KeyModifiers, MouseEvent, MouseEventKind,
+        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind,
     },
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use image::ImageEncoder;
 use ratatui::text::Line;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{
@@ -21,6 +23,7 @@ use tokio::{
 };
 use uuid::Uuid;
 
+mod at_mention;
 mod connect;
 mod model_panel;
 mod permission;
@@ -32,6 +35,7 @@ mod theme_panel;
 mod undo;
 
 use crate::{
+    app::at_mention::{AtMentionKind, AtMentionState, current_at_fragment},
     app::model_panel::ModelPanelState,
     app::permission::{PendingToolExecution, PermissionDialogState, RunningToolExecution},
     app::session_panel::SessionPanelState,
@@ -45,7 +49,7 @@ use crate::{
     markdown_stream::MarkdownStreamCollector,
     prompts::SessionMode,
     provider_setup::ConnectDialog,
-    session::{AssistantTurn, BackendEvent, Conversation, Message, MessageRole},
+    session::{AssistantTurn, BackendEvent, Conversation, Message, MessageAttachment, MessageRole},
     storage::SessionStore,
     theme::{ThemeManager, ThemeName},
     tooling::ToolRegistry,
@@ -78,10 +82,12 @@ struct App {
     theme_panel: Option<ThemePanelState>,
     model_panel: Option<ModelPanelState>,
     session_panel: Option<SessionPanelState>,
+    at_mention: AtMentionState,
     pending_tool_execution: Option<PendingToolExecution>,
     permission_dialog: Option<PermissionDialogState>,
     running_tool_execution: Option<RunningToolExecution>,
     composer: Composer,
+    draft_attachments: Vec<MessageAttachment>,
     pending_request: bool,
     active_request_id: u64,
     abort_confirmation_deadline: Option<Instant>,
@@ -164,10 +170,12 @@ impl App {
             theme_panel: None,
             model_panel: None,
             session_panel: None,
+            at_mention: AtMentionState::default(),
             pending_tool_execution: None,
             permission_dialog: None,
             running_tool_execution: None,
             composer,
+            draft_attachments: Vec::new(),
             pending_request: false,
             active_request_id: 0,
             abort_confirmation_deadline: None,
@@ -218,6 +226,9 @@ impl App {
         match event {
             Event::Key(key) if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
                 self.handle_key_event(key, runtime)?;
+            }
+            Event::Paste(text) => {
+                self.handle_text_paste(&text)?;
             }
             Event::Mouse(mouse) => {
                 self.handle_mouse_event(mouse);
@@ -475,6 +486,16 @@ impl App {
             return Ok(());
         }
 
+        if matches!(key.code, KeyCode::Char('v'))
+            && (key.modifiers.contains(KeyModifiers::CONTROL)
+                || key.modifiers.contains(KeyModifiers::SUPER))
+            && !key.modifiers.contains(KeyModifiers::ALT)
+            && !key.modifiers.contains(KeyModifiers::SHIFT)
+        {
+            self.handle_clipboard_paste()?;
+            return Ok(());
+        }
+
         if !self.command_palette.visible && key.code == KeyCode::Tab {
             self.mode = self.mode.toggle();
             self.last_notice = Some(format!("Mode switched to {}", self.mode.as_str()));
@@ -524,8 +545,40 @@ impl App {
             return Ok(());
         }
 
+        if self.at_mention.visible {
+            match key.code {
+                KeyCode::Esc => {
+                    self.at_mention.clear();
+                    return Ok(());
+                }
+                KeyCode::Up => {
+                    self.at_mention.move_selection(-1);
+                    return Ok(());
+                }
+                KeyCode::Down => {
+                    self.at_mention.move_selection(1);
+                    return Ok(());
+                }
+                KeyCode::Tab | KeyCode::Enter => {
+                    self.accept_at_mention();
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+
         if let Some(submission) = self.composer.handle_key_with_history(key, true) {
             self.handle_submission(submission, runtime)?;
+            self.at_mention.clear();
+        } else {
+            if key.code == KeyCode::Enter && !self.draft_attachments.is_empty() {
+                self.handle_submission(String::new(), runtime)?;
+                self.at_mention.clear();
+                self.command_palette
+                    .sync(self.composer.text(), &self.commands);
+                return Ok(());
+            }
+            self.refresh_at_mention_state();
         }
 
         self.command_palette
@@ -537,11 +590,110 @@ impl App {
         let trimmed = submission.trim();
         if trimmed.starts_with('/') {
             self.execute_command_line(trimmed, runtime)?;
+            self.at_mention.clear();
+            self.draft_attachments.clear();
         } else {
             self.submit_prompt(submission, runtime)?;
         }
 
         Ok(())
+    }
+
+    fn handle_text_paste(&mut self, text: &str) -> Result<()> {
+        let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+        self.composer.insert_str(&normalized);
+        self.refresh_at_mention_state();
+        self.command_palette
+            .sync(self.composer.text(), &self.commands);
+        Ok(())
+    }
+
+    fn handle_clipboard_paste(&mut self) -> Result<()> {
+        let mut clipboard = match arboard::Clipboard::new() {
+            Ok(clipboard) => clipboard,
+            Err(error) => {
+                self.last_notice = Some(format!("Clipboard unavailable: {error}"));
+                return Ok(());
+            }
+        };
+
+        if let Ok(text) = clipboard.get_text() {
+            if !text.is_empty() {
+                return self.handle_text_paste(&text);
+            }
+        }
+
+        let image = match clipboard.get_image() {
+            Ok(image) => image,
+            Err(_) => {
+                self.last_notice =
+                    Some("Clipboard does not contain pasteable text or image".to_string());
+                return Ok(());
+            }
+        };
+
+        if !self.active_model.supports_images {
+            self.last_notice = Some("This model does not support image attachments".to_string());
+            return Ok(());
+        }
+
+        let data_url = match png_data_url_from_clipboard_image(image) {
+            Ok(value) => value,
+            Err(error) => {
+                self.last_notice = Some(format!("Failed to decode clipboard image: {error}"));
+                return Ok(());
+            }
+        };
+
+        self.draft_attachments.push(MessageAttachment::Image {
+            filename: format!("pasted-image-{}.png", Uuid::new_v4()),
+            mime: "image/png".to_string(),
+            data_url,
+        });
+        self.last_notice = Some("Image pasted into draft".to_string());
+        Ok(())
+    }
+
+    fn refresh_at_mention_state(&mut self) {
+        if self.command_palette.visible
+            || self.connect_dialog.is_some()
+            || self.theme_panel.is_some()
+            || self.model_panel.is_some()
+            || self.session_panel.is_some()
+        {
+            self.at_mention.clear();
+            return;
+        }
+
+        let text = self.composer.text();
+        let cursor = self.composer.cursor();
+        self.at_mention
+            .sync(self.workspace_root.as_path(), text, cursor);
+    }
+
+    fn accept_at_mention(&mut self) {
+        let Some((start, _query)) =
+            current_at_fragment(self.composer.text(), self.composer.cursor())
+        else {
+            self.at_mention.clear();
+            return;
+        };
+
+        let Some(selection) = self.at_mention.selected().cloned() else {
+            self.at_mention.clear();
+            return;
+        };
+
+        let replacement = match selection.kind {
+            AtMentionKind::Directory => format!("@{}/", selection.path.trim_end_matches('/')),
+            _ => format!("@{}", selection.path),
+        };
+        self.composer
+            .replace_range(start, self.composer.cursor(), &replacement);
+        self.at_mention.clear();
+        self.refresh_at_mention_state();
+        self.command_palette
+            .sync(self.composer.text(), &self.commands);
     }
 
     fn execute_command_line(&mut self, line: &str, runtime: &Runtime) -> Result<()> {
@@ -640,6 +792,8 @@ impl App {
 
     fn open_model_panel(&mut self, initial_query: String) {
         self.command_palette.clear();
+        self.at_mention.clear();
+        self.draft_attachments.clear();
         self.connect_dialog = None;
         self.theme_panel = None;
         self.composer.clear();
@@ -655,6 +809,8 @@ impl App {
 
     fn close_model_panel(&mut self) {
         self.model_panel = None;
+        self.at_mention.clear();
+        self.draft_attachments.clear();
         self.composer.clear();
         self.composer
             .set_placeholder("Ask TiDev about your code, task, or question...");
@@ -737,6 +893,8 @@ impl App {
         self.model_panel = None;
         self.session_panel = None;
         self.command_palette.clear();
+        self.at_mention.clear();
+        self.draft_attachments.clear();
         self.composer.clear();
         self.composer
             .set_placeholder("Ask TiDev about your code, task, or question...");
@@ -748,12 +906,12 @@ impl App {
 
     fn submit_prompt(&mut self, prompt: String, runtime: &Runtime) -> Result<()> {
         let prompt = prompt.trim().to_string();
-        if prompt.is_empty() {
+        if self.pending_request {
+            self.last_notice = Some("A response is already in progress".to_string());
             return Ok(());
         }
 
-        if self.pending_request {
-            self.last_notice = Some("A response is already in progress".to_string());
+        if prompt.is_empty() && self.draft_attachments.is_empty() {
             return Ok(());
         }
 
@@ -766,10 +924,20 @@ impl App {
             self.context_manager = ContextManager::new();
         }
 
-        let user_message = Message::new(MessageRole::User, prompt.clone());
+        let attachments = self.build_prompt_attachments(&prompt)?;
+        if attachments.iter().any(MessageAttachment::is_image) && !self.active_model.supports_images
+        {
+            self.last_notice = Some("This model does not support image attachments".to_string());
+            return Ok(());
+        }
+
+        let mut user_message = Message::new(MessageRole::User, prompt.clone());
+        user_message.attachments = attachments;
         self.conversation.push(user_message.clone());
         self.store
             .append_message(self.conversation.session_id, &user_message)?;
+
+        self.draft_attachments.clear();
 
         if let Err(error) = self.capture_prompt_snapshot(user_message.id) {
             self.last_notice = Some(format!("Workspace snapshot unavailable: {error}"));
@@ -805,6 +973,101 @@ impl App {
         }
 
         self.start_assistant_turn(runtime)
+    }
+
+    fn build_prompt_attachments(&self, prompt: &str) -> Result<Vec<MessageAttachment>> {
+        let mut attachments = Vec::new();
+        let mut seen_paths = std::collections::BTreeSet::new();
+
+        for path in self.inline_file_references(prompt) {
+            if !seen_paths.insert(path.clone()) {
+                continue;
+            }
+
+            let absolute = self.resolve_workspace_path(&path);
+            match self.build_attachment_for_path(&path, &absolute)? {
+                Some(attachment) => attachments.push(attachment),
+                None => continue,
+            }
+        }
+
+        attachments.extend(self.draft_attachments.iter().cloned());
+        Ok(attachments)
+    }
+
+    fn build_attachment_for_path(
+        &self,
+        path: &str,
+        absolute: &Path,
+    ) -> Result<Option<MessageAttachment>> {
+        let metadata = match std::fs::metadata(absolute) {
+            Ok(metadata) => metadata,
+            Err(_error) => return Ok(None),
+        };
+
+        if metadata.is_dir() {
+            let tree = build_directory_tree(absolute, 2, 80)?;
+            return Ok(Some(MessageAttachment::DirectoryReference {
+                path: path.trim_end_matches(['/', '\\']).to_string(),
+                tree,
+            }));
+        }
+
+        if let Some(mime) = image_mime_from_path(absolute) {
+            let bytes = std::fs::read(absolute)?;
+            let filename = absolute
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or(path)
+                .to_string();
+            let data_url = format!("data:{mime};base64,{}", BASE64_STANDARD.encode(bytes));
+            return Ok(Some(MessageAttachment::Image {
+                filename,
+                mime: mime.to_string(),
+                data_url,
+            }));
+        }
+
+        let content = match std::fs::read_to_string(absolute) {
+            Ok(content) => content,
+            Err(_error) => return Ok(None),
+        };
+
+        Ok(Some(MessageAttachment::FileReference {
+            path: path.to_string(),
+            content,
+        }))
+    }
+
+    fn inline_file_references(&self, prompt: &str) -> Vec<String> {
+        let mut paths = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+
+        for token in prompt.split_whitespace() {
+            let Some(path) = token.strip_prefix('@') else {
+                continue;
+            };
+            let path = path.trim_matches(|ch: char| {
+                matches!(ch, ',' | '.' | ';' | ':' | ')' | ']' | '"' | '\'')
+            });
+            if path.is_empty() {
+                continue;
+            }
+            if !seen.insert(path.to_string()) {
+                continue;
+            }
+            paths.push(path.to_string());
+        }
+
+        paths
+    }
+
+    fn resolve_workspace_path(&self, path: &str) -> PathBuf {
+        let candidate = Path::new(path);
+        if candidate.is_absolute() {
+            return candidate.to_path_buf();
+        }
+        self.workspace_root.join(path)
     }
 
     fn start_assistant_turn(&mut self, runtime: &Runtime) -> Result<()> {
@@ -1100,6 +1363,105 @@ impl App {
     }
 }
 
+fn png_data_url_from_clipboard_image(image: arboard::ImageData<'_>) -> Result<String> {
+    let mut png = Vec::new();
+    let encoder = image::codecs::png::PngEncoder::new(&mut png);
+    let width = image.width as u32;
+    let height = image.height as u32;
+    let rgba = image.bytes.into_owned();
+    encoder
+        .write_image(&rgba, width, height, image::ExtendedColorType::Rgba8)
+        .context("failed to encode clipboard image")?;
+    Ok(format!(
+        "data:image/png;base64,{}",
+        BASE64_STANDARD.encode(png)
+    ))
+}
+
+fn build_directory_tree(path: &Path, max_depth: usize, max_entries: usize) -> Result<String> {
+    let label = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| path.display().to_string());
+
+    let mut lines = vec![format!("{label}/")];
+    let mut entry_count = 0usize;
+    append_directory_tree(
+        path,
+        1,
+        max_depth,
+        max_entries,
+        &mut entry_count,
+        &mut lines,
+    )?;
+    Ok(lines.join("\n"))
+}
+
+fn append_directory_tree(
+    path: &Path,
+    depth: usize,
+    max_depth: usize,
+    max_entries: usize,
+    entry_count: &mut usize,
+    lines: &mut Vec<String>,
+) -> Result<()> {
+    if depth > max_depth || *entry_count >= max_entries {
+        return Ok(());
+    }
+
+    let mut entries = Vec::new();
+    for entry in
+        std::fs::read_dir(path).with_context(|| format!("failed to read {}", path.display()))?
+    {
+        let entry = entry.with_context(|| format!("failed to read entry in {}", path.display()))?;
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("failed to inspect {}", entry.path().display()))?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        entries.push((file_type.is_dir(), name, entry.path()));
+    }
+
+    entries.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| right.0.cmp(&left.0)));
+
+    for (is_dir, name, child_path) in entries {
+        if *entry_count >= max_entries {
+            lines.push(format!("{}...", "  ".repeat(depth)));
+            break;
+        }
+
+        let indent = "  ".repeat(depth);
+        if is_dir {
+            lines.push(format!("{indent}{name}/"));
+            *entry_count += 1;
+            append_directory_tree(
+                &child_path,
+                depth + 1,
+                max_depth,
+                max_entries,
+                entry_count,
+                lines,
+            )?;
+        } else {
+            lines.push(format!("{indent}{name}"));
+            *entry_count += 1;
+        }
+    }
+
+    Ok(())
+}
+
+fn image_mime_from_path(path: &Path) -> Option<&'static str> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    match extension.as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "webp" => Some("image/webp"),
+        "gif" => Some("image/gif"),
+        _ => None,
+    }
+}
+
 struct TerminalSession;
 
 impl TerminalSession {
@@ -1108,6 +1470,7 @@ impl TerminalSession {
         crossterm::execute!(
             io::stdout(),
             EnterAlternateScreen,
+            EnableBracketedPaste,
             EnableMouseCapture,
             crossterm::cursor::Hide,
         )
@@ -1123,6 +1486,7 @@ impl Drop for TerminalSession {
         let _ = crossterm::execute!(
             io::stdout(),
             LeaveAlternateScreen,
+            DisableBracketedPaste,
             DisableMouseCapture,
             Show,
         );

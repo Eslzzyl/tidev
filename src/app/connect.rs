@@ -25,6 +25,8 @@ pub(crate) enum ProviderPickerItem {
 impl App {
     pub(crate) fn open_connect_dialog(&mut self) -> Result<()> {
         self.command_palette.clear();
+        self.at_mention.clear();
+        self.draft_attachments.clear();
 
         self.composer.clear();
         self.composer
@@ -79,6 +81,8 @@ impl App {
             .provider_display_name(&provider_id)
             .map(str::to_string)
             .unwrap_or_else(|| provider_id.clone());
+        self.at_mention.clear();
+        self.draft_attachments.clear();
         self.composer.clear();
         self.composer
             .set_placeholder(format!("Enter API key for {label}"));
@@ -116,12 +120,12 @@ impl App {
                 .models
                 .keys()
                 .position(|candidate| candidate == &model_id)
-            {
-                let mut draft = draft;
-                draft.selected_model_index = index;
-                self.show_edit_provider_step(provider_id, EditProviderStep::ModelList, None, draft);
-                return Ok(());
-            }
+        {
+            let mut draft = draft;
+            draft.selected_model_index = index;
+            self.show_edit_provider_step(provider_id, EditProviderStep::ModelList, None, draft);
+            return Ok(());
+        }
         self.show_edit_provider_step(provider_id, EditProviderStep::DisplayName, None, draft);
         Ok(())
     }
@@ -133,6 +137,8 @@ impl App {
         model_step: Option<EditModelStep>,
         draft: EditProviderDraft,
     ) {
+        self.at_mention.clear();
+        self.draft_attachments.clear();
         self.composer.clear();
         if let Some(model_step) = model_step {
             self.composer.set_placeholder(format!(
@@ -328,6 +334,8 @@ impl App {
     }
 
     fn show_new_provider_step(&mut self, step: NewProviderStep, draft: NewProviderDraft) {
+        self.at_mention.clear();
+        self.draft_attachments.clear();
         self.composer.clear();
         self.composer
             .set_placeholder(format!("{} · {}", step.label(), step.help()));
@@ -337,6 +345,8 @@ impl App {
 
     fn cancel_connect_dialog(&mut self) {
         self.connect_dialog = None;
+        self.at_mention.clear();
+        self.draft_attachments.clear();
         self.composer.clear();
         self.composer
             .set_placeholder("Ask TiDev about your code, task, or question...");

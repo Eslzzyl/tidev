@@ -76,6 +76,66 @@ impl App {
         frame.render_stateful_widget(list, inner, &mut state);
     }
 
+    pub(super) fn render_at_mention_palette(&self, frame: &mut Frame<'_>, area: Rect) {
+        if !self.at_mention.visible || self.at_mention.suggestions.is_empty() {
+            return;
+        }
+
+        let palette = self.palette();
+        let width = area.width.min(72);
+        let height = (self.at_mention.suggestions.len() as u16)
+            .min(6)
+            .saturating_add(2);
+        let rect = Rect::new(area.x, area.y.saturating_sub(height), width, height);
+        let inner = rect.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+
+        let items = self
+            .at_mention
+            .suggestions
+            .iter()
+            .map(|suggestion| {
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        format!("@{}", suggestion.path),
+                        Style::default()
+                            .fg(palette.accent)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(
+                        suggestion.display.clone(),
+                        Style::default().fg(palette.muted),
+                    ),
+                ]))
+            })
+            .collect::<Vec<_>>();
+
+        let mut state = ListState::default();
+        state.select(Some(self.at_mention.selected_index));
+
+        let panel = Block::default()
+            .style(Style::default().bg(palette.panel_alt))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.border_active()))
+            .title(format!("Files · @{}", self.at_mention.query));
+
+        let list = List::new(items)
+            .style(Style::default().bg(palette.panel_alt).fg(palette.text))
+            .highlight_style(
+                Style::default()
+                    .bg(palette.selection_bg)
+                    .fg(palette.selection_fg)
+                    .add_modifier(Modifier::BOLD),
+            );
+
+        frame.render_widget(Clear, rect);
+        frame.render_widget(panel, rect);
+        frame.render_stateful_widget(list, inner, &mut state);
+    }
+
     pub(super) fn render_connect_dialog(&self, frame: &mut Frame<'_>, area: Rect) {
         let Some(dialog) = &self.connect_dialog else {
             return;

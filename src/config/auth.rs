@@ -68,6 +68,7 @@ pub struct ActiveModel {
     pub context_window: usize,
     pub max_output_tokens: usize,
     pub temperature: f32,
+    pub supports_images: bool,
     pub system_prompt: String,
     pub api_key: Option<String>,
 }

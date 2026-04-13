@@ -56,6 +56,7 @@ impl App {
             self.composer.placeholder(),
             false,
         );
+        self.render_at_mention_palette(frame, layout[1]);
         self.render_prompt_footer(frame, layout[2]);
         self.render_command_palette(frame, layout[1]);
     }
@@ -196,7 +197,9 @@ impl App {
         lines.push(Line::from("/theme"));
         lines.push(Line::from("/help"));
         lines.push(Line::from("/undo - revert the previous user message"));
-        lines.push(Line::from("/redo - move one step forward in the undo history"));
+        lines.push(Line::from(
+            "/redo - move one step forward in the undo history",
+        ));
         lines.push(Line::from("/model - open the model panel"));
         lines.push(Line::from("/model <query> - prefilter the model panel"));
         lines.push(Line::from("/session - open the session panel"));
@@ -301,14 +304,19 @@ impl App {
         let palette = self.palette();
 
         match message.role {
-            MessageRole::User => vec![(
-                palette.panel_alt,
-                self.render_text_body_lines(
+            MessageRole::User => vec![(palette.panel_alt, {
+                let mut lines = self.render_text_body_lines(
                     &message.content,
                     body_width,
                     Some(self.workspace_root.as_path()),
-                ),
-            )],
+                );
+
+                for attachment in &message.attachments {
+                    lines.push(line_with_style(&attachment.summary(), palette.accent_soft));
+                }
+
+                lines
+            })],
             MessageRole::Assistant => {
                 let mut cards = Vec::new();
                 let body_lines = self.render_assistant_body_lines(message, body_width);

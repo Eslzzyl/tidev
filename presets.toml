@@ -11,6 +11,7 @@ context_window = 128000
 max_output_tokens = 8192
 temperature = 0.7
 supports_streaming = true
+supports_images = false
 
 [providers.deepseek.models.deepseek-reasoner]
 display_name = "DeepSeek Reasoner"
@@ -18,3 +19,4 @@ context_window = 128000
 max_output_tokens = 8192
 temperature = 0.2
 supports_streaming = true
+supports_images = false

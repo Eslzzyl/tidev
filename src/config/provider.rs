@@ -51,6 +51,8 @@ pub struct ModelConfig {
     pub system_prompt: Option<String>,
     #[serde(default = "default_true")]
     pub supports_streaming: bool,
+    #[serde(default)]
+    pub supports_images: bool,
 }
 
 fn default_true() -> bool {
