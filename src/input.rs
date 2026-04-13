@@ -227,11 +227,10 @@ impl Composer {
         if self.history_cursor.is_none() {
             self.draft = self.text.clone();
             self.history_cursor = Some(self.history.len().saturating_sub(1));
-        } else if let Some(index) = self.history_cursor {
-            if index > 0 {
+        } else if let Some(index) = self.history_cursor
+            && index > 0 {
                 self.history_cursor = Some(index - 1);
             }
-        }
 
         if let Some(index) = self.history_cursor {
             self.text = self.history[index].clone();

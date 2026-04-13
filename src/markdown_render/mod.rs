@@ -334,11 +334,10 @@ where
 
     fn start_table_row(&mut self) {
         self.flush_current_line();
-        if let Some(table) = self.table_state.as_mut() {
-            if !(table.in_head && table.current_row.is_some()) {
+        if let Some(table) = self.table_state.as_mut()
+            && !(table.in_head && table.current_row.is_some()) {
                 table.start_row();
             }
-        }
         self.in_table_cell = false;
     }
 

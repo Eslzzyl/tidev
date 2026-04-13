@@ -16,6 +16,12 @@ pub struct ContextManager {
     pub maximum_summary_chars: usize,
 }
 
+impl Default for ContextManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ContextManager {
     pub fn new() -> Self {
         Self {

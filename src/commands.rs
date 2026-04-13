@@ -152,15 +152,14 @@ impl CommandPaletteState {
             return;
         }
 
-        if let Some(previous) = previous {
-            if let Some(index) = self
+        if let Some(previous) = previous
+            && let Some(index) = self
                 .suggestions
                 .iter()
                 .position(|item| item.spec.name == previous)
-            {
-                self.selected_index = index;
-                return;
-            }
+        {
+            self.selected_index = index;
+            return;
         }
 
         self.selected_index = self
@@ -241,8 +240,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "theme",
         aliases: &["appearance"],
-        description: "Switch between light and dark themes",
-        usage: "/theme [light|dark]",
+        description: "Switch between built-in themes",
+        usage: "/theme [dark|light|nord|one-dark|catppuccin|solarized|orng|github|material]",
         action: CommandAction::Theme,
     },
     CommandSpec {

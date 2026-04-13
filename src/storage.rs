@@ -258,7 +258,7 @@ impl SessionStore {
         )?;
 
         let record = statement
-            .query_row([], |row| Self::session_from_row(row))
+            .query_row([], Self::session_from_row)
             .optional()?;
 
         Ok(record)

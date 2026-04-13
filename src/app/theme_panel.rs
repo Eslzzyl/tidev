@@ -22,7 +22,7 @@ impl ThemePanelState {
     }
 
     pub fn themes() -> &'static [ThemeName] {
-        &[ThemeName::Dark, ThemeName::Light]
+        ThemeName::all()
     }
 
     pub fn move_up(&mut self) {

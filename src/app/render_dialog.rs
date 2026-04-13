@@ -21,7 +21,7 @@ impl App {
         }
 
         let palette = self.palette();
-        let width = area.width.min(72).max(28).min(area.width);
+        let width = area.width.min(72);
         let height = (self.command_palette.suggestions.len() as u16)
             .min(6)
             .saturating_add(2);
@@ -189,7 +189,7 @@ impl App {
 
                             ListItem::new(Line::from(vec![
                                 Span::styled(
-                                    format!("{}", display_name),
+                                    display_name.to_string(),
                                     Style::default()
                                         .fg(palette.text)
                                         .add_modifier(Modifier::BOLD),
@@ -478,7 +478,7 @@ impl App {
 
                             ListItem::new(Line::from(vec![
                                 Span::styled(
-                                    format!("{}", model.display_name),
+                                    model.display_name.to_string(),
                                     Style::default()
                                         .fg(palette.text)
                                         .add_modifier(Modifier::BOLD),
@@ -626,7 +626,7 @@ impl App {
         panel: &ThemePanelState,
     ) {
         let current_palette = self.palette();
-        let overlay = centered_rect(40, 12, area);
+        let overlay = centered_rect(40, 18, area);
         let themes = ThemePanelState::themes();
 
         let items: Vec<ListItem> = themes
@@ -732,7 +732,7 @@ impl App {
                 } => {
                     rows.push(ListItem::new(Line::from(vec![
                         Span::styled(
-                            format!("{display_name}"),
+                            display_name.to_string(),
                             Style::default()
                                 .fg(palette.accent)
                                 .add_modifier(Modifier::BOLD),

@@ -1,5 +1,4 @@
-use ratatui::text::Line;
-use ratatui::text::Span;
+use ratatui::text::{Line, Span};
 
 pub fn line_to_static(line: &Line<'_>) -> Line<'static> {
     Line {
@@ -30,25 +29,4 @@ pub fn is_blank_line_spaces_only(line: &Line<'_>) -> bool {
     line.spans
         .iter()
         .all(|span| span.content.is_empty() || span.content.chars().all(|ch| ch == ' '))
-}
-
-pub fn prefix_lines(
-    lines: Vec<Line<'static>>,
-    initial_prefix: Span<'static>,
-    subsequent_prefix: Span<'static>,
-) -> Vec<Line<'static>> {
-    lines
-        .into_iter()
-        .enumerate()
-        .map(|(index, line)| {
-            let mut spans = Vec::with_capacity(line.spans.len() + 1);
-            spans.push(if index == 0 {
-                initial_prefix.clone()
-            } else {
-                subsequent_prefix.clone()
-            });
-            spans.extend(line.spans);
-            Line::from(spans).style(line.style)
-        })
-        .collect()
 }

@@ -60,7 +60,7 @@ fn parse_local_link_target(dest_url: &str) -> Option<(String, Option<String>)> {
     }
 
     let decoded_path_text =
-        urlencoding::decode(path_text).unwrap_or_else(|_| std::borrow::Cow::Borrowed(path_text));
+        urlencoding::decode(path_text).unwrap_or(std::borrow::Cow::Borrowed(path_text));
     Some((expand_local_link_path(&decoded_path_text), location_suffix))
 }
 

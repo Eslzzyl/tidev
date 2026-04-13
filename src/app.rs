@@ -813,18 +813,16 @@ impl App {
                     self.streaming_preview_lines
                         .extend(collector.commit_complete_lines());
                 }
-                if let Some(message) = self.conversation.messages.last_mut() {
-                    if message.streaming && matches!(message.role, MessageRole::Assistant) {
+                if let Some(message) = self.conversation.messages.last_mut()
+                    && message.streaming && matches!(message.role, MessageRole::Assistant) {
                         message.content.push_str(&delta);
                     }
-                }
             }
             BackendEvent::ReasoningDelta(delta) => {
-                if let Some(message) = self.conversation.messages.last_mut() {
-                    if message.streaming && matches!(message.role, MessageRole::Assistant) {
+                if let Some(message) = self.conversation.messages.last_mut()
+                    && message.streaming && matches!(message.role, MessageRole::Assistant) {
                         message.reasoning.push_str(&delta);
                     }
-                }
             }
             BackendEvent::Finished(turn) => {
                 self.finish_assistant_turn(turn, runtime)?;
@@ -836,8 +834,8 @@ impl App {
                 self.streaming_markdown = None;
                 self.streaming_preview_lines.clear();
 
-                if let Some(message) = self.conversation.messages.last_mut() {
-                    if message.streaming && matches!(message.role, MessageRole::Assistant) {
+                if let Some(message) = self.conversation.messages.last_mut()
+                    && message.streaming && matches!(message.role, MessageRole::Assistant) {
                         message.role = MessageRole::Error;
                         message.streaming = false;
                         message.content = format!("Request failed: {error}");
@@ -847,7 +845,6 @@ impl App {
                         self.last_notice = Some(error);
                         return Ok(());
                     }
-                }
 
                 let message = Message::new(MessageRole::Error, format!("Request failed: {error}"));
                 self.conversation.push(message.clone());
@@ -863,15 +860,14 @@ impl App {
     fn finish_assistant_turn(&mut self, turn: AssistantTurn, runtime: &Runtime) -> Result<()> {
         let mut persisted_message = None;
 
-        if let Some(message) = self.conversation.messages.last_mut() {
-            if message.streaming && matches!(message.role, MessageRole::Assistant) {
+        if let Some(message) = self.conversation.messages.last_mut()
+            && message.streaming && matches!(message.role, MessageRole::Assistant) {
                 message.content = turn.content.clone();
                 message.reasoning = turn.reasoning.clone();
                 message.tool_calls = turn.tool_calls.clone();
                 message.streaming = false;
                 persisted_message = Some(message.clone());
             }
-        }
 
         if let Some(message) = persisted_message {
             self.store

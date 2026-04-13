@@ -318,6 +318,7 @@ struct AnthropicResponse {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
 enum AnthropicContentBlockResponse {
     Text {
         text: String,
@@ -332,6 +333,7 @@ enum AnthropicContentBlockResponse {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
 enum AnthropicStreamEvent {
     MessageStart {
         message: AnthropicMessageInfo,

@@ -3,7 +3,7 @@ mod paths;
 mod provider;
 mod ui;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -81,7 +81,7 @@ impl AppConfig {
         r#"# TiDev configuration
 # Bundled provider presets ship with the binary and do not need to be copied here.
 # Add your own providers below if you want custom endpoints.
-# `theme` can be dark or light.
+# `theme` can be one of: dark, light, nord, one-dark, catppuccin, solarized, orng, github, material.
 theme = "dark"
 default_provider = "openai"
 default_model = "gpt-4o-mini"
@@ -255,10 +255,10 @@ max_input_lines = 6
         let mut matches = Vec::new();
 
         for provider_id in self.provider_ids() {
-            if let Some(provider) = self.provider(&provider_id) {
-                if provider.models.contains_key(query) {
-                    matches.push((provider_id.clone(), query.to_string()));
-                }
+            if let Some(provider) = self.provider(&provider_id)
+                && provider.models.contains_key(query)
+            {
+                matches.push((provider_id.clone(), query.to_string()));
             }
         }
 

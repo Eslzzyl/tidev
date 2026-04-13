@@ -57,8 +57,7 @@ fn normalize_identifier(value: &str, label: &str) -> Result<String> {
     let normalized = value
         .trim()
         .to_ascii_lowercase()
-        .replace(' ', "-")
-        .replace('.', "-");
+        .replace([' ', '.'], "-");
 
     if normalized.is_empty() {
         bail!("{label} cannot be empty");

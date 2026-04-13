@@ -220,7 +220,7 @@ impl App {
             "/connect - open the provider picker",
             "/model - open the model panel",
             "/model <query> - prefilter the model panel",
-            "/theme [light|dark] - switch theme",
+            "/theme [dark|light|nord|one-dark|catppuccin|solarized|orng|github|material] - switch theme",
             "/clear - start a fresh session",
             "/exit - exit TiDev",
             "",

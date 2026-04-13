@@ -192,7 +192,7 @@ impl TableState {
             let mut spans = self.prefix.clone();
             spans.push(Span::raw("│"));
 
-            for column_index in 0..widths.len() {
+            for (column_index, &width) in widths.iter().enumerate() {
                 spans.push(Span::raw(" "));
                 let cell_line = wrapped_cells
                     .get(column_index)
@@ -201,7 +201,7 @@ impl TableState {
                     .unwrap_or_default();
                 spans.extend(pad_cell_spans(
                     cell_line,
-                    widths[column_index],
+                    width,
                     self.alignments
                         .get(column_index)
                         .copied()
@@ -335,9 +335,7 @@ fn shrink_table_widths(
             }
         }
 
-        let Some(index) = chosen_index else {
-            return None;
-        };
+        let index = chosen_index?;
 
         if widths[index] <= min_width {
             return None;

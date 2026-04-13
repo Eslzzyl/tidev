@@ -111,8 +111,8 @@ impl App {
             &provider,
             self.auth.api_key(&provider_id).map(str::to_string),
         );
-        if let Some(model_id) = selected_model_id {
-            if let Some(index) = draft
+        if let Some(model_id) = selected_model_id
+            && let Some(index) = draft
                 .models
                 .keys()
                 .position(|candidate| candidate == &model_id)
@@ -122,7 +122,6 @@ impl App {
                 self.show_edit_provider_step(provider_id, EditProviderStep::ModelList, None, draft);
                 return Ok(());
             }
-        }
         self.show_edit_provider_step(provider_id, EditProviderStep::DisplayName, None, draft);
         Ok(())
     }

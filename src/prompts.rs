@@ -9,14 +9,6 @@ impl SessionMode {
         &[Self::Plan, Self::Build]
     }
 
-    pub fn from_str(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "plan" | "planning" | "readonly" | "read_only" => Some(Self::Plan),
-            "build" | "implement" | "implementation" => Some(Self::Build),
-            _ => None,
-        }
-    }
-
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Plan => "plan",
