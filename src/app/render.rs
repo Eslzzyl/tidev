@@ -2,6 +2,7 @@ use crate::{
     app::model_panel::{ModelPanelItem, ModelPanelState},
     app::permission::PermissionDialogState,
     app::theme_panel::ThemePanelState,
+    markdown::append_markdown,
     config::ProviderSource,
     prompts::SessionMode,
     provider_setup::{ConnectDialog, EditProviderStep, NewProviderStep},
@@ -821,7 +822,8 @@ impl App {
             ));
 
         let inner_height = area.height.saturating_sub(2) as usize;
-        let (text, total_lines) = self.messages_text();
+        let content_width = area.width.saturating_sub(2).max(1) as usize;
+        let (text, total_lines) = self.messages_text(Some(content_width));
         let scroll = total_lines.saturating_sub(inner_height) as u16;
 
         let paragraph = Paragraph::new(text)
@@ -1054,7 +1056,7 @@ impl App {
         }
     }
 
-    fn messages_text(&self) -> (Text<'static>, usize) {
+    fn messages_text(&self, content_width: Option<usize>) -> (Text<'static>, usize) {
         let palette = self.palette();
         if self.conversation.messages.is_empty() {
             let lines = vec![
@@ -1168,9 +1170,12 @@ impl App {
                     )]));
                 }
             } else {
-                for line in message.content.lines() {
-                    lines.push(Line::from(line.to_string()));
-                }
+                append_markdown(
+                    &message.content,
+                    content_width,
+                    Some(self.workspace_root.as_path()),
+                    &mut lines,
+                );
 
                 if message.streaming {
                     lines.push(Line::from(vec![Span::styled(
