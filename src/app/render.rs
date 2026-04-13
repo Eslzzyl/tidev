@@ -2,7 +2,7 @@ use crate::{
     app::theme_panel::ThemePanelState,
     config::ProviderSource,
     prompts::SessionMode,
-    provider_setup::{ConnectDialog, NewProviderStep},
+    provider_setup::{ConnectDialog, EditProviderStep, NewProviderStep},
     session::MessageRole,
     theme::ThemePalette,
 };
@@ -89,6 +89,20 @@ impl App {
         let palette = self.palette();
         let (overlay_width, overlay_height) = match dialog {
             ConnectDialog::ProviderPicker { .. } => (area.width.min(92), area.height.min(28)),
+            ConnectDialog::EditProvider {
+                step, model_step, ..
+            } => {
+                if model_step.is_some() {
+                    (area.width.min(90), area.height.min(26))
+                } else {
+                    match step {
+                        EditProviderStep::ModelList | EditProviderStep::ConfirmDeleteModel => {
+                            (area.width.min(96), area.height.min(34))
+                        }
+                        _ => (area.width.min(84), area.height.min(24)),
+                    }
+                }
+            }
             _ => (area.width.min(80), area.height.min(24)),
         };
         let overlay = centered_rect(overlay_width, overlay_height, area);
@@ -106,6 +120,18 @@ impl App {
             }
             ConnectDialog::NewProvider { step, .. } => {
                 format!("Create provider · {}", step.title())
+            }
+            ConnectDialog::EditProvider {
+                provider_id,
+                step,
+                model_step,
+                ..
+            } => {
+                if let Some(model_step) = model_step {
+                    format!("Edit model · {provider_id} · {}", model_step.title())
+                } else {
+                    format!("Edit provider · {provider_id} · {}", step.title())
+                }
             }
         };
 
@@ -132,7 +158,7 @@ impl App {
                 .split(inner);
 
                 frame.render_widget(
-                    Paragraph::new("Type to filter by provider id or display name.")
+                    Paragraph::new("Type to filter by provider id or display name. Press Ctrl+E to edit custom providers.")
                         .alignment(Alignment::Center)
                         .style(Style::default().bg(palette.panel).fg(palette.muted)),
                     sections[0],
@@ -234,9 +260,11 @@ impl App {
                 frame.render_stateful_widget(list, sections[2], &mut state);
 
                 frame.render_widget(
-                    Paragraph::new("Enter to connect or create · Esc to cancel")
-                        .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                    Paragraph::new(
+                        "Enter to connect · Ctrl+E to edit custom providers · Esc to cancel",
+                    )
+                    .alignment(Alignment::Center)
+                    .style(Style::default().bg(palette.panel).fg(palette.muted)),
                     sections[3],
                 );
             }
@@ -356,6 +384,243 @@ impl App {
                         .style(Style::default().bg(palette.panel).fg(palette.muted)),
                     lines[4],
                 );
+            }
+            ConnectDialog::EditProvider {
+                provider_id,
+                step,
+                model_step,
+                draft,
+            } => {
+                if let Some(model_step) = model_step {
+                    let lines = Layout::vertical([
+                        Constraint::Length(2),
+                        Constraint::Length(2),
+                        Constraint::Length(4),
+                        Constraint::Length(2),
+                        Constraint::Length(1),
+                    ])
+                    .split(inner);
+
+                    let provider_label = self
+                        .config
+                        .provider_display_name(provider_id)
+                        .unwrap_or(provider_id)
+                        .to_string();
+
+                    frame.render_widget(
+                        Paragraph::new(format!(
+                            "Edit model for {provider_label} · {}",
+                            model_step.title()
+                        ))
+                        .alignment(Alignment::Center)
+                        .style(
+                            Style::default()
+                                .bg(palette.panel)
+                                .fg(palette.text)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        lines[0],
+                    );
+
+                    frame.render_widget(
+                        Paragraph::new(model_step.help())
+                            .alignment(Alignment::Center)
+                            .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                        lines[1],
+                    );
+
+                    self.render_input_block(
+                        frame,
+                        lines[2],
+                        model_step.label(),
+                        model_step.placeholder(),
+                        model_step.is_secret(),
+                    );
+
+                    frame.render_widget(
+                        Paragraph::new("Enter to continue · Esc to cancel")
+                            .alignment(Alignment::Center)
+                            .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
+                        lines[3],
+                    );
+
+                    frame.render_widget(
+                        Paragraph::new("Model ids stay fixed while editing existing models")
+                            .alignment(Alignment::Center)
+                            .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                        lines[4],
+                    );
+                } else if *step == EditProviderStep::ModelList {
+                    let lines = Layout::vertical([
+                        Constraint::Length(2),
+                        Constraint::Min(8),
+                        Constraint::Length(1),
+                    ])
+                    .split(inner);
+
+                    frame.render_widget(
+                        Paragraph::new(format!("Manage models for {}", provider_id))
+                            .alignment(Alignment::Center)
+                            .style(
+                                Style::default()
+                                    .bg(palette.panel)
+                                    .fg(palette.text)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                        lines[0],
+                    );
+
+                    let items = draft
+                        .models
+                        .iter()
+                        .enumerate()
+                        .map(|(index, (model_id, model))| {
+                            let is_selected = index == draft.selected_model_index;
+                            let status_style = if is_selected {
+                                Style::default().fg(palette.selection_fg)
+                            } else {
+                                Style::default().fg(palette.muted)
+                            };
+
+                            ListItem::new(Line::from(vec![
+                                Span::styled(
+                                    format!("{}", model.display_name),
+                                    Style::default()
+                                        .fg(palette.text)
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                                Span::raw("  "),
+                                Span::styled(
+                                    format!("({model_id})"),
+                                    Style::default().fg(palette.muted),
+                                ),
+                                Span::raw("  "),
+                                Span::styled(format!("ctx {}", model.context_window), status_style),
+                                Span::raw("  "),
+                                Span::styled(
+                                    format!("max {}", model.max_output_tokens),
+                                    status_style,
+                                ),
+                            ]))
+                        })
+                        .collect::<Vec<_>>();
+
+                    let mut state = ListState::default();
+                    state.select(Some(
+                        draft
+                            .selected_model_index
+                            .min(items.len().saturating_sub(1)),
+                    ));
+
+                    let list = List::new(items)
+                        .style(Style::default().bg(palette.panel).fg(palette.text))
+                        .highlight_style(
+                            Style::default()
+                                .bg(palette.selection_bg)
+                                .fg(palette.selection_fg)
+                                .add_modifier(Modifier::BOLD),
+                        );
+
+                    frame.render_stateful_widget(list, lines[1], &mut state);
+
+                    frame.render_widget(
+                        Paragraph::new("Enter edit · N new · D delete · S save · Esc cancel")
+                            .alignment(Alignment::Center)
+                            .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
+                        lines[2],
+                    );
+                } else if *step == EditProviderStep::ConfirmDeleteModel {
+                    let lines = Layout::vertical([
+                        Constraint::Length(2),
+                        Constraint::Length(2),
+                        Constraint::Length(4),
+                        Constraint::Length(1),
+                    ])
+                    .split(inner);
+
+                    let pending = draft
+                        .pending_delete_model_id
+                        .as_deref()
+                        .unwrap_or("unknown model");
+
+                    frame.render_widget(
+                        Paragraph::new(format!("Delete model {pending}?"))
+                            .alignment(Alignment::Center)
+                            .style(
+                                Style::default()
+                                    .bg(palette.panel)
+                                    .fg(palette.error)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                        lines[0],
+                    );
+
+                    frame.render_widget(
+                        Paragraph::new("This only removes the model from config.toml. Historical sessions keep their stored snapshot.")
+                            .alignment(Alignment::Center)
+                            .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                        lines[1],
+                    );
+
+                    self.render_input_block(frame, lines[2], "Confirm", "y or n", false);
+
+                    frame.render_widget(
+                        Paragraph::new("Y to delete · N / Esc to keep")
+                            .alignment(Alignment::Center)
+                            .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
+                        lines[3],
+                    );
+                } else {
+                    let lines = Layout::vertical([
+                        Constraint::Length(2),
+                        Constraint::Length(2),
+                        Constraint::Length(4),
+                        Constraint::Length(2),
+                        Constraint::Length(1),
+                    ])
+                    .split(inner);
+
+                    frame.render_widget(
+                        Paragraph::new(format!("Edit provider · {}", provider_id))
+                            .alignment(Alignment::Center)
+                            .style(
+                                Style::default()
+                                    .bg(palette.panel)
+                                    .fg(palette.text)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                        lines[0],
+                    );
+
+                    frame.render_widget(
+                        Paragraph::new(step.help())
+                            .alignment(Alignment::Center)
+                            .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                        lines[1],
+                    );
+
+                    self.render_input_block(
+                        frame,
+                        lines[2],
+                        step.label(),
+                        step.placeholder(),
+                        step.is_secret(),
+                    );
+
+                    frame.render_widget(
+                        Paragraph::new("Enter to continue · Esc to cancel")
+                            .alignment(Alignment::Center)
+                            .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
+                        lines[3],
+                    );
+
+                    frame.render_widget(
+                        Paragraph::new("After the fields, manage models from the list")
+                            .alignment(Alignment::Center)
+                            .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                        lines[4],
+                    );
+                }
             }
         }
     }

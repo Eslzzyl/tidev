@@ -275,7 +275,6 @@ impl SessionStore {
             })?,
         })
     }
-
 }
 
 fn parse_datetime(value: &str) -> std::result::Result<DateTime<Utc>, chrono::ParseError> {

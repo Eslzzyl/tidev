@@ -2,7 +2,10 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::config::ProviderSource;
-use crate::provider_setup::{ConnectDialog, NewProviderDraft, NewProviderStep};
+use crate::provider_setup::{
+    ConnectDialog, EditModelStep, EditProviderDraft, EditProviderStep, NewProviderDraft,
+    NewProviderStep,
+};
 
 use super::App;
 
@@ -80,6 +83,137 @@ impl App {
         self.composer
             .set_placeholder(format!("Enter API key for {label}"));
         self.connect_dialog = Some(ConnectDialog::ApiKey { provider_id });
+    }
+
+    fn begin_provider_edit(&mut self, provider_id: String) -> Result<()> {
+        let Some(provider) = self.config.providers.get(&provider_id).cloned() else {
+            self.last_notice = Some(format!("Provider '{provider_id}' is not editable"));
+            return Ok(());
+        };
+
+        let draft = EditProviderDraft::from_provider(
+            &provider,
+            self.auth.api_key(&provider_id).map(str::to_string),
+        );
+        self.show_edit_provider_step(provider_id, EditProviderStep::DisplayName, None, draft);
+        Ok(())
+    }
+
+    fn show_edit_provider_step(
+        &mut self,
+        provider_id: String,
+        step: EditProviderStep,
+        model_step: Option<EditModelStep>,
+        draft: EditProviderDraft,
+    ) {
+        self.composer.clear();
+        if let Some(model_step) = model_step {
+            self.composer.set_placeholder(format!(
+                "{} · {}",
+                model_step.label(),
+                model_step.help()
+            ));
+            self.composer
+                .set_text(draft.model.current_value_for_edit(model_step));
+        } else if step == EditProviderStep::ModelList {
+            self.composer
+                .set_placeholder("Enter to edit · n to add · d to delete · s to save");
+        } else if step == EditProviderStep::ConfirmDeleteModel {
+            self.composer.set_placeholder("y or n");
+        } else {
+            self.composer
+                .set_placeholder(format!("{} · {}", step.label(), step.help()));
+            self.composer.set_text(draft.current_value(step));
+        }
+
+        self.connect_dialog = Some(ConnectDialog::EditProvider {
+            provider_id,
+            step,
+            model_step,
+            draft,
+        });
+    }
+
+    fn begin_new_model_in_edit(&mut self, provider_id: String, mut draft: EditProviderDraft) {
+        draft.begin_new_model();
+        self.show_edit_provider_step(
+            provider_id,
+            EditProviderStep::ModelList,
+            Some(EditModelStep::ModelId),
+            draft,
+        );
+    }
+
+    fn begin_existing_model_edit(
+        &mut self,
+        provider_id: String,
+        model_id: String,
+        mut draft: EditProviderDraft,
+    ) -> Result<()> {
+        draft.begin_edit_model(&model_id)?;
+        self.show_edit_provider_step(
+            provider_id,
+            EditProviderStep::ModelList,
+            Some(EditModelStep::ModelDisplayName),
+            draft,
+        );
+        Ok(())
+    }
+
+    fn finish_provider_edit(
+        &mut self,
+        provider_id: String,
+        draft: EditProviderDraft,
+    ) -> Result<()> {
+        let (provider_config, api_key) = draft.into_provider_config()?;
+        self.config
+            .providers
+            .insert(provider_id.clone(), provider_config);
+        self.config.save(&self.paths)?;
+
+        self.auth.set_api_key(provider_id.clone(), api_key);
+        self.auth.save(&self.paths)?;
+
+        self.refresh_active_model_after_provider_change(&provider_id)?;
+
+        self.cancel_connect_dialog();
+        self.last_notice = Some(format!("Updated provider '{provider_id}'"));
+        Ok(())
+    }
+
+    fn refresh_active_model_after_provider_change(&mut self, provider_id: &str) -> Result<()> {
+        if self.active_model.provider_id != provider_id {
+            return Ok(());
+        }
+
+        let updated = self
+            .config
+            .resolve_model_by_ids(
+                &self.auth,
+                &self.active_model.provider_id,
+                &self.active_model.model_id,
+            )
+            .or_else(|_| {
+                self.config
+                    .resolve_provider_default_model(&self.auth, provider_id)
+            })?;
+
+        self.active_model = updated.clone();
+        self.conversation.set_model(
+            updated.provider_id.clone(),
+            updated.provider_display_name.clone(),
+            updated.model_id.clone(),
+            updated.display_name.clone(),
+        );
+        self.store.update_session_model(
+            self.conversation.session_id,
+            &updated.provider_id,
+            &updated.provider_display_name,
+            &updated.model_id,
+            &updated.display_name,
+        )?;
+
+        Ok(())
     }
 
     fn finish_connect_api_key(&mut self, provider_id: String, api_key: String) -> Result<()> {
@@ -244,6 +378,28 @@ impl App {
                 KeyEvent {
                     code: KeyCode::Tab, ..
                 } => {}
+                KeyEvent {
+                    code: KeyCode::Char('e'),
+                    modifiers,
+                    ..
+                } if modifiers.contains(KeyModifiers::CONTROL) => {
+                    let items = self.provider_picker_items();
+                    let selected = selected.min(items.len().saturating_sub(1));
+                    if let Some(ProviderPickerItem::Provider {
+                        provider_id,
+                        source,
+                        ..
+                    }) = items.get(selected)
+                    {
+                        if matches!(source, ProviderSource::User) {
+                            self.begin_provider_edit(provider_id.clone())?;
+                        } else {
+                            self.last_notice = Some(
+                                "Bundled presets are read-only; clone them with the new provider flow".to_string(),
+                            );
+                        }
+                    }
+                }
                 _ => {
                     let previous_query = self.composer.text().to_string();
                     let _ = self.composer.handle_key_with_history(key, false);
@@ -333,6 +489,215 @@ impl App {
                         self.show_new_provider_step(next_step, draft);
                     } else {
                         self.finish_new_provider_setup(draft)?;
+                    }
+                }
+            }
+            ConnectDialog::EditProvider {
+                provider_id,
+                step,
+                model_step,
+                mut draft,
+            } => {
+                if matches!(key.code, KeyCode::Esc) {
+                    self.cancel_connect_dialog();
+                    return Ok(());
+                }
+
+                if let Some(model_step) = model_step {
+                    if let Some(submission) = self.composer.handle_key_with_history(key, false) {
+                        if let Err(error) = draft.model.apply_edit_step(model_step, &submission) {
+                            self.last_notice = Some(error.to_string());
+                            self.show_edit_provider_step(
+                                provider_id,
+                                EditProviderStep::ModelList,
+                                Some(model_step),
+                                draft,
+                            );
+                            return Ok(());
+                        }
+
+                        if let Some(next_step) = model_step.next(draft.editing_model_id.is_some()) {
+                            self.show_edit_provider_step(
+                                provider_id,
+                                EditProviderStep::ModelList,
+                                Some(next_step),
+                                draft,
+                            );
+                        } else {
+                            if let Err(error) = draft.finish_current_model() {
+                                self.last_notice = Some(error.to_string());
+                                self.show_edit_provider_step(
+                                    provider_id,
+                                    EditProviderStep::ModelList,
+                                    Some(EditModelStep::ModelId),
+                                    draft,
+                                );
+                                return Ok(());
+                            }
+
+                            self.show_edit_provider_step(
+                                provider_id,
+                                EditProviderStep::ModelList,
+                                None,
+                                draft,
+                            );
+                        }
+                    }
+
+                    return Ok(());
+                }
+
+                match step {
+                    EditProviderStep::DisplayName
+                    | EditProviderStep::BaseUrl
+                    | EditProviderStep::ApiKey => {
+                        if let Some(submission) = self.composer.handle_key_with_history(key, false)
+                        {
+                            if let Err(error) = draft.apply_step(step, &submission) {
+                                self.last_notice = Some(error.to_string());
+                                self.show_edit_provider_step(provider_id, step, None, draft);
+                                return Ok(());
+                            }
+
+                            if let Some(next_step) = step.next() {
+                                self.show_edit_provider_step(provider_id, next_step, None, draft);
+                            } else {
+                                self.show_edit_provider_step(
+                                    provider_id,
+                                    EditProviderStep::ModelList,
+                                    None,
+                                    draft,
+                                );
+                            }
+                        }
+                    }
+                    EditProviderStep::ModelList => match key {
+                        KeyEvent {
+                            code: KeyCode::Up, ..
+                        } => {
+                            draft.move_selection_up();
+                            self.show_edit_provider_step(
+                                provider_id,
+                                EditProviderStep::ModelList,
+                                None,
+                                draft,
+                            );
+                        }
+                        KeyEvent {
+                            code: KeyCode::Down,
+                            ..
+                        } => {
+                            draft.move_selection_down();
+                            self.show_edit_provider_step(
+                                provider_id,
+                                EditProviderStep::ModelList,
+                                None,
+                                draft,
+                            );
+                        }
+                        KeyEvent {
+                            code: KeyCode::Enter,
+                            modifiers,
+                            ..
+                        } if !modifiers.contains(KeyModifiers::SHIFT)
+                            && !modifiers.contains(KeyModifiers::ALT) =>
+                        {
+                            if let Some(model_id) = draft.selected_model_id() {
+                                self.begin_existing_model_edit(provider_id, model_id, draft)?;
+                            }
+                        }
+                        KeyEvent {
+                            code: KeyCode::Char('n'),
+                            modifiers,
+                            ..
+                        } if !modifiers.contains(KeyModifiers::CONTROL)
+                            && !modifiers.contains(KeyModifiers::ALT) =>
+                        {
+                            self.begin_new_model_in_edit(provider_id, draft);
+                        }
+                        KeyEvent {
+                            code: KeyCode::Char('d'),
+                            modifiers,
+                            ..
+                        } if !modifiers.contains(KeyModifiers::CONTROL)
+                            && !modifiers.contains(KeyModifiers::ALT) =>
+                        {
+                            if let Err(error) = draft.request_delete_selected_model() {
+                                self.last_notice = Some(error.to_string());
+                                self.show_edit_provider_step(
+                                    provider_id,
+                                    EditProviderStep::ModelList,
+                                    None,
+                                    draft,
+                                );
+                            } else {
+                                self.show_edit_provider_step(
+                                    provider_id,
+                                    EditProviderStep::ConfirmDeleteModel,
+                                    None,
+                                    draft,
+                                );
+                            }
+                        }
+                        KeyEvent {
+                            code: KeyCode::Char('s'),
+                            modifiers,
+                            ..
+                        } if !modifiers.contains(KeyModifiers::CONTROL)
+                            && !modifiers.contains(KeyModifiers::ALT) =>
+                        {
+                            self.finish_provider_edit(provider_id, draft)?;
+                        }
+                        _ => {}
+                    },
+                    EditProviderStep::ConfirmDeleteModel => {
+                        if let Some(submission) = self.composer.handle_key_with_history(key, false)
+                        {
+                            match parse_add_another_model_answer(&submission) {
+                                Some(true) => {
+                                    if let Err(error) = draft.confirm_delete_selected_model() {
+                                        self.last_notice = Some(error.to_string());
+                                    }
+                                    self.show_edit_provider_step(
+                                        provider_id,
+                                        EditProviderStep::ModelList,
+                                        None,
+                                        draft,
+                                    );
+                                }
+                                Some(false) => {
+                                    draft.pending_delete_model_id = None;
+                                    self.show_edit_provider_step(
+                                        provider_id,
+                                        EditProviderStep::ModelList,
+                                        None,
+                                        draft,
+                                    );
+                                }
+                                None => {
+                                    self.last_notice = Some("Enter y or n".to_string());
+                                    self.show_edit_provider_step(
+                                        provider_id,
+                                        EditProviderStep::ConfirmDeleteModel,
+                                        None,
+                                        draft,
+                                    );
+                                }
+                            }
+                        } else if matches!(key.code, KeyCode::Enter)
+                            && !key.modifiers.contains(KeyModifiers::SHIFT)
+                            && !key.modifiers.contains(KeyModifiers::ALT)
+                        {
+                            if let Err(error) = draft.confirm_delete_selected_model() {
+                                self.last_notice = Some(error.to_string());
+                            }
+                            self.show_edit_provider_step(
+                                provider_id,
+                                EditProviderStep::ModelList,
+                                None,
+                                draft,
+                            );
+                        }
                     }
                 }
             }
