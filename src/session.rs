@@ -146,6 +146,7 @@ impl Message {
 #[derive(Clone, Debug)]
 pub struct Conversation {
     pub session_id: Uuid,
+    pub workspace_root: String,
     pub provider_id: String,
     pub provider_display_name: String,
     pub model_id: String,
@@ -159,6 +160,7 @@ pub struct Conversation {
 impl Conversation {
     pub fn new(
         session_id: Uuid,
+        workspace_root: impl Into<String>,
         provider_id: impl Into<String>,
         provider_display_name: impl Into<String>,
         model_id: impl Into<String>,
@@ -168,6 +170,7 @@ impl Conversation {
         let now = Utc::now();
         Self {
             session_id,
+            workspace_root: workspace_root.into(),
             provider_id: provider_id.into(),
             provider_display_name: provider_display_name.into(),
             model_id: model_id.into(),

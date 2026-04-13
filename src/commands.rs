@@ -5,6 +5,7 @@ pub enum CommandAction {
     Help,
     Connect,
     Model,
+    Session,
     Clear,
     Theme,
     Quit,
@@ -236,6 +237,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         description: "Open the model panel",
         usage: "/model [query]",
         action: CommandAction::Model,
+    },
+    CommandSpec {
+        name: "session",
+        aliases: &["sessions", "resume"],
+        description: "Open the session panel",
+        usage: "/session [query]",
+        action: CommandAction::Session,
     },
     CommandSpec {
         name: "theme",

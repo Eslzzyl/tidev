@@ -191,6 +191,8 @@ impl App {
         lines.push(Line::from("/help"));
         lines.push(Line::from("/model - open the model panel"));
         lines.push(Line::from("/model <query> - prefilter the model panel"));
+        lines.push(Line::from("/session - open the session panel"));
+        lines.push(Line::from("/session <query> - prefilter the session panel"));
         lines.push(Line::from("/clear"));
         lines.push(Line::from("/exit"));
         lines.push(Line::from(""));

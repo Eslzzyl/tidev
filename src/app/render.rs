@@ -28,6 +28,9 @@ impl App {
         if let Some(panel) = &self.model_panel {
             self.render_model_panel(frame, area, panel);
         }
+        if let Some(panel) = &self.session_panel {
+            self.render_session_panel(frame, area, panel);
+        }
         if let Some(dialog) = &self.permission_dialog {
             self.render_permission_dialog(frame, area, dialog);
         }
@@ -93,7 +96,12 @@ impl App {
             false,
         );
 
-        self.render_prompt_footer(frame, sections[3]);
+        let hint = Paragraph::new(
+            "Enter to send · /session to switch sessions · Shift+Enter/Ctrl+J newline",
+        )
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(palette.accent_soft));
+        frame.render_widget(hint, sections[3]);
 
         self.render_command_palette(frame, sections[2]);
     }
@@ -169,6 +177,8 @@ impl App {
             "/connect - open the provider picker",
             "/model - open the model panel",
             "/model <query> - prefilter the model panel",
+            "/session - open the session panel",
+            "/session <query> - prefilter the session panel",
             "/theme [dark|light|nord|one-dark|catppuccin|solarized|orng|github|material] - switch theme",
             "/clear - start a fresh session",
             "/exit - exit TiDev",

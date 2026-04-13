@@ -12,7 +12,7 @@ use crate::{
     tooling::TodoItem,
 };
 
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 pub struct SessionStore {
     connection: Connection,
@@ -22,6 +22,7 @@ pub struct SessionStore {
 #[derive(Clone, Debug)]
 pub struct SessionRecord {
     pub session_id: Uuid,
+    pub workspace_root: String,
     pub provider_id: String,
     pub provider_display_name: String,
     pub model_id: String,
@@ -60,6 +61,7 @@ impl SessionStore {
     pub fn create_session(
         &self,
         session_id: Uuid,
+        workspace_root: &Path,
         provider_id: &str,
         provider_display_name: &str,
         model_id: &str,
@@ -69,6 +71,7 @@ impl SessionStore {
         let now = Utc::now();
         let now_text = now.to_rfc3339();
         let session_id_text = session_id.to_string();
+        let workspace_root = workspace_root.display().to_string();
 
         self.connection.execute(
             "INSERT INTO sessions (id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -84,8 +87,14 @@ impl SessionStore {
             ],
         )?;
 
+        self.connection.execute(
+            "INSERT INTO session_workspaces (session_id, workspace_root) VALUES (?1, ?2)",
+            params![session_id_text, workspace_root.clone()],
+        )?;
+
         Ok(SessionRecord {
             session_id,
+            workspace_root,
             provider_id: provider_id.to_string(),
             provider_display_name: provider_display_name.to_string(),
             model_id: model_id.to_string(),
@@ -254,12 +263,10 @@ impl SessionStore {
 
     pub fn load_latest_session(&self) -> Result<Option<SessionRecord>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at FROM sessions ORDER BY updated_at DESC LIMIT 1",
+            "SELECT s.id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, COALESCE(sw.workspace_root, '') FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id ORDER BY s.updated_at DESC LIMIT 1",
         )?;
 
-        let record = statement
-            .query_row([], Self::session_from_row)
-            .optional()?;
+        let record = statement.query_row([], Self::session_from_row).optional()?;
 
         Ok(record)
     }
@@ -274,6 +281,7 @@ impl SessionStore {
         let messages = self.load_messages(session_id)?;
         Ok(Some(Conversation {
             session_id: record.session_id,
+            workspace_root: record.workspace_root,
             provider_id: record.provider_id,
             provider_display_name: record.provider_display_name,
             model_id: record.model_id,
@@ -287,7 +295,7 @@ impl SessionStore {
 
     pub fn load_session_record(&self, session_id: Uuid) -> Result<Option<SessionRecord>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at FROM sessions WHERE id = ?1 LIMIT 1",
+            "SELECT s.id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, COALESCE(sw.workspace_root, '') FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.id = ?1 LIMIT 1",
         )?;
 
         let record = statement
@@ -343,6 +351,22 @@ impl SessionStore {
         Ok(messages)
     }
 
+    pub fn load_sessions_for_workspace(&self, workspace_root: &Path) -> Result<Vec<SessionRecord>> {
+        let workspace_root = workspace_root.display().to_string();
+        let mut statement = self.connection.prepare(
+            "SELECT s.id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE sw.workspace_root = ?1 ORDER BY s.updated_at DESC, s.created_at DESC",
+        )?;
+
+        let rows = statement.query_map(params![workspace_root], Self::session_from_row)?;
+
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row?);
+        }
+
+        Ok(records)
+    }
+
     fn touch_session(&self, session_id: Uuid) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         self.connection.execute(
@@ -361,11 +385,13 @@ impl SessionStore {
         let title = row.get::<_, String>(5)?;
         let created_at = row.get::<_, String>(6)?;
         let updated_at = row.get::<_, String>(7)?;
+        let workspace_root = row.get::<_, String>(8)?;
 
         Ok(SessionRecord {
             session_id: Uuid::parse_str(&id).map_err(|error| {
                 rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
             })?,
+            workspace_root,
             provider_id: provider_id.clone(),
             provider_display_name: fallback_display_name(provider_display_name, &provider_id),
             model_id: model_id.clone(),
@@ -408,6 +434,11 @@ CREATE TABLE IF NOT EXISTS sessions (
     title TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS session_workspaces (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    workspace_root TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -480,6 +511,7 @@ mod tests {
             let record = store
                 .create_session(
                     session_id,
+                    Path::new("/tmp/workspace"),
                     "deepseek",
                     "DeepSeek",
                     "deepseek-chat",
@@ -492,6 +524,7 @@ mod tests {
             assert_eq!(record.provider_display_name, "DeepSeek");
             assert_eq!(record.model_id, "deepseek-chat");
             assert_eq!(record.model_display_name, "DeepSeek Chat");
+            assert_eq!(record.workspace_root, "/tmp/workspace");
 
             let loaded = store
                 .load_session_record(session_id)
@@ -500,6 +533,7 @@ mod tests {
 
             assert_eq!(loaded.provider_display_name, "DeepSeek");
             assert_eq!(loaded.model_display_name, "DeepSeek Chat");
+            assert_eq!(loaded.workspace_root, "/tmp/workspace");
 
             let conversation = store
                 .load_conversation(session_id)
@@ -508,6 +542,69 @@ mod tests {
 
             assert_eq!(conversation.provider_display_name, "DeepSeek");
             assert_eq!(conversation.model_display_name, "DeepSeek Chat");
+            assert_eq!(conversation.workspace_root, "/tmp/workspace");
+        }
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn workspace_session_listing_is_scoped_and_sorted() {
+        let path = std::env::temp_dir().join(format!(
+            "tidev-session-store-list-{}.sqlite3",
+            uuid::Uuid::new_v4()
+        ));
+
+        {
+            let store = SessionStore::open(&path).expect("store should open");
+            let shared_root = Path::new("/tmp/tidev-workspace-a");
+            let other_root = Path::new("/tmp/tidev-workspace-b");
+
+            let first = store
+                .create_session(
+                    uuid::Uuid::new_v4(),
+                    shared_root,
+                    "openai",
+                    "OpenAI",
+                    "gpt-4o",
+                    "GPT-4o",
+                    "First",
+                )
+                .expect("first session should be created");
+
+            std::thread::sleep(std::time::Duration::from_millis(2));
+
+            let second = store
+                .create_session(
+                    uuid::Uuid::new_v4(),
+                    shared_root,
+                    "openai",
+                    "OpenAI",
+                    "gpt-4o-mini",
+                    "GPT-4o mini",
+                    "Second",
+                )
+                .expect("second session should be created");
+
+            store
+                .create_session(
+                    uuid::Uuid::new_v4(),
+                    other_root,
+                    "anthropic",
+                    "Anthropic",
+                    "claude",
+                    "Claude",
+                    "Other",
+                )
+                .expect("other session should be created");
+
+            let sessions = store
+                .load_sessions_for_workspace(shared_root)
+                .expect("sessions should load");
+
+            assert_eq!(sessions.len(), 2);
+            assert_eq!(sessions[0].session_id, second.session_id);
+            assert_eq!(sessions[1].session_id, first.session_id);
         }
 
         let _ = std::fs::remove_file(path);

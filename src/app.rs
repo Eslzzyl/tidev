@@ -27,11 +27,13 @@ mod permission;
 mod render;
 mod render_chat;
 mod render_dialog;
+mod session_panel;
 mod theme_panel;
 
 use crate::{
     app::model_panel::ModelPanelState,
     app::permission::{PendingToolExecution, PermissionDialogState, RunningToolExecution},
+    app::session_panel::SessionPanelState,
     app::theme_panel::ThemePanelState,
     commands::{CommandAction, CommandPaletteState, CommandRegistry},
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
@@ -74,6 +76,7 @@ struct App {
     connect_dialog: Option<ConnectDialog>,
     theme_panel: Option<ThemePanelState>,
     model_panel: Option<ModelPanelState>,
+    session_panel: Option<SessionPanelState>,
     pending_tool_execution: Option<PendingToolExecution>,
     permission_dialog: Option<PermissionDialogState>,
     running_tool_execution: Option<RunningToolExecution>,
@@ -116,77 +119,32 @@ impl App {
         let mode = SessionMode::Build;
 
         let fallback_model = Self::resolve_fallback_model(&config, &auth)?;
-        let (conversation, active_model, last_notice) = match store.load_latest_session()? {
-            Some(record) => match store.load_conversation(record.session_id)? {
-                Some(conversation) => {
-                    let active_model =
-                        Self::resolve_conversation_model(&config, &auth, &conversation)
-                            .unwrap_or_else(|_| fallback_model.clone());
-                    let last_notice = if conversation.provider_id != active_model.provider_id
-                        || conversation.model_id != active_model.model_id
-                    {
-                        Some(format!(
-                            "Session model {} is unavailable; using {}",
-                            conversation.model_label(),
-                            active_model.label()
-                        ))
-                    } else {
-                        None
-                    };
-                    (conversation, active_model, last_notice)
-                }
-                None => {
-                    let session_id = Uuid::new_v4();
-                    let conversation = Conversation::new(
-                        session_id,
-                        fallback_model.provider_id.clone(),
-                        fallback_model.provider_display_name.clone(),
-                        fallback_model.model_id.clone(),
-                        fallback_model.display_name.clone(),
-                        "Untitled session",
-                    );
-                    store.create_session(
-                        session_id,
-                        &fallback_model.provider_id,
-                        &fallback_model.provider_display_name,
-                        &fallback_model.model_id,
-                        &fallback_model.display_name,
-                        &conversation.title,
-                    )?;
-                    (conversation, fallback_model.clone(), None)
-                }
-            },
-            None => {
-                let session_id = Uuid::new_v4();
-                let conversation = Conversation::new(
-                    session_id,
-                    fallback_model.provider_id.clone(),
-                    fallback_model.provider_display_name.clone(),
-                    fallback_model.model_id.clone(),
-                    fallback_model.display_name.clone(),
-                    "Untitled session",
-                );
-                store.create_session(
-                    session_id,
-                    &fallback_model.provider_id,
-                    &fallback_model.provider_display_name,
-                    &fallback_model.model_id,
-                    &fallback_model.display_name,
-                    &conversation.title,
-                )?;
-                (conversation, fallback_model.clone(), None)
-            }
-        };
+        let session_id = Uuid::new_v4();
+        let conversation = Conversation::new(
+            session_id,
+            workspace_root.display().to_string(),
+            fallback_model.provider_id.clone(),
+            fallback_model.provider_display_name.clone(),
+            fallback_model.model_id.clone(),
+            fallback_model.display_name.clone(),
+            "Untitled session",
+        );
+        store.create_session(
+            session_id,
+            workspace_root.as_path(),
+            &fallback_model.provider_id,
+            &fallback_model.provider_display_name,
+            &fallback_model.model_id,
+            &fallback_model.display_name,
+            &conversation.title,
+        )?;
 
-        let screen = if conversation.messages.is_empty() {
-            Screen::Welcome
-        } else {
-            Screen::Chat
-        };
+        let active_model = fallback_model.clone();
+        let last_notice = None;
 
         Ok(Self {
             should_quit: false,
-            screen,
+            screen: Screen::Welcome,
             workspace_root,
             paths,
             config,
@@ -204,6 +162,7 @@ impl App {
             connect_dialog: None,
             theme_panel: None,
             model_panel: None,
+            session_panel: None,
             pending_tool_execution: None,
             permission_dialog: None,
             running_tool_execution: None,
@@ -507,6 +466,10 @@ impl App {
             return self.handle_model_panel_key(key);
         }
 
+        if self.session_panel.is_some() {
+            return self.handle_session_panel_key(key);
+        }
+
         if self.handle_request_abort_key(key)? {
             return Ok(());
         }
@@ -631,6 +594,9 @@ impl App {
             CommandAction::Model => {
                 self.open_model_panel(args.join(" "));
             }
+            CommandAction::Session => {
+                self.open_session_panel(args.join(" "))?;
+            }
             CommandAction::Clear => {
                 self.start_new_session()?;
             }
@@ -726,6 +692,7 @@ impl App {
         let session_id = Uuid::new_v4();
         let conversation = Conversation::new(
             session_id,
+            self.workspace_root.display().to_string(),
             self.active_model.provider_id.clone(),
             self.active_model.provider_display_name.clone(),
             self.active_model.model_id.clone(),
@@ -735,6 +702,7 @@ impl App {
 
         self.store.create_session(
             session_id,
+            self.workspace_root.as_path(),
             &self.active_model.provider_id,
             &self.active_model.provider_display_name,
             &self.active_model.model_id,
@@ -749,8 +717,14 @@ impl App {
         self.permission_dialog = None;
         self.running_tool_execution = None;
         self.abort_confirmation_deadline = None;
+        self.active_request_id = self.active_request_id.wrapping_add(1);
+        self.streaming_markdown = None;
+        self.streaming_preview_lines.clear();
         self.screen = Screen::Welcome;
         self.connect_dialog = None;
+        self.theme_panel = None;
+        self.model_panel = None;
+        self.session_panel = None;
         self.command_palette.clear();
         self.composer.clear();
         self.composer

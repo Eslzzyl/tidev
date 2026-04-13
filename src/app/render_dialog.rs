@@ -1,6 +1,7 @@
 use crate::{
     app::model_panel::{ModelPanelItem, ModelPanelState},
     app::permission::PermissionDialogState,
+    app::session_panel::SessionPanelState,
     app::theme_panel::ThemePanelState,
     config::ProviderSource,
     provider_setup::{ConnectDialog, EditProviderStep, NewProviderStep},
@@ -12,7 +13,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 
-use super::{connect::ProviderPickerItem, render::*, App};
+use super::{App, connect::ProviderPickerItem, render::*};
 
 impl App {
     pub(super) fn render_command_palette(&self, frame: &mut Frame<'_>, area: Rect) {
@@ -672,6 +673,128 @@ impl App {
                 vertical: 1,
             }),
             &mut state,
+        );
+    }
+
+    pub(super) fn render_session_panel(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        panel: &SessionPanelState,
+    ) {
+        let palette = self.palette();
+        let overlay = centered_rect(area.width.min(112), area.height.min(36), area);
+        frame.render_widget(Clear, overlay);
+
+        let title = Block::default()
+            .style(Style::default().bg(palette.panel))
+            .title(" Select session ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.border_active()));
+        frame.render_widget(title, overlay);
+
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+
+        let sections = Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Length(3),
+            Constraint::Min(8),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+        frame.render_widget(
+            Paragraph::new("Type to filter by title, model, provider, or session id.")
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(palette.panel).fg(palette.muted)),
+            sections[0],
+        );
+
+        self.render_input_block(
+            frame,
+            sections[1],
+            "Search sessions",
+            self.composer.placeholder(),
+            false,
+        );
+
+        let query = self.composer.text().to_string();
+        let matches = panel.matching_indices(&query);
+        if matches.is_empty() {
+            frame.render_widget(
+                Paragraph::new("No sessions match this search.")
+                    .alignment(Alignment::Center)
+                    .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                sections[2],
+            );
+        } else {
+            let items = matches
+                .iter()
+                .map(|index| {
+                    let session = &panel.sessions[*index];
+                    let is_current = session.session_id == self.conversation.session_id;
+                    let updated_at = session.updated_at.format("%Y-%m-%d %H:%M").to_string();
+                    ListItem::new(Line::from(vec![
+                        Span::styled(
+                            shorten(&session.title, 28),
+                            Style::default()
+                                .fg(palette.text)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw("  "),
+                        Span::styled(
+                            format!("({})", session.session_id.simple()),
+                            Style::default().fg(palette.muted),
+                        ),
+                        Span::raw("  "),
+                        Span::styled(
+                            format!(
+                                "{} / {}",
+                                shorten(&session.provider_display_name, 14),
+                                shorten(&session.model_display_name, 16)
+                            ),
+                            Style::default().fg(palette.accent_soft),
+                        ),
+                        Span::raw("  "),
+                        Span::styled(updated_at, Style::default().fg(palette.muted)),
+                        Span::raw("  "),
+                        Span::styled(
+                            if is_current { "current" } else { "" },
+                            if is_current {
+                                Style::default().fg(palette.success)
+                            } else {
+                                Style::default().fg(palette.muted)
+                            },
+                        ),
+                    ]))
+                })
+                .collect::<Vec<_>>();
+
+            let mut state = ListState::default();
+            state.select(Some(
+                panel.selected_index.min(matches.len().saturating_sub(1)),
+            ));
+
+            let list = List::new(items)
+                .style(Style::default().bg(palette.panel).fg(palette.text))
+                .highlight_style(
+                    Style::default()
+                        .bg(palette.selection_bg)
+                        .fg(palette.selection_fg)
+                        .add_modifier(Modifier::BOLD),
+                );
+
+            frame.render_stateful_widget(list, sections[2], &mut state);
+        }
+
+        frame.render_widget(
+            Paragraph::new("Enter to switch · Esc to cancel · Up/Down to navigate")
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(palette.panel).fg(palette.muted)),
+            sections[3],
         );
     }
 
