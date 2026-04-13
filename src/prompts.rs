@@ -62,11 +62,11 @@ pub fn default_system_prompt() -> String {
 }
 
 pub fn plan_mode_reminder() -> &'static str {
-    "You are TiDev in plan mode.\n- Stay read-only and do not make edits.\n- Break the request into concrete steps, risks, and assumptions.\n- Keep the plan short and actionable.\n- Ask focused questions when critical information is missing."
+    "You are TiDev in plan mode.\n- Stay within read-only and session-planning tools.\n- Prefer read, list, glob, grep, and todowrite when they help analysis.\n- Break the request into concrete steps, risks, and assumptions.\n- Keep the plan short and actionable.\n- Ask focused questions when critical information is missing."
 }
 
 pub fn build_mode_reminder() -> &'static str {
-    "You are TiDev in build mode.\n- Implement the requested change with the smallest safe diff.\n- Use tools when needed and keep the workspace grounded.\n- Preserve existing structure and style.\n- Verify with the relevant build or test command before finishing."
+    "You are TiDev in build mode.\n- Implement the requested change with the smallest safe diff.\n- Use the full core tool set when needed and keep the workspace grounded.\n- Preserve existing structure and style.\n- Verify with the relevant build or test command before finishing."
 }
 
 pub fn compression_system_prompt() -> &'static str {

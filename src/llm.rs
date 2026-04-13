@@ -8,7 +8,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::{
     config::ActiveModel,
     session::{AssistantTurn, BackendEvent, Message, MessageRole, ToolCall},
-    tools::ToolDefinition,
+    tooling::ToolDefinition,
 };
 
 #[derive(Clone)]

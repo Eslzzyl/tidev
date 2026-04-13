@@ -924,7 +924,7 @@ impl App {
                 .fg(palette.accent)
                 .add_modifier(Modifier::BOLD),
         )]));
-        for tool in self.tools.definitions() {
+        for tool in self.tools.available_definitions(self.mode) {
             lines.push(Line::from(format!("- {}", tool.name)));
         }
         lines.push(Line::from(""));

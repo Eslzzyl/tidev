@@ -7,9 +7,12 @@ use std::{
 };
 use uuid::Uuid;
 
-use crate::session::{Conversation, Message, MessageRole, ToolCall};
+use crate::{
+    session::{Conversation, Message, MessageRole, ToolCall},
+    tooling::TodoItem,
+};
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 pub struct SessionStore {
     connection: Connection,
@@ -146,6 +149,73 @@ impl SessionStore {
 
         self.touch_session(session_id)?;
         Ok(())
+    }
+
+    pub fn append_tool_event(
+        &self,
+        session_id: Uuid,
+        tool_name: &str,
+        input_json: &str,
+        output_text: &str,
+    ) -> Result<()> {
+        self.connection.execute(
+            "INSERT INTO tool_events (id, session_id, tool_name, input_json, output_text, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                Uuid::new_v4().to_string(),
+                session_id.to_string(),
+                tool_name,
+                input_json,
+                output_text,
+                Utc::now().to_rfc3339(),
+            ],
+        )?;
+
+        self.touch_session(session_id)?;
+        Ok(())
+    }
+
+    pub fn replace_todos(&self, session_id: Uuid, todos: &[TodoItem]) -> Result<()> {
+        self.connection.execute(
+            "DELETE FROM todos WHERE session_id = ?1",
+            params![session_id.to_string()],
+        )?;
+
+        for (position, todo) in todos.iter().enumerate() {
+            self.connection.execute(
+                "INSERT INTO todos (session_id, position, content, status, priority) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    session_id.to_string(),
+                    position as i64,
+                    &todo.content,
+                    &todo.status,
+                    &todo.priority,
+                ],
+            )?;
+        }
+
+        self.touch_session(session_id)?;
+        Ok(())
+    }
+
+    pub fn load_todos(&self, session_id: Uuid) -> Result<Vec<TodoItem>> {
+        let mut statement = self.connection.prepare(
+            "SELECT content, status, priority FROM todos WHERE session_id = ?1 ORDER BY position ASC",
+        )?;
+
+        let rows = statement.query_map(params![session_id.to_string()], |row| {
+            Ok(TodoItem {
+                content: row.get::<_, String>(0)?,
+                status: row.get::<_, String>(1)?,
+                priority: row.get::<_, String>(2)?,
+            })
+        })?;
+
+        let mut todos = Vec::new();
+        for row in rows {
+            todos.push(row?);
+        }
+
+        Ok(todos)
     }
 
     pub fn load_latest_session(&self) -> Result<Option<SessionRecord>> {
@@ -333,6 +403,18 @@ CREATE TABLE IF NOT EXISTS tool_events (
 
 CREATE INDEX IF NOT EXISTS idx_tool_events_session_created_at
     ON tool_events(session_id, created_at);
+
+CREATE TABLE IF NOT EXISTS todos (
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    status TEXT NOT NULL,
+    priority TEXT NOT NULL,
+    PRIMARY KEY(session_id, position)
+);
+
+CREATE INDEX IF NOT EXISTS idx_todos_session_position
+    ON todos(session_id, position);
 "#;
 
 #[cfg(test)]

@@ -33,7 +33,7 @@ use crate::{
     session::{AssistantTurn, BackendEvent, Conversation, Message, MessageRole},
     storage::SessionStore,
     theme::{ThemeManager, ThemeName},
-    tools::ToolRegistry,
+    tooling::ToolRegistry,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -636,11 +636,7 @@ impl App {
         let llm = self.llm.clone();
         let model = self.request_model();
         let messages = self.conversation.messages.clone();
-        let tools = if self.mode.is_read_only() {
-            Vec::new()
-        } else {
-            self.tools.definitions().to_vec()
-        };
+        let tools = self.tools.available_definitions(self.mode);
         let tx = self.backend_tx.clone();
 
         runtime.spawn(async move {
@@ -752,14 +748,29 @@ impl App {
                 .append_message(self.conversation.session_id, &message)?;
         }
 
-        if !self.mode.is_read_only() && !turn.tool_calls.is_empty() {
+        if !turn.tool_calls.is_empty() {
             self.last_notice = Some(format!("Running {} tool call(s)...", turn.tool_calls.len()));
 
             for tool_call in turn.tool_calls {
-                let output = self
-                    .tools
-                    .execute_call(&tool_call)
-                    .unwrap_or_else(|error| format!("Tool failed: {error}"));
+                let output = if self.tools.can_execute(&tool_call.name, self.mode) {
+                    self.tools
+                        .execute_call(&self.store, self.conversation.session_id, &tool_call)
+                        .unwrap_or_else(|error| format!("Tool failed: {error}"))
+                } else {
+                    format!(
+                        "Tool '{}' is not available in {} mode",
+                        tool_call.name,
+                        self.mode.as_str()
+                    )
+                };
+
+                self.store.append_tool_event(
+                    self.conversation.session_id,
+                    &tool_call.name,
+                    &tool_call.arguments,
+                    &output,
+                )?;
+
                 let message = Message::tool_result(tool_call.id, tool_call.name, output);
                 self.conversation.push(message.clone());
                 self.store
