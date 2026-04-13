@@ -2,7 +2,7 @@ use ratatui::text::Line;
 use std::path::Path;
 use std::path::PathBuf;
 
-use crate::markdown;
+use crate::markdown_render::{is_blank_line_spaces_only, render_markdown_text_with_width_and_cwd};
 
 pub(crate) struct MarkdownStreamCollector {
     buffer: String,
@@ -30,20 +30,22 @@ impl MarkdownStreamCollector {
         self.buffer.push_str(delta);
     }
 
+    fn render_to_lines(&self, source: &str) -> Vec<Line<'static>> {
+        let text =
+            render_markdown_text_with_width_and_cwd(source, self.width, Some(self.cwd.as_path()));
+        text.lines
+    }
+
     pub fn commit_complete_lines(&mut self) -> Vec<Line<'static>> {
         let Some(last_newline) = self.buffer.rfind('\n') else {
             return Vec::new();
         };
 
         let source = self.buffer[..=last_newline].to_string();
-        let mut rendered = Vec::new();
-        markdown::append_markdown(&source, self.width, Some(self.cwd.as_path()), &mut rendered);
+        let rendered = self.render_to_lines(&source);
 
         let mut complete_line_count = rendered.len();
-        if complete_line_count > 0
-            && crate::render::line_utils::is_blank_line_spaces_only(
-                &rendered[complete_line_count - 1],
-            )
+        if complete_line_count > 0 && is_blank_line_spaces_only(&rendered[complete_line_count - 1])
         {
             complete_line_count -= 1;
         }
@@ -63,8 +65,7 @@ impl MarkdownStreamCollector {
             source.push('\n');
         }
 
-        let mut rendered = Vec::new();
-        markdown::append_markdown(&source, self.width, Some(self.cwd.as_path()), &mut rendered);
+        let rendered = self.render_to_lines(&source);
 
         let out = if self.committed_line_count >= rendered.len() {
             Vec::new()

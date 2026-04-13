@@ -1,8 +1,7 @@
 use crate::{
-    markdown::append_markdown,
+    markdown_render::{adaptive_wrap_lines, render_markdown_text_with_width_and_cwd, WrapOptions},
     session::{Message, MessageRole, ToolCall},
     tooling::canonical_tool_name,
-    wrapping::{adaptive_wrap_lines, RtOptions},
 };
 use ratatui::{
     layout::{Constraint, Layout, Margin, Rect},
@@ -403,7 +402,7 @@ impl App {
                 if let Some(width) = Some(body_width) {
                     let wrapped_preview = adaptive_wrap_lines(
                         self.streaming_preview_lines.iter(),
-                        RtOptions::new(width),
+                        WrapOptions::new(width),
                     );
                     lines.extend(wrapped_preview);
                 } else {
@@ -427,12 +426,12 @@ impl App {
                 lines.push(line_with_style("▌", self.palette().muted));
             }
         } else if !message.content.is_empty() {
-            append_markdown(
+            let rendered = render_markdown_text_with_width_and_cwd(
                 &message.content,
                 Some(body_width),
                 Some(self.workspace_root.as_path()),
-                &mut lines,
             );
+            lines.extend(rendered.lines);
         }
 
         if lines.is_empty() && message.reasoning.trim().is_empty() && message.tool_calls.is_empty()
@@ -453,7 +452,8 @@ impl App {
         if text.trim().is_empty() {
             lines.push(line_with_style("(empty)", self.palette().muted));
         } else {
-            append_markdown(text, Some(body_width), cwd, &mut lines);
+            let rendered = render_markdown_text_with_width_and_cwd(text, Some(body_width), cwd);
+            lines.extend(rendered.lines);
         }
         lines
     }

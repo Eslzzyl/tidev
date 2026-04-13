@@ -1,69 +1,21 @@
+mod auth;
+mod paths;
+mod provider;
+mod ui;
+
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fs,
-    path::{Path, PathBuf},
-};
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::prompts::default_system_prompt;
 use crate::theme::ThemeName;
 
-const BUNDLED_PRESETS_TOML: &str = include_str!("../presets.toml");
+pub use auth::{ActiveModel, AuthStore, ModelSummary, ProviderAuth};
+pub use paths::ConfigPaths;
+pub use provider::{ApiType, ModelConfig, ProviderConfig, ProviderSource};
+pub use ui::UiConfig;
 
-#[derive(Clone, Debug)]
-pub struct ConfigPaths {
-    pub config_dir: PathBuf,
-    pub data_dir: PathBuf,
-    pub config_file: PathBuf,
-    pub auth_file: PathBuf,
-    pub database_file: PathBuf,
-}
-
-impl ConfigPaths {
-    pub fn discover() -> Result<Self> {
-        let home_dir = dirs::home_dir().context("unable to determine the home directory")?;
-
-        let config_dir = home_dir.join(".config").join("tidev");
-        let data_dir = home_dir.join(".local/share").join("tidev");
-
-        Ok(Self {
-            config_file: config_dir.join("config.toml"),
-            auth_file: data_dir.join("auth.json"),
-            database_file: data_dir.join("sessions.sqlite3"),
-            config_dir,
-            data_dir,
-        })
-    }
-
-    pub fn ensure_directories(&self) -> Result<()> {
-        fs::create_dir_all(&self.config_dir).with_context(|| {
-            format!(
-                "failed to create config directory {}",
-                self.config_dir.display()
-            )
-        })?;
-        fs::create_dir_all(&self.data_dir).with_context(|| {
-            format!(
-                "failed to create data directory {}",
-                self.data_dir.display()
-            )
-        })?;
-        Ok(())
-    }
-
-    pub fn default_config_path(&self) -> &Path {
-        &self.config_file
-    }
-
-    pub fn default_auth_path(&self) -> &Path {
-        &self.auth_file
-    }
-
-    pub fn default_database_path(&self) -> &Path {
-        &self.database_file
-    }
-}
+const BUNDLED_PRESETS_TOML: &str = include_str!("../../presets.toml");
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -79,10 +31,8 @@ pub struct AppConfig {
     pub bundled_providers: BTreeMap<String, ProviderConfig>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ProviderSource {
-    User,
-    Bundled,
+fn default_theme() -> String {
+    ThemeName::Dark.as_str().to_string()
 }
 
 impl Default for AppConfig {
@@ -104,7 +54,7 @@ impl AppConfig {
 
         if !paths.config_file.exists() {
             let example = Self::example_toml();
-            fs::write(&paths.config_file, example)
+            std::fs::write(&paths.config_file, example)
                 .with_context(|| format!("failed to write {}", paths.config_file.display()))?;
             let config: Self = toml::from_str(example).with_context(|| {
                 format!("failed to parse generated {}", paths.config_file.display())
@@ -112,7 +62,7 @@ impl AppConfig {
             return config.attach_bundled_providers();
         }
 
-        let contents = fs::read_to_string(&paths.config_file)
+        let contents = std::fs::read_to_string(&paths.config_file)
             .with_context(|| format!("failed to read {}", paths.config_file.display()))?;
         let config: Self = toml::from_str(&contents)
             .with_context(|| format!("failed to parse {}", paths.config_file.display()))?;
@@ -122,7 +72,7 @@ impl AppConfig {
     pub fn save(&self, paths: &ConfigPaths) -> Result<()> {
         paths.ensure_directories()?;
         let contents = toml::to_string_pretty(self).context("failed to serialize config")?;
-        fs::write(&paths.config_file, contents)
+        std::fs::write(&paths.config_file, contents)
             .with_context(|| format!("failed to write {}", paths.config_file.display()))?;
         Ok(())
     }
@@ -353,184 +303,6 @@ max_input_lines = 6
 
     pub fn theme_name(&self) -> ThemeName {
         ThemeName::parse(&self.theme).unwrap_or(ThemeName::Dark)
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct UiConfig {
-    pub sidebar_width: u16,
-    pub welcome_width: u16,
-    pub max_input_lines: u16,
-}
-
-impl Default for UiConfig {
-    fn default() -> Self {
-        Self {
-            sidebar_width: 30,
-            welcome_width: 72,
-            max_input_lines: 6,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ApiType {
-    #[default]
-    OpenAi,
-    Anthropic,
-}
-
-impl ApiType {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::OpenAi => "openai",
-            Self::Anthropic => "anthropic",
-        }
-    }
-
-    pub fn parse(s: &str) -> Self {
-        match s {
-            "anthropic" => Self::Anthropic,
-            _ => Self::OpenAi,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ProviderConfig {
-    pub display_name: String,
-    pub base_url: String,
-    #[serde(default)]
-    pub api_type: Option<String>,
-    #[serde(default)]
-    pub models: BTreeMap<String, ModelConfig>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ModelConfig {
-    pub display_name: String,
-    pub context_window: usize,
-    pub max_output_tokens: usize,
-    pub temperature: f32,
-    #[serde(default)]
-    pub system_prompt: Option<String>,
-    #[serde(default = "default_true")]
-    pub supports_streaming: bool,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_theme() -> String {
-    ThemeName::Dark.as_str().to_string()
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct AuthStore {
-    #[serde(default)]
-    pub providers: BTreeMap<String, ProviderAuth>,
-}
-
-impl AuthStore {
-    pub fn load_or_create(paths: &ConfigPaths) -> Result<Self> {
-        paths.ensure_directories()?;
-
-        if !paths.auth_file.exists() {
-            let auth = Self::default();
-            auth.save(paths)?;
-            return Ok(auth);
-        }
-
-        let contents = fs::read_to_string(&paths.auth_file)
-            .with_context(|| format!("failed to read {}", paths.auth_file.display()))?;
-        let auth: Self = serde_json::from_str(&contents)
-            .with_context(|| format!("failed to parse {}", paths.auth_file.display()))?;
-        Ok(auth)
-    }
-
-    pub fn save(&self, paths: &ConfigPaths) -> Result<()> {
-        paths.ensure_directories()?;
-        let contents =
-            serde_json::to_string_pretty(self).context("failed to serialize auth store")?;
-        fs::write(&paths.auth_file, contents)
-            .with_context(|| format!("failed to write {}", paths.auth_file.display()))?;
-        Ok(())
-    }
-
-    pub fn set_api_key(&mut self, provider_id: impl Into<String>, api_key: impl Into<String>) {
-        let provider_id = provider_id.into();
-        let api_key = api_key.into();
-        self.providers.entry(provider_id).or_default().api_key = Some(api_key);
-    }
-
-    pub fn api_key(&self, provider_id: &str) -> Option<&str> {
-        self.providers
-            .get(provider_id)
-            .and_then(|provider| provider.api_key.as_deref())
-            .filter(|value| !value.trim().is_empty())
-    }
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct ProviderAuth {
-    #[serde(default)]
-    pub api_key: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-pub struct ActiveModel {
-    pub provider_id: String,
-    pub provider_display_name: String,
-    pub base_url: String,
-    pub api_type: ApiType,
-    pub model_id: String,
-    pub display_name: String,
-    pub context_window: usize,
-    pub max_output_tokens: usize,
-    pub temperature: f32,
-    pub system_prompt: String,
-    pub api_key: Option<String>,
-}
-
-impl ActiveModel {
-    pub fn label(&self) -> String {
-        format!("{}/{}", self.provider_id, self.model_id)
-    }
-
-    pub fn api_key_present(&self) -> bool {
-        self.api_key
-            .as_deref()
-            .is_some_and(|value| !value.trim().is_empty())
-    }
-
-    pub fn endpoint(&self) -> String {
-        match self.api_type {
-            ApiType::Anthropic => {
-                format!("{}/v1/messages", self.base_url.trim_end_matches('/'))
-            }
-            ApiType::OpenAi => {
-                format!("{}/chat/completions", self.base_url.trim_end_matches('/'))
-            }
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct ModelSummary {
-    pub provider_id: String,
-    pub provider_display_name: String,
-    pub model_id: String,
-    pub model_display_name: String,
-    pub base_url: String,
-    pub context_window: usize,
-    pub max_output_tokens: usize,
-}
-
-impl ModelSummary {
-    pub fn label(&self) -> String {
-        format!("{}/{}", self.provider_id, self.model_id)
     }
 }
 

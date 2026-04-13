@@ -5,9 +5,8 @@ use ratatui::text::Line;
 use ratatui::text::Span;
 use unicode_width::UnicodeWidthStr;
 
-use crate::render::line_utils::push_owned_lines;
-use crate::wrapping::word_wrap_line;
-use crate::wrapping::RtOptions;
+use super::line::push_owned_lines;
+use super::wrap::{word_wrap_line, RtOptions};
 
 #[derive(Clone, Debug)]
 pub(super) struct TableRowState {

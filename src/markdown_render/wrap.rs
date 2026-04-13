@@ -1,4 +1,4 @@
-use crate::render::line_utils::push_owned_lines;
+use super::line::push_owned_lines;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use std::borrow::Cow;
@@ -92,7 +92,7 @@ impl<'a> RtOptions<'a> {
     }
 }
 
-pub(crate) fn adaptive_wrap_line<'a>(line: &'a Line<'a>, base: RtOptions<'a>) -> Vec<Line<'a>> {
+pub fn adaptive_wrap_line<'a>(line: &'a Line<'a>, base: RtOptions<'a>) -> Vec<Line<'a>> {
     let selected = if line_contains_url_like(line) {
         url_preserving_wrap_options(base)
     } else {
@@ -102,7 +102,7 @@ pub(crate) fn adaptive_wrap_line<'a>(line: &'a Line<'a>, base: RtOptions<'a>) ->
 }
 
 #[allow(private_bounds)]
-pub(crate) fn adaptive_wrap_lines<'a, I, L>(
+pub fn adaptive_wrap_lines<'a, I, L>(
     lines: I,
     width_or_options: RtOptions<'a>,
 ) -> Vec<Line<'static>>
@@ -130,7 +130,7 @@ where
     out
 }
 
-pub(crate) fn word_wrap_line<'a, O>(line: &'a Line<'a>, width_or_options: O) -> Vec<Line<'a>>
+pub fn word_wrap_line<'a, O>(line: &'a Line<'a>, width_or_options: O) -> Vec<Line<'a>>
 where
     O: Into<RtOptions<'a>>,
 {

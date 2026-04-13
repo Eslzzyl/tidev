@@ -1,6 +1,9 @@
+mod highlight;
+mod line;
 mod links;
 mod styles;
 mod table;
+mod wrap;
 
 use std::path::{Path, PathBuf};
 
@@ -8,9 +11,11 @@ use pulldown_cmark::{Alignment, CodeBlockKind, CowStr, Event, HeadingLevel, Opti
 use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
 
-use crate::render::highlight::highlight_code_to_lines;
-use crate::render::line_utils::push_owned_lines;
-use crate::wrapping::{adaptive_wrap_line, RtOptions};
+use highlight::highlight_code_to_lines;
+use line::push_owned_lines;
+pub use line::is_blank_line_spaces_only;
+use wrap::{adaptive_wrap_line, RtOptions};
+pub use wrap::{adaptive_wrap_lines, RtOptions as WrapOptions};
 
 pub use links::is_local_path_like_link;
 
