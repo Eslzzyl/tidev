@@ -2,3 +2,6 @@
 	path = opencode
 	url = https://github.com/anomalyco/opencode.git
 	shallow = true
+[submodule "codex"]
+	path = codex
+	url = https://github.com/openai/codex.git
