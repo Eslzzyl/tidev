@@ -1,8 +1,10 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
+use std::sync::{Arc, atomic::AtomicBool};
 use tokio::runtime::Runtime;
 
 use crate::session::ToolCall;
+use crate::tooling::execute_shell_tool_call;
 
 use super::App;
 
@@ -57,6 +59,27 @@ impl PermissionDialogState {
     }
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct RunningToolExecution {
+    pub request_id: u64,
+    pub tool_call: ToolCall,
+    pub cancel_requested: Arc<AtomicBool>,
+}
+
+impl RunningToolExecution {
+    pub(crate) fn new(
+        request_id: u64,
+        tool_call: ToolCall,
+        cancel_requested: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            request_id,
+            tool_call,
+            cancel_requested,
+        }
+    }
+}
+
 impl App {
     pub(crate) fn begin_tool_execution(
         &mut self,
@@ -96,6 +119,10 @@ impl App {
             return Ok(());
         };
 
+        if self.running_tool_execution.is_some() {
+            return Ok(());
+        }
+
         loop {
             let Some((tool_call, current_index, total)) = self.pending_tool_snapshot() else {
                 break;
@@ -116,18 +143,18 @@ impl App {
                 .store
                 .load_tool_permission(self.conversation.session_id, &tool_call.name)?
             {
-                let output = if remembered {
-                    self.tools
-                        .execute_call(&self.store, self.conversation.session_id, &tool_call)
-                        .unwrap_or_else(|error| format!("Tool failed: {error}"))
+                if remembered {
+                    if self.execute_pending_tool_call(tool_call, runtime)? {
+                        return Ok(());
+                    }
                 } else {
-                    format!(
+                    let output = format!(
                         "Tool '{}' was denied by remembered permission",
                         tool_call.name
-                    )
-                };
-                self.record_tool_result(tool_call, output)?;
-                self.advance_pending_tool_execution();
+                    );
+                    self.record_tool_result(tool_call, output)?;
+                    self.advance_pending_tool_execution();
+                }
                 continue;
             }
 
@@ -151,12 +178,9 @@ impl App {
                 return Ok(());
             }
 
-            let output = self
-                .tools
-                .execute_call(&self.store, self.conversation.session_id, &tool_call)
-                .unwrap_or_else(|error| format!("Tool failed: {error}"));
-            self.record_tool_result(tool_call, output)?;
-            self.advance_pending_tool_execution();
+            if self.execute_pending_tool_call(tool_call, runtime)? {
+                return Ok(());
+            }
         }
 
         if self
@@ -189,11 +213,14 @@ impl App {
             )?;
         }
 
-        let output = if allow {
-            self.tools
-                .execute_call(&self.store, self.conversation.session_id, &dialog.tool_call)
-                .unwrap_or_else(|error| format!("Tool failed: {error}"))
-        } else if remember {
+        if allow {
+            if self.execute_pending_tool_call(dialog.tool_call, runtime)? {
+                return Ok(());
+            }
+            return self.process_pending_tool_execution(runtime);
+        }
+
+        let output = if remember {
             format!("Tool '{}' was denied and remembered", dialog.tool_call.name)
         } else {
             format!("Tool '{}' was denied", dialog.tool_call.name)
@@ -204,7 +231,65 @@ impl App {
         self.process_pending_tool_execution(runtime)
     }
 
-    fn record_tool_result(&mut self, tool_call: ToolCall, output: String) -> Result<()> {
+    fn execute_pending_tool_call(
+        &mut self,
+        tool_call: ToolCall,
+        runtime: &Runtime,
+    ) -> Result<bool> {
+        if self.should_run_shell_async(&tool_call) {
+            self.start_shell_tool_execution(tool_call, runtime)?;
+            return Ok(true);
+        }
+
+        let output = self
+            .tools
+            .execute_call(&self.store, self.conversation.session_id, &tool_call)
+            .unwrap_or_else(|error| format!("Tool failed: {error}"));
+        self.record_tool_result(tool_call, output)?;
+        self.advance_pending_tool_execution();
+        Ok(false)
+    }
+
+    fn should_run_shell_async(&self, tool_call: &ToolCall) -> bool {
+        self.tools
+            .definition_for(&tool_call.name)
+            .is_some_and(|definition| definition.name == "bash")
+    }
+
+    fn start_shell_tool_execution(&mut self, tool_call: ToolCall, runtime: &Runtime) -> Result<()> {
+        let request_id = self.active_request_id;
+        let cancel_requested = Arc::new(AtomicBool::new(false));
+        self.running_tool_execution = Some(RunningToolExecution::new(
+            request_id,
+            tool_call.clone(),
+            cancel_requested.clone(),
+        ));
+        self.last_notice = Some(format!("Running {}...", tool_call.name));
+
+        let tx = self.backend_tx.clone();
+        let workspace_root = self.tools.workspace_root().to_path_buf();
+        let max_output_bytes = self.tools.max_output_bytes();
+
+        runtime.spawn_blocking(move || {
+            let output = execute_shell_tool_call(
+                &workspace_root,
+                &tool_call,
+                max_output_bytes,
+                cancel_requested,
+            )
+            .unwrap_or_else(|error| format!("Tool failed: {error}"));
+
+            let _ = tx.send(crate::session::BackendEvent::ToolCompleted {
+                request_id,
+                tool_call,
+                output,
+            });
+        });
+
+        Ok(())
+    }
+
+    pub(crate) fn record_tool_result(&mut self, tool_call: ToolCall, output: String) -> Result<()> {
         self.store.append_tool_event(
             self.conversation.session_id,
             &tool_call.name,
@@ -219,7 +304,7 @@ impl App {
         Ok(())
     }
 
-    fn advance_pending_tool_execution(&mut self) {
+    pub(crate) fn advance_pending_tool_execution(&mut self) {
         if let Some(execution) = self.pending_tool_execution.as_mut() {
             execution.advance();
         }

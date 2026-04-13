@@ -29,16 +29,20 @@ impl LlmClient {
 
     pub async fn stream_chat(
         &self,
+        request_id: u64,
         model: ActiveModel,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
         tx: UnboundedSender<BackendEvent>,
     ) {
         if let Err(error) = self
-            .stream_chat_inner(model, messages, tools, tx.clone())
+            .stream_chat_inner(request_id, model, messages, tools, tx.clone())
             .await
         {
-            let _ = tx.send(BackendEvent::Failed(error.to_string()));
+            let _ = tx.send(BackendEvent::Failed {
+                request_id,
+                error: error.to_string(),
+            });
         }
     }
 
@@ -57,6 +61,7 @@ impl LlmClient {
 
     async fn stream_chat_inner(
         &self,
+        request_id: u64,
         model: ActiveModel,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
@@ -64,10 +69,11 @@ impl LlmClient {
     ) -> Result<()> {
         match model.api_type {
             ApiType::Anthropic => {
-                anthropic::stream_anthropic(&self.http, model, messages, tools, tx).await
+                anthropic::stream_anthropic(&self.http, request_id, model, messages, tools, tx)
+                    .await
             }
             ApiType::OpenAi => {
-                openai::stream_openai(&self.http, model, messages, tools, tx).await
+                openai::stream_openai(&self.http, request_id, model, messages, tools, tx).await
             }
         }
     }

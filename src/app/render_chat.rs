@@ -1,5 +1,5 @@
 use crate::{
-    markdown_render::{adaptive_wrap_lines, render_markdown_text_with_width_and_cwd, WrapOptions},
+    markdown_render::{WrapOptions, adaptive_wrap_lines, render_markdown_text_with_width_and_cwd},
     session::{Message, MessageRole, ToolCall},
     tooling::canonical_tool_name,
 };
@@ -11,7 +11,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 
-use super::{render::*, App};
+use super::{App, render::*};
 
 impl App {
     pub(super) fn render_chat(&mut self, frame: &mut Frame<'_>) {
@@ -42,26 +42,22 @@ impl App {
 
         let layout = Layout::vertical([
             Constraint::Min(6),
-            Constraint::Length(1),
             Constraint::Length(composer_height),
+            Constraint::Length(1),
         ])
         .split(main_area);
 
         self.render_messages(frame, layout[0]);
-        self.render_status_line(frame, layout[1]);
-        let prompt_title = if self.pending_request {
-            format!("{} prompt (streaming)", self.mode.title())
-        } else {
-            format!("{} prompt", self.mode.title())
-        };
+        let prompt_title = format!("{} prompt", self.mode.title());
         self.render_input_block(
             frame,
-            layout[2],
+            layout[1],
             &prompt_title,
             self.composer.placeholder(),
             false,
         );
-        self.render_command_palette(frame, layout[2]);
+        self.render_prompt_footer(frame, layout[2]);
+        self.render_command_palette(frame, layout[1]);
     }
 
     pub(super) fn render_messages(&mut self, frame: &mut Frame<'_>, area: Rect) {
@@ -126,47 +122,6 @@ impl App {
         }
     }
 
-    fn render_status_line(&self, frame: &mut Frame<'_>, area: Rect) {
-        let palette = self.palette();
-        let notice = self
-            .last_notice
-            .as_deref()
-            .unwrap_or(if self.pending_request {
-                "Thinking..."
-            } else {
-                "Idle"
-            });
-
-        let content = Line::from(vec![
-            Span::styled("cwd ", Style::default().fg(palette.accent_soft)),
-            Span::styled(
-                shorten(&self.workspace_root.display().to_string(), 28),
-                Style::default().fg(palette.text),
-            ),
-            Span::raw("  "),
-            Span::styled("model ", Style::default().fg(palette.accent_soft)),
-            Span::styled(
-                self.active_model.label(),
-                Style::default().fg(palette.accent),
-            ),
-            Span::raw("  "),
-            Span::styled("mode ", Style::default().fg(palette.accent_soft)),
-            Span::styled(self.mode.as_str(), Style::default().fg(palette.accent)),
-            Span::raw("  "),
-            Span::styled("session ", Style::default().fg(palette.accent_soft)),
-            Span::styled(
-                short_uuid(self.conversation.session_id),
-                Style::default().fg(palette.text),
-            ),
-            Span::raw("  "),
-            Span::styled("state ", Style::default().fg(palette.accent_soft)),
-            Span::styled(shorten(notice, 48), Style::default().fg(palette.warning)),
-        ]);
-
-        let paragraph = Paragraph::new(content).style(Style::default().fg(palette.text));
-        frame.render_widget(paragraph, area);
-    }
-
     fn render_sidebar(&self, frame: &mut Frame<'_>, area: Rect) {
         let palette = self.palette();
         let mut lines = Vec::new();
@@ -205,7 +160,7 @@ impl App {
         )]));
         lines.push(Line::from(""));
         lines.push(Line::from(vec![Span::styled(
-            "Workspace",
+            "cwd",
             Style::default()
                 .fg(palette.accent)
                 .add_modifier(Modifier::BOLD),

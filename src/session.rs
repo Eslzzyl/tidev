@@ -231,8 +231,25 @@ impl Conversation {
 
 #[derive(Clone, Debug)]
 pub enum BackendEvent {
-    Delta(String),
-    ReasoningDelta(String),
-    Finished(AssistantTurn),
-    Failed(String),
+    Delta {
+        request_id: u64,
+        content: String,
+    },
+    ReasoningDelta {
+        request_id: u64,
+        content: String,
+    },
+    Finished {
+        request_id: u64,
+        turn: AssistantTurn,
+    },
+    Failed {
+        request_id: u64,
+        error: String,
+    },
+    ToolCompleted {
+        request_id: u64,
+        tool_call: ToolCall,
+        output: String,
+    },
 }

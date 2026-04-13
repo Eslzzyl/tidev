@@ -1,21 +1,28 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use grep::{
     regex::RegexMatcherBuilder,
-    searcher::{sinks, SearcherBuilder},
+    searcher::{SearcherBuilder, sinks},
 };
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     fs,
+    io::Read,
     path::{Component, Path, PathBuf},
+    process::Stdio,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use crate::{session::ToolCall, storage::SessionStore};
 
 use super::schema::ToolArgs;
-use super::{canonical_tool_name, ToolDefinition, ToolPermission};
+use super::{ToolDefinition, ToolPermission, canonical_tool_name};
 
 macro_rules! tool_field_type {
     (string($desc:literal)) => {
@@ -648,36 +655,98 @@ pub(super) fn grep_paths(
 }
 
 pub fn run_shell(workspace_root: &Path, command: &str, max_output_bytes: usize) -> Result<String> {
-    let output = if cfg!(target_os = "windows") {
+    run_shell_inner(workspace_root, command, max_output_bytes, None)
+}
+
+pub fn run_shell_with_cancel(
+    workspace_root: &Path,
+    command: &str,
+    max_output_bytes: usize,
+    cancelled: Arc<AtomicBool>,
+) -> Result<String> {
+    run_shell_inner(workspace_root, command, max_output_bytes, Some(cancelled))
+}
+
+pub fn execute_shell_tool_call(
+    workspace_root: &Path,
+    call: &ToolCall,
+    max_output_bytes: usize,
+    cancelled: Arc<AtomicBool>,
+) -> Result<String> {
+    let arguments: Value = serde_json::from_str(&call.arguments)
+        .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
+    let args = parse_arguments::<BashArgs>(&call.name, arguments)?;
+    run_shell_with_cancel(workspace_root, &args.command, max_output_bytes, cancelled)
+}
+
+fn run_shell_inner(
+    workspace_root: &Path,
+    command: &str,
+    max_output_bytes: usize,
+    cancelled: Option<Arc<AtomicBool>>,
+) -> Result<String> {
+    let mut process = if cfg!(target_os = "windows") {
         std::process::Command::new("cmd")
             .arg("/C")
             .arg(command)
             .current_dir(workspace_root)
-            .output()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .with_context(|| format!("failed to run command '{command}'"))?
     } else {
         std::process::Command::new("sh")
             .arg("-lc")
             .arg(command)
             .current_dir(workspace_root)
-            .output()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .with_context(|| format!("failed to run command '{command}'"))?
     };
 
-    let mut combined = String::new();
-    combined.push_str(&String::from_utf8_lossy(&output.stdout));
+    let mut stdout = process.stdout.take();
+    let mut stderr = process.stderr.take();
 
-    if !output.stderr.is_empty() {
-        if !combined.is_empty() {
-            combined.push('\n');
+    loop {
+        if cancelled
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::SeqCst))
+        {
+            let _ = process.kill();
+            let _ = process.wait();
+            return Err(anyhow::anyhow!("shell command cancelled"));
         }
-        combined.push_str(&String::from_utf8_lossy(&output.stderr));
+
+        if let Some(status) = process
+            .try_wait()
+            .with_context(|| format!("failed while waiting for command '{command}' to finish"))?
+        {
+            let mut combined = String::new();
+
+            if let Some(mut handle) = stdout.take() {
+                let _ = handle.read_to_string(&mut combined);
+            }
+
+            if let Some(mut handle) = stderr.take() {
+                let mut error_output = String::new();
+                let _ = handle.read_to_string(&mut error_output);
+                if !error_output.is_empty() {
+                    if !combined.is_empty() {
+                        combined.push('\n');
+                    }
+                    combined.push_str(&error_output);
+                }
+            }
+
+            truncate_in_place(&mut combined, max_output_bytes);
+
+            let status = status.code().unwrap_or_default();
+            return Ok(format!("[exit {status}]\n{combined}"));
+        }
+
+        thread::sleep(std::time::Duration::from_millis(50));
     }
-
-    truncate_in_place(&mut combined, max_output_bytes);
-
-    let status = output.status.code().unwrap_or_default();
-    Ok(format!("[exit {status}]\n{combined}"))
 }
 
 pub(super) fn validate_todos(todos: &[TodoItem]) -> Result<()> {

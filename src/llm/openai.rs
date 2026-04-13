@@ -14,6 +14,7 @@ use super::think_parser::{finalize_turn, ThinkParser, ToolCallBuilder};
 
 pub(super) async fn stream_openai(
     http: &Client,
+    request_id: u64,
     model: ActiveModel,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
@@ -66,7 +67,7 @@ pub(super) async fn stream_openai(
                         &mut tool_calls,
                         &mut think_parser,
                     );
-                    let _ = tx.send(BackendEvent::Finished(turn));
+                    let _ = tx.send(BackendEvent::Finished { request_id, turn });
                     return Ok(());
                 }
 
@@ -76,7 +77,10 @@ pub(super) async fn stream_openai(
                 for choice in event.choices {
                     if let Some(reasoning) = choice.delta.reasoning_content {
                         reasoning_text.push_str(&reasoning);
-                        let _ = tx.send(BackendEvent::ReasoningDelta(reasoning));
+                        let _ = tx.send(BackendEvent::ReasoningDelta {
+                            request_id,
+                            content: reasoning,
+                        });
                     }
 
                     if let Some(content) = choice.delta.content {
@@ -84,12 +88,18 @@ pub(super) async fn stream_openai(
 
                         if !visible.is_empty() {
                             assistant_text.push_str(&visible);
-                            let _ = tx.send(BackendEvent::Delta(visible));
+                            let _ = tx.send(BackendEvent::Delta {
+                                request_id,
+                                content: visible,
+                            });
                         }
 
                         if !reasoning.is_empty() {
                             reasoning_text.push_str(&reasoning);
-                            let _ = tx.send(BackendEvent::ReasoningDelta(reasoning));
+                            let _ = tx.send(BackendEvent::ReasoningDelta {
+                                request_id,
+                                content: reasoning,
+                            });
                         }
                     }
 
@@ -127,7 +137,7 @@ pub(super) async fn stream_openai(
         &mut tool_calls,
         &mut think_parser,
     );
-    let _ = tx.send(BackendEvent::Finished(turn));
+    let _ = tx.send(BackendEvent::Finished { request_id, turn });
     Ok(())
 }
 

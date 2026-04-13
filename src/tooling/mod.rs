@@ -81,4 +81,6 @@ pub(crate) fn canonical_tool_name(tool_name: &str) -> Option<&'static str> {
     }
 }
 
-pub use tools::{list_dir, read_file, run_shell, write_file};
+pub use tools::{
+    execute_shell_tool_call, list_dir, read_file, run_shell, run_shell_with_cancel, write_file,
+};

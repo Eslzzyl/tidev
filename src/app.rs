@@ -12,7 +12,8 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{
     env, io,
     path::{Path, PathBuf},
-    time::Duration,
+    sync::atomic::Ordering,
+    time::{Duration, Instant},
 };
 use tokio::{
     runtime::Runtime,
@@ -30,7 +31,7 @@ mod theme_panel;
 
 use crate::{
     app::model_panel::ModelPanelState,
-    app::permission::{PendingToolExecution, PermissionDialogState},
+    app::permission::{PendingToolExecution, PermissionDialogState, RunningToolExecution},
     app::theme_panel::ThemePanelState,
     commands::{CommandAction, CommandPaletteState, CommandRegistry},
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
@@ -75,8 +76,11 @@ struct App {
     model_panel: Option<ModelPanelState>,
     pending_tool_execution: Option<PendingToolExecution>,
     permission_dialog: Option<PermissionDialogState>,
+    running_tool_execution: Option<RunningToolExecution>,
     composer: Composer,
     pending_request: bool,
+    active_request_id: u64,
+    abort_confirmation_deadline: Option<Instant>,
     last_notice: Option<String>,
     message_scroll_offset: usize,
     message_follow_tail: bool,
@@ -86,6 +90,7 @@ struct App {
     backend_rx: UnboundedReceiver<BackendEvent>,
     streaming_markdown: Option<MarkdownStreamCollector>,
     streaming_preview_lines: Vec<Line<'static>>,
+    loading_frame: usize,
 }
 
 pub fn run() -> Result<()> {
@@ -201,8 +206,11 @@ impl App {
             model_panel: None,
             pending_tool_execution: None,
             permission_dialog: None,
+            running_tool_execution: None,
             composer,
             pending_request: false,
+            active_request_id: 0,
+            abort_confirmation_deadline: None,
             last_notice,
             message_scroll_offset: 0,
             message_follow_tail: true,
@@ -212,6 +220,7 @@ impl App {
             backend_rx,
             streaming_markdown: None,
             streaming_preview_lines: Vec::new(),
+            loading_frame: 0,
         })
     }
 
@@ -337,6 +346,59 @@ impl App {
         }
     }
 
+    fn handle_request_abort_key(&mut self, key: KeyEvent) -> Result<bool> {
+        if key.code != KeyCode::Esc || !self.pending_request {
+            return Ok(false);
+        }
+
+        if self
+            .abort_confirmation_deadline
+            .is_some_and(|deadline| deadline > Instant::now())
+        {
+            self.abort_current_request();
+            return Ok(true);
+        }
+
+        self.abort_confirmation_deadline = Some(Instant::now() + Duration::from_secs(3));
+        self.last_notice =
+            Some("Press Esc again within 3 seconds to stop the current request".to_string());
+        Ok(true)
+    }
+
+    fn is_active_request(&self, request_id: u64) -> bool {
+        request_id == self.active_request_id
+    }
+
+    fn abort_current_request(&mut self) {
+        self.active_request_id = self.active_request_id.wrapping_add(1);
+        self.abort_confirmation_deadline = None;
+        self.pending_request = false;
+        self.pending_tool_execution = None;
+        self.permission_dialog = None;
+
+        if let Some(running) = self.running_tool_execution.take() {
+            running.cancel_requested.store(true, Ordering::SeqCst);
+        }
+
+        self.streaming_markdown = None;
+        self.streaming_preview_lines.clear();
+
+        if let Some(message) = self.conversation.messages.last_mut()
+            && message.streaming
+            && matches!(message.role, MessageRole::Assistant)
+        {
+            message.role = MessageRole::Error;
+            message.streaming = false;
+            message.content = "Request cancelled".to_string();
+            let persisted = message.clone();
+            let _ = self
+                .store
+                .append_message(self.conversation.session_id, &persisted);
+        }
+
+        self.last_notice = Some("Request cancelled".to_string());
+    }
+
     fn handle_theme_panel_key(&mut self, key: KeyEvent) -> Result<()> {
         if let Some(panel) = &mut self.theme_panel {
             match key.code {
@@ -443,6 +505,10 @@ impl App {
 
         if self.model_panel.is_some() {
             return self.handle_model_panel_key(key);
+        }
+
+        if self.handle_request_abort_key(key)? {
+            return Ok(());
         }
 
         if !self.command_palette.visible && key.code == KeyCode::Tab {
@@ -681,6 +747,8 @@ impl App {
         self.pending_request = false;
         self.pending_tool_execution = None;
         self.permission_dialog = None;
+        self.running_tool_execution = None;
+        self.abort_confirmation_deadline = None;
         self.screen = Screen::Welcome;
         self.connect_dialog = None;
         self.command_palette.clear();
@@ -752,6 +820,9 @@ impl App {
         ));
         self.streaming_preview_lines.clear();
         self.pending_request = true;
+        self.abort_confirmation_deadline = None;
+        self.active_request_id = self.active_request_id.wrapping_add(1);
+        let request_id = self.active_request_id;
         self.last_notice = Some(match self.mode {
             SessionMode::Plan => "Planning...".to_string(),
             SessionMode::Build => "Thinking...".to_string(),
@@ -772,7 +843,8 @@ impl App {
         let tx = self.backend_tx.clone();
 
         runtime.spawn(async move {
-            llm.stream_chat(model, messages, tools, tx).await;
+            llm.stream_chat(request_id, model, messages, tools, tx)
+                .await;
         });
 
         Ok(())
@@ -866,9 +938,16 @@ impl App {
 
     fn handle_backend_event(&mut self, event: BackendEvent, runtime: &Runtime) -> Result<()> {
         match event {
-            BackendEvent::Delta(delta) => {
+            BackendEvent::Delta {
+                request_id,
+                content,
+            } => {
+                if !self.is_active_request(request_id) {
+                    return Ok(());
+                }
+
                 if let Some(collector) = self.streaming_markdown.as_mut() {
-                    collector.push_delta(&delta);
+                    collector.push_delta(&content);
                     self.streaming_preview_lines
                         .extend(collector.commit_complete_lines());
                 }
@@ -876,24 +955,41 @@ impl App {
                     && message.streaming
                     && matches!(message.role, MessageRole::Assistant)
                 {
-                    message.content.push_str(&delta);
+                    message.content.push_str(&content);
                 }
             }
-            BackendEvent::ReasoningDelta(delta) => {
+            BackendEvent::ReasoningDelta {
+                request_id,
+                content,
+            } => {
+                if !self.is_active_request(request_id) {
+                    return Ok(());
+                }
+
                 if let Some(message) = self.conversation.messages.last_mut()
                     && message.streaming
                     && matches!(message.role, MessageRole::Assistant)
                 {
-                    message.reasoning.push_str(&delta);
+                    message.reasoning.push_str(&content);
                 }
             }
-            BackendEvent::Finished(turn) => {
+            BackendEvent::Finished { request_id, turn } => {
+                if !self.is_active_request(request_id) {
+                    return Ok(());
+                }
+
                 self.finish_assistant_turn(turn, runtime)?;
             }
-            BackendEvent::Failed(error) => {
+            BackendEvent::Failed { request_id, error } => {
+                if !self.is_active_request(request_id) {
+                    return Ok(());
+                }
+
                 self.pending_request = false;
                 self.pending_tool_execution = None;
                 self.permission_dialog = None;
+                self.running_tool_execution = None;
+                self.abort_confirmation_deadline = None;
                 self.streaming_markdown = None;
                 self.streaming_preview_lines.clear();
 
@@ -916,6 +1012,28 @@ impl App {
                 self.store
                     .append_message(self.conversation.session_id, &message)?;
                 self.last_notice = Some(error);
+            }
+            BackendEvent::ToolCompleted {
+                request_id,
+                tool_call,
+                output,
+            } => {
+                if !self.is_active_request(request_id) {
+                    return Ok(());
+                }
+
+                let Some(running) = self.running_tool_execution.take() else {
+                    return Ok(());
+                };
+
+                if running.request_id != request_id || running.tool_call.id != tool_call.id {
+                    self.running_tool_execution = Some(running);
+                    return Ok(());
+                }
+
+                self.record_tool_result(tool_call, output)?;
+                self.advance_pending_tool_execution();
+                self.process_pending_tool_execution(runtime)?;
             }
         }
 
@@ -956,6 +1074,7 @@ impl App {
         }
 
         self.pending_request = false;
+        self.abort_confirmation_deadline = None;
         self.last_notice = Some(match turn.finish_reason.as_deref() {
             Some(reason) if reason != "stop" => format!("Response finished ({reason})"),
             _ => "Response complete".to_string(),

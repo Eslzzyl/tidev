@@ -7,7 +7,6 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 use unicode_width::UnicodeWidthStr;
-use uuid::Uuid;
 
 use super::{App, Screen};
 
@@ -34,7 +33,7 @@ impl App {
         }
     }
 
-    fn render_welcome(&self, frame: &mut Frame<'_>) {
+    fn render_welcome(&mut self, frame: &mut Frame<'_>) {
         let area = frame.area();
         let palette = self.palette();
         frame.render_widget(Clear, area);
@@ -48,7 +47,7 @@ impl App {
             .ui
             .welcome_width
             .min(area.width.saturating_sub(4).max(32));
-        let card_height = 12u16.min(area.height.saturating_sub(2).max(10));
+        let card_height = 13u16.min(area.height.saturating_sub(2).max(10));
         let card = centered_rect(card_width, card_height, area);
 
         let block = Block::default()
@@ -64,7 +63,6 @@ impl App {
 
         let sections = Layout::vertical([
             Constraint::Length(2),
-            Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(
                 self.composer
@@ -86,67 +84,18 @@ impl App {
             .style(Style::default().fg(palette.muted));
         frame.render_widget(subtitle, sections[1]);
 
-        let session_matches_active = self.conversation.provider_id == self.active_model.provider_id
-            && self.conversation.model_id == self.active_model.model_id
-            && self.conversation.provider_display_name == self.active_model.provider_display_name
-            && self.conversation.model_display_name == self.active_model.display_name;
-
-        let mut model_line = if self.active_model.api_key_present() {
-            format!(
-                "{} · {} · {} mode · API key ready",
-                self.active_model.provider_display_name,
-                self.active_model.label(),
-                self.mode.as_str()
-            )
-        } else {
-            format!(
-                "{} · {} · {} mode · API key missing",
-                self.active_model.provider_display_name,
-                self.active_model.label(),
-                self.mode.as_str()
-            )
-        };
-
-        if !session_matches_active {
-            model_line.push_str(&format!(
-                " · session {}",
-                shorten(&self.conversation.model_label(), 28)
-            ));
-        }
-
-        let status_style = if self.active_model.api_key_present() {
-            Style::default().fg(palette.success)
-        } else {
-            Style::default().fg(palette.error)
-        };
-        frame.render_widget(
-            Paragraph::new(model_line)
-                .alignment(Alignment::Center)
-                .style(status_style),
-            sections[2],
-        );
-
-        let prompt_title = if self.pending_request {
-            format!("{} prompt (streaming)", self.mode.title())
-        } else {
-            format!("{} prompt", self.mode.title())
-        };
+        let prompt_title = format!("{} prompt", self.mode.title());
         self.render_input_block(
             frame,
-            sections[3],
+            sections[2],
             &prompt_title,
             self.composer.placeholder(),
             false,
         );
 
-        let hint = Paragraph::new(
-            "Enter to send · Shift+Enter/Ctrl+J newline · PageUp/PageDown scroll · Ctrl+P/N history · Ctrl+C quit",
-        )
-        .alignment(Alignment::Center)
-        .style(Style::default().fg(palette.accent_soft));
-        frame.render_widget(hint, sections[4]);
+        self.render_prompt_footer(frame, sections[3]);
 
-        self.render_command_palette(frame, sections[3]);
+        self.render_command_palette(frame, sections[2]);
     }
 
     pub(super) fn render_input_block(
@@ -270,9 +219,72 @@ pub(super) fn shorten(value: &str, max_chars: usize) -> String {
     shortened
 }
 
-pub(super) fn short_uuid(id: Uuid) -> String {
-    let value = id.simple().to_string();
-    value.chars().take(8).collect()
+impl App {
+    pub(super) fn render_prompt_footer(&mut self, frame: &mut Frame<'_>, area: Rect) {
+        let palette = self.palette();
+        let status_text = self.footer_status_text();
+        let status_width = status_text.width().min(area.width as usize).max(1) as u16;
+        let chunks =
+            Layout::horizontal([Constraint::Min(1), Constraint::Length(status_width)]).split(area);
+
+        let model_line = Line::from(vec![
+            Span::styled("model ", Style::default().fg(palette.accent_soft)),
+            Span::styled(
+                self.active_model.label(),
+                Style::default().fg(palette.accent),
+            ),
+        ]);
+
+        frame.render_widget(
+            Paragraph::new(model_line).style(Style::default().fg(palette.text)),
+            chunks[0],
+        );
+
+        frame.render_widget(
+            Paragraph::new(status_text)
+                .alignment(Alignment::Right)
+                .style(Style::default().fg(palette.muted)),
+            chunks[1],
+        );
+    }
+
+    fn footer_status_text(&mut self) -> String {
+        if self.pending_request
+            && self
+                .abort_confirmation_deadline
+                .is_some_and(|deadline| deadline > std::time::Instant::now())
+        {
+            return "Esc again to stop".to_string();
+        }
+
+        if self.pending_request {
+            let spinner = self.loading_spinner();
+
+            if let Some(running_tool_execution) = self.running_tool_execution.as_ref() {
+                let tool_name = running_tool_execution.tool_call.name.clone();
+                return format!("{} Running {}", spinner, tool_name);
+            }
+
+            if self.pending_tool_execution.is_some() {
+                return format!("{} Running tools", spinner);
+            }
+
+            return format!("{} {}", spinner, self.mode.title());
+        }
+
+        if let Some(message) = self.last_notice.as_deref() {
+            return message.to_string();
+        }
+
+        "Ready".to_string()
+    }
+
+    fn loading_spinner(&mut self) -> &'static str {
+        const FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
+        let frame = FRAMES[self.loading_frame % FRAMES.len()];
+        self.loading_frame = self.loading_frame.wrapping_add(1);
+        frame
+    }
 }
 
 pub(super) fn line_with_style(text: &str, fg: Color) -> Line<'static> {
