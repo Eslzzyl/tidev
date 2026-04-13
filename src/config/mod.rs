@@ -27,6 +27,8 @@ pub struct AppConfig {
     pub ui: UiConfig,
     #[serde(default)]
     pub providers: BTreeMap<String, ProviderConfig>,
+    #[serde(default)]
+    pub instructions: Vec<String>,
     #[serde(skip)]
     pub bundled_providers: BTreeMap<String, ProviderConfig>,
 }
@@ -43,6 +45,7 @@ impl Default for AppConfig {
             theme: ThemeName::Dark.as_str().to_string(),
             ui: UiConfig::default(),
             providers: BTreeMap::new(),
+            instructions: Vec::new(),
             bundled_providers: bundled_provider_catalog().unwrap_or_default(),
         }
     }
@@ -85,6 +88,10 @@ impl AppConfig {
 theme = "dark"
 default_provider = "openai"
 default_model = "gpt-4o-mini"
+
+# Optional custom instruction files or glob patterns to include in the system prompt.
+# Example: instructions = ["docs/style.md", "packages/*/AGENTS.md"]
+instructions = []
 
 [ui]
 sidebar_width = 30

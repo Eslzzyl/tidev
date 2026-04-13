@@ -9,7 +9,11 @@ use crossterm::{
 };
 use ratatui::text::Line;
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::{env, io, path::PathBuf, time::Duration};
+use std::{
+    env, io,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use tokio::{
     runtime::Runtime,
     sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
@@ -32,6 +36,7 @@ use crate::{
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
     context::ContextManager,
     input::Composer,
+    instructions,
     llm::LlmClient,
     markdown_stream::MarkdownStreamCollector,
     prompts::SessionMode,
@@ -741,8 +746,6 @@ impl App {
     }
 
     fn start_assistant_turn(&mut self, runtime: &Runtime) -> Result<()> {
-        let assistant_message = Message::streaming(MessageRole::Assistant, "");
-        self.conversation.push(assistant_message);
         self.streaming_markdown = Some(MarkdownStreamCollector::new(
             None,
             self.workspace_root.as_path(),
@@ -755,7 +758,15 @@ impl App {
         });
 
         let llm = self.llm.clone();
-        let model = self.request_model();
+        let (system_prompt, instruction_sources) = self.compose_system_prompt();
+        let mut model = self.active_model.clone();
+        model.system_prompt = system_prompt;
+
+        let _ = self.push_loaded_instruction_sources_message(&instruction_sources);
+
+        let assistant_message = Message::streaming(MessageRole::Assistant, "");
+        self.conversation.push(assistant_message);
+
         let messages = self.conversation.messages.clone();
         let tools = self.tools.available_definitions(self.mode);
         let tx = self.backend_tx.clone();
@@ -767,21 +778,69 @@ impl App {
         Ok(())
     }
 
-    fn request_model(&self) -> ActiveModel {
-        let mut model = self.active_model.clone();
-        model.system_prompt = self.compose_system_prompt();
-        model
-    }
-
-    fn compose_system_prompt(&self) -> String {
+    fn compose_system_prompt(&self) -> (String, Vec<String>) {
         let base_prompt = self.active_model.system_prompt.trim();
         let mode_reminder = self.mode.reminder();
+        let (instruction_prompt, sources) = instructions::system_prompt_and_sources(
+            &self.workspace_root,
+            &self.paths.config_dir,
+            &self.config.instructions,
+        )
+        .unwrap_or_default();
 
-        if base_prompt.is_empty() {
-            mode_reminder.to_string()
-        } else {
-            format!("{base_prompt}\n\n{mode_reminder}")
+        let mut prompt = String::new();
+        if !base_prompt.is_empty() {
+            prompt.push_str(base_prompt);
         }
+        if !instruction_prompt.is_empty() {
+            if !prompt.is_empty() {
+                prompt.push_str("\n\n");
+            }
+            prompt.push_str(&instruction_prompt);
+        }
+        if !prompt.is_empty() {
+            prompt.push_str("\n\n");
+        }
+        prompt.push_str(mode_reminder);
+
+        (prompt, sources)
+    }
+
+    fn push_loaded_instruction_sources_message(&mut self, sources: &[String]) -> Result<()> {
+        if sources.is_empty() {
+            return Ok(());
+        }
+
+        let already_present = self.conversation.messages.iter().any(|message| {
+            matches!(message.role, MessageRole::System)
+                && message.content.starts_with("Loaded instruction sources:")
+        });
+
+        if already_present {
+            return Ok(());
+        }
+
+        let display_sources: Vec<String> = sources
+            .iter()
+            .map(|source| self.display_instruction_source(source))
+            .collect();
+        let content = format!("Loaded instruction sources: {}", display_sources.join(", "));
+        self.push_system_message(content)
+    }
+
+    fn display_instruction_source(&self, source: &str) -> String {
+        if source.starts_with("http://") || source.starts_with("https://") {
+            return source.to_string();
+        }
+
+        let path = Path::new(source);
+        if path.is_absolute() {
+            if let Ok(rel) = path.strip_prefix(&self.workspace_root) {
+                return rel.display().to_string();
+            }
+        }
+
+        source.to_string()
     }
 
     fn push_system_message(&mut self, content: impl Into<String>) -> Result<()> {
@@ -814,15 +873,19 @@ impl App {
                         .extend(collector.commit_complete_lines());
                 }
                 if let Some(message) = self.conversation.messages.last_mut()
-                    && message.streaming && matches!(message.role, MessageRole::Assistant) {
-                        message.content.push_str(&delta);
-                    }
+                    && message.streaming
+                    && matches!(message.role, MessageRole::Assistant)
+                {
+                    message.content.push_str(&delta);
+                }
             }
             BackendEvent::ReasoningDelta(delta) => {
                 if let Some(message) = self.conversation.messages.last_mut()
-                    && message.streaming && matches!(message.role, MessageRole::Assistant) {
-                        message.reasoning.push_str(&delta);
-                    }
+                    && message.streaming
+                    && matches!(message.role, MessageRole::Assistant)
+                {
+                    message.reasoning.push_str(&delta);
+                }
             }
             BackendEvent::Finished(turn) => {
                 self.finish_assistant_turn(turn, runtime)?;
@@ -835,16 +898,18 @@ impl App {
                 self.streaming_preview_lines.clear();
 
                 if let Some(message) = self.conversation.messages.last_mut()
-                    && message.streaming && matches!(message.role, MessageRole::Assistant) {
-                        message.role = MessageRole::Error;
-                        message.streaming = false;
-                        message.content = format!("Request failed: {error}");
-                        let persisted = message.clone();
-                        self.store
-                            .append_message(self.conversation.session_id, &persisted)?;
-                        self.last_notice = Some(error);
-                        return Ok(());
-                    }
+                    && message.streaming
+                    && matches!(message.role, MessageRole::Assistant)
+                {
+                    message.role = MessageRole::Error;
+                    message.streaming = false;
+                    message.content = format!("Request failed: {error}");
+                    let persisted = message.clone();
+                    self.store
+                        .append_message(self.conversation.session_id, &persisted)?;
+                    self.last_notice = Some(error);
+                    return Ok(());
+                }
 
                 let message = Message::new(MessageRole::Error, format!("Request failed: {error}"));
                 self.conversation.push(message.clone());
@@ -861,13 +926,15 @@ impl App {
         let mut persisted_message = None;
 
         if let Some(message) = self.conversation.messages.last_mut()
-            && message.streaming && matches!(message.role, MessageRole::Assistant) {
-                message.content = turn.content.clone();
-                message.reasoning = turn.reasoning.clone();
-                message.tool_calls = turn.tool_calls.clone();
-                message.streaming = false;
-                persisted_message = Some(message.clone());
-            }
+            && message.streaming
+            && matches!(message.role, MessageRole::Assistant)
+        {
+            message.content = turn.content.clone();
+            message.reasoning = turn.reasoning.clone();
+            message.tool_calls = turn.tool_calls.clone();
+            message.streaming = false;
+            persisted_message = Some(message.clone());
+        }
 
         if let Some(message) = persisted_message {
             self.store

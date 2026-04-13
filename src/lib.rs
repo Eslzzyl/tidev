@@ -3,6 +3,7 @@ pub mod commands;
 pub mod config;
 pub mod context;
 pub mod input;
+pub mod instructions;
 pub mod llm;
 pub mod markdown_render;
 pub mod markdown_stream;
