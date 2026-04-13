@@ -160,6 +160,22 @@ impl SessionStore {
         Ok(())
     }
 
+    pub fn delete_messages(&self, session_id: Uuid, message_ids: &[Uuid]) -> Result<()> {
+        if message_ids.is_empty() {
+            return Ok(());
+        }
+
+        for message_id in message_ids {
+            self.connection.execute(
+                "DELETE FROM messages WHERE session_id = ?1 AND id = ?2",
+                params![session_id.to_string(), message_id.to_string()],
+            )?;
+        }
+
+        self.touch_session(session_id)?;
+        Ok(())
+    }
+
     pub fn append_tool_event(
         &self,
         session_id: Uuid,
@@ -279,6 +295,7 @@ impl SessionStore {
         };
 
         let messages = self.load_messages(session_id)?;
+        let revert_message_id = self.load_revert_message_id(session_id)?;
         Ok(Some(Conversation {
             session_id: record.session_id,
             workspace_root: record.workspace_root,
@@ -290,7 +307,56 @@ impl SessionStore {
             created_at: record.created_at,
             updated_at: record.updated_at,
             messages,
+            revert_message_id,
         }))
+    }
+
+    pub fn load_revert_message_id(&self, session_id: Uuid) -> Result<Option<Uuid>> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT message_id FROM session_reverts WHERE session_id = ?1 LIMIT 1")?;
+
+        let message_id = statement
+            .query_row(params![session_id.to_string()], |row| {
+                row.get::<_, String>(0)
+            })
+            .optional()?
+            .map(|value| {
+                Uuid::parse_str(&value).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
+                })
+            })
+            .transpose()?;
+
+        Ok(message_id)
+    }
+
+    pub fn set_revert_message_id(&self, session_id: Uuid, message_id: Option<Uuid>) -> Result<()> {
+        match message_id {
+            Some(message_id) => {
+                self.connection.execute(
+                    "INSERT INTO session_reverts (session_id, message_id, created_at) VALUES (?1, ?2, ?3) ON CONFLICT(session_id) DO UPDATE SET message_id = excluded.message_id, created_at = excluded.created_at",
+                    params![
+                        session_id.to_string(),
+                        message_id.to_string(),
+                        Utc::now().to_rfc3339(),
+                    ],
+                )?;
+            }
+            None => {
+                self.connection.execute(
+                    "DELETE FROM session_reverts WHERE session_id = ?1",
+                    params![session_id.to_string()],
+                )?;
+            }
+        }
+
+        self.touch_session(session_id)?;
+        Ok(())
+    }
+
+    pub fn clear_revert_message_id(&self, session_id: Uuid) -> Result<()> {
+        self.set_revert_message_id(session_id, None)
     }
 
     pub fn load_session_record(&self, session_id: Uuid) -> Result<Option<SessionRecord>> {
@@ -439,6 +505,12 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS session_workspaces (
     session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
     workspace_root TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS session_reverts (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    message_id TEXT NOT NULL,
+    created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -605,6 +677,70 @@ mod tests {
             assert_eq!(sessions.len(), 2);
             assert_eq!(sessions[0].session_id, second.session_id);
             assert_eq!(sessions[1].session_id, first.session_id);
+        }
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn revert_marker_round_trips() {
+        let path = std::env::temp_dir().join(format!(
+            "tidev-session-store-revert-{}.sqlite3",
+            uuid::Uuid::new_v4()
+        ));
+
+        {
+            let store = SessionStore::open(&path).expect("store should open");
+            let session_id = uuid::Uuid::new_v4();
+            let message_id = uuid::Uuid::new_v4();
+
+            store
+                .create_session(
+                    session_id,
+                    Path::new("/workspace"),
+                    "deepseek",
+                    "DeepSeek",
+                    "deepseek-chat",
+                    "DeepSeek Chat",
+                    "Untitled session",
+                )
+                .expect("session should be created");
+
+            assert_eq!(
+                store
+                    .load_revert_message_id(session_id)
+                    .expect("revert should load"),
+                None
+            );
+
+            store
+                .set_revert_message_id(session_id, Some(message_id))
+                .expect("revert should save");
+
+            assert_eq!(
+                store
+                    .load_revert_message_id(session_id)
+                    .expect("revert should load"),
+                Some(message_id)
+            );
+
+            let conversation = store
+                .load_conversation(session_id)
+                .expect("conversation should load")
+                .expect("conversation should exist");
+
+            assert_eq!(conversation.revert_message_id, Some(message_id));
+
+            store
+                .clear_revert_message_id(session_id)
+                .expect("revert should clear");
+
+            assert_eq!(
+                store
+                    .load_revert_message_id(session_id)
+                    .expect("revert should load"),
+                None
+            );
         }
 
         let _ = std::fs::remove_file(path);

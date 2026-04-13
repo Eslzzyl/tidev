@@ -158,6 +158,12 @@ impl App {
             format!("Theme: {}", self.theme.name()),
             Style::default().fg(palette.text),
         )]));
+        if self.conversation.is_reverted() {
+            lines.push(Line::from(vec![Span::styled(
+                "Undo: active",
+                Style::default().fg(palette.warning),
+            )]));
+        }
         lines.push(Line::from(""));
         lines.push(Line::from(vec![Span::styled(
             "cwd",
@@ -189,6 +195,8 @@ impl App {
         lines.push(Line::from("/connect"));
         lines.push(Line::from("/theme"));
         lines.push(Line::from("/help"));
+        lines.push(Line::from("/undo - revert the previous user message"));
+        lines.push(Line::from("/redo - move one step forward in the undo history"));
         lines.push(Line::from("/model - open the model panel"));
         lines.push(Line::from("/model <query> - prefilter the model panel"));
         lines.push(Line::from("/session - open the session panel"));
@@ -245,7 +253,7 @@ impl App {
         let width = content_width.unwrap_or(1).max(1);
         let body_width = width.saturating_sub(2).max(1);
 
-        if self.conversation.messages.is_empty() {
+        if self.conversation.visible_messages().is_empty() {
             let lines = decorate_card_lines(
                 vec![
                     line_with_style("No messages yet.", palette.muted),
@@ -260,7 +268,7 @@ impl App {
 
         let mut lines = Vec::new();
 
-        for message in &self.conversation.messages {
+        for message in self.conversation.visible_messages() {
             for (card_bg, card_lines) in self.render_message_cards(message, body_width) {
                 if card_lines.is_empty() {
                     continue;

@@ -155,6 +155,7 @@ pub struct Conversation {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub messages: Vec<Message>,
+    pub revert_message_id: Option<Uuid>,
 }
 
 impl Conversation {
@@ -179,6 +180,7 @@ impl Conversation {
             created_at: now,
             updated_at: now,
             messages: Vec::new(),
+            revert_message_id: None,
         }
     }
 
@@ -209,7 +211,53 @@ impl Conversation {
 
     pub fn clear_messages(&mut self) {
         self.messages.clear();
+        self.revert_message_id = None;
         self.updated_at = Utc::now();
+    }
+
+    pub fn message_index(&self, message_id: Uuid) -> Option<usize> {
+        self.messages
+            .iter()
+            .position(|message| message.id == message_id)
+    }
+
+    pub fn visible_message_count(&self) -> usize {
+        self.revert_message_id
+            .and_then(|message_id| self.message_index(message_id))
+            .unwrap_or(self.messages.len())
+    }
+
+    pub fn visible_messages(&self) -> &[Message] {
+        let visible_count = self.visible_message_count();
+        &self.messages[..visible_count]
+    }
+
+    pub fn take_hidden_messages(&mut self) -> Vec<Message> {
+        let visible_count = self.visible_message_count();
+        if visible_count >= self.messages.len() {
+            return Vec::new();
+        }
+
+        self.messages.split_off(visible_count)
+    }
+
+    pub fn is_reverted(&self) -> bool {
+        self.revert_message_id.is_some()
+    }
+
+    pub fn last_visible_user_message(&self) -> Option<&Message> {
+        self.visible_messages()
+            .iter()
+            .rev()
+            .find(|message| matches!(message.role, MessageRole::User))
+    }
+
+    pub fn next_user_message_after(&self, message_id: Uuid) -> Option<&Message> {
+        let start_index = self.message_index(message_id)?;
+        self.messages
+            .iter()
+            .skip(start_index.saturating_add(1))
+            .find(|message| matches!(message.role, MessageRole::User))
     }
 
     pub fn title_from_prompt(prompt: &str) -> String {
@@ -255,4 +303,43 @@ pub enum BackendEvent {
         tool_call: ToolCall,
         output: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn visible_messages_stop_at_revert_marker() {
+        let mut conversation = Conversation::new(
+            Uuid::new_v4(),
+            "/workspace",
+            "provider",
+            "Provider",
+            "model",
+            "Model",
+            "Untitled session",
+        );
+
+        let first_user = Message::new(MessageRole::User, "first prompt");
+        let first_assistant = Message::new(MessageRole::Assistant, "first answer");
+        let second_user = Message::new(MessageRole::User, "second prompt");
+        let second_assistant = Message::new(MessageRole::Assistant, "second answer");
+
+        conversation.push(first_user.clone());
+        conversation.push(first_assistant);
+        conversation.push(second_user.clone());
+        conversation.push(second_assistant);
+        conversation.revert_message_id = Some(second_user.id);
+
+        assert_eq!(conversation.visible_messages().len(), 2);
+        assert_eq!(
+            conversation
+                .last_visible_user_message()
+                .map(|message| message.id),
+            Some(first_user.id)
+        );
+        assert_eq!(conversation.visible_messages()[0].id, first_user.id);
+        assert_eq!(conversation.visible_messages()[1].content, "first answer");
+    }
 }

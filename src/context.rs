@@ -59,7 +59,8 @@ impl ContextManager {
     }
 
     pub fn needs_compaction(&self, conversation: &Conversation) -> bool {
-        Self::estimate_tokens_for_messages(&conversation.messages) > self.prune_threshold_tokens
+        Self::estimate_tokens_for_messages(conversation.visible_messages())
+            > self.prune_threshold_tokens
     }
 
     pub fn build_request_messages(&self, conversation: &Conversation) -> Vec<Message> {
@@ -74,7 +75,7 @@ impl ContextManager {
 
         messages.extend(
             conversation
-                .messages
+                .visible_messages()
                 .iter()
                 .skip(self.retained_from)
                 .filter(|message| !message.streaming)
@@ -96,16 +97,17 @@ impl ContextManager {
         model: &ActiveModel,
         conversation: &Conversation,
     ) -> Result<bool> {
-        if !self.needs_compaction(conversation) || conversation.messages.is_empty() {
+        let messages = conversation.visible_messages();
+        if !self.needs_compaction(conversation) || messages.is_empty() {
             return Ok(false);
         }
 
-        let split_index = self.choose_split_index(conversation);
-        if split_index == 0 || split_index >= conversation.messages.len() {
+        let split_index = self.choose_split_index(messages);
+        if split_index == 0 || split_index >= messages.len() {
             return Ok(false);
         }
 
-        let compressed_chunk = conversation.messages[..split_index].to_vec();
+        let compressed_chunk = messages[..split_index].to_vec();
         let prompt = self.build_compression_prompt(&compressed_chunk);
         let summary = llm
             .complete_with_messages(
@@ -127,11 +129,11 @@ impl ContextManager {
         self.retained_from
     }
 
-    fn choose_split_index(&self, conversation: &Conversation) -> usize {
+    fn choose_split_index(&self, messages: &[Message]) -> usize {
         let mut token_budget = self.retain_recent_tokens;
-        let mut keep_from = conversation.messages.len();
+        let mut keep_from = messages.len();
 
-        for (index, message) in conversation.messages.iter().enumerate().rev() {
+        for (index, message) in messages.iter().enumerate().rev() {
             let message_tokens = Self::estimate_tokens_for_text(&message.content) + 8;
             if token_budget < message_tokens {
                 keep_from = index + 1;

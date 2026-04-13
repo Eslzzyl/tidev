@@ -7,6 +7,8 @@ pub enum CommandAction {
     Model,
     Session,
     Clear,
+    Undo,
+    Redo,
     Theme,
     Quit,
 }
@@ -258,6 +260,20 @@ pub static COMMANDS: &[CommandSpec] = &[
         description: "Start a new conversation",
         usage: "/clear",
         action: CommandAction::Clear,
+    },
+    CommandSpec {
+        name: "undo",
+        aliases: &[],
+        description: "Revert the previous user message",
+        usage: "/undo",
+        action: CommandAction::Undo,
+    },
+    CommandSpec {
+        name: "redo",
+        aliases: &[],
+        description: "Move one step forward in undo history",
+        usage: "/redo",
+        action: CommandAction::Redo,
     },
     CommandSpec {
         name: "help",

@@ -181,6 +181,8 @@ impl App {
             "/session <query> - prefilter the session panel",
             "/theme [dark|light|nord|one-dark|catppuccin|solarized|orng|github|material] - switch theme",
             "/clear - start a fresh session",
+            "/undo - revert the previous user message",
+            "/redo - move one step forward in the undo history",
             "/exit - exit TiDev",
             "",
             "Keys:",

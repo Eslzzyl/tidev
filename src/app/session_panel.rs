@@ -194,7 +194,7 @@ impl App {
         self.context_manager = ContextManager::new();
         self.conversation = conversation;
         self.active_model = active_model;
-        self.screen = if self.conversation.messages.is_empty() {
+        self.screen = if self.conversation.visible_messages().is_empty() {
             super::Screen::Welcome
         } else {
             super::Screen::Chat

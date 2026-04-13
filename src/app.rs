@@ -29,6 +29,7 @@ mod render_chat;
 mod render_dialog;
 mod session_panel;
 mod theme_panel;
+mod undo;
 
 use crate::{
     app::model_panel::ModelPanelState,
@@ -568,7 +569,11 @@ impl App {
     ) -> Result<()> {
         if self.pending_request {
             match action {
-                CommandAction::Help | CommandAction::Theme | CommandAction::Quit => {}
+                CommandAction::Help
+                | CommandAction::Theme
+                | CommandAction::Quit
+                | CommandAction::Undo
+                | CommandAction::Redo => {}
                 _ => {
                     self.last_notice = Some(
                         "A response is still streaming. Wait for it to finish before changing sessions.".to_string(),
@@ -599,6 +604,12 @@ impl App {
             }
             CommandAction::Clear => {
                 self.start_new_session()?;
+            }
+            CommandAction::Undo => {
+                self.undo_last_user_message()?;
+            }
+            CommandAction::Redo => {
+                self.redo_last_user_message()?;
             }
             CommandAction::Theme => {
                 self.apply_theme_command(args)?;
@@ -750,10 +761,19 @@ impl App {
         self.command_palette.clear();
         self.connect_dialog = None;
 
+        if self.conversation.is_reverted() {
+            self.discard_reverted_branch()?;
+            self.context_manager = ContextManager::new();
+        }
+
         let user_message = Message::new(MessageRole::User, prompt.clone());
         self.conversation.push(user_message.clone());
         self.store
             .append_message(self.conversation.session_id, &user_message)?;
+
+        if let Err(error) = self.capture_prompt_snapshot(user_message.id) {
+            self.last_notice = Some(format!("Workspace snapshot unavailable: {error}"));
+        }
 
         if self.conversation.messages.len() == 1 || self.conversation.title == "Untitled session" {
             self.conversation.update_title_from_prompt(&prompt);
@@ -812,7 +832,7 @@ impl App {
         let assistant_message = Message::streaming(MessageRole::Assistant, "");
         self.conversation.push(assistant_message);
 
-        let messages = self.conversation.messages.clone();
+        let messages = self.conversation.visible_messages().to_vec();
         let tools = self.tools.available_definitions(self.mode);
         let tx = self.backend_tx.clone();
 

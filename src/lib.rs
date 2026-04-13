@@ -13,6 +13,7 @@ pub mod session;
 pub mod storage;
 pub mod theme;
 pub mod tooling;
+pub mod workspace_snapshot;
 
 pub fn run() -> anyhow::Result<()> {
     app::run()
