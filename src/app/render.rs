@@ -424,7 +424,12 @@ impl App {
             .style(Style::default().fg(palette.muted));
         frame.render_widget(subtitle, sections[1]);
 
-        let model_line = if self.active_model.api_key_present() {
+        let session_matches_active = self.conversation.provider_id == self.active_model.provider_id
+            && self.conversation.model_id == self.active_model.model_id
+            && self.conversation.provider_display_name == self.active_model.provider_display_name
+            && self.conversation.model_display_name == self.active_model.display_name;
+
+        let mut model_line = if self.active_model.api_key_present() {
             format!(
                 "{} · {} · {} mode · API key ready",
                 self.active_model.provider_display_name,
@@ -439,6 +444,13 @@ impl App {
                 self.mode.as_str()
             )
         };
+
+        if !session_matches_active {
+            model_line.push_str(&format!(
+                " · session {}",
+                shorten(&self.conversation.model_label(), 28)
+            ));
+        }
 
         let status_style = if self.active_model.api_key_present() {
             Style::default().fg(palette.success)

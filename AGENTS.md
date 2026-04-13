@@ -51,6 +51,9 @@ OpenAI-compatible. Sends `system` prompt first, then conversation history. Suppo
 
 Tables: `meta`, `sessions`, `messages`, `tool_events`. Foreign keys enforced. Messages ordered by `created_at, rowid`.
 
+- Do not add runtime database migration code in `src/storage.rs`.
+- If the schema changes, update the schema directly and recreate the database rather than implementing migration logic.
+
 ## Submodule
 
 `opencode/` is a git submodule pointing to `https://github.com/anomalyco/opencode.git`.

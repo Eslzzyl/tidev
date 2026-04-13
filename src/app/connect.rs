@@ -96,12 +96,18 @@ impl App {
             .config
             .resolve_provider_default_model(&self.auth, &provider_id)?;
         self.active_model = model.clone();
-        self.conversation.provider_id = model.provider_id.clone();
-        self.conversation.model_id = model.model_id.clone();
+        self.conversation.set_model(
+            model.provider_id.clone(),
+            model.provider_display_name.clone(),
+            model.model_id.clone(),
+            model.display_name.clone(),
+        );
         self.store.update_session_model(
             self.conversation.session_id,
             &model.provider_id,
+            &model.provider_display_name,
             &model.model_id,
+            &model.display_name,
         )?;
 
         self.cancel_connect_dialog();
@@ -133,12 +139,18 @@ impl App {
             .config
             .resolve_provider_default_model(&self.auth, &provider_id)?;
         self.active_model = model.clone();
-        self.conversation.provider_id = model.provider_id.clone();
-        self.conversation.model_id = model.model_id.clone();
+        self.conversation.set_model(
+            model.provider_id.clone(),
+            model.provider_display_name.clone(),
+            model.model_id.clone(),
+            model.display_name.clone(),
+        );
         self.store.update_session_model(
             self.conversation.session_id,
             &model.provider_id,
+            &model.provider_display_name,
             &model.model_id,
+            &model.display_name,
         )?;
 
         self.cancel_connect_dialog();

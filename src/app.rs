@@ -89,29 +89,44 @@ impl App {
         let mode = SessionMode::Build;
 
         let fallback_model = Self::resolve_fallback_model(&config, &auth)?;
-        let (mut conversation, active_model) = match store.load_latest_session()? {
+        let (conversation, active_model, last_notice) = match store.load_latest_session()? {
             Some(record) => match store.load_conversation(record.session_id)? {
                 Some(conversation) => {
                     let active_model =
                         Self::resolve_conversation_model(&config, &auth, &conversation)
                             .unwrap_or_else(|_| fallback_model.clone());
-                    (conversation, active_model)
+                    let last_notice = if conversation.provider_id != active_model.provider_id
+                        || conversation.model_id != active_model.model_id
+                    {
+                        Some(format!(
+                            "Session model {} is unavailable; using {}",
+                            conversation.model_label(),
+                            active_model.label()
+                        ))
+                    } else {
+                        None
+                    };
+                    (conversation, active_model, last_notice)
                 }
                 None => {
                     let session_id = Uuid::new_v4();
                     let conversation = Conversation::new(
                         session_id,
                         fallback_model.provider_id.clone(),
+                        fallback_model.provider_display_name.clone(),
                         fallback_model.model_id.clone(),
+                        fallback_model.display_name.clone(),
                         "Untitled session",
                     );
                     store.create_session(
                         session_id,
                         &fallback_model.provider_id,
+                        &fallback_model.provider_display_name,
                         &fallback_model.model_id,
+                        &fallback_model.display_name,
                         &conversation.title,
                     )?;
-                    (conversation, fallback_model.clone())
+                    (conversation, fallback_model.clone(), None)
                 }
             },
             None => {
@@ -119,30 +134,22 @@ impl App {
                 let conversation = Conversation::new(
                     session_id,
                     fallback_model.provider_id.clone(),
+                    fallback_model.provider_display_name.clone(),
                     fallback_model.model_id.clone(),
+                    fallback_model.display_name.clone(),
                     "Untitled session",
                 );
                 store.create_session(
                     session_id,
                     &fallback_model.provider_id,
+                    &fallback_model.provider_display_name,
                     &fallback_model.model_id,
+                    &fallback_model.display_name,
                     &conversation.title,
                 )?;
-                (conversation, fallback_model.clone())
+                (conversation, fallback_model.clone(), None)
             }
         };
-
-        if conversation.provider_id != active_model.provider_id
-            || conversation.model_id != active_model.model_id
-        {
-            conversation.provider_id = active_model.provider_id.clone();
-            conversation.model_id = active_model.model_id.clone();
-            store.update_session_model(
-                conversation.session_id,
-                &active_model.provider_id,
-                &active_model.model_id,
-            )?;
-        }
 
         let screen = if conversation.messages.is_empty() {
             Screen::Welcome
@@ -171,7 +178,7 @@ impl App {
             theme_panel: None,
             composer,
             pending_request: false,
-            last_notice: None,
+            last_notice,
             backend_tx,
             backend_rx,
         })
@@ -441,12 +448,18 @@ impl App {
     fn switch_model(&mut self, selector: Option<&str>) -> Result<()> {
         let model = self.config.resolve_model(&self.auth, selector)?;
         self.active_model = model.clone();
-        self.conversation.provider_id = model.provider_id.clone();
-        self.conversation.model_id = model.model_id.clone();
+        self.conversation.set_model(
+            model.provider_id.clone(),
+            model.provider_display_name.clone(),
+            model.model_id.clone(),
+            model.display_name.clone(),
+        );
         self.store.update_session_model(
             self.conversation.session_id,
             &model.provider_id,
+            &model.provider_display_name,
             &model.model_id,
+            &model.display_name,
         )?;
         self.last_notice = Some(format!("Switched to {}", model.label()));
         Ok(())
@@ -457,14 +470,18 @@ impl App {
         let conversation = Conversation::new(
             session_id,
             self.active_model.provider_id.clone(),
+            self.active_model.provider_display_name.clone(),
             self.active_model.model_id.clone(),
+            self.active_model.display_name.clone(),
             "Untitled session",
         );
 
         self.store.create_session(
             session_id,
             &self.active_model.provider_id,
+            &self.active_model.provider_display_name,
             &self.active_model.model_id,
+            &self.active_model.display_name,
             &conversation.title,
         )?;
 

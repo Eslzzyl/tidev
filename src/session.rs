@@ -147,7 +147,9 @@ impl Message {
 pub struct Conversation {
     pub session_id: Uuid,
     pub provider_id: String,
+    pub provider_display_name: String,
     pub model_id: String,
+    pub model_display_name: String,
     pub title: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -158,19 +160,43 @@ impl Conversation {
     pub fn new(
         session_id: Uuid,
         provider_id: impl Into<String>,
+        provider_display_name: impl Into<String>,
         model_id: impl Into<String>,
+        model_display_name: impl Into<String>,
         title: impl Into<String>,
     ) -> Self {
         let now = Utc::now();
         Self {
             session_id,
             provider_id: provider_id.into(),
+            provider_display_name: provider_display_name.into(),
             model_id: model_id.into(),
+            model_display_name: model_display_name.into(),
             title: title.into(),
             created_at: now,
             updated_at: now,
             messages: Vec::new(),
         }
+    }
+
+    pub fn set_model(
+        &mut self,
+        provider_id: impl Into<String>,
+        provider_display_name: impl Into<String>,
+        model_id: impl Into<String>,
+        model_display_name: impl Into<String>,
+    ) {
+        self.provider_id = provider_id.into();
+        self.provider_display_name = provider_display_name.into();
+        self.model_id = model_id.into();
+        self.model_display_name = model_display_name.into();
+    }
+
+    pub fn model_label(&self) -> String {
+        format!(
+            "{} / {}",
+            self.provider_display_name, self.model_display_name
+        )
     }
 
     pub fn push(&mut self, message: Message) {

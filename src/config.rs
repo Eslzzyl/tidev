@@ -510,17 +510,15 @@ mod tests {
     #[test]
     fn bundled_provider_catalog_loads() {
         let catalog = bundled_provider_catalog().expect("bundled catalog should parse");
-        assert!(catalog.contains_key("openai"));
-        assert!(catalog.contains_key("anthropic"));
         assert!(catalog.contains_key("deepseek"));
     }
 
     #[test]
     fn app_config_uses_bundled_provider_ids() {
         let config = AppConfig::default();
-        assert!(config.provider_ids().contains(&"openai".to_string()));
+        assert!(config.provider_ids().contains(&"deepseek".to_string()));
         assert_eq!(
-            config.provider_source("openai"),
+            config.provider_source("deepseek"),
             Some(ProviderSource::Bundled)
         );
     }
@@ -529,24 +527,27 @@ mod tests {
     fn user_provider_overrides_bundled_preset() {
         let mut config = AppConfig::default();
         config.providers.insert(
-            "openai".to_string(),
+            "deepseek".to_string(),
             ProviderConfig {
-                display_name: "Custom OpenAI".to_string(),
+                display_name: "Custom DeepSeek".to_string(),
                 base_url: "https://example.com/v1".to_string(),
                 models: BTreeMap::new(),
             },
         );
 
-        assert_eq!(config.provider_source("openai"), Some(ProviderSource::User));
         assert_eq!(
-            config.provider_display_name("openai"),
-            Some("Custom OpenAI")
+            config.provider_source("deepseek"),
+            Some(ProviderSource::User)
+        );
+        assert_eq!(
+            config.provider_display_name("deepseek"),
+            Some("Custom DeepSeek")
         );
         assert_eq!(
             config
                 .provider_ids()
                 .iter()
-                .filter(|id| *id == "openai")
+                .filter(|id| *id == "deepseek")
                 .count(),
             1
         );
