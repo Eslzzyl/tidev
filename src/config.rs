@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -24,12 +24,8 @@ impl ConfigPaths {
     pub fn discover() -> Result<Self> {
         let home_dir = dirs::home_dir().context("unable to determine the home directory")?;
 
-        let config_dir = dirs::config_dir()
-            .unwrap_or_else(|| home_dir.join(".config"))
-            .join("tidev");
-        let data_dir = dirs::data_dir()
-            .unwrap_or_else(|| home_dir.join(".local/share"))
-            .join("tidev");
+        let config_dir = home_dir.join(".config").join("tidev");
+        let data_dir = home_dir.join(".local/share").join("tidev");
 
         Ok(Self {
             config_file: config_dir.join("config.toml"),
