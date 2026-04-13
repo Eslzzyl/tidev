@@ -196,6 +196,13 @@ max_input_lines = 6
         models
     }
 
+    pub fn connected_models(&self, auth: &AuthStore) -> Vec<ModelSummary> {
+        self.available_models()
+            .into_iter()
+            .filter(|summary| auth.api_key(&summary.provider_id).is_some())
+            .collect()
+    }
+
     pub fn resolve_active_model(&self, auth: &AuthStore) -> Result<ActiveModel> {
         self.resolve_model(auth, None)
     }

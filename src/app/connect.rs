@@ -86,6 +86,22 @@ impl App {
     }
 
     fn begin_provider_edit(&mut self, provider_id: String) -> Result<()> {
+        self.begin_provider_edit_with_selection(provider_id, None)
+    }
+
+    pub(crate) fn begin_provider_edit_for_model(
+        &mut self,
+        provider_id: String,
+        model_id: String,
+    ) -> Result<()> {
+        self.begin_provider_edit_with_selection(provider_id, Some(model_id))
+    }
+
+    fn begin_provider_edit_with_selection(
+        &mut self,
+        provider_id: String,
+        selected_model_id: Option<String>,
+    ) -> Result<()> {
         let Some(provider) = self.config.providers.get(&provider_id).cloned() else {
             self.last_notice = Some(format!("Provider '{provider_id}' is not editable"));
             return Ok(());
@@ -95,6 +111,18 @@ impl App {
             &provider,
             self.auth.api_key(&provider_id).map(str::to_string),
         );
+        if let Some(model_id) = selected_model_id {
+            if let Some(index) = draft
+                .models
+                .keys()
+                .position(|candidate| candidate == &model_id)
+            {
+                let mut draft = draft;
+                draft.selected_model_index = index;
+                self.show_edit_provider_step(provider_id, EditProviderStep::ModelList, None, draft);
+                return Ok(());
+            }
+        }
         self.show_edit_provider_step(provider_id, EditProviderStep::DisplayName, None, draft);
         Ok(())
     }

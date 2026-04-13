@@ -234,8 +234,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "model",
         aliases: &["models"],
-        description: "List or switch models",
-        usage: "/model [provider:model]",
+        description: "Open the model panel",
+        usage: "/model [query]",
         action: CommandAction::Model,
     },
     CommandSpec {

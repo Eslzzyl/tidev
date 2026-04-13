@@ -1,4 +1,5 @@
 use crate::{
+    app::model_panel::{ModelPanelItem, ModelPanelState},
     app::theme_panel::ThemePanelState,
     config::ProviderSource,
     prompts::SessionMode,
@@ -635,6 +636,9 @@ impl App {
         if let Some(panel) = &self.theme_panel {
             self.render_theme_panel(frame, area, panel);
         }
+        if let Some(panel) = &self.model_panel {
+            self.render_model_panel(frame, area, panel);
+        }
     }
 
     fn render_welcome(&self, frame: &mut Frame<'_>) {
@@ -933,7 +937,8 @@ impl App {
         lines.push(Line::from("/connect"));
         lines.push(Line::from("/theme"));
         lines.push(Line::from("/help"));
-        lines.push(Line::from("/model <id>"));
+        lines.push(Line::from("/model - open the model panel"));
+        lines.push(Line::from("/model <query> - prefilter the model panel"));
         lines.push(Line::from("/clear"));
         lines.push(Line::from("/exit"));
         lines.push(Line::from(""));
@@ -1183,8 +1188,8 @@ impl App {
             "Commands:",
             "/help - show this message",
             "/connect - open the provider picker",
-            "/model - list available models",
-            "/model <provider:model> - switch active model",
+            "/model - open the model panel",
+            "/model <query> - prefilter the model panel",
             "/theme [light|dark] - switch theme",
             "/clear - start a fresh session",
             "/exit - exit TiDev",
@@ -1206,22 +1211,6 @@ impl App {
 
         for mode in SessionMode::all() {
             lines.push(format!("- {} - {}", mode.as_str(), mode.description()));
-        }
-
-        lines.join("\n")
-    }
-
-    pub(crate) fn model_catalog_message(&self) -> String {
-        let mut lines = vec!["Available models:".to_string()];
-
-        for summary in self.config.available_models() {
-            lines.push(format!(
-                "- {} ({}) · context {} · max output {}",
-                summary.label(),
-                summary.model_display_name,
-                summary.context_window,
-                summary.max_output_tokens,
-            ));
         }
 
         lines.join("\n")
@@ -1275,6 +1264,129 @@ impl App {
                 vertical: 1,
             }),
             &mut state,
+        );
+    }
+
+    fn render_model_panel(&self, frame: &mut Frame<'_>, area: Rect, panel: &ModelPanelState) {
+        let palette = self.palette();
+        let overlay = centered_rect(area.width.min(104), area.height.min(34), area);
+        frame.render_widget(Clear, overlay);
+
+        let title = Block::default()
+            .style(Style::default().bg(palette.panel))
+            .title(" Select model ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.border_active()));
+        frame.render_widget(title, overlay);
+
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+
+        let sections = Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Length(3),
+            Constraint::Min(8),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+        frame.render_widget(
+            Paragraph::new(
+                "Type to filter by provider or model. Enter switches to the highlighted model.",
+            )
+            .alignment(Alignment::Center)
+            .style(Style::default().bg(palette.panel).fg(palette.muted)),
+            sections[0],
+        );
+
+        self.render_input_block(
+            frame,
+            sections[1],
+            "Search models",
+            self.composer.placeholder(),
+            false,
+        );
+
+        let items = self.model_panel_items();
+        let mut rows = Vec::new();
+        for item in &items {
+            match item {
+                ModelPanelItem::ProviderHeader {
+                    provider_id,
+                    display_name,
+                } => {
+                    rows.push(ListItem::new(Line::from(vec![
+                        Span::styled(
+                            format!("{display_name}"),
+                            Style::default()
+                                .fg(palette.accent)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw("  "),
+                        Span::styled(
+                            format!("({provider_id})"),
+                            Style::default().fg(palette.muted),
+                        ),
+                    ])));
+                }
+                ModelPanelItem::Model { summary } => {
+                    rows.push(ListItem::new(Line::from(vec![
+                        Span::styled(
+                            format!("  {}", summary.model_display_name),
+                            Style::default()
+                                .fg(palette.text)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw("  "),
+                        Span::styled(
+                            format!("({})", summary.model_id),
+                            Style::default().fg(palette.muted),
+                        ),
+                        Span::raw("  "),
+                        Span::styled(
+                            format!(
+                                "{} · max {}",
+                                summary.provider_display_name, summary.max_output_tokens
+                            ),
+                            Style::default().fg(palette.accent_soft),
+                        ),
+                    ])));
+                }
+            }
+        }
+
+        if rows.is_empty() {
+            frame.render_widget(
+                Paragraph::new("No connected models match this search.")
+                    .alignment(Alignment::Center)
+                    .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                sections[2],
+            );
+        } else {
+            let mut state = ListState::default();
+            state.select(Some(
+                panel.selected_index.min(items.len().saturating_sub(1)),
+            ));
+
+            let list = List::new(rows)
+                .style(Style::default().bg(palette.panel).fg(palette.text))
+                .highlight_style(
+                    Style::default()
+                        .bg(palette.selection_bg)
+                        .fg(palette.selection_fg)
+                        .add_modifier(Modifier::BOLD),
+                );
+
+            frame.render_stateful_widget(list, sections[2], &mut state);
+        }
+
+        frame.render_widget(
+            Paragraph::new("Enter switch · Ctrl+E edit selected provider · Esc close")
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(palette.panel).fg(palette.muted)),
+            sections[3],
         );
     }
 }

@@ -16,10 +16,12 @@ use tokio::{
 use uuid::Uuid;
 
 mod connect;
+mod model_panel;
 mod render;
 mod theme_panel;
 
 use crate::{
+    app::model_panel::ModelPanelState,
     app::theme_panel::ThemePanelState,
     commands::{CommandAction, CommandPaletteState, CommandRegistry},
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
@@ -59,6 +61,7 @@ struct App {
     command_palette: CommandPaletteState,
     connect_dialog: Option<ConnectDialog>,
     theme_panel: Option<ThemePanelState>,
+    model_panel: Option<ModelPanelState>,
     composer: Composer,
     pending_request: bool,
     last_notice: Option<String>,
@@ -176,6 +179,7 @@ impl App {
             command_palette,
             connect_dialog: None,
             theme_panel: None,
+            model_panel: None,
             composer,
             pending_request: false,
             last_notice,
@@ -255,6 +259,57 @@ impl App {
         Ok(())
     }
 
+    fn handle_model_panel_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Some(panel) = self.model_panel.clone() else {
+            return Ok(());
+        };
+
+        match key.code {
+            KeyCode::Up => {
+                let items = self.model_panel_items();
+                let mut next_panel = panel;
+                next_panel.move_selection(&items, -1);
+                self.model_panel = Some(next_panel);
+            }
+            KeyCode::Down => {
+                let items = self.model_panel_items();
+                let mut next_panel = panel;
+                next_panel.move_selection(&items, 1);
+                self.model_panel = Some(next_panel);
+            }
+            KeyCode::Enter => {
+                let items = self.model_panel_items();
+                if let Some(summary) = panel.selected_model(&items).cloned() {
+                    self.switch_model(Some(&summary.label()))?;
+                    self.close_model_panel();
+                }
+            }
+            KeyCode::Esc => {
+                self.close_model_panel();
+            }
+            KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let items = self.model_panel_items();
+                if let Some(summary) = panel.selected_model(&items).cloned() {
+                    self.close_model_panel();
+                    self.begin_provider_edit_for_model(summary.provider_id, summary.model_id)?;
+                }
+            }
+            KeyCode::Tab => {}
+            _ => {
+                let previous_query = self.composer.text().to_string();
+                let _ = self.composer.handle_key_with_history(key, false);
+                if self.composer.text() != previous_query {
+                    let items = self.model_panel_items();
+                    let mut next_panel = panel;
+                    next_panel.reset_selection(&items);
+                    self.model_panel = Some(next_panel);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn handle_key_event(&mut self, key: KeyEvent, runtime: &Runtime) -> Result<()> {
         if matches!(key.code, KeyCode::Char('c')) && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.should_quit = true;
@@ -273,6 +328,10 @@ impl App {
 
         if self.theme_panel.is_some() {
             return self.handle_theme_panel_key(key);
+        }
+
+        if self.model_panel.is_some() {
+            return self.handle_model_panel_key(key);
         }
 
         if !self.command_palette.visible && key.code == KeyCode::Tab {
@@ -388,13 +447,7 @@ impl App {
                 self.open_connect_dialog()?;
             }
             CommandAction::Model => {
-                if let Some(model_selector) = args.first() {
-                    self.switch_model(Some(model_selector))?;
-                } else {
-                    let catalog = self.model_catalog_message();
-                    self.push_system_message(catalog)?;
-                    self.last_notice = Some("Model catalog shown".to_string());
-                }
+                self.open_model_panel(args.join(" "));
             }
             CommandAction::Clear => {
                 self.start_new_session()?;
@@ -424,6 +477,28 @@ impl App {
 
     fn open_theme_panel(&mut self) {
         self.theme_panel = Some(ThemePanelState::new(self.theme.palette().name));
+    }
+
+    fn open_model_panel(&mut self, initial_query: String) {
+        self.command_palette.clear();
+        self.connect_dialog = None;
+        self.theme_panel = None;
+        self.composer.clear();
+        self.composer
+            .set_placeholder("Search connected models by provider or model name");
+        self.composer.set_text(initial_query);
+
+        let mut panel = ModelPanelState::new();
+        let items = self.model_panel_items();
+        panel.reset_selection(&items);
+        self.model_panel = Some(panel);
+    }
+
+    fn close_model_panel(&mut self) {
+        self.model_panel = None;
+        self.composer.clear();
+        self.composer
+            .set_placeholder("Ask TiDev about your code, task, or question...");
     }
 
     fn close_theme_panel(&mut self, apply: bool) -> Result<()> {
