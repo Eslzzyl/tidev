@@ -17,11 +17,13 @@ use uuid::Uuid;
 
 mod connect;
 mod model_panel;
+mod permission;
 mod render;
 mod theme_panel;
 
 use crate::{
     app::model_panel::ModelPanelState,
+    app::permission::{PendingToolExecution, PermissionDialogState},
     app::theme_panel::ThemePanelState,
     commands::{CommandAction, CommandPaletteState, CommandRegistry},
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
@@ -62,6 +64,8 @@ struct App {
     connect_dialog: Option<ConnectDialog>,
     theme_panel: Option<ThemePanelState>,
     model_panel: Option<ModelPanelState>,
+    pending_tool_execution: Option<PendingToolExecution>,
+    permission_dialog: Option<PermissionDialogState>,
     composer: Composer,
     pending_request: bool,
     last_notice: Option<String>,
@@ -180,6 +184,8 @@ impl App {
             connect_dialog: None,
             theme_panel: None,
             model_panel: None,
+            pending_tool_execution: None,
+            permission_dialog: None,
             composer,
             pending_request: false,
             last_notice,
@@ -319,6 +325,10 @@ impl App {
         if matches!(key.code, KeyCode::Char('d')) && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.should_quit = true;
             return Ok(());
+        }
+
+        if self.permission_dialog.is_some() {
+            return self.handle_permission_dialog_key(key, runtime);
         }
 
         if let Some(dialog) = self.connect_dialog.clone() {
@@ -563,6 +573,8 @@ impl App {
         self.conversation = conversation;
         self.context_manager = ContextManager::new();
         self.pending_request = false;
+        self.pending_tool_execution = None;
+        self.permission_dialog = None;
         self.screen = Screen::Welcome;
         self.connect_dialog = None;
         self.command_palette.clear();
@@ -705,6 +717,8 @@ impl App {
             }
             BackendEvent::Failed(error) => {
                 self.pending_request = false;
+                self.pending_tool_execution = None;
+                self.permission_dialog = None;
 
                 if let Some(message) = self.conversation.messages.last_mut() {
                     if message.streaming && matches!(message.role, MessageRole::Assistant) {
@@ -751,33 +765,7 @@ impl App {
         if !turn.tool_calls.is_empty() {
             self.last_notice = Some(format!("Running {} tool call(s)...", turn.tool_calls.len()));
 
-            for tool_call in turn.tool_calls {
-                let output = if self.tools.can_execute(&tool_call.name, self.mode) {
-                    self.tools
-                        .execute_call(&self.store, self.conversation.session_id, &tool_call)
-                        .unwrap_or_else(|error| format!("Tool failed: {error}"))
-                } else {
-                    format!(
-                        "Tool '{}' is not available in {} mode",
-                        tool_call.name,
-                        self.mode.as_str()
-                    )
-                };
-
-                self.store.append_tool_event(
-                    self.conversation.session_id,
-                    &tool_call.name,
-                    &tool_call.arguments,
-                    &output,
-                )?;
-
-                let message = Message::tool_result(tool_call.id, tool_call.name, output);
-                self.conversation.push(message.clone());
-                self.store
-                    .append_message(self.conversation.session_id, &message)?;
-            }
-
-            self.start_assistant_turn(runtime)?;
+            self.begin_tool_execution(turn.tool_calls, runtime)?;
             return Ok(());
         }
 

@@ -10,7 +10,6 @@ pub mod session;
 pub mod storage;
 pub mod theme;
 pub mod tooling;
-pub mod tools;
 
 pub fn run() -> anyhow::Result<()> {
     app::run()

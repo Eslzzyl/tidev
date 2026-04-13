@@ -12,7 +12,7 @@ use crate::{
     tooling::TodoItem,
 };
 
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 pub struct SessionStore {
     connection: Connection,
@@ -172,6 +172,44 @@ impl SessionStore {
 
         self.touch_session(session_id)?;
         Ok(())
+    }
+
+    pub fn remember_tool_permission(
+        &self,
+        session_id: Uuid,
+        tool_name: &str,
+        allowed: bool,
+    ) -> Result<()> {
+        self.connection.execute(
+            "INSERT INTO tool_permissions (session_id, tool_name, allowed, created_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(session_id, tool_name) DO UPDATE SET allowed = excluded.allowed, created_at = excluded.created_at",
+            params![
+                session_id.to_string(),
+                tool_name,
+                if allowed { 1_i64 } else { 0_i64 },
+                Utc::now().to_rfc3339(),
+            ],
+        )?;
+
+        self.touch_session(session_id)?;
+        Ok(())
+    }
+
+    pub fn load_tool_permission(
+        &self,
+        session_id: Uuid,
+        tool_name: &str,
+    ) -> Result<Option<bool>> {
+        let mut statement = self.connection.prepare(
+            "SELECT allowed FROM tool_permissions WHERE session_id = ?1 AND tool_name = ?2 LIMIT 1",
+        )?;
+
+        let value = statement
+            .query_row(params![session_id.to_string(), tool_name], |row| {
+                Ok(row.get::<_, i64>(0)? != 0)
+            })
+            .optional()?;
+
+        Ok(value)
     }
 
     pub fn replace_todos(&self, session_id: Uuid, todos: &[TodoItem]) -> Result<()> {
@@ -415,6 +453,17 @@ CREATE TABLE IF NOT EXISTS todos (
 
 CREATE INDEX IF NOT EXISTS idx_todos_session_position
     ON todos(session_id, position);
+
+CREATE TABLE IF NOT EXISTS tool_permissions (
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    tool_name TEXT NOT NULL,
+    allowed INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(session_id, tool_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tool_permissions_session_created_at
+    ON tool_permissions(session_id, created_at);
 "#;
 
 #[cfg(test)]

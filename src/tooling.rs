@@ -184,6 +184,10 @@ impl ToolPermission {
             SessionMode::Build => true,
         }
     }
+
+    pub fn needs_confirmation(self) -> bool {
+        matches!(self, Self::Write | Self::Edit | Self::Execute | Self::Session)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -209,6 +213,10 @@ impl ToolDefinition {
             parameters: Args::schema(),
             permission,
         }
+    }
+
+    pub fn needs_confirmation(&self) -> bool {
+        self.permission.needs_confirmation()
     }
 }
 
@@ -290,14 +298,15 @@ impl ToolRegistry {
     }
 
     pub fn can_execute(&self, tool_name: &str, mode: SessionMode) -> bool {
-        let Some(canonical_name) = canonical_tool_name(tool_name) else {
-            return false;
-        };
+        self.definition_for(tool_name)
+            .is_some_and(|definition| definition.permission.is_allowed_in(mode))
+    }
 
+    pub fn definition_for(&self, tool_name: &str) -> Option<&ToolDefinition> {
+        let canonical_name = canonical_tool_name(tool_name)?;
         self.definitions
             .iter()
             .find(|definition| definition.name == canonical_name)
-            .is_some_and(|definition| definition.permission.is_allowed_in(mode))
     }
 
     pub fn execute_call(

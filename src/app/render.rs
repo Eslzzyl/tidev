@@ -1,5 +1,6 @@
 use crate::{
     app::model_panel::{ModelPanelItem, ModelPanelState},
+    app::permission::PermissionDialogState,
     app::theme_panel::ThemePanelState,
     config::ProviderSource,
     prompts::SessionMode,
@@ -639,6 +640,9 @@ impl App {
         if let Some(panel) = &self.model_panel {
             self.render_model_panel(frame, area, panel);
         }
+        if let Some(dialog) = &self.permission_dialog {
+            self.render_permission_dialog(frame, area, dialog);
+        }
     }
 
     fn render_welcome(&self, frame: &mut Frame<'_>) {
@@ -1201,6 +1205,7 @@ impl App {
             "Up/Down - move through command suggestions",
             "Ctrl+P / Ctrl+N - navigate input history",
             "Ctrl+C - exit",
+            "Permission prompt - Y allow · N deny · R allow and remember · X deny and remember",
             "Connect picker - type to filter providers, Enter to select, Esc to cancel",
             "",
             "Modes:",
@@ -1386,6 +1391,69 @@ impl App {
             Paragraph::new("Enter switch · Ctrl+E edit selected provider · Esc close")
                 .alignment(Alignment::Center)
                 .style(Style::default().bg(palette.panel).fg(palette.muted)),
+            sections[3],
+        );
+    }
+
+    fn render_permission_dialog(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        dialog: &PermissionDialogState,
+    ) {
+        let palette = self.palette();
+        let preview = pretty_tool_arguments(&dialog.tool_call.arguments);
+        let preview_height = preview.lines().count().min(8) as u16;
+        let overlay = centered_rect(area.width.min(96), preview_height.saturating_add(10), area);
+        frame.render_widget(Clear, overlay);
+
+        let block = Block::default()
+            .style(Style::default().bg(palette.panel_alt))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.border_active()))
+            .title(" Tool approval ");
+        frame.render_widget(block, overlay);
+
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+
+        let sections = Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Length(2),
+            Constraint::Min(4),
+            Constraint::Length(2),
+        ])
+        .split(inner);
+
+        frame.render_widget(
+            Paragraph::new(dialog.title())
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(palette.panel_alt).fg(palette.text).add_modifier(
+                    Modifier::BOLD,
+                )),
+            sections[0],
+        );
+
+        frame.render_widget(
+            Paragraph::new("This tool can change state. Review the arguments and choose whether to allow it.")
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+            sections[1],
+        );
+
+        frame.render_widget(
+            Paragraph::new(preview)
+                .style(Style::default().bg(palette.panel_alt).fg(palette.text))
+                .wrap(Wrap { trim: false }),
+            sections[2],
+        );
+
+        frame.render_widget(
+            Paragraph::new("Y allow · N deny · R allow and remember · X deny and remember · Esc deny")
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
             sections[3],
         );
     }
