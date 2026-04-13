@@ -1,8 +1,11 @@
 use anyhow::{Context, Result, bail};
-use grep::{regex::RegexMatcherBuilder, searcher::{SearcherBuilder, sinks}};
+use grep::{
+    regex::RegexMatcherBuilder,
+    searcher::{SearcherBuilder, sinks},
+};
 use ignore::WalkBuilder;
-use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     fs,
@@ -11,11 +14,7 @@ use std::{
 };
 use uuid::Uuid;
 
-use crate::{
-    prompts::SessionMode,
-    session::ToolCall,
-    storage::SessionStore,
-};
+use crate::{prompts::SessionMode, session::ToolCall, storage::SessionStore};
 
 macro_rules! tool_field_type {
     (string($desc:literal)) => {
@@ -186,7 +185,10 @@ impl ToolPermission {
     }
 
     pub fn needs_confirmation(self) -> bool {
-        matches!(self, Self::Write | Self::Edit | Self::Execute | Self::Session)
+        matches!(
+            self,
+            Self::Write | Self::Edit | Self::Execute | Self::Session
+        )
     }
 }
 
@@ -397,7 +399,12 @@ impl ToolRegistry {
 
     fn grep_tool(&self, args: GrepArgs) -> Result<String> {
         let path = args.path.unwrap_or_else(|| ".".to_string());
-        grep_paths(&self.workspace_root, path, &args.pattern, args.include.as_deref())
+        grep_paths(
+            &self.workspace_root,
+            path,
+            &args.pattern,
+            args.include.as_deref(),
+        )
     }
 
     fn bash_tool(&self, args: BashArgs) -> Result<String> {
@@ -488,7 +495,7 @@ where
         .with_context(|| format!("failed to decode arguments for tool '{}'", tool_name))
 }
 
-fn canonical_tool_name(tool_name: &str) -> Option<&'static str> {
+pub(crate) fn canonical_tool_name(tool_name: &str) -> Option<&'static str> {
     match tool_name {
         "read" | "read_file" => Some("read"),
         "write" | "write_file" => Some("write"),
@@ -508,12 +515,23 @@ fn validate_todos(todos: &[TodoItem]) -> Result<()> {
             bail!("todo item {} has empty content", index + 1);
         }
 
-        if !matches!(todo.status.as_str(), "pending" | "in_progress" | "completed" | "cancelled") {
-            bail!("todo item {} has invalid status '{}'", index + 1, todo.status);
+        if !matches!(
+            todo.status.as_str(),
+            "pending" | "in_progress" | "completed" | "cancelled"
+        ) {
+            bail!(
+                "todo item {} has invalid status '{}'",
+                index + 1,
+                todo.status
+            );
         }
 
         if !matches!(todo.priority.as_str(), "high" | "medium" | "low") {
-            bail!("todo item {} has invalid priority '{}'", index + 1, todo.priority);
+            bail!(
+                "todo item {} has invalid priority '{}'",
+                index + 1,
+                todo.priority
+            );
         }
     }
 
@@ -553,7 +571,9 @@ pub fn list_dir(workspace_root: &Path, relative_path: impl AsRef<Path>) -> Resul
     }
 
     let mut entries = Vec::new();
-    for entry in fs::read_dir(&path).with_context(|| format!("failed to read {}", path.display()))? {
+    for entry in
+        fs::read_dir(&path).with_context(|| format!("failed to read {}", path.display()))?
+    {
         let entry = entry.with_context(|| format!("failed to read entry in {}", path.display()))?;
         let file_type = entry
             .file_type()
@@ -587,14 +607,18 @@ fn edit_file(
     }
 
     let path = resolve_workspace_path(workspace_root, relative_path.as_ref())?;
-    let contents = fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let contents =
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
 
     let matches = contents.match_indices(old_text).count();
     if matches == 0 {
         bail!("text not found in {}", path.display());
     }
     if !replace_all && matches > 1 {
-        bail!("text occurs multiple times in {}; set replace_all to true", path.display());
+        bail!(
+            "text occurs multiple times in {}; set replace_all to true",
+            path.display()
+        );
     }
 
     let updated = if replace_all {
@@ -604,10 +628,17 @@ fn edit_file(
     };
 
     fs::write(&path, updated).with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(format!("Edited {}", display_workspace_relative(workspace_root, &path)))
+    Ok(format!(
+        "Edited {}",
+        display_workspace_relative(workspace_root, &path)
+    ))
 }
 
-fn glob_paths(workspace_root: &Path, relative_path: impl AsRef<Path>, pattern: &str) -> Result<String> {
+fn glob_paths(
+    workspace_root: &Path,
+    relative_path: impl AsRef<Path>,
+    pattern: &str,
+) -> Result<String> {
     let search_root = resolve_workspace_path(workspace_root, relative_path.as_ref())?;
     if !search_root.exists() {
         bail!("{} does not exist", search_root.display());
@@ -644,7 +675,11 @@ fn glob_paths(workspace_root: &Path, relative_path: impl AsRef<Path>, pattern: &
                 }
             };
 
-            if !entry.file_type().map(|file_type| file_type.is_file()).unwrap_or(false) {
+            if !entry
+                .file_type()
+                .map(|file_type| file_type.is_file())
+                .unwrap_or(false)
+            {
                 continue;
             }
 
@@ -757,7 +792,9 @@ fn grep_paths(
                 .follow_links(false)
                 .build()
                 .filter_map(|result| match result {
-                    Ok(entry) => entry.file_type().map(|file_type| (entry, file_type.is_file())),
+                    Ok(entry) => entry
+                        .file_type()
+                        .map(|file_type| (entry, file_type.is_file())),
                     Err(_) => None,
                 })
                 .filter_map(|(entry, is_file)| is_file.then(|| entry.into_path())),

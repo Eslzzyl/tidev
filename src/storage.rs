@@ -194,11 +194,7 @@ impl SessionStore {
         Ok(())
     }
 
-    pub fn load_tool_permission(
-        &self,
-        session_id: Uuid,
-        tool_name: &str,
-    ) -> Result<Option<bool>> {
+    pub fn load_tool_permission(&self, session_id: Uuid, tool_name: &str) -> Result<Option<bool>> {
         let mut statement = self.connection.prepare(
             "SELECT allowed FROM tool_permissions WHERE session_id = ?1 AND tool_name = ?2 LIMIT 1",
         )?;

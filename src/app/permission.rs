@@ -121,7 +121,10 @@ impl App {
                         .execute_call(&self.store, self.conversation.session_id, &tool_call)
                         .unwrap_or_else(|error| format!("Tool failed: {error}"))
                 } else {
-                    format!("Tool '{}' was denied by remembered permission", tool_call.name)
+                    format!(
+                        "Tool '{}' was denied by remembered permission",
+                        tool_call.name
+                    )
                 };
                 self.record_tool_result(tool_call, output)?;
                 self.advance_pending_tool_execution();
@@ -191,10 +194,7 @@ impl App {
                 .execute_call(&self.store, self.conversation.session_id, &dialog.tool_call)
                 .unwrap_or_else(|error| format!("Tool failed: {error}"))
         } else if remember {
-            format!(
-                "Tool '{}' was denied and remembered",
-                dialog.tool_call.name
-            )
+            format!("Tool '{}' was denied and remembered", dialog.tool_call.name)
         } else {
             format!("Tool '{}' was denied", dialog.tool_call.name)
         };

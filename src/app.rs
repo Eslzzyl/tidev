@@ -3,12 +3,12 @@ use crossterm::{
     cursor::Show,
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
-        KeyModifiers,
+        KeyModifiers, MouseEvent, MouseEventKind,
     },
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{Terminal, backend::CrosstermBackend};
 use ratatui::text::Line;
+use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{env, io, path::PathBuf, time::Duration};
 use tokio::{
     runtime::Runtime,
@@ -71,6 +71,10 @@ struct App {
     composer: Composer,
     pending_request: bool,
     last_notice: Option<String>,
+    message_scroll_offset: usize,
+    message_follow_tail: bool,
+    message_viewport_lines: usize,
+    message_total_lines: usize,
     backend_tx: UnboundedSender<BackendEvent>,
     backend_rx: UnboundedReceiver<BackendEvent>,
     streaming_markdown: Option<MarkdownStreamCollector>,
@@ -193,6 +197,10 @@ impl App {
             composer,
             pending_request: false,
             last_notice,
+            message_scroll_offset: 0,
+            message_follow_tail: true,
+            message_viewport_lines: 0,
+            message_total_lines: 0,
             backend_tx,
             backend_rx,
             streaming_markdown: None,
@@ -235,11 +243,91 @@ impl App {
             Event::Key(key) if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
                 self.handle_key_event(key, runtime)?;
             }
+            Event::Mouse(mouse) => {
+                self.handle_mouse_event(mouse);
+            }
             Event::Resize(_, _) => {}
             _ => {}
         }
 
         Ok(())
+    }
+
+    fn can_scroll_conversation(&self) -> bool {
+        self.screen == Screen::Chat
+            && self.permission_dialog.is_none()
+            && self.connect_dialog.is_none()
+            && self.theme_panel.is_none()
+            && self.model_panel.is_none()
+            && !self.command_palette.visible
+    }
+
+    fn scroll_messages_to_bottom(&mut self) {
+        self.message_scroll_offset = 0;
+        self.message_follow_tail = true;
+    }
+
+    fn message_scroll_max(&self) -> usize {
+        self.message_total_lines
+            .saturating_sub(self.message_viewport_lines)
+    }
+
+    fn message_scroll_page(&self) -> usize {
+        self.message_viewport_lines.saturating_sub(1).max(1)
+    }
+
+    fn scroll_messages_up(&mut self, lines: usize) {
+        let max_scroll = self.message_scroll_max();
+        let current = if self.message_follow_tail {
+            max_scroll
+        } else {
+            self.message_scroll_offset.min(max_scroll)
+        };
+
+        self.message_scroll_offset = current.saturating_sub(lines);
+        self.message_follow_tail = self.message_scroll_offset >= max_scroll;
+    }
+
+    fn scroll_messages_down(&mut self, lines: usize) {
+        let max_scroll = self.message_scroll_max();
+        let current = if self.message_follow_tail {
+            max_scroll
+        } else {
+            self.message_scroll_offset.min(max_scroll)
+        };
+
+        self.message_scroll_offset = current.saturating_add(lines).min(max_scroll);
+        self.message_follow_tail = self.message_scroll_offset >= max_scroll;
+    }
+
+    fn handle_message_scroll_key(&mut self, key: KeyEvent) -> bool {
+        if !self.can_scroll_conversation() {
+            return false;
+        }
+
+        match key.code {
+            KeyCode::PageUp => {
+                self.scroll_messages_up(self.message_scroll_page());
+                true
+            }
+            KeyCode::PageDown => {
+                self.scroll_messages_down(self.message_scroll_page());
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_mouse_event(&mut self, mouse: MouseEvent) {
+        if !self.can_scroll_conversation() {
+            return;
+        }
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => self.scroll_messages_up(3),
+            MouseEventKind::ScrollDown => self.scroll_messages_down(3),
+            _ => {}
+        }
     }
 
     fn handle_theme_panel_key(&mut self, key: KeyEvent) -> Result<()> {
@@ -395,6 +483,10 @@ impl App {
             }
         }
 
+        if !self.command_palette.visible && self.handle_message_scroll_key(key) {
+            return Ok(());
+        }
+
         if let Some(submission) = self.composer.handle_key_with_history(key, true) {
             self.handle_submission(submission, runtime)?;
         }
@@ -454,6 +546,7 @@ impl App {
             CommandAction::Help => {
                 let help = self.help_message();
                 self.push_system_message(help)?;
+                self.scroll_messages_to_bottom();
                 self.last_notice = Some("Help shown".to_string());
             }
             CommandAction::Connect => {
@@ -587,6 +680,7 @@ impl App {
         self.composer.clear();
         self.composer
             .set_placeholder("Ask TiDev about your code, task, or question...");
+        self.scroll_messages_to_bottom();
         self.last_notice = Some("Started a fresh session".to_string());
 
         Ok(())
@@ -617,6 +711,8 @@ impl App {
             self.store
                 .update_session_title(self.conversation.session_id, &self.conversation.title)?;
         }
+
+        self.scroll_messages_to_bottom();
 
         let compacted = {
             let llm = self.llm.clone();
@@ -712,7 +808,8 @@ impl App {
             BackendEvent::Delta(delta) => {
                 if let Some(collector) = self.streaming_markdown.as_mut() {
                     collector.push_delta(&delta);
-                    self.streaming_preview_lines.extend(collector.commit_complete_lines());
+                    self.streaming_preview_lines
+                        .extend(collector.commit_complete_lines());
                 }
                 if let Some(message) = self.conversation.messages.last_mut() {
                     if message.streaming && matches!(message.role, MessageRole::Assistant) {

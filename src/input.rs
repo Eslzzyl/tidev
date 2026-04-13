@@ -90,6 +90,9 @@ impl Composer {
                 'e' => {
                     self.cursor = self.text.len();
                 }
+                'j' => {
+                    self.insert_char('\n');
+                }
                 'u' => {
                     self.text.clear();
                     self.cursor = 0;
@@ -154,11 +157,7 @@ impl Composer {
     }
 
     pub fn preferred_height(&self, max_lines: u16) -> u16 {
-        let visible_lines = if self.text.is_empty() {
-            1
-        } else {
-            self.text.lines().count().max(1) as u16
-        };
+        let visible_lines = display_line_count(&self.text) as u16;
 
         visible_lines.min(max_lines).saturating_add(2)
     }
@@ -293,5 +292,32 @@ impl Composer {
             .find('\n')
             .map(|position| index + position)
             .unwrap_or(self.text.len())
+    }
+}
+
+fn display_line_count(text: &str) -> usize {
+    text.split('\n').count().max(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ctrl_j_inserts_newline() {
+        let mut composer = Composer::new("placeholder");
+
+        let result = composer.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL));
+
+        assert!(result.is_none());
+        assert_eq!(composer.text(), "\n");
+    }
+
+    #[test]
+    fn preferred_height_counts_trailing_newline() {
+        let mut composer = Composer::new("placeholder");
+        composer.set_text("hello\n".to_string());
+
+        assert_eq!(composer.preferred_height(10), 4);
     }
 }

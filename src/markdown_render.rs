@@ -1,10 +1,10 @@
 use crate::render::highlight::highlight_code_to_lines;
 use crate::render::line_utils::push_owned_lines;
+use crate::wrapping::RtOptions;
 use crate::wrapping::adaptive_wrap_line;
 use crate::wrapping::word_wrap_line;
-use crate::wrapping::RtOptions;
-use pulldown_cmark::CodeBlockKind;
 use pulldown_cmark::Alignment;
+use pulldown_cmark::CodeBlockKind;
 use pulldown_cmark::CowStr;
 use pulldown_cmark::Event;
 use pulldown_cmark::HeadingLevel;
@@ -17,10 +17,10 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::text::Text;
-use unicode_width::UnicodeWidthStr;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::LazyLock;
+use unicode_width::UnicodeWidthStr;
 use url::Url;
 
 struct MarkdownStyles {
@@ -158,7 +158,13 @@ impl TableState {
         let column_count = header_row
             .cells
             .len()
-            .max(body_rows.iter().map(|row| row.cells.len()).max().unwrap_or(0))
+            .max(
+                body_rows
+                    .iter()
+                    .map(|row| row.cells.len())
+                    .max()
+                    .unwrap_or(0),
+            )
             .max(self.alignments.len());
 
         if column_count == 0 {
@@ -176,10 +182,13 @@ impl TableState {
                     return self.render_stacked_rows(&header_row, &body_rows, available_width);
                 }
 
-                let content_budget = available_width.saturating_sub(table_border_overhead(column_count));
+                let content_budget =
+                    available_width.saturating_sub(table_border_overhead(column_count));
                 match shrink_table_widths(natural_widths, content_budget, min_cell_width) {
                     Some(widths) => widths,
-                    None => return self.render_stacked_rows(&header_row, &body_rows, available_width),
+                    None => {
+                        return self.render_stacked_rows(&header_row, &body_rows, available_width);
+                    }
                 }
             }
             None => natural_widths,
@@ -281,7 +290,13 @@ impl TableState {
         out
     }
 
-    fn render_border_line(&self, left: char, middle: char, right: char, widths: &[usize]) -> Line<'static> {
+    fn render_border_line(
+        &self,
+        left: char,
+        middle: char,
+        right: char,
+        widths: &[usize],
+    ) -> Line<'static> {
         let mut spans = self.prefix.clone();
         spans.push(Span::raw(left.to_string()));
 
@@ -419,10 +434,7 @@ pub fn render_markdown_text(input: &str) -> Text<'static> {
     render_markdown_text_with_width(input, None)
 }
 
-pub(crate) fn render_markdown_text_with_width(
-    input: &str,
-    width: Option<usize>,
-) -> Text<'static> {
+pub(crate) fn render_markdown_text_with_width(input: &str, width: Option<usize>) -> Text<'static> {
     let cwd = std::env::current_dir().ok();
     render_markdown_text_with_width_and_cwd(input, width, cwd.as_deref())
 }
@@ -655,11 +667,8 @@ where
             self.push_blank_line();
             self.needs_newline = false;
         }
-        self.indent_stack.push(IndentContext::new(
-            vec![Span::from("> ")],
-            None,
-            false,
-        ));
+        self.indent_stack
+            .push(IndentContext::new(vec![Span::from("> ")], None, false));
     }
 
     fn end_blockquote(&mut self) {
@@ -914,7 +923,8 @@ where
             let indent_len = if is_ordered { width + 2 } else { width + 1 };
             vec![Span::from(" ".repeat(indent_len))]
         };
-        self.indent_stack.push(IndentContext::new(indent_prefix, marker, true));
+        self.indent_stack
+            .push(IndentContext::new(indent_prefix, marker, true));
         self.needs_newline = false;
     }
 
@@ -1034,9 +1044,7 @@ where
             let style = self.current_line_style;
             let line = line.style(style);
 
-            let should_wrap = self
-                .wrap_width
-                .is_some_and(|width| width > 0)
+            let should_wrap = self.wrap_width.is_some_and(|width| width > 0)
                 && !self.current_line_in_code_block
                 && !line.spans.is_empty();
 
@@ -1117,7 +1125,10 @@ where
         } else {
             None
         };
-        let last_list_index = self.indent_stack.iter().rposition(|context| context.is_list);
+        let last_list_index = self
+            .indent_stack
+            .iter()
+            .rposition(|context| context.is_list);
 
         for (index, context) in self.indent_stack.iter().enumerate() {
             if pending_marker_line {
@@ -1127,7 +1138,8 @@ where
                     prefix.extend(marker.iter().cloned());
                     continue;
                 }
-                if context.is_list && last_marker_index.is_some_and(|marker_index| marker_index > index)
+                if context.is_list
+                    && last_marker_index.is_some_and(|marker_index| marker_index > index)
                 {
                     continue;
                 }
@@ -1148,11 +1160,7 @@ fn display_line_width(line: &Line<'_>) -> usize {
         .sum()
 }
 
-fn pad_cell_spans(
-    cell: Line<'static>,
-    width: usize,
-    alignment: Alignment,
-) -> Vec<Span<'static>> {
+fn pad_cell_spans(cell: Line<'static>, width: usize, alignment: Alignment) -> Vec<Span<'static>> {
     let cell_width = display_line_width(&cell);
     let padding = width.saturating_sub(cell_width);
     let (left_pad, right_pad) = match alignment {
@@ -1206,7 +1214,9 @@ fn parse_local_link_target(dest_url: &str) -> Option<(String, Option<String>)> {
     if dest_url.starts_with("file://") {
         let url = Url::parse(dest_url).ok()?;
         let path_text = file_url_to_local_path_text(&url)?;
-        let location_suffix = url.fragment().and_then(normalize_hash_location_suffix_fragment);
+        let location_suffix = url
+            .fragment()
+            .and_then(normalize_hash_location_suffix_fragment);
         return Some((path_text, location_suffix));
     }
 
@@ -1228,12 +1238,9 @@ fn parse_local_link_target(dest_url: &str) -> Option<(String, Option<String>)> {
         location_suffix = Some(suffix);
     }
 
-    let decoded_path_text = urlencoding::decode(path_text)
-        .unwrap_or_else(|_| std::borrow::Cow::Borrowed(path_text));
-    Some((
-        expand_local_link_path(&decoded_path_text),
-        location_suffix,
-    ))
+    let decoded_path_text =
+        urlencoding::decode(path_text).unwrap_or_else(|_| std::borrow::Cow::Borrowed(path_text));
+    Some((expand_local_link_path(&decoded_path_text), location_suffix))
 }
 
 fn normalize_hash_location_suffix_fragment(fragment: &str) -> Option<String> {

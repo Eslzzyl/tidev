@@ -39,7 +39,10 @@ impl<'a> RtOptions<'a> {
     }
 
     pub fn line_ending(self, line_ending: textwrap::LineEnding) -> Self {
-        Self { line_ending, ..self }
+        Self {
+            line_ending,
+            ..self
+        }
     }
 
     pub fn width(self, width: usize) -> Self {
@@ -61,7 +64,10 @@ impl<'a> RtOptions<'a> {
     }
 
     pub fn break_words(self, break_words: bool) -> Self {
-        Self { break_words, ..self }
+        Self {
+            break_words,
+            ..self
+        }
     }
 
     pub fn word_separator(self, word_separator: textwrap::WordSeparator) -> Self {
@@ -225,10 +231,7 @@ where
 }
 
 #[allow(dead_code)]
-pub(crate) fn word_wrap_lines_borrowed<'a, I, O>(
-    lines: I,
-    width_or_options: O,
-) -> Vec<Line<'a>>
+pub(crate) fn word_wrap_lines_borrowed<'a, I, O>(lines: I, width_or_options: O) -> Vec<Line<'a>>
 where
     I: IntoIterator<Item = &'a Line<'a>>,
     O: Into<RtOptions<'a>>,
@@ -279,7 +282,21 @@ fn trim_url_token(raw_token: &str) -> &str {
     raw_token.trim_matches(|ch: char| {
         matches!(
             ch,
-            '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | ',' | '.' | ';' | ':' | '!' | '?' | '\'' | '"'
+            '(' | ')'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '<'
+                | '>'
+                | ','
+                | '.'
+                | ';'
+                | ':'
+                | '!'
+                | '?'
+                | '\''
+                | '"'
         )
     })
 }
@@ -291,7 +308,10 @@ fn is_absolute_url_like(token: &str) -> bool {
 
     if let Ok(url) = url::Url::parse(token) {
         let scheme = url.scheme().to_ascii_lowercase();
-        if matches!(scheme.as_str(), "http" | "https" | "ftp" | "ftps" | "ws" | "wss") {
+        if matches!(
+            scheme.as_str(),
+            "http" | "https" | "ftp" | "ftps" | "ws" | "wss"
+        ) {
             return url.host_str().is_some();
         }
         return true;
@@ -377,7 +397,9 @@ fn is_ipv4(host: &str) -> bool {
         return false;
     }
 
-    parts.iter().all(|part| !part.is_empty() && part.parse::<u8>().is_ok())
+    parts
+        .iter()
+        .all(|part| !part.is_empty() && part.parse::<u8>().is_ok())
 }
 
 fn is_domain_name(host: &str) -> bool {
@@ -674,6 +696,9 @@ mod tests {
         let line = Line::from("https://example.com/long-url-with-dashes-wider-than-terminal");
         let out = adaptive_wrap_line(&line, RtOptions::new(20));
         assert_eq!(out.len(), 1);
-        assert_eq!(concat_line(&out[0]), "https://example.com/long-url-with-dashes-wider-than-terminal");
+        assert_eq!(
+            concat_line(&out[0]),
+            "https://example.com/long-url-with-dashes-wider-than-terminal"
+        );
     }
 }

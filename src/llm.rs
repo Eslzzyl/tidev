@@ -47,20 +47,12 @@ impl LlmClient {
         messages: Vec<Message>,
     ) -> Result<String> {
         match model.api_type {
-            ApiType::Anthropic => {
-                self.complete_anthropic(model, messages).await
-            }
-            ApiType::OpenAi => {
-                self.complete_openai(model, messages).await
-            }
+            ApiType::Anthropic => self.complete_anthropic(model, messages).await,
+            ApiType::OpenAi => self.complete_openai(model, messages).await,
         }
     }
 
-    async fn complete_openai(
-        &self,
-        model: ActiveModel,
-        messages: Vec<Message>,
-    ) -> Result<String> {
+    async fn complete_openai(&self, model: ActiveModel, messages: Vec<Message>) -> Result<String> {
         let request = self.build_openai_request(&model, messages, false, &[])?;
         let response =
             self.http
@@ -88,9 +80,10 @@ impl LlmClient {
         model: ActiveModel,
         messages: Vec<Message>,
     ) -> Result<String> {
-        let api_key = model.api_key.clone().with_context(|| {
-            format!("missing API key for provider '{}'", model.provider_id)
-        })?;
+        let api_key = model
+            .api_key
+            .clone()
+            .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
         let request = self.build_anthropic_request(&model, messages, &[])?;
 
         let response = self
@@ -129,12 +122,8 @@ impl LlmClient {
         tx: UnboundedSender<BackendEvent>,
     ) -> Result<()> {
         match model.api_type {
-            ApiType::Anthropic => {
-                self.stream_anthropic(model, messages, tools, tx).await
-            }
-            ApiType::OpenAi => {
-                self.stream_openai(model, messages, tools, tx).await
-            }
+            ApiType::Anthropic => self.stream_anthropic(model, messages, tools, tx).await,
+            ApiType::OpenAi => self.stream_openai(model, messages, tools, tx).await,
         }
     }
 
@@ -653,9 +642,10 @@ impl LlmClient {
         tools: Vec<ToolDefinition>,
         tx: UnboundedSender<BackendEvent>,
     ) -> Result<()> {
-        let api_key = model.api_key.clone().with_context(|| {
-            format!("missing API key for provider '{}'", model.provider_id)
-        })?;
+        let api_key = model
+            .api_key
+            .clone()
+            .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
         let request = self.build_anthropic_request(&model, messages, &tools)?;
 
         let response = self
@@ -702,38 +692,34 @@ impl LlmClient {
                     };
 
                     match event {
-                        AnthropicStreamEvent::ContentBlockDelta { delta, index } => {
-                            match delta {
-                                AnthropicDelta::TextDelta { text } => {
-                                    let (visible, reasoning) = think_parser.push(&text);
-                                    if !visible.is_empty() {
-                                        assistant_text.push_str(&visible);
-                                        let _ = tx.send(BackendEvent::Delta(visible));
-                                    }
-                                    if !reasoning.is_empty() {
-                                        reasoning_text.push_str(&reasoning);
-                                        let _ = tx.send(BackendEvent::ReasoningDelta(reasoning));
-                                    }
+                        AnthropicStreamEvent::ContentBlockDelta { delta, index } => match delta {
+                            AnthropicDelta::TextDelta { text } => {
+                                let (visible, reasoning) = think_parser.push(&text);
+                                if !visible.is_empty() {
+                                    assistant_text.push_str(&visible);
+                                    let _ = tx.send(BackendEvent::Delta(visible));
                                 }
-                                AnthropicDelta::InputJsonDelta { partial_json } => {
-                                    let entry = tool_calls.entry(index).or_default();
-                                    entry.arguments.push_str(&partial_json);
+                                if !reasoning.is_empty() {
+                                    reasoning_text.push_str(&reasoning);
+                                    let _ = tx.send(BackendEvent::ReasoningDelta(reasoning));
                                 }
                             }
-                        }
+                            AnthropicDelta::InputJsonDelta { partial_json } => {
+                                let entry = tool_calls.entry(index).or_default();
+                                entry.arguments.push_str(&partial_json);
+                            }
+                        },
                         AnthropicStreamEvent::ContentBlockStart {
                             index,
                             content_block,
-                        } => {
-                            match content_block {
-                                AnthropicContentBlockStart::Text { .. } => {}
-                                AnthropicContentBlockStart::ToolUse { id, name } => {
-                                    let entry = tool_calls.entry(index).or_default();
-                                    entry.id = id;
-                                    entry.name = name;
-                                }
+                        } => match content_block {
+                            AnthropicContentBlockStart::Text { .. } => {}
+                            AnthropicContentBlockStart::ToolUse { id, name } => {
+                                let entry = tool_calls.entry(index).or_default();
+                                entry.id = id;
+                                entry.name = name;
                             }
-                        }
+                        },
                         AnthropicStreamEvent::MessageStop => {
                             let turn = finalize_turn(
                                 &mut assistant_text,
@@ -797,19 +783,24 @@ impl LlmClient {
                 MessageRole::User => {
                     anthropic_messages.push(AnthropicMessage {
                         role: "user".to_string(),
-                        content: vec![AnthropicContentBlock::Text { text: message.content }],
+                        content: vec![AnthropicContentBlock::Text {
+                            text: message.content,
+                        }],
                     });
                 }
                 MessageRole::Assistant => {
                     let mut content = Vec::new();
                     if !message.content.is_empty() {
-                        content.push(AnthropicContentBlock::Text { text: message.content });
+                        content.push(AnthropicContentBlock::Text {
+                            text: message.content,
+                        });
                     }
                     for tool_call in &message.tool_calls {
                         content.push(AnthropicContentBlock::ToolUse {
                             id: tool_call.id.clone(),
                             name: tool_call.name.clone(),
-                            input: serde_json::from_str(&tool_call.arguments).unwrap_or(serde_json::Value::Object(Default::default())),
+                            input: serde_json::from_str(&tool_call.arguments)
+                                .unwrap_or(serde_json::Value::Object(Default::default())),
                         });
                     }
                     anthropic_messages.push(AnthropicMessage {
@@ -848,7 +839,11 @@ impl LlmClient {
         Ok(AnthropicRequest {
             model: model.model_id.clone(),
             max_tokens: model.max_output_tokens as u32,
-            system: if system_prompt.is_empty() { None } else { Some(system_prompt) },
+            system: if system_prompt.is_empty() {
+                None
+            } else {
+                Some(system_prompt)
+            },
             messages: anthropic_messages,
             stream: true,
             temperature: model.temperature,
@@ -880,7 +875,9 @@ struct AnthropicMessage {
 #[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
 enum AnthropicContentBlock {
-    Text { text: String },
+    Text {
+        text: String,
+    },
     ToolUse {
         id: String,
         name: String,
@@ -908,19 +905,38 @@ struct AnthropicResponse {
 #[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
 enum AnthropicContentBlockResponse {
-    Text { text: String },
-    ToolUse { id: String, name: String, input: serde_json::Value },
+    Text {
+        text: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
 enum AnthropicStreamEvent {
-    MessageStart { message: AnthropicMessageInfo },
-    ContentBlockStart { index: usize, content_block: AnthropicContentBlockStart },
-    ContentBlockDelta { index: usize, delta: AnthropicDelta },
-    ContentBlockStop { index: usize },
-    MessageDelta { delta: AnthropicMessageDelta, usage: Option<AnthropicUsage> },
+    MessageStart {
+        message: AnthropicMessageInfo,
+    },
+    ContentBlockStart {
+        index: usize,
+        content_block: AnthropicContentBlockStart,
+    },
+    ContentBlockDelta {
+        index: usize,
+        delta: AnthropicDelta,
+    },
+    ContentBlockStop {
+        index: usize,
+    },
+    MessageDelta {
+        delta: AnthropicMessageDelta,
+        usage: Option<AnthropicUsage>,
+    },
     MessageStop,
 }
 

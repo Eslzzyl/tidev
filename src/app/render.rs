@@ -2,13 +2,14 @@ use crate::{
     app::model_panel::{ModelPanelItem, ModelPanelState},
     app::permission::PermissionDialogState,
     app::theme_panel::ThemePanelState,
-    markdown::append_markdown,
     config::ProviderSource,
+    markdown::append_markdown,
     prompts::SessionMode,
     provider_setup::{ConnectDialog, EditProviderStep, NewProviderStep},
-    session::MessageRole,
+    session::{Message, MessageRole, ToolCall},
     theme::ThemePalette,
-    wrapping::{adaptive_wrap_lines, RtOptions},
+    tooling::canonical_tool_name,
+    wrapping::{RtOptions, adaptive_wrap_lines},
 };
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Position, Rect},
@@ -16,6 +17,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
+use serde_json::Value;
 use uuid::Uuid;
 
 use super::{App, Screen, connect::ProviderPickerItem};
@@ -629,7 +631,7 @@ impl App {
         }
     }
 
-    pub(crate) fn render(&self, frame: &mut Frame<'_>) {
+    pub(crate) fn render(&mut self, frame: &mut Frame<'_>) {
         match self.screen {
             Screen::Welcome => self.render_welcome(frame),
             Screen::Chat => self.render_chat(frame),
@@ -753,7 +755,7 @@ impl App {
         );
 
         let hint = Paragraph::new(
-            "Enter to send · Shift+Enter for newline · Ctrl+P/N history · Ctrl+C quit",
+            "Enter to send · Shift+Enter/Ctrl+J newline · PageUp/PageDown scroll · Ctrl+P/N history · Ctrl+C quit",
         )
         .alignment(Alignment::Center)
         .style(Style::default().fg(palette.accent_soft));
@@ -762,7 +764,7 @@ impl App {
         self.render_command_palette(frame, sections[3]);
     }
 
-    fn render_chat(&self, frame: &mut Frame<'_>) {
+    fn render_chat(&mut self, frame: &mut Frame<'_>) {
         let area = frame.area();
         let palette = self.palette();
         frame.render_widget(
@@ -812,20 +814,36 @@ impl App {
         self.render_command_palette(frame, layout[2]);
     }
 
-    fn render_messages(&self, frame: &mut Frame<'_>, area: Rect) {
+    fn render_messages(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let palette = self.palette();
+        let inner_height = area.height.saturating_sub(2) as usize;
+        let content_width = area.width.saturating_sub(2).max(1) as usize;
+        let (text, total_lines) = self.messages_text(Some(content_width));
+
+        self.message_viewport_lines = inner_height;
+        self.message_total_lines = total_lines;
+
+        let max_scroll = total_lines.saturating_sub(inner_height);
+        let scroll = if self.message_follow_tail {
+            max_scroll
+        } else {
+            self.message_scroll_offset.min(max_scroll)
+        } as u16;
+
+        let title_suffix = if !self.message_follow_tail && max_scroll > 0 {
+            " · history"
+        } else {
+            ""
+        };
+
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(palette.border_idle()))
             .title(format!(
-                "Conversation · {}",
-                shorten(&self.conversation.title, 32)
+                "Conversation · {}{}",
+                shorten(&self.conversation.title, 32),
+                title_suffix
             ));
-
-        let inner_height = area.height.saturating_sub(2) as usize;
-        let content_width = area.width.saturating_sub(2).max(1) as usize;
-        let (text, total_lines) = self.messages_text(Some(content_width));
-        let scroll = total_lines.saturating_sub(inner_height) as u16;
 
         let paragraph = Paragraph::new(text)
             .block(block)
@@ -1027,7 +1045,7 @@ impl App {
             vertical: 1,
         });
         let visible_lines = inner.height.max(1) as usize;
-        let total_lines = self.composer.text().lines().count().max(1);
+        let total_lines = self.composer.text().split('\n').count().max(1);
         let scroll = total_lines.saturating_sub(visible_lines) as u16;
 
         let paragraph = Paragraph::new(content)
@@ -1087,7 +1105,7 @@ impl App {
                 MessageRole::Tool => message
                     .tool_name
                     .as_deref()
-                    .map(|tool_name| format!("tool · {tool_name}"))
+                    .map(|tool_name| format!("tool · {}", display_tool_name(tool_name)))
                     .unwrap_or_else(|| message.role.label().to_string()),
                 _ if message.streaming => format!("{} · streaming", message.role.label()),
                 _ => message.role.label().to_string(),
@@ -1136,29 +1154,12 @@ impl App {
                 )]));
 
                 for tool_call in &message.tool_calls {
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            format!("  {}", tool_call.name),
-                            Style::default().fg(palette.accent_soft),
-                        ),
-                        Span::raw("  "),
-                        Span::styled(
-                            shorten(&tool_call.id, 24),
-                            Style::default().fg(palette.muted),
-                        ),
-                    ]));
-
-                    let arguments = pretty_tool_arguments(&tool_call.arguments);
-                    for line in arguments.lines() {
-                        lines.push(Line::from(vec![Span::styled(
-                            format!("    {line}"),
-                            Style::default().fg(palette.text),
-                        )]));
-                    }
+                    lines.extend(self.render_tool_call_lines(tool_call));
                 }
             }
 
-            let is_streaming_assistant = message.streaming && matches!(message.role, MessageRole::Assistant);
+            let is_streaming_assistant =
+                message.streaming && matches!(message.role, MessageRole::Assistant);
 
             if is_streaming_assistant {
                 if !self.streaming_preview_lines.is_empty() {
@@ -1189,6 +1190,8 @@ impl App {
                     "▌",
                     Style::default().fg(palette.muted),
                 )]));
+            } else if matches!(message.role, MessageRole::Tool) {
+                lines.extend(self.render_tool_result_lines(message));
             } else if message.content.is_empty() {
                 if message.reasoning.trim().is_empty() && message.tool_calls.is_empty() {
                     lines.push(Line::from(vec![Span::styled(
@@ -1212,6 +1215,104 @@ impl App {
         (Text::from(lines), total_lines)
     }
 
+    fn find_tool_call(&self, tool_call_id: Option<&str>) -> Option<&ToolCall> {
+        let tool_call_id = tool_call_id?;
+
+        self.conversation.messages.iter().rev().find_map(|message| {
+            message
+                .tool_calls
+                .iter()
+                .find(|tool_call| tool_call.id == tool_call_id)
+        })
+    }
+
+    fn render_tool_call_lines(&self, tool_call: &ToolCall) -> Vec<Line<'static>> {
+        let palette = self.palette();
+        let mut lines = vec![Line::from(vec![
+            Span::styled(
+                format!("  {}", display_tool_name(&tool_call.name)),
+                Style::default()
+                    .fg(palette.accent_soft)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                shorten(&tool_call.id, 24),
+                Style::default().fg(palette.muted),
+            ),
+        ])];
+
+        let fields = summarize_tool_arguments(&tool_call.name, &tool_call.arguments);
+        lines.extend(render_tool_fields(&fields, &palette, 4));
+        lines
+    }
+
+    fn render_tool_result_lines(&self, message: &Message) -> Vec<Line<'static>> {
+        let palette = self.palette();
+        let tool_name = message.tool_name.as_deref().unwrap_or(message.role.label());
+        let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
+        let mut lines = Vec::new();
+        let output = message.content.trim_end();
+        let output_is_error = tool_output_is_error(output);
+
+        let fields = self
+            .find_tool_call(message.tool_call_id.as_deref())
+            .map(|tool_call| summarize_tool_arguments(&tool_call.name, &tool_call.arguments))
+            .unwrap_or_default();
+
+        if !fields.is_empty() {
+            let should_show_input_heading =
+                !matches!(canonical_name, "read" | "write" | "edit") || output_is_error;
+            if should_show_input_heading {
+                lines.push(Line::from(vec![Span::styled(
+                    "Input",
+                    Style::default()
+                        .fg(palette.accent_soft)
+                        .add_modifier(Modifier::BOLD),
+                )]));
+            }
+            lines.extend(render_tool_fields(&fields, &palette, 2));
+        }
+
+        let hide_output = matches!(canonical_name, "read" | "write" | "edit") && !output_is_error;
+        let should_show_output =
+            !output.is_empty() && (!hide_output || fields.is_empty() || output_is_error);
+
+        if should_show_output {
+            lines.push(Line::from(vec![Span::styled(
+                "Output",
+                Style::default()
+                    .fg(if output_is_error {
+                        palette.error
+                    } else {
+                        palette.accent_soft
+                    })
+                    .add_modifier(Modifier::BOLD),
+            )]));
+            let output_style = if output_is_error {
+                Style::default().fg(palette.error)
+            } else {
+                Style::default().fg(palette.text)
+            };
+            lines.extend(render_tool_output_preview(
+                output,
+                &palette,
+                output_style,
+                6,
+                2,
+            ));
+        }
+
+        if lines.is_empty() {
+            lines.push(Line::from(vec![Span::styled(
+                "(empty)",
+                Style::default().fg(palette.muted),
+            )]));
+        }
+
+        lines
+    }
+
     pub(crate) fn help_message(&self) -> String {
         let mut lines = vec![
             "Commands:",
@@ -1225,7 +1326,8 @@ impl App {
             "",
             "Keys:",
             "Enter - send prompt or execute the highlighted slash command",
-            "Shift+Enter - insert newline",
+            "Shift+Enter / Ctrl+J - insert newline",
+            "PageUp / PageDown / mouse wheel - scroll conversation",
             "Tab - switch mode (when no command is being entered)",
             "Up/Down - move through command suggestions",
             "Ctrl+P / Ctrl+N - navigate input history",
@@ -1455,16 +1557,21 @@ impl App {
         frame.render_widget(
             Paragraph::new(dialog.title())
                 .alignment(Alignment::Center)
-                .style(Style::default().bg(palette.panel_alt).fg(palette.text).add_modifier(
-                    Modifier::BOLD,
-                )),
+                .style(
+                    Style::default()
+                        .bg(palette.panel_alt)
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                ),
             sections[0],
         );
 
         frame.render_widget(
-            Paragraph::new("This tool can change state. Review the arguments and choose whether to allow it.")
-                .alignment(Alignment::Center)
-                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+            Paragraph::new(
+                "This tool can change state. Review the arguments and choose whether to allow it.",
+            )
+            .alignment(Alignment::Center)
+            .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
             sections[1],
         );
 
@@ -1476,9 +1583,15 @@ impl App {
         );
 
         frame.render_widget(
-            Paragraph::new("Y allow · N deny · R allow and remember · X deny and remember · Esc deny")
-                .alignment(Alignment::Center)
-                .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
+            Paragraph::new(
+                "Y allow · N deny · R allow and remember · X deny and remember · Esc deny",
+            )
+            .alignment(Alignment::Center)
+            .style(
+                Style::default()
+                    .bg(palette.panel_alt)
+                    .fg(palette.accent_soft),
+            ),
             sections[3],
         );
     }
@@ -1515,4 +1628,161 @@ fn pretty_tool_arguments(arguments: &str) -> String {
         Ok(value) => serde_json::to_string_pretty(&value).unwrap_or_else(|_| arguments.to_string()),
         Err(_) => arguments.to_string(),
     }
+}
+
+fn display_tool_name(tool_name: &str) -> String {
+    canonical_tool_name(tool_name)
+        .unwrap_or(tool_name)
+        .to_string()
+}
+
+fn summarize_tool_arguments(tool_name: &str, arguments: &str) -> Vec<(String, String)> {
+    let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
+    let parsed = serde_json::from_str::<Value>(arguments).ok();
+    let mut fields = Vec::new();
+
+    let string_field = |key: &str| {
+        parsed
+            .as_ref()
+            .and_then(|value| value.get(key))
+            .and_then(Value::as_str)
+            .map(|value| shorten_single_line(value, 96))
+    };
+
+    match canonical_name {
+        "read" | "write" | "edit" => {
+            if let Some(path) = string_field("path") {
+                fields.push(("path".to_string(), path));
+            }
+        }
+        "list" => {
+            fields.push((
+                "path".to_string(),
+                string_field("path").unwrap_or_else(|| ".".to_string()),
+            ));
+        }
+        "glob" => {
+            if let Some(pattern) = string_field("pattern") {
+                fields.push(("pattern".to_string(), pattern));
+            }
+            fields.push((
+                "path".to_string(),
+                string_field("path").unwrap_or_else(|| ".".to_string()),
+            ));
+        }
+        "grep" => {
+            if let Some(pattern) = string_field("pattern") {
+                fields.push(("pattern".to_string(), pattern));
+            }
+            fields.push((
+                "path".to_string(),
+                string_field("path").unwrap_or_else(|| ".".to_string()),
+            ));
+            if let Some(include) = string_field("include") {
+                fields.push(("include".to_string(), include));
+            }
+        }
+        "bash" => {
+            if let Some(command) = string_field("command") {
+                fields.push(("command".to_string(), command));
+            }
+        }
+        "todowrite" => {
+            let todo_count = parsed
+                .as_ref()
+                .and_then(|value| value.get("todos"))
+                .and_then(Value::as_array)
+                .map(|todos| format!("{} item(s)", todos.len()));
+
+            if let Some(todo_count) = todo_count {
+                fields.push(("todos".to_string(), todo_count));
+            }
+        }
+        _ => {}
+    }
+
+    if fields.is_empty() {
+        fields.push((
+            "arguments".to_string(),
+            shorten_single_line(&pretty_tool_arguments(arguments), 120),
+        ));
+    }
+
+    fields
+}
+
+fn render_tool_fields(
+    fields: &[(String, String)],
+    palette: &ThemePalette,
+    indent: usize,
+) -> Vec<Line<'static>> {
+    let prefix = " ".repeat(indent);
+    let mut lines = Vec::new();
+
+    for (label, value) in fields {
+        lines.push(Line::from(vec![
+            Span::raw(prefix.clone()),
+            Span::styled(
+                format!("{label}:"),
+                Style::default().fg(palette.accent_soft),
+            ),
+            Span::raw(" "),
+            Span::styled(value.clone(), Style::default().fg(palette.text)),
+        ]));
+    }
+
+    lines
+}
+
+fn render_tool_output_preview(
+    output: &str,
+    palette: &ThemePalette,
+    style: Style,
+    max_lines: usize,
+    indent: usize,
+) -> Vec<Line<'static>> {
+    let prefix = " ".repeat(indent);
+    let mut lines = Vec::new();
+    let preview_lines: Vec<&str> = output.lines().collect();
+
+    if preview_lines.is_empty() {
+        lines.push(Line::from(vec![
+            Span::raw(prefix),
+            Span::styled("(no output)", Style::default().fg(palette.muted)),
+        ]));
+        return lines;
+    }
+
+    for line in preview_lines.iter().take(max_lines) {
+        lines.push(Line::from(vec![
+            Span::raw(prefix.clone()),
+            Span::styled(shorten_single_line(line, 180), style),
+        ]));
+    }
+
+    if preview_lines.len() > max_lines {
+        lines.push(Line::from(vec![
+            Span::raw(prefix),
+            Span::styled(
+                format!("... {} more line(s)", preview_lines.len() - max_lines),
+                Style::default().fg(palette.muted),
+            ),
+        ]));
+    }
+
+    lines
+}
+
+fn tool_output_is_error(output: &str) -> bool {
+    let first_line = output.lines().next().unwrap_or("").trim_start();
+
+    first_line.starts_with("Tool failed:")
+        || first_line.starts_with("Tool '")
+        || first_line.starts_with("Request failed:")
+        || (first_line.starts_with("[exit ") && !first_line.starts_with("[exit 0]"))
+}
+
+fn shorten_single_line(value: &str, max_chars: usize) -> String {
+    let single_line = value.replace('\n', " ").replace('\r', "");
+    shorten(&single_line, max_chars)
 }

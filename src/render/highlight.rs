@@ -63,7 +63,10 @@ pub(crate) fn highlight_code_to_lines(code: &str, lang: &str) -> Vec<Line<'stati
         return lines.into_iter().map(Line::from).collect();
     }
 
-    let mut out: Vec<Line<'static>> = code.lines().map(|line| Line::from(line.to_string())).collect();
+    let mut out: Vec<Line<'static>> = code
+        .lines()
+        .map(|line| Line::from(line.to_string()))
+        .collect();
     if out.is_empty() {
         out.push(Line::from(String::new()));
     }
@@ -96,9 +99,7 @@ fn highlight_to_spans(code: &str, lang: &str) -> Option<Vec<Vec<Span<'static>>>>
     for raw_line in code.split_inclusive('\n') {
         saw_any_line = true;
         let normalized = raw_line.trim_end_matches('\n').trim_end_matches('\r');
-        let ranges = highlighter
-            .highlight_line(normalized, syntax_set())
-            .ok()?;
+        let ranges = highlighter.highlight_line(normalized, syntax_set()).ok()?;
         out.push(
             ranges
                 .into_iter()
