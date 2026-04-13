@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{
-    config::ActiveModel,
+    config::{ActiveModel, ApiType},
     session::{AssistantTurn, BackendEvent, Message, MessageRole, ToolCall},
     tooling::ToolDefinition,
 };
@@ -46,7 +46,22 @@ impl LlmClient {
         model: ActiveModel,
         messages: Vec<Message>,
     ) -> Result<String> {
-        let request = self.build_request(&model, messages, false, &[])?;
+        match model.api_type {
+            ApiType::Anthropic => {
+                self.complete_anthropic(model, messages).await
+            }
+            ApiType::OpenAi => {
+                self.complete_openai(model, messages).await
+            }
+        }
+    }
+
+    async fn complete_openai(
+        &self,
+        model: ActiveModel,
+        messages: Vec<Message>,
+    ) -> Result<String> {
+        let request = self.build_openai_request(&model, messages, false, &[])?;
         let response =
             self.http
                 .post(model.endpoint())
@@ -68,7 +83,62 @@ impl LlmClient {
         Ok(content)
     }
 
+    async fn complete_anthropic(
+        &self,
+        model: ActiveModel,
+        messages: Vec<Message>,
+    ) -> Result<String> {
+        let api_key = model.api_key.clone().with_context(|| {
+            format!("missing API key for provider '{}'", model.provider_id)
+        })?;
+        let request = self.build_anthropic_request(&model, messages, &[])?;
+
+        let response = self
+            .http
+            .post(model.endpoint())
+            .header("x-api-key", &api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("anthropic-dangerous-direct-browser-access", "true")
+            .json(&request)
+            .send()
+            .await?
+            .error_for_status()?;
+
+        let response: AnthropicResponse = response.json().await?;
+        let content = response
+            .content
+            .into_iter()
+            .filter_map(|block| {
+                if let AnthropicContentBlockResponse::Text { text } = block {
+                    Some(text)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("");
+
+        Ok(content)
+    }
+
     async fn stream_chat_inner(
+        &self,
+        model: ActiveModel,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+        tx: UnboundedSender<BackendEvent>,
+    ) -> Result<()> {
+        match model.api_type {
+            ApiType::Anthropic => {
+                self.stream_anthropic(model, messages, tools, tx).await
+            }
+            ApiType::OpenAi => {
+                self.stream_openai(model, messages, tools, tx).await
+            }
+        }
+    }
+
+    async fn stream_openai(
         &self,
         model: ActiveModel,
         messages: Vec<Message>,
@@ -79,7 +149,7 @@ impl LlmClient {
             .api_key
             .clone()
             .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
-        let request = self.build_request(&model, messages, true, &tools)?;
+        let request = self.build_openai_request(&model, messages, true, &tools)?;
 
         let response = self
             .http
@@ -186,7 +256,7 @@ impl LlmClient {
         Ok(())
     }
 
-    fn build_request(
+    fn build_openai_request(
         &self,
         model: &ActiveModel,
         messages: Vec<Message>,
@@ -573,4 +643,317 @@ fn finalize_turn(
         tool_calls,
         finish_reason: finish_reason.clone(),
     }
+}
+
+impl LlmClient {
+    async fn stream_anthropic(
+        &self,
+        model: ActiveModel,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+        tx: UnboundedSender<BackendEvent>,
+    ) -> Result<()> {
+        let api_key = model.api_key.clone().with_context(|| {
+            format!("missing API key for provider '{}'", model.provider_id)
+        })?;
+        let request = self.build_anthropic_request(&model, messages, &tools)?;
+
+        let response = self
+            .http
+            .post(model.endpoint())
+            .header("x-api-key", &api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("anthropic-dangerous-direct-browser-access", "true")
+            .json(&request)
+            .send()
+            .await?
+            .error_for_status()?;
+
+        let mut stream = response.bytes_stream();
+        let mut buffer = String::new();
+        let mut assistant_text = String::new();
+        let mut reasoning_text = String::new();
+        let mut finish_reason: Option<String> = None;
+        let mut tool_calls: BTreeMap<usize, ToolCallBuilder> = BTreeMap::new();
+        let mut think_parser = ThinkParser::default();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            while let Some(line_end) = buffer.find('\n') {
+                let line = buffer[..line_end].trim_end_matches('\r').to_string();
+                buffer.drain(..=line_end);
+
+                if line.is_empty() {
+                    continue;
+                }
+
+                if let Some(payload) = line.strip_prefix("data:") {
+                    let payload = payload.trim();
+
+                    if payload.is_empty() {
+                        continue;
+                    }
+
+                    let event: AnthropicStreamEvent = match serde_json::from_str(payload) {
+                        Ok(event) => event,
+                        Err(_) => continue,
+                    };
+
+                    match event {
+                        AnthropicStreamEvent::ContentBlockDelta { delta, index } => {
+                            match delta {
+                                AnthropicDelta::TextDelta { text } => {
+                                    let (visible, reasoning) = think_parser.push(&text);
+                                    if !visible.is_empty() {
+                                        assistant_text.push_str(&visible);
+                                        let _ = tx.send(BackendEvent::Delta(visible));
+                                    }
+                                    if !reasoning.is_empty() {
+                                        reasoning_text.push_str(&reasoning);
+                                        let _ = tx.send(BackendEvent::ReasoningDelta(reasoning));
+                                    }
+                                }
+                                AnthropicDelta::InputJsonDelta { partial_json } => {
+                                    let entry = tool_calls.entry(index).or_default();
+                                    entry.arguments.push_str(&partial_json);
+                                }
+                            }
+                        }
+                        AnthropicStreamEvent::ContentBlockStart {
+                            index,
+                            content_block,
+                        } => {
+                            match content_block {
+                                AnthropicContentBlockStart::Text { .. } => {}
+                                AnthropicContentBlockStart::ToolUse { id, name } => {
+                                    let entry = tool_calls.entry(index).or_default();
+                                    entry.id = id;
+                                    entry.name = name;
+                                }
+                            }
+                        }
+                        AnthropicStreamEvent::MessageStop => {
+                            let turn = finalize_turn(
+                                &mut assistant_text,
+                                &mut reasoning_text,
+                                &mut finish_reason,
+                                &mut tool_calls,
+                                &mut think_parser,
+                            );
+                            let _ = tx.send(BackendEvent::Finished(turn));
+                            return Ok(());
+                        }
+                        AnthropicStreamEvent::MessageDelta { delta, usage } => {
+                            if let Some(stop_reason) = delta.stop_reason {
+                                finish_reason = Some(stop_reason);
+                            }
+                            if usage.map(|u| u.output_tokens).unwrap_or(0) > 0 {
+                                // tokens used info
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        let turn = finalize_turn(
+            &mut assistant_text,
+            &mut reasoning_text,
+            &mut finish_reason,
+            &mut tool_calls,
+            &mut think_parser,
+        );
+        let _ = tx.send(BackendEvent::Finished(turn));
+        Ok(())
+    }
+
+    fn build_anthropic_request(
+        &self,
+        model: &ActiveModel,
+        messages: Vec<Message>,
+        tools: &[ToolDefinition],
+    ) -> Result<AnthropicRequest> {
+        let mut system_prompt = String::new();
+        let mut anthropic_messages = Vec::new();
+
+        if !model.system_prompt.trim().is_empty() {
+            system_prompt = model.system_prompt.clone();
+        }
+
+        for message in messages {
+            if message.streaming {
+                continue;
+            }
+
+            match message.role {
+                MessageRole::System => {
+                    if system_prompt.is_empty() {
+                        system_prompt = message.content;
+                    }
+                }
+                MessageRole::User => {
+                    anthropic_messages.push(AnthropicMessage {
+                        role: "user".to_string(),
+                        content: vec![AnthropicContentBlock::Text { text: message.content }],
+                    });
+                }
+                MessageRole::Assistant => {
+                    let mut content = Vec::new();
+                    if !message.content.is_empty() {
+                        content.push(AnthropicContentBlock::Text { text: message.content });
+                    }
+                    for tool_call in &message.tool_calls {
+                        content.push(AnthropicContentBlock::ToolUse {
+                            id: tool_call.id.clone(),
+                            name: tool_call.name.clone(),
+                            input: serde_json::from_str(&tool_call.arguments).unwrap_or(serde_json::Value::Object(Default::default())),
+                        });
+                    }
+                    anthropic_messages.push(AnthropicMessage {
+                        role: "assistant".to_string(),
+                        content,
+                    });
+                }
+                MessageRole::Tool => {
+                    anthropic_messages.push(AnthropicMessage {
+                        role: "user".to_string(),
+                        content: vec![AnthropicContentBlock::ToolResult {
+                            tool_use_id: message.tool_call_id.unwrap_or_default(),
+                            content: message.content,
+                        }],
+                    });
+                }
+                MessageRole::Error => {}
+            }
+        }
+
+        let anthropic_tools = if tools.is_empty() {
+            None
+        } else {
+            Some(
+                tools
+                    .iter()
+                    .map(|t| AnthropicTool {
+                        name: t.name.to_string(),
+                        description: t.description.to_string(),
+                        input_schema: t.parameters.clone(),
+                    })
+                    .collect(),
+            )
+        };
+
+        Ok(AnthropicRequest {
+            model: model.model_id.clone(),
+            max_tokens: model.max_output_tokens as u32,
+            system: if system_prompt.is_empty() { None } else { Some(system_prompt) },
+            messages: anthropic_messages,
+            stream: true,
+            temperature: model.temperature,
+            tools: anthropic_tools,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct AnthropicRequest {
+    model: String,
+    max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<String>,
+    messages: Vec<AnthropicMessage>,
+    stream: bool,
+    temperature: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<AnthropicTool>>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct AnthropicMessage {
+    role: String,
+    content: Vec<AnthropicContentBlock>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "type")]
+#[serde(rename_all = "snake_case")]
+enum AnthropicContentBlock {
+    Text { text: String },
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+    },
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct AnthropicTool {
+    name: String,
+    description: String,
+    input_schema: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct AnthropicResponse {
+    content: Vec<AnthropicContentBlockResponse>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "type")]
+#[serde(rename_all = "snake_case")]
+enum AnthropicContentBlockResponse {
+    Text { text: String },
+    ToolUse { id: String, name: String, input: serde_json::Value },
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "type")]
+#[serde(rename_all = "snake_case")]
+enum AnthropicStreamEvent {
+    MessageStart { message: AnthropicMessageInfo },
+    ContentBlockStart { index: usize, content_block: AnthropicContentBlockStart },
+    ContentBlockDelta { index: usize, delta: AnthropicDelta },
+    ContentBlockStop { index: usize },
+    MessageDelta { delta: AnthropicMessageDelta, usage: Option<AnthropicUsage> },
+    MessageStop,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct AnthropicMessageInfo {
+    id: String,
+    role: String,
+    model: String,
+    stop_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "type")]
+#[serde(rename_all = "snake_case")]
+enum AnthropicContentBlockStart {
+    Text { text: Option<String> },
+    ToolUse { id: String, name: String },
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "type")]
+#[serde(rename_all = "snake_case")]
+enum AnthropicDelta {
+    TextDelta { text: String },
+    InputJsonDelta { partial_json: String },
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct AnthropicMessageDelta {
+    stop_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct AnthropicUsage {
+    output_tokens: u32,
 }

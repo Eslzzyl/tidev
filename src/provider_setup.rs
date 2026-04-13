@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use std::collections::BTreeMap;
 
 use crate::config::{ModelConfig, ProviderConfig};
@@ -578,6 +578,7 @@ impl EditProviderDraft {
             ProviderConfig {
                 display_name,
                 base_url: self.base_url,
+                api_type: None,
                 models: self.models,
             },
             api_key,
@@ -695,6 +696,7 @@ impl NewProviderDraft {
             ProviderConfig {
                 display_name,
                 base_url: self.base_url,
+                api_type: None,
                 models: self.models,
             },
             self.api_key,

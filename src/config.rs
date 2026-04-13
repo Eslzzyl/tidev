@@ -245,11 +245,17 @@ max_input_lines = 6
             .with_context(|| format!("unknown model '{model_id}' for provider '{provider_id}'"))?;
 
         let api_key = self.resolve_api_key(auth, provider_id);
+        let api_type = provider
+            .api_type
+            .as_deref()
+            .map(ApiType::parse)
+            .unwrap_or_default();
 
         Ok(ActiveModel {
             provider_id: provider_id.to_string(),
             provider_display_name: provider.display_name.clone(),
             base_url: provider.base_url.clone(),
+            api_type,
             model_id: model_id.to_string(),
             display_name: model.display_name.clone(),
             context_window: model.context_window,
@@ -367,10 +373,36 @@ impl Default for UiConfig {
     }
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiType {
+    #[default]
+    OpenAi,
+    Anthropic,
+}
+
+impl ApiType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::OpenAi => "openai",
+            Self::Anthropic => "anthropic",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "anthropic" => Self::Anthropic,
+            _ => Self::OpenAi,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProviderConfig {
     pub display_name: String,
     pub base_url: String,
+    #[serde(default)]
+    pub api_type: Option<String>,
     #[serde(default)]
     pub models: BTreeMap<String, ModelConfig>,
 }
@@ -452,6 +484,7 @@ pub struct ActiveModel {
     pub provider_id: String,
     pub provider_display_name: String,
     pub base_url: String,
+    pub api_type: ApiType,
     pub model_id: String,
     pub display_name: String,
     pub context_window: usize,
@@ -473,7 +506,14 @@ impl ActiveModel {
     }
 
     pub fn endpoint(&self) -> String {
-        format!("{}/chat/completions", self.base_url.trim_end_matches('/'))
+        match self.api_type {
+            ApiType::Anthropic => {
+                format!("{}/v1/messages", self.base_url.trim_end_matches('/'))
+            }
+            ApiType::OpenAi => {
+                format!("{}/chat/completions", self.base_url.trim_end_matches('/'))
+            }
+        }
     }
 }
 
