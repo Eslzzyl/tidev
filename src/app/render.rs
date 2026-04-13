@@ -20,15 +20,6 @@ impl App {
         self.theme.palette()
     }
 
-    pub(crate) fn theme_help_message(&self) -> String {
-        [
-            format!("Current theme: {}", self.theme.name()),
-            "Available themes: light, dark".to_string(),
-            "Use /theme light or /theme dark to switch.".to_string(),
-        ]
-        .join("\n")
-    }
-
     fn render_command_palette(&self, frame: &mut Frame<'_>, area: Rect) {
         if !self.command_palette.visible || self.command_palette.suggestions.is_empty() {
             return;
@@ -921,7 +912,11 @@ impl App {
             .border_style(Style::default().fg(current_palette.border_active()));
 
         let list = List::new(items)
-            .style(Style::default().bg(current_palette.panel_alt).fg(current_palette.text))
+            .style(
+                Style::default()
+                    .bg(current_palette.panel_alt)
+                    .fg(current_palette.text),
+            )
             .highlight_style(
                 Style::default()
                     .bg(preview_palette.selection_bg)
@@ -931,7 +926,14 @@ impl App {
 
         frame.render_widget(Clear, overlay);
         frame.render_widget(panel_block, overlay);
-        frame.render_stateful_widget(list, overlay.inner(Margin { horizontal: 1, vertical: 1 }), &mut state);
+        frame.render_stateful_widget(
+            list,
+            overlay.inner(Margin {
+                horizontal: 1,
+                vertical: 1,
+            }),
+            &mut state,
+        );
     }
 }
 
