@@ -118,6 +118,14 @@ skills = []
 # [mcp.servers.events]
 # kind = "sse"
 # url = "https://example.com/sse"
+#
+# [mcp.servers.webtools]
+# kind = "stdio"
+# command = "webtools-mcp"
+#
+# # During development, you can also launch it through Cargo:
+# # command = "cargo"
+# # args = ["run", "--quiet", "--bin", "webtools-mcp", "--"]
 
 [mcp]
 

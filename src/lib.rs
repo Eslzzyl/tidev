@@ -14,6 +14,7 @@ pub mod session;
 pub mod skills;
 pub mod storage;
 pub mod theme;
+pub mod webtools;
 pub mod tooling;
 pub mod workspace_snapshot;
 

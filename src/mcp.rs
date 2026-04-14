@@ -431,13 +431,14 @@ impl McpManager {
 
 fn parse_tool(server_name: &str, tool: McpTool) -> Result<ToolDefinition> {
     let annotations = tool.annotations.unwrap_or_else(ToolAnnotations::default);
-    let permission = if annotations.read_only_hint.unwrap_or(false) {
-        ToolPermission::Read
-    } else {
-        ToolPermission::Execute
+    let remote_tool_name = tool.name.to_string();
+    let permission = match remote_tool_name.as_str() {
+        "websearch" => ToolPermission::Search,
+        "webfetch" => ToolPermission::Read,
+        _ if annotations.read_only_hint.unwrap_or(false) => ToolPermission::Read,
+        _ => ToolPermission::Execute,
     };
 
-    let remote_tool_name = tool.name.to_string();
     let name = ToolDefinition::mcp_name(server_name, &remote_tool_name);
     let display_name = if let Some(title) = tool.title {
         if title.trim().is_empty() {
@@ -492,6 +493,11 @@ fn call_tool_result_text(result: &rmcp::model::CallToolResult) -> String {
 
         if let Some(resource) = content.raw.as_resource_link() {
             chunks.push(format!("[resource:{}]", resource.uri));
+            continue;
+        }
+
+        if let rmcp::model::RawContent::Image(_) = &content.raw {
+            chunks.push("<image content>".to_string());
             continue;
         }
 
