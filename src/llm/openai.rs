@@ -75,6 +75,15 @@ pub(super) async fn stream_openai(
                 let event: ChatCompletionStreamResponse =
                     serde_json::from_str(payload).context("failed to parse streaming response")?;
 
+                if let Some(usage) = event.usage {
+                    let _ = tx.send(BackendEvent::UsageStats {
+                        request_id,
+                        input_tokens: usage.input_tokens,
+                        output_tokens: usage.output_tokens,
+                        total_tokens: usage.total_tokens,
+                    });
+                }
+
                 for choice in event.choices {
                     if let Some(reasoning) = choice.delta.reasoning_content {
                         reasoning_text.push_str(&reasoning);
@@ -231,6 +240,13 @@ fn build_openai_request(
         temperature: Some(model.temperature),
         max_tokens: Some(model.max_output_tokens as u32),
         stream,
+        stream_options: if stream {
+            Some(StreamOptions {
+                include_usage: true,
+            })
+        } else {
+            None
+        },
         tools: chat_tools.clone(),
         tool_choice: if stream && chat_tools.is_some() {
             Some("auto".to_string())
@@ -248,9 +264,17 @@ struct ChatCompletionRequest {
     max_tokens: Option<u32>,
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<StreamOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<ChatToolSpec>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_choice: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct StreamOptions {
+    #[serde(rename = "include_usage")]
+    include_usage: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -356,6 +380,18 @@ fn user_message_content(model: &ActiveModel, message: &Message) -> Result<serde_
 struct ChatCompletionStreamResponse {
     #[serde(default)]
     choices: Vec<ChatCompletionChoice>,
+    #[serde(default)]
+    usage: Option<ChatCompletionUsage>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ChatCompletionUsage {
+    #[serde(rename = "prompt_tokens", default)]
+    input_tokens: u32,
+    #[serde(rename = "completion_tokens", default)]
+    output_tokens: u32,
+    #[serde(rename = "total_tokens", default)]
+    total_tokens: u32,
 }
 
 #[derive(Clone, Debug, Deserialize)]

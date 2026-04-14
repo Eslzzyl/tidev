@@ -173,6 +173,7 @@ struct App {
     streaming_markdown: Option<MarkdownStreamCollector>,
     streaming_preview_lines: Vec<Line<'static>>,
     loading_frame: usize,
+    context_usage: Option<(u32, u32, u32)>, // (input_tokens, output_tokens, total_tokens)
 }
 
 pub fn run() -> Result<()> {
@@ -261,6 +262,7 @@ impl App {
             streaming_markdown: None,
             streaming_preview_lines: Vec::new(),
             loading_frame: 0,
+            context_usage: None,
         })
     }
 
@@ -1459,6 +1461,18 @@ impl App {
                 self.advance_pending_tool_execution();
                 self.process_pending_tool_execution(runtime)?;
             }
+            BackendEvent::UsageStats {
+                request_id,
+                input_tokens,
+                output_tokens,
+                total_tokens,
+            } => {
+                if !self.is_active_request(request_id) {
+                    return Ok(());
+                }
+
+                self.context_usage = Some((input_tokens, output_tokens, total_tokens));
+            }
         }
 
         Ok(())
@@ -1475,6 +1489,13 @@ impl App {
             message.reasoning = turn.reasoning.clone();
             message.tool_calls = turn.tool_calls.clone();
             message.streaming = false;
+
+            if let Some((input_tokens, output_tokens, total_tokens)) = self.context_usage {
+                message.input_tokens = Some(input_tokens);
+                message.output_tokens = Some(output_tokens);
+                message.total_tokens = Some(total_tokens);
+            }
+
             persisted_message = Some(message.clone());
         }
 

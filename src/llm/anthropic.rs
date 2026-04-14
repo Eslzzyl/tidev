@@ -121,8 +121,14 @@ pub(super) async fn stream_anthropic(
                         if let Some(stop_reason) = delta.stop_reason {
                             finish_reason = Some(stop_reason);
                         }
-                        if usage.map(|u| u.output_tokens).unwrap_or(0) > 0 {
-                            // tokens used info
+                        if let Some(usage) = usage {
+                            let total_tokens = usage.input_tokens + usage.output_tokens;
+                            let _ = tx.send(BackendEvent::UsageStats {
+                                request_id,
+                                input_tokens: usage.input_tokens,
+                                output_tokens: usage.output_tokens,
+                                total_tokens,
+                            });
                         }
                     }
                     _ => {}
@@ -462,4 +468,6 @@ struct AnthropicMessageDelta {
 struct AnthropicUsage {
     #[allow(dead_code)]
     output_tokens: u32,
+    #[serde(rename = "input_tokens", default)]
+    input_tokens: u32,
 }

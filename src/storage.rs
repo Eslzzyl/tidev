@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, OptionalExtension, params, types::Type};
+use rusqlite::{params, types::Type, Connection, OptionalExtension};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -12,7 +12,7 @@ use crate::{
     tooling::TodoItem,
 };
 
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 
 pub struct SessionStore {
     connection: Connection,
@@ -196,7 +196,7 @@ impl SessionStore {
         let attachments = serde_json::to_string(&message.attachments)
             .context("failed to serialize attachments")?;
         self.connection.execute(
-            "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, created_at, streaming) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, created_at, streaming, input_tokens, output_tokens, total_tokens) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 message.id.to_string(),
                 session_id.to_string(),
@@ -209,6 +209,9 @@ impl SessionStore {
                 message.tool_name,
                 message.created_at.to_rfc3339(),
                 if message.streaming { 1_i64 } else { 0_i64 },
+                message.input_tokens,
+                message.output_tokens,
+                message.total_tokens,
             ],
         )?;
 
@@ -432,7 +435,7 @@ impl SessionStore {
 
     pub fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, created_at, streaming FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
+            "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, created_at, streaming, input_tokens, output_tokens, total_tokens FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
         )?;
 
         let rows = statement.query_map(params![session_id.to_string()], |row| {
@@ -446,6 +449,9 @@ impl SessionStore {
             let tool_name = row.get::<_, Option<String>>(7)?;
             let created_at = row.get::<_, String>(8)?;
             let streaming = row.get::<_, i64>(9)? != 0;
+            let input_tokens = row.get::<_, Option<u32>>(10)?;
+            let output_tokens = row.get::<_, Option<u32>>(11)?;
+            let total_tokens = row.get::<_, Option<u32>>(12)?;
 
             let attachments = serde_json::from_str(&attachments).unwrap_or_default();
             let tool_calls: Vec<ToolCall> = serde_json::from_str(&tool_calls).unwrap_or_default();
@@ -466,6 +472,9 @@ impl SessionStore {
             message.tool_calls = tool_calls;
             message.tool_call_id = tool_call_id;
             message.tool_name = tool_name;
+            message.input_tokens = input_tokens;
+            message.output_tokens = output_tokens;
+            message.total_tokens = total_tokens;
             Ok(message)
         })?;
 
@@ -613,7 +622,10 @@ CREATE TABLE IF NOT EXISTS messages (
     tool_call_id TEXT,
     tool_name TEXT,
     created_at TEXT NOT NULL,
-    streaming INTEGER NOT NULL DEFAULT 0
+    streaming INTEGER NOT NULL DEFAULT 0,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    total_tokens INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_session_created_at

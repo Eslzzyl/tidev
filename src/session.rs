@@ -162,6 +162,12 @@ pub struct Message {
     pub tool_name: Option<String>,
     pub created_at: DateTime<Utc>,
     pub streaming: bool,
+    #[serde(default)]
+    pub input_tokens: Option<u32>,
+    #[serde(default)]
+    pub output_tokens: Option<u32>,
+    #[serde(default)]
+    pub total_tokens: Option<u32>,
 }
 
 impl Message {
@@ -177,6 +183,9 @@ impl Message {
             tool_name: None,
             created_at: Utc::now(),
             streaming: false,
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
         }
     }
 
@@ -192,6 +201,9 @@ impl Message {
             tool_name: None,
             created_at: Utc::now(),
             streaming: true,
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
         }
     }
 
@@ -213,6 +225,9 @@ impl Message {
             tool_name: None,
             created_at,
             streaming,
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
         }
     }
 
@@ -232,6 +247,9 @@ impl Message {
             tool_name: Some(tool_name.into()),
             created_at: Utc::now(),
             streaming: false,
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
         }
     }
 }
@@ -404,6 +422,12 @@ pub enum BackendEvent {
         request_id: u64,
         tool_call: ToolCall,
         result: ToolExecutionResult,
+    },
+    UsageStats {
+        request_id: u64,
+        input_tokens: u32,
+        output_tokens: u32,
+        total_tokens: u32,
     },
 }
 

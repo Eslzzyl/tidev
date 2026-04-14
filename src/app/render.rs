@@ -299,6 +299,14 @@ impl App {
     }
 
     fn footer_status_text(&mut self) -> String {
+        if let Some((_, _, total_tokens)) = self.context_usage {
+            let max_context = self.active_model.context_window as u32;
+            let percent = total_tokens as f64 / max_context as f64 * 100.0;
+            let used_k = total_tokens / 1000;
+            let max_k = max_context / 1000;
+            return format!("{:.1}% ({}K/{}K)", percent, used_k, max_k);
+        }
+
         if self.pending_request
             && self
                 .abort_confirmation_deadline

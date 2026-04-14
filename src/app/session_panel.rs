@@ -172,17 +172,6 @@ impl App {
         let active_model =
             Self::resolve_conversation_model(&self.config, &self.auth, &conversation)
                 .unwrap_or_else(|_| fallback_model.clone());
-        let model_notice = if conversation.provider_id != active_model.provider_id
-            || conversation.model_id != active_model.model_id
-        {
-            Some(format!(
-                "Session model {} is unavailable; using {}",
-                conversation.model_label(),
-                active_model.label()
-            ))
-        } else {
-            None
-        };
 
         self.pending_request = false;
         self.pending_tool_execution = None;
@@ -195,6 +184,18 @@ impl App {
         self.context_manager = ContextManager::new();
         self.conversation = conversation;
         self.active_model = active_model;
+
+        if !self.conversation.visible_messages().is_empty() {
+            let total_tokens: u32 = self
+                .conversation
+                .messages
+                .iter()
+                .filter_map(|m| m.total_tokens)
+                .sum();
+            if total_tokens > 0 {
+                self.context_usage = Some((0, 0, total_tokens));
+            }
+        }
         self.screen = if self.conversation.visible_messages().is_empty() {
             super::Screen::Welcome
         } else {
@@ -210,8 +211,6 @@ impl App {
         self.composer
             .set_placeholder("Ask TiDev about your code, task, or question...");
         self.scroll_messages_to_bottom();
-        self.last_notice = model_notice
-            .or_else(|| Some(format!("Switched to session {}", self.conversation.title)));
 
         Ok(())
     }
