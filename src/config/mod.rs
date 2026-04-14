@@ -29,6 +29,8 @@ pub struct AppConfig {
     pub providers: BTreeMap<String, ProviderConfig>,
     #[serde(default)]
     pub instructions: Vec<String>,
+    #[serde(default)]
+    pub skills: Vec<String>,
     #[serde(skip)]
     pub bundled_providers: BTreeMap<String, ProviderConfig>,
 }
@@ -46,6 +48,7 @@ impl Default for AppConfig {
             ui: UiConfig::default(),
             providers: BTreeMap::new(),
             instructions: Vec::new(),
+            skills: Vec::new(),
             bundled_providers: bundled_provider_catalog().unwrap_or_default(),
         }
     }
@@ -92,6 +95,10 @@ default_model = "gpt-4o-mini"
 # Optional custom instruction files or glob patterns to include in the system prompt.
 # Example: instructions = ["docs/style.md", "packages/*/AGENTS.md"]
 instructions = []
+
+# Optional additional skill sources. Each entry can be a local path or an HTTP(S) URL to a SKILL.md file.
+# Example: skills = ["https://example.com/skills/git-release/SKILL.md"]
+skills = []
 
 [ui]
 sidebar_width = 30

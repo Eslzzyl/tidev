@@ -6,6 +6,7 @@ use serde_json::Value;
 
 pub use registry::ToolRegistry;
 pub use schema::ToolArgs;
+pub(crate) use tools::SkillArgs;
 pub use tools::TodoItem;
 
 use crate::prompts::SessionMode;
@@ -40,7 +41,7 @@ impl ToolPermission {
 #[derive(Clone, Debug)]
 pub struct ToolDefinition {
     pub name: &'static str,
-    pub description: &'static str,
+    pub description: String,
     pub parameters: Value,
     pub permission: ToolPermission,
 }
@@ -48,7 +49,7 @@ pub struct ToolDefinition {
 impl ToolDefinition {
     pub fn new<Args>(
         name: &'static str,
-        description: &'static str,
+        description: impl Into<String>,
         permission: ToolPermission,
     ) -> Self
     where
@@ -56,7 +57,7 @@ impl ToolDefinition {
     {
         Self {
             name,
-            description,
+            description: description.into(),
             parameters: Args::schema(),
             permission,
         }
@@ -77,6 +78,7 @@ pub(crate) fn canonical_tool_name(tool_name: &str) -> Option<&'static str> {
         "grep" => Some("grep"),
         "bash" | "shell" => Some("bash"),
         "todowrite" | "todo" => Some("todowrite"),
+        "skill" => Some("skill"),
         _ => None,
     }
 }

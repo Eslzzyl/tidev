@@ -46,6 +46,8 @@ impl PendingToolExecution {
 #[derive(Clone, Debug)]
 pub(crate) struct PermissionDialogState {
     pub tool_call: ToolCall,
+    pub permission_key: String,
+    pub display_name: String,
     pub current_index: usize,
     pub total: usize,
 }
@@ -54,7 +56,7 @@ impl PermissionDialogState {
     pub(crate) fn title(&self) -> String {
         format!(
             "Approve tool call {} of {} · {}",
-            self.current_index, self.total, self.tool_call.name
+            self.current_index, self.total, self.display_name
         )
     }
 }
@@ -127,6 +129,8 @@ impl App {
             let Some((tool_call, current_index, total)) = self.pending_tool_snapshot() else {
                 break;
             };
+            let permission_key = self.tools.permission_key_for_call(&tool_call);
+            let permission_label = self.tools.permission_label_for_call(&tool_call);
 
             if !self.tools.can_execute(&tool_call.name, self.mode) {
                 let output = format!(
@@ -141,7 +145,7 @@ impl App {
 
             if let Some(remembered) = self
                 .store
-                .load_tool_permission(self.conversation.session_id, &tool_call.name)?
+                .load_tool_permission(self.conversation.session_id, &permission_key)?
             {
                 if remembered {
                     if self.execute_pending_tool_call(tool_call, runtime)? {
@@ -150,7 +154,7 @@ impl App {
                 } else {
                     let output = format!(
                         "Tool '{}' was denied by remembered permission",
-                        tool_call.name
+                        permission_label
                     );
                     self.record_tool_result(tool_call, output)?;
                     self.advance_pending_tool_execution();
@@ -168,9 +172,11 @@ impl App {
             if definition.needs_confirmation() {
                 self.last_notice = Some(format!(
                     "Approve tool call {} of {}: {}",
-                    current_index, total, tool_call.name
+                    current_index, total, permission_label
                 ));
                 self.permission_dialog = Some(PermissionDialogState {
+                    permission_key,
+                    display_name: permission_label,
                     tool_call,
                     current_index,
                     total,
@@ -208,7 +214,7 @@ impl App {
         if remember {
             self.store.remember_tool_permission(
                 self.conversation.session_id,
-                &dialog.tool_call.name,
+                &dialog.permission_key,
                 allow,
             )?;
         }
@@ -221,9 +227,9 @@ impl App {
         }
 
         let output = if remember {
-            format!("Tool '{}' was denied and remembered", dialog.tool_call.name)
+            format!("Tool '{}' was denied and remembered", dialog.display_name)
         } else {
-            format!("Tool '{}' was denied", dialog.tool_call.name)
+            format!("Tool '{}' was denied", dialog.display_name)
         };
 
         self.record_tool_result(dialog.tool_call, output)?;

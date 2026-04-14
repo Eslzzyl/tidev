@@ -186,7 +186,11 @@ impl App {
         let store = SessionStore::open(paths.default_database_path())?;
         let llm = LlmClient::new()?;
         let theme = ThemeManager::new(&config.theme);
-        let tools = ToolRegistry::new(workspace_root.clone());
+        let tools = ToolRegistry::new(
+            workspace_root.clone(),
+            paths.config_dir.clone(),
+            config.skills.clone(),
+        );
         let commands = CommandRegistry::new();
         let command_palette = CommandPaletteState::default();
         let composer = Composer::new("Ask TiDev about your code, task, or question...");
@@ -1144,6 +1148,7 @@ impl App {
     }
 
     fn start_assistant_turn(&mut self, runtime: &Runtime) -> Result<()> {
+        self.refresh_tools();
         self.streaming_markdown = Some(MarkdownStreamCollector::new(
             None,
             self.workspace_root.as_path(),
@@ -1178,6 +1183,14 @@ impl App {
         });
 
         Ok(())
+    }
+
+    fn refresh_tools(&mut self) {
+        self.tools = ToolRegistry::new(
+            self.workspace_root.clone(),
+            self.paths.config_dir.clone(),
+            self.config.skills.clone(),
+        );
     }
 
     fn compose_system_prompt(&self) -> (String, Vec<String>) {

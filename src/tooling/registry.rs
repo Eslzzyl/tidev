@@ -3,23 +3,29 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use crate::{prompts::SessionMode, session::ToolCall, storage::SessionStore};
+use crate::skills::SkillCatalog;
 
 use super::tools::{execute_tool_call, tool_definitions};
-use super::ToolDefinition;
+use super::{ToolDefinition, canonical_tool_name};
 
 #[derive(Clone, Debug)]
 pub struct ToolRegistry {
     workspace_root: PathBuf,
     max_output_bytes: usize,
     definitions: Vec<ToolDefinition>,
+    skills: SkillCatalog,
 }
 
 impl ToolRegistry {
-    pub fn new(workspace_root: PathBuf) -> Self {
+    pub fn new(workspace_root: PathBuf, config_dir: PathBuf, skill_sources: Vec<String>) -> Self {
+        let skills = SkillCatalog::discover(&workspace_root, &config_dir, &skill_sources);
+        let definitions = tool_definitions(skills.tool_description());
+
         Self {
             workspace_root,
             max_output_bytes: 12_000,
-            definitions: tool_definitions(),
+            definitions,
+            skills,
         }
     }
 
@@ -29,6 +35,38 @@ impl ToolRegistry {
 
     pub fn definitions(&self) -> &[ToolDefinition] {
         &self.definitions
+    }
+
+    pub fn permission_key_for_call(&self, call: &ToolCall) -> String {
+        if call.name == "skill" {
+            if let Ok(args) = serde_json::from_str::<crate::tooling::SkillArgs>(&call.arguments)
+                && !args.name.trim().is_empty()
+            {
+                return SkillCatalog::permission_key_for_name(args.name.trim());
+            }
+
+            return SkillCatalog::permission_key_for_name("unknown");
+        }
+
+        canonical_tool_name(&call.name)
+            .unwrap_or(&call.name)
+            .to_string()
+    }
+
+    pub fn permission_label_for_call(&self, call: &ToolCall) -> String {
+        if call.name == "skill" {
+            if let Ok(args) = serde_json::from_str::<crate::tooling::SkillArgs>(&call.arguments)
+                && !args.name.trim().is_empty()
+            {
+                return format!("skill '{}'", args.name.trim());
+            }
+
+            return "skill".to_string();
+        }
+
+        canonical_tool_name(&call.name)
+            .unwrap_or(&call.name)
+            .to_string()
     }
 
     pub fn available_definitions(&self, mode: SessionMode) -> Vec<ToolDefinition> {
@@ -63,6 +101,7 @@ impl ToolRegistry {
     ) -> Result<String> {
         execute_tool_call(
             &self.workspace_root,
+            &self.skills,
             store,
             session_id,
             call,

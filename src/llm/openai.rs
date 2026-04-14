@@ -425,7 +425,7 @@ impl From<&ToolDefinition> for ChatToolSpec {
             kind: "function".to_string(),
             function: ChatToolFunctionSpec {
                 name: definition.name.to_string(),
-                description: definition.description.to_string(),
+                description: definition.description.clone(),
                 parameters: definition.parameters.clone(),
             },
         }

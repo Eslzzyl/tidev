@@ -10,6 +10,7 @@ pub mod markdown_stream;
 pub mod prompts;
 pub mod provider_setup;
 pub mod session;
+pub mod skills;
 pub mod storage;
 pub mod theme;
 pub mod tooling;

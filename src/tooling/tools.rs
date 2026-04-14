@@ -19,7 +19,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::{session::ToolCall, storage::SessionStore};
+use crate::{session::ToolCall, skills::SkillCatalog, storage::SessionStore};
 
 use super::schema::ToolArgs;
 use super::{ToolDefinition, ToolPermission, canonical_tool_name};
@@ -232,6 +232,12 @@ tool_args! {
     }
 }
 
+tool_args! {
+    pub struct SkillArgs {
+        name: string("Skill name to load"),
+    }
+}
+
 fn parse_arguments<Args>(tool_name: &str, arguments: Value) -> Result<Args>
 where
     Args: ToolArgs,
@@ -240,7 +246,7 @@ where
         .with_context(|| format!("failed to decode arguments for tool '{}'", tool_name))
 }
 
-pub(super) fn tool_definitions() -> Vec<ToolDefinition> {
+pub(super) fn tool_definitions(skill_description: String) -> Vec<ToolDefinition> {
     vec![
         ToolDefinition::new::<ReadArgs>(
             "read",
@@ -282,6 +288,7 @@ pub(super) fn tool_definitions() -> Vec<ToolDefinition> {
             "Update the session todo list",
             ToolPermission::Session,
         ),
+        ToolDefinition::new::<SkillArgs>("skill", skill_description, ToolPermission::Session),
     ]
 }
 
@@ -877,6 +884,7 @@ impl SearchHit {
 
 pub(super) fn execute_tool_call(
     workspace_root: &Path,
+    skills: &SkillCatalog,
     store: &SessionStore,
     session_id: uuid::Uuid,
     call: &ToolCall,
@@ -938,6 +946,10 @@ pub(super) fn execute_tool_call(
             store.replace_todos(session_id, &args.todos)?;
             let todos = store.load_todos(session_id)?;
             serde_json::to_string_pretty(&todos).context("failed to serialize todo list")
+        }
+        Some("skill") => {
+            let args = parse_arguments::<SkillArgs>(&call.name, arguments)?;
+            skills.render_skill(&args.name)
         }
         None => bail!("unknown tool '{}'", call.name),
         Some(other) => bail!("unsupported tool '{}'", other),
