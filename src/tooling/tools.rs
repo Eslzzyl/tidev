@@ -1,7 +1,7 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use grep::{
     regex::RegexMatcherBuilder,
-    searcher::{sinks, SearcherBuilder},
+    searcher::{SearcherBuilder, sinks},
 };
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
@@ -12,8 +12,8 @@ use std::{
     path::{Component, Path, PathBuf},
     process::Stdio,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     thread,
     time::{SystemTime, UNIX_EPOCH},
@@ -228,8 +228,8 @@ tool_args! {
 
 tool_args! {
     pub struct TaskArgs {
-        description: string("Short title for the task and child session"),
-        prompt: string("Task prompt to give the child session"),
+        description: string("Short title for the task"),
+        prompt: string("Task prompt to give the subagent"),
         subagent_type: optional_string("Optional subagent type, such as general or review"),
     }
 }
@@ -338,11 +338,7 @@ pub(super) fn tool_definitions(skill_description: String) -> Vec<ToolDefinition>
             "Run a shell command in the workspace root",
             ToolPermission::Execute,
         ),
-        ToolDefinition::new::<TaskArgs>(
-            "task",
-            "Create a child session for a subagent task",
-            ToolPermission::Session,
-        ),
+        ToolDefinition::new::<TaskArgs>("task", "Run a subagent task", ToolPermission::Session),
         ToolDefinition::new::<QuestionArgs>(
             "question",
             "Ask the user questions during execution",
@@ -1028,12 +1024,8 @@ pub(super) fn execute_tool_call(
             let path = args.path;
             let absolute_path = resolve_workspace_path(workspace_root, Path::new(&path))?;
             let old_content = read_existing_text(&absolute_path)?;
-            let updated = apply_edit_contents(
-                &old_content,
-                &args.old_text,
-                &args.new_text,
-                replace_all,
-            )?;
+            let updated =
+                apply_edit_contents(&old_content, &args.old_text, &args.new_text, replace_all)?;
 
             fs::write(&absolute_path, &updated)
                 .with_context(|| format!("failed to write {}", absolute_path.display()))?;
@@ -1102,8 +1094,7 @@ pub(super) fn execute_tool_call(
             let bootstrap_message = Message::new(
                 MessageRole::System,
                 format!(
-                    "You are a {subagent_type} subagent spawned from session {}. Work on the task and keep the response concise.",
-                    parent_session.session_id
+                    "You are a {subagent_type} assistant. Work on the task and keep the response concise."
                 ),
             );
             store.append_message(child_session_id, &bootstrap_message)?;
@@ -1112,7 +1103,7 @@ pub(super) fn execute_tool_call(
             store.append_message(child_session_id, &user_message)?;
 
             Ok(format!(
-                "Spawned child session {child_session_id} for {subagent_type} task '{description}'\nOpen it with /session {child_session_id}"
+                "Started {subagent_type} subagent task '{description}'"
             ))
         }
         Some("todowrite") => {

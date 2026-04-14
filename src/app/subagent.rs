@@ -1,0 +1,412 @@
+use anyhow::{Context, Result, bail};
+use std::{
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
+use tokio::{
+    runtime::Handle,
+    sync::mpsc::{UnboundedSender, unbounded_channel},
+};
+use uuid::Uuid;
+
+use crate::{
+    config::ActiveModel,
+    llm::LlmClient,
+    prompts::SessionMode,
+    session::{AssistantTurn, BackendEvent, Message, MessageRole, ToolCall, ToolExecutionResult},
+    storage::SessionStore,
+    tooling::{TaskArgs, ToolRegistry, canonical_tool_name, execute_shell_tool_call},
+};
+
+#[derive(Clone, Debug)]
+pub(crate) struct SubagentTaskContext {
+    pub parent_request_id: u64,
+    pub parent_session_id: Uuid,
+    pub child_session_id: Uuid,
+    pub description: String,
+    pub prompt: String,
+    pub subagent_type: String,
+    pub llm: LlmClient,
+    pub tools: ToolRegistry,
+    pub model: ActiveModel,
+    pub workspace_root: PathBuf,
+    pub store_path: PathBuf,
+    pub tx: UnboundedSender<BackendEvent>,
+    pub cancel_requested: Arc<AtomicBool>,
+    pub runtime_handle: Handle,
+    pub mode: SessionMode,
+}
+
+pub(crate) async fn run_subagent_task(context: SubagentTaskContext) -> Result<String> {
+    prepare_child_session(&context)?;
+
+    let result = run_subagent_loop(&context).await;
+    match result {
+        Ok(output) => Ok(output),
+        Err(error) => {
+            mark_child_session_failed(&context, error.to_string())?;
+            Err(error)
+        }
+    }
+}
+
+fn prepare_child_session(context: &SubagentTaskContext) -> Result<()> {
+    let store = SessionStore::open(&context.store_path)?;
+    let parent_record = store
+        .load_session_record(context.parent_session_id)?
+        .context("parent session not found")?;
+    let child_title = format!("Task: {}", context.description);
+
+    store.create_session_with_parent(
+        context.child_session_id,
+        context.parent_session_id,
+        &context.workspace_root,
+        &parent_record.provider_id,
+        &parent_record.provider_display_name,
+        &parent_record.model_id,
+        &parent_record.model_display_name,
+        &child_title,
+    )?;
+
+    let bootstrap_message = Message::new(
+        MessageRole::System,
+        format!(
+            "You are a {} assistant. Work on the task and keep the response concise.",
+            context.subagent_type
+        ),
+    );
+    store.append_message(context.child_session_id, &bootstrap_message)?;
+
+    let user_message = Message::new(MessageRole::User, context.prompt.clone());
+    store.append_message(context.child_session_id, &user_message)?;
+    store.update_session_title(context.child_session_id, &child_title)?;
+
+    Ok(())
+}
+
+async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
+    let mut request_sequence = 0u64;
+
+    let output = loop {
+        if context.cancel_requested.load(Ordering::SeqCst) {
+            bail!("subagent cancelled");
+        }
+
+        request_sequence = request_sequence.wrapping_add(1);
+        send_status(context, "Thinking...", None);
+
+        let mut assistant_message = Message::streaming(MessageRole::Assistant, "");
+        {
+            let store = SessionStore::open(&context.store_path)?;
+            store.append_message(context.child_session_id, &assistant_message)?;
+        }
+
+        let messages = {
+            let store = SessionStore::open(&context.store_path)?;
+            store.load_messages(context.child_session_id)?
+        };
+        let tools = context.tools.available_definitions(context.mode);
+        let (stream_tx, mut stream_rx) = unbounded_channel();
+        let llm = context.llm.clone();
+        let model = context.model.clone();
+        let stream_request_id = request_sequence;
+        let stream_handle = tokio::spawn(async move {
+            llm.stream_chat(stream_request_id, model, messages, tools, stream_tx)
+                .await;
+        });
+
+        let mut turn = AssistantTurn::default();
+        let mut finished = false;
+
+        while let Some(event) = stream_rx.recv().await {
+            match event {
+                BackendEvent::Delta { content, .. } => {
+                    assistant_message.content.push_str(&content);
+                    update_child_message(context, &assistant_message)?;
+                    send_status(context, "Thinking...", None);
+                }
+                BackendEvent::ReasoningDelta { content, .. } => {
+                    assistant_message.reasoning.push_str(&content);
+                    update_child_message(context, &assistant_message)?;
+                }
+                BackendEvent::Retrying {
+                    attempt,
+                    max_attempts,
+                    reason,
+                    retry_after_secs,
+                    ..
+                } => {
+                    let retry = retry_after_secs
+                        .map(|seconds| {
+                            format!(
+                                "Retrying subagent turn {attempt}/{max_attempts} in {seconds}s: {reason}"
+                            )
+                        })
+                        .unwrap_or_else(|| {
+                            format!("Retrying subagent turn {attempt}/{max_attempts}: {reason}")
+                        });
+                    send_status(context, retry, None);
+                }
+                BackendEvent::Finished {
+                    turn: next_turn, ..
+                } => {
+                    turn = next_turn;
+                    finished = true;
+                    break;
+                }
+                BackendEvent::Failed { error, .. } => {
+                    let error_message = format!("Subagent failed: {error}");
+                    assistant_message.role = MessageRole::Error;
+                    assistant_message.content = error_message.clone();
+                    assistant_message.reasoning.clear();
+                    assistant_message.tool_calls.clear();
+                    assistant_message.streaming = false;
+                    update_child_message(context, &assistant_message)?;
+                    let _ = stream_handle.await;
+                    return Err(anyhow::anyhow!(error_message));
+                }
+                BackendEvent::UsageStats { .. } => {}
+                BackendEvent::ToolCompleted { .. } => {}
+                BackendEvent::SubagentStatus { .. } => {}
+                BackendEvent::SubagentCompleted { .. } => {}
+            }
+        }
+
+        let _ = stream_handle.await;
+
+        if !finished {
+            let error_message = "Subagent stream ended without a final turn".to_string();
+            assistant_message.role = MessageRole::Error;
+            assistant_message.content = error_message.clone();
+            assistant_message.reasoning.clear();
+            assistant_message.tool_calls.clear();
+            assistant_message.streaming = false;
+            update_child_message(context, &assistant_message)?;
+            bail!(error_message);
+        }
+
+        assistant_message.content = turn.content.clone();
+        assistant_message.reasoning = turn.reasoning.clone();
+        assistant_message.tool_calls = turn.tool_calls.clone();
+        assistant_message.streaming = false;
+        update_child_message(context, &assistant_message)?;
+
+        if turn.tool_calls.is_empty() {
+            send_status(context, "Completed", None);
+            break turn.content;
+        }
+
+        for tool_call in turn.tool_calls {
+            if context.cancel_requested.load(Ordering::SeqCst) {
+                bail!("subagent cancelled");
+            }
+
+            let summary = summarize_tool_call(&tool_call.name, &tool_call.arguments, 64);
+            send_status(
+                context,
+                format!("Executing {summary}"),
+                Some(tool_call.clone()),
+            );
+
+            let result = execute_child_tool_call(context, &tool_call)
+                .await
+                .unwrap_or_else(|error| ToolExecutionResult::new(format!("Tool failed: {error}")));
+
+            record_tool_result(context, &tool_call, &result)?;
+            send_status(context, "Thinking...", None);
+        }
+    };
+
+    let output = if output.is_empty() {
+        read_last_assistant_text(context)?
+    } else {
+        output
+    };
+
+    Ok(output)
+}
+
+async fn execute_child_tool_call(
+    context: &SubagentTaskContext,
+    tool_call: &ToolCall,
+) -> Result<ToolExecutionResult> {
+    match canonical_tool_name(&tool_call.name) {
+        Some("task") => {
+            let args = serde_json::from_str::<TaskArgs>(&tool_call.arguments)?;
+            let description = args.description.trim();
+            let prompt = args.prompt.trim();
+            let subagent_type = args
+                .subagent_type
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("general")
+                .to_string();
+
+            if description.is_empty() {
+                bail!("task description cannot be empty");
+            }
+            if prompt.is_empty() {
+                bail!("task prompt cannot be empty");
+            }
+
+            let nested_session_id = Uuid::new_v4();
+            let nested_context = SubagentTaskContext {
+                parent_request_id: context.parent_request_id,
+                parent_session_id: context.child_session_id,
+                child_session_id: nested_session_id,
+                description: description.to_string(),
+                prompt: prompt.to_string(),
+                subagent_type,
+                llm: context.llm.clone(),
+                tools: context.tools.clone(),
+                model: context.model.clone(),
+                workspace_root: context.workspace_root.clone(),
+                store_path: context.store_path.clone(),
+                tx: context.tx.clone(),
+                cancel_requested: context.cancel_requested.clone(),
+                runtime_handle: context.runtime_handle.clone(),
+                mode: context.mode,
+            };
+
+            let result = Box::pin(run_subagent_task(nested_context)).await?;
+            Ok(ToolExecutionResult::new(result))
+        }
+        Some("bash") => {
+            let output = execute_shell_tool_call(
+                &context.workspace_root,
+                tool_call,
+                context.tools.max_output_bytes(),
+                context.cancel_requested.clone(),
+            )?;
+            Ok(ToolExecutionResult::new(output))
+        }
+        Some("question") => Ok(ToolExecutionResult::new(
+            "Tool failed: question tool is not supported inside background subagents",
+        )),
+        _ => {
+            let result = tokio::task::block_in_place(|| {
+                let store = SessionStore::open(&context.store_path)?;
+                context.tools.execute_call(
+                    &context.runtime_handle,
+                    &store,
+                    context.child_session_id,
+                    tool_call,
+                )
+            })?;
+            Ok(result)
+        }
+    }
+}
+
+fn update_child_message(context: &SubagentTaskContext, message: &Message) -> Result<()> {
+    let store = SessionStore::open(&context.store_path)?;
+    store.update_message(context.child_session_id, message)
+}
+
+fn record_tool_result(
+    context: &SubagentTaskContext,
+    tool_call: &ToolCall,
+    result: &ToolExecutionResult,
+) -> Result<()> {
+    let store = SessionStore::open(&context.store_path)?;
+    store.append_tool_event(
+        context.child_session_id,
+        &tool_call.name,
+        &tool_call.arguments,
+        &result.output,
+    )?;
+
+    let message =
+        Message::tool_result(tool_call.id.clone(), tool_call.name.clone(), result.clone());
+    store.append_message(context.child_session_id, &message)?;
+    Ok(())
+}
+
+fn send_status(
+    context: &SubagentTaskContext,
+    status_text: impl Into<String>,
+    current_tool_call: Option<ToolCall>,
+) {
+    let _ = context.tx.send(BackendEvent::SubagentStatus {
+        request_id: context.parent_request_id,
+        child_session_id: context.child_session_id,
+        status_text: status_text.into(),
+        current_tool_call,
+    });
+}
+
+fn mark_child_session_failed(context: &SubagentTaskContext, error: String) -> Result<()> {
+    let store = SessionStore::open(&context.store_path)?;
+    let mut messages = store.load_messages(context.child_session_id)?;
+
+    if let Some(message) = messages
+        .iter_mut()
+        .rev()
+        .find(|message| message.streaming && matches!(message.role, MessageRole::Assistant))
+    {
+        message.role = MessageRole::Error;
+        message.content = format!("Subagent failed: {error}");
+        message.reasoning.clear();
+        message.tool_calls.clear();
+        message.streaming = false;
+        store.update_message(context.child_session_id, message)?;
+    } else {
+        let message = Message::new(MessageRole::Error, format!("Subagent failed: {error}"));
+        store.append_message(context.child_session_id, &message)?;
+    }
+
+    Ok(())
+}
+
+fn read_last_assistant_text(context: &SubagentTaskContext) -> Result<String> {
+    let store = SessionStore::open(&context.store_path)?;
+    let messages = store.load_messages(context.child_session_id)?;
+    Ok(messages
+        .iter()
+        .rev()
+        .find(|message| matches!(message.role, MessageRole::Assistant))
+        .map(|message| message.content.clone())
+        .unwrap_or_default())
+}
+
+fn summarize_tool_call(tool_name: &str, arguments: &str, body_width: usize) -> String {
+    let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
+    let parsed = serde_json::from_str::<serde_json::Value>(arguments).ok();
+    let field = |name: &str| {
+        parsed
+            .as_ref()
+            .and_then(|value| value.get(name))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+
+    let summary = match canonical_name {
+        "read" => field("path"),
+        "write" => field("path"),
+        "edit" => field("path"),
+        "list" => field("path"),
+        "glob" => format!("{} in {}", field("pattern"), field("path")),
+        "grep" => format!("{} in {}", field("pattern"), field("path")),
+        "bash" => field("command"),
+        "task" => field("description"),
+        _ => tool_name.to_string(),
+    };
+
+    shorten_single_line(&summary, body_width)
+}
+
+fn shorten_single_line(value: &str, max_chars: usize) -> String {
+    let value = value.replace('\n', " ").replace('\r', "");
+    if value.chars().count() <= max_chars {
+        return value;
+    }
+
+    let mut shortened = value.chars().take(max_chars).collect::<String>();
+    shortened.push_str("...");
+    shortened
+}

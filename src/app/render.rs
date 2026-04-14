@@ -200,6 +200,7 @@ impl App {
             "Enter - send prompt or execute the highlighted slash command",
             "Shift+Enter / Ctrl+J - insert newline",
             "PageUp / PageDown / mouse wheel - scroll conversation",
+            "Ctrl+X then arrows - navigate parent and child sessions",
             "Tab - switch mode (when no command is being entered)",
             "Up/Down - move through command suggestions",
                 "Ctrl+V - paste clipboard text or image",
@@ -320,6 +321,14 @@ impl App {
 
         if self.pending_request {
             let spinner = self.loading_spinner();
+
+            if !self.running_subagent_executions.is_empty() {
+                return format!(
+                    "{} Waiting for {} subagent(s)",
+                    spinner,
+                    self.running_subagent_executions.len()
+                );
+            }
 
             if let Some(running_tool_execution) = self.running_tool_execution.as_ref() {
                 let tool_name = running_tool_execution.tool_call.name.clone();

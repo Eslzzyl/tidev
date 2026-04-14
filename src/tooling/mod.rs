@@ -6,8 +6,8 @@ use serde_json::Value;
 
 pub use registry::ToolRegistry;
 pub use schema::ToolArgs;
-pub(crate) use tools::{QuestionArgs, QuestionInfo, SkillArgs};
 pub use tools::TodoItem;
+pub(crate) use tools::{QuestionArgs, QuestionInfo, SkillArgs, TaskArgs};
 
 use crate::config::PermissionConfig;
 use crate::prompts::SessionMode;

@@ -121,11 +121,18 @@ impl ToolRegistry {
         let mut definitions = self
             .definitions
             .iter()
-            .filter(|definition| definition.permission.is_allowed_in(mode, &self.permission_config))
+            .filter(|definition| {
+                definition
+                    .permission
+                    .is_allowed_in(mode, &self.permission_config)
+            })
             .cloned()
             .collect::<Vec<_>>();
 
-        definitions.extend(self.mcp.available_definitions(mode, &self.permission_config));
+        definitions.extend(
+            self.mcp
+                .available_definitions(mode, &self.permission_config),
+        );
         definitions
     }
 
@@ -134,8 +141,11 @@ impl ToolRegistry {
     }
 
     pub fn can_execute(&self, tool_name: &str, mode: SessionMode) -> bool {
-        self.definition_for(tool_name)
-            .is_some_and(|definition| definition.permission.is_allowed_in(mode, &self.permission_config))
+        self.definition_for(tool_name).is_some_and(|definition| {
+            definition
+                .permission
+                .is_allowed_in(mode, &self.permission_config)
+        })
     }
 
     pub fn definition_for(&self, tool_name: &str) -> Option<ToolDefinition> {
@@ -160,7 +170,7 @@ impl ToolRegistry {
 
     pub fn execute_call(
         &self,
-        runtime: &tokio::runtime::Runtime,
+        runtime: &tokio::runtime::Handle,
         store: &SessionStore,
         session_id: Uuid,
         call: &ToolCall,

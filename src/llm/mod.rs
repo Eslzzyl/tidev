@@ -16,7 +16,7 @@ use crate::{
 
 use error::{MAX_RETRIES, backoff_delay, backoff_sleep, classify_anyhow_error};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LlmClient {
     http: Client,
 }

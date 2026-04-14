@@ -1,8 +1,8 @@
 use crate::{
-    markdown_render::{adaptive_wrap_lines, render_markdown_text_with_width_and_cwd, WrapOptions},
+    markdown_render::{WrapOptions, adaptive_wrap_lines, render_markdown_text_with_width_and_cwd},
     session::{Message, MessageAttachment, MessageRole, ToolCall},
-    tooling::canonical_tool_name,
     theme::ThemePalette,
+    tooling::canonical_tool_name,
 };
 use ratatui::{
     layout::{Constraint, Layout, Margin, Rect},
@@ -13,7 +13,8 @@ use ratatui::{
 };
 
 use super::diff_render::render_unified_diff_text;
-use super::{render::*, App};
+use super::permission::RunningSubagentExecution;
+use super::{App, render::*};
 
 impl App {
     pub(super) fn render_chat(&mut self, frame: &mut Frame<'_>) {
@@ -39,7 +40,10 @@ impl App {
 
         let composer_height = self
             .composer
-            .preferred_height(main_area.width.saturating_sub(4), self.config.ui.max_input_lines)
+            .preferred_height(
+                main_area.width.saturating_sub(4),
+                self.config.ui.max_input_lines,
+            )
             .min(main_area.height.saturating_sub(3).max(3));
 
         if let Some(dialog) = self.question_dialog.clone() {
@@ -165,6 +169,17 @@ impl App {
             total_lines += 3;
         }
 
+        for running_subagent in &self.running_subagent_executions {
+            let card_lines = self.render_running_subagent_lines(running_subagent, content_width);
+            if card_lines.is_empty() {
+                continue;
+            }
+
+            let decorated_lines = decorate_card_lines(card_lines, content_width, palette.panel);
+            total_lines += decorated_lines.len();
+            text.lines.extend(decorated_lines);
+        }
+
         self.message_viewport_lines = content_area.height as usize;
         self.message_total_lines = total_lines;
 
@@ -238,6 +253,14 @@ impl App {
                 Style::default().fg(palette.accent_soft),
             )]));
         }
+        if let Ok(children) = self.store.load_child_sessions(self.conversation.session_id)
+            && !children.is_empty()
+        {
+            lines.push(Line::from(vec![Span::styled(
+                format!("Subagents: {}", children.len()),
+                Style::default().fg(palette.accent_soft),
+            )]));
+        }
         lines.push(Line::from(""));
         lines.push(Line::from(vec![Span::styled(
             "cwd",
@@ -298,6 +321,9 @@ impl App {
         lines.push(Line::from("/model <query> - prefilter the model panel"));
         lines.push(Line::from("/session - open the session panel"));
         lines.push(Line::from("/session <query> - prefilter the session panel"));
+        lines.push(Line::from(
+            "Ctrl+X then arrows - navigate parent and child sessions",
+        ));
         lines.push(Line::from("/mcp - open the MCP panel"));
         lines.push(Line::from("/mcp add - create a new MCP server"));
         lines.push(Line::from("/mcp edit <name> - edit an MCP server"));
@@ -697,6 +723,39 @@ impl App {
             .map(MessageAttachment::summary)
             .collect::<Vec<_>>();
 
+        if canonical_name == "task" {
+            let summary = if output.is_empty() {
+                "Subagent finished".to_string()
+            } else {
+                let first_line = output
+                    .lines()
+                    .map(str::trim)
+                    .find(|line| !line.is_empty())
+                    .unwrap_or("Subagent finished");
+                shorten_single_line(first_line, body_width.saturating_sub(2))
+            };
+
+            let mut lines = vec![
+                line_with_style("Subagent complete", palette.accent_soft),
+                line_with_prefix(
+                    "↳",
+                    &summary,
+                    Style::default().fg(palette.accent_soft),
+                    Style::default().fg(palette.text),
+                ),
+                line_with_style(
+                    "Open the child session to inspect the full transcript.",
+                    palette.muted,
+                ),
+            ];
+
+            if !attachment_lines.is_empty() {
+                lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
+            }
+
+            return lines;
+        }
+
         if matches!(canonical_name, "grep" | "glob") {
             let count = if output.is_empty() {
                 0
@@ -713,7 +772,11 @@ impl App {
             let count = if output.trim() == "(empty)" {
                 0
             } else {
-                output.lines().skip(1).filter(|line| !line.trim().is_empty()).count()
+                output
+                    .lines()
+                    .skip(1)
+                    .filter(|line| !line.trim().is_empty())
+                    .count()
             };
             header_lines.push(line_with_style(
                 &format!("Listed {} items", count),
@@ -763,6 +826,70 @@ impl App {
             self.render_output_preview_lines(output, body_width, tool_output_is_error(output));
         lines.extend(preview_lines);
         lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
+        lines
+    }
+
+    fn render_running_subagent_lines(
+        &self,
+        execution: &RunningSubagentExecution,
+        body_width: usize,
+    ) -> Vec<Line<'static>> {
+        let palette = self.palette();
+        let task_summary = summarize_tool_call(
+            &execution.tool_call.name,
+            &execution.tool_call.arguments,
+            body_width,
+        );
+        let child_session_label = self
+            .store
+            .load_session_record(execution.child_session_id)
+            .ok()
+            .flatten()
+            .map(|record| {
+                format!(
+                    "{} · {}",
+                    shorten(&record.title, 44),
+                    execution.child_session_id.simple()
+                )
+            })
+            .unwrap_or_else(|| execution.child_session_id.simple().to_string());
+
+        let mut lines = vec![line_with_style("Subagent running", palette.accent_soft)];
+        lines.push(line_with_prefix(
+            "↳",
+            &task_summary,
+            Style::default().fg(palette.accent_soft),
+            Style::default().fg(palette.text),
+        ));
+        lines.push(line_with_prefix(
+            "↳",
+            &execution.status_text,
+            Style::default().fg(palette.accent_soft),
+            Style::default().fg(palette.text),
+        ));
+
+        if let Some(tool_call) = &execution.current_tool_call {
+            let current_tool =
+                summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width);
+            lines.push(line_with_prefix(
+                "↳",
+                &format!("Tool: {current_tool}"),
+                Style::default().fg(palette.accent_soft),
+                Style::default().fg(palette.text),
+            ));
+        }
+
+        lines.push(line_with_prefix(
+            "↳",
+            &format!("Session {child_session_label}"),
+            Style::default().fg(palette.accent_soft),
+            Style::default().fg(palette.text),
+        ));
+        lines.push(line_with_style(
+            "Ctrl+X then arrows to inspect the child session.",
+            palette.muted,
+        ));
+
         lines
     }
 
@@ -948,7 +1075,10 @@ mod tests {
 
         assert_eq!(line_text(&lines[0]), "┃ Thinking:");
         assert_eq!(line_text(&lines[1]), "┃ fn main() { println!(\"hi\"); }");
-        assert!(lines[1].spans.len() > 2, "expected highlighted spans in code line");
+        assert!(
+            lines[1].spans.len() > 2,
+            "expected highlighted spans in code line"
+        );
         assert!(
             lines[1]
                 .spans
@@ -980,7 +1110,11 @@ mod tests {
 
         let app = super::App::new().unwrap();
         let lines = app.render_tool_result_lines(&message, 80);
-        assert!(lines.iter().any(|line| line_text(line).contains("Listed 2 items")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line_text(line).contains("Listed 2 items"))
+        );
     }
 }
 
@@ -1140,7 +1274,10 @@ fn summarize_tool_arguments(tool_name: &str, arguments: &str) -> Vec<(String, St
                 .map(|questions| questions.len())
                 .unwrap_or(0);
 
-            fields.push(("questions".to_string(), format!("{question_count} question(s)")));
+            fields.push((
+                "questions".to_string(),
+                format!("{question_count} question(s)"),
+            ));
 
             if let Some(first_question) = parsed
                 .as_ref()

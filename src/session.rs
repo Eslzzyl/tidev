@@ -423,6 +423,18 @@ pub enum BackendEvent {
         tool_call: ToolCall,
         result: ToolExecutionResult,
     },
+    SubagentStatus {
+        request_id: u64,
+        child_session_id: Uuid,
+        status_text: String,
+        current_tool_call: Option<ToolCall>,
+    },
+    SubagentCompleted {
+        request_id: u64,
+        tool_call: ToolCall,
+        child_session_id: Uuid,
+        result: ToolExecutionResult,
+    },
     UsageStats {
         request_id: u64,
         input_tokens: u32,

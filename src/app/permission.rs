@@ -4,7 +4,7 @@ use std::sync::{Arc, atomic::AtomicBool};
 use tokio::runtime::Runtime;
 
 use crate::session::{ToolCall, ToolExecutionResult};
-use crate::tooling::{QuestionArgs, execute_shell_tool_call};
+use crate::tooling::{QuestionArgs, TaskArgs, execute_shell_tool_call};
 
 use super::App;
 
@@ -77,6 +77,35 @@ impl RunningToolExecution {
         Self {
             request_id,
             tool_call,
+            cancel_requested,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct RunningSubagentExecution {
+    pub request_id: u64,
+    pub tool_call: ToolCall,
+    pub child_session_id: uuid::Uuid,
+    pub current_tool_call: Option<ToolCall>,
+    pub status_text: String,
+    pub cancel_requested: Arc<AtomicBool>,
+}
+
+impl RunningSubagentExecution {
+    pub(crate) fn new(
+        request_id: u64,
+        tool_call: ToolCall,
+        child_session_id: uuid::Uuid,
+        cancel_requested: Arc<AtomicBool>,
+        status_text: impl Into<String>,
+    ) -> Self {
+        Self {
+            request_id,
+            tool_call,
+            child_session_id,
+            current_tool_call: None,
+            status_text: status_text.into(),
             cancel_requested,
         }
     }
@@ -195,7 +224,14 @@ impl App {
             .is_some_and(PendingToolExecution::is_finished)
         {
             self.pending_tool_execution = None;
-            self.start_assistant_turn(runtime)?;
+            if self.running_subagent_executions.is_empty() {
+                self.start_assistant_turn(runtime)?;
+            } else {
+                self.last_notice = Some(format!(
+                    "Waiting for {} subagent(s)...",
+                    self.running_subagent_executions.len()
+                ));
+            }
         }
 
         Ok(())
@@ -242,13 +278,28 @@ impl App {
         tool_call: ToolCall,
         runtime: &Runtime,
     ) -> Result<bool> {
+        if tool_call.name == "task" {
+            if let Err(error) = self.start_subagent_task_execution(tool_call.clone(), runtime) {
+                self.record_tool_result(
+                    tool_call,
+                    ToolExecutionResult::new(format!("Tool failed: {error}")),
+                )?;
+                self.advance_pending_tool_execution();
+                return Ok(false);
+            }
+            self.advance_pending_tool_execution();
+            return Ok(false);
+        }
+
         if tool_call.name == "question" {
             let args = match serde_json::from_str::<QuestionArgs>(&tool_call.arguments) {
                 Ok(args) => args,
                 Err(error) => {
                     self.record_tool_result(
                         tool_call,
-                        ToolExecutionResult::new(format!("Tool failed: failed to decode question arguments: {error}")),
+                        ToolExecutionResult::new(format!(
+                            "Tool failed: failed to decode question arguments: {error}"
+                        )),
                     )?;
                     self.advance_pending_tool_execution();
                     return Ok(false);
@@ -258,7 +309,9 @@ impl App {
             if args.questions.is_empty() {
                 self.record_tool_result(
                     tool_call,
-                    ToolExecutionResult::new("Tool failed: question tool requires at least one question"),
+                    ToolExecutionResult::new(
+                        "Tool failed: question tool requires at least one question",
+                    ),
                 )?;
                 self.advance_pending_tool_execution();
                 return Ok(false);
@@ -276,7 +329,7 @@ impl App {
         let result = self
             .tools
             .execute_call(
-                runtime,
+                runtime.handle(),
                 &self.store,
                 self.conversation.session_id,
                 &tool_call,
@@ -285,6 +338,91 @@ impl App {
         self.record_tool_result(tool_call, result)?;
         self.advance_pending_tool_execution();
         Ok(false)
+    }
+
+    fn start_subagent_task_execution(
+        &mut self,
+        tool_call: ToolCall,
+        runtime: &Runtime,
+    ) -> Result<()> {
+        let args = serde_json::from_str::<TaskArgs>(&tool_call.arguments)?;
+        let description = args.description.trim().to_string();
+        let prompt = args.prompt.trim().to_string();
+        let subagent_type = args
+            .subagent_type
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("general")
+            .to_string();
+
+        if description.is_empty() {
+            anyhow::bail!("task description cannot be empty");
+        }
+        if prompt.is_empty() {
+            anyhow::bail!("task prompt cannot be empty");
+        }
+
+        let request_id = self.active_request_id;
+        let parent_session_id = self.conversation.session_id;
+        let child_session_id = uuid::Uuid::new_v4();
+        let cancel_requested = Arc::new(AtomicBool::new(false));
+        self.running_subagent_executions
+            .push(RunningSubagentExecution::new(
+                request_id,
+                tool_call.clone(),
+                child_session_id,
+                cancel_requested.clone(),
+                "Starting subagent...",
+            ));
+        self.last_notice = Some(format!(
+            "Running {} subagent(s)...",
+            self.running_subagent_executions.len()
+        ));
+
+        let store_path = self.store.path().to_path_buf();
+        let runtime_handle = runtime.handle().clone();
+        let tx = self.backend_tx.clone();
+        let llm = self.llm.clone();
+        let tools = self.tools.clone();
+        let model = self.active_model.clone();
+        let workspace_root = self.workspace_root.clone();
+        let mode = self.mode;
+        let task_call = tool_call.clone();
+
+        runtime.spawn(async move {
+            let context = crate::app::subagent::SubagentTaskContext {
+                parent_request_id: request_id,
+                parent_session_id,
+                child_session_id,
+                description,
+                prompt,
+                subagent_type,
+                llm,
+                tools,
+                model,
+                workspace_root,
+                store_path,
+                tx: tx.clone(),
+                cancel_requested,
+                runtime_handle,
+                mode,
+            };
+
+            let output = match crate::app::subagent::run_subagent_task(context).await {
+                Ok(output) => output,
+                Err(error) => format!("Subagent failed: {error}"),
+            };
+
+            let _ = tx.send(crate::session::BackendEvent::SubagentCompleted {
+                request_id,
+                tool_call: task_call,
+                child_session_id,
+                result: ToolExecutionResult::new(output),
+            });
+        });
+
+        Ok(())
     }
 
     fn should_run_shell_async(&self, tool_call: &ToolCall) -> bool {

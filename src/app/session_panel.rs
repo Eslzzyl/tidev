@@ -538,6 +538,7 @@ impl App {
         self.pending_tool_execution = None;
         self.permission_dialog = None;
         self.running_tool_execution = None;
+        self.cancel_running_subagents();
         self.abort_confirmation_deadline = None;
         self.active_request_id = self.active_request_id.wrapping_add(1);
         self.streaming_markdown = None;

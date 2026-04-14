@@ -28,12 +28,13 @@ mod connect;
 mod diff_render;
 mod mcp_panel;
 mod model_panel;
-mod question;
 mod permission;
+mod question;
 mod render;
 mod render_chat;
 mod render_dialog;
 mod session_panel;
+mod subagent;
 mod theme_panel;
 mod undo;
 
@@ -41,8 +42,10 @@ use crate::{
     app::at_mention::{AtMentionKind, AtMentionState, current_at_fragment},
     app::mcp_panel::McpPanelState,
     app::model_panel::ModelPanelState,
+    app::permission::{
+        PendingToolExecution, PermissionDialogState, RunningSubagentExecution, RunningToolExecution,
+    },
     app::question::QuestionDialogState,
-    app::permission::{PendingToolExecution, PermissionDialogState, RunningToolExecution},
     app::session_panel::SessionPanelState,
     app::theme_panel::ThemePanelState,
     commands::{CommandAction, CommandPaletteState, CommandRegistry},
@@ -161,6 +164,8 @@ struct App {
     permission_dialog: Option<PermissionDialogState>,
     question_dialog: Option<QuestionDialogState>,
     running_tool_execution: Option<RunningToolExecution>,
+    running_subagent_executions: Vec<RunningSubagentExecution>,
+    leader_key_pending: bool,
     composer: Composer,
     draft_attachments: Vec<MessageAttachment>,
     pending_request: bool,
@@ -252,6 +257,8 @@ impl App {
             permission_dialog: None,
             question_dialog: None,
             running_tool_execution: None,
+            running_subagent_executions: Vec::new(),
+            leader_key_pending: false,
             composer,
             draft_attachments: Vec::new(),
             pending_request: false,
@@ -423,6 +430,13 @@ impl App {
         request_id == self.active_request_id
     }
 
+    fn cancel_running_subagents(&mut self) {
+        for execution in &self.running_subagent_executions {
+            execution.cancel_requested.store(true, Ordering::SeqCst);
+        }
+        self.running_subagent_executions.clear();
+    }
+
     fn abort_current_request(&mut self) {
         self.active_request_id = self.active_request_id.wrapping_add(1);
         self.abort_confirmation_deadline = None;
@@ -430,6 +444,7 @@ impl App {
         self.pending_tool_execution = None;
         self.permission_dialog = None;
         self.question_dialog = None;
+        self.cancel_running_subagents();
 
         if let Some(running) = self.running_tool_execution.take() {
             running.cancel_requested.store(true, Ordering::SeqCst);
@@ -535,6 +550,19 @@ impl App {
     }
 
     fn handle_key_event(&mut self, key: KeyEvent, runtime: &Runtime) -> Result<()> {
+        if self.leader_key_pending {
+            self.leader_key_pending = false;
+            let _ = self.handle_leader_key(key)?;
+            return Ok(());
+        }
+
+        if matches!(key.code, KeyCode::Char('x')) && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.leader_key_pending = true;
+            self.last_notice =
+                Some("Leader key active: use arrows to navigate subagents".to_string());
+            return Ok(());
+        }
+
         if matches!(key.code, KeyCode::Char('c')) && key.modifiers.contains(KeyModifiers::CONTROL) {
             if !self.composer.text().is_empty() {
                 self.composer.clear();
@@ -682,6 +710,52 @@ impl App {
         self.command_palette
             .sync(self.composer.text(), &self.commands);
         Ok(())
+    }
+
+    fn handle_leader_key(&mut self, key: KeyEvent) -> Result<bool> {
+        let current_session_id = self.conversation.session_id;
+        let parent_session_id = self
+            .conversation
+            .parent_session_id
+            .unwrap_or(current_session_id);
+
+        match key.code {
+            KeyCode::Up => {
+                if parent_session_id != current_session_id {
+                    self.switch_session(parent_session_id)?;
+                    return Ok(true);
+                }
+            }
+            KeyCode::Down | KeyCode::Right | KeyCode::Left => {
+                let children = self.store.load_child_sessions(parent_session_id)?;
+                if children.is_empty() {
+                    return Ok(false);
+                }
+
+                let step = if matches!(key.code, KeyCode::Left) {
+                    -1
+                } else {
+                    1
+                };
+                let index = children
+                    .iter()
+                    .position(|session| session.session_id == current_session_id)
+                    .unwrap_or(usize::MAX);
+                let next_index = if index == usize::MAX {
+                    0
+                } else {
+                    (index as isize + step).rem_euclid(children.len() as isize) as usize
+                };
+
+                if let Some(target) = children.get(next_index) {
+                    self.switch_session(target.session_id)?;
+                    return Ok(true);
+                }
+            }
+            _ => {}
+        }
+
+        Ok(false)
     }
 
     fn handle_submission(&mut self, submission: String, runtime: &Runtime) -> Result<()> {
@@ -1024,6 +1098,7 @@ impl App {
         self.permission_dialog = None;
         self.question_dialog = None;
         self.running_tool_execution = None;
+        self.cancel_running_subagents();
         self.abort_confirmation_deadline = None;
         self.active_request_id = self.active_request_id.wrapping_add(1);
         self.streaming_markdown = None;
@@ -1074,6 +1149,7 @@ impl App {
             self.permission_dialog = None;
             self.question_dialog = None;
             self.running_tool_execution = None;
+            self.cancel_running_subagents();
             self.abort_confirmation_deadline = None;
             self.active_request_id = self.active_request_id.wrapping_add(1);
             self.streaming_markdown = None;
@@ -1437,6 +1513,7 @@ impl App {
                 self.permission_dialog = None;
                 self.question_dialog = None;
                 self.running_tool_execution = None;
+                self.cancel_running_subagents();
                 self.abort_confirmation_deadline = None;
                 self.streaming_markdown = None;
                 self.streaming_preview_lines.clear();
@@ -1483,6 +1560,60 @@ impl App {
                 self.record_tool_result(tool_call, result)?;
                 self.advance_pending_tool_execution();
                 self.process_pending_tool_execution(runtime)?;
+            }
+            BackendEvent::SubagentStatus {
+                request_id,
+                child_session_id,
+                status_text,
+                current_tool_call,
+            } => {
+                if !self.is_active_request(request_id) {
+                    return Ok(());
+                }
+
+                if let Some(execution) = self
+                    .running_subagent_executions
+                    .iter_mut()
+                    .find(|execution| execution.child_session_id == child_session_id)
+                {
+                    execution.status_text = status_text;
+                    execution.current_tool_call = current_tool_call;
+                }
+            }
+            BackendEvent::SubagentCompleted {
+                request_id,
+                tool_call,
+                child_session_id,
+                result,
+            } => {
+                if !self.is_active_request(request_id) {
+                    return Ok(());
+                }
+
+                if let Some(index) = self
+                    .running_subagent_executions
+                    .iter()
+                    .position(|execution| {
+                        execution.request_id == request_id
+                            && execution.child_session_id == child_session_id
+                            && execution.tool_call.id == tool_call.id
+                    })
+                {
+                    self.running_subagent_executions.remove(index);
+                }
+
+                self.record_tool_result(tool_call, result)?;
+
+                if self.pending_tool_execution.is_none()
+                    && self.running_subagent_executions.is_empty()
+                {
+                    self.start_assistant_turn(runtime)?;
+                } else if !self.running_subagent_executions.is_empty() {
+                    self.last_notice = Some(format!(
+                        "Waiting for {} subagent(s)...",
+                        self.running_subagent_executions.len()
+                    ));
+                }
             }
             BackendEvent::UsageStats {
                 request_id,

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use rusqlite::{params, types::Type, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params, types::Type};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -206,6 +206,36 @@ impl SessionStore {
             params![
                 message.id.to_string(),
                 session_id.to_string(),
+                message.role.db_value(),
+                message.content,
+                attachments,
+                message.reasoning,
+                tool_calls,
+                message.tool_call_id,
+                message.tool_name,
+                message.created_at.to_rfc3339(),
+                if message.streaming { 1_i64 } else { 0_i64 },
+                message.input_tokens,
+                message.output_tokens,
+                message.total_tokens,
+            ],
+        )?;
+
+        self.touch_session(session_id)?;
+        Ok(())
+    }
+
+    pub fn update_message(&self, session_id: Uuid, message: &Message) -> Result<()> {
+        let tool_calls =
+            serde_json::to_string(&message.tool_calls).context("failed to serialize tool calls")?;
+        let attachments = serde_json::to_string(&message.attachments)
+            .context("failed to serialize attachments")?;
+
+        self.connection.execute(
+            "UPDATE messages SET role = ?3, content = ?4, attachments = ?5, reasoning = ?6, tool_calls = ?7, tool_call_id = ?8, tool_name = ?9, created_at = ?10, streaming = ?11, input_tokens = ?12, output_tokens = ?13, total_tokens = ?14 WHERE session_id = ?1 AND id = ?2",
+            params![
+                session_id.to_string(),
+                message.id.to_string(),
                 message.role.db_value(),
                 message.content,
                 attachments,
