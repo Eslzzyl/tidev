@@ -28,6 +28,9 @@ pub enum McpServerConfig {
     Http {
         url: String,
     },
+    Sse {
+        url: String,
+    },
 }
 
 impl McpServerConfig {
@@ -35,6 +38,7 @@ impl McpServerConfig {
         match self {
             Self::Stdio { .. } => "stdio",
             Self::Http { .. } => "http",
+            Self::Sse { .. } => "sse",
         }
     }
 }

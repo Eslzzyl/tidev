@@ -228,6 +228,9 @@ impl App {
         lines.push(Line::from("/session - open the session panel"));
         lines.push(Line::from("/session <query> - prefilter the session panel"));
         lines.push(Line::from("/mcp - open the MCP panel"));
+        lines.push(Line::from("/mcp add - create a new MCP server"));
+        lines.push(Line::from("/mcp edit <name> - edit an MCP server"));
+        lines.push(Line::from("/mcp remove <name> - remove an MCP server"));
         lines.push(Line::from("/clear"));
         lines.push(Line::from("/exit"));
         lines.push(Line::from(""));

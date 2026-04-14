@@ -2974,6 +2974,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "shlex",
  "syntect",
  "textwrap",
  "tokio",

@@ -105,7 +105,7 @@ instructions = []
 # Example: skills = ["https://example.com/skills/git-release/SKILL.md"]
 skills = []
 
-# MCP servers can be declared here. Supported transports: stdio and streamable HTTP.
+# MCP servers can be declared here. Supported transports: stdio, streamable HTTP, and SSE.
 # [mcp.servers.my_server]
 # kind = "stdio"
 # command = "npx"
@@ -114,6 +114,10 @@ skills = []
 # [mcp.servers.remote]
 # kind = "http"
 # url = "https://example.com/mcp"
+#
+# [mcp.servers.events]
+# kind = "sse"
+# url = "https://example.com/sse"
 
 [mcp]
 

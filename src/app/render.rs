@@ -180,6 +180,9 @@ impl App {
             "/help - show this message",
             "/connect - open the provider picker",
             "/mcp - open the MCP panel",
+            "/mcp add - create a new MCP server",
+            "/mcp edit <server-name> - edit an MCP server",
+            "/mcp remove <server-name> - remove an MCP server",
             "/model - open the model panel",
             "/model <query> - prefilter the model panel",
             "/session - open the session panel",
@@ -201,6 +204,7 @@ impl App {
             "Ctrl+C - exit",
             "Permission prompt - Y allow · N deny · R allow and remember · X deny and remember",
             "Connect picker - type to filter providers, Enter to select, Esc to cancel",
+            "MCP panel - Enter connect/disconnect · a add · e edit · d remove · R refresh · Esc close",
             "",
             "Modes:",
         ]

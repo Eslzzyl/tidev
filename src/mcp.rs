@@ -142,6 +142,56 @@ impl McpManager {
         Ok(())
     }
 
+    pub async fn upsert_server(&self, name: String, config: McpServerConfig) -> Result<()> {
+        let existing_client = {
+            let mut inner = self.inner.lock().unwrap();
+            let state = inner.servers.entry(name.clone()).or_insert_with(|| McpServerState {
+                config: config.clone(),
+                status: McpConnectionStatus::Disconnected,
+                client: None,
+                tools: Vec::new(),
+            });
+
+            state.config = config;
+            state.status = McpConnectionStatus::Disconnected;
+            state.tools.clear();
+            state.client.take()
+        };
+
+        if let Some(mut client) = existing_client {
+            let _ = client.close().await;
+        }
+
+        self.refresh_server(&name).await
+    }
+
+    pub async fn remove_server(&self, name: &str) -> Result<()> {
+        let client = {
+            let mut inner = self.inner.lock().unwrap();
+            inner
+                .servers
+                .remove(name)
+                .with_context(|| format!("unknown MCP server '{name}'"))?
+                .client
+        };
+
+        if let Some(mut client) = client {
+            let _ = client.close().await;
+        }
+
+        Ok(())
+    }
+
+    pub fn server_config(&self, name: &str) -> Option<McpServerConfig> {
+        let inner = self.inner.lock().unwrap();
+        inner.servers.get(name).map(|state| state.config.clone())
+    }
+
+    pub fn has_server(&self, name: &str) -> bool {
+        let inner = self.inner.lock().unwrap();
+        inner.servers.contains_key(name)
+    }
+
     pub async fn disconnect_server(&self, name: &str) -> Result<()> {
         let client = {
             let mut inner = self.inner.lock().unwrap();
@@ -313,7 +363,7 @@ impl McpManager {
                     .context("failed to connect to stdio MCP server")?;
                 Ok(client)
             }
-            McpServerConfig::Http { url } => {
+            McpServerConfig::Http { url } | McpServerConfig::Sse { url } => {
                 let transport = StreamableHttpClientTransport::from_uri(url.as_str());
                 let client: McpClient = client_info
                     .serve(transport)
