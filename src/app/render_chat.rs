@@ -91,18 +91,18 @@ impl App {
 
     pub(super) fn render_messages(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let palette = self.palette();
+        let mut title = format!("Conversation · {}", shorten(&self.conversation.title, 32),);
+        if !self.message_follow_tail {
+            title.push_str(" · history");
+        }
+        if self.conversation.parent_session_id.is_some() {
+            title.push_str(" · SUBSESSION");
+        }
+
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(palette.border_idle()))
-            .title(format!(
-                "Conversation · {}{}",
-                shorten(&self.conversation.title, 32),
-                if !self.message_follow_tail {
-                    " · history"
-                } else {
-                    ""
-                }
-            ));
+            .title(title);
         frame.render_widget(block, area);
 
         let inner = area.inner(Margin {
@@ -321,8 +321,9 @@ impl App {
         lines.push(Line::from("/model <query> - prefilter the model panel"));
         lines.push(Line::from("/session - open the session panel"));
         lines.push(Line::from("/session <query> - prefilter the session panel"));
+        lines.push(Line::from("Ctrl+X then Down arrow - open a child session"));
         lines.push(Line::from(
-            "Ctrl+X then arrows - navigate parent and child sessions",
+            "Ctrl+X then Up arrow - return to the parent session",
         ));
         lines.push(Line::from("/mcp - open the MCP panel"));
         lines.push(Line::from("/mcp add - create a new MCP server"));
@@ -379,22 +380,34 @@ impl App {
         let palette = self.palette();
         let width = content_width.unwrap_or(1).max(1);
         let body_width = width.saturating_sub(2).max(1);
+        let messages = self.conversation.visible_messages();
 
-        if self.conversation.visible_messages().is_empty() {
-            let lines = decorate_card_lines(
+        let mut lines = Vec::new();
+        if self.conversation.parent_session_id.is_some() {
+            lines.push(line_with_style(
+                "SUBSESSION active — viewing a child session.",
+                palette.accent_soft,
+            ));
+            lines.push(line_with_style(
+                "Press Ctrl+X then Up arrow to return to the parent session.",
+                palette.muted,
+            ));
+            lines.push(Line::from(""));
+        }
+
+        if messages.is_empty() {
+            lines.extend(decorate_card_lines(
                 vec![
                     line_with_style("No messages yet.", palette.muted),
                     line_with_style("Start with a prompt in the input box below.", palette.muted),
                 ],
                 width,
                 palette.panel,
-            );
+            ));
             let total_lines = lines.len().max(1);
             return (Text::from(lines), total_lines);
         }
 
-        let mut lines = Vec::new();
-        let messages = self.conversation.visible_messages();
         let mut i = 0;
         while i < messages.len() {
             let message = &messages[i];

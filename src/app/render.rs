@@ -200,7 +200,8 @@ impl App {
             "Enter - send prompt or execute the highlighted slash command",
             "Shift+Enter / Ctrl+J - insert newline",
             "PageUp / PageDown / mouse wheel - scroll conversation",
-            "Ctrl+X then arrows - navigate parent and child sessions",
+            "Ctrl+X then Down arrow - open a child session",
+            "Ctrl+X then Up arrow - return to the parent session",
             "Tab - switch mode (when no command is being entered)",
             "Up/Down - move through command suggestions",
                 "Ctrl+V - paste clipboard text or image",
@@ -344,6 +345,10 @@ impl App {
 
         if let Some(message) = self.last_notice.as_deref() {
             return message.to_string();
+        }
+
+        if self.conversation.parent_session_id.is_some() {
+            return "Subsession active · Ctrl+X then Up arrow to return".to_string();
         }
 
         "Ready".to_string()
