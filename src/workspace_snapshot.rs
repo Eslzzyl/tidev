@@ -253,14 +253,18 @@ mod tests {
             ],
         );
 
-        let snapshot = WorkspaceSnapshot::capture(&workspace_root).expect("snapshot should capture");
+        let snapshot =
+            WorkspaceSnapshot::capture(&workspace_root).expect("snapshot should capture");
 
         fs::write(workspace_root.join("tracked.txt"), "changed\n").expect("modify tracked file");
         fs::write(workspace_root.join("new.txt"), "new\n").expect("create untracked file");
 
-        snapshot.restore(&workspace_root).expect("snapshot should restore");
+        snapshot
+            .restore(&workspace_root)
+            .expect("snapshot should restore");
 
-        let tracked = fs::read_to_string(workspace_root.join("tracked.txt")).expect("tracked file should exist");
+        let tracked = fs::read_to_string(workspace_root.join("tracked.txt"))
+            .expect("tracked file should exist");
         assert_eq!(tracked, "base\n");
         assert!(!workspace_root.join("new.txt").exists());
 

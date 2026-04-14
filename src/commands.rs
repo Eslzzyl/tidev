@@ -4,6 +4,7 @@ use std::collections::HashMap;
 pub enum CommandAction {
     Help,
     Connect,
+    Mcp,
     Model,
     Session,
     Clear,
@@ -233,6 +234,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         description: "Open the provider picker",
         usage: "/connect",
         action: CommandAction::Connect,
+    },
+    CommandSpec {
+        name: "mcp",
+        aliases: &[],
+        description: "Open the MCP panel",
+        usage: "/mcp",
+        action: CommandAction::Mcp,
     },
     CommandSpec {
         name: "model",

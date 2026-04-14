@@ -1,4 +1,5 @@
 use crate::{
+    app::mcp_panel::McpPanelState,
     app::model_panel::{ModelPanelItem, ModelPanelState},
     app::permission::PermissionDialogState,
     app::session_panel::SessionPanelState,
@@ -982,6 +983,118 @@ impl App {
             Paragraph::new("Enter switch · Ctrl+E edit selected provider · Esc close")
                 .alignment(Alignment::Center)
                 .style(Style::default().bg(palette.panel).fg(palette.muted)),
+            sections[3],
+        );
+    }
+
+    pub(super) fn render_mcp_panel(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        panel: &McpPanelState,
+    ) {
+        let palette = self.palette();
+        let overlay = centered_rect(area.width.min(106), area.height.min(34), area);
+        frame.render_widget(Clear, overlay);
+
+        let title = Block::default()
+            .style(Style::default().bg(palette.panel))
+            .title(" MCP servers ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.border_active()));
+        frame.render_widget(title, overlay);
+
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+
+        let sections = Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Length(3),
+            Constraint::Min(8),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+        frame.render_widget(
+            Paragraph::new("Type to filter by server name, transport, or status. Enter toggles connect/disconnect.")
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(palette.panel).fg(palette.muted)),
+            sections[0],
+        );
+
+        self.render_input_block(
+            frame,
+            sections[1],
+            "Search MCP servers",
+            self.composer.placeholder(),
+            false,
+        );
+
+        let items = self.mcp_panel_items();
+        let mut rows = Vec::new();
+        for item in &items {
+            let summary = &item.summary;
+            rows.push(ListItem::new(Line::from(vec![
+                Span::styled(
+                    summary.name.clone(),
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    format!("({})", summary.kind),
+                    Style::default().fg(palette.muted),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    summary.status_text(),
+                    Style::default().fg(match summary.status.label() {
+                        "connected" => palette.success,
+                        "connecting" => palette.warning,
+                        "failed" => palette.error,
+                        _ => palette.muted,
+                    }),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    format!("{} tools", summary.tool_count),
+                    Style::default().fg(palette.accent_soft),
+                ),
+            ])));
+        }
+
+        if rows.is_empty() {
+            frame.render_widget(
+                Paragraph::new("No MCP servers match this search.")
+                    .alignment(Alignment::Center)
+                    .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                sections[2],
+            );
+        } else {
+            let mut state = ListState::default();
+            state.select(Some(
+                panel.selected_index.min(items.len().saturating_sub(1)),
+            ));
+
+            let list = List::new(rows)
+                .style(Style::default().bg(palette.panel).fg(palette.text))
+                .highlight_style(
+                    Style::default()
+                        .bg(palette.selection_bg)
+                        .fg(palette.selection_fg)
+                        .add_modifier(Modifier::BOLD),
+                );
+
+            frame.render_stateful_widget(list, sections[2], &mut state);
+        }
+
+        frame.render_widget(
+            Paragraph::new("Enter connect/disconnect · R refresh · Esc close")
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
             sections[3],
         );
     }

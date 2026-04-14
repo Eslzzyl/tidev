@@ -25,6 +25,7 @@ use uuid::Uuid;
 
 mod at_mention;
 mod connect;
+mod mcp_panel;
 mod model_panel;
 mod permission;
 mod render;
@@ -36,6 +37,7 @@ mod undo;
 
 use crate::{
     app::at_mention::{AtMentionKind, AtMentionState, current_at_fragment},
+    app::mcp_panel::McpPanelState,
     app::model_panel::ModelPanelState,
     app::permission::{PendingToolExecution, PermissionDialogState, RunningToolExecution},
     app::session_panel::SessionPanelState,
@@ -47,6 +49,7 @@ use crate::{
     instructions,
     llm::LlmClient,
     markdown_stream::MarkdownStreamCollector,
+    mcp::McpManager,
     prompts::SessionMode,
     provider_setup::ConnectDialog,
     session::{AssistantTurn, BackendEvent, Conversation, Message, MessageAttachment, MessageRole},
@@ -149,6 +152,7 @@ struct App {
     theme_panel: Option<ThemePanelState>,
     model_panel: Option<ModelPanelState>,
     session_panel: Option<SessionPanelState>,
+    mcp_panel: Option<McpPanelState>,
     at_mention: AtMentionState,
     pending_tool_execution: Option<PendingToolExecution>,
     permission_dialog: Option<PermissionDialogState>,
@@ -186,10 +190,12 @@ impl App {
         let store = SessionStore::open(paths.default_database_path())?;
         let llm = LlmClient::new()?;
         let theme = ThemeManager::new(&config.theme);
+        let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
         let tools = ToolRegistry::new(
             workspace_root.clone(),
             paths.config_dir.clone(),
             config.skills.clone(),
+            mcp,
         );
         let commands = CommandRegistry::new();
         let command_palette = CommandPaletteState::default();
@@ -243,6 +249,7 @@ impl App {
             theme_panel: None,
             model_panel: None,
             session_panel: None,
+            mcp_panel: None,
             at_mention: AtMentionState::default(),
             pending_tool_execution: None,
             permission_dialog: None,
@@ -267,6 +274,7 @@ impl App {
     }
 
     fn run(&mut self, runtime: &Runtime) -> Result<()> {
+        runtime.block_on(self.refresh_mcp_tools())?;
         let _session = TerminalSession::enter()?;
         let backend = CrosstermBackend::new(io::stdout());
         let mut terminal = Terminal::new(backend).context("failed to create terminal")?;
@@ -320,6 +328,7 @@ impl App {
             && self.connect_dialog.is_none()
             && self.theme_panel.is_none()
             && self.model_panel.is_none()
+            && self.mcp_panel.is_none()
             && !self.command_palette.visible
     }
 
@@ -548,6 +557,10 @@ impl App {
             return self.handle_theme_panel_key(key);
         }
 
+        if self.mcp_panel.is_some() {
+            return self.handle_mcp_panel_key(key, runtime);
+        }
+
         if self.model_panel.is_some() {
             return self.handle_model_panel_key(key);
         }
@@ -692,9 +705,10 @@ impl App {
         };
 
         if let Ok(text) = clipboard.get_text()
-            && !text.is_empty() {
-                return self.handle_text_paste(&text);
-            }
+            && !text.is_empty()
+        {
+            return self.handle_text_paste(&text);
+        }
 
         let image = match clipboard.get_image() {
             Ok(image) => image,
@@ -733,6 +747,7 @@ impl App {
             || self.theme_panel.is_some()
             || self.model_panel.is_some()
             || self.session_panel.is_some()
+            || self.mcp_panel.is_some()
         {
             self.at_mention.clear();
             return;
@@ -821,6 +836,9 @@ impl App {
                 }
                 self.open_connect_dialog()?;
             }
+            CommandAction::Mcp => {
+                self.open_mcp_panel(args.join(" "));
+            }
             CommandAction::Model => {
                 self.open_model_panel(args.join(" "));
             }
@@ -864,6 +882,7 @@ impl App {
     }
 
     fn open_theme_panel(&mut self) {
+        self.mcp_panel = None;
         self.theme_panel = Some(ThemePanelState::new(self.theme.palette().name));
     }
 
@@ -873,6 +892,7 @@ impl App {
         self.draft_attachments.clear();
         self.connect_dialog = None;
         self.theme_panel = None;
+        self.mcp_panel = None;
         self.composer.clear();
         self.composer
             .set_placeholder("Search connected models by provider or model name");
@@ -891,6 +911,10 @@ impl App {
         self.composer.clear();
         self.composer
             .set_placeholder("Ask TiDev about your code, task, or question...");
+    }
+
+    async fn refresh_mcp_tools(&self) -> Result<()> {
+        self.tools.refresh_mcp_tools().await
     }
 
     fn close_theme_panel(&mut self, apply: bool) -> Result<()> {
@@ -969,6 +993,7 @@ impl App {
         self.theme_panel = None;
         self.model_panel = None;
         self.session_panel = None;
+        self.mcp_panel = None;
         self.command_palette.clear();
         self.at_mention.clear();
         self.draft_attachments.clear();
@@ -1186,10 +1211,12 @@ impl App {
     }
 
     fn refresh_tools(&mut self) {
+        let mcp = self.tools.mcp_manager();
         self.tools = ToolRegistry::new(
             self.workspace_root.clone(),
             self.paths.config_dir.clone(),
             self.config.skills.clone(),
+            mcp,
         );
     }
 
@@ -1250,9 +1277,10 @@ impl App {
 
         let path = Path::new(source);
         if path.is_absolute()
-            && let Ok(rel) = path.strip_prefix(&self.workspace_root) {
-                return rel.display().to_string();
-            }
+            && let Ok(rel) = path.strip_prefix(&self.workspace_root)
+        {
+            return rel.display().to_string();
+        }
 
         source.to_string()
     }
@@ -1322,7 +1350,13 @@ impl App {
 
                 self.finish_assistant_turn(turn, runtime)?;
             }
-            BackendEvent::Retrying { request_id, attempt, max_attempts, reason, retry_after_secs } => {
+            BackendEvent::Retrying {
+                request_id,
+                attempt,
+                max_attempts,
+                reason,
+                retry_after_secs,
+            } => {
                 if !self.is_active_request(request_id) {
                     return Ok(());
                 }

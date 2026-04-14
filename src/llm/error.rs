@@ -31,23 +31,20 @@ impl std::fmt::Display for NetworkError {
 impl std::error::Error for NetworkError {}
 
 /// Classifies a reqwest `Response` status code into a `NetworkError`.
-pub fn classify_response_status(status: reqwest::StatusCode, _body: Option<String>) -> NetworkError {
+pub fn classify_response_status(
+    status: reqwest::StatusCode,
+    _body: Option<String>,
+) -> NetworkError {
     let code = status.as_u16();
     let message = status.canonical_reason().unwrap_or("Unknown").to_string();
 
     match code {
         // Retryable: server errors and rate limits
-        408 | 429 | 500 | 502 | 503 | 504 => NetworkError::Retryable {
-            message,
-        },
+        408 | 429 | 500 | 502 | 503 | 504 => NetworkError::Retryable { message },
         // Non-retryable: auth, not found, payload too large
-        401 | 403 | 404 | 413 => NetworkError::NonRetryable {
-            message,
-        },
+        401 | 403 | 404 | 413 => NetworkError::NonRetryable { message },
         // Unexpected but treat as non-retryable
-        _ => NetworkError::NonRetryable {
-            message,
-        },
+        _ => NetworkError::NonRetryable { message },
     }
 }
 

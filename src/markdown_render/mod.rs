@@ -7,15 +7,17 @@ mod wrap;
 
 use std::path::{Path, PathBuf};
 
-use pulldown_cmark::{Alignment, CodeBlockKind, CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{
+    Alignment, CodeBlockKind, CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd,
+};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
 
 use highlight::highlight_code_to_lines;
-use line::push_owned_lines;
 pub use line::is_blank_line_spaces_only;
-use wrap::{adaptive_wrap_line, RtOptions};
-pub use wrap::{adaptive_wrap_lines, RtOptions as WrapOptions};
+use line::push_owned_lines;
+use wrap::{RtOptions, adaptive_wrap_line};
+pub use wrap::{RtOptions as WrapOptions, adaptive_wrap_lines};
 
 pub use links::is_local_path_like_link;
 
@@ -335,9 +337,10 @@ where
     fn start_table_row(&mut self) {
         self.flush_current_line();
         if let Some(table) = self.table_state.as_mut()
-            && !(table.in_head && table.current_row.is_some()) {
-                table.start_row();
-            }
+            && !(table.in_head && table.current_row.is_some())
+        {
+            table.start_row();
+        }
         self.in_table_cell = false;
     }
 

@@ -14,7 +14,7 @@ use crate::{
     tooling::ToolDefinition,
 };
 
-use error::{backoff_delay, backoff_sleep, classify_anyhow_error, MAX_RETRIES};
+use error::{MAX_RETRIES, backoff_delay, backoff_sleep, classify_anyhow_error};
 
 #[derive(Clone)]
 pub struct LlmClient {
@@ -56,9 +56,7 @@ impl LlmClient {
         model: ActiveModel,
         messages: Vec<Message>,
     ) -> Result<String> {
-        let result = self
-            .complete_with_retry(model, messages)
-            .await;
+        let result = self.complete_with_retry(model, messages).await;
 
         result.context("LLM completion failed after retries")
     }
@@ -74,7 +72,13 @@ impl LlmClient {
     ) -> Result<()> {
         for attempt in 1..=MAX_RETRIES {
             let result = self
-                .stream_chat_inner(request_id, model.clone(), messages.clone(), tools.clone(), tx.clone())
+                .stream_chat_inner(
+                    request_id,
+                    model.clone(),
+                    messages.clone(),
+                    tools.clone(),
+                    tx.clone(),
+                )
                 .await;
 
             match result {
@@ -114,8 +118,12 @@ impl LlmClient {
     ) -> Result<String> {
         for attempt in 1..=MAX_RETRIES {
             let result = match model.api_type {
-                ApiType::Anthropic => anthropic::complete_anthropic(&self.http, model.clone(), messages.clone()).await,
-                ApiType::OpenAi => openai::complete_openai(&self.http, model.clone(), messages.clone()).await,
+                ApiType::Anthropic => {
+                    anthropic::complete_anthropic(&self.http, model.clone(), messages.clone()).await
+                }
+                ApiType::OpenAi => {
+                    openai::complete_openai(&self.http, model.clone(), messages.clone()).await
+                }
             };
 
             match result {

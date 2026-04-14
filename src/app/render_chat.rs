@@ -186,7 +186,28 @@ impl App {
                 .add_modifier(Modifier::BOLD),
         )]));
         for tool in self.tools.available_definitions(self.mode) {
-            lines.push(Line::from(format!("- {}", tool.name)));
+            lines.push(Line::from(format!("- {}", tool.display_name)));
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![Span::styled(
+            "MCP",
+            Style::default()
+                .fg(palette.accent)
+                .add_modifier(Modifier::BOLD),
+        )]));
+        let mcp_servers = self.tools.mcp_summaries();
+        if mcp_servers.is_empty() {
+            lines.push(Line::from("No MCP servers configured"));
+        } else {
+            for server in mcp_servers {
+                lines.push(Line::from(format!(
+                    "- {} · {} · {} · {} tools",
+                    server.name,
+                    server.kind,
+                    server.status_text(),
+                    server.tool_count
+                )));
+            }
         }
         lines.push(Line::from(""));
         lines.push(Line::from(vec![Span::styled(
@@ -206,6 +227,7 @@ impl App {
         lines.push(Line::from("/model <query> - prefilter the model panel"));
         lines.push(Line::from("/session - open the session panel"));
         lines.push(Line::from("/session <query> - prefilter the session panel"));
+        lines.push(Line::from("/mcp - open the MCP panel"));
         lines.push(Line::from("/clear"));
         lines.push(Line::from("/exit"));
         lines.push(Line::from(""));

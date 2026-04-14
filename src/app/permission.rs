@@ -249,7 +249,12 @@ impl App {
 
         let output = self
             .tools
-            .execute_call(&self.store, self.conversation.session_id, &tool_call)
+            .execute_call(
+                runtime,
+                &self.store,
+                self.conversation.session_id,
+                &tool_call,
+            )
             .unwrap_or_else(|error| format!("Tool failed: {error}"));
         self.record_tool_result(tool_call, output)?;
         self.advance_pending_tool_execution();

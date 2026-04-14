@@ -1,4 +1,5 @@
 mod auth;
+pub mod mcp;
 mod paths;
 mod provider;
 mod ui;
@@ -11,6 +12,7 @@ use crate::prompts::default_system_prompt;
 use crate::theme::ThemeName;
 
 pub use auth::{ActiveModel, AuthStore, ModelSummary, ProviderAuth};
+pub use mcp::{McpConfig, McpServerConfig};
 pub use paths::ConfigPaths;
 pub use provider::{ApiType, ModelConfig, ProviderConfig, ProviderSource};
 pub use ui::UiConfig;
@@ -31,6 +33,8 @@ pub struct AppConfig {
     pub instructions: Vec<String>,
     #[serde(default)]
     pub skills: Vec<String>,
+    #[serde(default, skip_serializing_if = "mcp::McpConfig::is_empty")]
+    pub mcp: McpConfig,
     #[serde(skip)]
     pub bundled_providers: BTreeMap<String, ProviderConfig>,
 }
@@ -49,6 +53,7 @@ impl Default for AppConfig {
             providers: BTreeMap::new(),
             instructions: Vec::new(),
             skills: Vec::new(),
+            mcp: McpConfig::default(),
             bundled_providers: bundled_provider_catalog().unwrap_or_default(),
         }
     }
@@ -99,6 +104,18 @@ instructions = []
 # Optional additional skill sources. Each entry can be a local path or an HTTP(S) URL to a SKILL.md file.
 # Example: skills = ["https://example.com/skills/git-release/SKILL.md"]
 skills = []
+
+# MCP servers can be declared here. Supported transports: stdio and streamable HTTP.
+# [mcp.servers.my_server]
+# kind = "stdio"
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
+#
+# [mcp.servers.remote]
+# kind = "http"
+# url = "https://example.com/mcp"
+
+[mcp]
 
 [ui]
 sidebar_width = 30

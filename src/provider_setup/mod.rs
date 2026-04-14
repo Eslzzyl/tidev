@@ -1,7 +1,7 @@
 mod edit_provider;
 mod new_provider;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
 pub use edit_provider::{EditModelStep, EditProviderDraft, EditProviderStep};
 pub use new_provider::{NewModelDraft, NewProviderDraft, NewProviderStep};
@@ -54,10 +54,7 @@ fn non_empty<'a>(value: &'a str, label: &str) -> Result<&'a str> {
 }
 
 fn normalize_identifier(value: &str, label: &str) -> Result<String> {
-    let normalized = value
-        .trim()
-        .to_ascii_lowercase()
-        .replace([' ', '.'], "-");
+    let normalized = value.trim().to_ascii_lowercase().replace([' ', '.'], "-");
 
     if normalized.is_empty() {
         bail!("{label} cannot be empty");

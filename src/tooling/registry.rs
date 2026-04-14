@@ -2,8 +2,9 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-use crate::{prompts::SessionMode, session::ToolCall, storage::SessionStore};
+use crate::mcp::McpManager;
 use crate::skills::SkillCatalog;
+use crate::{prompts::SessionMode, session::ToolCall, storage::SessionStore};
 
 use super::tools::{execute_tool_call, tool_definitions};
 use super::{ToolDefinition, canonical_tool_name};
@@ -14,10 +15,16 @@ pub struct ToolRegistry {
     max_output_bytes: usize,
     definitions: Vec<ToolDefinition>,
     skills: SkillCatalog,
+    mcp: McpManager,
 }
 
 impl ToolRegistry {
-    pub fn new(workspace_root: PathBuf, config_dir: PathBuf, skill_sources: Vec<String>) -> Self {
+    pub fn new(
+        workspace_root: PathBuf,
+        config_dir: PathBuf,
+        skill_sources: Vec<String>,
+        mcp: McpManager,
+    ) -> Self {
         let skills = SkillCatalog::discover(&workspace_root, &config_dir, &skill_sources);
         let definitions = tool_definitions(skills.tool_description());
 
@@ -26,6 +33,7 @@ impl ToolRegistry {
             max_output_bytes: 12_000,
             definitions,
             skills,
+            mcp,
         }
     }
 
@@ -35,6 +43,30 @@ impl ToolRegistry {
 
     pub fn definitions(&self) -> &[ToolDefinition] {
         &self.definitions
+    }
+
+    pub fn mcp_summaries(&self) -> Vec<crate::mcp::McpServerSummary> {
+        self.mcp.summaries()
+    }
+
+    pub fn mcp_manager(&self) -> McpManager {
+        self.mcp.clone()
+    }
+
+    pub async fn refresh_mcp_tools(&self) -> Result<()> {
+        self.mcp.refresh_all().await
+    }
+
+    pub async fn refresh_mcp_server(&self, name: &str) -> Result<()> {
+        self.mcp.refresh_server(name).await
+    }
+
+    pub async fn toggle_mcp_server(&self, name: &str) -> Result<()> {
+        self.mcp.toggle_server(name).await
+    }
+
+    pub async fn disconnect_mcp_server(&self, name: &str) -> Result<()> {
+        self.mcp.disconnect_server(name).await
     }
 
     pub fn permission_key_for_call(&self, call: &ToolCall) -> String {
@@ -48,9 +80,13 @@ impl ToolRegistry {
             return SkillCatalog::permission_key_for_name("unknown");
         }
 
-        canonical_tool_name(&call.name)
-            .unwrap_or(&call.name)
-            .to_string()
+        self.definition_for(&call.name)
+            .map(|definition| definition.permission_key())
+            .unwrap_or_else(|| {
+                canonical_tool_name(&call.name)
+                    .unwrap_or(&call.name)
+                    .to_string()
+            })
     }
 
     pub fn permission_label_for_call(&self, call: &ToolCall) -> String {
@@ -64,17 +100,25 @@ impl ToolRegistry {
             return "skill".to_string();
         }
 
-        canonical_tool_name(&call.name)
-            .unwrap_or(&call.name)
-            .to_string()
+        self.definition_for(&call.name)
+            .map(|definition| definition.permission_label())
+            .unwrap_or_else(|| {
+                canonical_tool_name(&call.name)
+                    .unwrap_or(&call.name)
+                    .to_string()
+            })
     }
 
     pub fn available_definitions(&self, mode: SessionMode) -> Vec<ToolDefinition> {
-        self.definitions
+        let mut definitions = self
+            .definitions
             .iter()
             .filter(|definition| definition.permission.is_allowed_in(mode))
             .cloned()
-            .collect()
+            .collect::<Vec<_>>();
+
+        definitions.extend(self.mcp.available_definitions(mode));
+        definitions
     }
 
     pub fn max_output_bytes(&self) -> usize {
@@ -86,19 +130,37 @@ impl ToolRegistry {
             .is_some_and(|definition| definition.permission.is_allowed_in(mode))
     }
 
-    pub fn definition_for(&self, tool_name: &str) -> Option<&ToolDefinition> {
+    pub fn definition_for(&self, tool_name: &str) -> Option<ToolDefinition> {
+        if let Some(definition) = self
+            .definitions
+            .iter()
+            .find(|definition| definition.name == tool_name)
+        {
+            return Some(definition.clone());
+        }
+
+        if let Some(definition) = self.mcp.definition_for(tool_name) {
+            return Some(definition);
+        }
+
         let canonical_name = super::canonical_tool_name(tool_name)?;
         self.definitions
             .iter()
             .find(|definition| definition.name == canonical_name)
+            .cloned()
     }
 
     pub fn execute_call(
         &self,
+        runtime: &tokio::runtime::Runtime,
         store: &SessionStore,
         session_id: Uuid,
         call: &ToolCall,
     ) -> Result<String> {
+        if self.mcp.definition_for(&call.name).is_some() {
+            return runtime.block_on(self.mcp.execute_call(call));
+        }
+
         execute_tool_call(
             &self.workspace_root,
             &self.skills,

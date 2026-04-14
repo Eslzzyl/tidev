@@ -25,6 +25,9 @@ impl App {
         if let Some(panel) = &self.theme_panel {
             self.render_theme_panel(frame, area, panel);
         }
+        if let Some(panel) = &self.mcp_panel {
+            self.render_mcp_panel(frame, area, panel);
+        }
         if let Some(panel) = &self.model_panel {
             self.render_model_panel(frame, area, panel);
         }
@@ -176,6 +179,7 @@ impl App {
             "Commands:",
             "/help - show this message",
             "/connect - open the provider picker",
+            "/mcp - open the MCP panel",
             "/model - open the model panel",
             "/model <query> - prefilter the model panel",
             "/session - open the session panel",
@@ -265,11 +269,11 @@ impl App {
     pub(super) fn render_retrying_hint(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let palette = self.palette();
 
-        let Some((attempt, max_attempts, reason, retry_after_secs)) = self.retrying_hint.as_ref() else {
+        let Some((attempt, max_attempts, reason, retry_after_secs)) = self.retrying_hint.as_ref()
+        else {
             // Clear any existing content
             frame.render_widget(
-                Paragraph::new("")
-                    .style(Style::default().fg(palette.text)),
+                Paragraph::new("").style(Style::default().fg(palette.text)),
                 area,
             );
             return;

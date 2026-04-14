@@ -21,8 +21,9 @@ use std::{
 
 use crate::{session::ToolCall, skills::SkillCatalog, storage::SessionStore};
 
+use super::canonical_tool_name;
 use super::schema::ToolArgs;
-use super::{ToolDefinition, ToolPermission, canonical_tool_name};
+use super::{ToolDefinition, ToolPermission};
 
 macro_rules! tool_field_type {
     (string($desc:literal)) => {

@@ -74,6 +74,7 @@ impl App {
         self.connect_dialog = None;
         self.theme_panel = None;
         self.model_panel = None;
+        self.mcp_panel = None;
 
         let sessions = self
             .store
@@ -203,6 +204,7 @@ impl App {
         self.theme_panel = None;
         self.model_panel = None;
         self.session_panel = None;
+        self.mcp_panel = None;
         self.command_palette.clear();
         self.composer.clear();
         self.composer

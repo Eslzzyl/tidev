@@ -208,7 +208,11 @@ fn discover_skill_files(root: &Path) -> Vec<PathBuf> {
 
 fn parse_skill_file(path: &Path) -> Result<SkillInfo, ()> {
     let raw_content = fs::read_to_string(path).map_err(|_| ())?;
-    parse_skill_content(path.to_path_buf(), Some(path.parent().ok_or(())?.to_path_buf()), raw_content)
+    parse_skill_content(
+        path.to_path_buf(),
+        Some(path.parent().ok_or(())?.to_path_buf()),
+        raw_content,
+    )
 }
 
 fn parse_skill_content(
@@ -262,7 +266,12 @@ fn load_additional_skill_source(raw_source: &str, workspace_root: &Path) -> Opti
 
     let resolved = resolve_local_skill_source(workspace_root, raw_source)?;
     let content = fs::read_to_string(&resolved).ok()?;
-    parse_skill_content(resolved.clone(), resolved.parent().map(Path::to_path_buf), content).ok()
+    parse_skill_content(
+        resolved.clone(),
+        resolved.parent().map(Path::to_path_buf),
+        content,
+    )
+    .ok()
 }
 
 fn resolve_local_skill_source(workspace_root: &Path, raw_source: &str) -> Option<PathBuf> {

@@ -27,6 +27,7 @@ impl App {
         self.command_palette.clear();
         self.at_mention.clear();
         self.draft_attachments.clear();
+        self.mcp_panel = None;
 
         self.composer.clear();
         self.composer

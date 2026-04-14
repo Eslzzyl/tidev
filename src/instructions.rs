@@ -63,14 +63,15 @@ pub fn system_prompt_and_sources(
 
     for path in paths {
         if let Ok(content) = fs::read_to_string(&path)
-            && !content.trim().is_empty() {
-                sections.push(format!(
-                    "Instructions from: {}\n{}",
-                    path.display(),
-                    content
-                ));
-                sources.push(path.display().to_string());
-            }
+            && !content.trim().is_empty()
+        {
+            sections.push(format!(
+                "Instructions from: {}\n{}",
+                path.display(),
+                content
+            ));
+            sources.push(path.display().to_string());
+        }
     }
 
     for url in instructions
@@ -78,10 +79,11 @@ pub fn system_prompt_and_sources(
         .filter(|item| item.starts_with("http://") || item.starts_with("https://"))
     {
         if let Ok(content) = fetch_remote(url)
-            && !content.trim().is_empty() {
-                sections.push(format!("Instructions from: {}\n{}", url, content));
-                sources.push(url.clone());
-            }
+            && !content.trim().is_empty()
+        {
+            sections.push(format!("Instructions from: {}\n{}", url, content));
+            sources.push(url.clone());
+        }
     }
 
     Ok((sections.join("\n\n"), sources))
