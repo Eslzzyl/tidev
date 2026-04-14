@@ -5,6 +5,7 @@ use uuid::Uuid;
 use crate::mcp::McpManager;
 use crate::skills::SkillCatalog;
 use crate::{
+    config::PermissionConfig,
     prompts::SessionMode,
     session::{ToolCall, ToolExecutionResult},
     storage::SessionStore,
@@ -20,6 +21,7 @@ pub struct ToolRegistry {
     definitions: Vec<ToolDefinition>,
     skills: SkillCatalog,
     mcp: McpManager,
+    permission_config: PermissionConfig,
 }
 
 impl ToolRegistry {
@@ -28,6 +30,7 @@ impl ToolRegistry {
         config_dir: PathBuf,
         skill_sources: Vec<String>,
         mcp: McpManager,
+        permission_config: PermissionConfig,
     ) -> Self {
         let skills = SkillCatalog::discover(&workspace_root, &config_dir, &skill_sources);
         let definitions = tool_definitions(skills.tool_description());
@@ -38,6 +41,7 @@ impl ToolRegistry {
             definitions,
             skills,
             mcp,
+            permission_config,
         }
     }
 
@@ -117,11 +121,11 @@ impl ToolRegistry {
         let mut definitions = self
             .definitions
             .iter()
-            .filter(|definition| definition.permission.is_allowed_in(mode))
+            .filter(|definition| definition.permission.is_allowed_in(mode, &self.permission_config))
             .cloned()
             .collect::<Vec<_>>();
 
-        definitions.extend(self.mcp.available_definitions(mode));
+        definitions.extend(self.mcp.available_definitions(mode, &self.permission_config));
         definitions
     }
 
@@ -131,7 +135,7 @@ impl ToolRegistry {
 
     pub fn can_execute(&self, tool_name: &str, mode: SessionMode) -> bool {
         self.definition_for(tool_name)
-            .is_some_and(|definition| definition.permission.is_allowed_in(mode))
+            .is_some_and(|definition| definition.permission.is_allowed_in(mode, &self.permission_config))
     }
 
     pub fn definition_for(&self, tool_name: &str) -> Option<ToolDefinition> {

@@ -8,8 +8,9 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::prompts::default_system_prompt;
+use crate::prompts::{default_system_prompt, SessionMode};
 use crate::theme::ThemeName;
+use crate::tooling::ToolPermission;
 
 pub use auth::{ActiveModel, AuthStore, ModelSummary, ProviderAuth};
 pub use mcp::{McpConfig, McpServerConfig};
@@ -35,6 +36,8 @@ pub struct AppConfig {
     pub skills: Vec<String>,
     #[serde(default, skip_serializing_if = "mcp::McpConfig::is_empty")]
     pub mcp: McpConfig,
+    #[serde(default)]
+    pub permissions: PermissionConfig,
     #[serde(skip)]
     pub bundled_providers: BTreeMap<String, ProviderConfig>,
 }
@@ -54,7 +57,90 @@ impl Default for AppConfig {
             instructions: Vec::new(),
             skills: Vec::new(),
             mcp: McpConfig::default(),
+            permissions: PermissionConfig::default(),
             bundled_providers: bundled_provider_catalog().unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PermissionSettings {
+    #[serde(default)]
+    pub read: bool,
+    #[serde(default)]
+    pub search: bool,
+    #[serde(default)]
+    pub write: bool,
+    #[serde(default)]
+    pub edit: bool,
+    #[serde(default)]
+    pub execute: bool,
+    #[serde(default)]
+    pub session: bool,
+}
+
+impl PermissionSettings {
+    pub fn is_allowed(&self, permission: ToolPermission) -> bool {
+        match permission {
+            ToolPermission::Read => self.read,
+            ToolPermission::Search => self.search,
+            ToolPermission::Write => self.write,
+            ToolPermission::Edit => self.edit,
+            ToolPermission::Execute => self.execute,
+            ToolPermission::Session => self.session,
+        }
+    }
+}
+
+impl Default for PermissionSettings {
+    fn default() -> Self {
+        Self {
+            read: false,
+            search: false,
+            write: false,
+            edit: false,
+            execute: false,
+            session: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PermissionConfig {
+    #[serde(default)]
+    pub plan: PermissionSettings,
+    #[serde(default)]
+    pub build: PermissionSettings,
+}
+
+impl PermissionConfig {
+    pub fn is_allowed(&self, mode: SessionMode, permission: ToolPermission) -> bool {
+        match mode {
+            SessionMode::Plan => self.plan.is_allowed(permission),
+            SessionMode::Build => self.build.is_allowed(permission),
+        }
+    }
+}
+
+impl Default for PermissionConfig {
+    fn default() -> Self {
+        Self {
+            plan: PermissionSettings {
+                read: true,
+                search: true,
+                write: false,
+                edit: false,
+                execute: false,
+                session: true,
+            },
+            build: PermissionSettings {
+                read: true,
+                search: true,
+                write: true,
+                edit: true,
+                execute: true,
+                session: true,
+            },
         }
     }
 }
@@ -104,6 +190,10 @@ instructions = []
 # Optional additional skill sources. Each entry can be a local path or an HTTP(S) URL to a SKILL.md file.
 # Example: skills = ["https://example.com/skills/git-release/SKILL.md"]
 skills = []
+
+# Optional permission settings by mode.
+# By default plan mode allows read/search/session and build mode allows all permissions.
+#permissions = { plan = { read = true, search = true, session = true, write = false, edit = false, execute = false }, build = { read = true, search = true, session = true, write = true, edit = true, execute = true } }
 
 # MCP servers can be declared here. Supported transports: stdio, streamable HTTP, and SSE.
 # [mcp.servers.my_server]
@@ -404,5 +494,24 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn default_permission_config_matches_mode_expectations() {
+        let permissions = PermissionConfig::default();
+
+        assert!(permissions.is_allowed(SessionMode::Plan, ToolPermission::Read));
+        assert!(permissions.is_allowed(SessionMode::Plan, ToolPermission::Search));
+        assert!(permissions.is_allowed(SessionMode::Plan, ToolPermission::Session));
+        assert!(!permissions.is_allowed(SessionMode::Plan, ToolPermission::Write));
+        assert!(!permissions.is_allowed(SessionMode::Plan, ToolPermission::Edit));
+        assert!(!permissions.is_allowed(SessionMode::Plan, ToolPermission::Execute));
+
+        assert!(permissions.is_allowed(SessionMode::Build, ToolPermission::Read));
+        assert!(permissions.is_allowed(SessionMode::Build, ToolPermission::Search));
+        assert!(permissions.is_allowed(SessionMode::Build, ToolPermission::Session));
+        assert!(permissions.is_allowed(SessionMode::Build, ToolPermission::Write));
+        assert!(permissions.is_allowed(SessionMode::Build, ToolPermission::Edit));
+        assert!(permissions.is_allowed(SessionMode::Build, ToolPermission::Execute));
     }
 }

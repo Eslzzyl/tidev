@@ -198,6 +198,7 @@ impl App {
             paths.config_dir.clone(),
             config.skills.clone(),
             mcp,
+            config.permissions.clone(),
         );
         let commands = CommandRegistry::new();
         let command_palette = CommandPaletteState::default();
@@ -1260,6 +1261,7 @@ impl App {
             self.paths.config_dir.clone(),
             self.config.skills.clone(),
             mcp,
+            self.config.permissions.clone(),
         );
     }
 

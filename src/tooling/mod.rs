@@ -9,6 +9,7 @@ pub use schema::ToolArgs;
 pub(crate) use tools::SkillArgs;
 pub use tools::TodoItem;
 
+use crate::config::PermissionConfig;
 use crate::prompts::SessionMode;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -23,18 +24,12 @@ pub enum ToolPermission {
 }
 
 impl ToolPermission {
-    pub fn is_allowed_in(self, mode: SessionMode) -> bool {
-        match mode {
-            SessionMode::Plan => matches!(self, Self::Read | Self::Search | Self::Session),
-            SessionMode::Build => true,
-        }
+    pub fn is_allowed_in(self, mode: SessionMode, permission_config: &PermissionConfig) -> bool {
+        permission_config.is_allowed(mode, self)
     }
 
     pub fn needs_confirmation(self) -> bool {
-        matches!(
-            self,
-            Self::Write | Self::Edit | Self::Execute | Self::Session
-        )
+        false
     }
 }
 
