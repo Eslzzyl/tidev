@@ -428,6 +428,14 @@ pub enum BackendEvent {
         child_session_id: Uuid,
         status_text: String,
         current_tool_call: Option<ToolCall>,
+        assistant_message: Option<Message>,
+        content_delta: Option<String>,
+        reasoning_delta: Option<String>,
+    },
+    SubagentToolResult {
+        request_id: u64,
+        child_session_id: Uuid,
+        message: Message,
     },
     SubagentCompleted {
         request_id: u64,

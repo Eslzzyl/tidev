@@ -85,6 +85,7 @@ impl RunningToolExecution {
 #[derive(Clone, Debug)]
 pub(crate) struct RunningSubagentExecution {
     pub request_id: u64,
+    pub parent_session_id: uuid::Uuid,
     pub tool_call: ToolCall,
     pub child_session_id: uuid::Uuid,
     pub current_tool_call: Option<ToolCall>,
@@ -95,6 +96,7 @@ pub(crate) struct RunningSubagentExecution {
 impl RunningSubagentExecution {
     pub(crate) fn new(
         request_id: u64,
+        parent_session_id: uuid::Uuid,
         tool_call: ToolCall,
         child_session_id: uuid::Uuid,
         cancel_requested: Arc<AtomicBool>,
@@ -102,6 +104,7 @@ impl RunningSubagentExecution {
     ) -> Self {
         Self {
             request_id,
+            parent_session_id,
             tool_call,
             child_session_id,
             current_tool_call: None,
@@ -151,13 +154,22 @@ impl App {
         };
 
         if self.running_tool_execution.is_some() {
+            crate::log_info!("process_pending_tool_execution: waiting for running_tool_execution");
             return Ok(());
         }
 
         loop {
             let Some((tool_call, current_index, total)) = self.pending_tool_snapshot() else {
+                crate::log_info!("process_pending_tool_execution: no more tool_calls in snapshot");
                 break;
             };
+            crate::log_info!(
+                "process_pending_tool_execution: processing tool {} ({}/{}) id={}",
+                tool_call.name,
+                current_index,
+                total,
+                tool_call.id
+            );
             let permission_key = self.tools.permission_key_for_call(&tool_call);
             let permission_label = self.tools.permission_label_for_call(&tool_call);
 
@@ -177,6 +189,7 @@ impl App {
                 .load_tool_permission(self.conversation.session_id, &permission_key)?
             {
                 if remembered {
+                    crate::log_info!("process_pending_tool_execution: remembered permission allowed for {}", tool_call.name);
                     if self.execute_pending_tool_call(tool_call, runtime)? {
                         return Ok(());
                     }
@@ -223,8 +236,13 @@ impl App {
             .as_ref()
             .is_some_and(PendingToolExecution::is_finished)
         {
+            crate::log_info!(
+                "process_pending_tool_execution: finished, running_subagent_executions={}",
+                self.running_subagent_executions.len()
+            );
             self.pending_tool_execution = None;
             if self.running_subagent_executions.is_empty() {
+                crate::log_info!("process_pending_tool_execution: calling start_assistant_turn");
                 self.start_assistant_turn(runtime)?;
             } else {
                 self.last_notice = Some(format!(
@@ -232,6 +250,12 @@ impl App {
                     self.running_subagent_executions.len()
                 ));
             }
+        } else {
+            crate::log_info!(
+                "process_pending_tool_execution: loop ended but not finished, pending_tool_execution={}, running_subagent_executions={}",
+                self.pending_tool_execution.is_some(),
+                self.running_subagent_executions.len()
+            );
         }
 
         Ok(())
@@ -278,8 +302,10 @@ impl App {
         tool_call: ToolCall,
         runtime: &Runtime,
     ) -> Result<bool> {
+        crate::log_info!("execute_pending_tool_call: {} id={}", tool_call.name, tool_call.id);
         if tool_call.name == "task" {
             if let Err(error) = self.start_subagent_task_execution(tool_call.clone(), runtime) {
+                crate::log_error!("start_subagent_task_execution failed: {}", error);
                 self.record_tool_result(
                     tool_call,
                     ToolExecutionResult::new(format!("Tool failed: {error}")),
@@ -287,6 +313,7 @@ impl App {
                 self.advance_pending_tool_execution();
                 return Ok(false);
             }
+            crate::log_info!("execute_pending_tool_call: task started, advancing and returning false");
             self.advance_pending_tool_execution();
             return Ok(false);
         }
@@ -366,10 +393,18 @@ impl App {
         let request_id = self.active_request_id;
         let parent_session_id = self.conversation.session_id;
         let child_session_id = uuid::Uuid::new_v4();
+        crate::log_info!(
+            "start_subagent_task_execution: request_id={}, parent_session_id={}, child_session_id={}, tool_call_id={}",
+            request_id,
+            parent_session_id,
+            child_session_id,
+            tool_call.id
+        );
         let cancel_requested = Arc::new(AtomicBool::new(false));
         self.running_subagent_executions
             .push(RunningSubagentExecution::new(
                 request_id,
+                parent_session_id,
                 tool_call.clone(),
                 child_session_id,
                 cancel_requested.clone(),
@@ -391,6 +426,11 @@ impl App {
         let task_call = tool_call.clone();
 
         runtime.spawn(async move {
+            crate::log_info!(
+                "subagent task spawned: request_id={}, child_session_id={}",
+                request_id,
+                child_session_id
+            );
             let context = crate::app::subagent::SubagentTaskContext {
                 parent_request_id: request_id,
                 parent_session_id,
@@ -410,10 +450,31 @@ impl App {
             };
 
             let output = match crate::app::subagent::run_subagent_task(context).await {
-                Ok(output) => output,
-                Err(error) => format!("Subagent failed: {error}"),
+                Ok(output) => {
+                    crate::log_info!(
+                        "subagent task succeeded: request_id={}, child_session_id={}, output_len={}",
+                        request_id,
+                        child_session_id,
+                        output.len()
+                    );
+                    output
+                }
+                Err(error) => {
+                    crate::log_error!(
+                        "subagent task failed: request_id={}, child_session_id={}, error={}",
+                        request_id,
+                        child_session_id,
+                        error
+                    );
+                    format!("Subagent failed: {error}")
+                }
             };
 
+            crate::log_info!(
+                "sending SubagentCompleted: request_id={}, child_session_id={}",
+                request_id,
+                child_session_id
+            );
             let _ = tx.send(crate::session::BackendEvent::SubagentCompleted {
                 request_id,
                 tool_call: task_call,

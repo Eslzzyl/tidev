@@ -231,13 +231,19 @@ impl App {
         }
     }
 
-    pub(crate) fn handle_session_panel_key(&mut self, key: KeyEvent) -> Result<()> {
+    pub(crate) fn handle_session_panel_key(
+        &mut self,
+        key: KeyEvent,
+        runtime: &tokio::runtime::Runtime,
+    ) -> Result<()> {
         let Some(panel) = self.session_panel.clone() else {
             return Ok(());
         };
 
         match (&panel.dialog, key.code) {
-            (SessionPanelDialog::None, _) => self.handle_session_panel_main_key(panel, key),
+            (SessionPanelDialog::None, _) => {
+                self.handle_session_panel_main_key(panel, key, runtime)
+            }
             (SessionPanelDialog::DeleteConfirm { .. }, KeyCode::Enter) => {
                 self.confirm_delete_session()
             }
@@ -269,6 +275,7 @@ impl App {
         &mut self,
         panel: SessionPanelState,
         key: KeyEvent,
+        runtime: &tokio::runtime::Runtime,
     ) -> Result<()> {
         match key.code {
             KeyCode::Up => {
@@ -286,7 +293,7 @@ impl App {
             KeyCode::Enter => {
                 let query = self.composer.text().to_string();
                 if let Some(session) = panel.selected_session(&query).cloned() {
-                    self.switch_session(session.session_id)?;
+                    self.switch_session(session.session_id, runtime)?;
                     self.close_session_panel();
                 }
             }
@@ -518,7 +525,11 @@ impl App {
         Ok(())
     }
 
-    pub(crate) fn switch_session(&mut self, session_id: Uuid) -> Result<()> {
+    pub(crate) fn switch_session(
+        &mut self,
+        session_id: Uuid,
+        runtime: &tokio::runtime::Runtime,
+    ) -> Result<()> {
         if self.conversation.session_id == session_id {
             self.last_notice = Some("Already on that session".to_string());
             return Ok(());
@@ -582,6 +593,14 @@ impl App {
         self.composer
             .set_placeholder("Ask TiDev about your code, task, or question...");
         self.scroll_messages_to_bottom();
+
+        if self.pending_assistant_turns.remove(&session_id) {
+            crate::log_info!(
+                "switch_session: session {} has pending assistant turn, starting now",
+                session_id
+            );
+            self.start_assistant_turn(runtime)?;
+        }
 
         Ok(())
     }

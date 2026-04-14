@@ -165,6 +165,7 @@ struct App {
     question_dialog: Option<QuestionDialogState>,
     running_tool_execution: Option<RunningToolExecution>,
     running_subagent_executions: Vec<RunningSubagentExecution>,
+    pending_assistant_turns: std::collections::HashSet<Uuid>,
     leader_key_pending: bool,
     composer: Composer,
     draft_attachments: Vec<MessageAttachment>,
@@ -195,6 +196,8 @@ impl App {
     fn new() -> Result<Self> {
         let workspace_root = env::current_dir().context("failed to determine workspace root")?;
         let paths = ConfigPaths::discover()?;
+        crate::logging::init(&paths.data_dir);
+        crate::log_info!("App initializing, workspace={}", workspace_root.display());
         let config = AppConfig::load_or_create(&paths)?;
         let auth = AuthStore::load_or_create(&paths)?;
         let store = SessionStore::open(paths.default_database_path())?;
@@ -258,6 +261,7 @@ impl App {
             question_dialog: None,
             running_tool_execution: None,
             running_subagent_executions: Vec::new(),
+            pending_assistant_turns: std::collections::HashSet::new(),
             leader_key_pending: false,
             composer,
             draft_attachments: Vec::new(),
@@ -552,7 +556,7 @@ impl App {
     fn handle_key_event(&mut self, key: KeyEvent, runtime: &Runtime) -> Result<()> {
         if self.leader_key_pending {
             self.leader_key_pending = false;
-            let _ = self.handle_leader_key(key)?;
+            let _ = self.handle_leader_key(key, runtime)?;
             return Ok(());
         }
 
@@ -605,7 +609,7 @@ impl App {
         }
 
         if self.session_panel.is_some() {
-            return self.handle_session_panel_key(key);
+            return self.handle_session_panel_key(key, runtime);
         }
 
         if self.handle_request_abort_key(key)? {
@@ -712,7 +716,7 @@ impl App {
         Ok(())
     }
 
-    fn handle_leader_key(&mut self, key: KeyEvent) -> Result<bool> {
+    fn handle_leader_key(&mut self, key: KeyEvent, runtime: &Runtime) -> Result<bool> {
         let current_session_id = self.conversation.session_id;
         let parent_session_id = self
             .conversation
@@ -722,7 +726,7 @@ impl App {
         match key.code {
             KeyCode::Up => {
                 if parent_session_id != current_session_id {
-                    self.switch_session(parent_session_id)?;
+                    self.switch_session(parent_session_id, runtime)?;
                     return Ok(true);
                 }
             }
@@ -748,7 +752,7 @@ impl App {
                 };
 
                 if let Some(target) = children.get(next_index) {
-                    self.switch_session(target.session_id)?;
+                    self.switch_session(target.session_id, runtime)?;
                     return Ok(true);
                 }
             }
@@ -1312,6 +1316,11 @@ impl App {
     }
 
     fn start_assistant_turn(&mut self, runtime: &Runtime) -> Result<()> {
+        crate::log_info!(
+            "start_assistant_turn: session_id={}, message_count={}",
+            self.conversation.session_id,
+            self.conversation.messages.len()
+        );
         self.refresh_tools();
         self.streaming_markdown = Some(MarkdownStreamCollector::new(
             None,
@@ -1322,6 +1331,7 @@ impl App {
         self.abort_confirmation_deadline = None;
         self.active_request_id = self.active_request_id.wrapping_add(1);
         let request_id = self.active_request_id;
+        crate::log_info!("start_assistant_turn: new request_id={}", request_id);
         self.last_notice = Some(match self.mode {
             SessionMode::Plan => "Planning...".to_string(),
             SessionMode::Build => "Thinking...".to_string(),
@@ -1447,6 +1457,30 @@ impl App {
     }
 
     fn handle_backend_event(&mut self, event: BackendEvent, runtime: &Runtime) -> Result<()> {
+        let event_type = match &event {
+            BackendEvent::Delta { .. } => "Delta",
+            BackendEvent::ReasoningDelta { .. } => "ReasoningDelta",
+            BackendEvent::Finished { request_id, .. } => {
+                crate::log_info!("handle_backend_event: Finished request_id={}", request_id);
+                "Finished"
+            }
+            BackendEvent::Retrying { .. } => "Retrying",
+            BackendEvent::Failed { request_id, .. } => {
+                crate::log_info!("handle_backend_event: Failed request_id={}", request_id);
+                "Failed"
+            }
+            BackendEvent::ToolCompleted { request_id, .. } => {
+                crate::log_info!("handle_backend_event: ToolCompleted request_id={}", request_id);
+                "ToolCompleted"
+            }
+            BackendEvent::SubagentStatus { .. } => "SubagentStatus",
+            BackendEvent::SubagentToolResult { .. } => "SubagentToolResult",
+            BackendEvent::SubagentCompleted { .. } => "SubagentCompleted",
+            BackendEvent::UsageStats { .. } => "UsageStats",
+        };
+        if event_type != "Delta" && event_type != "ReasoningDelta" && event_type != "UsageStats" && event_type != "SubagentStatus" && event_type != "SubagentToolResult" {
+            crate::log_debug!("handle_backend_event: {}", event_type);
+        }
         match event {
             BackendEvent::Delta {
                 request_id,
@@ -1566,6 +1600,9 @@ impl App {
                 child_session_id,
                 status_text,
                 current_tool_call,
+                assistant_message,
+                content_delta,
+                reasoning_delta: _,
             } => {
                 if !self.is_active_request(request_id) {
                     return Ok(());
@@ -1579,6 +1616,75 @@ impl App {
                     execution.status_text = status_text;
                     execution.current_tool_call = current_tool_call;
                 }
+
+                if self.conversation.session_id == child_session_id {
+                    if let Some(message) = assistant_message {
+                        let existing_index = self.conversation.messages.iter().position(|m| {
+                            matches!(m.role, MessageRole::Assistant) && m.id == message.id
+                        });
+
+                        if let Some(index) = existing_index {
+                            let existing = &mut self.conversation.messages[index];
+                            existing.content = message.content.clone();
+                            existing.reasoning = message.reasoning.clone();
+                            existing.tool_calls = message.tool_calls.clone();
+                            existing.streaming = message.streaming;
+                        } else {
+                            self.conversation.messages.push(message.clone());
+                        }
+
+                        if message.streaming {
+                            if self.streaming_markdown.is_none() {
+                                self.streaming_markdown = Some(MarkdownStreamCollector::new(
+                                    None,
+                                    self.workspace_root.as_path(),
+                                ));
+                            }
+                            if let Some(collector) = &mut self.streaming_markdown {
+                                if let Some(delta) = content_delta {
+                                    collector.push_delta(&delta);
+                                    self.streaming_preview_lines
+                                        .extend(collector.commit_complete_lines());
+                                } else if self.streaming_preview_lines.is_empty() {
+                                    let tail = message
+                                        .content
+                                        .rsplit_once('\n')
+                                        .map(|(_, tail)| tail)
+                                        .unwrap_or(message.content.as_str());
+                                    if !tail.is_empty() {
+                                        use ratatui::text::Line;
+                                        self.streaming_preview_lines
+                                            .push(Line::styled(tail.to_string(), ratatui::style::Style::default()));
+                                    }
+                                }
+                            }
+                        } else {
+                            self.streaming_preview_lines.clear();
+                            self.streaming_markdown = None;
+                        }
+                    }
+                }
+            }
+            BackendEvent::SubagentToolResult {
+                request_id,
+                child_session_id,
+                message,
+            } => {
+                if !self.is_active_request(request_id) {
+                    return Ok(());
+                }
+
+                if self.conversation.session_id == child_session_id {
+                    let tool_call_id = message.tool_call_id.clone();
+                    let already_exists = self.conversation.messages.iter().any(|m| {
+                        matches!(m.role, MessageRole::Tool)
+                            && m.tool_call_id == tool_call_id
+                    });
+
+                    if !already_exists {
+                        self.conversation.messages.push(message);
+                    }
+                }
             }
             BackendEvent::SubagentCompleted {
                 request_id,
@@ -1586,33 +1692,90 @@ impl App {
                 child_session_id,
                 result,
             } => {
+                crate::log_info!(
+                    "SubagentCompleted: request_id={}, active_request_id={}, child_session_id={}, tool_call_id={}",
+                    request_id,
+                    self.active_request_id,
+                    child_session_id,
+                    tool_call.id
+                );
                 if !self.is_active_request(request_id) {
+                    crate::log_warn!(
+                        "SubagentCompleted ignored: request_id {} != active_request_id {}",
+                        request_id,
+                        self.active_request_id
+                    );
                     return Ok(());
                 }
 
-                if let Some(index) = self
+                let execution_index = self
                     .running_subagent_executions
                     .iter()
                     .position(|execution| {
                         execution.request_id == request_id
                             && execution.child_session_id == child_session_id
                             && execution.tool_call.id == tool_call.id
-                    })
-                {
-                    self.running_subagent_executions.remove(index);
-                }
+                    });
 
-                self.record_tool_result(tool_call, result)?;
+                let Some(index) = execution_index else {
+                    crate::log_warn!(
+                        "SubagentCompleted: no matching running_subagent_execution found"
+                    );
+                    return Ok(());
+                };
 
-                if self.pending_tool_execution.is_none()
-                    && self.running_subagent_executions.is_empty()
-                {
-                    self.start_assistant_turn(runtime)?;
-                } else if !self.running_subagent_executions.is_empty() {
-                    self.last_notice = Some(format!(
-                        "Waiting for {} subagent(s)...",
+                let execution = self.running_subagent_executions.remove(index);
+                let parent_session_id = execution.parent_session_id;
+                crate::log_info!(
+                    "Removed running_subagent_executions[{}], remaining count={}, parent_session_id={}",
+                    index,
+                    self.running_subagent_executions.len(),
+                    parent_session_id
+                );
+
+                let is_on_parent_session = self.conversation.session_id == parent_session_id;
+                crate::log_info!(
+                    "SubagentCompleted: is_on_parent_session={}, current_session_id={}",
+                    is_on_parent_session,
+                    self.conversation.session_id
+                );
+
+                if is_on_parent_session {
+                    self.record_tool_result(tool_call, result)?;
+                    crate::log_info!(
+                        "record_tool_result done, pending_tool_execution={}, running_subagent_executions={}",
+                        self.pending_tool_execution.is_some(),
                         self.running_subagent_executions.len()
-                    ));
+                    );
+
+                    if self.pending_tool_execution.is_none()
+                        && self.running_subagent_executions.is_empty()
+                    {
+                        crate::log_info!("SubagentCompleted: calling start_assistant_turn");
+                        self.start_assistant_turn(runtime)?;
+                    } else if !self.running_subagent_executions.is_empty() {
+                        self.last_notice = Some(format!(
+                            "Waiting for {} subagent(s)...",
+                            self.running_subagent_executions.len()
+                        ));
+                    }
+                } else {
+                    crate::log_info!(
+                        "SubagentCompleted: user switched away from parent session, writing to database directly"
+                    );
+                    self.store.append_tool_event(
+                        parent_session_id,
+                        &tool_call.name,
+                        &tool_call.arguments,
+                        &result.output,
+                    )?;
+                    let message = Message::tool_result(tool_call.id, tool_call.name, result);
+                    self.store.append_message(parent_session_id, &message)?;
+                    self.pending_assistant_turns.insert(parent_session_id);
+                    crate::log_info!(
+                        "SubagentCompleted: marked parent_session_id={} as pending assistant turn",
+                        parent_session_id
+                    );
                 }
             }
             BackendEvent::UsageStats {
@@ -1633,6 +1796,11 @@ impl App {
     }
 
     fn finish_assistant_turn(&mut self, turn: AssistantTurn, runtime: &Runtime) -> Result<()> {
+        crate::log_info!(
+            "finish_assistant_turn: tool_calls_count={}, finish_reason={:?}",
+            turn.tool_calls.len(),
+            turn.finish_reason
+        );
         let mut persisted_message = None;
 
         if let Some(message) = self.conversation.messages.last_mut()
@@ -1666,6 +1834,8 @@ impl App {
         self.streaming_preview_lines.clear();
 
         if !turn.tool_calls.is_empty() {
+            let tool_names: Vec<_> = turn.tool_calls.iter().map(|tc| tc.name.as_str()).collect();
+            crate::log_info!("finish_assistant_turn: calling begin_tool_execution for {:?}", tool_names);
             self.last_notice = Some(format!("Running {} tool call(s)...", turn.tool_calls.len()));
 
             self.begin_tool_execution(turn.tool_calls, runtime)?;

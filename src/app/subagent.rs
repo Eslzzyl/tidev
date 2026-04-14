@@ -96,7 +96,7 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
         }
 
         request_sequence = request_sequence.wrapping_add(1);
-        send_status(context, "Thinking...", None);
+        send_status(context, "Thinking...", None, None, None, None);
 
         let mut assistant_message = Message::streaming(MessageRole::Assistant, "");
         {
@@ -120,17 +120,34 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
 
         let mut turn = AssistantTurn::default();
         let mut finished = false;
+        let mut last_sent_content_len: usize = 0;
+        let mut last_sent_reasoning_len: usize = 0;
 
         while let Some(event) = stream_rx.recv().await {
             match event {
                 BackendEvent::Delta { content, .. } => {
                     assistant_message.content.push_str(&content);
                     update_child_message(context, &assistant_message)?;
-                    send_status(context, "Thinking...", None);
+                    send_status_with_delta(
+                        context,
+                        "Thinking...",
+                        None,
+                        &assistant_message,
+                        &mut last_sent_content_len,
+                        &mut last_sent_reasoning_len,
+                    );
                 }
                 BackendEvent::ReasoningDelta { content, .. } => {
                     assistant_message.reasoning.push_str(&content);
                     update_child_message(context, &assistant_message)?;
+                    send_status_with_delta(
+                        context,
+                        "Thinking...",
+                        None,
+                        &assistant_message,
+                        &mut last_sent_content_len,
+                        &mut last_sent_reasoning_len,
+                    );
                 }
                 BackendEvent::Retrying {
                     attempt,
@@ -148,7 +165,14 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
                         .unwrap_or_else(|| {
                             format!("Retrying subagent turn {attempt}/{max_attempts}: {reason}")
                         });
-                    send_status(context, retry, None);
+                    send_status_with_delta(
+                        context,
+                        retry,
+                        None,
+                        &assistant_message,
+                        &mut last_sent_content_len,
+                        &mut last_sent_reasoning_len,
+                    );
                 }
                 BackendEvent::Finished {
                     turn: next_turn, ..
@@ -168,9 +192,22 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
                     let _ = stream_handle.await;
                     return Err(anyhow::anyhow!(error_message));
                 }
-                BackendEvent::UsageStats { .. } => {}
+                BackendEvent::UsageStats {
+                    input_tokens,
+                    output_tokens,
+                    total_tokens,
+                    ..
+                } => {
+                    let _ = context.tx.send(BackendEvent::UsageStats {
+                        request_id: context.parent_request_id,
+                        input_tokens,
+                        output_tokens,
+                        total_tokens,
+                    });
+                }
                 BackendEvent::ToolCompleted { .. } => {}
                 BackendEvent::SubagentStatus { .. } => {}
+                BackendEvent::SubagentToolResult { .. } => {}
                 BackendEvent::SubagentCompleted { .. } => {}
             }
         }
@@ -195,7 +232,7 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
         update_child_message(context, &assistant_message)?;
 
         if turn.tool_calls.is_empty() {
-            send_status(context, "Completed", None);
+            send_status(context, "Completed", None, Some(&assistant_message), None, None);
             break turn.content;
         }
 
@@ -209,6 +246,9 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
                 context,
                 format!("Executing {summary}"),
                 Some(tool_call.clone()),
+                Some(&assistant_message),
+                None,
+                None,
             );
 
             let result = execute_child_tool_call(context, &tool_call)
@@ -216,7 +256,7 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
                 .unwrap_or_else(|error| ToolExecutionResult::new(format!("Tool failed: {error}")));
 
             record_tool_result(context, &tool_call, &result)?;
-            send_status(context, "Thinking...", None);
+            send_status(context, "Thinking...", None, Some(&assistant_message), None, None);
         }
     };
 
@@ -323,6 +363,13 @@ fn record_tool_result(
     let message =
         Message::tool_result(tool_call.id.clone(), tool_call.name.clone(), result.clone());
     store.append_message(context.child_session_id, &message)?;
+
+    let _ = context.tx.send(BackendEvent::SubagentToolResult {
+        request_id: context.parent_request_id,
+        child_session_id: context.child_session_id,
+        message: message.clone(),
+    });
+
     Ok(())
 }
 
@@ -330,13 +377,53 @@ fn send_status(
     context: &SubagentTaskContext,
     status_text: impl Into<String>,
     current_tool_call: Option<ToolCall>,
+    assistant_message: Option<&Message>,
+    content_delta: Option<String>,
+    reasoning_delta: Option<String>,
 ) {
     let _ = context.tx.send(BackendEvent::SubagentStatus {
         request_id: context.parent_request_id,
         child_session_id: context.child_session_id,
         status_text: status_text.into(),
         current_tool_call,
+        assistant_message: assistant_message.cloned(),
+        content_delta,
+        reasoning_delta,
     });
+}
+
+fn send_status_with_delta(
+    context: &SubagentTaskContext,
+    status_text: impl Into<String>,
+    current_tool_call: Option<ToolCall>,
+    assistant_message: &Message,
+    last_sent_content_len: &mut usize,
+    last_sent_reasoning_len: &mut usize,
+) {
+    let content_delta = if assistant_message.content.len() > *last_sent_content_len {
+        let delta = assistant_message.content[*last_sent_content_len..].to_string();
+        *last_sent_content_len = assistant_message.content.len();
+        Some(delta)
+    } else {
+        None
+    };
+
+    let reasoning_delta = if assistant_message.reasoning.len() > *last_sent_reasoning_len {
+        let delta = assistant_message.reasoning[*last_sent_reasoning_len..].to_string();
+        *last_sent_reasoning_len = assistant_message.reasoning.len();
+        Some(delta)
+    } else {
+        None
+    };
+
+    send_status(
+        context,
+        status_text,
+        current_tool_call,
+        Some(assistant_message),
+        content_delta,
+        reasoning_delta,
+    );
 }
 
 fn mark_child_session_failed(context: &SubagentTaskContext, error: String) -> Result<()> {

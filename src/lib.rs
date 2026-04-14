@@ -5,6 +5,7 @@ pub mod context;
 pub mod input;
 pub mod instructions;
 pub mod llm;
+pub mod logging;
 pub mod markdown_render;
 pub mod markdown_stream;
 pub mod mcp;
