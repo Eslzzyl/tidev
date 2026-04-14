@@ -167,6 +167,8 @@ pub(crate) fn canonical_tool_name(tool_name: &str) -> Option<&'static str> {
         "task" => Some("task"),
         "todowrite" | "todo" => Some("todowrite"),
         "skill" => Some("skill"),
+        "websearch" => Some("websearch"),
+        "webfetch" => Some("webfetch"),
         _ => None,
     }
 }

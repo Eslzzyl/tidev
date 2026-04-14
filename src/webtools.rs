@@ -33,6 +33,52 @@ pub async fn run() -> Result<()> {
     Ok(())
 }
 
+pub async fn websearch(
+    query: &str,
+    num_results: Option<i64>,
+    search_type: Option<&str>,
+) -> Result<String> {
+    let service = WebToolsServer::new()?;
+    let args = SearchArgs {
+        query: query.to_string(),
+        num_results: num_results.map(|v| v as u64),
+        livecrawl: None,
+        search_type: search_type.map(|s| match s {
+            "fast" => SearchType::Fast,
+            "deep" => SearchType::Deep,
+            _ => SearchType::Auto,
+        }),
+        context_max_characters: None,
+    };
+    let result = service.search(args).await?;
+    result
+        .content
+        .first()
+        .and_then(|c| c.raw.as_text())
+        .map(|t| t.text.clone())
+        .ok_or_else(|| anyhow::anyhow!("websearch returned no content"))
+}
+
+pub async fn webfetch(url: &str, format: Option<&str>, timeout: Option<i64>) -> Result<String> {
+    let service = WebToolsServer::new()?;
+    let args = FetchArgs {
+        url: url.to_string(),
+        format: format.map(|f| match f {
+            "text" => WebFetchFormat::Text,
+            "html" => WebFetchFormat::Html,
+            _ => WebFetchFormat::Markdown,
+        }),
+        timeout: timeout.map(|v| v as u64),
+    };
+    let result = service.fetch(args).await?;
+    result
+        .content
+        .first()
+        .and_then(|c| c.raw.as_text())
+        .map(|t| t.text.clone())
+        .ok_or_else(|| anyhow::anyhow!("webfetch returned no content"))
+}
+
 fn stdio() -> (tokio::io::Stdin, tokio::io::Stdout) {
     (tokio::io::stdin(), tokio::io::stdout())
 }

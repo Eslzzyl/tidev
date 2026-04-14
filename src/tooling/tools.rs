@@ -1,7 +1,7 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use grep::{
     regex::RegexMatcherBuilder,
-    searcher::{SearcherBuilder, sinks},
+    searcher::{sinks, SearcherBuilder},
 };
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
@@ -12,8 +12,8 @@ use std::{
     path::{Component, Path, PathBuf},
     process::Stdio,
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
+        Arc,
     },
     thread,
     time::{SystemTime, UNIX_EPOCH},
@@ -252,6 +252,22 @@ tool_args! {
     }
 }
 
+tool_args! {
+    pub struct WebSearchArgs {
+        query: string("Web search query"),
+        num_results: optional_integer("Number of search results to return"),
+        search_type: optional_string("Search type: auto, fast, or deep"),
+    }
+}
+
+tool_args! {
+    pub struct WebFetchArgs {
+        url: string("The URL to fetch"),
+        format: optional_string("Output format: text, markdown, or html"),
+        timeout: optional_integer("Timeout in seconds (max 120)"),
+    }
+}
+
 fn parse_arguments<Args>(tool_name: &str, arguments: Value) -> Result<Args>
 where
     Args: ToolArgs,
@@ -308,6 +324,16 @@ pub(super) fn tool_definitions(skill_description: String) -> Vec<ToolDefinition>
             ToolPermission::Session,
         ),
         ToolDefinition::new::<SkillArgs>("skill", skill_description, ToolPermission::Session),
+        ToolDefinition::new::<WebSearchArgs>(
+            "websearch",
+            "Search the web using Exa",
+            ToolPermission::Search,
+        ),
+        ToolDefinition::new::<WebFetchArgs>(
+            "webfetch",
+            "Fetch a web page as text, markdown, or HTML",
+            ToolPermission::Read,
+        ),
     ]
 }
 
@@ -1019,6 +1045,24 @@ pub(super) fn execute_tool_call(
         Some("skill") => {
             let args = parse_arguments::<SkillArgs>(&call.name, arguments)?;
             skills.render_skill(&args.name)
+        }
+        Some("websearch") => {
+            let args = parse_arguments::<WebSearchArgs>(&call.name, arguments)?;
+            let runtime = tokio::runtime::Handle::current();
+            runtime.block_on(crate::webtools::websearch(
+                &args.query,
+                args.num_results,
+                args.search_type.as_deref(),
+            ))
+        }
+        Some("webfetch") => {
+            let args = parse_arguments::<WebFetchArgs>(&call.name, arguments)?;
+            let runtime = tokio::runtime::Handle::current();
+            runtime.block_on(crate::webtools::webfetch(
+                &args.url,
+                args.format.as_deref(),
+                args.timeout,
+            ))
         }
         None => bail!("unknown tool '{}'", call.name),
         Some(other) => bail!("unsupported tool '{}'", other),
