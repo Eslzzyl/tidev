@@ -1,5 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::UnicodeWidthChar;
 
 #[derive(Clone, Debug)]
 pub struct Composer {
@@ -160,22 +160,42 @@ impl Composer {
         None
     }
 
-    pub fn preferred_height(&self, max_lines: u16) -> u16 {
-        let visible_lines = display_line_count(&self.text) as u16;
+    pub fn preferred_height(&self, width: u16, max_lines: u16) -> u16 {
+        let visible_lines = display_line_count(&self.text, width as usize) as u16;
 
         visible_lines.min(max_lines).saturating_add(2)
     }
 
-    pub fn cursor_position(&self) -> (u16, u16) {
-        let prefix = &self.text[..self.cursor];
-        let line = prefix.chars().filter(|ch| *ch == '\n').count() as u16;
-        let column = prefix
-            .rsplit_once('\n')
-            .map(|(_, tail)| tail)
-            .unwrap_or(prefix)
-            .width() as u16;
+    pub fn cursor_position(&self, width: u16) -> (u16, u16) {
+        let width = width as usize;
+        if width == 0 {
+            return (0, 0);
+        }
+
+        let mut line = 0u16;
+        let mut column = 0u16;
+
+        for ch in self.text[..self.cursor].chars() {
+            if ch == '\n' {
+                line += 1;
+                column = 0;
+                continue;
+            }
+
+            let char_width = UnicodeWidthChar::width(ch).unwrap_or(0) as u16;
+            if column + char_width > width as u16 && column > 0 {
+                line += 1;
+                column = char_width;
+            } else {
+                column += char_width;
+            }
+        }
 
         (line, column)
+    }
+
+    pub fn display_line_count(&self, width: usize) -> usize {
+        display_line_count(&self.text, width)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -307,8 +327,36 @@ impl Composer {
     }
 }
 
-fn display_line_count(text: &str) -> usize {
-    text.split('\n').count().max(1)
+fn display_line_count(text: &str, width: usize) -> usize {
+    if width == 0 {
+        return text.lines().count().max(1);
+    }
+
+    text.lines()
+        .map(|line| wrap_line_count(line, width))
+        .sum::<usize>()
+        .max(1)
+}
+
+fn wrap_line_count(line: &str, width: usize) -> usize {
+    if width == 0 {
+        return 1;
+    }
+
+    let mut count = 1;
+    let mut current_width = 0;
+
+    for ch in line.chars() {
+        let char_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if current_width + char_width > width && current_width > 0 {
+            count += 1;
+            current_width = char_width;
+        } else {
+            current_width += char_width;
+        }
+    }
+
+    count
 }
 
 #[cfg(test)]
@@ -330,6 +378,24 @@ mod tests {
         let mut composer = Composer::new("placeholder");
         composer.set_text("hello\n".to_string());
 
-        assert_eq!(composer.preferred_height(10), 4);
+        assert_eq!(composer.preferred_height(10, 10), 4);
+    }
+
+    #[test]
+    fn preferred_height_wraps_long_lines() {
+        let mut composer = Composer::new("placeholder");
+        composer.set_text("abcdefghij".to_string());
+
+        assert_eq!(composer.preferred_height(4, 10), 4);
+    }
+
+    #[test]
+    fn cursor_position_wraps_long_lines() {
+        let mut composer = Composer::new("placeholder");
+        composer.set_text("abcdefg".to_string());
+        composer.replace_range(0, 7, "abcdefg");
+        composer.cursor = 7;
+
+        assert_eq!(composer.cursor_position(4), (1, 3));
     }
 }

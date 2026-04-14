@@ -39,7 +39,7 @@ impl App {
 
         let composer_height = self
             .composer
-            .preferred_height(self.config.ui.max_input_lines)
+            .preferred_height(main_area.width.saturating_sub(4), self.config.ui.max_input_lines)
             .min(main_area.height.saturating_sub(3).max(3));
 
         if let Some(dialog) = self.question_dialog.clone() {

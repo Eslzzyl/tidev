@@ -57,6 +57,8 @@ impl App {
         let card_height = 13u16.min(area.height.saturating_sub(2).max(10));
         let card = centered_rect(card_width, card_height, area);
 
+        let card_inner_width = card.width.saturating_sub(4);
+
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(palette.border_active()))
@@ -73,7 +75,7 @@ impl App {
             Constraint::Length(1),
             Constraint::Length(
                 self.composer
-                    .preferred_height(self.config.ui.max_input_lines),
+                    .preferred_height(card_inner_width, self.config.ui.max_input_lines),
             ),
             Constraint::Length(1),
         ])
@@ -145,7 +147,7 @@ impl App {
             vertical: 1,
         });
         let visible_lines = inner.height.max(1) as usize;
-        let total_lines = self.composer.text().split('\n').count().max(1);
+        let total_lines = self.composer.display_line_count(inner.width as usize);
         let scroll = total_lines.saturating_sub(visible_lines) as u16;
 
         let paragraph = Paragraph::new(content)
@@ -162,7 +164,7 @@ impl App {
         frame.render_widget(paragraph, area);
 
         if inner.width > 0 && inner.height > 0 {
-            let (cursor_line, cursor_col) = self.composer.cursor_position();
+            let (cursor_line, cursor_col) = self.composer.cursor_position(inner.width);
             let cursor_line = cursor_line.saturating_sub(scroll);
             let cursor_x = inner
                 .x

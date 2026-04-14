@@ -1348,7 +1348,7 @@ impl App {
 
         let input_height = self
             .composer
-            .preferred_height(self.config.ui.max_input_lines)
+            .preferred_height(inner.width.saturating_sub(4), self.config.ui.max_input_lines)
             .min(inner.height.saturating_sub(8).max(3));
         let options_height = current_question
             .map(|question| {
