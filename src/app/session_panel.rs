@@ -534,16 +534,25 @@ impl App {
             Self::resolve_conversation_model(&self.config, &self.auth, &conversation)
                 .unwrap_or_else(|_| fallback_model.clone());
 
+        let current_session_id = self.conversation.session_id;
+        let target_parent_id = conversation.parent_session_id;
+        let is_parent_or_child = target_parent_id == Some(current_session_id)
+            || self.conversation.parent_session_id == Some(session_id);
+
         self.pending_request = false;
         self.pending_tool_execution = None;
         self.permission_dialog = None;
         self.running_tool_execution = None;
-        self.cancel_running_subagents();
-        self.abort_confirmation_deadline = None;
-        self.active_request_id = self.active_request_id.wrapping_add(1);
         self.streaming_markdown = None;
         self.streaming_preview_lines.clear();
-        self.context_manager = ContextManager::new();
+
+        if !is_parent_or_child {
+            self.cancel_running_subagents();
+            self.abort_confirmation_deadline = None;
+            self.active_request_id = self.active_request_id.wrapping_add(1);
+            self.context_manager = ContextManager::new();
+        }
+
         self.conversation = conversation;
         self.active_model = active_model;
 

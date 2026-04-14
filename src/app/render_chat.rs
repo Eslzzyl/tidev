@@ -169,15 +169,17 @@ impl App {
             total_lines += 3;
         }
 
-        for running_subagent in &self.running_subagent_executions {
-            let card_lines = self.render_running_subagent_lines(running_subagent, content_width);
-            if card_lines.is_empty() {
-                continue;
-            }
+        if self.conversation.parent_session_id.is_none() {
+            for running_subagent in &self.running_subagent_executions {
+                let card_lines = self.render_running_subagent_lines(running_subagent, content_width);
+                if card_lines.is_empty() {
+                    continue;
+                }
 
-            let decorated_lines = decorate_card_lines(card_lines, content_width, palette.panel);
-            total_lines += decorated_lines.len();
-            text.lines.extend(decorated_lines);
+                let decorated_lines = decorate_card_lines(card_lines, content_width, palette.panel);
+                total_lines += decorated_lines.len();
+                text.lines.extend(decorated_lines);
+            }
         }
 
         self.message_viewport_lines = content_area.height as usize;
