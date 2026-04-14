@@ -262,6 +262,34 @@ impl App {
         );
     }
 
+    pub(super) fn render_retrying_hint(&mut self, frame: &mut Frame<'_>, area: Rect) {
+        let palette = self.palette();
+
+        let Some((attempt, max_attempts, reason, retry_after_secs)) = self.retrying_hint.as_ref() else {
+            // Clear any existing content
+            frame.render_widget(
+                Paragraph::new("")
+                    .style(Style::default().fg(palette.text)),
+                area,
+            );
+            return;
+        };
+
+        let retry_after_str = retry_after_secs
+            .map(|s| format!("Retrying in {s}s"))
+            .unwrap_or_else(|| "Retrying...".to_string());
+
+        let hint_text = format!(
+            "Retrying ({}/{}): {} · {}",
+            attempt, max_attempts, reason, retry_after_str
+        );
+
+        frame.render_widget(
+            Paragraph::new(hint_text).style(Style::default().fg(palette.accent_soft)),
+            area,
+        );
+    }
+
     fn footer_status_text(&mut self) -> String {
         if self.pending_request
             && self

@@ -44,6 +44,7 @@ impl App {
             Constraint::Min(6),
             Constraint::Length(composer_height),
             Constraint::Length(1),
+            Constraint::Length(1),
         ])
         .split(main_area);
 
@@ -58,6 +59,7 @@ impl App {
         );
         self.render_at_mention_palette(frame, layout[1]);
         self.render_prompt_footer(frame, layout[2]);
+        self.render_retrying_hint(frame, layout[3]);
         self.render_command_palette(frame, layout[1]);
     }
 

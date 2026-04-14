@@ -92,6 +92,7 @@ struct App {
     active_request_id: u64,
     abort_confirmation_deadline: Option<Instant>,
     last_notice: Option<String>,
+    retrying_hint: Option<(u32, u32, String, Option<u32>)>, // (attempt, max, reason, retry_after_secs)
     message_scroll_offset: usize,
     message_follow_tail: bool,
     message_viewport_lines: usize,
@@ -148,6 +149,7 @@ impl App {
 
         let active_model = fallback_model.clone();
         let last_notice = None;
+        let retrying_hint = None;
 
         Ok(Self {
             should_quit: false,
@@ -180,6 +182,7 @@ impl App {
             active_request_id: 0,
             abort_confirmation_deadline: None,
             last_notice,
+            retrying_hint,
             message_scroll_offset: 0,
             message_follow_tail: true,
             message_viewport_lines: 0,
@@ -1237,6 +1240,13 @@ impl App {
 
                 self.finish_assistant_turn(turn, runtime)?;
             }
+            BackendEvent::Retrying { request_id, attempt, max_attempts, reason, retry_after_secs } => {
+                if !self.is_active_request(request_id) {
+                    return Ok(());
+                }
+
+                self.retrying_hint = Some((attempt, max_attempts, reason, retry_after_secs));
+            }
             BackendEvent::Failed { request_id, error } => {
                 if !self.is_active_request(request_id) {
                     return Ok(());
@@ -1249,6 +1259,7 @@ impl App {
                 self.abort_confirmation_deadline = None;
                 self.streaming_markdown = None;
                 self.streaming_preview_lines.clear();
+                self.retrying_hint = None;
 
                 if let Some(message) = self.conversation.messages.last_mut()
                     && message.streaming

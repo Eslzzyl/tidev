@@ -375,6 +375,13 @@ pub enum BackendEvent {
         request_id: u64,
         error: String,
     },
+    Retrying {
+        request_id: u64,
+        attempt: u32,
+        max_attempts: u32,
+        reason: String,
+        retry_after_secs: Option<u32>,
+    },
     ToolCompleted {
         request_id: u64,
         tool_call: ToolCall,

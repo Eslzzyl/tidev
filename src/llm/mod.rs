@@ -1,5 +1,6 @@
 mod anthropic;
 mod attachments;
+mod error;
 mod openai;
 mod think_parser;
 
@@ -12,6 +13,8 @@ use crate::{
     session::{BackendEvent, Message},
     tooling::ToolDefinition,
 };
+
+use error::{backoff_delay, backoff_sleep, classify_anyhow_error, MAX_RETRIES};
 
 #[derive(Clone)]
 pub struct LlmClient {
@@ -36,10 +39,11 @@ impl LlmClient {
         tools: Vec<ToolDefinition>,
         tx: UnboundedSender<BackendEvent>,
     ) {
-        if let Err(error) = self
-            .stream_chat_inner(request_id, model, messages, tools, tx.clone())
-            .await
-        {
+        let result = self
+            .stream_chat_with_retry(request_id, model, messages, tools, tx.clone())
+            .await;
+
+        if let Err(error) = result {
             let _ = tx.send(BackendEvent::Failed {
                 request_id,
                 error: error.to_string(),
@@ -52,10 +56,94 @@ impl LlmClient {
         model: ActiveModel,
         messages: Vec<Message>,
     ) -> Result<String> {
-        match model.api_type {
-            ApiType::Anthropic => anthropic::complete_anthropic(&self.http, model, messages).await,
-            ApiType::OpenAi => openai::complete_openai(&self.http, model, messages).await,
+        let result = self
+            .complete_with_retry(model, messages)
+            .await;
+
+        result.context("LLM completion failed after retries")
+    }
+
+    /// Internal: stream chat with retry logic for retryable errors.
+    async fn stream_chat_with_retry(
+        &self,
+        request_id: u64,
+        model: ActiveModel,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+        tx: UnboundedSender<BackendEvent>,
+    ) -> Result<()> {
+        for attempt in 1..=MAX_RETRIES {
+            let result = self
+                .stream_chat_inner(request_id, model.clone(), messages.clone(), tools.clone(), tx.clone())
+                .await;
+
+            match result {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    let network_error = classify_anyhow_error(e);
+                    let is_last_attempt = attempt == MAX_RETRIES;
+
+                    if !network_error.is_retryable() || is_last_attempt {
+                        // Return the final error (non-retryable or exhausted retries)
+                        return Err(anyhow::anyhow!("{}", network_error.message()));
+                    }
+
+                    let delay_secs = backoff_delay(attempt).as_secs() as u32;
+
+                    let _ = tx.send(BackendEvent::Retrying {
+                        request_id,
+                        attempt,
+                        max_attempts: MAX_RETRIES,
+                        reason: network_error.message().to_string(),
+                        retry_after_secs: Some(delay_secs),
+                    });
+
+                    backoff_sleep(attempt).await;
+                }
+            }
         }
+
+        unreachable!("loop should return before this point")
+    }
+
+    /// Internal: complete with retry logic.
+    async fn complete_with_retry(
+        &self,
+        model: ActiveModel,
+        messages: Vec<Message>,
+    ) -> Result<String> {
+        for attempt in 1..=MAX_RETRIES {
+            let result = match model.api_type {
+                ApiType::Anthropic => anthropic::complete_anthropic(&self.http, model.clone(), messages.clone()).await,
+                ApiType::OpenAi => openai::complete_openai(&self.http, model.clone(), messages.clone()).await,
+            };
+
+            match result {
+                Ok(response) => return Ok(response),
+                Err(e) => {
+                    let network_error = classify_anyhow_error(e);
+                    let is_last_attempt = attempt == MAX_RETRIES;
+
+                    if !network_error.is_retryable() || is_last_attempt {
+                        return Err(anyhow::anyhow!("{}", network_error.message()));
+                    }
+
+                    let delay_secs = backoff_delay(attempt).as_secs() as u32;
+
+                    eprintln!(
+                        "Completion failed (attempt {}/{}): {}, retrying in {}s...",
+                        attempt,
+                        MAX_RETRIES,
+                        network_error.message(),
+                        delay_secs
+                    );
+
+                    backoff_sleep(attempt).await;
+                }
+            }
+        }
+
+        unreachable!("loop should return before this point")
     }
 
     async fn stream_chat_inner(
