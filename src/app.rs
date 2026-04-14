@@ -687,11 +687,10 @@ impl App {
             }
         };
 
-        if let Ok(text) = clipboard.get_text() {
-            if !text.is_empty() {
+        if let Ok(text) = clipboard.get_text()
+            && !text.is_empty() {
                 return self.handle_text_paste(&text);
             }
-        }
 
         let image = match clipboard.get_image() {
             Ok(image) => image,
@@ -1237,11 +1236,10 @@ impl App {
         }
 
         let path = Path::new(source);
-        if path.is_absolute() {
-            if let Ok(rel) = path.strip_prefix(&self.workspace_root) {
+        if path.is_absolute()
+            && let Ok(rel) = path.strip_prefix(&self.workspace_root) {
                 return rel.display().to_string();
             }
-        }
 
         source.to_string()
     }

@@ -99,7 +99,7 @@ pub fn classify_anyhow_error(error: anyhow::Error) -> NetworkError {
 /// Base delay is 2 seconds, multiplied by 2^(attempt-1).
 /// Caps at 30 seconds.
 pub fn backoff_delay(attempt: u32) -> Duration {
-    let delay_secs = 2u64.saturating_pow(attempt as u32).min(30);
+    let delay_secs = 2u64.saturating_pow(attempt).min(30);
     Duration::from_secs(delay_secs)
 }
 

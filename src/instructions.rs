@@ -62,8 +62,8 @@ pub fn system_prompt_and_sources(
     let paths = system_paths(workspace_root, config_dir, instructions)?;
 
     for path in paths {
-        if let Ok(content) = fs::read_to_string(&path) {
-            if !content.trim().is_empty() {
+        if let Ok(content) = fs::read_to_string(&path)
+            && !content.trim().is_empty() {
                 sections.push(format!(
                     "Instructions from: {}\n{}",
                     path.display(),
@@ -71,19 +71,17 @@ pub fn system_prompt_and_sources(
                 ));
                 sources.push(path.display().to_string());
             }
-        }
     }
 
     for url in instructions
         .iter()
         .filter(|item| item.starts_with("http://") || item.starts_with("https://"))
     {
-        if let Ok(content) = fetch_remote(url) {
-            if !content.trim().is_empty() {
+        if let Ok(content) = fetch_remote(url)
+            && !content.trim().is_empty() {
                 sections.push(format!("Instructions from: {}\n{}", url, content));
                 sources.push(url.clone());
             }
-        }
     }
 
     Ok((sections.join("\n\n"), sources))
