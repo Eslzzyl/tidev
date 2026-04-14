@@ -710,7 +710,11 @@ impl App {
             };
             header_lines.push(line_with_style(&status_text, palette.accent_soft));
         } else if canonical_name == "list" {
-            let count = attachment_lines.len();
+            let count = if output.trim() == "(empty)" {
+                0
+            } else {
+                output.lines().skip(1).filter(|line| !line.trim().is_empty()).count()
+            };
             header_lines.push(line_with_style(
                 &format!("Listed {} items", count),
                 palette.accent_soft,
@@ -962,6 +966,21 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert_eq!(line_text(&lines[0]), "┃ Thinking:");
         assert_eq!(line_text(&lines[1]), "┃ ");
+    }
+
+    #[test]
+    fn render_tool_result_lines_list_counts_items_from_output() {
+        use crate::session::{Message, ToolExecutionResult};
+
+        let message = Message::tool_result(
+            "tool-call-id",
+            "list",
+            ToolExecutionResult::new("./\nfile1.txt\nfile2.txt"),
+        );
+
+        let app = super::App::new().unwrap();
+        let lines = app.render_tool_result_lines(&message, 80);
+        assert!(lines.iter().any(|line| line_text(line).contains("Listed 2 items")));
     }
 }
 
