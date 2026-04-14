@@ -536,7 +536,13 @@ impl App {
 
     fn handle_key_event(&mut self, key: KeyEvent, runtime: &Runtime) -> Result<()> {
         if matches!(key.code, KeyCode::Char('c')) && key.modifiers.contains(KeyModifiers::CONTROL) {
-            self.should_quit = true;
+            if !self.composer.text().is_empty() {
+                self.composer.clear();
+                self.at_mention.clear();
+                self.command_palette
+                    .sync(self.composer.text(), &self.commands);
+                self.last_notice = Some("Input cleared".to_string());
+            }
             return Ok(());
         }
 
