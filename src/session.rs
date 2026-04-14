@@ -239,6 +239,7 @@ impl Message {
 #[derive(Clone, Debug)]
 pub struct Conversation {
     pub session_id: Uuid,
+    pub parent_session_id: Option<Uuid>,
     pub workspace_root: String,
     pub provider_id: String,
     pub provider_display_name: String,
@@ -264,6 +265,7 @@ impl Conversation {
         let now = Utc::now();
         Self {
             session_id,
+            parent_session_id: None,
             workspace_root: workspace_root.into(),
             provider_id: provider_id.into(),
             provider_display_name: provider_display_name.into(),

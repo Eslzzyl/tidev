@@ -164,6 +164,7 @@ pub(crate) fn canonical_tool_name(tool_name: &str) -> Option<&'static str> {
         "glob" => Some("glob"),
         "grep" => Some("grep"),
         "bash" | "shell" => Some("bash"),
+        "task" => Some("task"),
         "todowrite" | "todo" => Some("todowrite"),
         "skill" => Some("skill"),
         _ => None,

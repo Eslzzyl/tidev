@@ -12,7 +12,7 @@ use crate::{
     tooling::TodoItem,
 };
 
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 pub struct SessionStore {
     connection: Connection,
@@ -22,6 +22,7 @@ pub struct SessionStore {
 #[derive(Clone, Debug)]
 pub struct SessionRecord {
     pub session_id: Uuid,
+    pub parent_session_id: Option<Uuid>,
     pub workspace_root: String,
     pub provider_id: String,
     pub provider_display_name: String,
@@ -76,7 +77,7 @@ impl SessionStore {
         self.connection.execute(
             "INSERT INTO sessions (id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
-                session_id_text,
+                session_id_text.clone(),
                 provider_id,
                 provider_display_name,
                 model_id,
@@ -94,6 +95,58 @@ impl SessionStore {
 
         Ok(SessionRecord {
             session_id,
+            parent_session_id: None,
+            workspace_root,
+            provider_id: provider_id.to_string(),
+            provider_display_name: provider_display_name.to_string(),
+            model_id: model_id.to_string(),
+            model_display_name: model_display_name.to_string(),
+            title: title.to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+    }
+
+    pub fn create_session_with_parent(
+        &self,
+        session_id: Uuid,
+        parent_session_id: Uuid,
+        workspace_root: &Path,
+        provider_id: &str,
+        provider_display_name: &str,
+        model_id: &str,
+        model_display_name: &str,
+        title: &str,
+    ) -> Result<SessionRecord> {
+        let now = Utc::now();
+        let now_text = now.to_rfc3339();
+        let session_id_text = session_id.to_string();
+        let parent_session_id_text = parent_session_id.to_string();
+        let workspace_root = workspace_root.display().to_string();
+
+        self.connection.execute(
+            "INSERT INTO sessions (id, parent_session_id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                session_id_text.clone(),
+                parent_session_id_text,
+                provider_id,
+                provider_display_name,
+                model_id,
+                model_display_name,
+                title,
+                now_text,
+                now_text,
+            ],
+        )?;
+
+        self.connection.execute(
+            "INSERT INTO session_workspaces (session_id, workspace_root) VALUES (?1, ?2)",
+            params![session_id_text, workspace_root.clone()],
+        )?;
+
+        Ok(SessionRecord {
+            session_id,
+            parent_session_id: Some(parent_session_id),
             workspace_root,
             provider_id: provider_id.to_string(),
             provider_display_name: provider_display_name.to_string(),
@@ -282,7 +335,7 @@ impl SessionStore {
 
     pub fn load_latest_session(&self) -> Result<Option<SessionRecord>> {
         let mut statement = self.connection.prepare(
-            "SELECT s.id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, COALESCE(sw.workspace_root, '') FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id ORDER BY s.updated_at DESC LIMIT 1",
+              "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, COALESCE(sw.workspace_root, '') FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id ORDER BY s.updated_at DESC LIMIT 1",
         )?;
 
         let record = statement.query_row([], Self::session_from_row).optional()?;
@@ -301,6 +354,7 @@ impl SessionStore {
         let revert_message_id = self.load_revert_message_id(session_id)?;
         Ok(Some(Conversation {
             session_id: record.session_id,
+            parent_session_id: record.parent_session_id,
             workspace_root: record.workspace_root,
             provider_id: record.provider_id,
             provider_display_name: record.provider_display_name,
@@ -364,7 +418,7 @@ impl SessionStore {
 
     pub fn load_session_record(&self, session_id: Uuid) -> Result<Option<SessionRecord>> {
         let mut statement = self.connection.prepare(
-            "SELECT s.id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, COALESCE(sw.workspace_root, '') FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.id = ?1 LIMIT 1",
+              "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, COALESCE(sw.workspace_root, '') FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.id = ?1 LIMIT 1",
         )?;
 
         let record = statement
@@ -426,10 +480,28 @@ impl SessionStore {
     pub fn load_sessions_for_workspace(&self, workspace_root: &Path) -> Result<Vec<SessionRecord>> {
         let workspace_root = workspace_root.display().to_string();
         let mut statement = self.connection.prepare(
-            "SELECT s.id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE sw.workspace_root = ?1 ORDER BY s.updated_at DESC, s.created_at DESC",
+              "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE sw.workspace_root = ?1 ORDER BY s.updated_at DESC, s.created_at DESC",
         )?;
 
         let rows = statement.query_map(params![workspace_root], Self::session_from_row)?;
+
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row?);
+        }
+
+        Ok(records)
+    }
+
+    pub fn load_child_sessions(&self, parent_session_id: Uuid) -> Result<Vec<SessionRecord>> {
+        let mut statement = self.connection.prepare(
+                "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, COALESCE(sw.workspace_root, '') FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.parent_session_id = ?1 ORDER BY s.updated_at DESC, s.created_at DESC",
+            )?;
+
+        let rows = statement.query_map(
+            params![parent_session_id.to_string()],
+            Self::session_from_row,
+        )?;
 
         let mut records = Vec::new();
         for row in rows {
@@ -450,19 +522,29 @@ impl SessionStore {
 
     fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRecord> {
         let id = row.get::<_, String>(0)?;
-        let provider_id = row.get::<_, String>(1)?;
-        let provider_display_name = row.get::<_, String>(2)?;
-        let model_id = row.get::<_, String>(3)?;
-        let model_display_name = row.get::<_, String>(4)?;
-        let title = row.get::<_, String>(5)?;
-        let created_at = row.get::<_, String>(6)?;
-        let updated_at = row.get::<_, String>(7)?;
-        let workspace_root = row.get::<_, String>(8)?;
+        let parent_session_id = row.get::<_, Option<String>>(1)?;
+        let provider_id = row.get::<_, String>(2)?;
+        let provider_display_name = row.get::<_, String>(3)?;
+        let model_id = row.get::<_, String>(4)?;
+        let model_display_name = row.get::<_, String>(5)?;
+        let title = row.get::<_, String>(6)?;
+        let created_at = row.get::<_, String>(7)?;
+        let updated_at = row.get::<_, String>(8)?;
+        let workspace_root = row.get::<_, String>(9)?;
+
+        let parent_session_id = parent_session_id
+            .map(|value| {
+                Uuid::parse_str(&value).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(1, Type::Text, Box::new(error))
+                })
+            })
+            .transpose()?;
 
         Ok(SessionRecord {
             session_id: Uuid::parse_str(&id).map_err(|error| {
                 rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
             })?,
+            parent_session_id,
             workspace_root,
             provider_id: provider_id.clone(),
             provider_display_name: fallback_display_name(provider_display_name, &provider_id),
@@ -470,10 +552,10 @@ impl SessionStore {
             model_display_name: fallback_display_name(model_display_name, &model_id),
             title,
             created_at: parse_datetime(&created_at).map_err(|error| {
-                rusqlite::Error::FromSqlConversionFailure(6, Type::Text, Box::new(error))
+                rusqlite::Error::FromSqlConversionFailure(7, Type::Text, Box::new(error))
             })?,
             updated_at: parse_datetime(&updated_at).map_err(|error| {
-                rusqlite::Error::FromSqlConversionFailure(7, Type::Text, Box::new(error))
+                rusqlite::Error::FromSqlConversionFailure(8, Type::Text, Box::new(error))
             })?,
         })
     }
@@ -499,6 +581,7 @@ CREATE TABLE IF NOT EXISTS meta (
 
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
+    parent_session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
     provider_id TEXT NOT NULL,
     provider_display_name TEXT NOT NULL,
     model_id TEXT NOT NULL,
@@ -622,6 +705,62 @@ mod tests {
             assert_eq!(conversation.provider_display_name, "DeepSeek");
             assert_eq!(conversation.model_display_name, "DeepSeek Chat");
             assert_eq!(conversation.workspace_root, "/tmp/workspace");
+        }
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn child_session_round_trip_records_parent() {
+        let path = std::env::temp_dir().join(format!(
+            "tidev-session-store-child-{}.sqlite3",
+            uuid::Uuid::new_v4()
+        ));
+
+        {
+            let store = SessionStore::open(&path).expect("store should open");
+            let parent_session_id = uuid::Uuid::new_v4();
+            let child_session_id = uuid::Uuid::new_v4();
+
+            store
+                .create_session(
+                    parent_session_id,
+                    Path::new("/tmp/workspace"),
+                    "openai",
+                    "OpenAI",
+                    "gpt-4o",
+                    "GPT-4o",
+                    "Parent",
+                )
+                .expect("parent session should be created");
+
+            let child_record = store
+                .create_session_with_parent(
+                    child_session_id,
+                    parent_session_id,
+                    Path::new("/tmp/workspace"),
+                    "openai",
+                    "OpenAI",
+                    "gpt-4o",
+                    "GPT-4o",
+                    "Task: Child",
+                )
+                .expect("child session should be created");
+
+            assert_eq!(child_record.parent_session_id, Some(parent_session_id));
+
+            let loaded = store
+                .load_session_record(child_session_id)
+                .expect("child session should load")
+                .expect("child session should exist");
+            assert_eq!(loaded.parent_session_id, Some(parent_session_id));
+
+            let children = store
+                .load_child_sessions(parent_session_id)
+                .expect("child sessions should load");
+            assert_eq!(children.len(), 1);
+            assert_eq!(children[0].session_id, child_session_id);
+            assert_eq!(children[0].parent_session_id, Some(parent_session_id));
         }
 
         let _ = std::fs::remove_file(path);

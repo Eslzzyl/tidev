@@ -145,12 +145,15 @@ impl McpManager {
     pub async fn upsert_server(&self, name: String, config: McpServerConfig) -> Result<()> {
         let existing_client = {
             let mut inner = self.inner.lock().unwrap();
-            let state = inner.servers.entry(name.clone()).or_insert_with(|| McpServerState {
-                config: config.clone(),
-                status: McpConnectionStatus::Disconnected,
-                client: None,
-                tools: Vec::new(),
-            });
+            let state = inner
+                .servers
+                .entry(name.clone())
+                .or_insert_with(|| McpServerState {
+                    config: config.clone(),
+                    status: McpConnectionStatus::Disconnected,
+                    client: None,
+                    tools: Vec::new(),
+                });
 
             state.config = config;
             state.status = McpConnectionStatus::Disconnected;
@@ -479,7 +482,10 @@ fn parse_arguments(arguments: &str) -> Result<Map<String, Value>> {
     }
 }
 
-fn call_tool_result_data(result: &rmcp::model::CallToolResult, tool_name: &str) -> ToolExecutionResult {
+fn call_tool_result_data(
+    result: &rmcp::model::CallToolResult,
+    tool_name: &str,
+) -> ToolExecutionResult {
     if let Some(structured) = &result.structured_content {
         return ToolExecutionResult::new(
             serde_json::to_string_pretty(structured).unwrap_or_else(|_| structured.to_string()),
@@ -524,7 +530,10 @@ fn call_tool_result_data(result: &rmcp::model::CallToolResult, tool_name: &str) 
         joined
     };
 
-    ToolExecutionResult { output, attachments }
+    ToolExecutionResult {
+        output,
+        attachments,
+    }
 }
 
 fn image_filename(tool_name: &str, index: usize, mime_type: &str) -> String {
@@ -540,7 +549,13 @@ fn image_filename(tool_name: &str, index: usize, mime_type: &str) -> String {
 
     let sanitized = tool_name
         .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' { ch } else { '-' })
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
         .collect::<String>();
 
     format!("{sanitized}-attachment-{}.{}", index + 1, extension)

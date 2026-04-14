@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use base64::Engine as _;
+use pulldown_cmark::{Event, Options as MarkdownOptions, Parser as MarkdownParser, Tag, TagEnd};
 use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
 use reqwest::{Client, StatusCode};
 use rmcp::ErrorData as McpError;
@@ -11,7 +12,6 @@ use rmcp::model::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use pulldown_cmark::{Event, Options as MarkdownOptions, Parser as MarkdownParser, Tag, TagEnd};
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
@@ -164,7 +164,10 @@ impl WebToolsServer {
                 .context("failed to send web search request")?;
 
             if !response.status().is_success() {
-                bail!("web search request failed with status {}", response.status());
+                bail!(
+                    "web search request failed with status {}",
+                    response.status()
+                );
             }
 
             response
@@ -179,7 +182,9 @@ impl WebToolsServer {
             "No search results found. Please try a different query.".to_string()
         });
 
-        Ok(CallToolResult::success(vec![rmcp::model::Content::text(text)]))
+        Ok(CallToolResult::success(vec![rmcp::model::Content::text(
+            text,
+        )]))
     }
 
     async fn fetch(&self, args: FetchArgs) -> Result<CallToolResult> {
@@ -209,7 +214,10 @@ impl WebToolsServer {
             bail!("response too large (exceeds 5MB limit)");
         }
 
-        let bytes = response.bytes().await.context("failed to read response body")?;
+        let bytes = response
+            .bytes()
+            .await
+            .context("failed to read response body")?;
         if bytes.len() > MAX_RESPONSE_BYTES {
             bail!("response too large (exceeds 5MB limit)");
         }
@@ -241,7 +249,9 @@ impl WebToolsServer {
             }
         };
 
-        Ok(CallToolResult::success(vec![rmcp::model::Content::text(output)]))
+        Ok(CallToolResult::success(vec![rmcp::model::Content::text(
+            output,
+        )]))
     }
 
     async fn fetch_response(&self, url: &Url, headers: HeaderMap) -> Result<reqwest::Response> {
@@ -318,7 +328,10 @@ impl ServerHandler for WebToolsServer {
                 let args = parse_call_args::<FetchArgs>(&request, FETCH_TOOL_NAME)?;
                 self.fetch(args).await.map_err(internal_error)
             }
-            other => Err(McpError::invalid_params(format!("unknown tool: {other}"), None)),
+            other => Err(McpError::invalid_params(
+                format!("unknown tool: {other}"),
+                None,
+            )),
         }
     }
 }
@@ -372,8 +385,14 @@ fn parse_call_args<T: for<'de> Deserialize<'de>>(
     tool: &'static str,
 ) -> Result<T, McpError> {
     let arguments = request.arguments.clone().unwrap_or_default();
-    serde_json::from_value(serde_json::Value::Object(arguments.into_iter().collect()))
-        .map_err(|err| McpError::invalid_params(format!("failed to decode arguments for {tool}: {err}"), None))
+    serde_json::from_value(serde_json::Value::Object(arguments.into_iter().collect())).map_err(
+        |err| {
+            McpError::invalid_params(
+                format!("failed to decode arguments for {tool}: {err}"),
+                None,
+            )
+        },
+    )
 }
 
 fn parse_exa_sse(body: &str) -> Result<Option<String>> {
@@ -387,8 +406,8 @@ fn parse_exa_sse(body: &str) -> Result<Option<String>> {
             continue;
         }
 
-        let value: serde_json::Value = serde_json::from_str(data)
-            .with_context(|| "failed to parse Exa SSE payload")?;
+        let value: serde_json::Value =
+            serde_json::from_str(data).with_context(|| "failed to parse Exa SSE payload")?;
 
         if let Some(text) = value
             .get("result")
@@ -419,9 +438,7 @@ fn fetch_headers(format: WebFetchFormat) -> HeaderMap {
         WebFetchFormat::Markdown => {
             "text/markdown;q=1.0, text/x-markdown;q=0.9, text/plain;q=0.8, text/html;q=0.7, */*;q=0.1"
         }
-        WebFetchFormat::Text => {
-            "text/plain;q=1.0, text/markdown;q=0.9, text/html;q=0.8, */*;q=0.1"
-        }
+        WebFetchFormat::Text => "text/plain;q=1.0, text/markdown;q=0.9, text/html;q=0.8, */*;q=0.1",
         WebFetchFormat::Html => {
             "text/html;q=1.0, application/xhtml+xml;q=0.9, text/plain;q=0.8, text/markdown;q=0.7, */*;q=0.1"
         }
@@ -599,12 +616,17 @@ mod tests {
                 .build()
                 .expect("test client"),
             exa_url: exa_url.into(),
-            tools: Arc::new(vec![WebToolsServer::websearch_tool(), WebToolsServer::webfetch_tool()]),
+            tools: Arc::new(vec![
+                WebToolsServer::websearch_tool(),
+                WebToolsServer::webfetch_tool(),
+            ]),
         }
     }
 
     async fn spawn_http_server(response: Vec<u8>) -> String {
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind test server");
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
         let addr = listener.local_addr().expect("local addr");
 
         tokio::spawn(async move {
@@ -624,7 +646,10 @@ mod tests {
         for (name, value) in headers {
             response.push_str(&format!("{name}: {value}\r\n"));
         }
-        response.push_str(&format!("Content-Length: {}\r\nConnection: close\r\n\r\n", body.len()));
+        response.push_str(&format!(
+            "Content-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        ));
         let mut bytes = response.into_bytes();
         bytes.extend_from_slice(body);
         bytes
@@ -637,8 +662,18 @@ mod tests {
 
         assert!(info.capabilities.tools.is_some());
         assert_eq!(server.tools.len(), 2);
-        assert!(server.tools.iter().any(|tool| tool.name.as_ref() == SEARCH_TOOL_NAME));
-        assert!(server.tools.iter().any(|tool| tool.name.as_ref() == FETCH_TOOL_NAME));
+        assert!(
+            server
+                .tools
+                .iter()
+                .any(|tool| tool.name.as_ref() == SEARCH_TOOL_NAME)
+        );
+        assert!(
+            server
+                .tools
+                .iter()
+                .any(|tool| tool.name.as_ref() == FETCH_TOOL_NAME)
+        );
     }
 
     #[tokio::test]
@@ -772,7 +807,9 @@ event: message
 data: {"result":{"content":[{"type":"text","text":"hello"}]}}
 "#;
 
-        let text = parse_exa_sse(body).expect("should parse").expect("should contain text");
+        let text = parse_exa_sse(body)
+            .expect("should parse")
+            .expect("should contain text");
         assert_eq!(text, "hello");
     }
 

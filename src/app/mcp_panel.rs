@@ -132,37 +132,17 @@ impl App {
                         .set_placeholder("Search MCP servers by name or transport");
                     self.reset_mcp_panel_selection();
                 }
-                KeyCode::Enter | KeyCode::Tab => {
-                    match editor.apply_input(&self.composer.text()) {
-                        Ok(Some(result)) => {
-                            match self.apply_mcp_server_draft(runtime, result) {
-                                Ok(()) => {
-                                    let previous_query = editor.previous_query.clone();
-                                    panel.clear_editor();
-                                    self.mcp_panel = Some(panel);
-                                    self.composer.clear();
-                                    self.composer.set_text(previous_query);
-                                    self.composer.set_placeholder(
-                                        "Search MCP servers by name or transport",
-                                    );
-                                    self.reset_mcp_panel_selection();
-                                }
-                                Err(error) => {
-                                    self.last_notice = Some(error.to_string());
-                                    panel.editor = Some(editor);
-                                    self.mcp_panel = Some(panel);
-                                    self.composer.set_text(input_before);
-                                }
-                            }
-                        }
-                        Ok(None) => {
-                            let next_input = editor.current_input();
-                            let next_placeholder = editor.placeholder();
-                            panel.editor = Some(editor);
+                KeyCode::Enter | KeyCode::Tab => match editor.apply_input(&self.composer.text()) {
+                    Ok(Some(result)) => match self.apply_mcp_server_draft(runtime, result) {
+                        Ok(()) => {
+                            let previous_query = editor.previous_query.clone();
+                            panel.clear_editor();
                             self.mcp_panel = Some(panel);
                             self.composer.clear();
-                            self.composer.set_text(next_input);
-                            self.composer.set_placeholder(next_placeholder);
+                            self.composer.set_text(previous_query);
+                            self.composer
+                                .set_placeholder("Search MCP servers by name or transport");
+                            self.reset_mcp_panel_selection();
                         }
                         Err(error) => {
                             self.last_notice = Some(error.to_string());
@@ -170,8 +150,23 @@ impl App {
                             self.mcp_panel = Some(panel);
                             self.composer.set_text(input_before);
                         }
+                    },
+                    Ok(None) => {
+                        let next_input = editor.current_input();
+                        let next_placeholder = editor.placeholder();
+                        panel.editor = Some(editor);
+                        self.mcp_panel = Some(panel);
+                        self.composer.clear();
+                        self.composer.set_text(next_input);
+                        self.composer.set_placeholder(next_placeholder);
                     }
-                }
+                    Err(error) => {
+                        self.last_notice = Some(error.to_string());
+                        panel.editor = Some(editor);
+                        self.mcp_panel = Some(panel);
+                        self.composer.set_text(input_before);
+                    }
+                },
                 _ => {
                     let _ = self.composer.handle_key_with_history(key, false);
                     panel.editor = Some(editor);
@@ -294,7 +289,11 @@ impl App {
         panel.begin_create_editor(previous_query);
         self.mcp_panel = Some(panel);
         self.composer.clear();
-        if let Some(editor) = self.mcp_panel.as_ref().and_then(|panel| panel.editor.as_ref()) {
+        if let Some(editor) = self
+            .mcp_panel
+            .as_ref()
+            .and_then(|panel| panel.editor.as_ref())
+        {
             self.composer.set_text(editor.current_input());
             self.composer.set_placeholder(editor.placeholder());
         }
@@ -322,7 +321,11 @@ impl App {
         panel.begin_edit_editor(previous_query, server_name, &config);
         self.mcp_panel = Some(panel);
         self.composer.clear();
-        if let Some(editor) = self.mcp_panel.as_ref().and_then(|panel| panel.editor.as_ref()) {
+        if let Some(editor) = self
+            .mcp_panel
+            .as_ref()
+            .and_then(|panel| panel.editor.as_ref())
+        {
             self.composer.set_text(editor.current_input());
             self.composer.set_placeholder(editor.placeholder());
         }
@@ -362,7 +365,9 @@ impl App {
             config,
         } = result;
 
-        if original_name.as_deref() != Some(name.as_str()) && self.config.mcp.servers.contains_key(&name) {
+        if original_name.as_deref() != Some(name.as_str())
+            && self.config.mcp.servers.contains_key(&name)
+        {
             bail!("MCP server '{name}' already exists");
         }
 
@@ -371,7 +376,10 @@ impl App {
             && original_name != name
         {
             previous_name = Some(original_name);
-            self.config.mcp.servers.remove(previous_name.as_ref().expect("name set"));
+            self.config
+                .mcp
+                .servers
+                .remove(previous_name.as_ref().expect("name set"));
         }
 
         self.config.mcp.servers.insert(name.clone(), config.clone());
@@ -463,7 +471,9 @@ impl McpEditorStep {
     pub fn help(self, kind: McpServerKind) -> String {
         match self {
             Self::Name => "Use lowercase letters, numbers, '-', or '_' only.".to_string(),
-            Self::Kind => "Choose stdio for a local process or http/sse for a remote endpoint.".to_string(),
+            Self::Kind => {
+                "Choose stdio for a local process or http/sse for a remote endpoint.".to_string()
+            }
             Self::Endpoint => {
                 if kind.is_stdio() {
                     "Command used to launch the MCP server process.".to_string()
@@ -473,7 +483,9 @@ impl McpEditorStep {
             }
             Self::Args => "Use shell-style quoting if you need spaces in an argument.".to_string(),
             Self::Cwd => "Leave blank to use the workspace root.".to_string(),
-            Self::Env => "Leave blank if the server does not need custom environment variables.".to_string(),
+            Self::Env => {
+                "Leave blank if the server does not need custom environment variables.".to_string()
+            }
         }
     }
 }
@@ -595,7 +607,14 @@ impl McpServerDraft {
 
     pub fn summary_text(&self) -> String {
         let mut lines = vec![
-            format!("name: {}", if self.name.is_empty() { "<empty>" } else { self.name.as_str() }),
+            format!(
+                "name: {}",
+                if self.name.is_empty() {
+                    "<empty>"
+                } else {
+                    self.name.as_str()
+                }
+            ),
             format!("transport: {}", self.kind.label()),
             format!(
                 "endpoint: {}",
@@ -616,11 +635,19 @@ impl McpServerDraft {
 
             lines.push(format!(
                 "args: {}",
-                if self.args.is_empty() { "<none>" } else { self.args.as_str() }
+                if self.args.is_empty() {
+                    "<none>"
+                } else {
+                    self.args.as_str()
+                }
             ));
             lines.push(format!(
                 "cwd: {}",
-                if self.cwd.is_empty() { "<workspace root>" } else { self.cwd.as_str() }
+                if self.cwd.is_empty() {
+                    "<workspace root>"
+                } else {
+                    self.cwd.as_str()
+                }
             ));
             lines.push(format!("env lines: {env_count}"));
         }

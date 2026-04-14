@@ -1,12 +1,12 @@
 use crate::{
     app::mcp_panel::McpPanelState,
+    app::mcp_panel::McpServerEditorState,
     app::model_panel::{ModelPanelItem, ModelPanelState},
     app::permission::PermissionDialogState,
     app::session_panel::SessionPanelState,
     app::theme_panel::ThemePanelState,
     config::ProviderSource,
     provider_setup::{ConnectDialog, EditProviderStep, NewProviderStep},
-    app::mcp_panel::McpServerEditorState,
 };
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
@@ -799,7 +799,7 @@ impl App {
                     let session = &panel.sessions[*index];
                     let is_current = session.session_id == self.conversation.session_id;
                     let updated_at = session.updated_at.format("%Y-%m-%d %H:%M").to_string();
-                    ListItem::new(Line::from(vec![
+                    let mut spans = vec![
                         Span::styled(
                             shorten(&session.title, 28),
                             Style::default()
@@ -831,7 +831,15 @@ impl App {
                                 Style::default().fg(palette.muted)
                             },
                         ),
-                    ]))
+                    ];
+                    if session.parent_session_id.is_some() {
+                        spans.push(Span::raw("  "));
+                        spans.push(Span::styled(
+                            "child",
+                            Style::default().fg(palette.accent_soft),
+                        ));
+                    }
+                    ListItem::new(Line::from(spans))
                 })
                 .collect::<Vec<_>>();
 
@@ -1145,9 +1153,11 @@ impl App {
             }
 
             frame.render_widget(
-                Paragraph::new("Enter connect/disconnect · a add · e edit · d remove · R refresh · Esc close")
-                    .alignment(Alignment::Center)
-                    .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
+                Paragraph::new(
+                    "Enter connect/disconnect · a add · e edit · d remove · R refresh · Esc close",
+                )
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
                 sections[3],
             );
         }

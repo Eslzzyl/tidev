@@ -167,6 +167,12 @@ impl App {
                 Style::default().fg(palette.warning),
             )]));
         }
+        if let Some(parent_session_id) = self.conversation.parent_session_id {
+            lines.push(Line::from(vec![Span::styled(
+                format!("Parent: {}", parent_session_id.simple()),
+                Style::default().fg(palette.accent_soft),
+            )]));
+        }
         lines.push(Line::from(""));
         lines.push(Line::from(vec![Span::styled(
             "cwd",
@@ -547,7 +553,8 @@ impl App {
             return self.render_attachment_preview_lines(&attachment_lines, body_width);
         }
 
-        let mut lines = self.render_output_preview_lines(output, body_width, tool_output_is_error(output));
+        let mut lines =
+            self.render_output_preview_lines(output, body_width, tool_output_is_error(output));
         lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
         lines
     }
@@ -713,6 +720,11 @@ fn summarize_tool_call(tool_name: &str, arguments: &str, body_width: usize) -> S
         "bash" => field("command")
             .map(|command| format!("run shell command {command}"))
             .unwrap_or_else(|| "run shell command".to_string()),
+        "task" => {
+            let description = field("description").unwrap_or("task");
+            let subagent_type = field("subagent_type").unwrap_or("general");
+            format!("spawn {subagent_type} subagent for {description}")
+        }
         "todowrite" => fields
             .iter()
             .find(|(key, _)| key == "todos")
@@ -782,6 +794,14 @@ fn summarize_tool_arguments(tool_name: &str, arguments: &str) -> Vec<(String, St
         "bash" => {
             if let Some(command) = string_field("command") {
                 fields.push(("command".to_string(), command));
+            }
+        }
+        "task" => {
+            if let Some(description) = string_field("description") {
+                fields.push(("description".to_string(), description));
+            }
+            if let Some(subagent_type) = string_field("subagent_type") {
+                fields.push(("subagent_type".to_string(), subagent_type));
             }
         }
         "todowrite" => {

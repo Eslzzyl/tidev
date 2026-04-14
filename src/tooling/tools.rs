@@ -19,7 +19,12 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::{session::{ToolCall, ToolExecutionResult}, skills::SkillCatalog, storage::SessionStore};
+use crate::{
+    session::{Message, MessageRole, ToolCall, ToolExecutionResult},
+    skills::SkillCatalog,
+    storage::SessionStore,
+};
+use uuid::Uuid;
 
 use super::canonical_tool_name;
 use super::schema::ToolArgs;
@@ -220,6 +225,14 @@ tool_args! {
 }
 
 tool_args! {
+    pub struct TaskArgs {
+        description: string("Short title for the task and child session"),
+        prompt: string("Task prompt to give the child session"),
+        subagent_type: optional_string("Optional subagent type, such as general or review"),
+    }
+}
+
+tool_args! {
     pub struct TodoItem {
         content: string("Brief description of the task"),
         status: string("Current status of the task: pending, in_progress, completed, cancelled"),
@@ -283,6 +296,11 @@ pub(super) fn tool_definitions(skill_description: String) -> Vec<ToolDefinition>
             "bash",
             "Run a shell command in the workspace root",
             ToolPermission::Execute,
+        ),
+        ToolDefinition::new::<TaskArgs>(
+            "task",
+            "Create a child session for a subagent task",
+            ToolPermission::Session,
         ),
         ToolDefinition::new::<TodoWriteArgs>(
             "todowrite",
@@ -941,6 +959,56 @@ pub(super) fn execute_tool_call(
             let args = parse_arguments::<BashArgs>(&call.name, arguments)?;
             run_shell(workspace_root, &args.command, max_output_bytes)
         }
+        Some("task") => {
+            let args = parse_arguments::<TaskArgs>(&call.name, arguments)?;
+            let parent_session = store
+                .load_session_record(session_id)?
+                .context("parent session not found")?;
+            let description = args.description.trim();
+            let prompt = args.prompt.trim();
+            let subagent_type = args
+                .subagent_type
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("general");
+
+            if description.is_empty() {
+                bail!("task description cannot be empty");
+            }
+            if prompt.is_empty() {
+                bail!("task prompt cannot be empty");
+            }
+
+            let child_session_id = Uuid::new_v4();
+            let child_title = format!("Task: {description}");
+            store.create_session_with_parent(
+                child_session_id,
+                parent_session.session_id,
+                workspace_root,
+                &parent_session.provider_id,
+                &parent_session.provider_display_name,
+                &parent_session.model_id,
+                &parent_session.model_display_name,
+                &child_title,
+            )?;
+
+            let bootstrap_message = Message::new(
+                MessageRole::System,
+                format!(
+                    "You are a {subagent_type} subagent spawned from session {}. Work on the task and keep the response concise.",
+                    parent_session.session_id
+                ),
+            );
+            store.append_message(child_session_id, &bootstrap_message)?;
+
+            let user_message = Message::new(MessageRole::User, prompt.to_string());
+            store.append_message(child_session_id, &user_message)?;
+
+            Ok(format!(
+                "Spawned child session {child_session_id} for {subagent_type} task '{description}'\nOpen it with /session {child_session_id}"
+            ))
+        }
         Some("todowrite") => {
             let args = parse_arguments::<TodoWriteArgs>(&call.name, arguments)?;
             validate_todos(&args.todos)?;
@@ -956,7 +1024,10 @@ pub(super) fn execute_tool_call(
         Some(other) => bail!("unsupported tool '{}'", other),
     }?;
 
-    Ok(ToolExecutionResult::new(truncate_to_limit(output, max_output_bytes)))
+    Ok(ToolExecutionResult::new(truncate_to_limit(
+        output,
+        max_output_bytes,
+    )))
 }
 
 #[cfg(test)]

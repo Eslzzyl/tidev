@@ -14,8 +14,8 @@ pub mod session;
 pub mod skills;
 pub mod storage;
 pub mod theme;
-pub mod webtools;
 pub mod tooling;
+pub mod webtools;
 pub mod workspace_snapshot;
 
 pub fn run() -> anyhow::Result<()> {

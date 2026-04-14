@@ -4,7 +4,11 @@ use uuid::Uuid;
 
 use crate::mcp::McpManager;
 use crate::skills::SkillCatalog;
-use crate::{prompts::SessionMode, session::{ToolCall, ToolExecutionResult}, storage::SessionStore};
+use crate::{
+    prompts::SessionMode,
+    session::{ToolCall, ToolExecutionResult},
+    storage::SessionStore,
+};
 
 use super::tools::{execute_tool_call, tool_definitions};
 use super::{ToolDefinition, canonical_tool_name};

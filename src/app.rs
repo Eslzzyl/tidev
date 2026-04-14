@@ -836,35 +836,33 @@ impl App {
                 }
                 self.open_connect_dialog()?;
             }
-            CommandAction::Mcp => {
-                match args.first().map(|value| value.as_str()) {
-                    Some("add") | Some("new") | Some("create") => {
-                        self.open_mcp_panel(String::new());
-                        self.open_new_mcp_server_editor(String::new());
-                    }
-                    Some("edit") => {
-                        if let Some(server_name) = args.get(1) {
-                            self.open_mcp_panel(server_name.clone());
-                            self.open_existing_mcp_server_editor(String::new(), server_name.clone())?;
-                        } else {
-                            self.last_notice = Some("Usage: /mcp edit <server-name>".to_string());
-                        }
-                    }
-                    Some("remove") | Some("delete") | Some("rm") => {
-                        if let Some(server_name) = args.get(1) {
-                            if let Err(error) = self.remove_mcp_server_from_editor(runtime, server_name)
-                            {
-                                self.last_notice = Some(error.to_string());
-                            }
-                        } else {
-                            self.last_notice = Some("Usage: /mcp remove <server-name>".to_string());
-                        }
-                    }
-                    _ => {
-                        self.open_mcp_panel(args.join(" "));
+            CommandAction::Mcp => match args.first().map(|value| value.as_str()) {
+                Some("add") | Some("new") | Some("create") => {
+                    self.open_mcp_panel(String::new());
+                    self.open_new_mcp_server_editor(String::new());
+                }
+                Some("edit") => {
+                    if let Some(server_name) = args.get(1) {
+                        self.open_mcp_panel(server_name.clone());
+                        self.open_existing_mcp_server_editor(String::new(), server_name.clone())?;
+                    } else {
+                        self.last_notice = Some("Usage: /mcp edit <server-name>".to_string());
                     }
                 }
-            }
+                Some("remove") | Some("delete") | Some("rm") => {
+                    if let Some(server_name) = args.get(1) {
+                        if let Err(error) = self.remove_mcp_server_from_editor(runtime, server_name)
+                        {
+                            self.last_notice = Some(error.to_string());
+                        }
+                    } else {
+                        self.last_notice = Some("Usage: /mcp remove <server-name>".to_string());
+                    }
+                }
+                _ => {
+                    self.open_mcp_panel(args.join(" "));
+                }
+            },
             CommandAction::Model => {
                 self.open_model_panel(args.join(" "));
             }
