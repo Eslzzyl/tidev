@@ -122,7 +122,7 @@ impl App {
         let border_style = if self.pending_request {
             Style::default().fg(palette.warning)
         } else {
-            Style::default().fg(palette.border_active())
+            Style::default().fg(palette.border_mode_color(self.mode))
         };
 
         let content = if self.composer.is_empty() {

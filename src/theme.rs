@@ -1,6 +1,8 @@
 use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
 
+use crate::prompts::SessionMode;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ThemeName {
@@ -82,6 +84,8 @@ pub struct ThemePalette {
     pub error: Color,
     pub selection_bg: Color,
     pub selection_fg: Color,
+    pub mode_build: Color,
+    pub mode_plan: Color,
 }
 
 impl ThemePalette {
@@ -101,6 +105,8 @@ impl ThemePalette {
             error: Color::Rgb(248, 113, 113),
             selection_bg: Color::Rgb(38, 52, 69),
             selection_fg: Color::Rgb(255, 255, 255),
+            mode_build: Color::Rgb(45, 212, 191),
+            mode_plan: Color::Rgb(100, 116, 139),
         }
     }
 
@@ -120,6 +126,8 @@ impl ThemePalette {
             error: Color::Rgb(220, 38, 38),
             selection_bg: Color::Rgb(203, 213, 225),
             selection_fg: Color::Rgb(15, 23, 42),
+            mode_build: Color::Rgb(13, 148, 136),
+            mode_plan: Color::Rgb(71, 85, 105),
         }
     }
 
@@ -139,6 +147,8 @@ impl ThemePalette {
             error: Color::Rgb(220, 38, 38),
             selection_bg: Color::Rgb(251, 208, 125),
             selection_fg: Color::Rgb(33, 24, 17),
+            mode_build: Color::Rgb(251, 146, 60),
+            mode_plan: Color::Rgb(234, 179, 8),
         }
     }
 
@@ -158,6 +168,8 @@ impl ThemePalette {
             error: Color::Rgb(207, 34, 46),
             selection_bg: Color::Rgb(9, 105, 218),
             selection_fg: Color::Rgb(255, 255, 255),
+            mode_build: Color::Rgb(9, 105, 218),
+            mode_plan: Color::Rgb(127, 139, 167),
         }
     }
 
@@ -177,6 +189,8 @@ impl ThemePalette {
             error: Color::Rgb(220, 38, 38),
             selection_bg: Color::Rgb(124, 58, 237),
             selection_fg: Color::Rgb(255, 255, 255),
+            mode_build: Color::Rgb(124, 58, 237),
+            mode_plan: Color::Rgb(171, 145, 247),
         }
     }
 
@@ -196,6 +210,8 @@ impl ThemePalette {
             error: Color::Rgb(191, 97, 106),
             selection_bg: Color::Rgb(59, 66, 82),
             selection_fg: Color::Rgb(229, 233, 240),
+            mode_build: Color::Rgb(163, 190, 140),
+            mode_plan: Color::Rgb(116, 145, 159),
         }
     }
 
@@ -215,6 +231,8 @@ impl ThemePalette {
             error: Color::Rgb(231, 76, 60),
             selection_bg: Color::Rgb(69, 76, 89),
             selection_fg: Color::Rgb(223, 230, 255),
+            mode_build: Color::Rgb(97, 175, 239),
+            mode_plan: Color::Rgb(120, 129, 175),
         }
     }
 
@@ -234,6 +252,8 @@ impl ThemePalette {
             error: Color::Rgb(241, 124, 151),
             selection_bg: Color::Rgb(67, 74, 101),
             selection_fg: Color::Rgb(255, 255, 255),
+            mode_build: Color::Rgb(159, 147, 255),
+            mode_plan: Color::Rgb(120, 109, 186),
         }
     }
 
@@ -253,6 +273,8 @@ impl ThemePalette {
             error: Color::Rgb(220, 50, 47),
             selection_bg: Color::Rgb(7, 54, 66),
             selection_fg: Color::Rgb(253, 246, 227),
+            mode_build: Color::Rgb(38, 139, 210),
+            mode_plan: Color::Rgb(88, 110, 117),
         }
     }
 
@@ -276,6 +298,13 @@ impl ThemePalette {
 
     pub fn border_idle(&self) -> Color {
         self.border
+    }
+
+    pub fn border_mode_color(&self, mode: SessionMode) -> Color {
+        match mode {
+            SessionMode::Build => self.mode_build,
+            SessionMode::Plan => self.mode_plan,
+        }
     }
 }
 
