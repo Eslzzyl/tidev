@@ -214,15 +214,6 @@ impl App {
             fallback_model.display_name.clone(),
             "Untitled session",
         );
-        store.create_session(
-            session_id,
-            workspace_root.as_path(),
-            &fallback_model.provider_id,
-            &fallback_model.provider_display_name,
-            &fallback_model.model_id,
-            &fallback_model.display_name,
-            &conversation.title,
-        )?;
 
         let active_model = fallback_model.clone();
         let last_notice = None;
@@ -976,6 +967,9 @@ impl App {
             &model.model_id,
             &model.display_name,
         )?;
+        self.config.default_provider = model.provider_id.clone();
+        self.config.default_model = model.model_id.clone();
+        self.config.save(&self.paths)?;
         self.last_notice = Some(format!("Switched to {}", model.label()));
         Ok(())
     }
@@ -1039,6 +1033,28 @@ impl App {
 
         if prompt.is_empty() && self.draft_attachments.is_empty() {
             return Ok(());
+        }
+
+        if self.screen == Screen::Welcome {
+            let session_id = Uuid::new_v4();
+            self.conversation.session_id = session_id;
+            self.store.create_session(
+                session_id,
+                self.workspace_root.as_path(),
+                &self.active_model.provider_id,
+                &self.active_model.provider_display_name,
+                &self.active_model.model_id,
+                &self.active_model.display_name,
+                "Untitled session",
+            )?;
+            self.context_manager = ContextManager::new();
+            self.pending_tool_execution = None;
+            self.permission_dialog = None;
+            self.running_tool_execution = None;
+            self.abort_confirmation_deadline = None;
+            self.active_request_id = self.active_request_id.wrapping_add(1);
+            self.streaming_markdown = None;
+            self.streaming_preview_lines.clear();
         }
 
         self.screen = Screen::Chat;
