@@ -108,6 +108,9 @@ fn search_entries(workspace_root: &Path, query: &str) -> Vec<AtMentionSuggestion
         let Ok(rel) = path.strip_prefix(workspace_root) else {
             continue;
         };
+        if rel.as_os_str().is_empty() {
+            continue;
+        }
         let kind = if file_type.is_dir() {
             AtMentionKind::Directory
         } else if is_image_path(path) {
@@ -138,10 +141,6 @@ fn search_entries(workspace_root: &Path, query: &str) -> Vec<AtMentionSuggestion
             display,
             kind,
         });
-
-        if matches.len() >= 12 {
-            break;
-        }
     }
 
     matches.sort_by(|left, right| {
@@ -149,6 +148,8 @@ fn search_entries(workspace_root: &Path, query: &str) -> Vec<AtMentionSuggestion
             .cmp(&kind_rank(right.kind))
             .then_with(|| left.display.cmp(&right.display))
     });
+
+    matches.truncate(12);
 
     matches
 }
@@ -171,4 +172,45 @@ fn is_image_path(path: &Path) -> bool {
             )
         })
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{fs, path::PathBuf};
+    use uuid::Uuid;
+
+    fn make_temp_dir() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("tidev-at-mention-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).expect("failed to create temp dir");
+        dir
+    }
+
+    #[test]
+    fn search_entries_includes_root_level_files() {
+        let workspace = make_temp_dir();
+        let nested = workspace.join("nested");
+        fs::create_dir_all(&nested).expect("failed to create nested dir");
+
+        for index in 0..12 {
+            fs::write(nested.join(format!("match-{index:02}.txt")), "nested")
+                .expect("failed to write nested file");
+        }
+        fs::write(workspace.join("match-root.txt"), "root").expect("failed to write root file");
+
+        let suggestions = search_entries(&workspace, "match");
+
+        assert!(suggestions.iter().any(|suggestion| suggestion.path == "match-root.txt"));
+        assert!(suggestions.len() <= 12);
+    }
+
+    #[test]
+    fn search_entries_skips_workspace_root_directory() {
+        let workspace = make_temp_dir();
+        fs::write(workspace.join("match-root.txt"), "root").expect("failed to write root file");
+
+        let suggestions = search_entries(&workspace, "");
+
+        assert!(suggestions.iter().all(|suggestion| !suggestion.path.is_empty()));
+    }
 }
