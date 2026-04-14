@@ -11,6 +11,7 @@ pub enum CommandAction {
     Redo,
     Theme,
     Quit,
+    Init,
 }
 
 #[derive(Clone, Debug)]
@@ -288,5 +289,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         description: "Exit TiDev",
         usage: "/exit",
         action: CommandAction::Quit,
+    },
+    CommandSpec {
+        name: "init",
+        aliases: &[],
+        description: "Analyze project and create AGENTS.md",
+        usage: "/init",
+        action: CommandAction::Init,
     },
 ];
