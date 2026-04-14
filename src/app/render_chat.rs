@@ -767,13 +767,13 @@ impl App {
 
         if matches!(canonical_name, "write" | "edit") {
             if tool_output_is_error(output) {
-                let mut error_lines = self.render_output_preview_lines(output, body_width, true);
+                let error_lines = self.render_output_preview_lines(output, body_width, true);
                 lines.extend(error_lines);
                 lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
                 return lines;
             }
 
-            let mut out_lines = self.render_output_preview_lines(output, body_width, false);
+            let out_lines = self.render_output_preview_lines(output, body_width, false);
             lines.extend(out_lines);
             lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
             return lines;
@@ -781,7 +781,7 @@ impl App {
 
         if matches!(canonical_name, "read" | "list" | "todowrite") {
             if tool_output_is_error(output) {
-                let mut error_lines = self.render_output_preview_lines(output, body_width, true);
+                let error_lines = self.render_output_preview_lines(output, body_width, true);
                 lines.extend(error_lines);
                 lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
                 return lines;
@@ -791,7 +791,7 @@ impl App {
             return lines;
         }
 
-        let mut preview_lines =
+        let preview_lines =
             self.render_output_preview_lines(output, body_width, tool_output_is_error(output));
         lines.extend(preview_lines);
         lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
