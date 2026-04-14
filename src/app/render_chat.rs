@@ -2,6 +2,7 @@ use crate::{
     markdown_render::{adaptive_wrap_lines, render_markdown_text_with_width_and_cwd, WrapOptions},
     session::{Message, MessageAttachment, MessageRole, ToolCall},
     tooling::canonical_tool_name,
+    theme::ThemePalette,
 };
 use ratatui::{
     layout::{Constraint, Layout, Margin, Rect},
@@ -581,71 +582,6 @@ impl App {
         lines
     }
 
-    fn render_reasoning_lines(&self, reasoning: &str, body_width: usize) -> Vec<Line<'static>> {
-        let palette = self.palette();
-        let mut lines = Vec::new();
-        let reasoning_lines: Vec<&str> = reasoning.lines().collect();
-
-        if reasoning_lines.is_empty() {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "┃ ",
-                    Style::default()
-                        .fg(palette.muted)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("Thinking: ", Style::default().fg(palette.muted)),
-            ]));
-        } else if reasoning_lines.len() == 1 {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "┃ ",
-                    Style::default()
-                        .fg(palette.muted)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!(
-                        "Thinking: {}",
-                        shorten_single_line(reasoning_lines[0], body_width.saturating_sub(12))
-                    ),
-                    Style::default().fg(palette.muted),
-                ),
-            ]));
-        } else {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "┃ ",
-                    Style::default()
-                        .fg(palette.muted)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!(
-                        "Thinking: {}",
-                        shorten_single_line(reasoning_lines[0], body_width.saturating_sub(12))
-                    ),
-                    Style::default().fg(palette.muted),
-                ),
-            ]));
-
-            for line in &reasoning_lines[1..] {
-                let content = shorten_single_line(line, body_width.saturating_sub(2));
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        "┃ ",
-                        Style::default()
-                            .fg(palette.muted)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(content, Style::default().fg(palette.muted)),
-                ]));
-            }
-        }
-
-        lines
-    }
-
     fn render_error_body_lines(&self, message: &Message, body_width: usize) -> Vec<Line<'static>> {
         let palette = self.palette();
         let mut lines = Vec::new();
@@ -719,6 +655,15 @@ impl App {
         )])]
     }
 
+    fn render_reasoning_lines(&self, reasoning: &str, body_width: usize) -> Vec<Line<'static>> {
+        render_reasoning_markdown_lines(
+            reasoning,
+            body_width,
+            Some(self.workspace_root.as_path()),
+            self.palette(),
+        )
+    }
+
     fn render_tool_result_lines(&self, message: &Message, body_width: usize) -> Vec<Line<'static>> {
         let palette = self.palette();
         let tool_name = message.tool_name.as_deref().unwrap_or(message.role.label());
@@ -732,7 +677,6 @@ impl App {
             .map(MessageAttachment::summary)
             .collect::<Vec<_>>();
 
-        // Add result count for search/list tools
         if matches!(canonical_name, "grep" | "glob") {
             let count = if output.is_empty() {
                 0
@@ -906,6 +850,98 @@ impl App {
         let paragraph =
             Paragraph::new(Text::from(lines)).style(Style::default().bg(palette.background));
         frame.render_widget(paragraph, area);
+    }
+}
+
+fn render_reasoning_markdown_lines(
+    reasoning: &str,
+    body_width: usize,
+    cwd: Option<&std::path::Path>,
+    palette: ThemePalette,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let label_style = Style::default()
+        .fg(palette.muted)
+        .add_modifier(Modifier::BOLD);
+    let body_style = Style::default().fg(palette.muted);
+
+    lines.push(Line::from(vec![
+        Span::styled("┃ ", label_style),
+        Span::styled("Thinking:", body_style),
+    ]));
+
+    if reasoning.trim().is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled("┃ ", label_style),
+            Span::styled(String::new(), body_style),
+        ]));
+        return lines;
+    }
+
+    let content_width = body_width.saturating_sub(2).max(1);
+    let rendered = render_markdown_text_with_width_and_cwd(reasoning, Some(content_width), cwd);
+
+    if rendered.lines.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled("┃ ", label_style),
+            Span::styled(String::new(), body_style),
+        ]));
+        return lines;
+    }
+
+    for line in rendered.lines {
+        let mut spans = Vec::with_capacity(line.spans.len().saturating_add(1));
+        spans.push(Span::styled("┃ ", label_style));
+        spans.extend(line.spans);
+        lines.push(Line::from(spans));
+    }
+
+    lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_reasoning_markdown_lines;
+    use crate::theme::ThemePalette;
+    use ratatui::style::Style;
+    use ratatui::text::Line;
+
+    fn line_text(line: &Line<'static>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>()
+    }
+
+    #[test]
+    fn reasoning_lines_render_markdown_code_blocks() {
+        let lines = render_reasoning_markdown_lines(
+            "```rust\nfn main() { println!(\"hi\"); }\n```\n",
+            80,
+            None,
+            ThemePalette::dark(),
+        );
+
+        assert_eq!(line_text(&lines[0]), "┃ Thinking:");
+        assert_eq!(line_text(&lines[1]), "┃ fn main() { println!(\"hi\"); }");
+        assert!(lines[1].spans.len() > 2, "expected highlighted spans in code line");
+        assert!(
+            lines[1]
+                .spans
+                .iter()
+                .skip(1)
+                .any(|span| span.style != Style::default()),
+            "expected syntax highlighting styles on code spans"
+        );
+    }
+
+    #[test]
+    fn reasoning_lines_preserve_empty_state() {
+        let lines = render_reasoning_markdown_lines("", 80, None, ThemePalette::dark());
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!(line_text(&lines[0]), "┃ Thinking:");
+        assert_eq!(line_text(&lines[1]), "┃ ");
     }
 }
 
