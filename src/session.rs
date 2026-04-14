@@ -62,6 +62,22 @@ impl MessageAttachment {
     }
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ToolExecutionResult {
+    pub output: String,
+    #[serde(default)]
+    pub attachments: Vec<MessageAttachment>,
+}
+
+impl ToolExecutionResult {
+    pub fn new(output: impl Into<String>) -> Self {
+        Self {
+            output: output.into(),
+            attachments: Vec::new(),
+        }
+    }
+}
+
 fn truncate_preview(value: &str, max_chars: usize) -> String {
     let count = value.chars().count();
     if count <= max_chars {
@@ -203,13 +219,13 @@ impl Message {
     pub fn tool_result(
         tool_call_id: impl Into<String>,
         tool_name: impl Into<String>,
-        content: impl Into<String>,
+        result: ToolExecutionResult,
     ) -> Self {
         Self {
             id: Uuid::new_v4(),
             role: MessageRole::Tool,
-            content: content.into(),
-            attachments: Vec::new(),
+            content: result.output,
+            attachments: result.attachments,
             reasoning: String::new(),
             tool_calls: Vec::new(),
             tool_call_id: Some(tool_call_id.into()),
@@ -385,7 +401,7 @@ pub enum BackendEvent {
     ToolCompleted {
         request_id: u64,
         tool_call: ToolCall,
-        output: String,
+        result: ToolExecutionResult,
     },
 }
 

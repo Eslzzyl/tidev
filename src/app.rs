@@ -1426,7 +1426,7 @@ impl App {
             BackendEvent::ToolCompleted {
                 request_id,
                 tool_call,
-                output,
+                result,
             } => {
                 if !self.is_active_request(request_id) {
                     return Ok(());
@@ -1441,7 +1441,7 @@ impl App {
                     return Ok(());
                 }
 
-                self.record_tool_result(tool_call, output)?;
+                self.record_tool_result(tool_call, result)?;
                 self.advance_pending_tool_execution();
                 self.process_pending_tool_execution(runtime)?;
             }

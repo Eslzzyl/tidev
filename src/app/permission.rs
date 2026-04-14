@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use std::sync::{Arc, atomic::AtomicBool};
 use tokio::runtime::Runtime;
 
-use crate::session::ToolCall;
+use crate::session::{ToolCall, ToolExecutionResult};
 use crate::tooling::execute_shell_tool_call;
 
 use super::App;
@@ -138,7 +138,7 @@ impl App {
                     tool_call.name,
                     self.mode.as_str()
                 );
-                self.record_tool_result(tool_call, output)?;
+                self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
                 self.advance_pending_tool_execution();
                 continue;
             }
@@ -156,7 +156,7 @@ impl App {
                         "Tool '{}' was denied by remembered permission",
                         permission_label
                     );
-                    self.record_tool_result(tool_call, output)?;
+                    self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
                     self.advance_pending_tool_execution();
                 }
                 continue;
@@ -164,7 +164,7 @@ impl App {
 
             let Some(definition) = self.tools.definition_for(&tool_call.name) else {
                 let output = format!("Tool '{}' is unknown", tool_call.name);
-                self.record_tool_result(tool_call, output)?;
+                self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
                 self.advance_pending_tool_execution();
                 continue;
             };
@@ -232,7 +232,7 @@ impl App {
             format!("Tool '{}' was denied", dialog.display_name)
         };
 
-        self.record_tool_result(dialog.tool_call, output)?;
+        self.record_tool_result(dialog.tool_call, ToolExecutionResult::new(output))?;
         self.advance_pending_tool_execution();
         self.process_pending_tool_execution(runtime)
     }
@@ -247,7 +247,7 @@ impl App {
             return Ok(true);
         }
 
-        let output = self
+        let result = self
             .tools
             .execute_call(
                 runtime,
@@ -255,8 +255,8 @@ impl App {
                 self.conversation.session_id,
                 &tool_call,
             )
-            .unwrap_or_else(|error| format!("Tool failed: {error}"));
-        self.record_tool_result(tool_call, output)?;
+            .unwrap_or_else(|error| ToolExecutionResult::new(format!("Tool failed: {error}")));
+        self.record_tool_result(tool_call, result)?;
         self.advance_pending_tool_execution();
         Ok(false)
     }
@@ -293,22 +293,26 @@ impl App {
             let _ = tx.send(crate::session::BackendEvent::ToolCompleted {
                 request_id,
                 tool_call,
-                output,
+                result: ToolExecutionResult::new(output),
             });
         });
 
         Ok(())
     }
 
-    pub(crate) fn record_tool_result(&mut self, tool_call: ToolCall, output: String) -> Result<()> {
+    pub(crate) fn record_tool_result(
+        &mut self,
+        tool_call: ToolCall,
+        result: ToolExecutionResult,
+    ) -> Result<()> {
         self.store.append_tool_event(
             self.conversation.session_id,
             &tool_call.name,
             &tool_call.arguments,
-            &output,
+            &result.output,
         )?;
 
-        let message = crate::session::Message::tool_result(tool_call.id, tool_call.name, output);
+        let message = crate::session::Message::tool_result(tool_call.id, tool_call.name, result);
         self.conversation.push(message.clone());
         self.store
             .append_message(self.conversation.session_id, &message)?;

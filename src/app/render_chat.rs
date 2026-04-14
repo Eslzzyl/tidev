@@ -1,6 +1,6 @@
 use crate::{
     markdown_render::{WrapOptions, adaptive_wrap_lines, render_markdown_text_with_width_and_cwd},
-    session::{Message, MessageRole, ToolCall},
+    session::{Message, MessageAttachment, MessageRole, ToolCall},
     tooling::canonical_tool_name,
 };
 use ratatui::{
@@ -524,8 +524,13 @@ impl App {
         let tool_name = message.tool_name.as_deref().unwrap_or(message.role.label());
         let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
         let output = message.content.trim_end();
+        let attachment_lines = message
+            .attachments
+            .iter()
+            .map(MessageAttachment::summary)
+            .collect::<Vec<_>>();
 
-        if output.is_empty() {
+        if output.is_empty() && attachment_lines.is_empty() {
             return Vec::new();
         }
 
@@ -534,13 +539,37 @@ impl App {
             "read" | "write" | "edit" | "list" | "todowrite"
         ) {
             if tool_output_is_error(output) {
-                return self.render_output_preview_lines(output, body_width, true);
+                let mut lines = self.render_output_preview_lines(output, body_width, true);
+                lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
+                return lines;
             }
 
-            return Vec::new();
+            return self.render_attachment_preview_lines(&attachment_lines, body_width);
         }
 
-        self.render_output_preview_lines(output, body_width, tool_output_is_error(output))
+        let mut lines = self.render_output_preview_lines(output, body_width, tool_output_is_error(output));
+        lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
+        lines
+    }
+
+    fn render_attachment_preview_lines(
+        &self,
+        attachments: &[String],
+        body_width: usize,
+    ) -> Vec<Line<'static>> {
+        let palette = self.palette();
+        let mut lines = Vec::new();
+
+        for attachment in attachments {
+            lines.push(line_with_prefix(
+                "↳",
+                &shorten_single_line(attachment, body_width.saturating_sub(2)),
+                Style::default().fg(palette.accent_soft),
+                Style::default().fg(palette.text),
+            ));
+        }
+
+        lines
     }
 
     fn render_output_preview_lines(

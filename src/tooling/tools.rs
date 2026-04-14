@@ -19,7 +19,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::{session::ToolCall, skills::SkillCatalog, storage::SessionStore};
+use crate::{session::{ToolCall, ToolExecutionResult}, skills::SkillCatalog, storage::SessionStore};
 
 use super::canonical_tool_name;
 use super::schema::ToolArgs;
@@ -890,7 +890,7 @@ pub(super) fn execute_tool_call(
     session_id: uuid::Uuid,
     call: &ToolCall,
     max_output_bytes: usize,
-) -> Result<String> {
+) -> Result<ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
 
@@ -956,7 +956,7 @@ pub(super) fn execute_tool_call(
         Some(other) => bail!("unsupported tool '{}'", other),
     }?;
 
-    Ok(truncate_to_limit(output, max_output_bytes))
+    Ok(ToolExecutionResult::new(truncate_to_limit(output, max_output_bytes)))
 }
 
 #[cfg(test)]

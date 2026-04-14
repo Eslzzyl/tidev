@@ -14,7 +14,7 @@ use tokio::process::Command;
 
 use crate::config::mcp::McpServerConfig;
 use crate::prompts::SessionMode;
-use crate::session::ToolCall;
+use crate::session::{MessageAttachment, ToolCall, ToolExecutionResult};
 use crate::tooling::{ToolDefinition, ToolPermission};
 
 type McpClient = RunningService<RoleClient, ClientInfo>;
@@ -291,7 +291,7 @@ impl McpManager {
             .is_some_and(|definition| definition.permission.is_allowed_in(mode))
     }
 
-    pub async fn execute_call(&self, call: &ToolCall) -> Result<String> {
+    pub async fn execute_call(&self, call: &ToolCall) -> Result<ToolExecutionResult> {
         let definition = self
             .definition_for(&call.name)
             .with_context(|| format!("unknown MCP tool '{}'", call.name))?;
@@ -328,7 +328,7 @@ impl McpManager {
 
         self.restore_client(server_name.as_str(), client);
 
-        Ok(call_tool_result_text(&result))
+        Ok(call_tool_result_data(&result, &tool_name))
     }
 
     async fn connect_client(&self, config: &McpServerConfig) -> Result<McpClient> {
@@ -479,12 +479,15 @@ fn parse_arguments(arguments: &str) -> Result<Map<String, Value>> {
     }
 }
 
-fn call_tool_result_text(result: &rmcp::model::CallToolResult) -> String {
+fn call_tool_result_data(result: &rmcp::model::CallToolResult, tool_name: &str) -> ToolExecutionResult {
     if let Some(structured) = &result.structured_content {
-        return serde_json::to_string_pretty(structured).unwrap_or_else(|_| structured.to_string());
+        return ToolExecutionResult::new(
+            serde_json::to_string_pretty(structured).unwrap_or_else(|_| structured.to_string()),
+        );
     }
 
     let mut chunks = Vec::new();
+    let mut attachments = Vec::new();
     for content in &result.content {
         if let Some(text) = content.raw.as_text() {
             chunks.push(text.text.clone());
@@ -496,8 +499,12 @@ fn call_tool_result_text(result: &rmcp::model::CallToolResult) -> String {
             continue;
         }
 
-        if let rmcp::model::RawContent::Image(_) = &content.raw {
-            chunks.push("<image content>".to_string());
+        if let Some(image) = content.raw.as_image() {
+            attachments.push(MessageAttachment::Image {
+                filename: image_filename(tool_name, attachments.len(), &image.mime_type),
+                mime: image.mime_type.clone(),
+                data_url: format!("data:{};base64,{}", image.mime_type, image.data),
+            });
             continue;
         }
 
@@ -505,13 +512,68 @@ fn call_tool_result_text(result: &rmcp::model::CallToolResult) -> String {
     }
 
     let joined = chunks.join("\n");
-    if joined.trim().is_empty() {
+    let output = if joined.trim().is_empty() {
         if result.is_error.unwrap_or(false) {
             "MCP tool returned an empty error".to_string()
+        } else if !attachments.is_empty() {
+            "MCP tool returned image attachment(s)".to_string()
         } else {
             "MCP tool returned no content".to_string()
         }
     } else {
         joined
+    };
+
+    ToolExecutionResult { output, attachments }
+}
+
+fn image_filename(tool_name: &str, index: usize, mime_type: &str) -> String {
+    let extension = match mime_type {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/jpg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/bmp" => "bmp",
+        _ => "img",
+    };
+
+    let sanitized = tool_name
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' { ch } else { '-' })
+        .collect::<String>();
+
+    format!("{sanitized}-attachment-{}.{}", index + 1, extension)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rmcp::model::CallToolResult;
+
+    #[test]
+    fn converts_image_tool_content_into_attachment() {
+        let result = CallToolResult::success(vec![
+            rmcp::model::Content::text("Image fetched successfully"),
+            rmcp::model::Content::image("aGVsbG8=", "image/png"),
+        ]);
+
+        let converted = call_tool_result_data(&result, "webfetch");
+
+        assert_eq!(converted.output, "Image fetched successfully");
+        assert_eq!(converted.attachments.len(), 1);
+
+        match &converted.attachments[0] {
+            MessageAttachment::Image {
+                filename,
+                mime,
+                data_url,
+            } => {
+                assert_eq!(filename, "webfetch-attachment-1.png");
+                assert_eq!(mime, "image/png");
+                assert_eq!(data_url, "data:image/png;base64,aGVsbG8=");
+            }
+            other => panic!("expected image attachment, got {other:?}"),
+        }
     }
 }

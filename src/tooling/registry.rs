@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::mcp::McpManager;
 use crate::skills::SkillCatalog;
-use crate::{prompts::SessionMode, session::ToolCall, storage::SessionStore};
+use crate::{prompts::SessionMode, session::{ToolCall, ToolExecutionResult}, storage::SessionStore};
 
 use super::tools::{execute_tool_call, tool_definitions};
 use super::{ToolDefinition, canonical_tool_name};
@@ -156,7 +156,7 @@ impl ToolRegistry {
         store: &SessionStore,
         session_id: Uuid,
         call: &ToolCall,
-    ) -> Result<String> {
+    ) -> Result<ToolExecutionResult> {
         if self.mcp.definition_for(&call.name).is_some() {
             return runtime.block_on(self.mcp.execute_call(call));
         }

@@ -589,6 +589,181 @@ fn internal_error(err: anyhow::Error) -> McpError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    fn test_server(exa_url: impl Into<String>) -> WebToolsServer {
+        WebToolsServer {
+            http: Client::builder()
+                .user_agent("tidev-webtools/0.1")
+                .build()
+                .expect("test client"),
+            exa_url: exa_url.into(),
+            tools: Arc::new(vec![WebToolsServer::websearch_tool(), WebToolsServer::webfetch_tool()]),
+        }
+    }
+
+    async fn spawn_http_server(response: Vec<u8>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind test server");
+        let addr = listener.local_addr().expect("local addr");
+
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let mut buffer = [0u8; 4096];
+                let _ = socket.read(&mut buffer).await;
+                let _ = socket.write_all(&response).await;
+            }
+        });
+
+        format!("http://{}", addr)
+    }
+
+    fn http_response(status: &str, headers: &[(&str, &str)], body: impl AsRef<[u8]>) -> Vec<u8> {
+        let body = body.as_ref();
+        let mut response = format!("HTTP/1.1 {status}\r\n");
+        for (name, value) in headers {
+            response.push_str(&format!("{name}: {value}\r\n"));
+        }
+        response.push_str(&format!("Content-Length: {}\r\nConnection: close\r\n\r\n", body.len()));
+        let mut bytes = response.into_bytes();
+        bytes.extend_from_slice(body);
+        bytes
+    }
+
+    #[tokio::test]
+    async fn discovers_web_tools() {
+        let server = test_server("http://127.0.0.1");
+        let info = server.get_info();
+
+        assert!(info.capabilities.tools.is_some());
+        assert_eq!(server.tools.len(), 2);
+        assert!(server.tools.iter().any(|tool| tool.name.as_ref() == SEARCH_TOOL_NAME));
+        assert!(server.tools.iter().any(|tool| tool.name.as_ref() == FETCH_TOOL_NAME));
+    }
+
+    #[tokio::test]
+    async fn search_returns_result_text() {
+        let body = "event: message\ndata: {\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Rust search result\"}]}}\n";
+        let url = spawn_http_server(http_response(
+            "200 OK",
+            &[("Content-Type", "text/event-stream")],
+            body,
+        ))
+        .await;
+
+        let server = test_server(url);
+        let result = server
+            .search(SearchArgs {
+                query: "rust".to_string(),
+                num_results: Some(3),
+                livecrawl: None,
+                search_type: None,
+                context_max_characters: None,
+            })
+            .await
+            .expect("search should succeed");
+
+        let text = result
+            .content
+            .iter()
+            .find_map(|content| content.as_text().map(|text| text.text.clone()))
+            .expect("text content");
+        assert!(text.contains("Rust search result"));
+    }
+
+    #[tokio::test]
+    async fn fetch_returns_markdown_for_html() {
+        let html = b"<h1>Hello</h1><p>World</p>".to_vec();
+        let url = spawn_http_server(http_response(
+            "200 OK",
+            &[("Content-Type", "text/html; charset=utf-8")],
+            html,
+        ))
+        .await;
+
+        let server = test_server("http://127.0.0.1");
+        let result = server
+            .fetch(FetchArgs {
+                url,
+                format: Some(WebFetchFormat::Markdown),
+                timeout: Some(5),
+            })
+            .await
+            .expect("fetch should succeed");
+
+        let text = result
+            .content
+            .iter()
+            .find_map(|content| content.as_text().map(|text| text.text.clone()))
+            .expect("text content");
+        assert!(text.contains("Hello"));
+        assert!(text.contains("World"));
+    }
+
+    #[tokio::test]
+    async fn fetch_returns_image_content() {
+        let url = spawn_http_server(http_response(
+            "200 OK",
+            &[("Content-Type", "image/png")],
+            b"fake-png-bytes",
+        ))
+        .await;
+
+        let server = test_server("http://127.0.0.1");
+        let result = server
+            .fetch(FetchArgs {
+                url,
+                format: Some(WebFetchFormat::Markdown),
+                timeout: Some(5),
+            })
+            .await
+            .expect("fetch should succeed");
+
+        let image = result
+            .content
+            .iter()
+            .find_map(|content| content.as_image())
+            .expect("image content");
+        assert_eq!(image.mime_type, "image/png");
+        assert!(!image.data.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_rejects_http_errors() {
+        let url = spawn_http_server(http_response(
+            "500 Internal Server Error",
+            &[("Content-Type", "text/plain")],
+            b"boom",
+        ))
+        .await;
+
+        let server = test_server("http://127.0.0.1");
+        let err = server
+            .fetch(FetchArgs {
+                url,
+                format: Some(WebFetchFormat::Text),
+                timeout: Some(5),
+            })
+            .await
+            .expect_err("fetch should fail");
+        assert!(err.to_string().contains("status 500"));
+    }
+
+    #[tokio::test]
+    async fn search_rejects_empty_queries() {
+        let server = test_server("http://127.0.0.1");
+        let err = server
+            .search(SearchArgs {
+                query: "   ".to_string(),
+                num_results: None,
+                livecrawl: None,
+                search_type: None,
+                context_max_characters: None,
+            })
+            .await
+            .expect_err("search should reject empty queries");
+        assert!(err.to_string().contains("query cannot be empty"));
+    }
 
     #[test]
     fn parses_exa_sse_payload() {
