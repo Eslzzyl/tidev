@@ -11,6 +11,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 
+use super::diff_render::render_unified_diff_text;
 use super::{App, render::*};
 
 impl App {
@@ -432,12 +433,18 @@ impl App {
                 lines.push(line_with_style("▌", self.palette().muted));
             }
         } else if !message.content.is_empty() {
-            let rendered = render_markdown_text_with_width_and_cwd(
-                &message.content,
-                Some(body_width),
-                Some(self.workspace_root.as_path()),
-            );
-            lines.extend(rendered.lines);
+            if let Some(diff_lines) =
+                render_unified_diff_text(&message.content, body_width, self.palette())
+            {
+                lines.extend(diff_lines);
+            } else {
+                let rendered = render_markdown_text_with_width_and_cwd(
+                    &message.content,
+                    Some(body_width),
+                    Some(self.workspace_root.as_path()),
+                );
+                lines.extend(rendered.lines);
+            }
         }
 
         if lines.is_empty() && message.reasoning.trim().is_empty() && message.tool_calls.is_empty()
@@ -527,6 +534,7 @@ impl App {
     }
 
     fn render_tool_result_lines(&self, message: &Message, body_width: usize) -> Vec<Line<'static>> {
+        let palette = self.palette();
         let tool_name = message.tool_name.as_deref().unwrap_or(message.role.label());
         let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
         let output = message.content.trim_end();
@@ -540,9 +548,27 @@ impl App {
             return Vec::new();
         }
 
+        if let Some(diff_lines) = render_unified_diff_text(output, body_width, palette) {
+            let mut lines = diff_lines;
+            lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
+            return lines;
+        }
+
+        if matches!(canonical_name, "write" | "edit") {
+            if tool_output_is_error(output) {
+                let mut lines = self.render_output_preview_lines(output, body_width, true);
+                lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
+                return lines;
+            }
+
+            let mut lines = self.render_output_preview_lines(output, body_width, false);
+            lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
+            return lines;
+        }
+
         if matches!(
             canonical_name,
-            "read" | "write" | "edit" | "list" | "todowrite"
+            "read" | "list" | "todowrite"
         ) {
             if tool_output_is_error(output) {
                 let mut lines = self.render_output_preview_lines(output, body_width, true);

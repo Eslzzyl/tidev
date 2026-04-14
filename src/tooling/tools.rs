@@ -19,6 +19,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use diffy::DiffOptions;
+
 use crate::{
     session::{Message, MessageRole, ToolCall, ToolExecutionResult},
     skills::SkillCatalog,
@@ -394,9 +396,29 @@ pub fn list_dir(workspace_root: &Path, relative_path: impl AsRef<Path>) -> Resul
     }
 }
 
+#[allow(dead_code)]
 pub(super) fn edit_file(
     workspace_root: &Path,
     relative_path: impl AsRef<Path>,
+    old_text: &str,
+    new_text: &str,
+    replace_all: bool,
+) -> Result<String> {
+    let path = resolve_workspace_path(workspace_root, relative_path.as_ref())?;
+    let contents =
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+
+    let updated = apply_edit_contents(&contents, old_text, new_text, replace_all)?;
+
+    fs::write(&path, updated).with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(format!(
+        "Edited {}",
+        display_workspace_relative(workspace_root, &path)
+    ))
+}
+
+fn apply_edit_contents(
+    contents: &str,
     old_text: &str,
     new_text: &str,
     replace_all: bool,
@@ -405,32 +427,47 @@ pub(super) fn edit_file(
         bail!("old_text cannot be empty");
     }
 
-    let path = resolve_workspace_path(workspace_root, relative_path.as_ref())?;
-    let contents =
-        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
-
     let matches = contents.match_indices(old_text).count();
     if matches == 0 {
-        bail!("text not found in {}", path.display());
+        bail!("text not found in file");
     }
     if !replace_all && matches > 1 {
-        bail!(
-            "text occurs multiple times in {}; set replace_all to true",
-            path.display()
-        );
+        bail!("text occurs multiple times; set replace_all to true");
     }
 
-    let updated = if replace_all {
+    Ok(if replace_all {
         contents.replace(old_text, new_text)
     } else {
         contents.replacen(old_text, new_text, 1)
-    };
+    })
+}
 
-    fs::write(&path, updated).with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(format!(
-        "Edited {}",
-        display_workspace_relative(workspace_root, &path)
-    ))
+fn read_existing_text(path: &Path) -> Result<String> {
+    match fs::read_to_string(path) {
+        Ok(contents) => Ok(contents),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(error).with_context(|| format!("failed to read {}", path.display())),
+    }
+}
+
+fn file_change_output(
+    workspace_root: &Path,
+    absolute_path: &Path,
+    old_content: &str,
+    new_content: &str,
+    action: &str,
+) -> String {
+    let relative = display_workspace_relative(workspace_root, absolute_path);
+    let mut options = DiffOptions::new();
+    options.set_original_filename(format!("a/{relative}"));
+    options.set_modified_filename(format!("b/{relative}"));
+    let patch = options.create_patch(old_content, new_content);
+
+    if patch.hunks().is_empty() {
+        format!("{action} {relative} (no content changes)")
+    } else {
+        patch.to_string()
+    }
 }
 
 pub(super) fn glob_paths(
@@ -946,25 +983,40 @@ pub(super) fn execute_tool_call(
         Some("write") => {
             let args = parse_arguments::<WriteArgs>(&call.name, arguments)?;
             let path = args.path;
+            let absolute_path = resolve_workspace_path(workspace_root, Path::new(&path))?;
+            let old_content = read_existing_text(&absolute_path)?;
             write_file(workspace_root, &path, &args.content)?;
-            Ok(format!(
-                "Wrote {}",
-                display_workspace_relative(
-                    workspace_root,
-                    &resolve_workspace_path(workspace_root, Path::new(&path))?,
-                )
+            Ok(file_change_output(
+                workspace_root,
+                &absolute_path,
+                &old_content,
+                &args.content,
+                "Wrote",
             ))
         }
         Some("edit") => {
             let args = parse_arguments::<EditArgs>(&call.name, arguments)?;
             let replace_all = args.replace_all.unwrap_or(false);
-            edit_file(
-                workspace_root,
-                args.path,
+            let path = args.path;
+            let absolute_path = resolve_workspace_path(workspace_root, Path::new(&path))?;
+            let old_content = read_existing_text(&absolute_path)?;
+            let updated = apply_edit_contents(
+                &old_content,
                 &args.old_text,
                 &args.new_text,
                 replace_all,
-            )
+            )?;
+
+            fs::write(&absolute_path, &updated)
+                .with_context(|| format!("failed to write {}", absolute_path.display()))?;
+
+            Ok(file_change_output(
+                workspace_root,
+                &absolute_path,
+                &old_content,
+                &updated,
+                "Edited",
+            ))
         }
         Some("list") => {
             let args = parse_arguments::<ListArgs>(&call.name, arguments)?;

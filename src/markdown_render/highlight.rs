@@ -3,6 +3,7 @@ use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
+use std::path::Path;
 use std::sync::OnceLock;
 use std::sync::RwLock;
 use syntect::easy::HighlightLines;
@@ -11,8 +12,7 @@ use syntect::highlighting::FontStyle;
 use syntect::highlighting::Style as SyntectStyle;
 use syntect::highlighting::Theme;
 use syntect::highlighting::ThemeSet;
-use syntect::parsing::SyntaxSet;
-
+use syntect::parsing::{SyntaxReference, SyntaxSet};
 const MAX_HIGHLIGHT_BYTES: usize = 512 * 1024;
 const MAX_HIGHLIGHT_LINES: usize = 10_000;
 
@@ -81,15 +81,31 @@ pub(crate) fn highlight_code_to_styled_spans(
     highlight_to_spans(code, lang)
 }
 
-fn highlight_to_spans(code: &str, lang: &str) -> Option<Vec<Vec<Span<'static>>>> {
-    if code.len() > MAX_HIGHLIGHT_BYTES || code.lines().count() > MAX_HIGHLIGHT_LINES {
-        return None;
-    }
+pub(crate) fn highlight_code_to_lines_for_path(
+    code: &str,
+    path: Option<&Path>,
+) -> Option<Vec<Line<'static>>> {
+    let syntax = syntax_for_path(path)?;
+    let lines = highlight_to_spans_with_syntax(code, syntax)?;
+    Some(lines.into_iter().map(Line::from).collect())
+}
 
+fn highlight_to_spans(code: &str, lang: &str) -> Option<Vec<Vec<Span<'static>>>> {
     let syntax = syntax_set()
         .find_syntax_by_token(lang)
         .or_else(|| syntax_set().find_syntax_by_name(lang))
         .unwrap_or_else(|| syntax_set().find_syntax_plain_text());
+    highlight_to_spans_with_syntax(code, syntax)
+}
+
+fn highlight_to_spans_with_syntax(
+    code: &str,
+    syntax: &SyntaxReference,
+) -> Option<Vec<Vec<Span<'static>>>> {
+    if code.len() > MAX_HIGHLIGHT_BYTES || code.lines().count() > MAX_HIGHLIGHT_LINES {
+        return None;
+    }
+
     let theme = current_syntax_theme();
     let mut highlighter = HighlightLines::new(syntax, &theme);
 
@@ -113,6 +129,25 @@ fn highlight_to_spans(code: &str, lang: &str) -> Option<Vec<Vec<Span<'static>>>>
     }
 
     Some(out)
+}
+
+fn syntax_for_path(path: Option<&Path>) -> Option<&'static SyntaxReference> {
+    let path = path?;
+
+    if let Some(extension) = path.extension().and_then(|value| value.to_str()) {
+        if let Some(syntax) = syntax_set().find_syntax_by_extension(extension) {
+            return Some(syntax);
+        }
+
+        if let Some(syntax) = syntax_set().find_syntax_by_token(extension) {
+            return Some(syntax);
+        }
+    }
+
+    let file_name = path.file_name().and_then(|value| value.to_str())?;
+    syntax_set()
+        .find_syntax_by_token(file_name)
+        .or_else(|| syntax_set().find_syntax_by_name(file_name))
 }
 
 fn convert_style(style: SyntectStyle) -> Style {

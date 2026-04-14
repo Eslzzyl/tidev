@@ -25,6 +25,7 @@ use uuid::Uuid;
 
 mod at_mention;
 mod connect;
+mod diff_render;
 mod mcp_panel;
 mod model_panel;
 mod permission;

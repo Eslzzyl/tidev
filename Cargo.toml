@@ -50,6 +50,7 @@ rmcp = { version = "1.4.0", features = [
     "transport-child-process",
     "transport-streamable-http-client-reqwest",
 ] }
+diffy = "0.4.2"
 
 [profile.dev]
 incremental = true # Compile your binary in smaller steps.

@@ -385,7 +385,9 @@ pub(super) fn decorate_card_line(
     spans.push(Span::styled(" ", bg_style));
 
     for mut span in line.spans {
-        span.style = span.style.patch(bg_style);
+        if span.style.bg.is_none() {
+            span.style = span.style.patch(bg_style);
+        }
         spans.push(span);
     }
 

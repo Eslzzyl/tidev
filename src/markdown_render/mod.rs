@@ -13,8 +13,11 @@ use pulldown_cmark::{
 use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
 
-use highlight::highlight_code_to_lines;
 pub use line::is_blank_line_spaces_only;
+pub(crate) use highlight::{
+    highlight_code_to_lines,
+    highlight_code_to_lines_for_path,
+};
 use line::push_owned_lines;
 use wrap::{RtOptions, adaptive_wrap_line};
 pub use wrap::{RtOptions as WrapOptions, adaptive_wrap_lines};
