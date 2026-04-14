@@ -2,62 +2,45 @@
 
 A terminal AI coding assistant built with Rust and ratatui.
 
-## Build & Run
+## Check
+
+Prefer `cargo check` over `cargo build` for faster verification.
 
 ```sh
-cargo build --release
-./target/release/tidev
-cargo run --release
+cargo check
+cargo clippy
+cargo test
 ```
 
 ## Architecture
 
-- `src/app.rs` - TUI main loop, screen state (Welcome/Chat), event routing
-- `src/app/connect.rs` - Provider creation wizard UI
-- `src/app/render.rs` - Terminal rendering (ratatui)
-- `src/llm.rs` - OpenAI-compatible HTTP client (streaming + non-streaming)
-- `src/tools.rs` - Tool registry and execution
-- `src/config.rs` - Config loading, provider/model config (XDG-based)
-- `src/storage.rs` - SQLite session persistence (rusqlite, bundled)
-- `src/session.rs` - Conversation/message types
-- `src/prompts.rs` - Built-in prompt presets
-- `src/commands.rs` - Slash command registry
-- `src/context.rs` - Context manager
-- `src/provider_setup.rs` - Provider onboarding UI
+- `src/app.rs` — main run loop entrypoint (`app::run()`)
+- `src/storage.rs` — SQLite session persistence
+- `src/llm.rs` — LLM provider abstraction
+- `src/context.rs` — conversation context management
+- `src/tooling.rs` — agent tool definitions
+- `src/instructions.rs` — instruction file handling
+- `src/workspace_snapshot.rs` — file tree snapshots
 
-## Storage Locations (XDG)
+## Storage Locations
 
 - Config: `~/.config/tidev/config.toml`
 - Auth: `~/.local/share/tidev/auth.json`
 - DB: `~/.local/share/tidev/sessions.sqlite3`
 
-## Built-in Commands
-
-`/connect` (login), `/model` (models), `/theme`, `/clear` (new), `/help`, `/quit` (exit, q)
-
-## Tools
-
-`read_file`, `write_file`, `list_dir`, `shell` - all paths are resolved against workspace root.
-
-## Prompt Presets
-
-`tidev_default`, `plan`, `review`, `apply_patch`, `compact`, `provider_setup`.
-
-## LLM Client
-
-OpenAI-compatible. Sends `system` prompt first, then conversation history. Supports streaming via SSE (`data: [DONE]` terminator).
-
 ## Database Schema
 
-Tables: `meta`, `sessions`, `messages`, `tool_events`. Foreign keys enforced. Messages ordered by `created_at, rowid`.
+Current schema version: 6 (table `meta`).
 
-- Do not add runtime database migration code in `src/storage.rs`.
-- If the schema changes, update the schema directly and recreate the database rather than implementing migration logic.
+Tables: `meta`, `sessions`, `session_workspaces`, `session_reverts`, `messages`, `tool_events`, `todos`, `tool_permissions`.
 
-## Submodule
+Do not add runtime migration code in `src/storage.rs`. If the schema changes, update `SCHEMA_SQL` in `src/storage.rs` directly and ask user to recreate the database.
 
-`opencode/` is a git submodule pointing to `https://github.com/anomalyco/opencode.git`.
+## Bundled Provider Presets
 
-## Testing
+`presets.toml` in the repo root is merged with user config at runtime. Bundled providers: `deepseek`. Do not put user credentials in this file. Do not modify this file to add new provider unless user ask you to do so.
 
-No tests currently exist in the repo.
+## Submodules
+
+- `opencode/` — git submodule pointing to `https://github.com/anomalyco/opencode.git` (shallow)
+- `codex/` — git submodule pointing to `https://github.com/openai/codex.git` (shallow)
