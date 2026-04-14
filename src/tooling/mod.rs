@@ -6,7 +6,7 @@ use serde_json::Value;
 
 pub use registry::ToolRegistry;
 pub use schema::ToolArgs;
-pub(crate) use tools::SkillArgs;
+pub(crate) use tools::{QuestionArgs, QuestionInfo, SkillArgs};
 pub use tools::TodoItem;
 
 use crate::config::PermissionConfig;
@@ -160,6 +160,7 @@ pub(crate) fn canonical_tool_name(tool_name: &str) -> Option<&'static str> {
         "grep" => Some("grep"),
         "bash" | "shell" => Some("bash"),
         "task" => Some("task"),
+        "question" => Some("question"),
         "todowrite" | "todo" => Some("todowrite"),
         "skill" => Some("skill"),
         "websearch" => Some("websearch"),

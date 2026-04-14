@@ -255,6 +255,29 @@ tool_args! {
 }
 
 tool_args! {
+    pub struct QuestionOption {
+        label: string("Display text for the option"),
+        description: optional_string("Optional explanation of the option"),
+    }
+}
+
+tool_args! {
+    pub struct QuestionInfo {
+        question: string("Complete question"),
+        header: string("Short label for the question"),
+        options: array(QuestionOption, "Available choices"),
+        multiple: optional_boolean("Allow selecting multiple choices"),
+        custom: optional_boolean("Allow typing a custom answer"),
+    }
+}
+
+tool_args! {
+    pub struct QuestionArgs {
+        questions: array(QuestionInfo, "Questions to ask"),
+    }
+}
+
+tool_args! {
     pub struct WebSearchArgs {
         query: string("Web search query"),
         num_results: optional_integer("Number of search results to return"),
@@ -318,6 +341,11 @@ pub(super) fn tool_definitions(skill_description: String) -> Vec<ToolDefinition>
         ToolDefinition::new::<TaskArgs>(
             "task",
             "Create a child session for a subagent task",
+            ToolPermission::Session,
+        ),
+        ToolDefinition::new::<QuestionArgs>(
+            "question",
+            "Ask the user questions during execution",
             ToolPermission::Session,
         ),
         ToolDefinition::new::<TodoWriteArgs>(

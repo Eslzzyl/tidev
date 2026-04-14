@@ -28,6 +28,7 @@ mod connect;
 mod diff_render;
 mod mcp_panel;
 mod model_panel;
+mod question;
 mod permission;
 mod render;
 mod render_chat;
@@ -40,6 +41,7 @@ use crate::{
     app::at_mention::{AtMentionKind, AtMentionState, current_at_fragment},
     app::mcp_panel::McpPanelState,
     app::model_panel::ModelPanelState,
+    app::question::QuestionDialogState,
     app::permission::{PendingToolExecution, PermissionDialogState, RunningToolExecution},
     app::session_panel::SessionPanelState,
     app::theme_panel::ThemePanelState,
@@ -157,6 +159,7 @@ struct App {
     at_mention: AtMentionState,
     pending_tool_execution: Option<PendingToolExecution>,
     permission_dialog: Option<PermissionDialogState>,
+    question_dialog: Option<QuestionDialogState>,
     running_tool_execution: Option<RunningToolExecution>,
     composer: Composer,
     draft_attachments: Vec<MessageAttachment>,
@@ -247,6 +250,7 @@ impl App {
             at_mention: AtMentionState::default(),
             pending_tool_execution: None,
             permission_dialog: None,
+            question_dialog: None,
             running_tool_execution: None,
             composer,
             draft_attachments: Vec::new(),
@@ -320,6 +324,7 @@ impl App {
     fn can_scroll_conversation(&self) -> bool {
         self.screen == Screen::Chat
             && self.permission_dialog.is_none()
+            && self.question_dialog.is_none()
             && self.connect_dialog.is_none()
             && self.theme_panel.is_none()
             && self.model_panel.is_none()
@@ -424,6 +429,7 @@ impl App {
         self.pending_request = false;
         self.pending_tool_execution = None;
         self.permission_dialog = None;
+        self.question_dialog = None;
 
         if let Some(running) = self.running_tool_execution.take() {
             running.cancel_requested.store(true, Ordering::SeqCst);
@@ -541,6 +547,10 @@ impl App {
 
         if self.permission_dialog.is_some() {
             return self.handle_permission_dialog_key(key, runtime);
+        }
+
+        if self.question_dialog.is_some() {
+            return self.handle_question_dialog_key(key, runtime);
         }
 
         if let Some(dialog) = self.connect_dialog.clone() {
@@ -743,6 +753,7 @@ impl App {
             || self.model_panel.is_some()
             || self.session_panel.is_some()
             || self.mcp_panel.is_some()
+            || self.question_dialog.is_some()
         {
             self.at_mention.clear();
             return;
@@ -1005,6 +1016,7 @@ impl App {
         self.pending_request = false;
         self.pending_tool_execution = None;
         self.permission_dialog = None;
+        self.question_dialog = None;
         self.running_tool_execution = None;
         self.abort_confirmation_deadline = None;
         self.active_request_id = self.active_request_id.wrapping_add(1);
@@ -1054,6 +1066,7 @@ impl App {
             self.context_manager = ContextManager::new();
             self.pending_tool_execution = None;
             self.permission_dialog = None;
+            self.question_dialog = None;
             self.running_tool_execution = None;
             self.abort_confirmation_deadline = None;
             self.active_request_id = self.active_request_id.wrapping_add(1);
@@ -1416,6 +1429,7 @@ impl App {
                 self.pending_request = false;
                 self.pending_tool_execution = None;
                 self.permission_dialog = None;
+                self.question_dialog = None;
                 self.running_tool_execution = None;
                 self.abort_confirmation_deadline = None;
                 self.streaming_markdown = None;

@@ -42,6 +42,26 @@ impl App {
             .preferred_height(self.config.ui.max_input_lines)
             .min(main_area.height.saturating_sub(3).max(3));
 
+        if let Some(dialog) = self.question_dialog.clone() {
+            let question_height = dialog
+                .prompt_height(composer_height)
+                .min(main_area.height.saturating_sub(3).max(6));
+
+            let layout = Layout::vertical([
+                Constraint::Min(6),
+                Constraint::Length(question_height),
+                Constraint::Length(1),
+                Constraint::Length(1),
+            ])
+            .split(main_area);
+
+            self.render_messages(frame, layout[0]);
+            self.render_question_dialog(frame, layout[1], &dialog);
+            self.render_prompt_footer(frame, layout[2]);
+            self.render_retrying_hint(frame, layout[3]);
+            return;
+        }
+
         let layout = Layout::vertical([
             Constraint::Min(6),
             Constraint::Length(composer_height),
@@ -957,6 +977,7 @@ fn tool_output_is_error(output: &str) -> bool {
 fn summarize_tool_call(tool_name: &str, arguments: &str, body_width: usize) -> String {
     let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
     let fields = summarize_tool_arguments(tool_name, arguments);
+    let parsed = serde_json::from_str::<serde_json::Value>(arguments).ok();
 
     let field = |name: &str| {
         fields
@@ -999,6 +1020,22 @@ fn summarize_tool_call(tool_name: &str, arguments: &str, body_width: usize) -> S
             let description = field("description").unwrap_or("task");
             let subagent_type = field("subagent_type").unwrap_or("general");
             format!("Spawn {subagent_type} subagent: {description}")
+        }
+        "question" => {
+            let count = parsed
+                .as_ref()
+                .and_then(|value| value.get("questions"))
+                .and_then(serde_json::Value::as_array)
+                .map(|questions| questions.len())
+                .unwrap_or(0);
+
+            if count == 1 {
+                field("question")
+                    .map(|question| format!("Ask: {question}"))
+                    .unwrap_or_else(|| "Ask 1 question".to_string())
+            } else {
+                format!("Ask {count} question{}", if count == 1 { "" } else { "s" })
+            }
         }
         "todowrite" => "Update todo list".to_string(),
         _ => {
@@ -1074,6 +1111,30 @@ fn summarize_tool_arguments(tool_name: &str, arguments: &str) -> Vec<(String, St
             }
             if let Some(subagent_type) = string_field("subagent_type") {
                 fields.push(("subagent_type".to_string(), subagent_type));
+            }
+        }
+        "question" => {
+            let question_count = parsed
+                .as_ref()
+                .and_then(|value| value.get("questions"))
+                .and_then(serde_json::Value::as_array)
+                .map(|questions| questions.len())
+                .unwrap_or(0);
+
+            fields.push(("questions".to_string(), format!("{question_count} question(s)")));
+
+            if let Some(first_question) = parsed
+                .as_ref()
+                .and_then(|value| value.get("questions"))
+                .and_then(serde_json::Value::as_array)
+                .and_then(|questions| questions.first())
+                .and_then(|question| question.get("question"))
+                .and_then(serde_json::Value::as_str)
+            {
+                fields.push((
+                    "question".to_string(),
+                    shorten_single_line(first_question, 96),
+                ));
             }
         }
         "todowrite" => {

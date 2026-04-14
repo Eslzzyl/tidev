@@ -2,6 +2,7 @@ use crate::{
     app::mcp_panel::McpPanelState,
     app::mcp_panel::McpServerEditorState,
     app::model_panel::{ModelPanelItem, ModelPanelState},
+    app::question::QuestionDialogState,
     app::permission::PermissionDialogState,
     app::session_panel::{SessionPanelDialog, SessionPanelState, SessionViewMode},
     app::theme_panel::ThemePanelState,
@@ -1291,6 +1292,126 @@ impl App {
                     .fg(palette.accent_soft),
             ),
             sections[3],
+        );
+    }
+
+    pub(super) fn render_question_dialog(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        dialog: &QuestionDialogState,
+    ) {
+        let palette = self.palette();
+        let current_question = dialog.current_question();
+        let options_text = current_question
+            .map(|question| {
+                if question.options.is_empty() {
+                    return "No predefined options were provided. Type a freeform answer below.".to_string();
+                }
+
+                let mut lines = Vec::with_capacity(question.options.len().saturating_add(2));
+                lines.push(format!(
+                    "{}{}",
+                    if question.multiple.unwrap_or(false) { "Select one or more options. " } else { "Select one option. " },
+                    if question.custom.unwrap_or(true) {
+                        "Type your own answer if needed."
+                    } else {
+                        "Type the option number or label."
+                    }
+                ));
+
+                for (index, option) in question.options.iter().enumerate() {
+                    if let Some(description) = option.description.as_deref().filter(|text| !text.trim().is_empty()) {
+                        lines.push(format!("  {}. {} - {}", index + 1, option.label, description));
+                    } else {
+                        lines.push(format!("  {}. {}", index + 1, option.label));
+                    }
+                }
+
+                lines.join("\n")
+            })
+            .unwrap_or_else(|| "No questions available.".to_string());
+
+        frame.render_widget(Clear, area);
+
+        let block = Block::default()
+            .style(Style::default().bg(palette.panel_alt))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.border_active()))
+            .title(" Question prompt ");
+        frame.render_widget(block, area);
+
+        let inner = area.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+
+        let input_height = self
+            .composer
+            .preferred_height(self.config.ui.max_input_lines)
+            .min(inner.height.saturating_sub(8).max(3));
+        let options_height = current_question
+            .map(|question| {
+                if question.options.is_empty() {
+                    2
+                } else {
+                    question.options.len() as u16 + 1
+                }
+            })
+            .unwrap_or(2);
+
+        let sections = Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Length(2),
+            Constraint::Length(options_height),
+            Constraint::Length(input_height),
+            Constraint::Length(2),
+        ])
+        .split(inner);
+
+        frame.render_widget(
+            Paragraph::new(dialog.title())
+                .alignment(Alignment::Center)
+                .style(
+                    Style::default()
+                        .bg(palette.panel_alt)
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            sections[0],
+        );
+
+        frame.render_widget(
+            Paragraph::new(dialog.body_title())
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+            sections[1],
+        );
+
+        frame.render_widget(
+            Paragraph::new(options_text)
+                .style(Style::default().bg(palette.panel_alt).fg(palette.text))
+                .wrap(Wrap { trim: false }),
+            sections[2],
+        );
+
+        self.render_input_block(
+            frame,
+            sections[3],
+            "Answer",
+            &dialog.answer_placeholder(),
+            false,
+        );
+
+        frame.render_widget(
+            Paragraph::new("Enter submit · Ctrl+P/Ctrl+N/←/→ previous/next · Esc dismiss")
+                .alignment(Alignment::Center)
+                .style(
+                    Style::default()
+                        .bg(palette.panel_alt)
+                        .fg(palette.accent_soft),
+                ),
+            sections[4],
         );
     }
 

@@ -4,7 +4,7 @@ use std::sync::{Arc, atomic::AtomicBool};
 use tokio::runtime::Runtime;
 
 use crate::session::{ToolCall, ToolExecutionResult};
-use crate::tooling::execute_shell_tool_call;
+use crate::tooling::{QuestionArgs, execute_shell_tool_call};
 
 use super::App;
 
@@ -242,6 +242,32 @@ impl App {
         tool_call: ToolCall,
         runtime: &Runtime,
     ) -> Result<bool> {
+        if tool_call.name == "question" {
+            let args = match serde_json::from_str::<QuestionArgs>(&tool_call.arguments) {
+                Ok(args) => args,
+                Err(error) => {
+                    self.record_tool_result(
+                        tool_call,
+                        ToolExecutionResult::new(format!("Tool failed: failed to decode question arguments: {error}")),
+                    )?;
+                    self.advance_pending_tool_execution();
+                    return Ok(false);
+                }
+            };
+
+            if args.questions.is_empty() {
+                self.record_tool_result(
+                    tool_call,
+                    ToolExecutionResult::new("Tool failed: question tool requires at least one question"),
+                )?;
+                self.advance_pending_tool_execution();
+                return Ok(false);
+            }
+
+            self.begin_question_dialog(tool_call, args)?;
+            return Ok(true);
+        }
+
         if self.should_run_shell_async(&tool_call) {
             self.start_shell_tool_execution(tool_call, runtime)?;
             return Ok(true);
