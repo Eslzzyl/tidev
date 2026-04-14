@@ -1,6 +1,5 @@
 use anyhow::{Context, Result, bail};
 use base64::Engine as _;
-use html2md::parse_html;
 use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
 use reqwest::{Client, StatusCode};
 use rmcp::ErrorData as McpError;
@@ -12,6 +11,7 @@ use rmcp::model::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use pulldown_cmark::{Event, Options as MarkdownOptions, Parser as MarkdownParser, Tag, TagEnd};
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
@@ -227,14 +227,14 @@ impl WebToolsServer {
             WebFetchFormat::Html => body,
             WebFetchFormat::Markdown => {
                 if mime.contains("html") {
-                    parse_html(&body)
+                    html2md::rewrite_html(&body, false)
                 } else {
                     body
                 }
             }
             WebFetchFormat::Text => {
                 if mime.contains("html") {
-                    html2text::from_read(body.as_bytes(), 96)
+                    markdown_to_text(&html2md::rewrite_html(&body, false))
                 } else {
                     body
                 }
@@ -442,6 +442,142 @@ fn is_image_mime(mime: &str) -> bool {
     mime.starts_with("image/") && mime != "image/svg+xml"
 }
 
+fn markdown_to_text(markdown: &str) -> String {
+    let mut output = String::new();
+    let mut options = MarkdownOptions::empty();
+    options.insert(MarkdownOptions::ENABLE_STRIKETHROUGH);
+    options.insert(MarkdownOptions::ENABLE_TABLES);
+
+    let mut in_code_block = false;
+    for event in MarkdownParser::new_ext(markdown, options) {
+        match event {
+            Event::Start(Tag::CodeBlock(_)) => {
+                if !output.is_empty() && !output.ends_with('\n') {
+                    output.push('\n');
+                }
+                in_code_block = true;
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                if !output.ends_with('\n') {
+                    output.push('\n');
+                }
+                in_code_block = false;
+            }
+            Event::Start(tag) if is_block_tag(&tag) => {
+                if !output.is_empty() && !output.ends_with('\n') {
+                    output.push('\n');
+                }
+            }
+            Event::End(tag_end) if is_block_tag_end(&tag_end) => {
+                if !output.ends_with('\n') {
+                    output.push('\n');
+                }
+            }
+            Event::Text(text)
+            | Event::Code(text)
+            | Event::Html(text)
+            | Event::InlineHtml(text)
+            | Event::InlineMath(text)
+            | Event::DisplayMath(text) => {
+                append_text_segment(&mut output, &text, in_code_block);
+            }
+            Event::SoftBreak | Event::HardBreak => {
+                if !output.ends_with('\n') {
+                    output.push('\n');
+                }
+            }
+            _ => {}
+        }
+    }
+
+    normalize_plain_text(output)
+}
+
+fn append_text_segment(output: &mut String, text: &str, in_code_block: bool) {
+    if in_code_block {
+        output.push_str(text);
+        return;
+    }
+
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+
+    if matches!(output.chars().last(), Some(last) if !last.is_whitespace()) {
+        output.push(' ');
+    }
+
+    output.push_str(trimmed);
+}
+
+fn normalize_plain_text(text: String) -> String {
+    let mut normalized = String::with_capacity(text.len());
+    let mut previous_blank_line = false;
+
+    for line in text.lines().map(str::trim_end) {
+        let is_blank = line.trim().is_empty();
+        if is_blank {
+            if !previous_blank_line && !normalized.is_empty() {
+                normalized.push('\n');
+            }
+            previous_blank_line = true;
+            continue;
+        }
+
+        if !normalized.is_empty() && !normalized.ends_with('\n') {
+            normalized.push('\n');
+        }
+        normalized.push_str(line.trim());
+        previous_blank_line = false;
+    }
+
+    normalized.trim().to_string()
+}
+
+fn is_block_tag(tag: &Tag<'_>) -> bool {
+    matches!(
+        tag,
+        Tag::Paragraph
+            | Tag::Heading { .. }
+            | Tag::BlockQuote(_)
+            | Tag::CodeBlock(_)
+            | Tag::HtmlBlock
+            | Tag::List(_)
+            | Tag::Item
+            | Tag::FootnoteDefinition(_)
+            | Tag::DefinitionList
+            | Tag::DefinitionListTitle
+            | Tag::DefinitionListDefinition
+            | Tag::Table(_)
+            | Tag::TableHead
+            | Tag::TableRow
+            | Tag::TableCell
+            | Tag::MetadataBlock(_)
+    )
+}
+
+fn is_block_tag_end(tag: &TagEnd) -> bool {
+    matches!(
+        tag,
+        TagEnd::Paragraph
+            | TagEnd::Heading(_)
+            | TagEnd::BlockQuote(_)
+            | TagEnd::HtmlBlock
+            | TagEnd::List(_)
+            | TagEnd::Item
+            | TagEnd::FootnoteDefinition
+            | TagEnd::DefinitionList
+            | TagEnd::DefinitionListTitle
+            | TagEnd::DefinitionListDefinition
+            | TagEnd::Table
+            | TagEnd::TableHead
+            | TagEnd::TableRow
+            | TagEnd::TableCell
+            | TagEnd::MetadataBlock(_)
+    )
+}
+
 fn json_schema(value: serde_json::Value) -> JsonObject {
     serde_json::from_value(value).expect("valid JSON schema")
 }
@@ -473,8 +609,15 @@ data: {"result":{"content":[{"type":"text","text":"hello"}]}}
 
     #[test]
     fn converts_html_to_markdown() {
-        let markdown = parse_html("<h1>Hello</h1><p>World</p>");
+        let markdown = html2md::rewrite_html("<h1>Hello</h1><p>World</p>", false);
         assert!(markdown.contains("Hello"));
         assert!(markdown.contains("World"));
+    }
+
+    #[test]
+    fn converts_markdown_to_plain_text() {
+        let text = markdown_to_text("# Title\n\nHello **world**\n");
+        assert!(text.contains("Title"));
+        assert!(text.contains("Hello world"));
     }
 }

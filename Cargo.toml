@@ -14,8 +14,7 @@ futures-util = "0.3.32"
 globset = "0.4.15"
 grep = "0.4.1"
 ignore = "0.4.24"
-html2md = "0.2.15"
-html2text = "0.12.5"
+html2md = { package = "fast_html2md", version = "0.0.61", default-features = false, features = ["rewriter", "ignore_cookies"] }
 pulldown-cmark = "0.13.3"
 ratatui = "0.30.0"
 reqwest = { version = "0.12.24", default-features = false, features = [
