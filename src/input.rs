@@ -134,10 +134,26 @@ impl Composer {
                 }
             }
             KeyCode::Backspace => {
-                self.delete_previous_char();
+                if key.modifiers.contains(KeyModifiers::SUPER) {
+                    self.delete_to_line_start();
+                } else if key.modifiers.contains(KeyModifiers::ALT)
+                    || key.modifiers.contains(KeyModifiers::CONTROL)
+                {
+                    self.delete_previous_word();
+                } else {
+                    self.delete_previous_char();
+                }
             }
             KeyCode::Delete => {
-                self.delete_next_char();
+                if key.modifiers.contains(KeyModifiers::SUPER) {
+                    self.delete_to_line_start();
+                } else if key.modifiers.contains(KeyModifiers::ALT)
+                    || key.modifiers.contains(KeyModifiers::CONTROL)
+                {
+                    self.delete_previous_word();
+                } else {
+                    self.delete_next_char();
+                }
             }
             KeyCode::Left => {
                 self.move_left();
@@ -230,6 +246,46 @@ impl Composer {
         let previous = self.previous_char_boundary(self.cursor);
         self.text.drain(previous..self.cursor);
         self.cursor = previous;
+        self.history_cursor = None;
+    }
+
+    fn delete_previous_word(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+
+        let mut boundary = self.cursor;
+        while boundary > 0 {
+            let previous = self.previous_char_boundary(boundary);
+            let ch = self.text[previous..boundary].chars().next().unwrap();
+            if !ch.is_whitespace() {
+                break;
+            }
+            boundary = previous;
+        }
+
+        while boundary > 0 {
+            let previous = self.previous_char_boundary(boundary);
+            let ch = self.text[previous..boundary].chars().next().unwrap();
+            if ch.is_whitespace() {
+                break;
+            }
+            boundary = previous;
+        }
+
+        self.text.drain(boundary..self.cursor);
+        self.cursor = boundary;
+        self.history_cursor = None;
+    }
+
+    fn delete_to_line_start(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+
+        let start = self.line_start(self.cursor);
+        self.text.drain(start..self.cursor);
+        self.cursor = start;
         self.history_cursor = None;
     }
 
@@ -397,5 +453,57 @@ mod tests {
         composer.cursor = 7;
 
         assert_eq!(composer.cursor_position(4), (1, 3));
+    }
+
+    #[test]
+    fn ctrl_backspace_deletes_previous_word() {
+        let mut composer = Composer::new("placeholder");
+        composer.set_text("hello world".to_string());
+        composer.cursor = composer.text().len();
+
+        let result = composer.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL));
+
+        assert!(result.is_none());
+        assert_eq!(composer.text(), "hello ");
+        assert_eq!(composer.cursor(), 6);
+    }
+
+    #[test]
+    fn alt_backspace_deletes_previous_word() {
+        let mut composer = Composer::new("placeholder");
+        composer.set_text("hello world".to_string());
+        composer.cursor = composer.text().len();
+
+        let result = composer.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::ALT));
+
+        assert!(result.is_none());
+        assert_eq!(composer.text(), "hello ");
+        assert_eq!(composer.cursor(), 6);
+    }
+
+    #[test]
+    fn super_backspace_deletes_to_line_start() {
+        let mut composer = Composer::new("placeholder");
+        composer.set_text("hello world".to_string());
+        composer.cursor = composer.text().len();
+
+        let result = composer.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::SUPER));
+
+        assert!(result.is_none());
+        assert_eq!(composer.text(), "");
+        assert_eq!(composer.cursor(), 0);
+    }
+
+    #[test]
+    fn ctrl_backspace_skips_trailing_whitespace() {
+        let mut composer = Composer::new("placeholder");
+        composer.set_text("hello world   ".to_string());
+        composer.cursor = composer.text().len();
+
+        let result = composer.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL));
+
+        assert!(result.is_none());
+        assert_eq!(composer.text(), "hello ");
+        assert_eq!(composer.cursor(), 6);
     }
 }
