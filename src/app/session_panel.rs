@@ -550,6 +550,16 @@ impl App {
         let is_parent_or_child = target_parent_id == Some(current_session_id)
             || self.conversation.parent_session_id == Some(session_id);
 
+        let is_child_session_running = self
+            .running_subagent_executions
+            .iter()
+            .any(|execution| execution.child_session_id == session_id);
+
+        let is_parent_session_running = self
+            .running_subagent_executions
+            .iter()
+            .any(|execution| execution.parent_session_id == session_id);
+
         self.pending_request = false;
         self.pending_tool_execution = None;
         self.permission_dialog = None;
@@ -566,6 +576,10 @@ impl App {
 
         self.conversation = conversation;
         self.active_model = active_model;
+
+        if is_child_session_running || is_parent_session_running {
+            self.pending_request = true;
+        }
 
         if !self.conversation.visible_messages().is_empty() {
             let total_tokens: u32 = self
