@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use rusqlite::{params, types::Type, Connection, OptionalExtension};
 use std::{
     fs,
@@ -31,6 +31,12 @@ pub struct SessionRecord {
     pub title: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkspaceSessionCount {
+    pub workspace_root: String,
+    pub session_count: i64,
 }
 
 impl SessionStore {
@@ -518,6 +524,143 @@ impl SessionStore {
         }
 
         Ok(records)
+    }
+
+    pub fn load_all_sessions(&self) -> Result<Vec<SessionRecord>> {
+        let mut statement = self.connection.prepare(
+            "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id ORDER BY s.updated_at DESC, s.created_at DESC",
+        )?;
+
+        let rows = statement.query_map([], Self::session_from_row)?;
+
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row?);
+        }
+
+        Ok(records)
+    }
+
+    pub fn delete_session(&self, session_id: Uuid) -> Result<()> {
+        self.connection.execute(
+            "DELETE FROM sessions WHERE id = ?1",
+            params![session_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_sessions(&self, session_ids: &[Uuid]) -> Result<()> {
+        for session_id in session_ids {
+            self.connection.execute(
+                "DELETE FROM sessions WHERE id = ?1",
+                params![session_id.to_string()],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn delete_sessions_older_than(
+        &self,
+        duration: ChronoDuration,
+    ) -> Result<Vec<SessionRecord>> {
+        let cutoff = Utc::now() - duration;
+        let cutoff_text = cutoff.to_rfc3339();
+
+        let mut statement = self.connection.prepare(
+            "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.updated_at < ?1 ORDER BY s.updated_at DESC",
+        )?;
+
+        let rows = statement.query_map(params![cutoff_text], Self::session_from_row)?;
+
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row?);
+        }
+
+        let session_ids: Vec<String> = records.iter().map(|r| r.session_id.to_string()).collect();
+        for session_id in session_ids {
+            self.connection
+                .execute("DELETE FROM sessions WHERE id = ?1", params![session_id])?;
+        }
+
+        Ok(records)
+    }
+
+    pub fn delete_sessions_in_workspace(
+        &self,
+        workspace_root: &Path,
+    ) -> Result<Vec<SessionRecord>> {
+        let workspace_root = workspace_root.display().to_string();
+
+        let mut statement = self.connection.prepare(
+            "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE sw.workspace_root = ?1 ORDER BY s.updated_at DESC",
+        )?;
+
+        let rows = statement.query_map(params![workspace_root], Self::session_from_row)?;
+
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row?);
+        }
+
+        let session_ids: Vec<String> = records.iter().map(|r| r.session_id.to_string()).collect();
+        for session_id in session_ids {
+            self.connection
+                .execute("DELETE FROM sessions WHERE id = ?1", params![session_id])?;
+        }
+
+        Ok(records)
+    }
+
+    pub fn get_session_counts_by_workspace(&self) -> Result<Vec<WorkspaceSessionCount>> {
+        let mut statement = self.connection.prepare(
+            "SELECT workspace_root, COUNT(*) as cnt FROM session_workspaces GROUP BY workspace_root ORDER BY cnt DESC",
+        )?;
+
+        let rows = statement.query_map([], |row| {
+            Ok(WorkspaceSessionCount {
+                workspace_root: row.get(0)?,
+                session_count: row.get(1)?,
+            })
+        })?;
+
+        let mut counts = Vec::new();
+        for row in rows {
+            counts.push(row?);
+        }
+
+        Ok(counts)
+    }
+
+    pub fn get_sessions_older_than_preview(
+        &self,
+        duration: ChronoDuration,
+    ) -> Result<Vec<SessionRecord>> {
+        let cutoff = Utc::now() - duration;
+        let cutoff_text = cutoff.to_rfc3339();
+
+        let mut statement = self.connection.prepare(
+            "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.updated_at < ?1 ORDER BY sw.workspace_root, s.updated_at DESC",
+        )?;
+
+        let rows = statement.query_map(params![cutoff_text], Self::session_from_row)?;
+
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row?);
+        }
+
+        Ok(records)
+    }
+
+    pub fn get_current_workspace_sessions_count(&self, workspace_root: &Path) -> Result<i64> {
+        let workspace_root = workspace_root.display().to_string();
+        let count: i64 = self.connection.query_row(
+            "SELECT COUNT(*) FROM session_workspaces WHERE workspace_root = ?1",
+            params![workspace_root],
+            |row| row.get(0),
+        )?;
+        Ok(count)
     }
 
     fn touch_session(&self, session_id: Uuid) -> Result<()> {

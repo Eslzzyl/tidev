@@ -3,11 +3,12 @@ use crate::{
     app::mcp_panel::McpServerEditorState,
     app::model_panel::{ModelPanelItem, ModelPanelState},
     app::permission::PermissionDialogState,
-    app::session_panel::SessionPanelState,
+    app::session_panel::{SessionPanelDialog, SessionPanelState, SessionViewMode},
     app::theme_panel::ThemePanelState,
     config::ProviderSource,
     provider_setup::{ConnectDialog, EditProviderStep, NewProviderStep},
 };
+use chrono;
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     prelude::{Frame, Modifier, Style},
@@ -15,7 +16,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 
-use super::{App, connect::ProviderPickerItem, render::*};
+use super::{connect::ProviderPickerItem, render::*, App};
 
 impl App {
     pub(super) fn render_command_palette(&self, frame: &mut Frame<'_>, area: Rect) {
@@ -748,9 +749,24 @@ impl App {
         let overlay = centered_rect(area.width.min(112), area.height.min(36), area);
         frame.render_widget(Clear, overlay);
 
+        let view_mode_text = match panel.view_mode {
+            SessionViewMode::CurrentWorkspace => "Current Workspace",
+            SessionViewMode::AllSessions => "All Sessions",
+        };
+        let title_text =
+            if panel.operation_mode == crate::app::session_panel::OperationMode::MultiSelect {
+                format!(
+                    " Sessions: {} ({} selected) ",
+                    view_mode_text,
+                    panel.selected_count()
+                )
+            } else {
+                format!(" Sessions: {} ", view_mode_text)
+            };
+
         let title = Block::default()
             .style(Style::default().bg(palette.panel))
-            .title(" Select session ")
+            .title(title_text)
             .borders(Borders::ALL)
             .border_style(Style::default().fg(palette.border_active()));
         frame.render_widget(title, overlay);
@@ -785,6 +801,10 @@ impl App {
 
         let query = self.composer.text().to_string();
         let matches = panel.matching_indices(&query);
+
+        let is_multi_select =
+            panel.operation_mode == crate::app::session_panel::OperationMode::MultiSelect;
+
         if matches.is_empty() {
             frame.render_widget(
                 Paragraph::new("No sessions match this search.")
@@ -793,55 +813,84 @@ impl App {
                 sections[2],
             );
         } else {
-            let items = matches
-                .iter()
-                .map(|index| {
-                    let session = &panel.sessions[*index];
-                    let is_current = session.session_id == self.conversation.session_id;
-                    let updated_at = session.updated_at.format("%Y-%m-%d %H:%M").to_string();
-                    let mut spans = vec![
-                        Span::styled(
-                            shorten(&session.title, 28),
-                            Style::default()
-                                .fg(palette.text)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::raw("  "),
-                        Span::styled(
-                            format!("({})", session.session_id.simple()),
-                            Style::default().fg(palette.muted),
-                        ),
-                        Span::raw("  "),
-                        Span::styled(
-                            format!(
-                                "{} / {}",
-                                shorten(&session.provider_display_name, 14),
-                                shorten(&session.model_display_name, 16)
-                            ),
-                            Style::default().fg(palette.accent_soft),
-                        ),
-                        Span::raw("  "),
-                        Span::styled(updated_at, Style::default().fg(palette.muted)),
-                        Span::raw("  "),
-                        Span::styled(
-                            if is_current { "current" } else { "" },
-                            if is_current {
-                                Style::default().fg(palette.success)
-                            } else {
-                                Style::default().fg(palette.muted)
-                            },
-                        ),
-                    ];
-                    if session.parent_session_id.is_some() {
-                        spans.push(Span::raw("  "));
-                        spans.push(Span::styled(
-                            "child",
-                            Style::default().fg(palette.accent_soft),
-                        ));
+            let mut items: Vec<ListItem> = Vec::new();
+
+            let mut current_workspace = String::new();
+
+            for index in matches.iter() {
+                let session = &panel.sessions[*index];
+
+                if panel.view_mode == SessionViewMode::AllSessions
+                    && session.workspace_root != current_workspace
+                {
+                    if !current_workspace.is_empty() {
+                        items.push(ListItem::new(Line::from("")));
                     }
-                    ListItem::new(Line::from(spans))
-                })
-                .collect::<Vec<_>>();
+                    current_workspace = session.workspace_root.clone();
+                    items.push(ListItem::new(Line::from(vec![Span::styled(
+                        format!("[ {} ]", session.workspace_root),
+                        Style::default()
+                            .fg(palette.accent)
+                            .add_modifier(Modifier::BOLD),
+                    )])));
+                }
+
+                let is_current = session.session_id == self.conversation.session_id;
+                let updated_at = session.updated_at.format("%Y-%m-%d %H:%M").to_string();
+                let is_selected = panel.is_selected(*index);
+
+                let checkbox = if is_multi_select {
+                    if is_selected {
+                        "[✓] "
+                    } else {
+                        "[ ] "
+                    }
+                } else {
+                    ""
+                };
+
+                let mut spans = vec![
+                    Span::raw(checkbox),
+                    Span::styled(
+                        shorten(&session.title, 24),
+                        Style::default()
+                            .fg(palette.text)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(
+                        format!("({})", session.session_id.simple()),
+                        Style::default().fg(palette.muted),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(
+                        format!(
+                            "{} / {}",
+                            shorten(&session.provider_display_name, 12),
+                            shorten(&session.model_display_name, 14)
+                        ),
+                        Style::default().fg(palette.accent_soft),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(updated_at, Style::default().fg(palette.muted)),
+                ];
+
+                if is_current {
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled(
+                        "current",
+                        Style::default().fg(palette.success),
+                    ));
+                }
+                if session.parent_session_id.is_some() {
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled(
+                        "child",
+                        Style::default().fg(palette.accent_soft),
+                    ));
+                }
+                items.push(ListItem::new(Line::from(spans)));
+            }
 
             let mut state = ListState::default();
             state.select(Some(
@@ -860,8 +909,16 @@ impl App {
             frame.render_stateful_widget(list, sections[2], &mut state);
         }
 
+        let help_text = if panel.operation_mode
+            == crate::app::session_panel::OperationMode::MultiSelect
+        {
+            "Enter/D: switch/delete · Space: select · Ctrl+A: exit multi-select · Tab: switch view · C: cleanup"
+        } else {
+            "Enter: switch · D: delete · C: cleanup · Ctrl+A: multi-select · Tab: switch view · W: all sessions"
+        };
+
         frame.render_widget(
-            Paragraph::new("Enter to switch · Esc to cancel · Up/Down to navigate")
+            Paragraph::new(help_text)
                 .alignment(Alignment::Center)
                 .style(Style::default().bg(palette.panel).fg(palette.muted)),
             sections[3],
@@ -1235,6 +1292,163 @@ impl App {
             ),
             sections[3],
         );
+    }
+
+    pub(super) fn render_session_panel_dialog(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        panel: &SessionPanelState,
+    ) {
+        let palette = self.palette();
+
+        match &panel.dialog {
+            SessionPanelDialog::None => {}
+            SessionPanelDialog::DeleteConfirm {
+                session_ids,
+                session_titles,
+            } => {
+                let overlay = centered_rect(60, 20, area);
+                frame.render_widget(Clear, overlay);
+
+                let block = Block::default()
+                    .style(Style::default().bg(palette.panel))
+                    .title(" Confirm Delete ")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(palette.border_active()));
+                frame.render_widget(block, overlay);
+
+                let inner = overlay.inner(Margin {
+                    horizontal: 1,
+                    vertical: 1,
+                });
+                let sections = Layout::vertical([
+                    Constraint::Length(3),
+                    Constraint::Min(1),
+                    Constraint::Length(3),
+                ])
+                .split(inner);
+
+                frame.render_widget(
+                    Paragraph::new(format!("Delete {} session(s)?", session_ids.len()))
+                        .alignment(Alignment::Center)
+                        .style(Style::default().bg(palette.panel).fg(palette.text)),
+                    sections[0],
+                );
+
+                let mut content = String::new();
+                for title in session_titles.iter().take(5) {
+                    content.push_str(&format!("  • {}\n", title));
+                }
+                if session_titles.len() > 5 {
+                    content.push_str(&format!("  ... and {} more\n", session_titles.len() - 5));
+                }
+
+                frame.render_widget(
+                    Paragraph::new(content)
+                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                    sections[1],
+                );
+
+                frame.render_widget(
+                    Paragraph::new("Enter: confirm · Esc: cancel")
+                        .alignment(Alignment::Center)
+                        .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
+                    sections[2],
+                );
+            }
+            SessionPanelDialog::Cleanup {
+                preview,
+                selected_duration,
+                cleanup_workspace,
+            } => {
+                let overlay = centered_rect(70, 25, area);
+                frame.render_widget(Clear, overlay);
+
+                let block = Block::default()
+                    .style(Style::default().bg(palette.panel))
+                    .title(" Cleanup Old Sessions ")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(palette.border_active()));
+                frame.render_widget(block, overlay);
+
+                let inner = overlay.inner(Margin {
+                    horizontal: 1,
+                    vertical: 1,
+                });
+                let sections = Layout::vertical([
+                    Constraint::Length(2),
+                    Constraint::Length(2),
+                    Constraint::Length(1),
+                    Constraint::Min(6),
+                    Constraint::Length(3),
+                ])
+                .split(inner);
+
+                let (title_text, hint_text) = if *cleanup_workspace {
+                    (
+                        "Delete all sessions in current workspace".to_string(),
+                        "5: current workspace (selected)".to_string(),
+                    )
+                } else {
+                    let duration_text = match selected_duration {
+                        Some(d) if *d <= chrono::Duration::weeks(1) => "1 week",
+                        Some(d) if *d <= chrono::Duration::days(30) => "1 month",
+                        Some(d) if *d <= chrono::Duration::days(90) => "3 months",
+                        Some(d) if *d <= chrono::Duration::days(365) => "1 year",
+                        None => "Select duration",
+                        _ => "Custom",
+                    };
+                    (
+                        format!("Delete sessions older than: {}", duration_text),
+                        "1: 1 week · 2: 1 month · 3: 3 months · 4: 1 year · 5: current workspace"
+                            .to_string(),
+                    )
+                };
+
+                frame.render_widget(
+                    Paragraph::new(title_text)
+                        .alignment(Alignment::Center)
+                        .style(Style::default().bg(palette.panel).fg(palette.text)),
+                    sections[0],
+                );
+
+                frame.render_widget(
+                    Paragraph::new(hint_text)
+                        .alignment(Alignment::Center)
+                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                    sections[1],
+                );
+
+                frame.render_widget(
+                    Paragraph::new(format!(
+                        "Preview: {} session(s) will be deleted",
+                        preview.total_count
+                    ))
+                    .alignment(Alignment::Center)
+                    .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
+                    sections[2],
+                );
+
+                let mut content = String::new();
+                for (workspace, count) in preview.workspace_counts.iter().take(5) {
+                    content.push_str(&format!("  {} ({} sessions)\n", workspace, count));
+                }
+
+                frame.render_widget(
+                    Paragraph::new(content)
+                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                    sections[3],
+                );
+
+                frame.render_widget(
+                    Paragraph::new("Enter: confirm · Esc: cancel")
+                        .alignment(Alignment::Center)
+                        .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
+                    sections[4],
+                );
+            }
+        }
     }
 }
 
