@@ -1,5 +1,5 @@
 use crate::{
-    markdown_render::{WrapOptions, adaptive_wrap_lines, render_markdown_text_with_width_and_cwd},
+    markdown_render::{adaptive_wrap_lines, render_markdown_text_with_width_and_cwd, WrapOptions},
     session::{Message, MessageAttachment, MessageRole, ToolCall},
     tooling::canonical_tool_name,
 };
@@ -12,7 +12,7 @@ use ratatui::{
 };
 
 use super::diff_render::render_unified_diff_text;
-use super::{App, render::*};
+use super::{render::*, App};
 
 impl App {
     pub(super) fn render_chat(&mut self, frame: &mut Frame<'_>) {
@@ -99,7 +99,50 @@ impl App {
 
         let content_area = scrollbar_area.0;
         let content_width = content_area.width.max(1) as usize;
-        let (text, total_lines) = self.messages_text(Some(content_width));
+        let (mut text, mut total_lines) = self.messages_text(Some(content_width));
+
+        // Add tool running state
+        if let Some(running) = &self.running_tool_execution {
+            let canonical_name =
+                canonical_tool_name(&running.tool_call.name).unwrap_or(&running.tool_call.name);
+            let action = match canonical_name {
+                "edit" | "write" => "Editing",
+                "read" => "Reading",
+                "bash" => "Running",
+                "grep" | "glob" | "list" => "Searching",
+                _ => "Executing",
+            };
+
+            let fields =
+                summarize_tool_arguments(&running.tool_call.name, &running.tool_call.arguments);
+            let target = fields
+                .iter()
+                .find(|(k, _)| k == "path" || k == "filePath" || k == "command")
+                .map(|(_, v)| v.as_str())
+                .unwrap_or(&running.tool_call.name);
+
+            let line = Line::from(vec![
+                Span::styled(
+                    format!("{} ", action),
+                    Style::default().fg(palette.accent_soft),
+                ),
+                Span::styled(
+                    shorten(target, 64),
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("...", Style::default().fg(palette.muted)),
+            ]);
+
+            let card_lines = decorate_card_lines(
+                vec![Line::from(""), line, Line::from("")],
+                content_width,
+                palette.panel_alt,
+            );
+            text.lines.extend(card_lines);
+            total_lines += 3;
+        }
 
         self.message_viewport_lines = content_area.height as usize;
         self.message_total_lines = total_lines;
@@ -304,8 +347,47 @@ impl App {
         }
 
         let mut lines = Vec::new();
+        let messages = self.conversation.visible_messages();
+        let mut i = 0;
+        while i < messages.len() {
+            let message = &messages[i];
 
-        for message in self.conversation.visible_messages() {
+            // Handle Assistant messages and their subsequent Tool messages together
+            if matches!(message.role, MessageRole::Assistant) {
+                let mut assistant_cards = self.render_message_cards(message, body_width);
+
+                // Peek ahead for tool results that belong to this assistant's tool calls
+                let mut next_i = i + 1;
+                while next_i < messages.len() && matches!(messages[next_i].role, MessageRole::Tool)
+                {
+                    let tool_msg = &messages[next_i];
+                    // Render tool result
+                    let tool_lines = self.render_tool_result_lines(tool_msg, body_width);
+                    if !tool_lines.is_empty() {
+                        let mut lines_with_margin = Vec::new();
+                        lines_with_margin.push(Line::from(""));
+                        lines_with_margin.extend(tool_lines);
+                        lines_with_margin.push(Line::from(""));
+                        // Tool results use panel_light
+                        assistant_cards.push((palette.panel_light, lines_with_margin));
+                    }
+                    next_i += 1;
+                }
+
+                for (card_bg, card_lines) in assistant_cards {
+                    if card_lines.is_empty() {
+                        continue;
+                    }
+                    lines.extend(decorate_card_lines(card_lines, width, card_bg));
+                    lines.push(Line::from(""));
+                }
+
+                i = next_i;
+                continue;
+            }
+
+            // Fallback for other message types (User, System, etc.)
+            // Note: Standalone Tool messages (if any) will still be rendered here
             for (card_bg, card_lines) in self.render_message_cards(message, body_width) {
                 if card_lines.is_empty() {
                     continue;
@@ -314,6 +396,7 @@ impl App {
                 lines.extend(decorate_card_lines(card_lines, width, card_bg));
                 lines.push(Line::from(""));
             }
+            i += 1;
         }
 
         if lines.is_empty() {
@@ -339,54 +422,81 @@ impl App {
 
         match message.role {
             MessageRole::User => vec![(palette.panel_alt, {
-                let mut lines = self.render_text_body_lines(
+                let mut content_lines = self.render_text_body_lines(
                     &message.content,
-                    body_width,
+                    body_width.saturating_sub(2),
                     Some(self.workspace_root.as_path()),
                 );
 
                 for attachment in &message.attachments {
-                    lines.push(line_with_style(&attachment.summary(), palette.accent_soft));
+                    content_lines.push(line_with_style(&attachment.summary(), palette.accent_soft));
                 }
+
+                let mut lines = Vec::new();
+                lines.push(Line::from(""));
+                for line in content_lines {
+                    let mut spans = vec![Span::styled(
+                        "┃ ",
+                        Style::default()
+                            .fg(palette.accent)
+                            .add_modifier(Modifier::BOLD),
+                    )];
+                    spans.extend(line.spans);
+                    lines.push(Line::from(spans));
+                }
+                lines.push(Line::from(""));
 
                 lines
             })],
             MessageRole::Assistant => {
                 let mut cards = Vec::new();
+
                 let body_lines = self.render_assistant_body_lines(message, body_width);
                 if !body_lines.is_empty() {
-                    cards.push((palette.panel, body_lines));
+                    let mut lines_with_margin = Vec::new();
+                    lines_with_margin.push(Line::from(""));
+                    lines_with_margin.extend(body_lines);
+                    lines_with_margin.push(Line::from(""));
+                    cards.push((palette.background, lines_with_margin));
                 }
 
                 for tool_call in &message.tool_calls {
-                    cards.push((
-                        palette.panel_alt,
-                        self.render_tool_call_lines(tool_call, body_width),
-                    ));
+                    let call_lines = self.render_tool_call_lines(tool_call, body_width);
+                    if !call_lines.is_empty() {
+                        let mut lines_with_margin = Vec::new();
+                        lines_with_margin.push(Line::from(""));
+                        lines_with_margin.extend(call_lines);
+                        lines_with_margin.push(Line::from(""));
+                        cards.push((palette.panel_light, lines_with_margin));
+                    }
                 }
 
                 cards
             }
             MessageRole::Tool => {
-                let lines = self.render_tool_result_lines(message, body_width);
-                if lines.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![(palette.panel, lines)]
-                }
+                // Return nothing here; handled by the loop in messages_text
+                Vec::new()
             }
-            MessageRole::System => vec![(
-                palette.background,
-                self.render_text_body_lines(
+            MessageRole::System => {
+                let content_lines = self.render_text_body_lines(
                     &message.content,
                     body_width,
                     Some(self.workspace_root.as_path()),
-                ),
-            )],
-            MessageRole::Error => vec![(
-                palette.panel_alt,
-                self.render_error_body_lines(message, body_width),
-            )],
+                );
+                let mut lines = Vec::new();
+                lines.push(Line::from(""));
+                lines.extend(content_lines);
+                lines.push(Line::from(""));
+                vec![(palette.background, lines)]
+            }
+            MessageRole::Error => {
+                let error_lines = self.render_error_body_lines(message, body_width);
+                let mut lines = Vec::new();
+                lines.push(Line::from(""));
+                lines.extend(error_lines);
+                lines.push(Line::from(""));
+                vec![(palette.panel_light, lines)]
+            }
         }
     }
 
@@ -474,19 +584,63 @@ impl App {
     fn render_reasoning_lines(&self, reasoning: &str, body_width: usize) -> Vec<Line<'static>> {
         let palette = self.palette();
         let mut lines = Vec::new();
+        let reasoning_lines: Vec<&str> = reasoning.lines().collect();
 
-        for line in reasoning.lines() {
-            let content = shorten_single_line(line, body_width.saturating_sub(2));
-            lines.push(line_with_prefix(
-                "│",
-                &content,
-                Style::default().fg(palette.muted),
-                Style::default().fg(palette.muted),
-            ));
-        }
+        if reasoning_lines.is_empty() {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "┃ ",
+                    Style::default()
+                        .fg(palette.muted)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("Thinking: ", Style::default().fg(palette.muted)),
+            ]));
+        } else if reasoning_lines.len() == 1 {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "┃ ",
+                    Style::default()
+                        .fg(palette.muted)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!(
+                        "Thinking: {}",
+                        shorten_single_line(reasoning_lines[0], body_width.saturating_sub(12))
+                    ),
+                    Style::default().fg(palette.muted),
+                ),
+            ]));
+        } else {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "┃ ",
+                    Style::default()
+                        .fg(palette.muted)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!(
+                        "Thinking: {}",
+                        shorten_single_line(reasoning_lines[0], body_width.saturating_sub(12))
+                    ),
+                    Style::default().fg(palette.muted),
+                ),
+            ]));
 
-        if lines.is_empty() {
-            lines.push(line_with_style("│", palette.muted));
+            for line in &reasoning_lines[1..] {
+                let content = shorten_single_line(line, body_width.saturating_sub(2));
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        "┃ ",
+                        Style::default()
+                            .fg(palette.muted)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(content, Style::default().fg(palette.muted)),
+                ]));
+            }
         }
 
         lines
@@ -522,21 +676,55 @@ impl App {
         tool_call: &ToolCall,
         body_width: usize,
     ) -> Vec<Line<'static>> {
-        let summary = summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width);
         let palette = self.palette();
+        let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
 
-        vec![line_with_prefix(
-            "│",
-            &summary,
-            Style::default().fg(palette.accent_soft),
-            Style::default().fg(palette.text),
-        )]
+        // Extraction for special rendering (e.g., bash command)
+        let fields = summarize_tool_arguments(&tool_call.name, &tool_call.arguments);
+        let get_field = |name: &str| {
+            fields
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.as_str())
+        };
+
+        if canonical_name == "bash" {
+            if let Some(cmd) = get_field("command") {
+                let mut lines = Vec::new();
+                lines.push(Line::from(vec![
+                    Span::styled("Run ", Style::default().fg(palette.accent_soft)),
+                    Span::styled(
+                        "shell command",
+                        Style::default()
+                            .fg(palette.text)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+
+                // Opencode style: command in its own block/lines
+                for line in cmd.lines() {
+                    lines.push(line_with_style(&format!("  {}", line), palette.text));
+                }
+                return lines;
+            }
+        }
+
+        let summary = summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width);
+
+        vec![Line::from(vec![Span::styled(
+            summary,
+            Style::default()
+                .fg(palette.text)
+                .add_modifier(Modifier::BOLD),
+        )])]
     }
 
     fn render_tool_result_lines(&self, message: &Message, body_width: usize) -> Vec<Line<'static>> {
         let palette = self.palette();
         let tool_name = message.tool_name.as_deref().unwrap_or(message.role.label());
         let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
+
+        let mut header_lines = Vec::new();
         let output = message.content.trim_end();
         let attachment_lines = message
             .attachments
@@ -544,43 +732,68 @@ impl App {
             .map(MessageAttachment::summary)
             .collect::<Vec<_>>();
 
-        if output.is_empty() && attachment_lines.is_empty() {
-            return Vec::new();
+        // Add result count for search/list tools
+        if matches!(canonical_name, "grep" | "glob") {
+            let count = if output.is_empty() {
+                0
+            } else {
+                output.lines().count()
+            };
+            let status_text = if tool_output_is_error(output) {
+                format!("Search failed with {} output lines", count)
+            } else {
+                format!("Found {} matches", count)
+            };
+            header_lines.push(line_with_style(&status_text, palette.accent_soft));
+        } else if canonical_name == "list" {
+            let count = attachment_lines.len();
+            header_lines.push(line_with_style(
+                &format!("Listed {} items", count),
+                palette.accent_soft,
+            ));
         }
 
+        if output.is_empty() && attachment_lines.is_empty() {
+            return header_lines;
+        }
+
+        let mut lines = header_lines;
+
         if let Some(diff_lines) = render_unified_diff_text(output, body_width, palette) {
-            let mut lines = diff_lines;
+            lines.extend(diff_lines);
             lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
             return lines;
         }
 
         if matches!(canonical_name, "write" | "edit") {
             if tool_output_is_error(output) {
-                let mut lines = self.render_output_preview_lines(output, body_width, true);
+                let mut error_lines = self.render_output_preview_lines(output, body_width, true);
+                lines.extend(error_lines);
                 lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
                 return lines;
             }
 
-            let mut lines = self.render_output_preview_lines(output, body_width, false);
+            let mut out_lines = self.render_output_preview_lines(output, body_width, false);
+            lines.extend(out_lines);
             lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
             return lines;
         }
 
-        if matches!(
-            canonical_name,
-            "read" | "list" | "todowrite"
-        ) {
+        if matches!(canonical_name, "read" | "list" | "todowrite") {
             if tool_output_is_error(output) {
-                let mut lines = self.render_output_preview_lines(output, body_width, true);
+                let mut error_lines = self.render_output_preview_lines(output, body_width, true);
+                lines.extend(error_lines);
                 lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
                 return lines;
             }
 
-            return self.render_attachment_preview_lines(&attachment_lines, body_width);
+            lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
+            return lines;
         }
 
-        let mut lines =
+        let mut preview_lines =
             self.render_output_preview_lines(output, body_width, tool_output_is_error(output));
+        lines.extend(preview_lines);
         lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
         lines
     }
@@ -718,46 +931,43 @@ fn summarize_tool_call(tool_name: &str, arguments: &str, body_width: usize) -> S
 
     let summary = match canonical_name {
         "read" => field("path")
-            .map(|path| format!("read file {path}"))
-            .unwrap_or_else(|| "read file".to_string()),
+            .map(|path| format!("Read {path}"))
+            .unwrap_or_else(|| "Read file".to_string()),
         "write" => field("path")
-            .map(|path| format!("write file {path}"))
-            .unwrap_or_else(|| "write file".to_string()),
+            .map(|path| format!("Write {path}"))
+            .unwrap_or_else(|| "Write file".to_string()),
         "edit" => field("path")
-            .map(|path| format!("edit file {path}"))
-            .unwrap_or_else(|| "edit file".to_string()),
+            .map(|path| format!("Edit {path}"))
+            .unwrap_or_else(|| "Edit file".to_string()),
         "list" => field("path")
-            .map(|path| format!("list items under path {path}"))
-            .unwrap_or_else(|| "list items under path .".to_string()),
+            .map(|path| format!("List {path}"))
+            .unwrap_or_else(|| "List items".to_string()),
         "glob" => {
             let pattern = field("pattern").unwrap_or("*");
             let path = field("path").unwrap_or(".");
-            format!("find {pattern} under path {path}")
+            format!("Find {pattern} in {path}")
         }
         "grep" => {
             let pattern = field("pattern").unwrap_or("");
             let path = field("path").unwrap_or(".");
             if pattern.is_empty() {
-                format!("search under path {path}")
+                format!("Search in {path}")
             } else {
-                format!("grep {pattern} under path {path}")
+                format!("Search \"{pattern}\" in {path}")
             }
         }
         "bash" => field("command")
-            .map(|command| format!("run shell command {command}"))
-            .unwrap_or_else(|| "run shell command".to_string()),
+            .map(|command| format!("Run shell command: {command}"))
+            .unwrap_or_else(|| "Run shell command".to_string()),
         "task" => {
             let description = field("description").unwrap_or("task");
             let subagent_type = field("subagent_type").unwrap_or("general");
-            format!("spawn {subagent_type} subagent for {description}")
+            format!("Spawn {subagent_type} subagent: {description}")
         }
-        "todowrite" => fields
-            .iter()
-            .find(|(key, _)| key == "todos")
-            .map(|(_, value)| format!("update todo list with {value}"))
-            .unwrap_or_else(|| "update todo list".to_string()),
+        "todowrite" => "Update todo list".to_string(),
         _ => {
             let mut summary = display_tool_name(tool_name);
+            summary = summary[0..1].to_uppercase() + &summary[1..];
             for (label, value) in fields.iter().take(2) {
                 summary.push(' ');
                 summary.push_str(label);
