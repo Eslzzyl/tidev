@@ -253,6 +253,7 @@ fn build_openai_request(
         } else {
             None
         },
+        extra_body: model.extra_body.clone(),
     })
 }
 
@@ -269,6 +270,8 @@ struct ChatCompletionRequest {
     tools: Option<Vec<ChatToolSpec>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_choice: Option<String>,
+    #[serde(flatten)]
+    extra_body: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Serialize)]

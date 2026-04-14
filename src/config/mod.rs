@@ -253,6 +253,7 @@ max_input_lines = 6
                 .filter(|prompt| !prompt.trim().is_empty())
                 .unwrap_or_else(default_system_prompt),
             api_key,
+            extra_body: model.extra_body.clone(),
         })
     }
 

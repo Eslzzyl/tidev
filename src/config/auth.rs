@@ -71,6 +71,7 @@ pub struct ActiveModel {
     pub supports_images: bool,
     pub system_prompt: String,
     pub api_key: Option<String>,
+    pub extra_body: Option<serde_json::Value>,
 }
 
 impl ActiveModel {

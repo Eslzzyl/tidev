@@ -53,6 +53,8 @@ pub struct ModelConfig {
     pub supports_streaming: bool,
     #[serde(default)]
     pub supports_images: bool,
+    #[serde(default)]
+    pub extra_body: Option<serde_json::Value>,
 }
 
 fn default_true() -> bool {

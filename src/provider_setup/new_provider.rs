@@ -232,6 +232,7 @@ impl NewModelDraft {
                 system_prompt: None,
                 supports_streaming: true,
                 supports_images: false,
+                extra_body: None,
             },
         )
     }
