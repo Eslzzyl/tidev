@@ -211,8 +211,10 @@ impl App {
     fn render_sidebar(&self, frame: &mut Frame<'_>, area: Rect) {
         let palette = self.palette();
         let mut lines = Vec::new();
+
+        // Model info
         lines.push(Line::from(vec![Span::styled(
-            "State",
+            "Model",
             Style::default()
                 .fg(palette.accent)
                 .add_modifier(Modifier::BOLD),
@@ -222,13 +224,13 @@ impl App {
                 "{} / {}",
                 self.active_model.provider_id, self.active_model.model_id
             ),
-            Style::default().fg(palette.accent),
+            Style::default().fg(palette.text),
         )]));
         lines.push(Line::from(vec![Span::styled(
             if self.active_model.api_key_present() {
-                "API key present"
+                "✓ API key present"
             } else {
-                "API key missing"
+                "✗ API key missing"
             },
             if self.active_model.api_key_present() {
                 Style::default().fg(palette.success)
@@ -236,134 +238,21 @@ impl App {
                 Style::default().fg(palette.error)
             },
         )]));
-        lines.push(Line::from(vec![Span::styled(
-            format!("Mode: {}", self.mode.title()),
-            Style::default().fg(palette.text),
-        )]));
-        lines.push(Line::from(vec![Span::styled(
-            format!("Theme: {}", self.theme.name()),
-            Style::default().fg(palette.text),
-        )]));
-        if self.conversation.is_reverted() {
-            lines.push(Line::from(vec![Span::styled(
-                "Undo: active",
-                Style::default().fg(palette.warning),
-            )]));
-        }
-        if let Some(parent_session_id) = self.conversation.parent_session_id {
-            lines.push(Line::from(vec![Span::styled(
-                format!("Parent: {}", parent_session_id.simple()),
-                Style::default().fg(palette.accent_soft),
-            )]));
-        }
-        if let Ok(children) = self.store.load_child_sessions(self.conversation.session_id)
-            && !children.is_empty()
-        {
-            lines.push(Line::from(vec![Span::styled(
-                format!("Subagents: {}", children.len()),
-                Style::default().fg(palette.accent_soft),
-            )]));
-        }
+
         lines.push(Line::from(""));
-        lines.push(Line::from(vec![Span::styled(
-            "cwd",
-            Style::default()
-                .fg(palette.accent)
-                .add_modifier(Modifier::BOLD),
-        )]));
+
+        // Working directory
         lines.push(Line::from(shorten(
             &self.workspace_root.display().to_string(),
             32,
         )));
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![Span::styled(
-            "Tools",
-            Style::default()
-                .fg(palette.accent)
-                .add_modifier(Modifier::BOLD),
-        )]));
-        for tool in self.tools.available_definitions(self.mode) {
-            lines.push(Line::from(format!("- {}", tool.display_name)));
-        }
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![Span::styled(
-            "MCP",
-            Style::default()
-                .fg(palette.accent)
-                .add_modifier(Modifier::BOLD),
-        )]));
-        let mcp_servers = self.tools.mcp_summaries();
-        if mcp_servers.is_empty() {
-            lines.push(Line::from("No MCP servers configured"));
-        } else {
-            for server in mcp_servers {
-                lines.push(Line::from(format!(
-                    "- {} · {} · {} · {} tools",
-                    server.name,
-                    server.kind,
-                    server.status_text(),
-                    server.tool_count
-                )));
-            }
-        }
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![Span::styled(
-            "Commands",
-            Style::default()
-                .fg(palette.accent)
-                .add_modifier(Modifier::BOLD),
-        )]));
-        lines.push(Line::from("/connect"));
-        lines.push(Line::from("/theme"));
-        lines.push(Line::from("/help"));
-        lines.push(Line::from("/undo - revert the previous user message"));
-        lines.push(Line::from(
-            "/redo - move one step forward in the undo history",
-        ));
-        lines.push(Line::from("/model - open the model panel"));
-        lines.push(Line::from("/model <query> - prefilter the model panel"));
-        lines.push(Line::from("/session - open the session panel"));
-        lines.push(Line::from("/session <query> - prefilter the session panel"));
-        lines.push(Line::from("Ctrl+X then Down arrow - open a child session"));
-        lines.push(Line::from(
-            "Ctrl+X then Up arrow - return to the parent session",
-        ));
-        lines.push(Line::from("/mcp - open the MCP panel"));
-        lines.push(Line::from("/mcp add - create a new MCP server"));
-        lines.push(Line::from("/mcp edit <name> - edit an MCP server"));
-        lines.push(Line::from("/mcp remove <name> - remove an MCP server"));
-        lines.push(Line::from("/clear"));
-        lines.push(Line::from("/exit"));
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![Span::styled(
-            "Keyboard Shortcuts",
-            Style::default()
-                .fg(palette.accent)
-                .add_modifier(Modifier::BOLD),
-        )]));
-        lines.push(Line::from("Tab - switch mode"));
-        lines.push(Line::from("/quit"));
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![Span::styled(
-            "Config",
-            Style::default()
-                .fg(palette.accent)
-                .add_modifier(Modifier::BOLD),
-        )]));
-        lines.push(Line::from(shorten(
-            &self.paths.default_config_path().display().to_string(),
-            32,
-        )));
 
-        if let Some(notice) = &self.last_notice {
-            lines.push(Line::from(""));
+        // Undo state (only when active)
+        if self.conversation.is_reverted() {
             lines.push(Line::from(vec![Span::styled(
-                "Notice",
-                Style::default()
-                    .fg(palette.accent)
-                    .add_modifier(Modifier::BOLD),
+                "⚠ Undo active",
+                Style::default().fg(palette.warning),
             )]));
-            lines.push(Line::from(shorten(notice, 32)));
         }
 
         let paragraph = Paragraph::new(Text::from(lines))
