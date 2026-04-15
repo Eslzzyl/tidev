@@ -64,6 +64,7 @@ pub struct ActiveModel {
     pub base_url: String,
     pub api_type: ApiType,
     pub model_id: String,
+    pub request_model_id: String,
     pub display_name: String,
     pub context_window: usize,
     pub max_output_tokens: usize,

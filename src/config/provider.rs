@@ -55,6 +55,8 @@ pub struct ModelConfig {
     pub supports_images: bool,
     #[serde(default)]
     pub extra_body: Option<serde_json::Value>,
+    #[serde(default)]
+    pub request_model_id: Option<String>,
 }
 
 fn default_true() -> bool {

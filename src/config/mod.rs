@@ -348,6 +348,10 @@ max_input_lines = 6
             base_url: provider.base_url.clone(),
             api_type,
             model_id: model_id.to_string(),
+            request_model_id: model
+                .request_model_id
+                .clone()
+                .unwrap_or_else(|| model_id.to_string()),
             display_name: model.display_name.clone(),
             context_window: model.context_window,
             max_output_tokens: model.max_output_tokens,

@@ -321,7 +321,7 @@ fn build_openai_request(
     };
 
     Ok(ChatCompletionRequest {
-        model: model.model_id.clone(),
+        model: model.request_model_id.clone(),
         messages: request_messages,
         temperature: Some(model.temperature),
         max_tokens: Some(model.max_output_tokens as u32),

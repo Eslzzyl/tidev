@@ -11,10 +11,16 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::time::{Duration, Instant};
 
 use super::diff_render::render_unified_diff_text;
 use super::permission::RunningSubagentExecution;
-use super::{App, render::*};
+use super::{
+    App, MessageRenderCacheEntry, MessageRenderCacheKey, MessageRenderCacheKind,
+    MessageRenderCacheValue, render::*,
+};
 
 impl App {
     pub(super) fn render_chat(&mut self, frame: &mut Frame<'_>) {
@@ -271,6 +277,7 @@ impl App {
     }
 
     fn messages_text(&self, content_width: Option<usize>) -> (Text<'static>, usize) {
+        let started_at = Instant::now();
         let palette = self.palette();
         let width = content_width.unwrap_or(1).max(1);
         let body_width = width.saturating_sub(2).max(1);
@@ -308,7 +315,7 @@ impl App {
 
             // Handle Assistant messages and their subsequent Tool messages together
             if matches!(message.role, MessageRole::Assistant) {
-                let mut assistant_cards = self.render_message_cards(message, body_width);
+                let mut assistant_cards = self.cached_render_message_cards(message, body_width);
 
                 // Peek ahead for tool results that belong to this assistant's tool calls
                 let mut next_i = i + 1;
@@ -316,7 +323,7 @@ impl App {
                 {
                     let tool_msg = &messages[next_i];
                     // Render tool result
-                    let tool_lines = self.render_tool_result_lines(tool_msg, body_width);
+                    let tool_lines = self.cached_render_tool_result_lines(tool_msg, body_width);
                     if !tool_lines.is_empty() {
                         let mut lines_with_margin = Vec::new();
                         lines_with_margin.push(Line::from(""));
@@ -342,7 +349,7 @@ impl App {
 
             // Fallback for other message types (User, System, etc.)
             // Note: Standalone Tool messages (if any) will still be rendered here
-            for (card_bg, card_lines) in self.render_message_cards(message, body_width) {
+            for (card_bg, card_lines) in self.cached_render_message_cards(message, body_width) {
                 if card_lines.is_empty() {
                     continue;
                 }
@@ -364,7 +371,111 @@ impl App {
         }
 
         let total_lines = lines.len().max(1);
+        let elapsed = started_at.elapsed();
+        if elapsed > Duration::from_millis(12) {
+            let (hits, misses, entries) = self.message_render_cache_stats();
+            crate::log_debug!(
+                "messages_text slow: messages={}, width={}, took={:?}, cache_hits={}, cache_misses={}, cache_entries={}",
+                messages.len(),
+                width,
+                elapsed,
+                hits,
+                misses,
+                entries
+            );
+        }
         (Text::from(lines), total_lines)
+    }
+
+    fn cached_render_message_cards(
+        &self,
+        message: &Message,
+        body_width: usize,
+    ) -> Vec<(Color, Vec<Line<'static>>)> {
+        if message.streaming && matches!(message.role, MessageRole::Assistant) {
+            self.record_message_render_cache_miss();
+            return self.render_message_cards(message, body_width);
+        }
+
+        let key = MessageRenderCacheKey {
+            session_id: self.conversation.session_id,
+            message_id: message.id,
+            width: body_width,
+            kind: MessageRenderCacheKind::Cards,
+        };
+        let fingerprint = message_render_fingerprint(message);
+        let tick = self.next_message_render_cache_tick();
+
+        {
+            let mut cache = self.message_render_cache.borrow_mut();
+            if let Some(entry) = cache.get_mut(&key)
+                && entry.fingerprint == fingerprint
+                && let MessageRenderCacheValue::Cards(cards) = &entry.value
+            {
+                entry.last_used_tick = tick;
+                self.record_message_render_cache_hit();
+                return cards.clone();
+            }
+        }
+
+        self.record_message_render_cache_miss();
+        let cards = self.render_message_cards(message, body_width);
+
+        {
+            let mut cache = self.message_render_cache.borrow_mut();
+            cache.insert(
+                key,
+                MessageRenderCacheEntry {
+                    fingerprint,
+                    value: MessageRenderCacheValue::Cards(cards.clone()),
+                    last_used_tick: tick,
+                },
+            );
+        }
+
+        self.prune_message_render_cache_if_needed();
+        cards
+    }
+
+    fn cached_render_tool_result_lines(&self, message: &Message, body_width: usize) -> Vec<Line<'static>> {
+        let key = MessageRenderCacheKey {
+            session_id: self.conversation.session_id,
+            message_id: message.id,
+            width: body_width,
+            kind: MessageRenderCacheKind::ToolResultLines,
+        };
+        let fingerprint = message_render_fingerprint(message);
+        let tick = self.next_message_render_cache_tick();
+
+        {
+            let mut cache = self.message_render_cache.borrow_mut();
+            if let Some(entry) = cache.get_mut(&key)
+                && entry.fingerprint == fingerprint
+                && let MessageRenderCacheValue::ToolResultLines(lines) = &entry.value
+            {
+                entry.last_used_tick = tick;
+                self.record_message_render_cache_hit();
+                return lines.clone();
+            }
+        }
+
+        self.record_message_render_cache_miss();
+        let lines = self.render_tool_result_lines(message, body_width);
+
+        {
+            let mut cache = self.message_render_cache.borrow_mut();
+            cache.insert(
+                key,
+                MessageRenderCacheEntry {
+                    fingerprint,
+                    value: MessageRenderCacheValue::ToolResultLines(lines.clone()),
+                    last_used_tick: tick,
+                },
+            );
+        }
+
+        self.prune_message_render_cache_if_needed();
+        lines
     }
 
     fn render_message_cards(
@@ -931,6 +1042,51 @@ fn render_reasoning_markdown_lines(
     }
 
     lines
+}
+
+fn message_render_fingerprint(message: &Message) -> u64 {
+    let mut hasher = DefaultHasher::new();
+
+    message.id.hash(&mut hasher);
+    message.role.label().hash(&mut hasher);
+    message.content.hash(&mut hasher);
+    message.reasoning.hash(&mut hasher);
+    message.tool_call_id.hash(&mut hasher);
+    message.tool_name.hash(&mut hasher);
+    message.streaming.hash(&mut hasher);
+
+    for attachment in &message.attachments {
+        match attachment {
+            MessageAttachment::FileReference { path, content } => {
+                1u8.hash(&mut hasher);
+                path.hash(&mut hasher);
+                content.hash(&mut hasher);
+            }
+            MessageAttachment::DirectoryReference { path, tree } => {
+                2u8.hash(&mut hasher);
+                path.hash(&mut hasher);
+                tree.hash(&mut hasher);
+            }
+            MessageAttachment::Image {
+                filename,
+                mime,
+                data_url,
+            } => {
+                3u8.hash(&mut hasher);
+                filename.hash(&mut hasher);
+                mime.hash(&mut hasher);
+                data_url.hash(&mut hasher);
+            }
+        }
+    }
+
+    for tool_call in &message.tool_calls {
+        tool_call.id.hash(&mut hasher);
+        tool_call.name.hash(&mut hasher);
+        tool_call.arguments.hash(&mut hasher);
+    }
+
+    hasher.finish()
 }
 
 #[cfg(test)]

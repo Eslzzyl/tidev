@@ -349,7 +349,7 @@ fn build_anthropic_request(
     };
 
     Ok(AnthropicRequest {
-        model: model.model_id.clone(),
+        model: model.request_model_id.clone(),
         max_tokens: model.max_output_tokens as u32,
         system: if system_prompt.is_empty() {
             None
