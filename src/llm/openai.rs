@@ -159,21 +159,23 @@ pub(super) async fn stream_openai(
                         }
                     }
 
-                    for tool_call in choice.delta.tool_calls {
-                        let index = tool_call.index.unwrap_or(tool_calls.len());
-                        let entry = tool_calls.entry(index).or_default();
+                    if let Some(ref tool_calls_delta) = choice.delta.tool_calls {
+                        for tool_call in tool_calls_delta {
+                            let index = tool_call.index.unwrap_or(tool_calls.len());
+                            let entry = tool_calls.entry(index).or_default();
 
-                        if let Some(id) = tool_call.id {
-                            entry.id = id;
-                        }
-
-                        if let Some(function) = tool_call.function {
-                            if let Some(name) = function.name {
-                                entry.name = name;
+                            if let Some(id) = &tool_call.id {
+                                entry.id = id.clone();
                             }
 
-                            if let Some(arguments) = function.arguments {
-                                entry.arguments.push_str(&arguments);
+                            if let Some(function) = &tool_call.function {
+                                if let Some(name) = &function.name {
+                                    entry.name = name.clone();
+                                }
+
+                                if let Some(arguments) = &function.arguments {
+                                    entry.arguments.push_str(arguments);
+                                }
                             }
                         }
                     }
@@ -498,7 +500,7 @@ struct ChatCompletionDelta {
     #[serde(default)]
     reasoning_content: Option<String>,
     #[serde(default)]
-    tool_calls: Vec<ChatCompletionToolCallDelta>,
+    tool_calls: Option<Vec<ChatCompletionToolCallDelta>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
