@@ -30,7 +30,7 @@ serde_json = "1.0.149"
 serde_yaml = "0.9.34"
 syntect = "5.3.0"
 textwrap = "0.16.2"
-tokio = { version = "=1.51.1", features = [
+tokio = { version = "=1.52.0", features = [
     "rt-multi-thread",
     "macros",
     "sync",
