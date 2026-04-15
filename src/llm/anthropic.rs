@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use crate::{
     config::ActiveModel,
+    log_debug, log_error,
     session::{BackendEvent, Message, MessageAttachment, MessageRole},
     tooling::ToolDefinition,
 };
@@ -28,16 +29,47 @@ pub(super) async fn stream_anthropic(
         .clone()
         .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
     let request = build_anthropic_request(&model, messages, &tools)?;
+    let request_body_size = serde_json::to_string(&request).map(|s| s.len()).unwrap_or(0);
 
-    let response = http
+    let send_result = http
         .post(model.endpoint())
         .header("x-api-key", &api_key)
         .header("anthropic-version", "2023-06-01")
         .header("anthropic-dangerous-direct-browser-access", "true")
         .json(&request)
         .send()
-        .await?
-        .error_for_status()?;
+        .await;
+
+    let response = match send_result {
+        Ok(resp) => match resp.error_for_status() {
+            Ok(r) => r,
+            Err(e) => {
+                log_error!(
+                    "anthropic request failed: method=POST url={} request_body_size={} error={}",
+                    model.endpoint(),
+                    request_body_size,
+                    e
+                );
+                return Err(e.into());
+            }
+        },
+        Err(e) => {
+            log_error!(
+                "anthropic request failed: method=POST url={} request_body_size={} error={}",
+                model.endpoint(),
+                request_body_size,
+                e
+            );
+            return Err(e.into());
+        }
+    };
+
+    log_debug!(
+        "anthropic request: method=POST url={} request_body_size={} status={}",
+        model.endpoint(),
+        request_body_size,
+        response.status()
+    );
 
     let mut stream = response.bytes_stream();
     let mut buffer = String::new();
@@ -171,16 +203,47 @@ pub(super) async fn complete_anthropic(
         .clone()
         .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
     let request = build_anthropic_request(&model, messages, &[])?;
+    let request_body_size = serde_json::to_string(&request).map(|s| s.len()).unwrap_or(0);
 
-    let response = http
+    let send_result = http
         .post(model.endpoint())
         .header("x-api-key", &api_key)
         .header("anthropic-version", "2023-06-01")
         .header("anthropic-dangerous-direct-browser-access", "true")
         .json(&request)
         .send()
-        .await?
-        .error_for_status()?;
+        .await;
+
+    let response = match send_result {
+        Ok(resp) => match resp.error_for_status() {
+            Ok(r) => r,
+            Err(e) => {
+                log_error!(
+                    "anthropic request (complete) failed: method=POST url={} request_body_size={} error={}",
+                    model.endpoint(),
+                    request_body_size,
+                    e
+                );
+                return Err(e.into());
+            }
+        },
+        Err(e) => {
+            log_error!(
+                "anthropic request (complete) failed: method=POST url={} request_body_size={} error={}",
+                model.endpoint(),
+                request_body_size,
+                e
+            );
+            return Err(e.into());
+        }
+    };
+
+    log_debug!(
+        "anthropic request (complete): method=POST url={} request_body_size={} status={}",
+        model.endpoint(),
+        request_body_size,
+        response.status()
+    );
 
     let response: AnthropicResponse = response.json().await?;
     let content = response
