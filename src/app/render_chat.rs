@@ -1,5 +1,5 @@
 use crate::{
-    markdown_render::{WrapOptions, adaptive_wrap_lines, render_markdown_text_with_width_and_cwd},
+    markdown_render::render_markdown_text_with_width_and_cwd,
     session::{Message, MessageAttachment, MessageRole, ToolCall},
     theme::ThemePalette,
     tooling::canonical_tool_name,
@@ -578,32 +578,8 @@ impl App {
         }
 
         if message.streaming && matches!(message.role, MessageRole::Assistant) {
-            if !self.streaming_preview_lines.is_empty() {
-                if let Some(width) = Some(body_width) {
-                    let wrapped_preview = adaptive_wrap_lines(
-                        self.streaming_preview_lines.iter(),
-                        WrapOptions::new(width),
-                    );
-                    lines.extend(wrapped_preview);
-                } else {
-                    lines.extend(self.streaming_preview_lines.clone());
-                }
-            }
-
-            let tail = message
-                .content
-                .rsplit_once('\n')
-                .map(|(_, tail)| tail)
-                .unwrap_or(message.content.as_str());
-            if !tail.is_empty() {
-                lines.push(line_with_prefix(
-                    "▌",
-                    tail,
-                    Style::default().fg(self.palette().accent),
-                    Style::default().fg(self.palette().text),
-                ));
-            } else if lines.is_empty() {
-                lines.push(line_with_style("▌", self.palette().muted));
+            for line in message.content.lines() {
+                lines.push(Line::from(line.to_string()));
             }
         } else if !message.content.is_empty() {
             if let Some(diff_lines) =

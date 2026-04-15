@@ -9,7 +9,6 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use image::ImageEncoder;
-use ratatui::text::Line;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{
     env, io,
@@ -54,7 +53,6 @@ use crate::{
     input::Composer,
     instructions,
     llm::LlmClient,
-    markdown_stream::MarkdownStreamCollector,
     mcp::McpManager,
     prompts::SessionMode,
     provider_setup::ConnectDialog,
@@ -155,7 +153,6 @@ struct CachedSessionRuntime {
     message_follow_tail: bool,
     message_viewport_lines: usize,
     message_total_lines: usize,
-    streaming_preview_lines: Vec<Line<'static>>,
     context_usage: Option<(u32, u32, u32)>,
 }
 
@@ -220,8 +217,6 @@ struct App {
     message_total_lines: usize,
     backend_tx: UnboundedSender<BackendEvent>,
     backend_rx: UnboundedReceiver<BackendEvent>,
-    streaming_markdown: Option<MarkdownStreamCollector>,
-    streaming_preview_lines: Vec<Line<'static>>,
     loading_frame: usize,
     context_usage: Option<(u32, u32, u32)>, // (input_tokens, output_tokens, total_tokens)
 }
@@ -318,8 +313,6 @@ impl App {
             message_total_lines: 0,
             backend_tx,
             backend_rx,
-            streaming_markdown: None,
-            streaming_preview_lines: Vec::new(),
             loading_frame: 0,
             context_usage: None,
         })
@@ -375,7 +368,6 @@ impl App {
             message_follow_tail: self.message_follow_tail,
             message_viewport_lines: self.message_viewport_lines,
             message_total_lines: self.message_total_lines,
-            streaming_preview_lines: self.streaming_preview_lines.clone(),
             context_usage: self.context_usage,
         };
 
@@ -473,9 +465,7 @@ impl App {
         self.message_follow_tail = cached.message_follow_tail;
         self.message_viewport_lines = cached.message_viewport_lines;
         self.message_total_lines = cached.message_total_lines;
-        self.streaming_preview_lines = cached.streaming_preview_lines;
         self.context_usage = cached.context_usage;
-        self.streaming_markdown = None;
     }
 
     fn reset_active_runtime(&mut self) {
@@ -488,8 +478,6 @@ impl App {
         self.pending_request = false;
         self.abort_confirmation_deadline = None;
         self.retrying_hint = None;
-        self.streaming_markdown = None;
-        self.streaming_preview_lines.clear();
         self.context_usage = None;
         self.scroll_messages_to_bottom();
     }
@@ -543,7 +531,6 @@ impl App {
             message_follow_tail: true,
             message_viewport_lines: 0,
             message_total_lines: 0,
-            streaming_preview_lines: Vec::new(),
             context_usage: None,
         };
 
@@ -798,9 +785,6 @@ impl App {
         if let Some(running) = self.running_tool_execution.take() {
             running.cancel_requested.store(true, Ordering::SeqCst);
         }
-
-        self.streaming_markdown = None;
-        self.streaming_preview_lines.clear();
 
         if let Some(message) = self.conversation.messages.last_mut()
             && message.streaming
@@ -1502,8 +1486,6 @@ impl App {
             self.running_tool_execution = None;
             self.abort_confirmation_deadline = None;
             self.active_request_id = self.active_request_id.wrapping_add(1);
-            self.streaming_markdown = None;
-            self.streaming_preview_lines.clear();
         }
 
         self.screen = Screen::Chat;
@@ -1649,11 +1631,6 @@ impl App {
             self.conversation.messages.len()
         );
         self.refresh_tools();
-        self.streaming_markdown = Some(MarkdownStreamCollector::new(
-            None,
-            self.workspace_root.as_path(),
-        ));
-        self.streaming_preview_lines.clear();
         self.pending_request = true;
         self.abort_confirmation_deadline = None;
         self.active_request_id = self.active_request_id.wrapping_add(1);
@@ -1857,11 +1834,6 @@ impl App {
                     return Ok(());
                 }
 
-                if let Some(collector) = self.streaming_markdown.as_mut() {
-                    collector.push_delta(&content);
-                    self.streaming_preview_lines
-                        .extend(collector.commit_complete_lines());
-                }
                 if let Some(message) = self.conversation.messages.last_mut()
                     && message.streaming
                     && matches!(message.role, MessageRole::Assistant)
@@ -1926,8 +1898,6 @@ impl App {
                 self.running_tool_execution = None;
                 self.cancel_running_subagents();
                 self.abort_confirmation_deadline = None;
-                self.streaming_markdown = None;
-                self.streaming_preview_lines.clear();
                 self.retrying_hint = None;
 
                 if let Some(message) = self.conversation.messages.last_mut()
@@ -1980,7 +1950,7 @@ impl App {
                 status_text,
                 current_tool_call,
                 assistant_message,
-                content_delta,
+                content_delta: _,
                 reasoning_delta: _,
             } => {
                 if !self.is_active_request(request_id) {
@@ -2013,38 +1983,6 @@ impl App {
                             existing.streaming = message.streaming;
                         } else {
                             self.conversation.messages.push(message.clone());
-                        }
-
-                        if message.streaming {
-                            if self.streaming_markdown.is_none() {
-                                self.streaming_markdown = Some(MarkdownStreamCollector::new(
-                                    None,
-                                    self.workspace_root.as_path(),
-                                ));
-                            }
-                            if let Some(collector) = &mut self.streaming_markdown {
-                                if let Some(delta) = content_delta {
-                                    collector.push_delta(&delta);
-                                    self.streaming_preview_lines
-                                        .extend(collector.commit_complete_lines());
-                                } else if self.streaming_preview_lines.is_empty() {
-                                    let tail = message
-                                        .content
-                                        .rsplit_once('\n')
-                                        .map(|(_, tail)| tail)
-                                        .unwrap_or(message.content.as_str());
-                                    if !tail.is_empty() {
-                                        use ratatui::text::Line;
-                                        self.streaming_preview_lines.push(Line::styled(
-                                            tail.to_string(),
-                                            ratatui::style::Style::default(),
-                                        ));
-                                    }
-                                }
-                            }
-                        } else {
-                            self.streaming_preview_lines.clear();
-                            self.streaming_markdown = None;
                         }
                     }
                 }
@@ -2220,13 +2158,6 @@ impl App {
             self.store
                 .append_message(self.conversation.session_id, &message)?;
         }
-
-        if let Some(collector) = self.streaming_markdown.as_mut() {
-            self.streaming_preview_lines
-                .extend(collector.finalize_and_drain());
-        }
-        self.streaming_markdown = None;
-        self.streaming_preview_lines.clear();
 
         if !turn.tool_calls.is_empty() {
             let tool_names: Vec<_> = turn.tool_calls.iter().map(|tc| tc.name.as_str()).collect();
