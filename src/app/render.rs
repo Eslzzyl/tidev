@@ -144,7 +144,7 @@ impl App {
             .style(Style::default().fg(palette.muted));
         frame.render_widget(subtitle, sections[1]);
 
-        let prompt_title = format!("{} prompt", self.mode.title());
+        let prompt_title = self.mode.title().to_string();
         self.render_input_block(
             frame,
             sections[2],

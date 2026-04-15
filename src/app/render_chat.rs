@@ -81,7 +81,7 @@ impl App {
         .split(main_area);
 
         self.render_messages(frame, layout[0]);
-        let prompt_title = format!("{} prompt", self.mode.title());
+        let prompt_title = self.mode.title().to_string();
         self.render_input_block(
             frame,
             layout[1],
