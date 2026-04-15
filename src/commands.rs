@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CommandAction {
-    Help,
     Connect,
     Mcp,
     Model,
@@ -283,13 +282,6 @@ pub static COMMANDS: &[CommandSpec] = &[
         description: "Move one step forward in undo history",
         usage: "/redo",
         action: CommandAction::Redo,
-    },
-    CommandSpec {
-        name: "help",
-        aliases: &["?"],
-        description: "Show command and key help",
-        usage: "/help",
-        action: CommandAction::Help,
     },
     CommandSpec {
         name: "exit",

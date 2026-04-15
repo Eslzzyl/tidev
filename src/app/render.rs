@@ -1,4 +1,4 @@
-use crate::{prompts::SessionMode, theme::ThemePalette};
+use crate::theme::ThemePalette;
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Position, Rect},
     prelude::{Frame, Modifier, Style, Text},
@@ -186,55 +186,6 @@ impl App {
 
             frame.set_cursor_position(Position::new(cursor_x, cursor_y));
         }
-    }
-
-    pub(crate) fn help_message(&self) -> String {
-        let mut lines = vec![
-            "Commands:",
-            "/help - show this message",
-            "/connect - open the provider picker",
-            "/mcp - open the MCP panel",
-            "/mcp add - create a new MCP server",
-            "/mcp edit <server-name> - edit an MCP server",
-            "/mcp remove <server-name> - remove an MCP server",
-            "/model - open the model panel",
-            "/model <query> - prefilter the model panel",
-            "/session - open the session panel",
-            "/session <query> - prefilter the session panel",
-            "/theme [dark|light|nord|one-dark|catppuccin|solarized|orng|github|material] - switch theme",
-            "/clear - start a fresh session",
-            "/undo - revert the previous user message",
-            "/redo - move one step forward in the undo history",
-            "/exit - exit TiDev",
-            "",
-            "Keys:",
-            "Enter - send prompt or execute the highlighted slash command",
-            "Shift+Enter / Ctrl+J - insert newline",
-            "PageUp / PageDown / mouse wheel - scroll conversation",
-            "Mouse drag - select visible text and copy on release",
-            "Esc - clear the current mouse selection",
-            "Ctrl+X then Down arrow - open a child session",
-            "Ctrl+X then Up arrow - return to the parent session",
-            "Tab - switch mode (when no command is being entered)",
-            "Up/Down - move through command suggestions",
-                "Ctrl+V - paste clipboard text or image",
-            "Ctrl+P / Ctrl+N - navigate input history",
-            "Ctrl+C - exit",
-            "Permission prompt - Y allow · N deny · R allow and remember · X deny and remember",
-            "Connect picker - type to filter providers, Enter to select, Esc to cancel",
-            "MCP panel - Enter connect/disconnect · a add · e edit · d remove · R refresh · Esc close",
-            "",
-            "Modes:",
-        ]
-        .into_iter()
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-
-        for mode in SessionMode::all() {
-            lines.push(format!("- {} - {}", mode.as_str(), mode.description()));
-        }
-
-        lines.join("\n")
     }
 }
 

@@ -1341,8 +1341,7 @@ impl App {
     ) -> Result<()> {
         if self.pending_request {
             match action {
-                CommandAction::Help
-                | CommandAction::Theme
+                CommandAction::Theme
                 | CommandAction::Quit
                 | CommandAction::Undo
                 | CommandAction::Redo
@@ -1358,12 +1357,6 @@ impl App {
         }
 
         match action {
-            CommandAction::Help => {
-                let help = self.help_message();
-                self.push_system_message(help)?;
-                self.scroll_messages_to_bottom();
-                self.last_notice = Some("Help shown".to_string());
-            }
             CommandAction::Connect => {
                 if !args.is_empty() {
                     self.last_notice = Some("Ignoring arguments to /connect".to_string());
