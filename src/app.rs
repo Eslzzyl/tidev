@@ -1092,7 +1092,10 @@ impl App {
                 if self.composer.text() != previous_query {
                     let items = self.model_panel_items();
                     let mut next_panel = panel;
-                    next_panel.reset_selection(&items);
+                    next_panel.reset_selection(
+                        &items,
+                        Some((&self.active_model.provider_id, &self.active_model.model_id)),
+                    );
                     self.model_panel = Some(next_panel);
                 }
             }
@@ -1557,7 +1560,10 @@ impl App {
 
         let mut panel = ModelPanelState::new();
         let items = self.model_panel_items();
-        panel.reset_selection(&items);
+        panel.reset_selection(
+            &items,
+            Some((&self.active_model.provider_id, &self.active_model.model_id)),
+        );
         self.model_panel = Some(panel);
     }
 

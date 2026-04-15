@@ -10,7 +10,21 @@ impl ModelPanelState {
         Self { selected_index: 0 }
     }
 
-    pub fn reset_selection(&mut self, items: &[ModelPanelItem]) {
+    pub fn reset_selection(
+        &mut self,
+        items: &[ModelPanelItem],
+        active_model: Option<(&str, &str)>,
+    ) {
+        if let Some((provider_id, model_id)) = active_model {
+            if let Some(index) = items.iter().position(|item| {
+                matches!(item, ModelPanelItem::Model { summary }
+                    if summary.provider_id == provider_id && summary.model_id == model_id)
+            }) {
+                self.selected_index = index;
+                return;
+            }
+        }
+
         self.selected_index = first_selectable_index(items).unwrap_or(0);
     }
 
