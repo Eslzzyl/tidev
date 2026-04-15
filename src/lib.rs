@@ -12,11 +12,11 @@ pub mod prompts;
 pub mod provider_setup;
 pub mod session;
 pub mod skills;
+pub mod snapshot;
 pub mod storage;
 pub mod theme;
 pub mod tooling;
 pub mod webtools;
-pub mod workspace_snapshot;
 
 pub fn run() -> anyhow::Result<()> {
     app::run()

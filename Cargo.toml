@@ -51,6 +51,7 @@ rmcp = { version = "1.4.0", features = [
     "transport-streamable-http-client-reqwest",
 ] }
 diffy = "0.4.2"
+blake3 = "1.8.4"
 
 [profile.dev]
 incremental = true # Compile your binary in smaller steps.

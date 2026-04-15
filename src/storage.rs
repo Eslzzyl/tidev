@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use rusqlite::{Connection, OptionalExtension, params, types::Type};
+use rusqlite::{params, types::Type, Connection, OptionalExtension};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -13,7 +13,7 @@ use crate::{
     tooling::TodoItem,
 };
 
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 9;
 
 pub struct SessionStore {
     connection: Connection,
@@ -205,7 +205,7 @@ impl SessionStore {
         let attachments = serde_json::to_string(&message.attachments)
             .context("failed to serialize attachments")?;
         self.connection.execute(
-            "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, created_at, streaming, input_tokens, output_tokens, total_tokens) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, created_at, streaming, input_tokens, output_tokens, total_tokens, snapshot_hash, patch_files) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 message.id.to_string(),
                 session_id.to_string(),
@@ -221,6 +221,8 @@ impl SessionStore {
                 message.input_tokens,
                 message.output_tokens,
                 message.total_tokens,
+                message.snapshot_hash,
+                message.patch_files,
             ],
         )?;
 
@@ -235,7 +237,7 @@ impl SessionStore {
             .context("failed to serialize attachments")?;
 
         self.connection.execute(
-            "UPDATE messages SET role = ?3, content = ?4, attachments = ?5, reasoning = ?6, tool_calls = ?7, tool_call_id = ?8, tool_name = ?9, created_at = ?10, streaming = ?11, input_tokens = ?12, output_tokens = ?13, total_tokens = ?14 WHERE session_id = ?1 AND id = ?2",
+            "UPDATE messages SET role = ?3, content = ?4, attachments = ?5, reasoning = ?6, tool_calls = ?7, tool_call_id = ?8, tool_name = ?9, created_at = ?10, streaming = ?11, input_tokens = ?12, output_tokens = ?13, total_tokens = ?14, snapshot_hash = ?15, patch_files = ?16 WHERE session_id = ?1 AND id = ?2",
             params![
                 session_id.to_string(),
                 message.id.to_string(),
@@ -251,6 +253,8 @@ impl SessionStore {
                 message.input_tokens,
                 message.output_tokens,
                 message.total_tokens,
+                message.snapshot_hash,
+                message.patch_files,
             ],
         )?;
 
@@ -449,14 +453,20 @@ impl SessionStore {
         Ok(message_id)
     }
 
-    pub fn set_revert_message_id(&self, session_id: Uuid, message_id: Option<Uuid>) -> Result<()> {
+    pub fn set_revert_message_id(
+        &self,
+        session_id: Uuid,
+        message_id: Option<Uuid>,
+        redo_snapshot: Option<&str>,
+    ) -> Result<()> {
         match message_id {
             Some(message_id) => {
                 self.connection.execute(
-                    "INSERT INTO session_reverts (session_id, message_id, created_at) VALUES (?1, ?2, ?3) ON CONFLICT(session_id) DO UPDATE SET message_id = excluded.message_id, created_at = excluded.created_at",
+                    "INSERT INTO session_reverts (session_id, message_id, redo_snapshot, created_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(session_id) DO UPDATE SET message_id = excluded.message_id, redo_snapshot = excluded.redo_snapshot, created_at = excluded.created_at",
                     params![
                         session_id.to_string(),
                         message_id.to_string(),
+                        redo_snapshot,
                         Utc::now().to_rfc3339(),
                     ],
                 )?;
@@ -474,7 +484,52 @@ impl SessionStore {
     }
 
     pub fn clear_revert_message_id(&self, session_id: Uuid) -> Result<()> {
-        self.set_revert_message_id(session_id, None)
+        self.set_revert_message_id(session_id, None, None)
+    }
+
+    pub fn load_redo_snapshot(&self, session_id: Uuid) -> Result<Option<String>> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT redo_snapshot FROM session_reverts WHERE session_id = ?1 LIMIT 1")?;
+
+        let snapshot = statement
+            .query_row(params![session_id.to_string()], |row| {
+                row.get::<_, Option<String>>(0)
+            })
+            .optional()?
+            .flatten();
+
+        Ok(snapshot)
+    }
+
+    pub fn update_message_snapshot(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        snapshot_hash: &str,
+    ) -> Result<()> {
+        self.connection.execute(
+            "UPDATE messages SET snapshot_hash = ?1 WHERE session_id = ?2 AND id = ?3",
+            params![
+                snapshot_hash,
+                session_id.to_string(),
+                message_id.to_string()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_message_patch(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        patch_files: &str,
+    ) -> Result<()> {
+        self.connection.execute(
+            "UPDATE messages SET patch_files = ?1 WHERE session_id = ?2 AND id = ?3",
+            params![patch_files, session_id.to_string(), message_id.to_string()],
+        )?;
+        Ok(())
     }
 
     pub fn load_session_record(&self, session_id: Uuid) -> Result<Option<SessionRecord>> {
@@ -493,7 +548,7 @@ impl SessionStore {
 
     pub fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, created_at, streaming, input_tokens, output_tokens, total_tokens FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
+            "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, created_at, streaming, input_tokens, output_tokens, total_tokens, snapshot_hash, patch_files FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
         )?;
 
         let rows = statement.query_map(params![session_id.to_string()], |row| {
@@ -510,6 +565,8 @@ impl SessionStore {
             let input_tokens = row.get::<_, Option<u32>>(10)?;
             let output_tokens = row.get::<_, Option<u32>>(11)?;
             let total_tokens = row.get::<_, Option<u32>>(12)?;
+            let snapshot_hash = row.get::<_, Option<String>>(13)?;
+            let patch_files = row.get::<_, Option<String>>(14)?;
 
             let attachments = serde_json::from_str(&attachments).unwrap_or_default();
             let tool_calls: Vec<ToolCall> = serde_json::from_str(&tool_calls).unwrap_or_default();
@@ -533,6 +590,8 @@ impl SessionStore {
             message.input_tokens = input_tokens;
             message.output_tokens = output_tokens;
             message.total_tokens = total_tokens;
+            message.snapshot_hash = snapshot_hash;
+            message.patch_files = patch_files;
             Ok(message)
         })?;
 
@@ -803,6 +862,7 @@ CREATE TABLE IF NOT EXISTS session_workspaces (
 CREATE TABLE IF NOT EXISTS session_reverts (
     session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
     message_id TEXT NOT NULL,
+    redo_snapshot TEXT,
     created_at TEXT NOT NULL
 );
 
@@ -820,7 +880,9 @@ CREATE TABLE IF NOT EXISTS messages (
     streaming INTEGER NOT NULL DEFAULT 0,
     input_tokens INTEGER,
     output_tokens INTEGER,
-    total_tokens INTEGER
+    total_tokens INTEGER,
+    snapshot_hash TEXT,
+    patch_files TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_session_created_at
@@ -1192,7 +1254,7 @@ mod tests {
             );
 
             store
-                .set_revert_message_id(session_id, Some(message_id))
+                .set_revert_message_id(session_id, Some(message_id), None)
                 .expect("revert should save");
 
             assert_eq!(

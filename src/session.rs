@@ -168,6 +168,10 @@ pub struct Message {
     pub output_tokens: Option<u32>,
     #[serde(default)]
     pub total_tokens: Option<u32>,
+    #[serde(default)]
+    pub snapshot_hash: Option<String>,
+    #[serde(default)]
+    pub patch_files: Option<String>,
 }
 
 impl Message {
@@ -186,6 +190,8 @@ impl Message {
             input_tokens: None,
             output_tokens: None,
             total_tokens: None,
+            snapshot_hash: None,
+            patch_files: None,
         }
     }
 
@@ -204,6 +210,8 @@ impl Message {
             input_tokens: None,
             output_tokens: None,
             total_tokens: None,
+            snapshot_hash: None,
+            patch_files: None,
         }
     }
 
@@ -228,6 +236,8 @@ impl Message {
             input_tokens: None,
             output_tokens: None,
             total_tokens: None,
+            snapshot_hash: None,
+            patch_files: None,
         }
     }
 
@@ -250,6 +260,8 @@ impl Message {
             input_tokens: None,
             output_tokens: None,
             total_tokens: None,
+            snapshot_hash: None,
+            patch_files: None,
         }
     }
 }

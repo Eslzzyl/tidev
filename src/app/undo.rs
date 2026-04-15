@@ -1,12 +1,64 @@
-use anyhow::{Context, Result};
-use std::{fs, path::PathBuf};
+use anyhow::Result;
 use uuid::Uuid;
 
-use crate::{context::ContextManager, session::MessageRole, workspace_snapshot::WorkspaceSnapshot};
+use crate::{context::ContextManager, snapshot::Patch};
 
 use super::{App, Screen};
 
 impl App {
+    pub(crate) fn finalize_snapshot_for_last_user_message_sync(&mut self) -> Result<()> {
+        let last_user_message_id = {
+            let Some(last_user_message) = self.conversation.last_visible_user_message() else {
+                return Ok(());
+            };
+
+            let Some(_) = last_user_message.snapshot_hash.clone() else {
+                return Ok(());
+            };
+
+            last_user_message.id
+        };
+
+        let snapshot_hash = {
+            let Some(msg) = self
+                .conversation
+                .messages
+                .iter()
+                .find(|m| m.id == last_user_message_id)
+            else {
+                return Ok(());
+            };
+            msg.snapshot_hash.clone()
+        };
+
+        let Some(snapshot_hash) = snapshot_hash else {
+            return Ok(());
+        };
+
+        let rt = tokio::runtime::Handle::current();
+        let patch = rt.block_on(self.snapshot.patch(&snapshot_hash))?;
+
+        if !patch.files.is_empty() {
+            let patch_files = serde_json::to_string(&patch.files)?;
+            self.store.update_message_patch(
+                self.conversation.session_id,
+                last_user_message_id,
+                &patch_files,
+            )?;
+
+            if let Some(msg) = self
+                .conversation
+                .messages
+                .iter_mut()
+                .find(|m| m.id == last_user_message_id)
+            {
+                msg.patch_files = Some(patch_files);
+            }
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn undo_last_user_message(&mut self) -> Result<()> {
         if self.pending_request {
             self.abort_current_request();
@@ -17,23 +69,55 @@ impl App {
             return Ok(());
         };
 
-        let mut notice = None;
+        let patches = self.collect_patches_after_message(message.id)?;
 
-        if let Err(error) = self.capture_redo_snapshot() {
-            notice = Some(format!(
-                "Saved undo state without workspace snapshot: {error}"
-            ));
+        if patches.is_empty() && self.conversation.revert_message_id.is_none() {
+            self.last_notice = Some("No changes to undo".to_string());
+            return Ok(());
         }
 
-        if let Err(error) = self.restore_workspace_snapshot_for_message(message.id) {
-            notice = Some(format!(
-                "Undid message, but workspace rollback failed: {error}"
-            ));
+        let rt = tokio::runtime::Handle::current();
+        let mut notice = None;
+
+        let redo_snapshot = if let Some(existing) = self
+            .store
+            .load_redo_snapshot(self.conversation.session_id)?
+        {
+            existing
+        } else {
+            match rt.block_on(self.snapshot.track()) {
+                Ok(Some(hash)) => hash,
+                Ok(None) => String::new(),
+                Err(error) => {
+                    notice = Some(format!("Failed to capture redo snapshot: {error}"));
+                    String::new()
+                }
+            }
+        };
+
+        if let Some(existing_snapshot) = self
+            .store
+            .load_redo_snapshot(self.conversation.session_id)?
+        {
+            rt.block_on(self.snapshot.restore(&existing_snapshot))?;
+        }
+
+        if !patches.is_empty() {
+            if let Err(error) = rt.block_on(self.snapshot.revert(&patches)) {
+                notice = Some(format!("Undo partially failed: {error}"));
+            }
         }
 
         self.command_palette.clear();
         self.context_manager = ContextManager::new();
-        self.set_revert_message_id(Some(message.id))?;
+        self.set_revert_message_id(
+            Some(message.id),
+            if redo_snapshot.is_empty() {
+                None
+            } else {
+                Some(&redo_snapshot)
+            },
+        )?;
         self.composer.set_text(message.content);
         self.screen = Screen::Chat;
         self.scroll_messages_to_bottom();
@@ -46,39 +130,30 @@ impl App {
             self.abort_current_request();
         }
 
-        let Some(current_revert) = self.conversation.revert_message_id else {
+        let Some(_current_revert) = self.conversation.revert_message_id else {
             self.last_notice = Some("Nothing to redo".to_string());
             return Ok(());
         };
 
         self.command_palette.clear();
+
+        let Some(redo_snapshot) = self
+            .store
+            .load_redo_snapshot(self.conversation.session_id)?
+        else {
+            self.last_notice = Some("Redo state unavailable".to_string());
+            self.clear_revert_state()?;
+            return Ok(());
+        };
+
+        let rt = tokio::runtime::Handle::current();
         let mut notice = None;
 
-        if let Some(next_message) = self
-            .conversation
-            .next_user_message_after(current_revert)
-            .cloned()
-        {
-            if let Err(error) = self.restore_workspace_snapshot_for_message(next_message.id) {
-                notice = Some(format!(
-                    "Redid message, but workspace rollback failed: {error}"
-                ));
-            }
-
-            self.set_revert_message_id(Some(next_message.id))?;
-            self.context_manager = ContextManager::new();
-            self.screen = Screen::Chat;
-            self.scroll_messages_to_bottom();
-            self.last_notice = notice.or_else(|| Some("Redid previous undo".to_string()));
-            return Ok(());
-        }
-
-        if let Err(error) = self.restore_redo_snapshot() {
-            notice = Some(format!("Redo state unavailable: {error}"));
+        if let Err(error) = rt.block_on(self.snapshot.restore(&redo_snapshot)) {
+            notice = Some(format!("Redo failed: {error}"));
         }
 
         self.clear_revert_state()?;
-        self.clear_redo_snapshot();
         self.context_manager = ContextManager::new();
         self.composer.clear();
         self.screen = Screen::Chat;
@@ -87,9 +162,33 @@ impl App {
         Ok(())
     }
 
-    pub(crate) fn capture_prompt_snapshot(&self, message_id: Uuid) -> Result<()> {
-        let snapshot = WorkspaceSnapshot::capture(self.workspace_root.as_path())?;
-        self.write_message_snapshot(message_id, &snapshot)
+    pub(crate) fn capture_prompt_snapshot(&mut self, message_id: Uuid) -> Result<()> {
+        let rt = tokio::runtime::Handle::current();
+
+        match rt.block_on(self.snapshot.track()) {
+            Ok(Some(hash)) => {
+                self.store.update_message_snapshot(
+                    self.conversation.session_id,
+                    message_id,
+                    &hash,
+                )?;
+
+                if let Some(msg) = self
+                    .conversation
+                    .messages
+                    .iter_mut()
+                    .find(|m| m.id == message_id)
+                {
+                    msg.snapshot_hash = Some(hash);
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                crate::log_warn!("failed to capture snapshot: {}", error);
+            }
+        }
+
+        Ok(())
     }
 
     pub(crate) fn discard_reverted_branch(&mut self) -> Result<()> {
@@ -99,11 +198,6 @@ impl App {
 
         let visible_count = self.conversation.visible_message_count();
         let hidden_messages = self.conversation.messages[visible_count..].to_vec();
-        let hidden_user_message_ids: Vec<Uuid> = hidden_messages
-            .iter()
-            .filter(|message| matches!(message.role, MessageRole::User))
-            .map(|message| message.id)
-            .collect();
 
         self.store.delete_messages(
             self.conversation.session_id,
@@ -113,22 +207,50 @@ impl App {
                 .collect::<Vec<_>>(),
         )?;
 
-        for message_id in hidden_user_message_ids {
-            let _ = self.delete_message_snapshot(message_id);
-        }
-
-        self.clear_redo_snapshot();
         let _ = self.conversation.take_hidden_messages();
         self.clear_revert_state()?;
         self.context_manager = ContextManager::new();
         Ok(())
     }
 
-    fn set_revert_message_id(&mut self, message_id: Option<Uuid>) -> Result<()> {
+    fn collect_patches_after_message(&self, message_id: Uuid) -> Result<Vec<Patch>> {
+        let mut patches = Vec::new();
+        let mut found = false;
+
+        for message in &self.conversation.messages {
+            if found {
+                if let Some(patch_files_str) = &message.patch_files {
+                    if let Some(snapshot_hash) = &message.snapshot_hash {
+                        let files: Vec<String> = serde_json::from_str(patch_files_str)?;
+                        patches.push(Patch {
+                            hash: snapshot_hash.clone(),
+                            files,
+                        });
+                    }
+                }
+                continue;
+            }
+
+            if message.id == message_id {
+                found = true;
+            }
+        }
+
+        Ok(patches)
+    }
+
+    fn set_revert_message_id(
+        &mut self,
+        message_id: Option<Uuid>,
+        redo_snapshot: Option<&str>,
+    ) -> Result<()> {
         self.conversation.revert_message_id = message_id;
         if let Some(message_id) = message_id {
-            self.store
-                .set_revert_message_id(self.conversation.session_id, Some(message_id))?;
+            self.store.set_revert_message_id(
+                self.conversation.session_id,
+                Some(message_id),
+                redo_snapshot,
+            )?;
         } else {
             self.store
                 .clear_revert_message_id(self.conversation.session_id)?;
@@ -137,87 +259,6 @@ impl App {
     }
 
     pub(crate) fn clear_revert_state(&mut self) -> Result<()> {
-        self.set_revert_message_id(None)
-    }
-
-    fn undo_state_root(&self) -> PathBuf {
-        self.paths
-            .data_dir
-            .join("undo")
-            .join(self.conversation.session_id.to_string())
-    }
-
-    fn redo_snapshot_path(&self) -> PathBuf {
-        self.undo_state_root().join("redo.json")
-    }
-
-    fn message_snapshot_path(&self, message_id: Uuid) -> PathBuf {
-        self.undo_state_root()
-            .join("messages")
-            .join(format!("{message_id}.json"))
-    }
-
-    fn write_message_snapshot(&self, message_id: Uuid, snapshot: &WorkspaceSnapshot) -> Result<()> {
-        let path = self.message_snapshot_path(message_id);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!("failed to create snapshot directory {}", parent.display())
-            })?;
-        }
-
-        let contents = serde_json::to_vec_pretty(snapshot)
-            .context("failed to serialize workspace snapshot")?;
-        fs::write(&path, contents)
-            .with_context(|| format!("failed to write snapshot {}", path.display()))?;
-        Ok(())
-    }
-
-    fn capture_redo_snapshot(&self) -> Result<()> {
-        let snapshot = WorkspaceSnapshot::capture(self.workspace_root.as_path())?;
-        let path = self.redo_snapshot_path();
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!("failed to create snapshot directory {}", parent.display())
-            })?;
-        }
-
-        let contents =
-            serde_json::to_vec_pretty(&snapshot).context("failed to serialize redo snapshot")?;
-        fs::write(&path, contents)
-            .with_context(|| format!("failed to write snapshot {}", path.display()))?;
-        Ok(())
-    }
-
-    fn restore_workspace_snapshot_for_message(&self, message_id: Uuid) -> Result<()> {
-        let path = self.message_snapshot_path(message_id);
-        let contents = fs::read(&path)
-            .with_context(|| format!("failed to read snapshot {}", path.display()))?;
-        let snapshot: WorkspaceSnapshot =
-            serde_json::from_slice(&contents).context("failed to parse workspace snapshot")?;
-        snapshot.restore(self.workspace_root.as_path())
-    }
-
-    fn restore_redo_snapshot(&self) -> Result<()> {
-        let path = self.redo_snapshot_path();
-        let contents = fs::read(&path)
-            .with_context(|| format!("failed to read snapshot {}", path.display()))?;
-        let snapshot: WorkspaceSnapshot =
-            serde_json::from_slice(&contents).context("failed to parse redo snapshot")?;
-        snapshot.restore(self.workspace_root.as_path())
-    }
-
-    fn clear_redo_snapshot(&self) {
-        let _ = fs::remove_file(self.redo_snapshot_path());
-    }
-
-    fn delete_message_snapshot(&self, message_id: Uuid) -> Result<()> {
-        let path = self.message_snapshot_path(message_id);
-        match fs::remove_file(&path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => {
-                Err(error).with_context(|| format!("failed to remove snapshot {}", path.display()))
-            }
-        }
+        self.set_revert_message_id(None, None)
     }
 }

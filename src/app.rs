@@ -67,6 +67,7 @@ use crate::{
     prompts::SessionMode,
     provider_setup::ConnectDialog,
     session::{AssistantTurn, BackendEvent, Conversation, Message, MessageAttachment, MessageRole},
+    snapshot::SnapshotService,
     storage::SessionStore,
     theme::{ThemeManager, ThemeName},
     tooling::ToolRegistry,
@@ -250,7 +251,7 @@ struct App {
     last_notice: Option<String>,
     toast: Option<(String, Instant)>,
     mouse_selection: MouseSelectionState,
-    retrying_hint: Option<(u32, u32, String, Option<u32>)>, // (attempt, max, reason, retry_after_secs)
+    retrying_hint: Option<(u32, u32, String, Option<u32>)>,
     message_scroll_offset: usize,
     message_follow_tail: bool,
     message_viewport_lines: usize,
@@ -266,7 +267,8 @@ struct App {
     backend_tx: UnboundedSender<BackendEvent>,
     backend_rx: UnboundedReceiver<BackendEvent>,
     loading_frame: usize,
-    context_usage: Option<(u32, u32, u32)>, // (input_tokens, output_tokens, total_tokens)
+    context_usage: Option<(u32, u32, u32)>,
+    snapshot: SnapshotService,
 }
 
 pub fn run() -> Result<()> {
@@ -315,6 +317,8 @@ impl App {
         let active_model = fallback_model.clone();
         let last_notice = None;
         let retrying_hint = None;
+        
+        let snapshot = SnapshotService::new(&workspace_root, &paths)?;
 
         let app = Self {
             should_quit: false,
@@ -372,6 +376,7 @@ impl App {
             backend_rx,
             loading_frame: 0,
             context_usage: None,
+            snapshot,
         };
 
         app.at_mention
@@ -2393,6 +2398,11 @@ impl App {
 
         self.pending_request = false;
         self.abort_confirmation_deadline = None;
+
+        if let Err(error) = self.finalize_snapshot_for_last_user_message_sync() {
+            crate::log_warn!("failed to finalize snapshot: {}", error);
+        }
+
         self.last_notice = Some(match turn.finish_reason.as_deref() {
             Some(reason) if reason != "stop" => format!("Response finished ({reason})"),
             _ => "Response complete".to_string(),
