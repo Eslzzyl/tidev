@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 use super::diff_render::render_unified_diff_text;
 use super::permission::RunningSubagentExecution;
 use super::{
-    App, MessageRenderCacheEntry, MessageRenderCacheKey, MessageRenderCacheKind,
-    MessageRenderCacheValue, render::*,
+    render::*, App, MessageRenderCacheEntry, MessageRenderCacheKey, MessageRenderCacheKind,
+    MessageRenderCacheValue,
 };
 
 impl App {
@@ -311,42 +311,58 @@ impl App {
         while i < messages.len() {
             let message = &messages[i];
 
-            // Handle Assistant messages and their subsequent Tool messages together
             if matches!(message.role, MessageRole::Assistant) {
-                let mut assistant_cards = self.cached_render_message_cards(message, body_width);
-
-                // Peek ahead for tool results that belong to this assistant's tool calls
-                let mut next_i = i + 1;
-                while next_i < messages.len() && matches!(messages[next_i].role, MessageRole::Tool)
-                {
-                    let tool_msg = &messages[next_i];
-                    // Render tool result
-                    let tool_lines = self.cached_render_tool_result_lines(tool_msg, body_width);
-                    if !tool_lines.is_empty() {
-                        let mut lines_with_margin = Vec::new();
-                        lines_with_margin.push(Line::from(""));
-                        lines_with_margin.extend(tool_lines);
-                        lines_with_margin.push(Line::from(""));
-                        // Tool results use panel_light
-                        assistant_cards.push((palette.panel_light, lines_with_margin));
-                    }
-                    next_i += 1;
-                }
+                let assistant_cards = self.cached_render_message_cards(message, body_width);
 
                 for (card_bg, card_lines) in assistant_cards {
                     if card_lines.is_empty() {
                         continue;
                     }
                     lines.extend(decorate_card_lines(card_lines, width, card_bg));
+                }
+
+                let tool_results_by_id: std::collections::HashMap<String, &Message> = {
+                    let mut map = std::collections::HashMap::new();
+                    let mut j = i + 1;
+                    while j < messages.len() && matches!(messages[j].role, MessageRole::Tool) {
+                        if let Some(id) = &messages[j].tool_call_id {
+                            map.insert(id.clone(), &messages[j]);
+                        }
+                        j += 1;
+                    }
+                    map
+                };
+
+                if !message.tool_calls.is_empty() {
+                    let mut tool_cards = Vec::new();
+                    for tool_call in &message.tool_calls {
+                        let tool_result = tool_results_by_id.get(&tool_call.id).copied();
+                        let card_lines =
+                            self.render_tool_call_with_result(tool_call, tool_result, body_width);
+                        if !card_lines.is_empty() {
+                            tool_cards.push((palette.panel_light, card_lines));
+                        }
+                    }
+
+                    for (card_bg, card_lines) in tool_cards {
+                        if card_lines.is_empty() {
+                            continue;
+                        }
+                        lines.extend(decorate_card_lines(card_lines, width, card_bg));
+                    }
                     lines.push(Line::from(""));
                 }
 
+                let next_i = i + 1 + tool_results_by_id.len();
                 i = next_i;
                 continue;
             }
 
-            // Fallback for other message types (User, System, etc.)
-            // Note: Standalone Tool messages (if any) will still be rendered here
+            if matches!(message.role, MessageRole::Tool) {
+                i += 1;
+                continue;
+            }
+
             for (card_bg, card_lines) in self.cached_render_message_cards(message, body_width) {
                 if card_lines.is_empty() {
                     continue;
@@ -405,12 +421,12 @@ impl App {
 
         {
             let mut cache = self.message_render_cache.borrow_mut();
-            if let Some(entry) = cache.get_mut(&key)
-                && let MessageRenderCacheValue::Cards(cards) = &entry.value
-            {
+            if let Some(entry) = cache.get_mut(&key) {
                 entry.last_used_tick = tick;
                 self.record_message_render_cache_hit();
-                return cards.clone();
+                match &entry.value {
+                    MessageRenderCacheValue::Cards(cards) => return cards.clone(),
+                }
             }
         }
 
@@ -430,48 +446,6 @@ impl App {
 
         self.prune_message_render_cache_if_needed();
         cards
-    }
-
-    fn cached_render_tool_result_lines(
-        &self,
-        message: &Message,
-        body_width: usize,
-    ) -> Vec<Line<'static>> {
-        let key = MessageRenderCacheKey {
-            session_id: self.conversation.session_id,
-            message_id: message.id,
-            width: body_width,
-            kind: MessageRenderCacheKind::ToolResultLines,
-        };
-        let tick = self.next_message_render_cache_tick();
-
-        {
-            let mut cache = self.message_render_cache.borrow_mut();
-            if let Some(entry) = cache.get_mut(&key)
-                && let MessageRenderCacheValue::ToolResultLines(lines) = &entry.value
-            {
-                entry.last_used_tick = tick;
-                self.record_message_render_cache_hit();
-                return lines.clone();
-            }
-        }
-
-        self.record_message_render_cache_miss();
-        let lines = self.render_tool_result_lines(message, body_width);
-
-        {
-            let mut cache = self.message_render_cache.borrow_mut();
-            cache.insert(
-                key,
-                MessageRenderCacheEntry {
-                    value: MessageRenderCacheValue::ToolResultLines(lines.clone()),
-                    last_used_tick: tick,
-                },
-            );
-        }
-
-        self.prune_message_render_cache_if_needed();
-        lines
     }
 
     fn render_message_cards(
@@ -521,15 +495,8 @@ impl App {
                     cards.push((palette.background, lines_with_margin));
                 }
 
-                for tool_call in &message.tool_calls {
-                    let call_lines = self.render_tool_call_lines(tool_call, body_width);
-                    if !call_lines.is_empty() {
-                        let mut lines_with_margin = Vec::new();
-                        lines_with_margin.push(Line::from(""));
-                        lines_with_margin.extend(call_lines);
-                        lines_with_margin.push(Line::from(""));
-                        cards.push((palette.panel_light, lines_with_margin));
-                    }
+                for _tool_call in &message.tool_calls {
+                    // Tool calls are rendered in messages_text along with their results
                 }
 
                 cards
@@ -689,6 +656,170 @@ impl App {
                 .fg(palette.text)
                 .add_modifier(Modifier::BOLD),
         )])]
+    }
+
+    fn render_tool_call_with_result(
+        &self,
+        tool_call: &ToolCall,
+        tool_result: Option<&Message>,
+        body_width: usize,
+    ) -> Vec<Line<'static>> {
+        let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
+
+        if matches!(canonical_name, "list" | "grep" | "glob" | "read") {
+            return self.render_tool_call_summary_line(tool_call, tool_result, body_width);
+        }
+
+        let mut lines = Vec::new();
+        lines.push(Line::from(""));
+
+        let call_lines = self.render_tool_call_lines(tool_call, body_width);
+        lines.extend(call_lines);
+
+        if let Some(result_msg) = tool_result {
+            let result_lines = self.render_tool_result_detail_lines(result_msg, body_width);
+            if !result_lines.is_empty() {
+                lines.push(Line::from(""));
+                lines.extend(result_lines);
+            }
+        }
+
+        lines.push(Line::from(""));
+        lines
+    }
+
+    fn render_tool_call_summary_line(
+        &self,
+        tool_call: &ToolCall,
+        tool_result: Option<&Message>,
+        body_width: usize,
+    ) -> Vec<Line<'static>> {
+        let palette = self.palette();
+        let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
+        let fields = summarize_tool_arguments(&tool_call.name, &tool_call.arguments);
+
+        let get_field = |name: &str| {
+            fields
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.as_str())
+        };
+
+        let (action_label, target) = match canonical_name {
+            "list" => {
+                let path = get_field("path").unwrap_or(".");
+                ("List", path.to_string())
+            }
+            "grep" => {
+                let pattern = get_field("pattern").unwrap_or("");
+                let path = get_field("path").unwrap_or(".");
+                ("Search", format!("\"{}\" in {}", pattern, path))
+            }
+            "glob" => {
+                let pattern = get_field("pattern").unwrap_or("*");
+                let path = get_field("path").unwrap_or(".");
+                ("Find", format!("{} in {}", pattern, path))
+            }
+            "read" => {
+                let path = get_field("path").unwrap_or("file");
+                ("Read", path.to_string())
+            }
+            _ => {
+                let summary =
+                    summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width);
+                return vec![Line::from(vec![Span::styled(
+                    summary,
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                )])];
+            }
+        };
+
+        let result_suffix = if let Some(result_msg) = tool_result {
+            let output = result_msg.content.trim();
+            self.compute_tool_result_suffix(canonical_name, output)
+        } else {
+            " ...".to_string()
+        };
+
+        let line = Line::from(vec![
+            Span::styled(
+                format!("{} ", action_label),
+                Style::default().fg(palette.accent_soft),
+            ),
+            Span::styled(
+                target.clone(),
+                Style::default()
+                    .fg(palette.text)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(result_suffix, Style::default().fg(palette.muted)),
+        ]);
+
+        vec![line]
+    }
+
+    fn compute_tool_result_suffix(&self, canonical_name: &str, output: &str) -> String {
+        match canonical_name {
+            "list" => {
+                let count = if output.trim() == "(empty)" {
+                    0
+                } else {
+                    output
+                        .lines()
+                        .skip(1)
+                        .filter(|line| !line.trim().is_empty())
+                        .count()
+                };
+                format!(" → {} items", count)
+            }
+            "grep" | "glob" => {
+                if tool_output_is_error(output) {
+                    let count = if output.is_empty() {
+                        0
+                    } else {
+                        output.lines().count()
+                    };
+                    format!(" → failed ({} lines)", count)
+                } else {
+                    let count = if output.is_empty() {
+                        0
+                    } else {
+                        output.lines().count()
+                    };
+                    format!(" → {} matches", count)
+                }
+            }
+            "read" => {
+                if tool_output_is_error(output) {
+                    " → error".to_string()
+                } else {
+                    let total_lines = output.lines().count();
+                    if total_lines == 0 {
+                        " → empty".to_string()
+                    } else {
+                        format!(" → {} lines", total_lines)
+                    }
+                }
+            }
+            _ => String::new(),
+        }
+    }
+
+    fn render_tool_result_detail_lines(
+        &self,
+        message: &Message,
+        body_width: usize,
+    ) -> Vec<Line<'static>> {
+        let tool_name = message.tool_name.as_deref().unwrap_or(message.role.label());
+        let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
+
+        if matches!(canonical_name, "list" | "grep" | "glob" | "read") {
+            return Vec::new();
+        }
+
+        self.render_tool_result_lines(message, body_width)
     }
 
     fn render_reasoning_lines(&self, reasoning: &str, body_width: usize) -> Vec<Line<'static>> {
@@ -1105,11 +1236,9 @@ mod tests {
 
         let app = super::App::new().unwrap();
         let lines = app.render_tool_result_lines(&message, 80);
-        assert!(
-            lines
-                .iter()
-                .any(|line| line_text(line).contains("Listed 2 items"))
-        );
+        assert!(lines
+            .iter()
+            .any(|line| line_text(line).contains("Listed 2 items")));
     }
 
     #[test]

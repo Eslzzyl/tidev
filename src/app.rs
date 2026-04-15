@@ -144,7 +144,6 @@ const MESSAGE_RENDER_CACHE_MAX_ENTRIES: usize = 1200;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum MessageRenderCacheKind {
     Cards,
-    ToolResultLines,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -158,7 +157,6 @@ struct MessageRenderCacheKey {
 #[derive(Clone, Debug)]
 enum MessageRenderCacheValue {
     Cards(Vec<(Color, Vec<Line<'static>>)>),
-    ToolResultLines(Vec<Line<'static>>),
 }
 
 #[derive(Clone, Debug)]
