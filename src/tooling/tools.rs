@@ -1,7 +1,7 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use grep::{
     regex::RegexMatcherBuilder,
-    searcher::{SearcherBuilder, sinks},
+    searcher::{sinks, SearcherBuilder},
 };
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
@@ -12,8 +12,8 @@ use std::{
     path::{Component, Path, PathBuf},
     process::Stdio,
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
+        Arc,
     },
     thread,
     time::{SystemTime, UNIX_EPOCH},
@@ -799,9 +799,8 @@ fn run_shell_inner(
     cancelled: Option<Arc<AtomicBool>>,
 ) -> Result<String> {
     let mut process = if cfg!(target_os = "windows") {
-        std::process::Command::new("cmd")
-            .arg("/C")
-            .arg(command)
+        std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", command])
             .current_dir(workspace_root)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
