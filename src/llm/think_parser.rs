@@ -42,9 +42,9 @@ impl ThinkParser {
 
         loop {
             if self.in_think {
-                if let Some(end) = self.buffer.find("```") {
+                if let Some(end) = self.buffer.find("</think>") {
                     reasoning.push_str(&self.buffer[..end]);
-                    self.buffer.drain(..end + "```".len());
+                    self.buffer.drain(..end + "</think>".len());
                     self.in_think = false;
                     continue;
                 }
@@ -56,9 +56,9 @@ impl ThinkParser {
                 break;
             }
 
-            if let Some(start) = self.buffer.find("```") {
+            if let Some(start) = self.buffer.find("<think>") {
                 visible.push_str(&self.buffer[..start]);
-                self.buffer.drain(..start + "```".len());
+                self.buffer.drain(..start + "<think>".len());
                 self.in_think = true;
                 continue;
             }
@@ -89,7 +89,7 @@ impl ThinkParser {
 }
 
 fn think_tag_suffix_len(text: &str) -> usize {
-    const TAGS: [&str; 2] = ["```", "```"];
+    const TAGS: [&str; 2] = ["</think>", "<think>"];
 
     for tag in TAGS {
         let max = tag.len().saturating_sub(1);
