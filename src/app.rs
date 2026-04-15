@@ -243,9 +243,9 @@ impl App {
     fn new() -> Result<Self> {
         let workspace_root = env::current_dir().context("failed to determine workspace root")?;
         let paths = ConfigPaths::discover()?;
-        crate::logging::init(&paths.data_dir);
-        crate::log_info!("App initializing, workspace={}", workspace_root.display());
         let config = AppConfig::load_or_create(&paths)?;
+        crate::logging::init(&paths.data_dir, config.logging.clone());
+        crate::log_info!("App initializing, workspace={}", workspace_root.display());
         let auth = AuthStore::load_or_create(&paths)?;
         let store = SessionStore::open(paths.default_database_path())?;
         let llm = LlmClient::new()?;

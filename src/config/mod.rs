@@ -1,4 +1,5 @@
 mod auth;
+pub mod logging;
 pub mod mcp;
 mod paths;
 mod provider;
@@ -13,6 +14,7 @@ use crate::theme::ThemeName;
 use crate::tooling::ToolPermission;
 
 pub use auth::{ActiveModel, AuthStore, ModelSummary, ProviderAuth};
+pub use logging::LogConfig;
 pub use mcp::{McpConfig, McpServerConfig};
 pub use paths::ConfigPaths;
 pub use provider::{ApiType, ModelConfig, ProviderConfig, ProviderSource};
@@ -28,6 +30,8 @@ pub struct AppConfig {
     pub theme: String,
     #[serde(default)]
     pub ui: UiConfig,
+    #[serde(default)]
+    pub logging: LogConfig,
     #[serde(default)]
     pub providers: BTreeMap<String, ProviderConfig>,
     #[serde(default)]
@@ -53,6 +57,7 @@ impl Default for AppConfig {
             default_model: "gpt-4o-mini".to_string(),
             theme: ThemeName::Dark.as_str().to_string(),
             ui: UiConfig::default(),
+            logging: LogConfig::default(),
             providers: BTreeMap::new(),
             instructions: Vec::new(),
             skills: Vec::new(),
@@ -190,6 +195,17 @@ instructions = []
 # Optional additional skill sources. Each entry can be a local path or an HTTP(S) URL to a SKILL.md file.
 # Example: skills = ["https://example.com/skills/git-release/SKILL.md"]
 skills = []
+
+# Optional logging configuration.
+# Set enabled = true to enable file logging.
+# level can be: DEBUG, INFO, WARN, ERROR
+# max_size_mb: max log file size before rotation (default: 10)
+# max_files: number of rotated log files to keep (default: 5)
+#[logging]
+#enabled = false
+#level = "INFO"
+#max_size_mb = 10
+#max_files = 5
 
 # Optional permission settings by mode.
 # By default plan mode allows read/search/session and build mode allows all permissions.
