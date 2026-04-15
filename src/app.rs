@@ -4,12 +4,17 @@ use crossterm::{
     cursor::Show,
     event::{
         self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-        Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind,
+        Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
+        MouseEventKind,
     },
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use image::ImageEncoder;
-use ratatui::{Terminal, backend::CrosstermBackend};
+use ratatui::{
+    Terminal,
+    backend::CrosstermBackend,
+    layout::{Position, Rect},
+};
 use std::{
     env, io,
     path::{Path, PathBuf},
@@ -27,6 +32,7 @@ mod connect;
 mod diff_render;
 mod mcp_panel;
 mod model_panel;
+mod mouse_selection;
 mod permission;
 mod question;
 mod render;
@@ -41,6 +47,7 @@ use crate::{
     app::at_mention::{AtMentionKind, AtMentionState, current_at_fragment},
     app::mcp_panel::McpPanelState,
     app::model_panel::ModelPanelState,
+    app::mouse_selection::{ClipboardLease, MouseSelectionState},
     app::permission::{
         PendingToolExecution, PermissionDialogState, RunningSubagentExecution, RunningToolExecution,
     },
@@ -170,6 +177,7 @@ struct UiStateSnapshot {
     composer: Composer,
     draft_attachments: Vec<MessageAttachment>,
     last_notice: Option<String>,
+    mouse_selection: MouseSelectionState,
 }
 
 struct App {
@@ -210,11 +218,15 @@ struct App {
     active_request_id: u64,
     abort_confirmation_deadline: Option<Instant>,
     last_notice: Option<String>,
+    mouse_selection: MouseSelectionState,
     retrying_hint: Option<(u32, u32, String, Option<u32>)>, // (attempt, max, reason, retry_after_secs)
     message_scroll_offset: usize,
     message_follow_tail: bool,
     message_viewport_lines: usize,
     message_total_lines: usize,
+    message_content_area: Option<Rect>,
+    sidebar_area: Option<Rect>,
+    selection_clipboard_lease: Option<ClipboardLease>,
     backend_tx: UnboundedSender<BackendEvent>,
     backend_rx: UnboundedReceiver<BackendEvent>,
     loading_frame: usize,
@@ -306,11 +318,15 @@ impl App {
             active_request_id: 0,
             abort_confirmation_deadline: None,
             last_notice,
+            mouse_selection: MouseSelectionState::default(),
             retrying_hint,
             message_scroll_offset: 0,
             message_follow_tail: true,
             message_viewport_lines: 0,
             message_total_lines: 0,
+            message_content_area: None,
+            sidebar_area: None,
+            selection_clipboard_lease: None,
             backend_tx,
             backend_rx,
             loading_frame: 0,
@@ -327,6 +343,7 @@ impl App {
 
         loop {
             self.process_backend_events(runtime)?;
+            self.update_mouse_selection_auto_scroll();
             terminal
                 .draw(|frame| self.render(frame))
                 .context("failed to render frame")?;
@@ -388,6 +405,7 @@ impl App {
             composer: self.composer.clone(),
             draft_attachments: self.draft_attachments.clone(),
             last_notice: self.last_notice.clone(),
+            mouse_selection: self.mouse_selection.clone(),
         }
     }
 
@@ -404,6 +422,7 @@ impl App {
         self.composer = snapshot.composer;
         self.draft_attachments = snapshot.draft_attachments;
         self.last_notice = snapshot.last_notice;
+        self.mouse_selection = snapshot.mouse_selection;
     }
 
     fn with_temporary_session_context<F>(&mut self, session_id: Uuid, operation: F) -> Result<()>
@@ -657,7 +676,11 @@ impl App {
             Event::Mouse(mouse) => {
                 self.handle_mouse_event(mouse);
             }
-            Event::Resize(_, _) => {}
+            Event::Resize(_, _) => {
+                self.clear_mouse_selection();
+                self.message_content_area = None;
+                self.sidebar_area = None;
+            }
             _ => {}
         }
 
@@ -665,16 +688,90 @@ impl App {
     }
 
     fn handle_mouse_event(&mut self, mouse: MouseEvent) {
-        if !self.can_scroll_conversation() {
-            return;
-        }
-
         match mouse.kind {
-            MouseEventKind::ScrollUp => self.scroll_messages_up(3),
-            MouseEventKind::ScrollDown => self.scroll_messages_down(3),
+            MouseEventKind::Down(MouseButton::Left) => {
+                let position = Position::new(mouse.column, mouse.row);
+                if let Some(bounds) = self.selection_bounds_for_position(position) {
+                    self.mouse_selection
+                        .press_with_bounds(position, Some(bounds));
+                } else {
+                    self.clear_mouse_selection();
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                self.mouse_selection
+                    .drag(Position::new(mouse.column, mouse.row));
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.mouse_selection
+                    .release(Position::new(mouse.column, mouse.row));
+            }
+            MouseEventKind::ScrollUp => {
+                if self.can_scroll_conversation() {
+                    self.clear_mouse_selection();
+                    self.scroll_messages_up(3);
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if self.can_scroll_conversation() {
+                    self.clear_mouse_selection();
+                    self.scroll_messages_down(3);
+                }
+            }
             _ => {}
         }
     }
+
+    fn update_mouse_selection_auto_scroll(&mut self) {
+        if !self.mouse_selection.is_dragging() || !self.can_scroll_conversation() {
+            return;
+        }
+
+        let Some(area) = self.message_content_area else {
+            return;
+        };
+
+        let Some(pointer) = self.mouse_selection.pointer() else {
+            return;
+        };
+
+        let left = area.x;
+        let right = area.x.saturating_add(area.width);
+        if pointer.x < left || pointer.x >= right {
+            return;
+        }
+
+        let top_threshold = area.y.saturating_add(1);
+        let bottom_threshold = area.y.saturating_add(area.height.saturating_sub(2));
+
+        if pointer.y <= top_threshold {
+            self.scroll_messages_up_internal(3);
+        } else if pointer.y >= bottom_threshold {
+            self.scroll_messages_down_internal(3);
+        }
+    }
+
+    fn clear_mouse_selection(&mut self) {
+        self.mouse_selection.clear();
+    }
+
+    fn selection_bounds_for_position(&self, position: Position) -> Option<Rect> {
+        if let Some(area) = self.message_content_area
+            && area.contains(position)
+        {
+            return Some(area);
+        }
+
+        if let Some(area) = self.sidebar_area
+            && area.contains(position)
+        {
+            return Some(area);
+        }
+
+        None
+    }
+
+    pub(crate) fn register_selection_region(&self, _area: Rect) {}
 
     fn can_scroll_conversation(&self) -> bool {
         self.screen == Screen::Chat
@@ -688,6 +785,7 @@ impl App {
     }
 
     fn scroll_messages_to_bottom(&mut self) {
+        self.clear_mouse_selection();
         self.message_scroll_offset = 0;
         self.message_follow_tail = true;
     }
@@ -702,6 +800,11 @@ impl App {
     }
 
     fn scroll_messages_up(&mut self, lines: usize) {
+        self.clear_mouse_selection();
+        self.scroll_messages_up_internal(lines);
+    }
+
+    fn scroll_messages_up_internal(&mut self, lines: usize) {
         let max_scroll = self.message_scroll_max();
         let current = if self.message_follow_tail {
             max_scroll
@@ -714,6 +817,11 @@ impl App {
     }
 
     fn scroll_messages_down(&mut self, lines: usize) {
+        self.clear_mouse_selection();
+        self.scroll_messages_down_internal(lines);
+    }
+
+    fn scroll_messages_down_internal(&mut self, lines: usize) {
         let max_scroll = self.message_scroll_max();
         let current = if self.message_follow_tail {
             max_scroll
@@ -942,6 +1050,11 @@ impl App {
         }
 
         if self.handle_request_abort_key(key)? {
+            return Ok(());
+        }
+
+        if matches!(key.code, KeyCode::Esc) && self.mouse_selection.has_selection() {
+            self.clear_mouse_selection();
             return Ok(());
         }
 

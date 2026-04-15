@@ -548,6 +548,7 @@ impl App {
         } else {
             super::Screen::Chat
         };
+        self.clear_mouse_selection();
         self.connect_dialog = None;
         self.theme_panel = None;
         self.model_panel = None;

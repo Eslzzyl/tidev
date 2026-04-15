@@ -32,6 +32,7 @@ impl App {
                 Constraint::Length(self.config.ui.sidebar_width),
             ])
             .split(area);
+            self.sidebar_area = Some(split[1]);
             self.render_sidebar(frame, split[1]);
             split[0]
         } else {
@@ -123,6 +124,7 @@ impl App {
         };
 
         let content_area = scrollbar_area.0;
+        self.message_content_area = Some(content_area);
         let content_width = content_area.width.max(1) as usize;
         let (mut text, mut total_lines) = self.messages_text(Some(content_width));
 

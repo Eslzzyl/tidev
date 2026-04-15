@@ -16,6 +16,8 @@ impl App {
     }
 
     pub(crate) fn render(&mut self, frame: &mut Frame<'_>) {
+        self.message_content_area = None;
+        self.sidebar_area = None;
         match self.screen {
             Screen::Welcome => self.render_welcome(frame),
             Screen::Chat => self.render_chat(frame),
@@ -38,6 +40,7 @@ impl App {
         if let Some(dialog) = &self.permission_dialog {
             self.render_permission_dialog(frame, area, dialog);
         }
+        self.finish_mouse_selection(frame);
     }
 
     fn render_welcome(&mut self, frame: &mut Frame<'_>) {
@@ -200,6 +203,8 @@ impl App {
             "Enter - send prompt or execute the highlighted slash command",
             "Shift+Enter / Ctrl+J - insert newline",
             "PageUp / PageDown / mouse wheel - scroll conversation",
+            "Mouse drag - select visible text and copy on release",
+            "Esc - clear the current mouse selection",
             "Ctrl+X then Down arrow - open a child session",
             "Ctrl+X then Up arrow - return to the parent session",
             "Tab - switch mode (when no command is being entered)",

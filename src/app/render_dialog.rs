@@ -35,6 +35,7 @@ impl App {
             horizontal: 1,
             vertical: 1,
         });
+        self.register_selection_region(inner);
 
         let items = self
             .command_palette
@@ -95,6 +96,7 @@ impl App {
             horizontal: 1,
             vertical: 1,
         });
+        self.register_selection_region(inner);
 
         let items = self
             .at_mention
@@ -205,6 +207,7 @@ impl App {
             horizontal: 1,
             vertical: 1,
         });
+        self.register_selection_region(inner);
 
         match dialog {
             ConnectDialog::ProviderPicker { selected } => {
@@ -730,14 +733,12 @@ impl App {
 
         frame.render_widget(Clear, overlay);
         frame.render_widget(panel_block, overlay);
-        frame.render_stateful_widget(
-            list,
-            overlay.inner(Margin {
-                horizontal: 1,
-                vertical: 1,
-            }),
-            &mut state,
-        );
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+        self.register_selection_region(inner);
+        frame.render_stateful_widget(list, inner, &mut state);
     }
 
     pub(super) fn render_session_panel(
@@ -776,6 +777,7 @@ impl App {
             horizontal: 1,
             vertical: 1,
         });
+        self.register_selection_region(inner);
 
         let sections = Layout::vertical([
             Constraint::Length(2),
@@ -943,6 +945,7 @@ impl App {
             horizontal: 1,
             vertical: 1,
         });
+        self.register_selection_region(inner);
 
         let sections = Layout::vertical([
             Constraint::Length(2),
@@ -1085,6 +1088,7 @@ impl App {
             horizontal: 1,
             vertical: 1,
         });
+        self.register_selection_region(inner);
 
         if let Some(editor) = &panel.editor {
             let sections = Layout::vertical([
@@ -1240,6 +1244,7 @@ impl App {
             horizontal: 1,
             vertical: 1,
         });
+        self.register_selection_region(inner);
 
         let sections = Layout::vertical([
             Constraint::Length(2),
@@ -1456,6 +1461,7 @@ impl App {
                     horizontal: 1,
                     vertical: 1,
                 });
+                self.register_selection_region(inner);
                 let sections = Layout::vertical([
                     Constraint::Length(3),
                     Constraint::Min(1),
@@ -1510,6 +1516,7 @@ impl App {
                     horizontal: 1,
                     vertical: 1,
                 });
+                self.register_selection_region(inner);
                 let sections = Layout::vertical([
                     Constraint::Length(2),
                     Constraint::Length(2),
