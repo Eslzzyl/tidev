@@ -2,8 +2,8 @@ use crate::{
     app::mcp_panel::McpPanelState,
     app::mcp_panel::McpServerEditorState,
     app::model_panel::{ModelPanelItem, ModelPanelState},
-    app::question::QuestionDialogState,
     app::permission::PermissionDialogState,
+    app::question::QuestionDialogState,
     app::session_panel::{SessionPanelDialog, SessionPanelState, SessionViewMode},
     app::theme_panel::ThemePanelState,
     config::ProviderSource,
@@ -17,7 +17,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 
-use super::{connect::ProviderPickerItem, render::*, App};
+use super::{App, connect::ProviderPickerItem, render::*};
 
 impl App {
     pub(super) fn render_command_palette(&self, frame: &mut Frame<'_>, area: Rect) {
@@ -841,11 +841,7 @@ impl App {
                 let is_selected = panel.is_selected(*index);
 
                 let checkbox = if is_multi_select {
-                    if is_selected {
-                        "[✓] "
-                    } else {
-                        "[ ] "
-                    }
+                    if is_selected { "[✓] " } else { "[ ] " }
                 } else {
                     ""
                 };
@@ -1306,13 +1302,18 @@ impl App {
         let options_text = current_question
             .map(|question| {
                 if question.options.is_empty() {
-                    return "No predefined options were provided. Type a freeform answer below.".to_string();
+                    return "No predefined options were provided. Type a freeform answer below."
+                        .to_string();
                 }
 
                 let mut lines = Vec::with_capacity(question.options.len().saturating_add(2));
                 lines.push(format!(
                     "{}{}",
-                    if question.multiple.unwrap_or(false) { "Select one or more options. " } else { "Select one option. " },
+                    if question.multiple.unwrap_or(false) {
+                        "Select one or more options. "
+                    } else {
+                        "Select one option. "
+                    },
                     if question.custom.unwrap_or(true) {
                         "Type your own answer if needed."
                     } else {
@@ -1321,8 +1322,17 @@ impl App {
                 ));
 
                 for (index, option) in question.options.iter().enumerate() {
-                    if let Some(description) = option.description.as_deref().filter(|text| !text.trim().is_empty()) {
-                        lines.push(format!("  {}. {} - {}", index + 1, option.label, description));
+                    if let Some(description) = option
+                        .description
+                        .as_deref()
+                        .filter(|text| !text.trim().is_empty())
+                    {
+                        lines.push(format!(
+                            "  {}. {} - {}",
+                            index + 1,
+                            option.label,
+                            description
+                        ));
                     } else {
                         lines.push(format!("  {}. {}", index + 1, option.label));
                     }
@@ -1348,7 +1358,10 @@ impl App {
 
         let input_height = self
             .composer
-            .preferred_height(inner.width.saturating_sub(4), self.config.ui.max_input_lines)
+            .preferred_height(
+                inner.width.saturating_sub(4),
+                self.config.ui.max_input_lines,
+            )
             .min(inner.height.saturating_sub(8).max(3));
         let options_height = current_question
             .map(|question| {

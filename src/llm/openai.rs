@@ -3,6 +3,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tokio::sync::mpsc::UnboundedSender;
+use uuid::Uuid;
 
 use crate::{
     config::ActiveModel,
@@ -15,6 +16,7 @@ use super::think_parser::{ThinkParser, ToolCallBuilder, finalize_turn};
 
 pub(super) async fn stream_openai(
     http: &Client,
+    session_id: Uuid,
     request_id: u64,
     model: ActiveModel,
     messages: Vec<Message>,
@@ -68,7 +70,11 @@ pub(super) async fn stream_openai(
                         &mut tool_calls,
                         &mut think_parser,
                     );
-                    let _ = tx.send(BackendEvent::Finished { request_id, turn });
+                    let _ = tx.send(BackendEvent::Finished {
+                        session_id,
+                        request_id,
+                        turn,
+                    });
                     return Ok(());
                 }
 
@@ -77,6 +83,7 @@ pub(super) async fn stream_openai(
 
                 if let Some(usage) = event.usage {
                     let _ = tx.send(BackendEvent::UsageStats {
+                        session_id,
                         request_id,
                         input_tokens: usage.input_tokens,
                         output_tokens: usage.output_tokens,
@@ -88,6 +95,7 @@ pub(super) async fn stream_openai(
                     if let Some(reasoning) = choice.delta.reasoning_content {
                         reasoning_text.push_str(&reasoning);
                         let _ = tx.send(BackendEvent::ReasoningDelta {
+                            session_id,
                             request_id,
                             content: reasoning,
                         });
@@ -99,6 +107,7 @@ pub(super) async fn stream_openai(
                         if !visible.is_empty() {
                             assistant_text.push_str(&visible);
                             let _ = tx.send(BackendEvent::Delta {
+                                session_id,
                                 request_id,
                                 content: visible,
                             });
@@ -107,6 +116,7 @@ pub(super) async fn stream_openai(
                         if !reasoning.is_empty() {
                             reasoning_text.push_str(&reasoning);
                             let _ = tx.send(BackendEvent::ReasoningDelta {
+                                session_id,
                                 request_id,
                                 content: reasoning,
                             });
@@ -147,7 +157,11 @@ pub(super) async fn stream_openai(
         &mut tool_calls,
         &mut think_parser,
     );
-    let _ = tx.send(BackendEvent::Finished { request_id, turn });
+    let _ = tx.send(BackendEvent::Finished {
+        session_id,
+        request_id,
+        turn,
+    });
     Ok(())
 }
 

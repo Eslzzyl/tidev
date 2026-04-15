@@ -52,7 +52,12 @@ impl QuestionDialogState {
             .filter(|header| !header.is_empty())
             .unwrap_or("Questions");
 
-        format!("Question {} of {} · {}", self.current_index + 1, count, header)
+        format!(
+            "Question {} of {} · {}",
+            self.current_index + 1,
+            count,
+            header
+        )
     }
 
     pub(crate) fn body_title(&self) -> String {
@@ -69,7 +74,10 @@ impl QuestionDialogState {
             .and_then(|question| question.custom)
             .unwrap_or(true);
 
-        if self.current_question().is_some_and(|question| question.multiple.unwrap_or(false)) {
+        if self
+            .current_question()
+            .is_some_and(|question| question.multiple.unwrap_or(false))
+        {
             if custom {
                 "Type comma-separated answers and press Enter".to_string()
             } else {
@@ -147,8 +155,7 @@ impl QuestionDialogState {
             })
             .unwrap_or(2);
 
-        2u16
-            .saturating_add(2)
+        2u16.saturating_add(2)
             .saturating_add(option_lines)
             .saturating_add(input_height)
             .saturating_add(2)
@@ -156,7 +163,11 @@ impl QuestionDialogState {
 }
 
 impl App {
-    pub(crate) fn begin_question_dialog(&mut self, tool_call: ToolCall, args: QuestionArgs) -> Result<()> {
+    pub(crate) fn begin_question_dialog(
+        &mut self,
+        tool_call: ToolCall,
+        args: QuestionArgs,
+    ) -> Result<()> {
         self.connect_dialog = None;
         self.theme_panel = None;
         self.model_panel = None;
@@ -193,7 +204,10 @@ impl App {
             || (matches!(key.code, KeyCode::Left) && key.modifiers.is_empty())
         {
             let placeholder = {
-                let dialog = self.question_dialog.as_mut().expect("question dialog exists");
+                let dialog = self
+                    .question_dialog
+                    .as_mut()
+                    .expect("question dialog exists");
                 dialog.set_current_answer_from_text(self.composer.text());
                 dialog.move_previous();
                 let answer_text = dialog.current_answer_text();
@@ -209,7 +223,10 @@ impl App {
             || (matches!(key.code, KeyCode::Right) && key.modifiers.is_empty())
         {
             let placeholder = {
-                let dialog = self.question_dialog.as_mut().expect("question dialog exists");
+                let dialog = self
+                    .question_dialog
+                    .as_mut()
+                    .expect("question dialog exists");
                 dialog.set_current_answer_from_text(self.composer.text());
                 dialog.move_next();
                 let answer_text = dialog.current_answer_text();
@@ -227,7 +244,10 @@ impl App {
         {
             let submission = self.composer.text().to_string();
             let (is_last, next_text, placeholder) = {
-                let dialog = self.question_dialog.as_mut().expect("question dialog exists");
+                let dialog = self
+                    .question_dialog
+                    .as_mut()
+                    .expect("question dialog exists");
                 dialog.set_current_answer_from_text(&submission);
 
                 if dialog.is_last() {

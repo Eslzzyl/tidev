@@ -4,6 +4,7 @@ use rusqlite::{Connection, OptionalExtension, params, types::Type};
 use std::{
     fs,
     path::{Path, PathBuf},
+    time::Duration,
 };
 use uuid::Uuid;
 
@@ -52,6 +53,8 @@ impl SessionStore {
         let connection = Connection::open(&path)
             .with_context(|| format!("failed to open {}", path.display()))?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
+        connection.pragma_update(None, "journal_mode", "WAL")?;
+        connection.busy_timeout(Duration::from_secs(5))?;
         connection.execute_batch(SCHEMA_SQL)?;
         connection.execute(
             "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?1)",
@@ -326,6 +329,25 @@ impl SessionStore {
             .optional()?;
 
         Ok(value)
+    }
+
+    pub fn copy_tool_permissions(&self, from_session_id: Uuid, to_session_id: Uuid) -> Result<()> {
+        self.connection.execute(
+            "INSERT INTO tool_permissions (session_id, tool_name, allowed, created_at)
+             SELECT ?1, tool_name, allowed, ?2
+             FROM tool_permissions
+             WHERE session_id = ?3
+             ON CONFLICT(session_id, tool_name)
+             DO UPDATE SET allowed = excluded.allowed, created_at = excluded.created_at",
+            params![
+                to_session_id.to_string(),
+                Utc::now().to_rfc3339(),
+                from_session_id.to_string(),
+            ],
+        )?;
+
+        self.touch_session(to_session_id)?;
+        Ok(())
     }
 
     pub fn replace_todos(&self, session_id: Uuid, todos: &[TodoItem]) -> Result<()> {
@@ -946,6 +968,71 @@ mod tests {
             assert_eq!(children.len(), 1);
             assert_eq!(children[0].session_id, child_session_id);
             assert_eq!(children[0].parent_session_id, Some(parent_session_id));
+        }
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn copy_tool_permissions_inherits_parent_permissions() {
+        let path = std::env::temp_dir().join(format!(
+            "tidev-session-store-permissions-{}.sqlite3",
+            uuid::Uuid::new_v4()
+        ));
+
+        {
+            let store = SessionStore::open(&path).expect("store should open");
+            let parent_session_id = uuid::Uuid::new_v4();
+            let child_session_id = uuid::Uuid::new_v4();
+
+            store
+                .create_session(
+                    parent_session_id,
+                    Path::new("/tmp/workspace"),
+                    "openai",
+                    "OpenAI",
+                    "gpt-4o",
+                    "GPT-4o",
+                    "Parent",
+                )
+                .expect("parent session should be created");
+
+            store
+                .create_session_with_parent(
+                    child_session_id,
+                    parent_session_id,
+                    Path::new("/tmp/workspace"),
+                    "openai",
+                    "OpenAI",
+                    "gpt-4o",
+                    "GPT-4o",
+                    "Task: Child",
+                )
+                .expect("child session should be created");
+
+            store
+                .remember_tool_permission(parent_session_id, "bash", true)
+                .expect("permission should be recorded");
+            store
+                .remember_tool_permission(parent_session_id, "read", false)
+                .expect("permission should be recorded");
+
+            store
+                .copy_tool_permissions(parent_session_id, child_session_id)
+                .expect("permissions should be copied");
+
+            assert_eq!(
+                store
+                    .load_tool_permission(child_session_id, "bash")
+                    .expect("child permission should load"),
+                Some(true)
+            );
+            assert_eq!(
+                store
+                    .load_tool_permission(child_session_id, "read")
+                    .expect("child permission should load"),
+                Some(false)
+            );
         }
 
         let _ = std::fs::remove_file(path);

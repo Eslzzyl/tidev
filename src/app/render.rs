@@ -348,7 +348,24 @@ impl App {
         }
 
         if let Some(message) = self.last_notice.as_deref() {
+            let background_running = self.background_running_count();
+            let background_waiting = self.background_waiting_question_count();
+            if background_running > 0 || background_waiting > 0 {
+                return format!(
+                    "{} · bg:{} · waiting:{}",
+                    message, background_running, background_waiting
+                );
+            }
             return message.to_string();
+        }
+
+        let background_running = self.background_running_count();
+        let background_waiting = self.background_waiting_question_count();
+        if background_running > 0 || background_waiting > 0 {
+            return format!(
+                "Ready · bg:{} · waiting:{}",
+                background_running, background_waiting
+            );
         }
 
         if self.conversation.parent_session_id.is_some() {

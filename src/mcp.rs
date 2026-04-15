@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tokio::process::Command;
 
-use crate::config::mcp::McpServerConfig;
 use crate::config::PermissionConfig;
+use crate::config::mcp::McpServerConfig;
 use crate::prompts::SessionMode;
 use crate::session::{MessageAttachment, ToolCall, ToolExecutionResult};
 use crate::tooling::{ToolDefinition, ToolPermission};
@@ -247,7 +247,11 @@ impl McpManager {
             .collect()
     }
 
-    pub fn available_definitions(&self, mode: SessionMode, permission_config: &PermissionConfig) -> Vec<ToolDefinition> {
+    pub fn available_definitions(
+        &self,
+        mode: SessionMode,
+        permission_config: &PermissionConfig,
+    ) -> Vec<ToolDefinition> {
         let inner = self.inner.lock().unwrap();
         inner
             .servers
@@ -257,7 +261,9 @@ impl McpManager {
                 state
                     .tools
                     .iter()
-                    .filter(|definition| definition.permission.is_allowed_in(mode, permission_config))
+                    .filter(|definition| {
+                        definition.permission.is_allowed_in(mode, permission_config)
+                    })
                     .cloned()
                     .collect::<Vec<_>>()
             })
@@ -290,7 +296,12 @@ impl McpManager {
         call.name.clone()
     }
 
-    pub fn can_execute(&self, tool_name: &str, mode: SessionMode, permission_config: &PermissionConfig) -> bool {
+    pub fn can_execute(
+        &self,
+        tool_name: &str,
+        mode: SessionMode,
+        permission_config: &PermissionConfig,
+    ) -> bool {
         self.definition_for(tool_name)
             .is_some_and(|definition| definition.permission.is_allowed_in(mode, permission_config))
     }

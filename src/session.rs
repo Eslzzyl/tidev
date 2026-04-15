@@ -396,22 +396,27 @@ impl Conversation {
 #[derive(Clone, Debug)]
 pub enum BackendEvent {
     Delta {
+        session_id: Uuid,
         request_id: u64,
         content: String,
     },
     ReasoningDelta {
+        session_id: Uuid,
         request_id: u64,
         content: String,
     },
     Finished {
+        session_id: Uuid,
         request_id: u64,
         turn: AssistantTurn,
     },
     Failed {
+        session_id: Uuid,
         request_id: u64,
         error: String,
     },
     Retrying {
+        session_id: Uuid,
         request_id: u64,
         attempt: u32,
         max_attempts: u32,
@@ -419,11 +424,13 @@ pub enum BackendEvent {
         retry_after_secs: Option<u32>,
     },
     ToolCompleted {
+        session_id: Uuid,
         request_id: u64,
         tool_call: ToolCall,
         result: ToolExecutionResult,
     },
     SubagentStatus {
+        session_id: Uuid,
         request_id: u64,
         child_session_id: Uuid,
         status_text: String,
@@ -433,22 +440,50 @@ pub enum BackendEvent {
         reasoning_delta: Option<String>,
     },
     SubagentToolResult {
+        session_id: Uuid,
         request_id: u64,
         child_session_id: Uuid,
         message: Message,
     },
     SubagentCompleted {
+        session_id: Uuid,
         request_id: u64,
         tool_call: ToolCall,
         child_session_id: Uuid,
         result: ToolExecutionResult,
     },
     UsageStats {
+        session_id: Uuid,
         request_id: u64,
         input_tokens: u32,
         output_tokens: u32,
         total_tokens: u32,
     },
+    ContextCompacted {
+        session_id: Uuid,
+        compacted: bool,
+        summary: Option<String>,
+        retained_from: usize,
+        error: Option<String>,
+    },
+}
+
+impl BackendEvent {
+    pub fn session_id(&self) -> Uuid {
+        match self {
+            Self::Delta { session_id, .. }
+            | Self::ReasoningDelta { session_id, .. }
+            | Self::Finished { session_id, .. }
+            | Self::Failed { session_id, .. }
+            | Self::Retrying { session_id, .. }
+            | Self::ToolCompleted { session_id, .. }
+            | Self::SubagentStatus { session_id, .. }
+            | Self::SubagentToolResult { session_id, .. }
+            | Self::SubagentCompleted { session_id, .. }
+            | Self::UsageStats { session_id, .. }
+            | Self::ContextCompacted { session_id, .. } => *session_id,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -487,5 +522,17 @@ mod tests {
         );
         assert_eq!(conversation.visible_messages()[0].id, first_user.id);
         assert_eq!(conversation.visible_messages()[1].content, "first answer");
+    }
+
+    #[test]
+    fn backend_event_exposes_session_id() {
+        let session_id = Uuid::new_v4();
+        let event = BackendEvent::Failed {
+            session_id,
+            request_id: 7,
+            error: "boom".to_string(),
+        };
+
+        assert_eq!(event.session_id(), session_id);
     }
 }

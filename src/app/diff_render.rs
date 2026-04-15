@@ -1,4 +1,4 @@
-use crate::markdown_render::{adaptive_wrap_lines, highlight_code_to_lines_for_path, WrapOptions};
+use crate::markdown_render::{WrapOptions, adaptive_wrap_lines, highlight_code_to_lines_for_path};
 use crate::theme::{ThemeName, ThemePalette};
 use diffy::{Line as DiffLine, Patch};
 use ratatui::{
@@ -105,10 +105,7 @@ fn render_diff_section(
         return None;
     }
 
-    let syntax_path = patch
-        .modified()
-        .or_else(|| patch.original())
-        .map(Path::new);
+    let syntax_path = patch.modified().or_else(|| patch.original()).map(Path::new);
     let layout = if width >= WIDE_LAYOUT_THRESHOLD {
         DiffLayout::Wide
     } else {
@@ -222,7 +219,13 @@ fn render_wide_rows(
                     .as_ref()
                     .map(|cell| render_cell_lines(cell, right_width, syntax_path, palette))
                     .unwrap_or_else(|| vec![blank_cell_line(right_width, right_bg.flatten())]);
-                out.extend(merge_columns(left, right, separator.clone(), left_width, right_width));
+                out.extend(merge_columns(
+                    left,
+                    right,
+                    separator.clone(),
+                    left_width,
+                    right_width,
+                ));
             }
             RowKind::Removed => {
                 let left = row
@@ -231,7 +234,13 @@ fn render_wide_rows(
                     .map(|cell| render_cell_lines(cell, left_width, syntax_path, palette))
                     .unwrap_or_else(|| vec![blank_cell_line(left_width, left_bg.flatten())]);
                 let right = vec![blank_cell_line(right_width, right_bg.flatten())];
-                out.extend(merge_columns(left, right, separator.clone(), left_width, right_width));
+                out.extend(merge_columns(
+                    left,
+                    right,
+                    separator.clone(),
+                    left_width,
+                    right_width,
+                ));
             }
             RowKind::Added => {
                 let left = vec![blank_cell_line(left_width, left_bg.flatten())];
@@ -240,7 +249,13 @@ fn render_wide_rows(
                     .as_ref()
                     .map(|cell| render_cell_lines(cell, right_width, syntax_path, palette))
                     .unwrap_or_else(|| vec![blank_cell_line(right_width, right_bg.flatten())]);
-                out.extend(merge_columns(left, right, separator.clone(), left_width, right_width));
+                out.extend(merge_columns(
+                    left,
+                    right,
+                    separator.clone(),
+                    left_width,
+                    right_width,
+                ));
             }
             RowKind::Modified => {
                 let left = row
@@ -253,7 +268,13 @@ fn render_wide_rows(
                     .as_ref()
                     .map(|cell| render_cell_lines(cell, right_width, syntax_path, palette))
                     .unwrap_or_else(|| vec![blank_cell_line(right_width, right_bg.flatten())]);
-                out.extend(merge_columns(left, right, separator.clone(), left_width, right_width));
+                out.extend(merge_columns(
+                    left,
+                    right,
+                    separator.clone(),
+                    left_width,
+                    right_width,
+                ));
             }
         }
     }
@@ -395,7 +416,10 @@ fn cell_prefix(cell: DiffLineKind, palette: ThemePalette) -> Line<'static> {
         DiffLineKind::Insert => "+",
     };
 
-    Line::from(vec![Span::styled(marker, marker_style(cell, palette)), Span::styled(" ", Style::default())])
+    Line::from(vec![
+        Span::styled(marker, marker_style(cell, palette)),
+        Span::styled(" ", Style::default()),
+    ])
 }
 
 fn blank_prefix() -> Line<'static> {

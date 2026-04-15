@@ -189,7 +189,10 @@ impl App {
                 .load_tool_permission(self.conversation.session_id, &permission_key)?
             {
                 if remembered {
-                    crate::log_info!("process_pending_tool_execution: remembered permission allowed for {}", tool_call.name);
+                    crate::log_info!(
+                        "process_pending_tool_execution: remembered permission allowed for {}",
+                        tool_call.name
+                    );
                     if self.execute_pending_tool_call(tool_call, runtime)? {
                         return Ok(());
                     }
@@ -302,7 +305,11 @@ impl App {
         tool_call: ToolCall,
         runtime: &Runtime,
     ) -> Result<bool> {
-        crate::log_info!("execute_pending_tool_call: {} id={}", tool_call.name, tool_call.id);
+        crate::log_info!(
+            "execute_pending_tool_call: {} id={}",
+            tool_call.name,
+            tool_call.id
+        );
         if tool_call.name == "task" {
             if let Err(error) = self.start_subagent_task_execution(tool_call.clone(), runtime) {
                 crate::log_error!("start_subagent_task_execution failed: {}", error);
@@ -313,7 +320,9 @@ impl App {
                 self.advance_pending_tool_execution();
                 return Ok(false);
             }
-            crate::log_info!("execute_pending_tool_call: task started, advancing and returning false");
+            crate::log_info!(
+                "execute_pending_tool_call: task started, advancing and returning false"
+            );
             self.advance_pending_tool_execution();
             return Ok(false);
         }
@@ -476,6 +485,7 @@ impl App {
                 child_session_id
             );
             let _ = tx.send(crate::session::BackendEvent::SubagentCompleted {
+                session_id: parent_session_id,
                 request_id,
                 tool_call: task_call,
                 child_session_id,
@@ -493,6 +503,7 @@ impl App {
     }
 
     fn start_shell_tool_execution(&mut self, tool_call: ToolCall, runtime: &Runtime) -> Result<()> {
+        let session_id = self.conversation.session_id;
         let request_id = self.active_request_id;
         let cancel_requested = Arc::new(AtomicBool::new(false));
         self.running_tool_execution = Some(RunningToolExecution::new(
@@ -516,6 +527,7 @@ impl App {
             .unwrap_or_else(|error| format!("Tool failed: {error}"));
 
             let _ = tx.send(crate::session::BackendEvent::ToolCompleted {
+                session_id,
                 request_id,
                 tool_call,
                 result: ToolExecutionResult::new(output),

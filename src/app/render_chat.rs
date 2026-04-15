@@ -171,7 +171,8 @@ impl App {
 
         if self.conversation.parent_session_id.is_none() {
             for running_subagent in &self.running_subagent_executions {
-                let card_lines = self.render_running_subagent_lines(running_subagent, content_width);
+                let card_lines =
+                    self.render_running_subagent_lines(running_subagent, content_width);
                 if card_lines.is_empty() {
                     continue;
                 }

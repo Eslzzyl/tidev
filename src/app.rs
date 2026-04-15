@@ -137,6 +137,44 @@ enum Screen {
     Chat,
 }
 
+#[derive(Clone, Debug)]
+struct CachedSessionRuntime {
+    conversation: Conversation,
+    active_model: ActiveModel,
+    context_manager: ContextManager,
+    pending_tool_execution: Option<PendingToolExecution>,
+    permission_dialog: Option<PermissionDialogState>,
+    question_dialog: Option<QuestionDialogState>,
+    running_tool_execution: Option<RunningToolExecution>,
+    running_subagent_executions: Vec<RunningSubagentExecution>,
+    pending_request: bool,
+    active_request_id: u64,
+    abort_confirmation_deadline: Option<Instant>,
+    retrying_hint: Option<(u32, u32, String, Option<u32>)>,
+    message_scroll_offset: usize,
+    message_follow_tail: bool,
+    message_viewport_lines: usize,
+    message_total_lines: usize,
+    streaming_preview_lines: Vec<Line<'static>>,
+    context_usage: Option<(u32, u32, u32)>,
+}
+
+#[derive(Clone, Debug)]
+struct UiStateSnapshot {
+    screen: Screen,
+    connect_dialog: Option<ConnectDialog>,
+    theme_panel: Option<ThemePanelState>,
+    model_panel: Option<ModelPanelState>,
+    session_panel: Option<SessionPanelState>,
+    mcp_panel: Option<McpPanelState>,
+    at_mention: AtMentionState,
+    command_palette: CommandPaletteState,
+    leader_key_pending: bool,
+    composer: Composer,
+    draft_attachments: Vec<MessageAttachment>,
+    last_notice: Option<String>,
+}
+
 struct App {
     should_quit: bool,
     screen: Screen,
@@ -166,6 +204,8 @@ struct App {
     running_tool_execution: Option<RunningToolExecution>,
     running_subagent_executions: Vec<RunningSubagentExecution>,
     pending_assistant_turns: std::collections::HashSet<Uuid>,
+    cached_sessions: std::collections::HashMap<Uuid, CachedSessionRuntime>,
+    compacting_sessions: std::collections::HashSet<Uuid>,
     leader_key_pending: bool,
     composer: Composer,
     draft_attachments: Vec<MessageAttachment>,
@@ -262,6 +302,8 @@ impl App {
             running_tool_execution: None,
             running_subagent_executions: Vec::new(),
             pending_assistant_turns: std::collections::HashSet::new(),
+            cached_sessions: std::collections::HashMap::new(),
+            compacting_sessions: std::collections::HashSet::new(),
             leader_key_pending: false,
             composer,
             draft_attachments: Vec::new(),
@@ -312,6 +354,268 @@ impl App {
 
         terminal.show_cursor().ok();
         Ok(())
+    }
+
+    fn cache_active_session_runtime(&mut self) {
+        let session_id = self.conversation.session_id;
+        let cached = CachedSessionRuntime {
+            conversation: self.conversation.clone(),
+            active_model: self.active_model.clone(),
+            context_manager: self.context_manager.clone(),
+            pending_tool_execution: self.pending_tool_execution.clone(),
+            permission_dialog: self.permission_dialog.clone(),
+            question_dialog: self.question_dialog.clone(),
+            running_tool_execution: self.running_tool_execution.clone(),
+            running_subagent_executions: self.running_subagent_executions.clone(),
+            pending_request: self.pending_request,
+            active_request_id: self.active_request_id,
+            abort_confirmation_deadline: self.abort_confirmation_deadline,
+            retrying_hint: self.retrying_hint.clone(),
+            message_scroll_offset: self.message_scroll_offset,
+            message_follow_tail: self.message_follow_tail,
+            message_viewport_lines: self.message_viewport_lines,
+            message_total_lines: self.message_total_lines,
+            streaming_preview_lines: self.streaming_preview_lines.clone(),
+            context_usage: self.context_usage,
+        };
+
+        self.cached_sessions.insert(session_id, cached);
+    }
+
+    fn capture_ui_snapshot(&self) -> UiStateSnapshot {
+        UiStateSnapshot {
+            screen: self.screen,
+            connect_dialog: self.connect_dialog.clone(),
+            theme_panel: self.theme_panel.clone(),
+            model_panel: self.model_panel.clone(),
+            session_panel: self.session_panel.clone(),
+            mcp_panel: self.mcp_panel.clone(),
+            at_mention: self.at_mention.clone(),
+            command_palette: self.command_palette.clone(),
+            leader_key_pending: self.leader_key_pending,
+            composer: self.composer.clone(),
+            draft_attachments: self.draft_attachments.clone(),
+            last_notice: self.last_notice.clone(),
+        }
+    }
+
+    fn restore_ui_snapshot(&mut self, snapshot: UiStateSnapshot) {
+        self.screen = snapshot.screen;
+        self.connect_dialog = snapshot.connect_dialog;
+        self.theme_panel = snapshot.theme_panel;
+        self.model_panel = snapshot.model_panel;
+        self.session_panel = snapshot.session_panel;
+        self.mcp_panel = snapshot.mcp_panel;
+        self.at_mention = snapshot.at_mention;
+        self.command_palette = snapshot.command_palette;
+        self.leader_key_pending = snapshot.leader_key_pending;
+        self.composer = snapshot.composer;
+        self.draft_attachments = snapshot.draft_attachments;
+        self.last_notice = snapshot.last_notice;
+    }
+
+    fn with_temporary_session_context<F>(&mut self, session_id: Uuid, operation: F) -> Result<()>
+    where
+        F: FnOnce(&mut Self) -> Result<()>,
+    {
+        if self.conversation.session_id == session_id {
+            return operation(self);
+        }
+
+        let original_session_id = self.conversation.session_id;
+        let ui_snapshot = self.capture_ui_snapshot();
+        self.cache_active_session_runtime();
+
+        let Some(target_runtime) = self.cached_sessions.remove(&session_id) else {
+            if let Some(original_runtime) = self.cached_sessions.remove(&original_session_id) {
+                self.restore_cached_session_runtime(original_runtime);
+            }
+            self.restore_ui_snapshot(ui_snapshot);
+            return Ok(());
+        };
+
+        self.restore_cached_session_runtime(target_runtime);
+        let result = operation(self);
+        self.cache_active_session_runtime();
+
+        if let Some(original_runtime) = self.cached_sessions.remove(&original_session_id) {
+            self.restore_cached_session_runtime(original_runtime);
+        }
+        self.restore_ui_snapshot(ui_snapshot);
+
+        result
+    }
+
+    fn restore_cached_session_runtime(&mut self, cached: CachedSessionRuntime) {
+        self.conversation = cached.conversation;
+        self.active_model = cached.active_model;
+        self.context_manager = cached.context_manager;
+        self.pending_tool_execution = cached.pending_tool_execution;
+        self.permission_dialog = cached.permission_dialog;
+        self.question_dialog = cached.question_dialog;
+        self.running_tool_execution = cached.running_tool_execution;
+        self.running_subagent_executions = cached.running_subagent_executions;
+        self.pending_request = cached.pending_request;
+        self.active_request_id = cached.active_request_id;
+        self.abort_confirmation_deadline = cached.abort_confirmation_deadline;
+        self.retrying_hint = cached.retrying_hint;
+        self.message_scroll_offset = cached.message_scroll_offset;
+        self.message_follow_tail = cached.message_follow_tail;
+        self.message_viewport_lines = cached.message_viewport_lines;
+        self.message_total_lines = cached.message_total_lines;
+        self.streaming_preview_lines = cached.streaming_preview_lines;
+        self.context_usage = cached.context_usage;
+        self.streaming_markdown = None;
+    }
+
+    fn reset_active_runtime(&mut self) {
+        self.context_manager = ContextManager::new();
+        self.pending_tool_execution = None;
+        self.permission_dialog = None;
+        self.question_dialog = None;
+        self.running_tool_execution = None;
+        self.running_subagent_executions.clear();
+        self.pending_request = false;
+        self.abort_confirmation_deadline = None;
+        self.retrying_hint = None;
+        self.streaming_markdown = None;
+        self.streaming_preview_lines.clear();
+        self.context_usage = None;
+        self.scroll_messages_to_bottom();
+    }
+
+    fn restore_or_load_session(
+        &mut self,
+        session_id: Uuid,
+        fallback_model: &ActiveModel,
+    ) -> Result<()> {
+        if let Some(cached) = self.cached_sessions.remove(&session_id) {
+            self.restore_cached_session_runtime(cached);
+            return Ok(());
+        }
+
+        let Some(conversation) = self.store.load_conversation(session_id)? else {
+            anyhow::bail!("session not found");
+        };
+
+        let active_model =
+            Self::resolve_conversation_model(&self.config, &self.auth, &conversation)
+                .unwrap_or_else(|_| fallback_model.clone());
+
+        self.conversation = conversation;
+        self.active_model = active_model;
+        self.reset_active_runtime();
+
+        if !self.conversation.visible_messages().is_empty() {
+            let total_tokens: u32 = self
+                .conversation
+                .messages
+                .iter()
+                .filter_map(|message| message.total_tokens)
+                .sum();
+            if total_tokens > 0 {
+                self.context_usage = Some((0, 0, total_tokens));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn schedule_context_compaction_for_session(&mut self, session_id: Uuid, runtime: &Runtime) {
+        if self.compacting_sessions.contains(&session_id) {
+            return;
+        }
+
+        let Some((conversation, mut context_manager, model)) =
+            (if self.conversation.session_id == session_id {
+                Some((
+                    self.conversation.clone(),
+                    self.context_manager.clone(),
+                    self.active_model.clone(),
+                ))
+            } else {
+                self.cached_sessions.get(&session_id).map(|cached| {
+                    (
+                        cached.conversation.clone(),
+                        cached.context_manager.clone(),
+                        cached.active_model.clone(),
+                    )
+                })
+            })
+        else {
+            return;
+        };
+
+        self.compacting_sessions.insert(session_id);
+        let llm = self.llm.clone();
+        let tx = self.backend_tx.clone();
+
+        runtime.spawn(async move {
+            let result = context_manager
+                .compact_if_needed(&llm, &model, &conversation)
+                .await;
+
+            let (compacted, summary, retained_from, error) = match result {
+                Ok(compacted) => (
+                    compacted,
+                    context_manager.summary,
+                    context_manager.retained_from,
+                    None,
+                ),
+                Err(error) => (false, None, 0, Some(error.to_string())),
+            };
+
+            let _ = tx.send(BackendEvent::ContextCompacted {
+                session_id,
+                compacted,
+                summary,
+                retained_from,
+                error,
+            });
+        });
+    }
+
+    fn apply_context_compaction(
+        &mut self,
+        session_id: Uuid,
+        compacted: bool,
+        summary: Option<String>,
+        retained_from: usize,
+        error: Option<String>,
+    ) {
+        self.compacting_sessions.remove(&session_id);
+
+        if self.conversation.session_id == session_id {
+            if compacted {
+                self.context_manager.summary = summary;
+                self.context_manager.retained_from = retained_from;
+                self.last_notice = Some("Context compacted".to_string());
+            } else if let Some(error) = error {
+                self.last_notice = Some(error);
+            }
+            return;
+        }
+
+        if let Some(cached) = self.cached_sessions.get_mut(&session_id) {
+            if compacted {
+                cached.context_manager.summary = summary;
+                cached.context_manager.retained_from = retained_from;
+            }
+        }
+    }
+
+    fn background_running_count(&self) -> usize {
+        self.cached_sessions
+            .values()
+            .filter(|cached| cached.pending_request)
+            .count()
+    }
+
+    fn background_waiting_question_count(&self) -> usize {
+        self.cached_sessions
+            .values()
+            .filter(|cached| cached.question_dialog.is_some())
+            .count()
     }
 
     fn handle_event(&mut self, event: Event, runtime: &Runtime) -> Result<()> {
@@ -903,7 +1207,9 @@ impl App {
                 | CommandAction::Theme
                 | CommandAction::Quit
                 | CommandAction::Undo
-                | CommandAction::Redo => {}
+                | CommandAction::Redo
+                | CommandAction::Session
+                | CommandAction::Clear => {}
                 _ => {
                     self.last_notice = Some(
                         "A response is still streaming. Wait for it to finish before changing sessions.".to_string(),
@@ -1074,6 +1380,8 @@ impl App {
     }
 
     fn start_new_session(&mut self) -> Result<()> {
+        self.cache_active_session_runtime();
+
         let session_id = Uuid::new_v4();
         let conversation = Conversation::new(
             session_id,
@@ -1096,17 +1404,8 @@ impl App {
         )?;
 
         self.conversation = conversation;
-        self.context_manager = ContextManager::new();
-        self.pending_request = false;
-        self.pending_tool_execution = None;
-        self.permission_dialog = None;
-        self.question_dialog = None;
-        self.running_tool_execution = None;
-        self.cancel_running_subagents();
-        self.abort_confirmation_deadline = None;
-        self.active_request_id = self.active_request_id.wrapping_add(1);
-        self.streaming_markdown = None;
-        self.streaming_preview_lines.clear();
+        self.reset_active_runtime();
+        self.active_request_id = 0;
         self.screen = Screen::Welcome;
         self.connect_dialog = None;
         self.theme_panel = None;
@@ -1137,23 +1436,29 @@ impl App {
         }
 
         if self.screen == Screen::Welcome {
-            let session_id = Uuid::new_v4();
-            self.conversation.session_id = session_id;
-            self.store.create_session(
-                session_id,
-                self.workspace_root.as_path(),
-                &self.active_model.provider_id,
-                &self.active_model.provider_display_name,
-                &self.active_model.model_id,
-                &self.active_model.display_name,
-                "Untitled session",
-            )?;
+            let session_exists = self
+                .store
+                .load_session_record(self.conversation.session_id)?
+                .is_some();
+
+            if !session_exists {
+                let session_id = Uuid::new_v4();
+                self.conversation.session_id = session_id;
+                self.store.create_session(
+                    session_id,
+                    self.workspace_root.as_path(),
+                    &self.active_model.provider_id,
+                    &self.active_model.provider_display_name,
+                    &self.active_model.model_id,
+                    &self.active_model.display_name,
+                    "Untitled session",
+                )?;
+            }
             self.context_manager = ContextManager::new();
             self.pending_tool_execution = None;
             self.permission_dialog = None;
             self.question_dialog = None;
             self.running_tool_execution = None;
-            self.cancel_running_subagents();
             self.abort_confirmation_deadline = None;
             self.active_request_id = self.active_request_id.wrapping_add(1);
             self.streaming_markdown = None;
@@ -1196,26 +1501,7 @@ impl App {
 
         self.scroll_messages_to_bottom();
 
-        let compacted = {
-            let llm = self.llm.clone();
-            let active_model = self.active_model.clone();
-            let conversation = self.conversation.clone();
-            runtime.block_on(self.context_manager.compact_if_needed(
-                &llm,
-                &active_model,
-                &conversation,
-            ))
-        };
-
-        match compacted {
-            Ok(true) => {
-                self.last_notice = Some("Context compacted".to_string());
-            }
-            Ok(false) => {}
-            Err(error) => {
-                self.last_notice = Some(error.to_string());
-            }
-        }
+        self.schedule_context_compaction_for_session(self.conversation.session_id, runtime);
 
         self.start_assistant_turn(runtime)
     }
@@ -1350,9 +1636,10 @@ impl App {
         let messages = self.conversation.visible_messages().to_vec();
         let tools = self.tools.available_definitions(self.mode);
         let tx = self.backend_tx.clone();
+        let session_id = self.conversation.session_id;
 
         runtime.spawn(async move {
-            llm.stream_chat(request_id, model, messages, tools, tx)
+            llm.stream_chat(session_id, request_id, model, messages, tools, tx)
                 .await;
         });
 
@@ -1457,6 +1744,21 @@ impl App {
     }
 
     fn handle_backend_event(&mut self, event: BackendEvent, runtime: &Runtime) -> Result<()> {
+        let session_id = event.session_id();
+        if session_id != self.conversation.session_id {
+            return self.with_temporary_session_context(session_id, |app| {
+                app.handle_backend_event_for_active(event, runtime)
+            });
+        }
+
+        self.handle_backend_event_for_active(event, runtime)
+    }
+
+    fn handle_backend_event_for_active(
+        &mut self,
+        event: BackendEvent,
+        runtime: &Runtime,
+    ) -> Result<()> {
         let event_type = match &event {
             BackendEvent::Delta { .. } => "Delta",
             BackendEvent::ReasoningDelta { .. } => "ReasoningDelta",
@@ -1470,19 +1772,29 @@ impl App {
                 "Failed"
             }
             BackendEvent::ToolCompleted { request_id, .. } => {
-                crate::log_info!("handle_backend_event: ToolCompleted request_id={}", request_id);
+                crate::log_info!(
+                    "handle_backend_event: ToolCompleted request_id={}",
+                    request_id
+                );
                 "ToolCompleted"
             }
             BackendEvent::SubagentStatus { .. } => "SubagentStatus",
             BackendEvent::SubagentToolResult { .. } => "SubagentToolResult",
             BackendEvent::SubagentCompleted { .. } => "SubagentCompleted",
             BackendEvent::UsageStats { .. } => "UsageStats",
+            BackendEvent::ContextCompacted { .. } => "ContextCompacted",
         };
-        if event_type != "Delta" && event_type != "ReasoningDelta" && event_type != "UsageStats" && event_type != "SubagentStatus" && event_type != "SubagentToolResult" {
+        if event_type != "Delta"
+            && event_type != "ReasoningDelta"
+            && event_type != "UsageStats"
+            && event_type != "SubagentStatus"
+            && event_type != "SubagentToolResult"
+        {
             crate::log_debug!("handle_backend_event: {}", event_type);
         }
         match event {
             BackendEvent::Delta {
+                session_id: _,
                 request_id,
                 content,
             } => {
@@ -1503,6 +1815,7 @@ impl App {
                 }
             }
             BackendEvent::ReasoningDelta {
+                session_id: _,
                 request_id,
                 content,
             } => {
@@ -1517,7 +1830,11 @@ impl App {
                     message.reasoning.push_str(&content);
                 }
             }
-            BackendEvent::Finished { request_id, turn } => {
+            BackendEvent::Finished {
+                session_id: _,
+                request_id,
+                turn,
+            } => {
                 if !self.is_active_request(request_id) {
                     return Ok(());
                 }
@@ -1525,6 +1842,7 @@ impl App {
                 self.finish_assistant_turn(turn, runtime)?;
             }
             BackendEvent::Retrying {
+                session_id: _,
                 request_id,
                 attempt,
                 max_attempts,
@@ -1537,7 +1855,11 @@ impl App {
 
                 self.retrying_hint = Some((attempt, max_attempts, reason, retry_after_secs));
             }
-            BackendEvent::Failed { request_id, error } => {
+            BackendEvent::Failed {
+                session_id: _,
+                request_id,
+                error,
+            } => {
                 if !self.is_active_request(request_id) {
                     return Ok(());
                 }
@@ -1574,6 +1896,7 @@ impl App {
                 self.last_notice = Some(error);
             }
             BackendEvent::ToolCompleted {
+                session_id: _,
                 request_id,
                 tool_call,
                 result,
@@ -1596,6 +1919,7 @@ impl App {
                 self.process_pending_tool_execution(runtime)?;
             }
             BackendEvent::SubagentStatus {
+                session_id: _,
                 request_id,
                 child_session_id,
                 status_text,
@@ -1653,8 +1977,10 @@ impl App {
                                         .unwrap_or(message.content.as_str());
                                     if !tail.is_empty() {
                                         use ratatui::text::Line;
-                                        self.streaming_preview_lines
-                                            .push(Line::styled(tail.to_string(), ratatui::style::Style::default()));
+                                        self.streaming_preview_lines.push(Line::styled(
+                                            tail.to_string(),
+                                            ratatui::style::Style::default(),
+                                        ));
                                     }
                                 }
                             }
@@ -1666,6 +1992,7 @@ impl App {
                 }
             }
             BackendEvent::SubagentToolResult {
+                session_id: _,
                 request_id,
                 child_session_id,
                 message,
@@ -1677,8 +2004,7 @@ impl App {
                 if self.conversation.session_id == child_session_id {
                     let tool_call_id = message.tool_call_id.clone();
                     let already_exists = self.conversation.messages.iter().any(|m| {
-                        matches!(m.role, MessageRole::Tool)
-                            && m.tool_call_id == tool_call_id
+                        matches!(m.role, MessageRole::Tool) && m.tool_call_id == tool_call_id
                     });
 
                     if !already_exists {
@@ -1687,6 +2013,7 @@ impl App {
                 }
             }
             BackendEvent::SubagentCompleted {
+                session_id: _,
                 request_id,
                 tool_call,
                 child_session_id,
@@ -1708,14 +2035,14 @@ impl App {
                     return Ok(());
                 }
 
-                let execution_index = self
-                    .running_subagent_executions
-                    .iter()
-                    .position(|execution| {
-                        execution.request_id == request_id
-                            && execution.child_session_id == child_session_id
-                            && execution.tool_call.id == tool_call.id
-                    });
+                let execution_index =
+                    self.running_subagent_executions
+                        .iter()
+                        .position(|execution| {
+                            execution.request_id == request_id
+                                && execution.child_session_id == child_session_id
+                                && execution.tool_call.id == tool_call.id
+                        });
 
                 let Some(index) = execution_index else {
                     crate::log_warn!(
@@ -1779,6 +2106,7 @@ impl App {
                 }
             }
             BackendEvent::UsageStats {
+                session_id: _,
                 request_id,
                 input_tokens,
                 output_tokens,
@@ -1789,6 +2117,15 @@ impl App {
                 }
 
                 self.context_usage = Some((input_tokens, output_tokens, total_tokens));
+            }
+            BackendEvent::ContextCompacted {
+                session_id,
+                compacted,
+                summary,
+                retained_from,
+                error,
+            } => {
+                self.apply_context_compaction(session_id, compacted, summary, retained_from, error);
             }
         }
 
@@ -1835,7 +2172,10 @@ impl App {
 
         if !turn.tool_calls.is_empty() {
             let tool_names: Vec<_> = turn.tool_calls.iter().map(|tc| tc.name.as_str()).collect();
-            crate::log_info!("finish_assistant_turn: calling begin_tool_execution for {:?}", tool_names);
+            crate::log_info!(
+                "finish_assistant_turn: calling begin_tool_execution for {:?}",
+                tool_names
+            );
             self.last_notice = Some(format!("Running {} tool call(s)...", turn.tool_calls.len()));
 
             self.begin_tool_execution(turn.tool_calls, runtime)?;
@@ -1848,6 +2188,7 @@ impl App {
             Some(reason) if reason != "stop" => format!("Response finished ({reason})"),
             _ => "Response complete".to_string(),
         });
+        self.schedule_context_compaction_for_session(self.conversation.session_id, runtime);
 
         Ok(())
     }

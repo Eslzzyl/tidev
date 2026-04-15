@@ -7,6 +7,7 @@ mod think_parser;
 use anyhow::{Context, Result};
 use reqwest::Client;
 use tokio::sync::mpsc::UnboundedSender;
+use uuid::Uuid;
 
 use crate::{
     config::{ActiveModel, ApiType},
@@ -33,6 +34,7 @@ impl LlmClient {
 
     pub async fn stream_chat(
         &self,
+        session_id: Uuid,
         request_id: u64,
         model: ActiveModel,
         messages: Vec<Message>,
@@ -40,11 +42,12 @@ impl LlmClient {
         tx: UnboundedSender<BackendEvent>,
     ) {
         let result = self
-            .stream_chat_with_retry(request_id, model, messages, tools, tx.clone())
+            .stream_chat_with_retry(session_id, request_id, model, messages, tools, tx.clone())
             .await;
 
         if let Err(error) = result {
             let _ = tx.send(BackendEvent::Failed {
+                session_id,
                 request_id,
                 error: error.to_string(),
             });
@@ -64,6 +67,7 @@ impl LlmClient {
     /// Internal: stream chat with retry logic for retryable errors.
     async fn stream_chat_with_retry(
         &self,
+        session_id: Uuid,
         request_id: u64,
         model: ActiveModel,
         messages: Vec<Message>,
@@ -73,6 +77,7 @@ impl LlmClient {
         for attempt in 1..=MAX_RETRIES {
             let result = self
                 .stream_chat_inner(
+                    session_id,
                     request_id,
                     model.clone(),
                     messages.clone(),
@@ -95,6 +100,7 @@ impl LlmClient {
                     let delay_secs = backoff_delay(attempt).as_secs() as u32;
 
                     let _ = tx.send(BackendEvent::Retrying {
+                        session_id,
                         request_id,
                         attempt,
                         max_attempts: MAX_RETRIES,
@@ -156,6 +162,7 @@ impl LlmClient {
 
     async fn stream_chat_inner(
         &self,
+        session_id: Uuid,
         request_id: u64,
         model: ActiveModel,
         messages: Vec<Message>,
@@ -164,11 +171,16 @@ impl LlmClient {
     ) -> Result<()> {
         match model.api_type {
             ApiType::Anthropic => {
-                anthropic::stream_anthropic(&self.http, request_id, model, messages, tools, tx)
-                    .await
+                anthropic::stream_anthropic(
+                    &self.http, session_id, request_id, model, messages, tools, tx,
+                )
+                .await
             }
             ApiType::OpenAi => {
-                openai::stream_openai(&self.http, request_id, model, messages, tools, tx).await
+                openai::stream_openai(
+                    &self.http, session_id, request_id, model, messages, tools, tx,
+                )
+                .await
             }
         }
     }

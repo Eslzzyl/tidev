@@ -1091,6 +1091,8 @@ pub(super) fn execute_tool_call(
                 &child_title,
             )?;
 
+            store.copy_tool_permissions(parent_session.session_id, child_session_id)?;
+
             let bootstrap_message = Message::new(
                 MessageRole::System,
                 format!(

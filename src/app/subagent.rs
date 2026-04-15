@@ -71,6 +71,8 @@ fn prepare_child_session(context: &SubagentTaskContext) -> Result<()> {
         &child_title,
     )?;
 
+    store.copy_tool_permissions(context.parent_session_id, context.child_session_id)?;
+
     let bootstrap_message = Message::new(
         MessageRole::System,
         format!(
@@ -113,9 +115,17 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
         let llm = context.llm.clone();
         let model = context.model.clone();
         let stream_request_id = request_sequence;
+        let stream_session_id = context.child_session_id;
         let stream_handle = tokio::spawn(async move {
-            llm.stream_chat(stream_request_id, model, messages, tools, stream_tx)
-                .await;
+            llm.stream_chat(
+                stream_session_id,
+                stream_request_id,
+                model,
+                messages,
+                tools,
+                stream_tx,
+            )
+            .await;
         });
 
         let mut turn = AssistantTurn::default();
@@ -199,6 +209,7 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
                     ..
                 } => {
                     let _ = context.tx.send(BackendEvent::UsageStats {
+                        session_id: context.parent_session_id,
                         request_id: context.parent_request_id,
                         input_tokens,
                         output_tokens,
@@ -209,6 +220,7 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
                 BackendEvent::SubagentStatus { .. } => {}
                 BackendEvent::SubagentToolResult { .. } => {}
                 BackendEvent::SubagentCompleted { .. } => {}
+                BackendEvent::ContextCompacted { .. } => {}
             }
         }
 
@@ -232,7 +244,14 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
         update_child_message(context, &assistant_message)?;
 
         if turn.tool_calls.is_empty() {
-            send_status(context, "Completed", None, Some(&assistant_message), None, None);
+            send_status(
+                context,
+                "Completed",
+                None,
+                Some(&assistant_message),
+                None,
+                None,
+            );
             break turn.content;
         }
 
@@ -256,7 +275,14 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
                 .unwrap_or_else(|error| ToolExecutionResult::new(format!("Tool failed: {error}")));
 
             record_tool_result(context, &tool_call, &result)?;
-            send_status(context, "Thinking...", None, Some(&assistant_message), None, None);
+            send_status(
+                context,
+                "Thinking...",
+                None,
+                Some(&assistant_message),
+                None,
+                None,
+            );
         }
     };
 
@@ -365,6 +391,7 @@ fn record_tool_result(
     store.append_message(context.child_session_id, &message)?;
 
     let _ = context.tx.send(BackendEvent::SubagentToolResult {
+        session_id: context.parent_session_id,
         request_id: context.parent_request_id,
         child_session_id: context.child_session_id,
         message: message.clone(),
@@ -382,6 +409,7 @@ fn send_status(
     reasoning_delta: Option<String>,
 ) {
     let _ = context.tx.send(BackendEvent::SubagentStatus {
+        session_id: context.parent_session_id,
         request_id: context.parent_request_id,
         child_session_id: context.child_session_id,
         status_text: status_text.into(),

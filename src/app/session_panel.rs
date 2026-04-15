@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::path::Path;
 use uuid::Uuid;
 
-use crate::{context::ContextManager, storage::SessionRecord};
+use crate::storage::SessionRecord;
 
 use super::App;
 
@@ -535,63 +535,14 @@ impl App {
             return Ok(());
         }
 
-        let Some(conversation) = self.store.load_conversation(session_id)? else {
-            self.last_notice = Some("Session not found".to_string());
-            return Ok(());
-        };
-
         let fallback_model = Self::resolve_fallback_model(&self.config, &self.auth)?;
-        let active_model =
-            Self::resolve_conversation_model(&self.config, &self.auth, &conversation)
-                .unwrap_or_else(|_| fallback_model.clone());
+        self.cache_active_session_runtime();
 
-        let current_session_id = self.conversation.session_id;
-        let target_parent_id = conversation.parent_session_id;
-        let is_parent_or_child = target_parent_id == Some(current_session_id)
-            || self.conversation.parent_session_id == Some(session_id);
-
-        let is_child_session_running = self
-            .running_subagent_executions
-            .iter()
-            .any(|execution| execution.child_session_id == session_id);
-
-        let is_parent_session_running = self
-            .running_subagent_executions
-            .iter()
-            .any(|execution| execution.parent_session_id == session_id);
-
-        self.pending_request = false;
-        self.pending_tool_execution = None;
-        self.permission_dialog = None;
-        self.running_tool_execution = None;
-        self.streaming_markdown = None;
-        self.streaming_preview_lines.clear();
-
-        if !is_parent_or_child {
-            self.cancel_running_subagents();
-            self.abort_confirmation_deadline = None;
-            self.active_request_id = self.active_request_id.wrapping_add(1);
-            self.context_manager = ContextManager::new();
+        if let Err(error) = self.restore_or_load_session(session_id, &fallback_model) {
+            self.last_notice = Some(error.to_string());
+            return Ok(());
         }
 
-        self.conversation = conversation;
-        self.active_model = active_model;
-
-        if is_child_session_running || is_parent_session_running {
-            self.pending_request = true;
-        }
-
-        if !self.conversation.visible_messages().is_empty() {
-            let total_tokens: u32 = self
-                .conversation
-                .messages
-                .iter()
-                .filter_map(|m| m.total_tokens)
-                .sum();
-            if total_tokens > 0 {
-                self.context_usage = Some((0, 0, total_tokens));
-            }
-        }
         self.screen = if self.conversation.visible_messages().is_empty() {
             super::Screen::Welcome
         } else {
@@ -604,16 +555,23 @@ impl App {
         self.mcp_panel = None;
         self.command_palette.clear();
         self.composer.clear();
-        self.composer
-            .set_placeholder("Ask TiDev about your code, task, or question...");
-        self.scroll_messages_to_bottom();
+
+        if let Some(dialog) = self.question_dialog.as_ref() {
+            self.composer.set_text(dialog.current_answer_text());
+            self.composer.set_placeholder(dialog.answer_placeholder());
+        } else {
+            self.composer
+                .set_placeholder("Ask TiDev about your code, task, or question...");
+        }
 
         if self.pending_assistant_turns.remove(&session_id) {
             crate::log_info!(
                 "switch_session: session {} has pending assistant turn, starting now",
                 session_id
             );
-            self.start_assistant_turn(runtime)?;
+            if !self.pending_request {
+                self.start_assistant_turn(runtime)?;
+            }
         }
 
         Ok(())

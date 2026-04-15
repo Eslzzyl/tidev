@@ -8,7 +8,7 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::prompts::{default_system_prompt, SessionMode};
+use crate::prompts::{SessionMode, default_system_prompt};
 use crate::theme::ThemeName;
 use crate::tooling::ToolPermission;
 

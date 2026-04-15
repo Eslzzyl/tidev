@@ -200,7 +200,11 @@ mod tests {
 
         let suggestions = search_entries(&workspace, "match");
 
-        assert!(suggestions.iter().any(|suggestion| suggestion.path == "match-root.txt"));
+        assert!(
+            suggestions
+                .iter()
+                .any(|suggestion| suggestion.path == "match-root.txt")
+        );
         assert!(suggestions.len() <= 12);
     }
 
@@ -211,6 +215,10 @@ mod tests {
 
         let suggestions = search_entries(&workspace, "");
 
-        assert!(suggestions.iter().all(|suggestion| !suggestion.path.is_empty()));
+        assert!(
+            suggestions
+                .iter()
+                .all(|suggestion| !suggestion.path.is_empty())
+        );
     }
 }
