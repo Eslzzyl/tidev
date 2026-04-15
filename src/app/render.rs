@@ -57,15 +57,12 @@ impl App {
             .ui
             .welcome_width
             .min(area.width.saturating_sub(4).max(32));
-        let card_height = 13u16.min(area.height.saturating_sub(2).max(10));
+        let card_height = 20u16.min(area.height.saturating_sub(2).max(10));
         let card = centered_rect(card_width, card_height, area);
 
         let card_inner_width = card.width.saturating_sub(4);
 
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()))
-            .title("TiDev");
+        let block = Block::default().borders(Borders::NONE);
         frame.render_widget(block, card);
 
         let inner = card.inner(Margin {
@@ -74,7 +71,7 @@ impl App {
         });
 
         let sections = Layout::vertical([
-            Constraint::Length(2),
+            Constraint::Length(8),
             Constraint::Length(1),
             Constraint::Length(
                 self.composer
@@ -84,12 +81,23 @@ impl App {
         ])
         .split(inner);
 
-        let title = Paragraph::new("TiDev").alignment(Alignment::Center).style(
+        // https://patorjk.com/software/taag/#p=display&f=BlurVision+ASCII&t=tidev&x=none&v=4&h=4&w=80&we=false
+        let ascii_art = Paragraph::new(
+            r#"░▒▓████████▓▒░▒▓█▓▒░▒▓███████▓▒░░▒▓████████▓▒░▒▓█▓▒░░▒▓█▓▒░ 
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░ 
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░       ░▒▓█▓▒▒▓█▓▒░  
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓██████▓▒░  ░▒▓█▓▒▒▓█▓▒░  
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░        ░▒▓█▓▓█▓▒░   
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░        ░▒▓█▓▓█▓▒░   
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓███████▓▒░░▒▓████████▓▒░  ░▒▓██▓▒░    "#,
+        )
+        .alignment(Alignment::Center)
+        .style(
             Style::default()
                 .fg(palette.accent)
                 .add_modifier(Modifier::BOLD),
         );
-        frame.render_widget(title, sections[0]);
+        frame.render_widget(ascii_art, sections[0]);
 
         let subtitle = Paragraph::new("Terminal AI assistant for focused coding work")
             .alignment(Alignment::Center)
