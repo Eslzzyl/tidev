@@ -39,18 +39,22 @@ pub(super) async fn stream_openai(
         .await;
 
     let response = match send_result {
-        Ok(resp) => match resp.error_for_status() {
-            Ok(r) => r,
-            Err(e) => {
+        Ok(resp) => {
+            let status = resp.status();
+            if status.is_success() {
+                resp
+            } else {
+                let error_body = resp.text().await.unwrap_or_default();
                 log_error!(
-                    "openai request failed: method=POST url={} request_body_size={} error={}",
+                    "openai request failed: method=POST url={} request_body_size={} status={} error_body={}",
                     model.endpoint(),
                     request_body_size,
-                    e
+                    status,
+                    error_body
                 );
-                return Err(e.into());
+                return Err(anyhow::anyhow!("HTTP error {}: {}", status, error_body));
             }
-        },
+        }
         Err(e) => {
             log_error!(
                 "openai request failed: method=POST url={} request_body_size={} error={}",
@@ -217,18 +221,22 @@ pub(super) async fn complete_openai(
         .await;
 
     let response = match send_result {
-        Ok(resp) => match resp.error_for_status() {
-            Ok(r) => r,
-            Err(e) => {
+        Ok(resp) => {
+            let status = resp.status();
+            if status.is_success() {
+                resp
+            } else {
+                let error_body = resp.text().await.unwrap_or_default();
                 log_error!(
-                    "openai request (complete) failed: method=POST url={} request_body_size={} error={}",
+                    "openai request (complete) failed: method=POST url={} request_body_size={} status={} error_body={}",
                     model.endpoint(),
                     request_body_size,
-                    e
+                    status,
+                    error_body
                 );
-                return Err(e.into());
+                return Err(anyhow::anyhow!("HTTP error {}: {}", status, error_body));
             }
-        },
+        }
         Err(e) => {
             log_error!(
                 "openai request (complete) failed: method=POST url={} request_body_size={} error={}",
