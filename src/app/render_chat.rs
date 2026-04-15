@@ -437,7 +437,11 @@ impl App {
         cards
     }
 
-    fn cached_render_tool_result_lines(&self, message: &Message, body_width: usize) -> Vec<Line<'static>> {
+    fn cached_render_tool_result_lines(
+        &self,
+        message: &Message,
+        body_width: usize,
+    ) -> Vec<Line<'static>> {
         let key = MessageRenderCacheKey {
             session_id: self.conversation.session_id,
             message_id: message.id,
@@ -1092,6 +1096,7 @@ fn message_render_fingerprint(message: &Message) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::render_reasoning_markdown_lines;
+    use crate::session::{Message, MessageRole};
     use crate::theme::ThemePalette;
     use ratatui::style::Style;
     use ratatui::text::Line;
@@ -1154,6 +1159,50 @@ mod tests {
                 .iter()
                 .any(|line| line_text(line).contains("Listed 2 items"))
         );
+    }
+
+    #[test]
+    fn message_render_cache_hits_on_second_render_same_width() {
+        let mut app = super::App::new().unwrap();
+        app.conversation
+            .push(Message::new(MessageRole::User, "show file list"));
+        app.conversation.push(Message::new(
+            MessageRole::Assistant,
+            "Summary with **markdown** and `inline code`.",
+        ));
+
+        let _ = app.messages_text(Some(80));
+        let (hits_before, misses_before, entries_before) = app.message_render_cache_stats();
+
+        let _ = app.messages_text(Some(80));
+        let (hits_after, misses_after, entries_after) = app.message_render_cache_stats();
+
+        assert_eq!(hits_before, 0);
+        assert!(misses_before >= 2);
+        assert!(entries_before >= 2);
+        assert!(hits_after > hits_before);
+        assert_eq!(misses_after, misses_before);
+        assert_eq!(entries_after, entries_before);
+    }
+
+    #[test]
+    fn message_render_cache_width_change_causes_miss() {
+        let mut app = super::App::new().unwrap();
+        app.conversation
+            .push(Message::new(MessageRole::User, "open README"));
+        app.conversation.push(Message::new(
+            MessageRole::Assistant,
+            "A longer paragraph that should wrap differently at another width.",
+        ));
+
+        let _ = app.messages_text(Some(72));
+        let (_, misses_before, entries_before) = app.message_render_cache_stats();
+
+        let _ = app.messages_text(Some(100));
+        let (_, misses_after, entries_after) = app.message_render_cache_stats();
+
+        assert!(misses_after > misses_before);
+        assert!(entries_after > entries_before);
     }
 }
 

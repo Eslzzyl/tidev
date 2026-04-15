@@ -14,8 +14,11 @@ use ratatui::{
     Terminal,
     backend::CrosstermBackend,
     layout::{Position, Rect},
+    style::Color,
+    text::Line,
 };
 use std::{
+    cell::{Cell, RefCell},
     env, io,
     path::{Path, PathBuf},
     sync::atomic::Ordering,
@@ -136,6 +139,35 @@ Prefer short sections and bullets. If the repo is simple, keep the file simple. 
 
 If `AGENTS.md` already exists at `${path}`, improve it in place rather than rewriting blindly. Preserve verified useful guidance, delete fluff or stale claims, and reconcile it with the current codebase."#;
 
+const MESSAGE_RENDER_CACHE_MAX_ENTRIES: usize = 1200;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum MessageRenderCacheKind {
+    Cards,
+    ToolResultLines,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct MessageRenderCacheKey {
+    session_id: Uuid,
+    message_id: Uuid,
+    width: usize,
+    kind: MessageRenderCacheKind,
+}
+
+#[derive(Clone, Debug)]
+enum MessageRenderCacheValue {
+    Cards(Vec<(Color, Vec<Line<'static>>)>),
+    ToolResultLines(Vec<Line<'static>>),
+}
+
+#[derive(Clone, Debug)]
+struct MessageRenderCacheEntry {
+    fingerprint: u64,
+    value: MessageRenderCacheValue,
+    last_used_tick: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Screen {
     Welcome,
@@ -224,6 +256,11 @@ struct App {
     message_follow_tail: bool,
     message_viewport_lines: usize,
     message_total_lines: usize,
+    message_render_cache:
+        RefCell<std::collections::HashMap<MessageRenderCacheKey, MessageRenderCacheEntry>>,
+    message_render_cache_tick: Cell<u64>,
+    message_render_cache_hits: Cell<u64>,
+    message_render_cache_misses: Cell<u64>,
     message_content_area: Option<Rect>,
     sidebar_area: Option<Rect>,
     selection_clipboard_lease: Option<ClipboardLease>,
@@ -324,6 +361,10 @@ impl App {
             message_follow_tail: true,
             message_viewport_lines: 0,
             message_total_lines: 0,
+            message_render_cache: RefCell::new(std::collections::HashMap::new()),
+            message_render_cache_tick: Cell::new(0),
+            message_render_cache_hits: Cell::new(0),
+            message_render_cache_misses: Cell::new(0),
             message_content_area: None,
             sidebar_area: None,
             selection_clipboard_lease: None,
@@ -485,6 +526,56 @@ impl App {
         self.message_viewport_lines = cached.message_viewport_lines;
         self.message_total_lines = cached.message_total_lines;
         self.context_usage = cached.context_usage;
+    }
+
+    fn clear_message_render_cache(&self) {
+        self.message_render_cache.borrow_mut().clear();
+        self.message_render_cache_tick.set(0);
+    }
+
+    fn next_message_render_cache_tick(&self) -> u64 {
+        let tick = self.message_render_cache_tick.get().wrapping_add(1);
+        self.message_render_cache_tick.set(tick);
+        tick
+    }
+
+    fn record_message_render_cache_hit(&self) {
+        self.message_render_cache_hits
+            .set(self.message_render_cache_hits.get().saturating_add(1));
+    }
+
+    fn record_message_render_cache_miss(&self) {
+        self.message_render_cache_misses
+            .set(self.message_render_cache_misses.get().saturating_add(1));
+    }
+
+    fn message_render_cache_stats(&self) -> (u64, u64, usize) {
+        (
+            self.message_render_cache_hits.get(),
+            self.message_render_cache_misses.get(),
+            self.message_render_cache.borrow().len(),
+        )
+    }
+
+    fn prune_message_render_cache_if_needed(&self) {
+        let cache_len = self.message_render_cache.borrow().len();
+        if cache_len <= MESSAGE_RENDER_CACHE_MAX_ENTRIES {
+            return;
+        }
+
+        let remove_count = cache_len - MESSAGE_RENDER_CACHE_MAX_ENTRIES;
+        let mut evict_candidates = self
+            .message_render_cache
+            .borrow()
+            .iter()
+            .map(|(key, entry)| (*key, entry.last_used_tick))
+            .collect::<Vec<_>>();
+        evict_candidates.sort_by_key(|(_, tick)| *tick);
+
+        let mut cache = self.message_render_cache.borrow_mut();
+        for (key, _) in evict_candidates.into_iter().take(remove_count) {
+            cache.remove(&key);
+        }
     }
 
     fn reset_active_runtime(&mut self) {
@@ -680,6 +771,7 @@ impl App {
                 self.clear_mouse_selection();
                 self.message_content_area = None;
                 self.sidebar_area = None;
+                self.clear_message_render_cache();
             }
             _ => {}
         }
@@ -918,6 +1010,7 @@ impl App {
                     panel.move_up();
                     if panel.preview_theme != previous_theme {
                         self.theme.set_mode(panel.preview_theme);
+                        self.clear_message_render_cache();
                     }
                 }
                 KeyCode::Down => {
@@ -925,6 +1018,7 @@ impl App {
                     panel.move_down();
                     if panel.preview_theme != previous_theme {
                         self.theme.set_mode(panel.preview_theme);
+                        self.clear_message_render_cache();
                     }
                 }
                 KeyCode::Enter => {
@@ -1474,6 +1568,7 @@ impl App {
                 self.apply_theme(panel.preview_theme)?;
             } else {
                 self.theme.set_mode(panel.original_theme);
+                self.clear_message_render_cache();
             }
         }
         Ok(())
@@ -1481,6 +1576,7 @@ impl App {
 
     fn apply_theme(&mut self, theme: ThemeName) -> Result<()> {
         self.theme.set_mode(theme);
+        self.clear_message_render_cache();
         self.config.set_theme(theme);
         self.config.save(&self.paths)?;
         self.last_notice = Some(format!("Theme switched to {}", self.theme.name()));
