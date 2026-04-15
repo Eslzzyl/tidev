@@ -11,8 +11,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
 use super::diff_render::render_unified_diff_text;
@@ -403,13 +401,11 @@ impl App {
             width: body_width,
             kind: MessageRenderCacheKind::Cards,
         };
-        let fingerprint = message_render_fingerprint(message);
         let tick = self.next_message_render_cache_tick();
 
         {
             let mut cache = self.message_render_cache.borrow_mut();
             if let Some(entry) = cache.get_mut(&key)
-                && entry.fingerprint == fingerprint
                 && let MessageRenderCacheValue::Cards(cards) = &entry.value
             {
                 entry.last_used_tick = tick;
@@ -426,7 +422,6 @@ impl App {
             cache.insert(
                 key,
                 MessageRenderCacheEntry {
-                    fingerprint,
                     value: MessageRenderCacheValue::Cards(cards.clone()),
                     last_used_tick: tick,
                 },
@@ -448,13 +443,11 @@ impl App {
             width: body_width,
             kind: MessageRenderCacheKind::ToolResultLines,
         };
-        let fingerprint = message_render_fingerprint(message);
         let tick = self.next_message_render_cache_tick();
 
         {
             let mut cache = self.message_render_cache.borrow_mut();
             if let Some(entry) = cache.get_mut(&key)
-                && entry.fingerprint == fingerprint
                 && let MessageRenderCacheValue::ToolResultLines(lines) = &entry.value
             {
                 entry.last_used_tick = tick;
@@ -471,7 +464,6 @@ impl App {
             cache.insert(
                 key,
                 MessageRenderCacheEntry {
-                    fingerprint,
                     value: MessageRenderCacheValue::ToolResultLines(lines.clone()),
                     last_used_tick: tick,
                 },
@@ -1048,51 +1040,6 @@ fn render_reasoning_markdown_lines(
     lines
 }
 
-fn message_render_fingerprint(message: &Message) -> u64 {
-    let mut hasher = DefaultHasher::new();
-
-    message.id.hash(&mut hasher);
-    message.role.label().hash(&mut hasher);
-    message.content.hash(&mut hasher);
-    message.reasoning.hash(&mut hasher);
-    message.tool_call_id.hash(&mut hasher);
-    message.tool_name.hash(&mut hasher);
-    message.streaming.hash(&mut hasher);
-
-    for attachment in &message.attachments {
-        match attachment {
-            MessageAttachment::FileReference { path, content } => {
-                1u8.hash(&mut hasher);
-                path.hash(&mut hasher);
-                content.hash(&mut hasher);
-            }
-            MessageAttachment::DirectoryReference { path, tree } => {
-                2u8.hash(&mut hasher);
-                path.hash(&mut hasher);
-                tree.hash(&mut hasher);
-            }
-            MessageAttachment::Image {
-                filename,
-                mime,
-                data_url,
-            } => {
-                3u8.hash(&mut hasher);
-                filename.hash(&mut hasher);
-                mime.hash(&mut hasher);
-                data_url.hash(&mut hasher);
-            }
-        }
-    }
-
-    for tool_call in &message.tool_calls {
-        tool_call.id.hash(&mut hasher);
-        tool_call.name.hash(&mut hasher);
-        tool_call.arguments.hash(&mut hasher);
-    }
-
-    hasher.finish()
-}
-
 #[cfg(test)]
 mod tests {
     use super::render_reasoning_markdown_lines;
@@ -1106,6 +1053,10 @@ mod tests {
             .iter()
             .map(|span| span.content.as_ref())
             .collect::<String>()
+    }
+
+    fn text_lines_to_string(lines: &[Line<'static>]) -> String {
+        lines.iter().map(line_text).collect::<Vec<_>>().join("\n")
     }
 
     #[test]
@@ -1203,6 +1154,25 @@ mod tests {
 
         assert!(misses_after > misses_before);
         assert!(entries_after > entries_before);
+    }
+
+    #[test]
+    fn message_render_cache_invalidation_refreshes_updated_content() {
+        let mut app = super::App::new().unwrap();
+        app.conversation
+            .push(Message::new(MessageRole::Assistant, "old cached content"));
+
+        let (before, _) = app.messages_text(Some(80));
+        let before_text = text_lines_to_string(&before.lines);
+        assert!(before_text.contains("old cached content"));
+
+        let message_id = app.conversation.messages[0].id;
+        app.conversation.messages[0].content = "new refreshed content".to_string();
+        app.invalidate_active_message_render_cache_for(message_id);
+
+        let (after, _) = app.messages_text(Some(80));
+        let after_text = text_lines_to_string(&after.lines);
+        assert!(after_text.contains("new refreshed content"));
     }
 }
 

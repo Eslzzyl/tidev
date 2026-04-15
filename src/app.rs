@@ -163,7 +163,6 @@ enum MessageRenderCacheValue {
 
 #[derive(Clone, Debug)]
 struct MessageRenderCacheEntry {
-    fingerprint: u64,
     value: MessageRenderCacheValue,
     last_used_tick: u64,
 }
@@ -531,6 +530,16 @@ impl App {
     fn clear_message_render_cache(&self) {
         self.message_render_cache.borrow_mut().clear();
         self.message_render_cache_tick.set(0);
+    }
+
+    fn invalidate_message_render_cache_for(&self, session_id: Uuid, message_id: Uuid) {
+        self.message_render_cache
+            .borrow_mut()
+            .retain(|key, _| !(key.session_id == session_id && key.message_id == message_id));
+    }
+
+    fn invalidate_active_message_render_cache_for(&self, message_id: Uuid) {
+        self.invalidate_message_render_cache_for(self.conversation.session_id, message_id);
     }
 
     fn next_message_render_cache_tick(&self) -> u64 {
@@ -2179,10 +2188,12 @@ impl App {
 
                         if let Some(index) = existing_index {
                             let existing = &mut self.conversation.messages[index];
+                            let message_id = existing.id;
                             existing.content = message.content.clone();
                             existing.reasoning = message.reasoning.clone();
                             existing.tool_calls = message.tool_calls.clone();
                             existing.streaming = message.streaming;
+                            self.invalidate_active_message_render_cache_for(message_id);
                         } else {
                             self.conversation.messages.push(message.clone());
                         }
