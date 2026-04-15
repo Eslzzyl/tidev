@@ -206,6 +206,7 @@ struct UiStateSnapshot {
     composer: Composer,
     draft_attachments: Vec<MessageAttachment>,
     last_notice: Option<String>,
+    toast: Option<(String, Instant)>,
     mouse_selection: MouseSelectionState,
 }
 
@@ -247,6 +248,7 @@ struct App {
     active_request_id: u64,
     abort_confirmation_deadline: Option<Instant>,
     last_notice: Option<String>,
+    toast: Option<(String, Instant)>,
     mouse_selection: MouseSelectionState,
     retrying_hint: Option<(u32, u32, String, Option<u32>)>, // (attempt, max, reason, retry_after_secs)
     message_scroll_offset: usize,
@@ -352,6 +354,7 @@ impl App {
             active_request_id: 0,
             abort_confirmation_deadline: None,
             last_notice,
+            toast: None,
             mouse_selection: MouseSelectionState::default(),
             retrying_hint,
             message_scroll_offset: 0,
@@ -443,6 +446,7 @@ impl App {
             composer: self.composer.clone(),
             draft_attachments: self.draft_attachments.clone(),
             last_notice: self.last_notice.clone(),
+            toast: self.toast.clone(),
             mouse_selection: self.mouse_selection.clone(),
         }
     }
@@ -460,6 +464,7 @@ impl App {
         self.composer = snapshot.composer;
         self.draft_attachments = snapshot.draft_attachments;
         self.last_notice = snapshot.last_notice;
+        self.toast = snapshot.toast;
         self.mouse_selection = snapshot.mouse_selection;
     }
 

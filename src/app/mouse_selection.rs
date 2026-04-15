@@ -4,6 +4,7 @@ use ratatui::{
     prelude::Frame,
     style::Style,
 };
+use std::time::{Duration, Instant};
 use unicode_width::UnicodeWidthStr;
 
 use super::App;
@@ -173,10 +174,16 @@ impl App {
             Ok(lease) => {
                 self.selection_clipboard_lease = lease;
                 self.mouse_selection.clear();
-                self.last_notice = Some("Selection copied to clipboard".to_string());
+                self.toast = Some((
+                    "Selection copied to clipboard".to_string(),
+                    Instant::now() + Duration::from_secs(3),
+                ));
             }
             Err(error) => {
-                self.last_notice = Some(format!("Failed to copy selection: {error}"));
+                self.toast = Some((
+                    format!("Failed to copy selection: {error}"),
+                    Instant::now() + Duration::from_secs(3),
+                ));
             }
         }
     }

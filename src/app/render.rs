@@ -6,6 +6,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
+use std::time::Instant;
 use unicode_width::UnicodeWidthStr;
 
 use super::{App, Screen};
@@ -41,6 +42,45 @@ impl App {
             self.render_permission_dialog(frame, area, dialog);
         }
         self.finish_mouse_selection(frame);
+        self.render_toast(frame);
+    }
+
+    fn render_toast(&mut self, frame: &mut Frame<'_>) {
+        let now = Instant::now();
+        let Some((message, expires_at)) = self.toast.take() else {
+            return;
+        };
+
+        if now >= expires_at {
+            return;
+        }
+
+        let Some(message_area) = self.message_content_area else {
+            return;
+        };
+
+        let palette = self.palette();
+        let message_width = UnicodeWidthStr::width(message.as_str()).min(30);
+        let width = (message_width + 2).min(32) as u16;
+        let height = 3;
+
+        let x = message_area.right().saturating_sub(width + 1);
+        let y = message_area.top().saturating_add(1);
+
+        let rect = Rect::new(x, y, width, height);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.accent))
+            .style(Style::default().bg(palette.background).fg(palette.text));
+        let paragraph = Paragraph::new(message.as_str())
+            .style(Style::default().bg(palette.background).fg(palette.text))
+            .alignment(Alignment::Center)
+            .block(block);
+
+        frame.render_widget(Clear, rect);
+        frame.render_widget(paragraph, rect);
+
+        self.toast = Some((message, expires_at));
     }
 
     fn render_welcome(&mut self, frame: &mut Frame<'_>) {
