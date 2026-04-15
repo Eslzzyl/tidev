@@ -1154,11 +1154,6 @@ impl App {
             return Ok(());
         }
 
-        if matches!(key.code, KeyCode::Esc) && self.mouse_selection.has_selection() {
-            self.clear_mouse_selection();
-            return Ok(());
-        }
-
         if matches!(key.code, KeyCode::Char('v'))
             && (key.modifiers.contains(KeyModifiers::CONTROL)
                 || key.modifiers.contains(KeyModifiers::SUPER))

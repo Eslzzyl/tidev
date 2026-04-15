@@ -172,6 +172,7 @@ impl App {
         match copy_to_clipboard(&text) {
             Ok(lease) => {
                 self.selection_clipboard_lease = lease;
+                self.mouse_selection.clear();
                 self.last_notice = Some("Selection copied to clipboard".to_string());
             }
             Err(error) => {
@@ -339,7 +340,7 @@ fn extract_row_text(buffer: &Buffer, y: u16, start_x: u16, end_x: u16) -> String
 
 #[cfg(test)]
 mod tests {
-    use super::{MouseSelectionState, apply_selection_style, extract_selected_text};
+    use super::{apply_selection_style, extract_selected_text, MouseSelectionState};
     use ratatui::{
         buffer::Buffer,
         layout::{Position, Rect},
