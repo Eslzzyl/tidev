@@ -103,19 +103,27 @@ impl App {
             .suggestions
             .iter()
             .map(|suggestion| {
-                ListItem::new(Line::from(vec![
-                    Span::styled(
-                        format!("@{}", suggestion.path),
-                        Style::default()
-                            .fg(palette.accent)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw("  "),
-                    Span::styled(
-                        suggestion.display.clone(),
-                        Style::default().fg(palette.muted),
-                    ),
-                ]))
+                let path_style = Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD);
+                let highlight_style = Style::default()
+                    .fg(palette.accent_soft)
+                    .add_modifier(Modifier::BOLD);
+                let mut path_spans = vec![Span::styled("@", path_style)];
+                path_spans.extend(spans_with_highlights(
+                    &suggestion.path,
+                    &suggestion.matched_indices,
+                    path_style,
+                    highlight_style,
+                ));
+                let mut spans = path_spans;
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(
+                    suggestion.display.clone(),
+                    Style::default().fg(palette.muted),
+                ));
+
+                ListItem::new(Line::from(spans))
             })
             .collect::<Vec<_>>();
 

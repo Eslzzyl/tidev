@@ -1,7 +1,11 @@
 use ignore::WalkBuilder;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 const MAX_SUGGESTIONS: usize = 12;
+const INDEX_BATCH_SIZE: usize = 128;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AtMentionKind {
@@ -15,6 +19,7 @@ pub struct AtMentionSuggestion {
     pub path: String,
     pub display: String,
     pub kind: AtMentionKind,
+    pub matched_indices: Vec<usize>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -23,8 +28,8 @@ pub struct AtMentionState {
     pub query: String,
     pub selected_index: usize,
     pub suggestions: Vec<AtMentionSuggestion>,
-    indexed_root: Option<PathBuf>,
-    indexed_entries: Vec<IndexedEntry>,
+    last_index_revision: u64,
+    index: Arc<AtMentionIndex>,
 }
 
 impl AtMentionState {
@@ -33,6 +38,11 @@ impl AtMentionState {
         self.query.clear();
         self.selected_index = 0;
         self.suggestions.clear();
+        self.last_index_revision = 0;
+    }
+
+    pub fn start_background_indexing(&self, workspace_root: &Path) {
+        AtMentionIndex::ensure_background_indexing(&self.index, workspace_root);
     }
 
     pub fn sync(&mut self, workspace_root: &Path, input: &str, cursor: usize) {
@@ -41,10 +51,18 @@ impl AtMentionState {
             return;
         };
 
+        self.start_background_indexing(workspace_root);
+
+        let current_revision = self.index.revision();
+        if self.visible && self.query == query && self.last_index_revision == current_revision {
+            return;
+        }
+
         self.visible = true;
         self.query = query.to_string();
-        self.ensure_index(workspace_root);
-        self.suggestions = search_entries(&self.indexed_entries, &self.query);
+        let search_result = self.index.search_entries(&self.query);
+        self.suggestions = search_result.suggestions;
+        self.last_index_revision = search_result.revision;
         if self.suggestions.is_empty() {
             self.selected_index = 0;
             return;
@@ -68,14 +86,143 @@ impl AtMentionState {
     pub fn selected(&self) -> Option<&AtMentionSuggestion> {
         self.suggestions.get(self.selected_index)
     }
+}
 
-    fn ensure_index(&mut self, workspace_root: &Path) {
-        if self.indexed_root.as_deref() == Some(workspace_root) {
+#[derive(Debug, Default)]
+struct AtMentionIndex {
+    root: Mutex<Option<PathBuf>>,
+    entries: Mutex<Vec<IndexedEntry>>,
+    current_generation: AtomicU64,
+    completed_generation: AtomicU64,
+    worker_generation: AtomicU64,
+    revision: AtomicU64,
+}
+
+#[derive(Clone, Debug)]
+struct IndexedEntry {
+    path: String,
+    display: String,
+    lowercase_path: String,
+    lowercase_name: String,
+    basename_char_offset: usize,
+    kind: AtMentionKind,
+}
+
+#[derive(Clone, Debug)]
+struct MatchCandidate {
+    score: u32,
+    matched_indices: Vec<usize>,
+}
+
+#[derive(Clone, Debug)]
+struct SearchResult {
+    revision: u64,
+    suggestions: Vec<AtMentionSuggestion>,
+}
+
+impl IndexedEntry {
+    fn suggestion(&self, matched_indices: Vec<usize>) -> AtMentionSuggestion {
+        AtMentionSuggestion {
+            path: self.path.clone(),
+            display: self.display.clone(),
+            kind: self.kind,
+            matched_indices,
+        }
+    }
+}
+
+impl AtMentionIndex {
+    fn ensure_background_indexing(index: &Arc<Self>, workspace_root: &Path) {
+        let generation = index.ensure_root(workspace_root);
+        if index.completed_generation.load(Ordering::Acquire) == generation {
             return;
         }
 
-        self.indexed_entries = index_workspace_entries(workspace_root);
-        self.indexed_root = Some(workspace_root.to_path_buf());
+        if index.worker_generation.load(Ordering::Acquire) == generation {
+            return;
+        }
+
+        index.worker_generation.store(generation, Ordering::Release);
+        let index = Arc::clone(index);
+        let workspace_root = workspace_root.to_path_buf();
+        thread::spawn(move || index.build_index(workspace_root, generation));
+    }
+
+    fn ensure_root(&self, workspace_root: &Path) -> u64 {
+        let mut root = self.root.lock().unwrap();
+        if root.as_deref() != Some(workspace_root) {
+            *root = Some(workspace_root.to_path_buf());
+            self.current_generation.fetch_add(1, Ordering::AcqRel);
+            self.completed_generation.store(0, Ordering::Release);
+
+            let mut entries = self.entries.lock().unwrap();
+            entries.clear();
+            self.revision.fetch_add(1, Ordering::AcqRel);
+        }
+
+        self.current_generation.load(Ordering::Acquire)
+    }
+
+    fn build_index(self: Arc<Self>, workspace_root: PathBuf, generation: u64) {
+        let mut batch = Vec::with_capacity(INDEX_BATCH_SIZE);
+        walk_workspace_entries(&workspace_root, |entry| {
+            if self.current_generation.load(Ordering::Acquire) != generation {
+                return false;
+            }
+
+            batch.push(entry);
+            if batch.len() >= INDEX_BATCH_SIZE {
+                self.flush_batch(generation, &mut batch);
+            }
+
+            true
+        });
+
+        self.flush_batch(generation, &mut batch);
+
+        if self.current_generation.load(Ordering::Acquire) == generation {
+            self.completed_generation
+                .store(generation, Ordering::Release);
+        }
+
+        let _ = self.worker_generation.compare_exchange(
+            generation,
+            0,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+    }
+
+    fn flush_batch(&self, generation: u64, batch: &mut Vec<IndexedEntry>) {
+        if batch.is_empty() {
+            return;
+        }
+
+        if self.current_generation.load(Ordering::Acquire) != generation {
+            batch.clear();
+            return;
+        }
+
+        let mut entries = self.entries.lock().unwrap();
+        if self.current_generation.load(Ordering::Acquire) != generation {
+            batch.clear();
+            return;
+        }
+
+        entries.extend(batch.drain(..));
+        self.revision.fetch_add(1, Ordering::AcqRel);
+    }
+
+    fn revision(&self) -> u64 {
+        self.revision.load(Ordering::Acquire)
+    }
+
+    fn search_entries(&self, query: &str) -> SearchResult {
+        let normalized = query.trim().to_ascii_lowercase();
+        let entries = self.entries.lock().unwrap();
+        let revision = self.revision();
+
+        rank_indexed_entries(entries.as_slice(), &normalized, revision)
     }
 }
 
@@ -98,27 +245,10 @@ pub fn current_at_fragment(input: &str, cursor: usize) -> Option<(usize, String)
     Some((at_index, query.to_string()))
 }
 
-#[derive(Clone, Debug)]
-struct IndexedEntry {
-    path: String,
-    display: String,
-    lowercase_display: String,
-    lowercase_name: String,
-    kind: AtMentionKind,
-}
-
-impl IndexedEntry {
-    fn suggestion(&self) -> AtMentionSuggestion {
-        AtMentionSuggestion {
-            path: self.path.clone(),
-            display: self.display.clone(),
-            kind: self.kind,
-        }
-    }
-}
-
-fn index_workspace_entries(workspace_root: &Path) -> Vec<IndexedEntry> {
-    let mut entries = Vec::new();
+fn walk_workspace_entries<F>(workspace_root: &Path, mut visit: F)
+where
+    F: FnMut(IndexedEntry) -> bool,
+{
     let walker = WalkBuilder::new(workspace_root)
         .hidden(false)
         .git_ignore(true)
@@ -148,137 +278,123 @@ fn index_workspace_entries(workspace_root: &Path) -> Vec<IndexedEntry> {
             continue;
         }
 
-        let path_text = rel.to_string_lossy().into_owned();
-        let kind = if file_type.is_dir() {
-            AtMentionKind::Directory
-        } else if is_image_path(path) {
-            AtMentionKind::Image
-        } else {
-            AtMentionKind::File
-        };
-        let display = match kind {
-            AtMentionKind::Directory => format!("{}/", path_text),
-            _ => path_text.clone(),
+        let Some(indexed_entry) = build_indexed_entry(rel, path, file_type.is_dir()) else {
+            continue;
         };
 
-        entries.push(IndexedEntry {
-            path: path_text,
-            lowercase_display: display.to_ascii_lowercase(),
-            lowercase_name: rel
-                .file_name()
-                .map(|value| value.to_string_lossy().to_ascii_lowercase())
-                .unwrap_or_default(),
-            display,
-            kind,
-        });
+        if !visit(indexed_entry) {
+            break;
+        }
     }
+}
 
+#[cfg(test)]
+fn index_workspace_entries(workspace_root: &Path) -> Vec<IndexedEntry> {
+    let mut entries = Vec::new();
+    walk_workspace_entries(workspace_root, |entry| {
+        entries.push(entry);
+        true
+    });
     entries
 }
 
-fn search_entries(indexed_entries: &[IndexedEntry], query: &str) -> Vec<AtMentionSuggestion> {
-    let normalized = query.trim().to_ascii_lowercase();
-
-    if normalized.is_empty() {
-        let mut suggestions = indexed_entries
-            .iter()
-            .map(IndexedEntry::suggestion)
-            .collect::<Vec<_>>();
-        suggestions.sort_by(|left, right| {
-            kind_rank(left.kind)
-                .cmp(&kind_rank(right.kind))
-                .then_with(|| left.display.cmp(&right.display))
-        });
-        suggestions.truncate(MAX_SUGGESTIONS);
-        return suggestions;
+fn build_indexed_entry(rel: &Path, path: &Path, is_dir: bool) -> Option<IndexedEntry> {
+    let path_text = rel.to_string_lossy().into_owned();
+    if path_text.is_empty() {
+        return None;
     }
 
-    let mut ranked = indexed_entries
-        .iter()
-        .filter_map(|entry| score_entry(entry, &normalized).map(|score| (score, entry)))
-        .collect::<Vec<_>>();
+    let kind = if is_dir {
+        AtMentionKind::Directory
+    } else if is_image_path(path) {
+        AtMentionKind::Image
+    } else {
+        AtMentionKind::File
+    };
 
-    ranked.sort_by(|(left_score, left), (right_score, right)| {
-        right_score
-            .cmp(left_score)
-            .then_with(|| kind_rank(left.kind).cmp(&kind_rank(right.kind)))
-            .then_with(|| left.display.cmp(&right.display))
-    });
-    ranked.truncate(MAX_SUGGESTIONS);
+    let display = match kind {
+        AtMentionKind::Directory => format!("{}/", path_text),
+        _ => path_text.clone(),
+    };
 
-    ranked
-        .into_iter()
-        .map(|(_, entry)| entry.suggestion())
-        .collect()
+    Some(IndexedEntry {
+        lowercase_path: path_text.to_ascii_lowercase(),
+        lowercase_name: rel
+            .file_name()
+            .map(|value| value.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default(),
+        basename_char_offset: basename_char_offset(&path_text),
+        path: path_text,
+        display,
+        kind,
+    })
 }
 
-#[derive(Clone, Copy, Debug)]
-struct SubsequenceMatch {
-    start: usize,
-    span: usize,
-    gaps: usize,
-}
+fn score_entry(entry: &IndexedEntry, query: &str) -> Option<MatchCandidate> {
+    let query_chars = query.chars().count();
+    let mut best: Option<MatchCandidate> = None;
 
-fn score_entry(entry: &IndexedEntry, query: &str) -> Option<u32> {
-    let mut best_score = None;
+    consider_candidate(
+        &mut best,
+        exact_match(&entry.lowercase_path, query, 1_000, 0),
+    );
+    consider_candidate(
+        &mut best,
+        exact_match(
+            &entry.lowercase_name,
+            query,
+            1_000,
+            entry.basename_char_offset,
+        ),
+    );
 
-    if entry.lowercase_name == query {
-        best_score = Some(1_000);
-    }
+    consider_candidate(
+        &mut best,
+        prefix_match(&entry.lowercase_path, query, 980, 3, 160, 0),
+    );
+    consider_candidate(
+        &mut best,
+        prefix_match(
+            &entry.lowercase_name,
+            query,
+            995,
+            2,
+            120,
+            entry.basename_char_offset,
+        ),
+    );
 
-    if entry.lowercase_name.starts_with(query) {
-        let penalty = entry
-            .lowercase_name
-            .len()
-            .saturating_sub(query.len())
-            .min(160) as u32;
-        let score = 980u32.saturating_sub(penalty);
-        best_score = Some(best_score.unwrap_or(0).max(score));
-    }
+    consider_candidate(
+        &mut best,
+        contains_match(&entry.lowercase_path, query, 920, 4, 0),
+    );
+    consider_candidate(
+        &mut best,
+        contains_match(
+            &entry.lowercase_name,
+            query,
+            950,
+            5,
+            entry.basename_char_offset,
+        ),
+    );
 
-    if let Some(position) = entry.lowercase_name.find(query) {
-        let score = 930u32.saturating_sub((position as u32).saturating_mul(8));
-        best_score = Some(best_score.unwrap_or(0).max(score));
-    }
-
-    if entry.lowercase_display.starts_with(query) {
-        let penalty = entry
-            .lowercase_display
-            .len()
-            .saturating_sub(query.len())
-            .min(180) as u32;
-        let score = 900u32.saturating_sub(penalty);
-        best_score = Some(best_score.unwrap_or(0).max(score));
-    }
-
-    if let Some(position) = entry.lowercase_display.find(query) {
-        let score = 860u32.saturating_sub((position as u32).saturating_mul(4));
-        best_score = Some(best_score.unwrap_or(0).max(score));
-    }
-
-    if let Some(subsequence) = find_subsequence_match(&entry.lowercase_name, query) {
-        let score = 800u32
-            .saturating_sub((subsequence.start as u32).saturating_mul(3))
-            .saturating_sub((subsequence.gaps as u32).saturating_mul(6))
-            .saturating_sub(
-                (subsequence.span as u32)
-                    .saturating_sub(query.len() as u32)
-                    .saturating_mul(4),
-            );
-        best_score = Some(best_score.unwrap_or(0).max(score));
-    }
-
-    if let Some(subsequence) = find_subsequence_match(&entry.lowercase_display, query) {
-        let score = 720u32
-            .saturating_sub((subsequence.start as u32).saturating_mul(2))
-            .saturating_sub((subsequence.gaps as u32).saturating_mul(3))
-            .saturating_sub(
-                (subsequence.span as u32)
-                    .saturating_sub(query.len() as u32)
-                    .saturating_mul(2),
-            );
-        best_score = Some(best_score.unwrap_or(0).max(score));
-    }
+    consider_candidate(
+        &mut best,
+        subsequence_match(&entry.lowercase_path, query, 850, 4, 7, query_chars, 0),
+    );
+    consider_candidate(
+        &mut best,
+        subsequence_match(
+            &entry.lowercase_name,
+            query,
+            890,
+            3,
+            6,
+            query_chars,
+            entry.basename_char_offset,
+        ),
+    );
 
     let kind_bonus = match entry.kind {
         AtMentionKind::Directory => 20,
@@ -287,50 +403,196 @@ fn score_entry(entry: &IndexedEntry, query: &str) -> Option<u32> {
     };
     let depth_penalty = entry.path.bytes().filter(|byte| *byte == b'/').count() as u32 * 6;
 
-    best_score.map(|score| {
-        score
+    best.map(|mut candidate| {
+        candidate.score = candidate
+            .score
             .saturating_sub(depth_penalty)
-            .saturating_add(kind_bonus)
+            .saturating_add(kind_bonus);
+        candidate
     })
 }
 
-fn find_subsequence_match(haystack: &str, needle: &str) -> Option<SubsequenceMatch> {
-    let haystack = haystack.as_bytes();
-    let needle = needle.as_bytes();
-    if needle.is_empty() {
+fn rank_indexed_entries(
+    indexed_entries: &[IndexedEntry],
+    query: &str,
+    revision: u64,
+) -> SearchResult {
+    let suggestions = if query.is_empty() {
+        let mut suggestions = indexed_entries
+            .iter()
+            .map(|entry| entry.suggestion(Vec::new()))
+            .collect::<Vec<_>>();
+        suggestions.sort_by(|left, right| {
+            kind_rank(left.kind)
+                .cmp(&kind_rank(right.kind))
+                .then_with(|| left.display.cmp(&right.display))
+        });
+        suggestions.truncate(MAX_SUGGESTIONS);
+        suggestions
+    } else {
+        let mut ranked = indexed_entries
+            .iter()
+            .filter_map(|entry| {
+                score_entry(entry, query)
+                    .map(|candidate| (candidate.score, entry, candidate.matched_indices))
+            })
+            .collect::<Vec<_>>();
+
+        ranked.sort_by(|(left_score, left, _), (right_score, right, _)| {
+            right_score
+                .cmp(left_score)
+                .then_with(|| kind_rank(left.kind).cmp(&kind_rank(right.kind)))
+                .then_with(|| left.display.cmp(&right.display))
+        });
+        ranked.truncate(MAX_SUGGESTIONS);
+
+        ranked
+            .into_iter()
+            .map(|(_, entry, matched_indices)| entry.suggestion(matched_indices))
+            .collect()
+    };
+
+    SearchResult {
+        revision,
+        suggestions,
+    }
+}
+
+#[cfg(test)]
+fn search_entries(indexed_entries: &[IndexedEntry], query: &str) -> Vec<AtMentionSuggestion> {
+    rank_indexed_entries(indexed_entries, &query.trim().to_ascii_lowercase(), 0).suggestions
+}
+
+fn consider_candidate(best: &mut Option<MatchCandidate>, candidate: Option<MatchCandidate>) {
+    let Some(candidate) = candidate else {
+        return;
+    };
+
+    if best
+        .as_ref()
+        .is_none_or(|current| candidate.score > current.score)
+    {
+        *best = Some(candidate);
+    }
+}
+
+fn exact_match(haystack: &str, query: &str, score: u32, offset: usize) -> Option<MatchCandidate> {
+    if haystack != query {
+        return None;
+    }
+
+    Some(MatchCandidate {
+        score,
+        matched_indices: range_indices(offset, haystack.chars().count()),
+    })
+}
+
+fn prefix_match(
+    haystack: &str,
+    query: &str,
+    base_score: u32,
+    length_penalty: u32,
+    max_length_penalty: u32,
+    offset: usize,
+) -> Option<MatchCandidate> {
+    if !haystack.starts_with(query) {
+        return None;
+    }
+
+    let penalty = haystack
+        .chars()
+        .count()
+        .saturating_sub(query.chars().count())
+        .min(max_length_penalty as usize) as u32;
+
+    Some(MatchCandidate {
+        score: base_score.saturating_sub(penalty.saturating_mul(length_penalty)),
+        matched_indices: range_indices(offset, query.chars().count()),
+    })
+}
+
+fn contains_match(
+    haystack: &str,
+    query: &str,
+    base_score: u32,
+    position_penalty: u32,
+    offset: usize,
+) -> Option<MatchCandidate> {
+    let start_byte = haystack.find(query)?;
+    let start = offset + byte_offset_to_char_index(haystack, start_byte);
+    let query_chars = query.chars().count();
+    Some(MatchCandidate {
+        score: base_score.saturating_sub((start as u32).saturating_mul(position_penalty)),
+        matched_indices: range_indices(start, query_chars),
+    })
+}
+
+fn subsequence_match(
+    haystack: &str,
+    query: &str,
+    base_score: u32,
+    start_penalty: u32,
+    gap_penalty: u32,
+    query_chars: usize,
+    offset: usize,
+) -> Option<MatchCandidate> {
+    let indices = find_subsequence_indices(haystack, query)?;
+    let start = offset + indices[0];
+    let span = indices.last().copied().unwrap_or(indices[0]) - indices[0] + 1;
+    let gaps = span.saturating_sub(indices.len());
+
+    let score = base_score
+        .saturating_sub((start as u32).saturating_mul(start_penalty))
+        .saturating_sub((gaps as u32).saturating_mul(gap_penalty))
+        .saturating_sub((span.saturating_sub(query_chars) as u32).saturating_mul(4));
+
+    Some(MatchCandidate {
+        score,
+        matched_indices: indices.into_iter().map(|index| index + offset).collect(),
+    })
+}
+
+fn find_subsequence_indices(haystack: &str, needle: &str) -> Option<Vec<usize>> {
+    let haystack_chars: Vec<char> = haystack.chars().collect();
+    let needle_chars: Vec<char> = needle.chars().collect();
+    if needle_chars.is_empty() {
         return None;
     }
 
     let mut haystack_index = 0usize;
-    let mut start = None;
-    let mut previous_index = None;
-    let mut gaps = 0usize;
+    let mut matched_indices = Vec::with_capacity(needle_chars.len());
 
-    for needle_byte in needle {
-        while haystack_index < haystack.len() && haystack[haystack_index] != *needle_byte {
+    for needle_char in needle_chars {
+        while haystack_index < haystack_chars.len() && haystack_chars[haystack_index] != needle_char
+        {
             haystack_index += 1;
         }
-        if haystack_index == haystack.len() {
+
+        if haystack_index == haystack_chars.len() {
             return None;
         }
 
-        if let Some(previous) = previous_index {
-            gaps += haystack_index.saturating_sub(previous + 1);
-        } else {
-            start = Some(haystack_index);
-        }
-
-        previous_index = Some(haystack_index);
+        matched_indices.push(haystack_index);
         haystack_index += 1;
     }
 
-    let start = start.unwrap_or(0);
-    let end = previous_index.unwrap_or(start);
-    Some(SubsequenceMatch {
-        start,
-        span: end.saturating_sub(start).saturating_add(1),
-        gaps,
-    })
+    Some(matched_indices)
+}
+
+fn range_indices(start: usize, len: usize) -> Vec<usize> {
+    (start..start.saturating_add(len)).collect()
+}
+
+fn byte_offset_to_char_index(text: &str, byte_offset: usize) -> usize {
+    text[..byte_offset].chars().count()
+}
+
+fn basename_char_offset(path: &str) -> usize {
+    let Some(byte_offset) = path.bytes().rposition(|byte| byte == b'/' || byte == b'\\') else {
+        return 0;
+    };
+
+    path[..=byte_offset].chars().count()
 }
 
 fn kind_rank(kind: AtMentionKind) -> usize {
@@ -435,5 +697,20 @@ mod tests {
                 .iter()
                 .any(|suggestion| suggestion.path == "at_mention.rs")
         );
+    }
+
+    #[test]
+    fn search_entries_returns_highlight_indices_for_fuzzy_matches() {
+        let workspace = make_temp_dir();
+        fs::write(workspace.join("at_mention.rs"), "mod").expect("failed to write file");
+
+        let indexed_entries = index_workspace_entries(&workspace);
+        let suggestions = search_entries(&indexed_entries, "atmnr");
+        let suggestion = suggestions
+            .iter()
+            .find(|suggestion| suggestion.path == "at_mention.rs")
+            .expect("expected suggestion");
+
+        assert_eq!(suggestion.matched_indices, vec![0, 1, 3, 5, 11]);
     }
 }

@@ -19,6 +19,9 @@ impl App {
     pub(crate) fn render(&mut self, frame: &mut Frame<'_>) {
         self.message_content_area = None;
         self.sidebar_area = None;
+        if self.at_mention.visible {
+            self.refresh_at_mention_state();
+        }
         match self.screen {
             Screen::Welcome => self.render_welcome(frame),
             Screen::Chat => self.render_chat(frame),
@@ -250,6 +253,29 @@ pub(super) fn shorten(value: &str, max_chars: usize) -> String {
     let mut shortened = value.chars().take(max_chars).collect::<String>();
     shortened.push_str("...");
     shortened
+}
+
+pub(super) fn spans_with_highlights(
+    text: &str,
+    highlight_indices: &[usize],
+    normal_style: Style,
+    highlighted_style: Style,
+) -> Vec<Span<'static>> {
+    let mut spans = Vec::with_capacity(text.chars().count());
+    let mut highlight_indices = highlight_indices.iter().copied().peekable();
+
+    for (index, ch) in text.chars().enumerate() {
+        let style = if highlight_indices.peek().is_some_and(|next| *next == index) {
+            highlight_indices.next();
+            highlighted_style
+        } else {
+            normal_style
+        };
+
+        spans.push(Span::styled(ch.to_string(), style));
+    }
+
+    spans
 }
 
 impl App {

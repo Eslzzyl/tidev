@@ -316,7 +316,7 @@ impl App {
         let last_notice = None;
         let retrying_hint = None;
 
-        Ok(Self {
+        let app = Self {
             should_quit: false,
             screen: Screen::Welcome,
             workspace_root,
@@ -372,7 +372,12 @@ impl App {
             backend_rx,
             loading_frame: 0,
             context_usage: None,
-        })
+        };
+
+        app.at_mention
+            .start_background_indexing(app.workspace_root.as_path());
+
+        Ok(app)
     }
 
     fn run(&mut self, runtime: &Runtime) -> Result<()> {
@@ -2139,9 +2144,10 @@ impl App {
                     return Ok(());
                 }
 
-                let running_idx = self.running_tool_executions.iter().position(|r| {
-                    r.request_id == request_id && r.tool_call.id == tool_call.id
-                });
+                let running_idx = self
+                    .running_tool_executions
+                    .iter()
+                    .position(|r| r.request_id == request_id && r.tool_call.id == tool_call.id);
 
                 if let Some(idx) = running_idx {
                     let running = self.running_tool_executions.remove(idx);
