@@ -209,6 +209,13 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
                     ..
                 } => {
                     let _ = context.tx.send(BackendEvent::UsageStats {
+                        session_id: context.child_session_id,
+                        request_id: context.parent_request_id,
+                        input_tokens,
+                        output_tokens,
+                        total_tokens,
+                    });
+                    let _ = context.tx.send(BackendEvent::UsageStats {
                         session_id: context.parent_session_id,
                         request_id: context.parent_request_id,
                         input_tokens,
@@ -391,7 +398,7 @@ fn record_tool_result(
     store.append_message(context.child_session_id, &message)?;
 
     let _ = context.tx.send(BackendEvent::SubagentToolResult {
-        session_id: context.parent_session_id,
+        session_id: context.child_session_id,
         request_id: context.parent_request_id,
         child_session_id: context.child_session_id,
         message: message.clone(),
@@ -408,11 +415,23 @@ fn send_status(
     content_delta: Option<String>,
     reasoning_delta: Option<String>,
 ) {
+    let status_text = status_text.into();
+    let _ = context.tx.send(BackendEvent::SubagentStatus {
+        session_id: context.child_session_id,
+        request_id: context.parent_request_id,
+        child_session_id: context.child_session_id,
+        status_text: status_text.clone(),
+        current_tool_call: current_tool_call.clone(),
+        assistant_message: assistant_message.cloned(),
+        content_delta: content_delta.clone(),
+        reasoning_delta: reasoning_delta.clone(),
+    });
+
     let _ = context.tx.send(BackendEvent::SubagentStatus {
         session_id: context.parent_session_id,
         request_id: context.parent_request_id,
         child_session_id: context.child_session_id,
-        status_text: status_text.into(),
+        status_text,
         current_tool_call,
         assistant_message: assistant_message.cloned(),
         content_delta,

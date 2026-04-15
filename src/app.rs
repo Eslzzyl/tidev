@@ -426,12 +426,22 @@ impl App {
         let ui_snapshot = self.capture_ui_snapshot();
         self.cache_active_session_runtime();
 
-        let Some(target_runtime) = self.cached_sessions.remove(&session_id) else {
-            if let Some(original_runtime) = self.cached_sessions.remove(&original_session_id) {
-                self.restore_cached_session_runtime(original_runtime);
+        let fallback_model = Self::resolve_fallback_model(&self.config, &self.auth)?;
+        let target_runtime = if let Some(cached) = self.cached_sessions.remove(&session_id) {
+            cached
+        } else {
+            match self.load_session_runtime_from_store(session_id, &fallback_model)? {
+                Some(runtime) => runtime,
+                None => {
+                    if let Some(original_runtime) =
+                        self.cached_sessions.remove(&original_session_id)
+                    {
+                        self.restore_cached_session_runtime(original_runtime);
+                    }
+                    self.restore_ui_snapshot(ui_snapshot);
+                    return Ok(());
+                }
             }
-            self.restore_ui_snapshot(ui_snapshot);
-            return Ok(());
         };
 
         self.restore_cached_session_runtime(target_runtime);
@@ -494,31 +504,62 @@ impl App {
             return Ok(());
         }
 
-        let Some(conversation) = self.store.load_conversation(session_id)? else {
+        let Some(runtime) = self.load_session_runtime_from_store(session_id, fallback_model)?
+        else {
             anyhow::bail!("session not found");
+        };
+
+        self.restore_cached_session_runtime(runtime);
+        Ok(())
+    }
+
+    fn load_session_runtime_from_store(
+        &self,
+        session_id: Uuid,
+        fallback_model: &ActiveModel,
+    ) -> Result<Option<CachedSessionRuntime>> {
+        let Some(conversation) = self.store.load_conversation(session_id)? else {
+            return Ok(None);
         };
 
         let active_model =
             Self::resolve_conversation_model(&self.config, &self.auth, &conversation)
                 .unwrap_or_else(|_| fallback_model.clone());
 
-        self.conversation = conversation;
-        self.active_model = active_model;
-        self.reset_active_runtime();
+        let mut runtime = CachedSessionRuntime {
+            conversation,
+            active_model,
+            context_manager: ContextManager::new(),
+            pending_tool_execution: None,
+            permission_dialog: None,
+            question_dialog: None,
+            running_tool_execution: None,
+            running_subagent_executions: Vec::new(),
+            pending_request: false,
+            active_request_id: 0,
+            abort_confirmation_deadline: None,
+            retrying_hint: None,
+            message_scroll_offset: 0,
+            message_follow_tail: true,
+            message_viewport_lines: 0,
+            message_total_lines: 0,
+            streaming_preview_lines: Vec::new(),
+            context_usage: None,
+        };
 
-        if !self.conversation.visible_messages().is_empty() {
-            let total_tokens: u32 = self
+        if !runtime.conversation.visible_messages().is_empty() {
+            let total_tokens: u32 = runtime
                 .conversation
                 .messages
                 .iter()
                 .filter_map(|message| message.total_tokens)
                 .sum();
             if total_tokens > 0 {
-                self.context_usage = Some((0, 0, total_tokens));
+                runtime.context_usage = Some((0, 0, total_tokens));
             }
         }
 
-        Ok(())
+        Ok(Some(runtime))
     }
 
     fn schedule_context_compaction_for_session(&mut self, session_id: Uuid, runtime: &Runtime) {
@@ -636,6 +677,18 @@ impl App {
         Ok(())
     }
 
+    fn handle_mouse_event(&mut self, mouse: MouseEvent) {
+        if !self.can_scroll_conversation() {
+            return;
+        }
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => self.scroll_messages_up(3),
+            MouseEventKind::ScrollDown => self.scroll_messages_down(3),
+            _ => {}
+        }
+    }
+
     fn can_scroll_conversation(&self) -> bool {
         self.screen == Screen::Chat
             && self.permission_dialog.is_none()
@@ -700,18 +753,6 @@ impl App {
                 true
             }
             _ => false,
-        }
-    }
-
-    fn handle_mouse_event(&mut self, mouse: MouseEvent) {
-        if !self.can_scroll_conversation() {
-            return;
-        }
-
-        match mouse.kind {
-            MouseEventKind::ScrollUp => self.scroll_messages_up(3),
-            MouseEventKind::ScrollDown => self.scroll_messages_down(3),
-            _ => {}
         }
     }
 
@@ -1745,13 +1786,27 @@ impl App {
 
     fn handle_backend_event(&mut self, event: BackendEvent, runtime: &Runtime) -> Result<()> {
         let session_id = event.session_id();
+        let request_id = event.request_id();
         if session_id != self.conversation.session_id {
             return self.with_temporary_session_context(session_id, |app| {
+                if let Some(request_id) = request_id {
+                    app.prime_active_request(request_id);
+                }
                 app.handle_backend_event_for_active(event, runtime)
             });
         }
 
+        if let Some(request_id) = request_id {
+            self.prime_active_request(request_id);
+        }
+
         self.handle_backend_event_for_active(event, runtime)
+    }
+
+    fn prime_active_request(&mut self, request_id: u64) {
+        if self.active_request_id == 0 {
+            self.active_request_id = request_id;
+        }
     }
 
     fn handle_backend_event_for_active(
@@ -1937,11 +1992,14 @@ impl App {
                     .iter_mut()
                     .find(|execution| execution.child_session_id == child_session_id)
                 {
-                    execution.status_text = status_text;
+                    execution.status_text = status_text.clone();
                     execution.current_tool_call = current_tool_call;
                 }
 
                 if self.conversation.session_id == child_session_id {
+                    let is_completed = status_text == "Completed";
+                    self.pending_request = !is_completed;
+
                     if let Some(message) = assistant_message {
                         let existing_index = self.conversation.messages.iter().position(|m| {
                             matches!(m.role, MessageRole::Assistant) && m.id == message.id

@@ -484,6 +484,22 @@ impl BackendEvent {
             | Self::ContextCompacted { session_id, .. } => *session_id,
         }
     }
+
+    pub fn request_id(&self) -> Option<u64> {
+        match self {
+            Self::Delta { request_id, .. }
+            | Self::ReasoningDelta { request_id, .. }
+            | Self::Finished { request_id, .. }
+            | Self::Failed { request_id, .. }
+            | Self::Retrying { request_id, .. }
+            | Self::ToolCompleted { request_id, .. }
+            | Self::SubagentStatus { request_id, .. }
+            | Self::SubagentToolResult { request_id, .. }
+            | Self::SubagentCompleted { request_id, .. }
+            | Self::UsageStats { request_id, .. } => Some(*request_id),
+            Self::ContextCompacted { .. } => None,
+        }
+    }
 }
 
 #[cfg(test)]

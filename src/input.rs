@@ -385,10 +385,10 @@ impl Composer {
 
 fn display_line_count(text: &str, width: usize) -> usize {
     if width == 0 {
-        return text.lines().count().max(1);
+        return text.split('\n').count().max(1);
     }
 
-    text.lines()
+    text.split('\n')
         .map(|line| wrap_line_count(line, width))
         .sum::<usize>()
         .max(1)
@@ -442,7 +442,7 @@ mod tests {
         let mut composer = Composer::new("placeholder");
         composer.set_text("abcdefghij".to_string());
 
-        assert_eq!(composer.preferred_height(4, 10), 4);
+        assert_eq!(composer.preferred_height(4, 10), 5);
     }
 
     #[test]

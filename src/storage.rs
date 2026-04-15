@@ -396,7 +396,7 @@ impl SessionStore {
 
     pub fn load_latest_session(&self) -> Result<Option<SessionRecord>> {
         let mut statement = self.connection.prepare(
-              "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, COALESCE(sw.workspace_root, '') FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id ORDER BY s.updated_at DESC LIMIT 1",
+              "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, COALESCE(sw.workspace_root, '') FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.parent_session_id IS NULL ORDER BY s.updated_at DESC LIMIT 1",
         )?;
 
         let record = statement.query_row([], Self::session_from_row).optional()?;
@@ -547,7 +547,7 @@ impl SessionStore {
     pub fn load_sessions_for_workspace(&self, workspace_root: &Path) -> Result<Vec<SessionRecord>> {
         let workspace_root = workspace_root.display().to_string();
         let mut statement = self.connection.prepare(
-              "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE sw.workspace_root = ?1 ORDER BY s.updated_at DESC, s.created_at DESC",
+              "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE sw.workspace_root = ?1 AND s.parent_session_id IS NULL ORDER BY s.updated_at DESC, s.created_at DESC",
         )?;
 
         let rows = statement.query_map(params![workspace_root], Self::session_from_row)?;
@@ -580,7 +580,7 @@ impl SessionStore {
 
     pub fn load_all_sessions(&self) -> Result<Vec<SessionRecord>> {
         let mut statement = self.connection.prepare(
-            "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id ORDER BY s.updated_at DESC, s.created_at DESC",
+            "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.parent_session_id IS NULL ORDER BY s.updated_at DESC, s.created_at DESC",
         )?;
 
         let rows = statement.query_map([], Self::session_from_row)?;
@@ -619,7 +619,7 @@ impl SessionStore {
         let cutoff_text = cutoff.to_rfc3339();
 
         let mut statement = self.connection.prepare(
-            "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.updated_at < ?1 ORDER BY s.updated_at DESC",
+            "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.updated_at < ?1 AND s.parent_session_id IS NULL ORDER BY s.updated_at DESC",
         )?;
 
         let rows = statement.query_map(params![cutoff_text], Self::session_from_row)?;
@@ -645,7 +645,7 @@ impl SessionStore {
         let workspace_root = workspace_root.display().to_string();
 
         let mut statement = self.connection.prepare(
-            "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE sw.workspace_root = ?1 ORDER BY s.updated_at DESC",
+            "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE sw.workspace_root = ?1 AND s.parent_session_id IS NULL ORDER BY s.updated_at DESC",
         )?;
 
         let rows = statement.query_map(params![workspace_root], Self::session_from_row)?;
@@ -666,7 +666,7 @@ impl SessionStore {
 
     pub fn get_session_counts_by_workspace(&self) -> Result<Vec<WorkspaceSessionCount>> {
         let mut statement = self.connection.prepare(
-            "SELECT workspace_root, COUNT(*) as cnt FROM session_workspaces GROUP BY workspace_root ORDER BY cnt DESC",
+            "SELECT sw.workspace_root, COUNT(*) as cnt FROM session_workspaces sw INNER JOIN sessions s ON s.id = sw.session_id WHERE s.parent_session_id IS NULL GROUP BY sw.workspace_root ORDER BY cnt DESC",
         )?;
 
         let rows = statement.query_map([], |row| {
@@ -692,7 +692,7 @@ impl SessionStore {
         let cutoff_text = cutoff.to_rfc3339();
 
         let mut statement = self.connection.prepare(
-            "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.updated_at < ?1 ORDER BY sw.workspace_root, s.updated_at DESC",
+            "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.updated_at < ?1 AND s.parent_session_id IS NULL ORDER BY sw.workspace_root, s.updated_at DESC",
         )?;
 
         let rows = statement.query_map(params![cutoff_text], Self::session_from_row)?;
@@ -708,7 +708,7 @@ impl SessionStore {
     pub fn get_current_workspace_sessions_count(&self, workspace_root: &Path) -> Result<i64> {
         let workspace_root = workspace_root.display().to_string();
         let count: i64 = self.connection.query_row(
-            "SELECT COUNT(*) FROM session_workspaces WHERE workspace_root = ?1",
+            "SELECT COUNT(*) FROM session_workspaces sw INNER JOIN sessions s ON s.id = sw.session_id WHERE sw.workspace_root = ?1 AND s.parent_session_id IS NULL",
             params![workspace_root],
             |row| row.get(0),
         )?;
@@ -1033,6 +1033,66 @@ mod tests {
                     .expect("child permission should load"),
                 Some(false)
             );
+        }
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn child_sessions_are_hidden_from_session_lists() {
+        let path = std::env::temp_dir().join(format!(
+            "tidev-session-store-visibility-{}.sqlite3",
+            uuid::Uuid::new_v4()
+        ));
+
+        {
+            let store = SessionStore::open(&path).expect("store should open");
+            let workspace_root = Path::new("/tmp/workspace");
+            let parent_session_id = uuid::Uuid::new_v4();
+            let child_session_id = uuid::Uuid::new_v4();
+
+            store
+                .create_session(
+                    parent_session_id,
+                    workspace_root,
+                    "openai",
+                    "OpenAI",
+                    "gpt-4o",
+                    "GPT-4o",
+                    "Parent",
+                )
+                .expect("parent session should be created");
+
+            std::thread::sleep(std::time::Duration::from_millis(2));
+
+            store
+                .create_session_with_parent(
+                    child_session_id,
+                    parent_session_id,
+                    workspace_root,
+                    "openai",
+                    "OpenAI",
+                    "gpt-4o",
+                    "GPT-4o",
+                    "Task: Child",
+                )
+                .expect("child session should be created");
+
+            let workspace_sessions = store
+                .load_sessions_for_workspace(workspace_root)
+                .expect("workspace sessions should load");
+            assert_eq!(workspace_sessions.len(), 1);
+            assert_eq!(workspace_sessions[0].session_id, parent_session_id);
+
+            let all_sessions = store.load_all_sessions().expect("all sessions should load");
+            assert_eq!(all_sessions.len(), 1);
+            assert_eq!(all_sessions[0].session_id, parent_session_id);
+
+            let latest_session = store
+                .load_latest_session()
+                .expect("latest session should load")
+                .expect("latest session should exist");
+            assert_eq!(latest_session.session_id, parent_session_id);
         }
 
         let _ = std::fs::remove_file(path);
