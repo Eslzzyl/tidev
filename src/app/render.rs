@@ -153,12 +153,14 @@ impl App {
             false,
         );
 
-        let hint = Paragraph::new(
-            "Enter to send · /session to switch sessions · Shift+Enter/Ctrl+J newline",
-        )
-        .alignment(Alignment::Center)
-        .style(Style::default().fg(palette.accent_soft));
-        frame.render_widget(hint, sections[3]);
+        let model_line = Line::from(vec![Span::styled(
+            self.active_model.label(),
+            Style::default().fg(palette.accent),
+        )]);
+        frame.render_widget(
+            Paragraph::new(model_line).style(Style::default().fg(palette.text)),
+            sections[3],
+        );
 
         self.render_at_mention_palette(frame, sections[2]);
         self.render_command_palette(frame, sections[2]);
@@ -258,13 +260,10 @@ impl App {
         let chunks =
             Layout::horizontal([Constraint::Min(1), Constraint::Length(status_width)]).split(area);
 
-        let model_line = Line::from(vec![
-            Span::styled("model ", Style::default().fg(palette.accent_soft)),
-            Span::styled(
-                self.active_model.label(),
-                Style::default().fg(palette.accent),
-            ),
-        ]);
+        let model_line = Line::from(vec![Span::styled(
+            self.active_model.label(),
+            Style::default().fg(palette.accent),
+        )]);
 
         frame.render_widget(
             Paragraph::new(model_line).style(Style::default().fg(palette.text)),
