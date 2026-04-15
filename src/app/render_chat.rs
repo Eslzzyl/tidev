@@ -378,7 +378,11 @@ impl App {
             i += 1;
         }
 
-        if lines.is_empty() {
+        let has_streaming = messages
+            .iter()
+            .any(|m| m.streaming && matches!(m.role, MessageRole::Assistant));
+
+        if lines.is_empty() && !has_streaming {
             let fallback = decorate_card_lines(
                 vec![line_with_style("(empty)", palette.muted)],
                 width,
@@ -565,7 +569,10 @@ impl App {
             }
         }
 
-        if lines.is_empty() && message.reasoning.trim().is_empty() && message.tool_calls.is_empty()
+        if lines.is_empty()
+            && !message.streaming
+            && message.reasoning.trim().is_empty()
+            && message.tool_calls.is_empty()
         {
             lines.push(line_with_style("(empty)", self.palette().muted));
         }
