@@ -98,6 +98,7 @@ impl NewProviderStep {
 #[derive(Clone, Debug)]
 pub struct NewModelDraft {
     pub model_id: String,
+    pub request_model_id: String,
     pub model_display_name: String,
     pub context_window: usize,
     pub max_output_tokens: usize,
@@ -108,6 +109,7 @@ impl Default for NewModelDraft {
     fn default() -> Self {
         Self {
             model_id: String::new(),
+            request_model_id: String::new(),
             model_display_name: String::new(),
             context_window: 128_000,
             max_output_tokens: 32_768,
@@ -118,8 +120,10 @@ impl Default for NewModelDraft {
 
 impl NewModelDraft {
     pub fn from_model(model_id: impl Into<String>, model: &ModelConfig) -> Self {
+        let model_id = model_id.into();
         Self {
-            model_id: model_id.into(),
+            model_id: model_id.clone(),
+            request_model_id: model.request_model_id.clone().unwrap_or(model_id),
             model_display_name: model.display_name.clone(),
             context_window: model.context_window,
             max_output_tokens: model.max_output_tokens,
@@ -167,6 +171,7 @@ impl NewModelDraft {
 
         match step {
             NewProviderStep::ModelId => {
+                self.request_model_id = value.to_string();
                 self.model_id = normalize_identifier(value, "model id")?;
                 self.model_display_name = self.model_id.clone();
             }
@@ -199,6 +204,7 @@ impl NewModelDraft {
 
         match step {
             EditModelStep::ModelId => {
+                self.request_model_id = value.to_string();
                 self.model_id = normalize_identifier(value, "model id")?;
                 self.model_display_name = self.model_id.clone();
             }
@@ -233,6 +239,7 @@ impl NewModelDraft {
                 supports_streaming: true,
                 supports_images: false,
                 extra_body: None,
+                request_model_id: Some(self.request_model_id),
             },
         )
     }
