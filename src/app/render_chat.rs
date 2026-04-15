@@ -14,6 +14,7 @@ use ratatui::{
 use std::time::{Duration, Instant};
 
 use super::diff_render::render_unified_diff_text;
+use super::permission::RunningStatus;
 use super::permission::RunningSubagentExecution;
 use super::{
     render::*, App, MessageRenderCacheEntry, MessageRenderCacheKey, MessageRenderCacheKind,
@@ -133,7 +134,10 @@ impl App {
         let (mut text, mut total_lines) = self.messages_text(Some(content_width));
 
         // Add tool running state
-        if let Some(running) = &self.running_tool_execution {
+        for running in &self.running_tool_executions {
+            if running.status != RunningStatus::Running {
+                continue;
+            }
             let canonical_name =
                 canonical_tool_name(&running.tool_call.name).unwrap_or(&running.tool_call.name);
             let action = match canonical_name {

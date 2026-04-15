@@ -179,7 +179,7 @@ struct CachedSessionRuntime {
     pending_tool_execution: Option<PendingToolExecution>,
     permission_dialog: Option<PermissionDialogState>,
     question_dialog: Option<QuestionDialogState>,
-    running_tool_execution: Option<RunningToolExecution>,
+    running_tool_executions: Vec<RunningToolExecution>,
     running_subagent_executions: Vec<RunningSubagentExecution>,
     pending_request: bool,
     active_request_id: u64,
@@ -236,7 +236,7 @@ struct App {
     pending_tool_execution: Option<PendingToolExecution>,
     permission_dialog: Option<PermissionDialogState>,
     question_dialog: Option<QuestionDialogState>,
-    running_tool_execution: Option<RunningToolExecution>,
+    running_tool_executions: Vec<RunningToolExecution>,
     running_subagent_executions: Vec<RunningSubagentExecution>,
     pending_assistant_turns: std::collections::HashSet<Uuid>,
     cached_sessions: std::collections::HashMap<Uuid, CachedSessionRuntime>,
@@ -342,7 +342,7 @@ impl App {
             pending_tool_execution: None,
             permission_dialog: None,
             question_dialog: None,
-            running_tool_execution: None,
+            running_tool_executions: Vec::new(),
             running_subagent_executions: Vec::new(),
             pending_assistant_turns: std::collections::HashSet::new(),
             cached_sessions: std::collections::HashMap::new(),
@@ -416,7 +416,7 @@ impl App {
             pending_tool_execution: self.pending_tool_execution.clone(),
             permission_dialog: self.permission_dialog.clone(),
             question_dialog: self.question_dialog.clone(),
-            running_tool_execution: self.running_tool_execution.clone(),
+            running_tool_executions: self.running_tool_executions.clone(),
             running_subagent_executions: self.running_subagent_executions.clone(),
             pending_request: self.pending_request,
             active_request_id: self.active_request_id,
@@ -517,7 +517,7 @@ impl App {
         self.pending_tool_execution = cached.pending_tool_execution;
         self.permission_dialog = cached.permission_dialog;
         self.question_dialog = cached.question_dialog;
-        self.running_tool_execution = cached.running_tool_execution;
+        self.running_tool_executions = cached.running_tool_executions;
         self.running_subagent_executions = cached.running_subagent_executions;
         self.pending_request = cached.pending_request;
         self.active_request_id = cached.active_request_id;
@@ -595,7 +595,7 @@ impl App {
         self.pending_tool_execution = None;
         self.permission_dialog = None;
         self.question_dialog = None;
-        self.running_tool_execution = None;
+        self.running_tool_executions.clear();
         self.running_subagent_executions.clear();
         self.pending_request = false;
         self.abort_confirmation_deadline = None;
@@ -643,7 +643,7 @@ impl App {
             pending_tool_execution: None,
             permission_dialog: None,
             question_dialog: None,
-            running_tool_execution: None,
+            running_tool_executions: Vec::new(),
             running_subagent_executions: Vec::new(),
             pending_request: false,
             active_request_id: 0,
@@ -994,7 +994,7 @@ impl App {
         self.question_dialog = None;
         self.cancel_running_subagents();
 
-        if let Some(running) = self.running_tool_execution.take() {
+        for running in self.running_tool_executions.drain(..) {
             running.cancel_requested.store(true, Ordering::SeqCst);
         }
 
@@ -1692,7 +1692,7 @@ impl App {
             self.pending_tool_execution = None;
             self.permission_dialog = None;
             self.question_dialog = None;
-            self.running_tool_execution = None;
+            self.running_tool_executions.clear();
             self.abort_confirmation_deadline = None;
             self.active_request_id = self.active_request_id.wrapping_add(1);
         }
@@ -2104,7 +2104,7 @@ impl App {
                 self.pending_tool_execution = None;
                 self.permission_dialog = None;
                 self.question_dialog = None;
-                self.running_tool_execution = None;
+                self.running_tool_executions.clear();
                 self.cancel_running_subagents();
                 self.abort_confirmation_deadline = None;
                 self.retrying_hint = None;
@@ -2139,18 +2139,15 @@ impl App {
                     return Ok(());
                 }
 
-                let Some(running) = self.running_tool_execution.take() else {
-                    return Ok(());
-                };
+                let running_idx = self.running_tool_executions.iter().position(|r| {
+                    r.request_id == request_id && r.tool_call.id == tool_call.id
+                });
 
-                if running.request_id != request_id || running.tool_call.id != tool_call.id {
-                    self.running_tool_execution = Some(running);
-                    return Ok(());
+                if let Some(idx) = running_idx {
+                    let running = self.running_tool_executions.remove(idx);
+                    self.record_tool_result(running.tool_call, result)?;
+                    self.try_start_parallel_execution(runtime)?;
                 }
-
-                self.record_tool_result(tool_call, result)?;
-                self.advance_pending_tool_execution();
-                self.process_pending_tool_execution(runtime)?;
             }
             BackendEvent::SubagentStatus {
                 session_id: _,

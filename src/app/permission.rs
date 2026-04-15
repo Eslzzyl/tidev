@@ -12,6 +12,7 @@ use super::App;
 pub(crate) struct PendingToolExecution {
     tool_calls: Vec<ToolCall>,
     next_index: usize,
+    ready_tool_calls: Vec<ToolCall>,
 }
 
 impl PendingToolExecution {
@@ -19,6 +20,7 @@ impl PendingToolExecution {
         Self {
             tool_calls,
             next_index: 0,
+            ready_tool_calls: Vec::new(),
         }
     }
 
@@ -39,7 +41,15 @@ impl PendingToolExecution {
     }
 
     pub(crate) fn is_finished(&self) -> bool {
-        self.next_index >= self.tool_calls.len()
+        self.next_index >= self.tool_calls.len() && self.ready_tool_calls.is_empty()
+    }
+
+    pub(crate) fn add_ready(&mut self, tool_call: ToolCall) {
+        self.ready_tool_calls.push(tool_call);
+    }
+
+    pub(crate) fn take_ready(&mut self) -> Vec<ToolCall> {
+        std::mem::take(&mut self.ready_tool_calls)
     }
 }
 
@@ -61,11 +71,19 @@ impl PermissionDialogState {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+#[allow(dead_code)]
+pub(crate) enum RunningStatus {
+    Running,
+    Completed,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct RunningToolExecution {
     pub request_id: u64,
     pub tool_call: ToolCall,
     pub cancel_requested: Arc<AtomicBool>,
+    pub status: RunningStatus,
 }
 
 impl RunningToolExecution {
@@ -78,6 +96,7 @@ impl RunningToolExecution {
             request_id,
             tool_call,
             cancel_requested,
+            status: RunningStatus::Running,
         }
     }
 }
@@ -153,8 +172,8 @@ impl App {
             return Ok(());
         };
 
-        if self.running_tool_execution.is_some() {
-            crate::log_info!("process_pending_tool_execution: waiting for running_tool_execution");
+        if !self.running_tool_executions.is_empty() {
+            crate::log_info!("process_pending_tool_execution: waiting for running_tool_executions");
             return Ok(());
         }
 
@@ -193,9 +212,12 @@ impl App {
                         "process_pending_tool_execution: remembered permission allowed for {}",
                         tool_call.name
                     );
-                    if self.execute_pending_tool_call(tool_call, runtime)? {
-                        return Ok(());
-                    }
+                    self.pending_tool_execution
+                        .as_mut()
+                        .unwrap()
+                        .add_ready(tool_call);
+                    self.advance_pending_tool_execution();
+                    continue;
                 } else {
                     let output = format!(
                         "Tool '{}' was denied by remembered permission",
@@ -229,9 +251,22 @@ impl App {
                 return Ok(());
             }
 
-            if self.execute_pending_tool_call(tool_call, runtime)? {
-                return Ok(());
-            }
+            self.pending_tool_execution
+                .as_mut()
+                .unwrap()
+                .add_ready(tool_call);
+            self.advance_pending_tool_execution();
+            continue;
+        }
+
+        let ready_calls = self
+            .pending_tool_execution
+            .as_mut()
+            .map(|p| p.take_ready())
+            .unwrap_or_default();
+
+        if !ready_calls.is_empty() {
+            return self.start_parallel_execution(ready_calls, runtime);
         }
 
         if self
@@ -283,8 +318,8 @@ impl App {
         }
 
         if allow {
-            if self.execute_pending_tool_call(dialog.tool_call, runtime)? {
-                return Ok(());
+            if let Some(p) = self.pending_tool_execution.as_mut() {
+                p.add_ready(dialog.tool_call);
             }
             return self.process_pending_tool_execution(runtime);
         }
@@ -300,6 +335,7 @@ impl App {
         self.process_pending_tool_execution(runtime)
     }
 
+    #[allow(dead_code)]
     fn execute_pending_tool_call(
         &mut self,
         tool_call: ToolCall,
@@ -506,7 +542,7 @@ impl App {
         let session_id = self.conversation.session_id;
         let request_id = self.active_request_id;
         let cancel_requested = Arc::new(AtomicBool::new(false));
-        self.running_tool_execution = Some(RunningToolExecution::new(
+        self.running_tool_executions.push(RunningToolExecution::new(
             request_id,
             tool_call.clone(),
             cancel_requested.clone(),
@@ -533,6 +569,82 @@ impl App {
                 result: ToolExecutionResult::new(output),
             });
         });
+
+        Ok(())
+    }
+
+    pub(crate) fn start_parallel_execution(
+        &mut self,
+        tool_calls: Vec<ToolCall>,
+        runtime: &Runtime,
+    ) -> Result<()> {
+        let count = tool_calls.len();
+        crate::log_info!("start_parallel_execution: {} tools", count);
+
+        if count == 1 {
+            self.last_notice = Some(format!("Running {}...", tool_calls[0].name));
+        } else {
+            let tool_names: Vec<_> = tool_calls.iter().map(|t| t.name.as_str()).collect();
+            self.last_notice = Some(format!("Running {} tools ({})...", count, tool_names.join(", ")));
+        }
+
+        for tool_call in tool_calls {
+            match tool_call.name.as_str() {
+                "task" => {
+                    if let Err(error) = self.start_subagent_task_execution(tool_call.clone(), runtime) {
+                        crate::log_error!("start_subagent_task_execution failed: {}", error);
+                        self.record_tool_result(
+                            tool_call,
+                            ToolExecutionResult::new(format!("Tool failed: {error}")),
+                        )?;
+                    }
+                }
+                "question" => {
+                    let parsed: Result<QuestionArgs, _> = serde_json::from_str(&tool_call.arguments);
+                    match parsed {
+                        Ok(args) if !args.questions.is_empty() => {
+                            self.begin_question_dialog(tool_call, args)?;
+                        }
+                        _ => {
+                            self.record_tool_result(
+                                tool_call,
+                                ToolExecutionResult::new(
+                                    "Tool failed: failed to decode question arguments or empty questions",
+                                ),
+                            )?;
+                        }
+                    };
+                }
+                _ => {
+                    if self.should_run_shell_async(&tool_call) {
+                        self.start_shell_tool_execution(tool_call, runtime)?;
+                    } else {
+                        let result = self
+                            .tools
+                            .execute_call(
+                                runtime.handle(),
+                                &self.store,
+                                self.conversation.session_id,
+                                &tool_call,
+                            )
+                            .unwrap_or_else(|error| ToolExecutionResult::new(format!("Tool failed: {error}")));
+                        self.record_tool_result(tool_call, result)?;
+                    }
+                }
+            }
+        }
+
+        if self.running_tool_executions.is_empty() && self.pending_tool_execution.as_ref().is_some_and(|p| p.is_finished()) {
+            self.pending_tool_execution = None;
+            if self.running_subagent_executions.is_empty() {
+                self.start_assistant_turn(runtime)?;
+            } else {
+                self.last_notice = Some(format!(
+                    "Waiting for {} subagent(s)...",
+                    self.running_subagent_executions.len()
+                ));
+            }
+        }
 
         Ok(())
     }
@@ -566,5 +678,22 @@ impl App {
         let execution = self.pending_tool_execution.as_ref()?;
         let tool_call = execution.current()?.clone();
         Some((tool_call, execution.current_index(), execution.total()))
+    }
+
+    pub(crate) fn try_start_parallel_execution(&mut self, runtime: &Runtime) -> Result<()> {
+        if self.running_tool_executions.is_empty()
+            && self.pending_tool_execution.as_ref().is_some_and(|p| p.is_finished())
+        {
+            self.pending_tool_execution = None;
+            if self.running_subagent_executions.is_empty() {
+                self.start_assistant_turn(runtime)?;
+            } else {
+                self.last_notice = Some(format!(
+                    "Waiting for {} subagent(s)...",
+                    self.running_subagent_executions.len()
+                ));
+            }
+        }
+        Ok(())
     }
 }

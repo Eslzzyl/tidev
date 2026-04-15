@@ -331,9 +331,22 @@ impl App {
                 );
             }
 
-            if let Some(running_tool_execution) = self.running_tool_execution.as_ref() {
-                let tool_name = running_tool_execution.tool_call.name.clone();
-                return format!("{} Running {}", spinner, tool_name);
+            if !self.running_tool_executions.is_empty() {
+                let tool_names: Vec<_> = self
+                    .running_tool_executions
+                    .iter()
+                    .map(|r| r.tool_call.name.as_str())
+                    .collect();
+                let count = tool_names.len();
+                if count == 1 {
+                    return format!("{} Running {}", spinner, tool_names[0]);
+                }
+                return format!(
+                    "{} Running {} tools ({})",
+                    spinner,
+                    count,
+                    tool_names.join(", ")
+                );
             }
 
             if self.pending_tool_execution.is_some() {
