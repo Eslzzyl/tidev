@@ -325,9 +325,10 @@ pub struct ThemeManager {
 
 impl ThemeManager {
     pub fn new(name: &str) -> Self {
-        Self {
-            palette: ThemePalette::from_name(name),
-        }
+        let palette = ThemePalette::from_name(name);
+        let theme_name = palette.name;
+        crate::markdown_render::set_syntax_theme_by_name(theme_name);
+        Self { palette }
     }
 
     pub fn palette(&self) -> ThemePalette {
@@ -346,6 +347,7 @@ impl ThemeManager {
             ThemeName::Github => ThemePalette::github(),
             ThemeName::Material => ThemePalette::material(),
         };
+        crate::markdown_render::set_syntax_theme_by_name(name);
     }
 
     pub fn toggle(&mut self) {

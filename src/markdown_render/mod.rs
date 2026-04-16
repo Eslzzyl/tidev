@@ -14,6 +14,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
 
 pub(crate) use highlight::{highlight_code_to_lines, highlight_code_to_lines_for_path};
+pub use highlight::set_syntax_theme_by_name;
 pub use line::is_blank_line_spaces_only;
 use line::push_owned_lines;
 use wrap::{RtOptions, adaptive_wrap_line};
@@ -270,8 +271,7 @@ where
             HeadingLevel::H5 => self.styles.h5,
             HeadingLevel::H6 => self.styles.h6,
         };
-        let content = format!("{} ", "#".repeat(level as usize));
-        self.push_line(Line::from(vec![Span::styled(content, heading_style)]));
+        self.push_line(Line::default());
         self.push_inline_style(heading_style);
         self.needs_newline = false;
     }
@@ -792,7 +792,7 @@ mod tests {
     fn renders_simple_heading() {
         let text = render_markdown_text("# Title\n");
         let rendered = lines_to_strings(&text);
-        assert_eq!(rendered, vec!["# Title".to_string()]);
+        assert_eq!(rendered, vec!["Title".to_string()]);
     }
 
     #[test]

@@ -13,6 +13,8 @@ use syntect::highlighting::Style as SyntectStyle;
 use syntect::highlighting::Theme;
 use syntect::highlighting::ThemeSet;
 use syntect::parsing::{SyntaxReference, SyntaxSet};
+
+use crate::theme::ThemeName;
 const MAX_HIGHLIGHT_BYTES: usize = 512 * 1024;
 const MAX_HIGHLIGHT_LINES: usize = 10_000;
 
@@ -36,6 +38,27 @@ fn default_theme() -> Theme {
         .or_else(|| themes.values().next())
         .cloned()
         .unwrap_or_default()
+}
+
+fn theme_name_to_syntax_theme(name: ThemeName) -> Theme {
+    let themes = &theme_set().themes;
+    let theme_key = match name {
+        ThemeName::Dark => "base16-ocean.dark",
+        ThemeName::Light => "InspiredGitHub",
+        ThemeName::Nord => "base16-ocean.dark",
+        ThemeName::OneDark => "base16-ocean.dark",
+        ThemeName::Catppuccin => "base16-mocha.dark",
+        ThemeName::Solarized => "Solarized (dark)",
+        ThemeName::Orng => "InspiredGitHub",
+        ThemeName::Github => "InspiredGitHub",
+        ThemeName::Material => "InspiredGitHub",
+    };
+    themes.get(theme_key).cloned().unwrap_or_else(default_theme)
+}
+
+pub fn set_syntax_theme_by_name(name: ThemeName) {
+    let theme = theme_name_to_syntax_theme(name);
+    set_syntax_theme(theme);
 }
 
 fn theme_lock() -> &'static RwLock<Theme> {

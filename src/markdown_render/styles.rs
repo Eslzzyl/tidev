@@ -20,12 +20,12 @@ pub(super) struct MarkdownStyles {
 impl Default for MarkdownStyles {
     fn default() -> Self {
         Self {
-            h1: Style::default().bold().underlined(),
-            h2: Style::default().bold(),
-            h3: Style::default().bold().italic(),
-            h4: Style::default().italic(),
-            h5: Style::default().italic(),
-            h6: Style::default().italic(),
+            h1: Style::default().cyan().bold().underlined(),
+            h2: Style::default().yellow().bold(),
+            h3: Style::default().magenta().bold().italic(),
+            h4: Style::default().blue().italic(),
+            h5: Style::default().green().italic(),
+            h6: Style::default().gray().italic(),
             code: Style::default().cyan(),
             emphasis: Style::default().italic(),
             strong: Style::default().bold(),
