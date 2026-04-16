@@ -236,6 +236,15 @@ impl App {
 
             if message.id == message_id {
                 found = true;
+                if let Some(patch_files_str) = &message.patch_files {
+                    if let Some(snapshot_hash) = &message.snapshot_hash {
+                        let files: Vec<String> = serde_json::from_str(patch_files_str)?;
+                        patches.push(Patch {
+                            hash: snapshot_hash.clone(),
+                            files,
+                        });
+                    }
+                }
             }
         }
 
