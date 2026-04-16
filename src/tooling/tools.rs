@@ -562,19 +562,494 @@ fn apply_edit_contents(
         return Ok(new_text.to_string());
     }
 
-    let matches = contents.match_indices(old_text).count();
-    if matches == 0 {
-        bail!("text not found in file");
+    let ending = detect_line_ending(contents);
+    let old = convert_to_line_ending(&normalize_line_endings(old_text), ending);
+    let new_text = convert_to_line_ending(&normalize_line_endings(new_text), ending);
+
+    let candidates = find_edit_candidates(contents, &old);
+    for candidate in candidates {
+        if !contents.contains(&candidate) {
+            continue;
+        }
+
+        if replace_all {
+            return Ok(contents.replace(&candidate, &new_text));
+        }
+
+        let occurrences = contents.match_indices(&candidate).count();
+        if occurrences == 1 {
+            return Ok(replace_first_occurrence(contents, &candidate, &new_text));
+        }
     }
-    if !replace_all && matches > 1 {
+
+    let direct_matches = contents.match_indices(&old).count();
+    if direct_matches == 1 {
+        return Ok(replace_first_occurrence(contents, &old, &new_text));
+    }
+    if direct_matches > 1 {
         bail!("text occurs multiple times; set replace_all to true");
     }
 
-    Ok(if replace_all {
-        contents.replace(old_text, new_text)
+    bail!("text not found in file");
+}
+
+fn normalize_line_endings(text: &str) -> String {
+    text.replace("\r\n", "\n")
+}
+
+fn detect_line_ending(text: &str) -> &'static str {
+    if text.contains("\r\n") { "\r\n" } else { "\n" }
+}
+
+fn convert_to_line_ending(text: &str, ending: &str) -> String {
+    if ending == "\n" {
+        text.to_string()
     } else {
-        contents.replacen(old_text, new_text, 1)
-    })
+        text.replace("\n", "\r\n")
+    }
+}
+
+fn replace_first_occurrence(content: &str, old: &str, new_text: &str) -> String {
+    if let Some(index) = content.find(old) {
+        let mut result = String::with_capacity(content.len() - old.len() + new_text.len());
+        result.push_str(&content[..index]);
+        result.push_str(new_text);
+        result.push_str(&content[index + old.len()..]);
+        result
+    } else {
+        content.to_string()
+    }
+}
+
+fn find_edit_candidates(content: &str, old_text: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    if content.contains(old_text) {
+        candidates.push(old_text.to_string());
+    }
+    candidates.extend(line_trimmed_replacer(content, old_text));
+    candidates.extend(block_anchor_replacer(content, old_text));
+    candidates.extend(whitespace_normalized_replacer(content, old_text));
+    candidates.extend(indentation_flexible_replacer(content, old_text));
+    candidates.extend(escape_normalized_replacer(content, old_text));
+    candidates.extend(trimmed_boundary_replacer(content, old_text));
+    candidates.extend(context_aware_replacer(content, old_text));
+    candidates.extend(multi_occurrence_replacer(content, old_text));
+
+    candidates.dedup();
+    candidates
+}
+
+fn split_lines_inclusive(text: &str) -> Vec<&str> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+    text.split_inclusive('\n').collect()
+}
+
+fn trim_newline(line: &str) -> &str {
+    line.strip_suffix('\n').unwrap_or(line)
+}
+
+fn trim_line(line: &str) -> String {
+    trim_newline(line).trim().to_string()
+}
+
+fn line_slice<'a>(content: &'a str, lines: &[&'a str], start: usize, end: usize) -> &'a str {
+    let start_byte: usize = lines[..start].iter().map(|l| l.len()).sum();
+    let end_byte: usize = lines[..end + 1].iter().map(|l| l.len()).sum();
+    &content[start_byte..end_byte]
+}
+
+fn normalize_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn remove_indentation(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let min_indent = lines
+        .iter()
+        .filter_map(|line| {
+            let trimmed = line.trim_start();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(line.len() - trimmed.len())
+            }
+        })
+        .min()
+        .unwrap_or(0);
+
+    lines
+        .into_iter()
+        .map(|line| {
+            if line.trim().is_empty() {
+                line.trim_end().to_string()
+            } else {
+                line.chars().skip(min_indent).collect()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn unescape_string(text: &str) -> String {
+    let mut output = String::new();
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            if let Some(next) = chars.next() {
+                match next {
+                    'n' => output.push('\n'),
+                    't' => output.push('\t'),
+                    'r' => output.push('\r'),
+                    '\\' => output.push('\\'),
+                    '"' => output.push('"'),
+                    '\'' => output.push('\''),
+                    '`' => output.push('`'),
+                    '$' => output.push('$'),
+                    _ => {
+                        output.push('\\');
+                        output.push(next);
+                    }
+                }
+            } else {
+                output.push('\\');
+            }
+        } else {
+            output.push(c);
+        }
+    }
+    output
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    if a.is_empty() || b.is_empty() {
+        return a.len().max(b.len());
+    }
+
+    let mut matrix: Vec<Vec<usize>> = vec![vec![0; b.len() + 1]; a.len() + 1];
+    for i in 0..=a.len() {
+        matrix[i][0] = i;
+    }
+    for j in 0..=b.len() {
+        matrix[0][j] = j;
+    }
+
+    for (i, a_ch) in a.chars().enumerate() {
+        for (j, b_ch) in b.chars().enumerate() {
+            let cost = if a_ch == b_ch { 0 } else { 1 };
+            matrix[i + 1][j + 1] = *[
+                matrix[i][j + 1] + 1,
+                matrix[i + 1][j] + 1,
+                matrix[i][j] + cost,
+            ]
+            .iter()
+            .min()
+            .unwrap();
+        }
+    }
+
+    matrix[a.len()][b.len()]
+}
+
+fn line_trimmed_replacer(content: &str, find: &str) -> Vec<String> {
+    let original_lines = split_lines_inclusive(content);
+    let mut search_lines = split_lines_inclusive(find);
+    if search_lines
+        .last()
+        .map(|line| trim_newline(line).is_empty())
+        == Some(true)
+    {
+        search_lines.pop();
+    }
+
+    if search_lines.is_empty() {
+        return Vec::new();
+    }
+
+    let search_trimmed: Vec<String> = search_lines.iter().map(|line| trim_line(line)).collect();
+    let needed = search_trimmed.len();
+    let original_trimmed: Vec<String> = original_lines.iter().map(|line| trim_line(line)).collect();
+
+    let mut results = Vec::new();
+    if original_trimmed.len() < needed {
+        return results;
+    }
+
+    for start in 0..=original_trimmed.len() - needed {
+        if original_trimmed[start..start + needed] == search_trimmed[..] {
+            results
+                .push(line_slice(content, &original_lines, start, start + needed - 1).to_string());
+        }
+    }
+
+    results
+}
+
+const SINGLE_CANDIDATE_SIMILARITY_THRESHOLD: f64 = 0.0;
+const MULTIPLE_CANDIDATES_SIMILARITY_THRESHOLD: f64 = 0.3;
+
+fn block_anchor_replacer(content: &str, find: &str) -> Vec<String> {
+    let original_lines = split_lines_inclusive(content);
+    let mut search_lines = split_lines_inclusive(find);
+    if search_lines
+        .last()
+        .map(|line| trim_newline(line).is_empty())
+        == Some(true)
+    {
+        search_lines.pop();
+    }
+    if search_lines.len() < 3 {
+        return Vec::new();
+    }
+
+    let original_trimmed: Vec<String> = original_lines.iter().map(|line| trim_line(line)).collect();
+    let search_trimmed: Vec<String> = search_lines.iter().map(|line| trim_line(line)).collect();
+    let first = &search_trimmed[0];
+    let last = &search_trimmed[search_trimmed.len() - 1];
+    let mut candidates = Vec::new();
+
+    for i in 0..original_trimmed.len() {
+        if &original_trimmed[i] != first {
+            continue;
+        }
+        for j in i + 2..original_trimmed.len() {
+            if &original_trimmed[j] == last {
+                candidates.push((i, j));
+                break;
+            }
+        }
+    }
+
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+
+    if candidates.len() == 1 {
+        let (start, end) = candidates[0];
+        if anchor_similarity(&original_trimmed, &search_trimmed, start, end)
+            >= SINGLE_CANDIDATE_SIMILARITY_THRESHOLD
+        {
+            return vec![line_slice(content, &original_lines, start, end).to_string()];
+        }
+        return Vec::new();
+    }
+
+    let mut best_match = None;
+    let mut max_similarity = -1.0;
+    for (start, end) in candidates {
+        let similarity = anchor_similarity(&original_trimmed, &search_trimmed, start, end);
+        if similarity > max_similarity {
+            max_similarity = similarity;
+            best_match = Some((start, end));
+        }
+    }
+
+    if max_similarity >= MULTIPLE_CANDIDATES_SIMILARITY_THRESHOLD {
+        if let Some((start, end)) = best_match {
+            return vec![line_slice(content, &original_lines, start, end).to_string()];
+        }
+    }
+    Vec::new()
+}
+
+fn anchor_similarity(
+    original_trimmed: &[String],
+    search_trimmed: &[String],
+    start: usize,
+    end: usize,
+) -> f64 {
+    let actual_block_size = end - start + 1;
+    let search_mid = if search_trimmed.len() > 2 {
+        &search_trimmed[1..search_trimmed.len() - 1]
+    } else {
+        &[]
+    };
+    let actual_mid = if actual_block_size > 2 {
+        &original_trimmed[start + 1..end]
+    } else {
+        &[]
+    };
+
+    if search_mid.is_empty() || actual_mid.is_empty() {
+        return 1.0;
+    }
+
+    let lines_to_check = std::cmp::min(search_mid.len(), actual_mid.len());
+    let mut similarity = 0.0;
+    for i in 0..lines_to_check {
+        let original_line = &actual_mid[i];
+        let search_line = &search_mid[i];
+        let max_len = original_line.len().max(search_line.len());
+        if max_len == 0 {
+            continue;
+        }
+        let distance = levenshtein(original_line, search_line);
+        similarity += 1.0 - (distance as f64 / max_len as f64);
+    }
+    similarity / lines_to_check as f64
+}
+
+fn whitespace_normalized_replacer(content: &str, find: &str) -> Vec<String> {
+    let normalized_find = normalize_whitespace(find);
+    let lines = split_lines_inclusive(content);
+    let mut results = Vec::new();
+
+    for line in &lines {
+        let line_norm = normalize_whitespace(trim_newline(line));
+        if line_norm == normalized_find || line_norm.contains(&normalized_find) {
+            results.push(line.to_string());
+        }
+    }
+
+    let find_lines: Vec<&str> = find.lines().collect();
+    if find_lines.len() > 1 {
+        for start in 0..=lines.len().saturating_sub(find_lines.len()) {
+            let block = lines[start..start + find_lines.len()].concat();
+            if normalize_whitespace(trim_newline(&block)) == normalized_find {
+                results.push(block);
+            }
+        }
+    }
+
+    results
+}
+
+fn indentation_flexible_replacer(content: &str, find: &str) -> Vec<String> {
+    let normalized_find = remove_indentation(find);
+    let lines = split_lines_inclusive(content);
+    let mut results = Vec::new();
+    let find_count = split_lines_inclusive(find).len();
+
+    if find_count == 0 {
+        return results;
+    }
+
+    for start in 0..=lines.len().saturating_sub(find_count) {
+        let block = lines[start..start + find_count].concat();
+        if remove_indentation(&block) == normalized_find {
+            results.push(block);
+        }
+    }
+
+    results
+}
+
+fn escape_normalized_replacer(content: &str, find: &str) -> Vec<String> {
+    let unescaped_find = unescape_string(find);
+    let mut results = Vec::new();
+
+    if content.contains(&unescaped_find) {
+        results.push(unescaped_find.clone());
+    }
+
+    let lines = split_lines_inclusive(content);
+    let find_lines = split_lines_inclusive(&unescaped_find);
+    if find_lines.len() > 1 {
+        for start in 0..=lines.len().saturating_sub(find_lines.len()) {
+            let block = lines[start..start + find_lines.len()].concat();
+            if unescape_string(&block) == unescaped_find {
+                results.push(block);
+            }
+        }
+    }
+
+    results
+}
+
+fn trimmed_boundary_replacer(content: &str, find: &str) -> Vec<String> {
+    let trimmed_find = find.trim();
+    if trimmed_find == find {
+        return Vec::new();
+    }
+
+    let mut results = Vec::new();
+    if content.contains(trimmed_find) {
+        results.push(trimmed_find.to_string());
+    }
+
+    let lines = split_lines_inclusive(content);
+    let find_count = split_lines_inclusive(find).len();
+    if find_count == 0 {
+        return results;
+    }
+
+    for start in 0..=lines.len().saturating_sub(find_count) {
+        let block = lines[start..start + find_count].concat();
+        if block.trim() == trimmed_find {
+            results.push(block);
+        }
+    }
+
+    results
+}
+
+fn context_aware_replacer(content: &str, find: &str) -> Vec<String> {
+    let mut search_lines = split_lines_inclusive(find);
+    if search_lines.len() < 3 {
+        return Vec::new();
+    }
+    if search_lines
+        .last()
+        .map(|line| trim_newline(line).is_empty())
+        == Some(true)
+    {
+        search_lines.pop();
+    }
+    if search_lines.len() < 3 {
+        return Vec::new();
+    }
+
+    let content_lines = split_lines_inclusive(content);
+    let find_trimmed: Vec<String> = search_lines.iter().map(|line| trim_line(line)).collect();
+    let first = &find_trimmed[0];
+    let last = &find_trimmed[find_trimmed.len() - 1];
+    let mut results = Vec::new();
+
+    for start in 0..content_lines.len() {
+        if trim_line(content_lines[start]) != *first {
+            continue;
+        }
+        for end in start + 2..content_lines.len() {
+            if trim_line(content_lines[end]) != *last {
+                continue;
+            }
+            let block_lines = &content_lines[start..=end];
+            if block_lines.len() != search_lines.len() {
+                continue;
+            }
+
+            let mut matching = 0;
+            let mut total = 0;
+            for i in 1..block_lines.len() - 1 {
+                let block_line = trim_line(block_lines[i]);
+                let find_line = find_trimmed[i].clone();
+                if !block_line.is_empty() || !find_line.is_empty() {
+                    total += 1;
+                    if block_line == find_line {
+                        matching += 1;
+                    }
+                }
+            }
+
+            if total == 0 || matching * 2 >= total {
+                results.push(block_lines.concat());
+                break;
+            }
+        }
+    }
+
+    results
+}
+
+fn multi_occurrence_replacer(content: &str, find: &str) -> Vec<String> {
+    let mut results = Vec::new();
+    let mut offset = 0;
+    while let Some(index) = content[offset..].find(find) {
+        results.push(find.to_string());
+        offset += index + find.len();
+    }
+    results
 }
 
 fn extract_patch_file_path(patch: &diffy::Patch<'_, str>) -> Result<String> {
@@ -594,13 +1069,6 @@ fn extract_patch_file_path(patch: &diffy::Patch<'_, str>) -> Result<String> {
     }
 
     Ok(file_path.to_string())
-}
-
-fn split_lines_inclusive(text: &str) -> Vec<&str> {
-    if text.is_empty() {
-        return Vec::new();
-    }
-    text.split_inclusive('\n').collect()
 }
 
 fn apply_patch_contents(contents: &str, patch: &diffy::Patch<'_, str>) -> Result<String> {
@@ -1447,6 +1915,27 @@ mod tests {
         let original = "hello\nworld\n";
         let updated = apply_patch_contents(original, &patch).expect("patch apply failed");
         assert_eq!(updated, "world\n");
+    }
+
+    #[test]
+    fn apply_edit_contents_line_trimmed_match() {
+        let original = "  hello \n  world \n";
+        let updated = apply_edit_contents(original, "hello\nworld\n", "hi\n", false)
+            .expect("edit apply failed");
+        assert_eq!(updated, "hi\n");
+    }
+
+    #[test]
+    fn apply_edit_contents_indentation_flexible_match() {
+        let original = "    fn main() {\n        println!(\"hi\");\n    }\n";
+        let updated = apply_edit_contents(
+            original,
+            "fn main() {\n    println!(\"hi\");\n}\n",
+            "fn main() {\n    println!(\"hello\");\n}\n",
+            false,
+        )
+        .expect("edit apply failed");
+        assert_eq!(updated, "fn main() {\n    println!(\"hello\");\n}\n");
     }
 
     #[test]
