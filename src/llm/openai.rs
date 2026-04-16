@@ -289,7 +289,7 @@ fn build_openai_request(
         .map(message_text_with_file_references)
         .next();
 
-    let has_context_summary = context_summary.is_some();
+    let _has_context_summary = context_summary.is_some();
 
     // Build combined system prompt: model.system_prompt + context summary
     // This ensures there is only one system message at the beginning, as required by
