@@ -1,5 +1,5 @@
 use crate::{
-    markdown_render::render_markdown_text_with_width_and_cwd,
+    markdown_render::{WrapOptions, render_markdown_text_with_width_and_cwd, word_wrap_line},
     session::{Message, MessageAttachment, MessageRole, ToolCall},
     theme::ThemePalette,
     tooling::canonical_tool_name,
@@ -1131,20 +1131,40 @@ impl App {
         } else {
             palette.text
         };
+        let prefix_style = Style::default().fg(if is_error {
+            palette.error
+        } else {
+            palette.accent_soft
+        });
 
         let total_output_lines = output.lines().count();
+        let wrap_width = body_width.saturating_sub(2);
         
         for line in output.lines().take(max_lines) {
-            lines.push(line_with_prefix(
-                prefix,
-                &shorten_single_line(line, body_width.saturating_sub(2)),
-                Style::default().fg(if is_error {
-                    palette.error
-                } else {
-                    palette.accent_soft
-                }),
-                Style::default().fg(fg),
-            ));
+            if is_expanded {
+                let owned_line = Line::from(line.to_string());
+                let wrapped = word_wrap_line(
+                    &owned_line,
+                    WrapOptions::new(wrap_width).break_words(true),
+                );
+                for (wrap_idx, wrapped_line) in wrapped.iter().enumerate() {
+                    let effective_prefix = if wrap_idx == 0 { prefix } else { " " };
+                    let mut spans = vec![
+                        Span::styled(format!("{} ", effective_prefix), prefix_style),
+                    ];
+                    spans.extend(wrapped_line.spans.iter().map(|span| {
+                        Span::styled(span.content.to_string(), Style::default().fg(fg))
+                    }));
+                    lines.push(Line::from(spans));
+                }
+            } else {
+                lines.push(line_with_prefix(
+                    prefix,
+                    &shorten_single_line(line, wrap_width),
+                    prefix_style,
+                    Style::default().fg(fg),
+                ));
+            }
         }
 
         if total_output_lines > max_lines {

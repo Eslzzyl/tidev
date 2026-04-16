@@ -18,7 +18,7 @@ pub use highlight::set_syntax_theme_by_name;
 pub use line::is_blank_line_spaces_only;
 use line::push_owned_lines;
 use wrap::{RtOptions, adaptive_wrap_line};
-pub use wrap::{RtOptions as WrapOptions, adaptive_wrap_lines};
+pub use wrap::{RtOptions as WrapOptions, adaptive_wrap_lines, word_wrap_line};
 
 pub use links::is_local_path_like_link;
 
