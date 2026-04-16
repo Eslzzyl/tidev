@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use grep::{
     regex::RegexMatcherBuilder,
     searcher::{SearcherBuilder, sinks},
@@ -208,6 +208,12 @@ tool_args! {
 }
 
 tool_args! {
+    pub struct ApplyPatchArgs {
+        patch_text: string("The full patch text that describes all changes to be made"),
+    }
+}
+
+tool_args! {
     pub struct ListArgs {
         path: optional_string("Directory path relative to the workspace root"),
     }
@@ -324,6 +330,11 @@ pub(super) fn tool_definitions(skill_description: String) -> Vec<ToolDefinition>
         ToolDefinition::new::<EditArgs>(
             "edit",
             "Edit a file by replacing text inside it",
+            ToolPermission::Edit,
+        ),
+        ToolDefinition::new::<ApplyPatchArgs>(
+            "apply_patch",
+            "Apply a unified diff patch to a file inside the workspace",
             ToolPermission::Edit,
         ),
         ToolDefinition::new::<ListArgs>(
@@ -548,7 +559,7 @@ fn apply_edit_contents(
     replace_all: bool,
 ) -> Result<String> {
     if old_text.is_empty() {
-        bail!("old_text cannot be empty");
+        return Ok(new_text.to_string());
     }
 
     let matches = contents.match_indices(old_text).count();
@@ -564,6 +575,79 @@ fn apply_edit_contents(
     } else {
         contents.replacen(old_text, new_text, 1)
     })
+}
+
+fn extract_patch_file_path(patch: &diffy::Patch<'_, str>) -> Result<String> {
+    let file_path = patch
+        .modified()
+        .or_else(|| patch.original())
+        .ok_or_else(|| anyhow!("patch is missing file path header"))?
+        .trim();
+
+    let file_path = file_path
+        .strip_prefix("a/")
+        .or_else(|| file_path.strip_prefix("b/"))
+        .unwrap_or(file_path);
+
+    if file_path.is_empty() {
+        bail!("patch file path is empty");
+    }
+
+    Ok(file_path.to_string())
+}
+
+fn split_lines_inclusive(text: &str) -> Vec<&str> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+    text.split_inclusive('\n').collect()
+}
+
+fn apply_patch_contents(contents: &str, patch: &diffy::Patch<'_, str>) -> Result<String> {
+    let line_fragments = split_lines_inclusive(contents);
+    let mut result = String::new();
+    let mut cursor = 0usize;
+
+    for hunk in patch.hunks() {
+        let old_start = hunk.old_range().start();
+        let old_len = hunk.old_range().len();
+        let old_index = old_start.saturating_sub(1);
+
+        if old_index > line_fragments.len() {
+            bail!("patch hunk refers to a line outside the file");
+        }
+
+        result.push_str(&line_fragments[cursor..old_index].concat());
+
+        let mut source_index = old_index;
+        for line in hunk.lines() {
+            match line {
+                diffy::Line::Context(text) => {
+                    if source_index >= line_fragments.len() || line_fragments[source_index] != *text
+                    {
+                        bail!("patch context does not match file contents");
+                    }
+                    result.push_str(text);
+                    source_index += 1;
+                }
+                diffy::Line::Delete(text) => {
+                    if source_index >= line_fragments.len() || line_fragments[source_index] != *text
+                    {
+                        bail!("patch delete hunk does not match file contents");
+                    }
+                    source_index += 1;
+                }
+                diffy::Line::Insert(text) => {
+                    result.push_str(text);
+                }
+            }
+        }
+
+        cursor = old_index + old_len;
+    }
+
+    result.push_str(&line_fragments[cursor..].concat());
+    Ok(result)
 }
 
 fn read_existing_text(path: &Path) -> Result<String> {
@@ -1137,6 +1221,39 @@ pub(super) fn execute_tool_call(
                 "Edited",
             ))
         }
+        Some("apply_patch") => {
+            let args = parse_arguments::<ApplyPatchArgs>(&call.name, arguments)?;
+            let patch = diffy::Patch::from_str(&args.patch_text)
+                .with_context(|| format!("failed to parse patch for tool '{}'", call.name))?;
+            let file_path = extract_patch_file_path(&patch)
+                .with_context(|| format!("failed to determine file path from patch"))?;
+            let absolute_path = resolve_workspace_path(workspace_root, Path::new(&file_path))?;
+            let old_content = read_existing_text(&absolute_path)?;
+            let updated = apply_patch_contents(&old_content, &patch)?;
+
+            if updated.is_empty() {
+                if absolute_path.exists() {
+                    fs::remove_file(&absolute_path)
+                        .with_context(|| format!("failed to remove {}", absolute_path.display()))?;
+                }
+            } else {
+                if let Some(parent) = absolute_path.parent() {
+                    fs::create_dir_all(parent).with_context(|| {
+                        format!("failed to create directory {}", parent.display())
+                    })?;
+                }
+                fs::write(&absolute_path, &updated)
+                    .with_context(|| format!("failed to write {}", absolute_path.display()))?;
+            }
+
+            Ok(file_change_output(
+                workspace_root,
+                &absolute_path,
+                &old_content,
+                &updated,
+                "Patched",
+            ))
+        }
         Some("list") => {
             let args = parse_arguments::<ListArgs>(&call.name, arguments)?;
             let path = args.path.unwrap_or_else(|| ".".to_string());
@@ -1298,5 +1415,45 @@ mod tests {
 
         fs::remove_file(&path).expect("failed to remove temp file");
         fs::remove_dir(&root).expect("failed to remove temp dir");
+    }
+
+    #[test]
+    fn apply_patch_contents_creates_new_file_content() {
+        let patch = diffy::Patch::from_str(
+            "--- /dev/null\n+++ b/foo.txt\n@@ -0,0 +1,2 @@\n+hello\n+world\n",
+        )
+        .expect("failed to parse patch");
+        let updated = apply_patch_contents("", &patch).expect("patch apply failed");
+        assert_eq!(updated, "hello\nworld\n");
+    }
+
+    #[test]
+    fn apply_patch_contents_updates_existing_file() {
+        let patch = diffy::Patch::from_str(
+            "--- a/foo.txt\n+++ b/foo.txt\n@@ -1,2 +1,2 @@\n-hello\n+hi\n world\n",
+        )
+        .expect("failed to parse patch");
+        let original = "hello\nworld\n";
+        let updated = apply_patch_contents(original, &patch).expect("patch apply failed");
+        assert_eq!(updated, "hi\nworld\n");
+    }
+
+    #[test]
+    fn apply_patch_contents_deletes_only_removed_text() {
+        let patch = diffy::Patch::from_str(
+            "--- a/foo.txt\n+++ b/foo.txt\n@@ -1,2 +1,1 @@\n-hello\n world\n",
+        )
+        .expect("failed to parse patch");
+        let original = "hello\nworld\n";
+        let updated = apply_patch_contents(original, &patch).expect("patch apply failed");
+        assert_eq!(updated, "world\n");
+    }
+
+    #[test]
+    fn extract_patch_file_path_strips_a_or_b_prefix() {
+        let patch =
+            diffy::Patch::from_str("--- a/foo.txt\n+++ b/foo.txt\n@@ -1,1 +1,1 @@\n-hello\n+hi\n")
+                .expect("failed to parse patch");
+        assert_eq!(extract_patch_file_path(&patch).unwrap(), "foo.txt");
     }
 }
