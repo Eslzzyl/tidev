@@ -32,6 +32,8 @@ pub fn init_snapshot_repo(gitdir: &Path) -> Result<()> {
         .args(["init"])
         .env("GIT_DIR", gitdir)
         .env("GIT_WORK_TREE", ".")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .context("failed to run git init")?;
 
@@ -47,6 +49,8 @@ pub fn init_snapshot_repo(gitdir: &Path) -> Result<()> {
     ] {
         let status = Command::new("git")
             .args(["--git-dir", &gitdir.to_string_lossy(), "config", key, value])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .status()
             .with_context(|| format!("failed to set git config {}", key))?;
 
@@ -382,6 +386,8 @@ pub fn checkout_file(gitdir: &Path, worktree: &Path, hash: &str, file: &str) -> 
             "--",
             file,
         ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .context("failed to run git checkout")?;
 
@@ -430,6 +436,8 @@ pub fn read_tree(gitdir: &Path, hash: &str) -> Result<()> {
             "read-tree",
             hash,
         ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .context("failed to run git read-tree")?;
 
@@ -455,6 +463,8 @@ pub fn checkout_index(gitdir: &Path, worktree: &Path) -> Result<()> {
             "-a",
             "-f",
         ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .context("failed to run git checkout-index")?;
 
@@ -473,6 +483,8 @@ pub fn gc_prune(gitdir: &Path, period: &str) -> Result<()> {
             "gc",
             &format!("--prune={}", period),
         ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .context("failed to run git gc")?;
 
@@ -568,6 +580,8 @@ pub fn checkout_files(gitdir: &Path, worktree: &Path, hash: &str, files: &[&str]
 
     let status = Command::new("git")
         .args(&args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .context("failed to run git checkout")?;
 

@@ -1535,10 +1535,10 @@ impl App {
                 self.start_new_session()?;
             }
             CommandAction::Undo => {
-                self.undo_last_user_message()?;
+                self.undo_last_user_message(runtime)?;
             }
             CommandAction::Redo => {
-                self.redo_last_user_message()?;
+                self.redo_last_user_message(runtime)?;
             }
             CommandAction::Theme => {
                 self.apply_theme_command(args)?;
@@ -1758,7 +1758,7 @@ impl App {
 
         self.draft_attachments.clear();
 
-        if let Err(error) = self.capture_prompt_snapshot(user_message.id) {
+        if let Err(error) = self.capture_prompt_snapshot(user_message.id, runtime) {
             self.last_notice = Some(format!("Workspace snapshot unavailable: {error}"));
         }
 
@@ -2420,7 +2420,7 @@ impl App {
         self.pending_request = false;
         self.abort_confirmation_deadline = None;
 
-        if let Err(error) = self.finalize_snapshot_for_last_user_message_sync() {
+        if let Err(error) = self.finalize_snapshot_for_last_user_message_sync(runtime) {
             crate::log_warn!("failed to finalize snapshot: {}", error);
         }
 

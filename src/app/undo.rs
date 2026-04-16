@@ -1,4 +1,5 @@
 use anyhow::Result;
+use tokio::runtime::Runtime;
 use uuid::Uuid;
 
 use crate::{context::ContextManager, snapshot::Patch};
@@ -6,7 +7,10 @@ use crate::{context::ContextManager, snapshot::Patch};
 use super::{App, Screen};
 
 impl App {
-    pub(crate) fn finalize_snapshot_for_last_user_message_sync(&mut self) -> Result<()> {
+    pub(crate) fn finalize_snapshot_for_last_user_message_sync(
+        &mut self,
+        runtime: &Runtime,
+    ) -> Result<()> {
         let last_user_message_id = {
             let Some(last_user_message) = self.conversation.last_visible_user_message() else {
                 return Ok(());
@@ -35,8 +39,7 @@ impl App {
             return Ok(());
         };
 
-        let rt = tokio::runtime::Handle::current();
-        let patch = rt.block_on(self.snapshot.patch(&snapshot_hash))?;
+        let patch = runtime.block_on(self.snapshot.patch(&snapshot_hash))?;
 
         if !patch.files.is_empty() {
             let patch_files = serde_json::to_string(&patch.files)?;
@@ -59,7 +62,7 @@ impl App {
         Ok(())
     }
 
-    pub(crate) fn undo_last_user_message(&mut self) -> Result<()> {
+    pub(crate) fn undo_last_user_message(&mut self, runtime: &Runtime) -> Result<()> {
         if self.pending_request {
             self.abort_current_request();
         }
@@ -76,7 +79,6 @@ impl App {
             return Ok(());
         }
 
-        let rt = tokio::runtime::Handle::current();
         let mut notice = None;
 
         let redo_snapshot = if let Some(existing) = self
@@ -85,7 +87,7 @@ impl App {
         {
             existing
         } else {
-            match rt.block_on(self.snapshot.track()) {
+            match runtime.block_on(self.snapshot.track()) {
                 Ok(Some(hash)) => hash,
                 Ok(None) => String::new(),
                 Err(error) => {
@@ -99,11 +101,11 @@ impl App {
             .store
             .load_redo_snapshot(self.conversation.session_id)?
         {
-            rt.block_on(self.snapshot.restore(&existing_snapshot))?;
+            runtime.block_on(self.snapshot.restore(&existing_snapshot))?;
         }
 
         if !patches.is_empty() {
-            if let Err(error) = rt.block_on(self.snapshot.revert(&patches)) {
+            if let Err(error) = runtime.block_on(self.snapshot.revert(&patches)) {
                 notice = Some(format!("Undo partially failed: {error}"));
             }
         }
@@ -125,7 +127,7 @@ impl App {
         Ok(())
     }
 
-    pub(crate) fn redo_last_user_message(&mut self) -> Result<()> {
+    pub(crate) fn redo_last_user_message(&mut self, runtime: &Runtime) -> Result<()> {
         if self.pending_request {
             self.abort_current_request();
         }
@@ -146,10 +148,9 @@ impl App {
             return Ok(());
         };
 
-        let rt = tokio::runtime::Handle::current();
         let mut notice = None;
 
-        if let Err(error) = rt.block_on(self.snapshot.restore(&redo_snapshot)) {
+        if let Err(error) = runtime.block_on(self.snapshot.restore(&redo_snapshot)) {
             notice = Some(format!("Redo failed: {error}"));
         }
 
@@ -162,10 +163,12 @@ impl App {
         Ok(())
     }
 
-    pub(crate) fn capture_prompt_snapshot(&mut self, message_id: Uuid) -> Result<()> {
-        let rt = tokio::runtime::Handle::current();
-
-        match rt.block_on(self.snapshot.track()) {
+    pub(crate) fn capture_prompt_snapshot(
+        &mut self,
+        message_id: Uuid,
+        runtime: &Runtime,
+    ) -> Result<()> {
+        match runtime.block_on(self.snapshot.track()) {
             Ok(Some(hash)) => {
                 self.store.update_message_snapshot(
                     self.conversation.session_id,
