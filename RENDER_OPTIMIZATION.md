@@ -172,39 +172,54 @@ enum CachedMarkdown {
 
 ---
 
-### 4. Code Highlighting Cache
+## ✅ Implemented: Code Highlighting Cache
 
-**Problem:** Syntect parsing is CPU-intensive, repeated for same code.
+**Status:** Implemented in `src/markdown_render/highlight.rs`
 
-**Solution:** Cache highlighted lines by content hash.
+### Design
 
-**Implementation:**
+Caches highlighted code lines using a combination of:
+- `blake3` hash for code content (fast, ~10GB/s throughput)
+- Theme generation counter (invalidates cache on theme change)
+- Language identifier
+
+### Implementation Details
 
 ```rust
-use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
+static HIGHLIGHT_CACHE: OnceLock<RwLock<LruCache<HighlightCacheKey, Vec<Line<'static>>>>> =
+    OnceLock::new();
+static HIGHLIGHT_CACHE_GEN: AtomicU64 = AtomicU64::new(0);
 
-static HIGHLIGHT_CACHE: Lazy<RwLock<LruCache<u64, Vec<Line<'static>>>>> = 
-    Lazy::new(|| RwLock::new(LruCache::new(NonZeroUsize::new(100).unwrap())));
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+struct HighlightCacheKey {
+    theme_gen: u64,       // Incremented on theme change
+    lang: String,         // Language identifier
+    code_hash: [u8; 32],  // blake3 hash of code content
+}
 
-fn highlight_code_to_lines_cached(code: &str, lang: &str) -> Vec<Line<'static>> {
-    let hash = compute_content_hash(code, lang);
-    if let Some(cached) = HIGHLIGHT_CACHE.read().get(&hash) {
-        return cached.clone();
-    }
-    let lines = highlight_code_to_lines(code, lang);
-    HIGHLIGHT_CACHE.write().put(hash, lines.clone());
-    lines
+pub(crate) fn highlight_code_to_lines(code: &str, lang: &str) -> Vec<Line<'static>> {
+    // 1. Check size limits (skip cache for huge files)
+    // 2. Compute cache key with theme_gen + lang + code_hash
+    // 3. Return cached result if hit
+    // 4. Otherwise, highlight and store in cache
 }
 ```
 
-**Key Changes:**
-- Add global LRU cache for highlighted code
-- Use `xxhash` or `ahash` for fast hashing
-- Limit cache size (e.g., 100 blocks)
+### Key Features
 
-**Complexity:** Low  
-**Expected Impact:** Significant for code-heavy conversations
+1. **LRU eviction**: Uses `lru` crate with 100 entry limit
+2. **Theme invalidation**: `set_syntax_theme()` increments `HIGHLIGHT_CACHE_GEN`
+3. **Fast hashing**: `blake3` for code content (already in dependencies)
+4. **Thread-safe**: `RwLock` protects cache access
+5. **Size bypass**: Large code (>512KB or >10,000 lines) skips highlighting entirely
+
+### Performance Characteristics
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| Same code rendered twice | Parse twice | Parse once, cache hit |
+| Theme change | Re-parse all | Cache invalidated by gen counter |
+| 100+ code blocks | Parse each time | LRU keeps hot blocks cached |
 
 ---
 
@@ -246,7 +261,7 @@ fn render_all_messages(&self, messages: &[Message], width: usize) -> Vec<Line<'s
 | Priority | Optimization | Status | Rationale |
 |----------|--------------|--------|-----------|
 | 1 | Viewport Virtualization | ✅ Done | High impact for long conversations |
-| 2 | Code Highlighting Cache | Pending | Low effort, high impact, isolated change |
+| 2 | Code Highlighting Cache | ✅ Done | Low effort, high impact, isolated change |
 | 3 | Markdown AST Caching | Pending | Mitigates resize penalty |
 | 4 | Parallel Rendering | Pending | Good ROI, but needs profiling |
 | 5 | Incremental Rendering | Pending | Highest complexity, save for later |

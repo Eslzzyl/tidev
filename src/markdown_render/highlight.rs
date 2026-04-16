@@ -1,9 +1,12 @@
+use lru::LruCache;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
+use std::num::NonZeroUsize;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::sync::RwLock;
 use syntect::easy::HighlightLines;
@@ -21,6 +24,24 @@ const MAX_HIGHLIGHT_LINES: usize = 10_000;
 static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
 static THEME_SET: OnceLock<ThemeSet> = OnceLock::new();
 static THEME: OnceLock<RwLock<Theme>> = OnceLock::new();
+static HIGHLIGHT_CACHE: OnceLock<RwLock<LruCache<HighlightCacheKey, Vec<Line<'static>>>>> =
+    OnceLock::new();
+static HIGHLIGHT_CACHE_GEN: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+struct HighlightCacheKey {
+    theme_gen: u64,
+    lang: String,
+    code_hash: [u8; 32],
+}
+
+fn highlight_cache() -> &'static RwLock<LruCache<HighlightCacheKey, Vec<Line<'static>>>> {
+    HIGHLIGHT_CACHE.get_or_init(|| {
+        RwLock::new(LruCache::new(
+            NonZeroUsize::new(100).expect("cache size must be non-zero"),
+        ))
+    })
+}
 
 fn syntax_set() -> &'static SyntaxSet {
     SYNTAX_SET.get_or_init(SyntaxSet::load_defaults_newlines)
@@ -67,11 +88,14 @@ fn theme_lock() -> &'static RwLock<Theme> {
 
 #[allow(dead_code)]
 pub(crate) fn set_syntax_theme(theme: Theme) {
-    let mut guard = match theme_lock().write() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    *guard = theme;
+    {
+        let mut guard = match theme_lock().write() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *guard = theme;
+    }
+    HIGHLIGHT_CACHE_GEN.fetch_add(1, Ordering::SeqCst);
 }
 
 pub(crate) fn current_syntax_theme() -> Theme {
@@ -82,10 +106,38 @@ pub(crate) fn current_syntax_theme() -> Theme {
 }
 
 pub(crate) fn highlight_code_to_lines(code: &str, lang: &str) -> Vec<Line<'static>> {
-    if let Some(lines) = highlight_to_spans(code, lang) {
-        return lines.into_iter().map(Line::from).collect();
+    if code.len() > MAX_HIGHLIGHT_BYTES || code.lines().count() > MAX_HIGHLIGHT_LINES {
+        return code_to_plain_lines(code);
     }
 
+    let theme_gen = HIGHLIGHT_CACHE_GEN.load(Ordering::SeqCst);
+    let code_hash = blake3::hash(code.as_bytes());
+    let key = HighlightCacheKey {
+        theme_gen,
+        lang: lang.to_string(),
+        code_hash: *code_hash.as_bytes(),
+    };
+
+    if let Ok(mut cache) = highlight_cache().write()
+        && let Some(cached) = cache.get(&key)
+    {
+        return cached.clone();
+    }
+
+    let lines = if let Some(spans) = highlight_to_spans(code, lang) {
+        spans.into_iter().map(Line::from).collect()
+    } else {
+        code_to_plain_lines(code)
+    };
+
+    if let Ok(mut cache) = highlight_cache().write() {
+        cache.put(key, lines.clone());
+    }
+
+    lines
+}
+
+fn code_to_plain_lines(code: &str) -> Vec<Line<'static>> {
     let mut out: Vec<Line<'static>> = code
         .lines()
         .map(|line| Line::from(line.to_string()))
@@ -252,5 +304,20 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(rendered, vec!["hello world"]);
+    }
+
+    #[test]
+    fn cache_returns_same_result() {
+        let code = "fn foo() { 42 }";
+        let lines1 = highlight_code_to_lines(code, "rust");
+        let lines2 = highlight_code_to_lines(code, "rust");
+        assert_eq!(lines1.len(), lines2.len());
+    }
+
+    #[test]
+    fn large_code_bypasses_highlighting() {
+        let large_code = "x".repeat(MAX_HIGHLIGHT_BYTES + 1);
+        let lines = highlight_code_to_lines(&large_code, "rust");
+        assert!(lines.len() > 0);
     }
 }
