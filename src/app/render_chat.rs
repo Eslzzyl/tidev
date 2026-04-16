@@ -810,12 +810,21 @@ impl App {
                     if total_lines == 0 {
                         " → empty".to_string()
                     } else {
-                        format!(" → {} lines", total_lines)
+                        let truncated = self.tool_output_is_truncated(output);
+                        let mut suffix = format!(" → {} lines", total_lines);
+                        if truncated {
+                            suffix.push_str(" (truncated)");
+                        }
+                        suffix
                     }
                 }
             }
             _ => String::new(),
         }
+    }
+
+    fn tool_output_is_truncated(&self, output: &str) -> bool {
+        output.contains("Use offset=") || output.contains("(Output capped at")
     }
 
     fn render_tool_result_detail_lines(
