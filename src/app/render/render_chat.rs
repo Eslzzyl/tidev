@@ -551,7 +551,7 @@ impl App {
         }
 
         if message.streaming && matches!(message.role, MessageRole::Assistant) {
-            for line in message.content.lines() {
+            for line in message.content.lines().skip_while(|line| line.is_empty()) {
                 lines.push(Line::from(line.to_string()));
             }
         } else if !message.content.is_empty() {
