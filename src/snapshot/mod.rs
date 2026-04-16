@@ -2,7 +2,7 @@ mod git;
 
 use anyhow::{Context, Result};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -10,12 +10,25 @@ use tokio::sync::Mutex;
 
 use crate::config::ConfigPaths;
 
+const BATCH_SIZE: usize = 100;
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Patch {
     pub hash: String,
     pub files: Vec<String>,
 }
 
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct FileDiff {
+    pub file: String,
+    pub patch: String,
+    pub additions: usize,
+    pub deletions: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+}
+
+#[derive(Clone)]
 pub struct SnapshotService {
     worktree: PathBuf,
     gitdir: PathBuf,
@@ -55,14 +68,18 @@ impl SnapshotService {
             git::init_snapshot_repo(&self.gitdir)?;
         }
         
-        git::sync_exclude(&self.gitdir, &self.worktree, &[])?;
-        
         let all_files = git::find_changed_files(&self.gitdir, &self.worktree)?;
         if all_files.is_empty() {
             return Ok(None);
         }
         
         let ignored = git::check_ignored(&self.worktree, &all_files)?;
+        
+        if !ignored.is_empty() {
+            let ignored_files: Vec<_> = ignored.iter().cloned().collect();
+            git::drop_files(&self.gitdir, &self.worktree, &ignored_files)?;
+        }
+        
         let allowed: Vec<_> = all_files.iter()
             .filter(|f| !ignored.contains(*f))
             .cloned()
@@ -82,6 +99,8 @@ impl SnapshotService {
         
         if !large_files.is_empty() {
             git::sync_exclude(&self.gitdir, &self.worktree, &large_files)?;
+        } else {
+            git::sync_exclude(&self.gitdir, &self.worktree, &[])?;
         }
         
         git::stage_files(&self.gitdir, &self.worktree, &to_stage)?;
@@ -94,11 +113,7 @@ impl SnapshotService {
     pub async fn patch(&self, hash: &str) -> Result<Patch> {
         let _guard = self.lock.lock().await;
         
-        let all_files = git::find_changed_files(&self.gitdir, &self.worktree)?;
-        if !all_files.is_empty() {
-            git::sync_exclude(&self.gitdir, &self.worktree, &[])?;
-            git::stage_files(&self.gitdir, &self.worktree, &all_files)?;
-        }
+        self.update_index()?;
         
         let changed = git::diff_cached_names(&self.gitdir, &self.worktree, hash)?;
         
@@ -137,14 +152,38 @@ impl SnapshotService {
             }
         }
         
-        for (hash, file, rel) in ops {
-            self.revert_single(&hash, &file, &rel).await?;
+        let mut i = 0;
+        while i < ops.len() {
+            let first = &ops[i];
+            let mut batch_indices = vec![i];
+            let mut j = i + 1;
+            
+            while j < ops.len() && batch_indices.len() < BATCH_SIZE {
+                let next = &ops[j];
+                if next.0 != first.0 {
+                    break;
+                }
+                if batch_indices.iter().any(|&idx| clash(&ops[idx].2, &next.2)) {
+                    break;
+                }
+                batch_indices.push(j);
+                j += 1;
+            }
+            
+            if batch_indices.len() == 1 {
+                self.revert_single(&first.0, &first.1, &first.2)?;
+            } else {
+                let batch: Vec<_> = batch_indices.iter().map(|&idx| &ops[idx]).collect();
+                self.revert_batch(&batch)?;
+            }
+            
+            i = j;
         }
         
         Ok(())
     }
 
-    async fn revert_single(&self, hash: &str, file: &str, rel: &str) -> Result<()> {
+    fn revert_single(&self, hash: &str, file: &str, rel: &str) -> Result<()> {
         match git::checkout_file(&self.gitdir, &self.worktree, hash, file) {
             Ok(()) => return Ok(()),
             Err(_) => {
@@ -153,18 +192,57 @@ impl SnapshotService {
                         return Ok(());
                     }
                     None => {
-                        let path = Path::new(file);
-                        if path.exists() {
-                            if path.is_dir() {
-                                std::fs::remove_dir_all(path)
-                                    .with_context(|| format!("failed to remove directory {}", file))?;
-                            } else {
-                                std::fs::remove_file(path)
-                                    .with_context(|| format!("failed to remove file {}", file))?;
-                            }
-                        }
+                        self.remove_path(file)?;
                     }
                 }
+            }
+        }
+        Ok(())
+    }
+
+    fn revert_batch(&self, batch: &[&(String, String, String)]) -> Result<()> {
+        let hash = &batch[0].0;
+        let rels: Vec<&str> = batch.iter().map(|op| op.2.as_str()).collect();
+        
+        let tree_output = git::ls_tree_names(&self.gitdir, hash, &rels)?;
+        let have: HashSet<&str> = tree_output.lines()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+        
+        let to_checkout: Vec<&str> = batch.iter()
+            .filter(|op| have.contains(op.2.as_str()))
+            .map(|op| op.1.as_str())
+            .collect();
+        
+        if !to_checkout.is_empty() {
+            if let Err(_) = git::checkout_files(&self.gitdir, &self.worktree, hash, &to_checkout) {
+                for op in batch {
+                    if have.contains(op.2.as_str()) {
+                        self.revert_single(&op.0, &op.1, &op.2)?;
+                    }
+                }
+            }
+        }
+        
+        for op in batch {
+            if !have.contains(op.2.as_str()) {
+                self.remove_path(&op.1)?;
+            }
+        }
+        
+        Ok(())
+    }
+
+    fn remove_path(&self, file: &str) -> Result<()> {
+        let path = Path::new(file);
+        if path.exists() {
+            if path.is_dir() {
+                std::fs::remove_dir_all(path)
+                    .with_context(|| format!("failed to remove directory {}", file))?;
+            } else {
+                std::fs::remove_file(path)
+                    .with_context(|| format!("failed to remove file {}", file))?;
             }
         }
         Ok(())
@@ -194,12 +272,90 @@ impl SnapshotService {
     pub async fn diff(&self, hash: &str) -> Result<String> {
         let _guard = self.lock.lock().await;
         
-        let all_files = git::find_changed_files(&self.gitdir, &self.worktree)?;
-        if !all_files.is_empty() {
-            git::sync_exclude(&self.gitdir, &self.worktree, &[])?;
-            git::stage_files(&self.gitdir, &self.worktree, &all_files)?;
-        }
+        self.update_index()?;
         
         git::diff_cached(&self.gitdir, &self.worktree, hash)
     }
+
+    pub async fn diff_full(&self, from: &str, to: &str) -> Result<Vec<FileDiff>> {
+        let _guard = self.lock.lock().await;
+        
+        self.update_index()?;
+        
+        let statuses = git::diff_name_status(&self.gitdir, &self.worktree, from, to)?;
+        let numstat = git::diff_numstat(&self.gitdir, &self.worktree, from, to)?;
+        
+        let mut status_map: HashMap<String, String> = HashMap::new();
+        for (status, file) in &statuses {
+            let s = if status.starts_with('A') {
+                "added"
+            } else if status.starts_with('D') {
+                "deleted"
+            } else {
+                "modified"
+            };
+            status_map.insert(file.clone(), s.to_string());
+        }
+        
+        let ignored = git::check_ignored(&self.worktree, &numstat.iter().map(|(_, _, f)| f.clone()).collect::<Vec<_>>())?;
+        
+        let mut result: Vec<FileDiff> = Vec::new();
+        
+        for (adds, dels, file) in &numstat {
+            if ignored.contains(file) {
+                continue;
+            }
+            
+            let binary = adds == "-" && dels == "-";
+            let additions = if binary { 0 } else { adds.parse().unwrap_or(0) };
+            let deletions = if binary { 0 } else { dels.parse().unwrap_or(0) };
+            
+            let patch = if binary {
+                String::new()
+            } else {
+                git::diff_file(&self.gitdir, &self.worktree, from, to, file)?
+            };
+            
+            result.push(FileDiff {
+                file: file.clone(),
+                patch,
+                additions,
+                deletions,
+                status: status_map.get(file).cloned(),
+            });
+        }
+        
+        Ok(result)
+    }
+
+    fn update_index(&self) -> Result<()> {
+        let all_files = git::find_changed_files(&self.gitdir, &self.worktree)?;
+        if all_files.is_empty() {
+            return Ok(());
+        }
+        
+        let ignored = git::check_ignored(&self.worktree, &all_files)?;
+        
+        if !ignored.is_empty() {
+            let ignored_files: Vec<_> = ignored.iter().cloned().collect();
+            git::drop_files(&self.gitdir, &self.worktree, &ignored_files)?;
+        }
+        
+        git::sync_exclude(&self.gitdir, &self.worktree, &[])?;
+        
+        let allowed: Vec<_> = all_files.iter()
+            .filter(|f| !ignored.contains(*f))
+            .cloned()
+            .collect();
+        
+        if !allowed.is_empty() {
+            git::stage_files(&self.gitdir, &self.worktree, &allowed)?;
+        }
+        
+        Ok(())
+    }
+}
+
+fn clash(a: &str, b: &str) -> bool {
+    a == b || a.starts_with(&format!("{}/", b)) || b.starts_with(&format!("{}/", a))
 }

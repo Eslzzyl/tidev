@@ -22,6 +22,7 @@ use std::{
     env, io,
     path::{Path, PathBuf},
     sync::atomic::Ordering,
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{
@@ -269,6 +270,7 @@ struct App {
     loading_frame: usize,
     context_usage: Option<(u32, u32, u32)>,
     snapshot: SnapshotService,
+    cleanup_cancel: Arc<std::sync::atomic::AtomicBool>,
 }
 
 pub fn run() -> Result<()> {
@@ -319,6 +321,7 @@ impl App {
         let retrying_hint = None;
         
         let snapshot = SnapshotService::new(&workspace_root, &paths)?;
+        let cleanup_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         let app = Self {
             should_quit: false,
@@ -377,6 +380,7 @@ impl App {
             loading_frame: 0,
             context_usage: None,
             snapshot,
+            cleanup_cancel,
         };
 
         app.at_mention
@@ -391,6 +395,22 @@ impl App {
         let backend = CrosstermBackend::new(io::stdout());
         let mut terminal = Terminal::new(backend).context("failed to create terminal")?;
         terminal.clear().context("failed to clear terminal")?;
+
+        let snapshot = self.snapshot.clone();
+        let cleanup_cancel = self.cleanup_cancel.clone();
+        
+        runtime.spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+            loop {
+                if cleanup_cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                    break;
+                }
+                if let Err(e) = snapshot.cleanup().await {
+                    crate::log_warn!("snapshot cleanup failed: {}", e);
+                }
+                tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+            }
+        });
 
         loop {
             self.process_backend_events(runtime)?;
@@ -413,6 +433,7 @@ impl App {
             }
         }
 
+        self.cleanup_cancel.store(true, std::sync::atomic::Ordering::SeqCst);
         terminal.show_cursor().ok();
         Ok(())
     }

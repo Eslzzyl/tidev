@@ -482,3 +482,223 @@ pub fn gc_prune(gitdir: &Path, period: &str) -> Result<()> {
 
     Ok(())
 }
+
+pub fn drop_files(gitdir: &Path, worktree: &Path, files: &[String]) -> Result<()> {
+    if files.is_empty() {
+        return Ok(());
+    }
+
+    let input = files.join("\0") + "\0";
+
+    let mut child = Command::new("git")
+        .args([
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.longpaths=true",
+            "-c",
+            "core.symlinks=true",
+            "--git-dir",
+            &gitdir.to_string_lossy(),
+            "--work-tree",
+            &worktree.to_string_lossy(),
+            "rm",
+            "--cached",
+            "-f",
+            "--ignore-unmatch",
+            "--pathspec-from-file=-",
+            "--pathspec-file-nul",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("failed to spawn git rm")?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        stdin
+            .write_all(input.as_bytes())
+            .context("failed to write to git rm stdin")?;
+    }
+
+    let _ = child.wait().context("failed to wait for git rm")?;
+
+    Ok(())
+}
+
+pub fn ls_tree_names(gitdir: &Path, hash: &str, rels: &[&str]) -> Result<String> {
+    let mut args: Vec<OsString> = vec![
+        OsString::from("-c"),
+        OsString::from("core.longpaths=true"),
+        OsString::from("-c"),
+        OsString::from("core.symlinks=true"),
+        OsString::from("--git-dir"),
+        OsString::from(gitdir.to_string_lossy().to_string()),
+        OsString::from("ls-tree"),
+        OsString::from("--name-only"),
+        OsString::from(hash),
+        OsString::from("--"),
+    ];
+    args.extend(rels.iter().map(|r| OsString::from(*r)));
+
+    let output = Command::new("git")
+        .args(&args)
+        .output()
+        .context("failed to run git ls-tree")?;
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+pub fn checkout_files(gitdir: &Path, worktree: &Path, hash: &str, files: &[&str]) -> Result<()> {
+    let mut args: Vec<OsString> = vec![
+        OsString::from("-c"),
+        OsString::from("core.longpaths=true"),
+        OsString::from("-c"),
+        OsString::from("core.symlinks=true"),
+        OsString::from("--git-dir"),
+        OsString::from(gitdir.to_string_lossy().to_string()),
+        OsString::from("--work-tree"),
+        OsString::from(worktree.to_string_lossy().to_string()),
+        OsString::from("checkout"),
+        OsString::from(hash),
+        OsString::from("--"),
+    ];
+    args.extend(files.iter().map(|f| OsString::from(*f)));
+
+    let status = Command::new("git")
+        .args(&args)
+        .status()
+        .context("failed to run git checkout")?;
+
+    if !status.success() {
+        bail!("git checkout failed");
+    }
+
+    Ok(())
+}
+
+pub fn diff_name_status(
+    gitdir: &Path,
+    worktree: &Path,
+    from: &str,
+    to: &str,
+) -> Result<Vec<(String, String)>> {
+    let output = Command::new("git")
+        .args([
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.longpaths=true",
+            "-c",
+            "core.symlinks=true",
+            "-c",
+            "core.quotepath=false",
+            "--git-dir",
+            &gitdir.to_string_lossy(),
+            "--work-tree",
+            &worktree.to_string_lossy(),
+            "diff",
+            "--no-ext-diff",
+            "--name-status",
+            "--no-renames",
+            from,
+            to,
+            "--",
+            ".",
+        ])
+        .output()
+        .context("failed to run git diff --name-status")?;
+
+    let mut result = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() >= 2 {
+            result.push((parts[0].to_string(), parts[1].to_string()));
+        }
+    }
+
+    Ok(result)
+}
+
+pub fn diff_numstat(
+    gitdir: &Path,
+    worktree: &Path,
+    from: &str,
+    to: &str,
+) -> Result<Vec<(String, String, String)>> {
+    let output = Command::new("git")
+        .args([
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.longpaths=true",
+            "-c",
+            "core.symlinks=true",
+            "-c",
+            "core.quotepath=false",
+            "--git-dir",
+            &gitdir.to_string_lossy(),
+            "--work-tree",
+            &worktree.to_string_lossy(),
+            "diff",
+            "--no-ext-diff",
+            "--no-renames",
+            "--numstat",
+            from,
+            to,
+            "--",
+            ".",
+        ])
+        .output()
+        .context("failed to run git diff --numstat")?;
+
+    let mut result = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() >= 3 {
+            result.push((
+                parts[0].to_string(),
+                parts[1].to_string(),
+                parts[2].to_string(),
+            ));
+        }
+    }
+
+    Ok(result)
+}
+
+pub fn diff_file(
+    gitdir: &Path,
+    worktree: &Path,
+    from: &str,
+    to: &str,
+    file: &str,
+) -> Result<String> {
+    let output = Command::new("git")
+        .args([
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.longpaths=true",
+            "-c",
+            "core.symlinks=true",
+            "-c",
+            "core.quotepath=false",
+            "--git-dir",
+            &gitdir.to_string_lossy(),
+            "--work-tree",
+            &worktree.to_string_lossy(),
+            "diff",
+            "--no-ext-diff",
+            "--no-renames",
+            from,
+            to,
+            "--",
+            file,
+        ])
+        .output()
+        .context("failed to run git diff for file")?;
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
