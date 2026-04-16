@@ -322,20 +322,27 @@ impl App {
 
         let mut lines = Vec::new();
         let mut card_ranges = Vec::new();
-        
-        if self.conversation.parent_session_id.is_some() {
-            lines.push(line_with_style(
-                "SUBSESSION active — viewing a child session.",
-                palette.accent_soft,
-            ));
-            lines.push(line_with_style(
-                "Press Ctrl+X then Up arrow to return to the parent session.",
-                palette.muted,
-            ));
-            lines.push(Line::from(""));
-        }
 
+        // Header for subsessions (always visible at top)
+        let header_lines = if self.conversation.parent_session_id.is_some() {
+            vec![
+                line_with_style(
+                    "SUBSESSION active — viewing a child session.",
+                    palette.accent_soft,
+                ),
+                line_with_style(
+                    "Press Ctrl+X then Up arrow to return to the parent session.",
+                    palette.muted,
+                ),
+                Line::from(""),
+            ]
+        } else {
+            Vec::new()
+        };
+
+        // Handle empty messages case
         if messages.is_empty() {
+            lines.extend(header_lines);
             lines.extend(decorate_card_lines(
                 vec![
                     line_with_style("No messages yet.", palette.muted),
@@ -347,6 +354,76 @@ impl App {
             let total_lines = lines.len().max(1);
             return (Text::from(lines), total_lines, card_ranges);
         }
+
+        // Check if there are streaming messages (need full render)
+        let has_streaming = messages
+            .iter()
+            .any(|m| m.streaming && matches!(m.role, MessageRole::Assistant));
+
+        // Decide: virtualized render vs full render
+        //
+        // We use virtualized rendering when:
+        // - No streaming messages (streaming messages change frequently)
+        // - Messages count exceeds threshold (worth the overhead)
+        //
+        // For streaming or small conversations, fall back to full render
+        // to avoid complexity with constantly changing content.
+        const VIRTUALIZE_THRESHOLD: usize = 20;
+        let use_virtualization = !has_streaming && messages.len() > VIRTUALIZE_THRESHOLD;
+
+        if use_virtualization {
+            // Update layout index
+            self.update_message_layout_index(width, body_width);
+
+            // Calculate visible range based on scroll position
+            let scroll = self.message_scroll_offset;
+            let viewport = self.message_viewport_lines.max(1);
+
+            // Find visible blocks
+            let visible_blocks = self.find_visible_message_blocks(scroll, viewport);
+
+            // Add header lines
+            let header_line_count = header_lines.len();
+            lines.extend(header_lines);
+
+            // Render visible blocks
+            let mut current_line_offset = header_line_count;
+            for block in &visible_blocks {
+                let block_lines = self.render_message_block_to_lines(
+                    messages,
+                    block,
+                    width,
+                    body_width,
+                    &mut card_ranges,
+                    current_line_offset,
+                );
+                current_line_offset += block_lines.len();
+                lines.extend(block_lines);
+            }
+
+            // Calculate total lines from layout index
+            let total_lines = header_line_count + self.message_layout_index.borrow().total_lines;
+
+            let elapsed = started_at.elapsed();
+            if elapsed > Duration::from_millis(12) {
+                let (hits, misses, entries) = self.message_render_cache_stats();
+                crate::log_debug!(
+                    "messages_text virtualized: messages={}, visible_blocks={}, width={}, took={:?}, cache_hits={}, cache_misses={}, cache_entries={}",
+                    messages.len(),
+                    visible_blocks.len(),
+                    width,
+                    elapsed,
+                    hits,
+                    misses,
+                    entries
+                );
+            }
+
+            return (Text::from(lines), total_lines, card_ranges);
+        }
+
+        // Full render (for streaming or small conversations)
+        lines.extend(header_lines);
 
         let mut i = 0;
         while i < messages.len() {
@@ -419,10 +496,6 @@ impl App {
             i += 1;
         }
 
-        let has_streaming = messages
-            .iter()
-            .any(|m| m.streaming && matches!(m.role, MessageRole::Assistant));
-
         if lines.is_empty() && !has_streaming {
             let fallback = decorate_card_lines(
                 vec![line_with_style("(empty)", palette.muted)],
@@ -438,7 +511,7 @@ impl App {
         if elapsed > Duration::from_millis(12) {
             let (hits, misses, entries) = self.message_render_cache_stats();
             crate::log_debug!(
-                "messages_text slow: messages={}, width={}, took={:?}, cache_hits={}, cache_misses={}, cache_entries={}",
+                "messages_text full: messages={}, width={}, took={:?}, cache_hits={}, cache_misses={}, cache_entries={}",
                 messages.len(),
                 width,
                 elapsed,
@@ -1190,6 +1263,284 @@ impl App {
 
         if lines.is_empty() {
             lines.push(line_with_style("(no output)", palette.muted));
+        }
+
+        lines
+    }
+
+    /// Updates the message layout index to enable viewport virtualization.
+    ///
+    /// The layout index maintains a mapping from messages to their positions in
+    /// the rendered output. This enables O(log n) binary search to find visible
+    /// messages without rendering everything.
+    ///
+    /// The index is rebuilt when:
+    /// - Width changes (line counts become invalid)
+    /// - Messages are added/removed
+    /// - Cache is cleared
+    ///
+    /// For incremental updates, only the tail (last few messages) is rebuilt,
+    /// preserving existing block positions for unchanged messages.
+    fn update_message_layout_index(&self, width: usize, body_width: usize) {
+        let messages = self.conversation.visible_messages();
+        let mut index = self.message_layout_index.borrow_mut();
+
+        // Check if we need a full rebuild
+        let needs_full_rebuild = !index.valid
+            || index.width != width
+            || index.blocks.is_empty() && !messages.is_empty();
+
+        if needs_full_rebuild {
+            index.blocks.clear();
+            index.total_lines = 0;
+            index.width = width;
+            index.valid = true;
+
+            let mut current_line = 0;
+            let mut i = 0;
+
+            while i < messages.len() {
+                // Build block without start_line (calculated below)
+                let (message_id, message_count, line_count) =
+                    self.build_message_block_data(messages, i, width, body_width);
+
+                let block = super::MessageBlock {
+                    message_id,
+                    message_start_idx: i,
+                    message_count,
+                    start_line: current_line,
+                    line_count,
+                };
+
+                current_line += line_count;
+                i += message_count;
+                index.blocks.push(block);
+            }
+
+            index.total_lines = current_line;
+        }
+    }
+
+    /// Builds data for a single message block (without start_line).
+    ///
+    /// Returns (message_id, message_count, line_count).
+    fn build_message_block_data(
+        &self,
+        messages: &[Message],
+        start_idx: usize,
+        width: usize,
+        body_width: usize,
+    ) -> (Uuid, usize, usize) {
+        let message = &messages[start_idx];
+        let message_id = message.id;
+        let palette = self.palette();
+
+        let (message_count, line_count) = match message.role {
+            MessageRole::Assistant => {
+                // Count tool result messages that follow
+                let mut count = 1;
+                while start_idx + count < messages.len()
+                    && matches!(messages[start_idx + count].role, MessageRole::Tool)
+                {
+                    count += 1;
+                }
+
+                // Calculate lines for assistant message
+                let cards = self.cached_render_message_cards(message, body_width);
+                let mut lines = 0;
+                for (_, card_lines) in &cards {
+                    lines += decorate_card_lines(card_lines.clone(), width, palette.background).len();
+                }
+
+                // Calculate lines for tool calls with results
+                let tool_results_by_id: std::collections::HashMap<String, &Message> = {
+                    let mut map = std::collections::HashMap::new();
+                    let mut j = start_idx + 1;
+                    while j < messages.len() && matches!(messages[j].role, MessageRole::Tool) {
+                        if let Some(id) = &messages[j].tool_call_id {
+                            map.insert(id.clone(), &messages[j]);
+                        }
+                        j += 1;
+                    }
+                    map
+                };
+
+                if !message.tool_calls.is_empty() {
+                    for tool_call in &message.tool_calls {
+                        let tool_result = tool_results_by_id.get(&tool_call.id).copied();
+                        let card_lines =
+                            self.render_tool_call_with_result(tool_call, tool_result, body_width);
+                        if !card_lines.is_empty() {
+                            lines += decorate_card_lines(card_lines, width, palette.panel_light).len();
+                        }
+                    }
+                    lines += 1; // Empty line after tool calls
+                }
+
+                (count, lines)
+            }
+            MessageRole::User => {
+                let cards = self.cached_render_message_cards(message, body_width);
+                let mut lines = 0;
+                for (_, card_lines) in &cards {
+                    lines += decorate_card_lines(card_lines.clone(), width, palette.panel_alt).len();
+                }
+                lines += 1; // Empty line after user message
+                (1, lines)
+            }
+            MessageRole::System => {
+                let cards = self.cached_render_message_cards(message, body_width);
+                let mut lines = 0;
+                for (_, card_lines) in &cards {
+                    lines += decorate_card_lines(card_lines.clone(), width, palette.background).len();
+                }
+                (1, lines)
+            }
+            MessageRole::Error => {
+                let cards = self.cached_render_message_cards(message, body_width);
+                let mut lines = 0;
+                for (_, card_lines) in &cards {
+                    lines += decorate_card_lines(card_lines.clone(), width, palette.panel_light).len();
+                }
+                (1, lines)
+            }
+            MessageRole::Tool => {
+                // Tool messages are included in Assistant blocks, skip
+                (1, 0)
+            }
+        };
+
+        (message_id, message_count, line_count)
+    }
+
+    /// Finds message blocks that intersect with the visible viewport.
+    ///
+    /// Uses binary search for O(log n) complexity. Returns blocks with a
+    /// buffer zone to ensure smooth scrolling.
+    fn find_visible_message_blocks(
+        &self,
+        scroll: usize,
+        viewport_height: usize,
+    ) -> Vec<super::MessageBlock> {
+        let index = self.message_layout_index.borrow();
+
+        if index.blocks.is_empty() {
+            return Vec::new();
+        }
+
+        let visible_start = scroll.saturating_sub(5); // Buffer above
+        let visible_end = scroll + viewport_height + 5; // Buffer below
+
+        // Binary search for first block that could be visible
+        let first_visible = index.blocks.partition_point(|block| {
+            block.start_line + block.line_count <= visible_start
+        });
+
+        // Collect all visible blocks
+        let mut visible_blocks = Vec::new();
+        for block in index.blocks.iter().skip(first_visible) {
+            if block.start_line >= visible_end {
+                break;
+            }
+            visible_blocks.push(block.clone());
+        }
+
+        visible_blocks
+    }
+
+    /// Renders a single message block to lines.
+    ///
+    /// This is the actual rendering logic, extracted for reuse in virtualization.
+    fn render_message_block_to_lines(
+        &self,
+        messages: &[Message],
+        block: &super::MessageBlock,
+        width: usize,
+        body_width: usize,
+        card_ranges: &mut Vec<ToolResultCardRange>,
+        current_line_offset: usize,
+    ) -> Vec<Line<'static>> {
+        let palette = self.palette();
+        let mut lines = Vec::new();
+
+        // Skip Tool messages - they're rendered as part of Assistant blocks
+        if block.message_count == 0 {
+            return lines;
+        }
+
+        let start_idx = block.message_start_idx;
+        let message = &messages[start_idx];
+
+        match message.role {
+            MessageRole::Assistant => {
+                // Render assistant message cards
+                let assistant_cards = self.cached_render_message_cards(message, body_width);
+                for (card_bg, card_lines) in assistant_cards {
+                    if !card_lines.is_empty() {
+                        lines.extend(decorate_card_lines(card_lines, width, card_bg));
+                    }
+                }
+
+                // Collect tool results
+                let tool_results_by_id: std::collections::HashMap<String, &Message> = {
+                    let mut map = std::collections::HashMap::new();
+                    let mut j = start_idx + 1;
+                    while j < messages.len() && j < start_idx + block.message_count {
+                        if matches!(messages[j].role, MessageRole::Tool)
+                            && let Some(id) = &messages[j].tool_call_id
+                        {
+                            map.insert(id.clone(), &messages[j]);
+                        }
+                        j += 1;
+                    }
+                    map
+                };
+
+                // Render tool calls with results
+                if !message.tool_calls.is_empty() {
+                    for tool_call in &message.tool_calls {
+                        let tool_result = tool_results_by_id.get(&tool_call.id).copied();
+                        let tool_card_lines =
+                            self.render_tool_call_with_result(tool_call, tool_result, body_width);
+                        if !tool_card_lines.is_empty() {
+                            let decorated =
+                                decorate_card_lines(tool_card_lines, width, palette.panel_light);
+                            if let Some(result_msg) = tool_result {
+                                let start_line = current_line_offset + lines.len();
+                                lines.extend(decorated);
+                                let end_line = current_line_offset + lines.len();
+                                card_ranges.push(ToolResultCardRange {
+                                    message_id: result_msg.id,
+                                    start_line,
+                                    end_line,
+                                });
+                            } else {
+                                lines.extend(decorated);
+                            }
+                        }
+                    }
+                    lines.push(Line::from(""));
+                }
+            }
+            MessageRole::User | MessageRole::System | MessageRole::Error => {
+                let cards = self.cached_render_message_cards(message, body_width);
+                let bg = match message.role {
+                    MessageRole::User => palette.panel_alt,
+                    MessageRole::Error => palette.panel_light,
+                    _ => palette.background,
+                };
+                for (_, card_lines) in cards {
+                    if !card_lines.is_empty() {
+                        lines.extend(decorate_card_lines(card_lines, width, bg));
+                    }
+                }
+                if matches!(message.role, MessageRole::User) {
+                    lines.push(Line::from(""));
+                }
+            }
+            MessageRole::Tool => {
+                // Tool messages are handled within Assistant blocks
+            }
         }
 
         lines

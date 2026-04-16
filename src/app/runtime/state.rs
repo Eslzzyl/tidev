@@ -24,6 +24,53 @@ use crate::{
 
 pub(crate) const MESSAGE_RENDER_CACHE_MAX_ENTRIES: usize = 1200;
 
+/// A block in the message layout index representing a renderable unit.
+///
+/// Each block contains either:
+/// - A single User/System/Error message
+/// - An Assistant message with its associated Tool results
+///
+/// The layout index enables O(log n) lookup of visible messages via binary search,
+/// avoiding full traversal of all messages on every frame.
+#[derive(Clone, Debug)]
+pub(crate) struct MessageBlock {
+    /// ID of the primary message in this block
+    #[allow(dead_code)]
+    pub(crate) message_id: Uuid,
+    /// Starting index in the messages array
+    pub(crate) message_start_idx: usize,
+    /// Number of messages in this block (1 for User/System/Error, 1+ for Assistant+Tool group)
+    pub(crate) message_count: usize,
+    /// Starting line number in the rendered output
+    pub(crate) start_line: usize,
+    /// Total lines consumed by this block
+    pub(crate) line_count: usize,
+}
+
+/// Layout index for efficient viewport virtualization.
+///
+/// This structure maintains a mapping from messages to their positions in the
+/// rendered output, enabling:
+/// 1. Binary search to find visible messages without rendering everything
+/// 2. Incremental updates when only the last few messages change
+/// 3. Accurate scroll position calculations
+///
+/// The index is invalidated when:
+/// - Window width changes (line counts become invalid)
+/// - Messages are added/removed
+/// - Cache is cleared
+#[derive(Clone, Debug, Default)]
+pub(crate) struct MessageLayoutIndex {
+    /// Sorted list of message blocks
+    pub(crate) blocks: Vec<MessageBlock>,
+    /// Total lines across all blocks
+    pub(crate) total_lines: usize,
+    /// Width used for calculating line counts
+    pub(crate) width: usize,
+    /// Whether the index is valid and up-to-date
+    pub(crate) valid: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum MessageRenderCacheKind {
     Cards,

@@ -97,6 +97,7 @@ impl App {
             message_render_cache_tick: Cell::new(0),
             message_render_cache_hits: Cell::new(0),
             message_render_cache_misses: Cell::new(0),
+            message_layout_index: RefCell::new(MessageLayoutIndex::default()),
             message_content_area: None,
             sidebar_area: None,
             selection_clipboard_lease: None,
@@ -301,6 +302,8 @@ impl App {
     pub(crate) fn clear_message_render_cache(&self) {
         self.message_render_cache.borrow_mut().clear();
         self.message_render_cache_tick.set(0);
+        // Invalidate layout index when cache is cleared
+        self.message_layout_index.borrow_mut().valid = false;
     }
 
     pub(crate) fn invalidate_message_render_cache_for(&self, session_id: Uuid, message_id: Uuid) {

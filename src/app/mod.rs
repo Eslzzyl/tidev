@@ -197,6 +197,10 @@ struct App {
     message_render_cache_tick: Cell<u64>,
     message_render_cache_hits: Cell<u64>,
     message_render_cache_misses: Cell<u64>,
+    /// Layout index for viewport virtualization.
+    /// Enables O(log n) lookup of visible messages via binary search,
+    /// avoiding full traversal on every frame.
+    message_layout_index: RefCell<MessageLayoutIndex>,
     message_content_area: Option<Rect>,
     sidebar_area: Option<Rect>,
     selection_clipboard_lease: Option<ClipboardLease>,

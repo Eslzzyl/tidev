@@ -44,37 +44,71 @@ render_chat.rs::render_messages()
 
 ---
 
-## Optimization Proposals
+## ✅ Implemented: Viewport Virtualization
 
-### 1. Viewport Virtualization
+**Status:** Implemented in `src/app/runtime/state.rs` and `src/app/render/render_chat.rs`
 
-**Problem:** Currently renders all messages even when off-screen.
+### Design
 
-**Solution:** Only render messages within the visible viewport plus a small buffer.
-
-**Implementation:**
-
-```rust
-// In messages_text(), calculate visible range
-fn calculate_visible_message_range(
-    messages: &[Message],
-    scroll_offset: usize,
-    viewport_height: usize,
-) -> Range<usize> {
-    // Binary search to find first visible message
-    // Include buffer of 2-3 messages above/below for smooth scrolling
-}
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Layer 1: Layout Index                            │
+├─────────────────────────────────────────────────────────────────────┤
+│ MessageLayoutIndex {                                                 │
+│   blocks: Vec<MessageBlock>,   // Sorted by start_line              │
+│   total_lines: usize,                                               │
+│   width: usize,                // Width used for calculations       │
+│   valid: bool,                 // Needs rebuild?                    │
+│ }                                                                    │
+│                                                                      │
+│ MessageBlock {                                                       │
+│   message_id: Uuid,           // Primary message ID                 │
+│   message_start_idx: usize,   // Index in messages array            │
+│   message_count: usize,       // 1 for User, 1+ for Assistant+Tool  │
+│   start_line: usize,          // Starting line in rendered output   │
+│   line_count: usize,          // Lines consumed by this block       │
+│ }                                                                    │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-**Key Changes:**
-- Add `message_line_offsets: Vec<usize>` to track each message's starting line
-- Use binary search to find visible range
-- Render only visible messages
+### Implementation Details
 
-**Complexity:** Medium  
-**Expected Impact:** 50-90% reduction for long conversations
+1. **Dual Rendering Paths** (`render_chat.rs:351-518`)
+   - Virtualized rendering for conversations > 20 messages
+   - Full rendering for streaming or small conversations
+   - Threshold configurable via `VIRTUALIZE_THRESHOLD` constant
+
+2. **Layout Index Update** (`render_chat.rs:519-573`)
+   - Rebuilds on width change or cache clear
+   - Calculates line counts using existing cache
+   - Groups Assistant + Tool messages into single blocks
+
+3. **Binary Search** (`render_chat.rs:633-659`)
+   - `find_visible_message_blocks()` uses `partition_point()` for O(log n)
+   - Includes 5-line buffer above/below viewport for smooth scrolling
+
+4. **Cache Integration**
+   - Layout index uses existing `MessageRenderCache` for line counts
+   - Cache clear also invalidates layout index (`run.rs:301-306`)
+
+### Performance Characteristics
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| 100 messages, 30-line viewport | Render ~1000 lines | Render ~40 lines |
+| Scrolling one line | Re-render all | Re-render visible only |
+| New message arrives | Re-render all | Incremental update |
+| Window resize | Re-render all | Re-render visible only |
+
+### Limitations
+
+- Virtualization disabled during streaming (content changes rapidly)
+- Small conversations (< 20 messages) use full render (overhead not worth it)
+- Layout index requires cache hit to get accurate line count
 
 ---
+
+## Remaining Optimization Proposals
 
 ### 2. Incremental Rendering
 
@@ -209,13 +243,13 @@ fn render_all_messages(&self, messages: &[Message], width: usize) -> Vec<Line<'s
 
 ## Recommended Implementation Order
 
-| Priority | Optimization | Rationale |
-|----------|--------------|-----------|
-| 1 | Code Highlighting Cache | Low effort, high impact, isolated change |
-| 2 | Viewport Virtualization | High impact for long conversations |
-| 3 | Markdown AST Caching | Mitigates resize penalty |
-| 4 | Parallel Rendering | Good ROI, but needs profiling |
-| 5 | Incremental Rendering | Highest complexity, save for later |
+| Priority | Optimization | Status | Rationale |
+|----------|--------------|--------|-----------|
+| 1 | Viewport Virtualization | ✅ Done | High impact for long conversations |
+| 2 | Code Highlighting Cache | Pending | Low effort, high impact, isolated change |
+| 3 | Markdown AST Caching | Pending | Mitigates resize penalty |
+| 4 | Parallel Rendering | Pending | Good ROI, but needs profiling |
+| 5 | Incremental Rendering | Pending | Highest complexity, save for later |
 
 ---
 
