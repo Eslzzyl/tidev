@@ -17,8 +17,8 @@ use super::diff_render::render_unified_diff_text;
 use super::permission::RunningStatus;
 use super::permission::RunningSubagentExecution;
 use super::{
-    render::*, App, MessageRenderCacheEntry, MessageRenderCacheKey, MessageRenderCacheKind,
-    MessageRenderCacheValue,
+    App, MessageRenderCacheEntry, MessageRenderCacheKey, MessageRenderCacheKind,
+    MessageRenderCacheValue, render::*,
 };
 
 impl App {
@@ -1247,9 +1247,11 @@ mod tests {
 
         let app = super::App::new().unwrap();
         let lines = app.render_tool_result_lines(&message, 80);
-        assert!(lines
-            .iter()
-            .any(|line| line_text(line).contains("Listed 2 items")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line_text(line).contains("Listed 2 items"))
+        );
     }
 
     #[test]

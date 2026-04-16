@@ -1328,25 +1328,41 @@ impl App {
         frame.render_widget(block, area);
 
         let options_height = options_lines.len().max(2) as u16;
-        let available_input_height = inner
-            .height
-            .saturating_sub(options_height.saturating_add(6));
-        let input_height = self
-            .composer
-            .preferred_height(
-                inner.width.saturating_sub(4),
-                self.config.ui.max_input_lines,
-            )
-            .min(available_input_height.max(3));
+        let sections = if dialog.editing_custom {
+            let available_input_height = inner
+                .height
+                .saturating_sub(options_height.saturating_add(6));
+            let input_height = self
+                .composer
+                .preferred_height(
+                    inner.width.saturating_sub(4),
+                    self.config.ui.max_input_lines,
+                )
+                .min(available_input_height.max(3));
 
-        let sections = Layout::vertical([
-            Constraint::Length(2),
-            Constraint::Length(2),
-            Constraint::Length(options_height),
-            Constraint::Length(input_height),
-            Constraint::Length(2),
-        ])
-        .split(inner);
+            Layout::vertical([
+                Constraint::Length(2),
+                Constraint::Length(2),
+                Constraint::Length(options_height),
+                Constraint::Length(input_height),
+                Constraint::Length(2),
+            ])
+            .split(inner)
+        } else {
+            Layout::vertical([
+                Constraint::Length(2),
+                Constraint::Length(2),
+                Constraint::Length(options_height),
+                Constraint::Length(2),
+            ])
+            .split(inner)
+        };
+
+        let footer_text = if dialog.editing_custom {
+            "Enter save custom answer · Esc cancel · Ctrl+P/Ctrl+N/←/→ previous/next"
+        } else {
+            "Enter select · Space toggle · Ctrl+P/Ctrl+N/←/→ previous/next · Esc dismiss"
+        };
 
         frame.render_widget(
             Paragraph::new(dialog.title())
@@ -1374,23 +1390,29 @@ impl App {
             sections[2],
         );
 
-        self.render_input_block(
-            frame,
-            sections[3],
-            "Answer",
-            &dialog.answer_placeholder(),
-            false,
-        );
+        if dialog.editing_custom {
+            self.render_input_block(
+                frame,
+                sections[3],
+                "Answer",
+                &dialog.answer_placeholder(),
+                false,
+            );
+        }
 
         frame.render_widget(
-            Paragraph::new("Enter submit · Ctrl+P/Ctrl+N/←/→ previous/next · Esc dismiss")
+            Paragraph::new(footer_text)
                 .alignment(Alignment::Center)
                 .style(
                     Style::default()
                         .bg(palette.panel_alt)
                         .fg(palette.accent_soft),
                 ),
-            sections[4],
+            if dialog.editing_custom {
+                sections[4]
+            } else {
+                sections[3]
+            },
         );
     }
 

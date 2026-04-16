@@ -347,7 +347,7 @@ fn extract_row_text(buffer: &Buffer, y: u16, start_x: u16, end_x: u16) -> String
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_selection_style, extract_selected_text, MouseSelectionState};
+    use super::{MouseSelectionState, apply_selection_style, extract_selected_text};
     use ratatui::{
         buffer::Buffer,
         layout::{Position, Rect},

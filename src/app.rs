@@ -21,8 +21,8 @@ use std::{
     cell::{Cell, RefCell},
     env, io,
     path::{Path, PathBuf},
-    sync::atomic::Ordering,
     sync::Arc,
+    sync::atomic::Ordering,
     time::{Duration, Instant},
 };
 use tokio::{
@@ -319,7 +319,7 @@ impl App {
         let active_model = fallback_model.clone();
         let last_notice = None;
         let retrying_hint = None;
-        
+
         let snapshot = SnapshotService::new(&workspace_root, &paths)?;
         let cleanup_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
@@ -398,7 +398,7 @@ impl App {
 
         let snapshot = self.snapshot.clone();
         let cleanup_cancel = self.cleanup_cancel.clone();
-        
+
         runtime.spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
             loop {
@@ -433,7 +433,8 @@ impl App {
             }
         }
 
-        self.cleanup_cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.cleanup_cancel
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         terminal.show_cursor().ok();
         Ok(())
     }

@@ -29,7 +29,9 @@ pub(super) async fn stream_anthropic(
         .clone()
         .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
     let request = build_anthropic_request(&model, messages, &tools)?;
-    let request_body_size = serde_json::to_string(&request).map(|s| s.len()).unwrap_or(0);
+    let request_body_size = serde_json::to_string(&request)
+        .map(|s| s.len())
+        .unwrap_or(0);
 
     let send_result = http
         .post(model.endpoint())
@@ -207,7 +209,9 @@ pub(super) async fn complete_anthropic(
         .clone()
         .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
     let request = build_anthropic_request(&model, messages, &[])?;
-    let request_body_size = serde_json::to_string(&request).map(|s| s.len()).unwrap_or(0);
+    let request_body_size = serde_json::to_string(&request)
+        .map(|s| s.len())
+        .unwrap_or(0);
 
     let send_result = http
         .post(model.endpoint())

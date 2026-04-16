@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use rusqlite::{params, types::Type, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params, types::Type};
 use std::{
     fs,
     path::{Path, PathBuf},

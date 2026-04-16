@@ -74,10 +74,7 @@ fn rotate_if_needed(state: &mut LogState) {
 
     state.file = None;
 
-    let log_dir = state
-        .log_path
-        .parent()
-        .unwrap_or(std::path::Path::new("."));
+    let log_dir = state.log_path.parent().unwrap_or(std::path::Path::new("."));
     let stem = state
         .log_path
         .file_stem()
@@ -109,7 +106,9 @@ fn rotate_if_needed(state: &mut LogState) {
 }
 
 pub fn log(level: &str, target: &str, message: &str) {
-    if let Some(mutex) = LOG_STATE.get() && let Ok(mut guard) = mutex.lock() {
+    if let Some(mutex) = LOG_STATE.get()
+        && let Ok(mut guard) = mutex.lock()
+    {
         let min_level = level_to_int(&guard.config.level);
         if level_to_int(level) < min_level {
             return;

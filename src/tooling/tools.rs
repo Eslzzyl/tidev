@@ -1,7 +1,7 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use grep::{
     regex::RegexMatcherBuilder,
-    searcher::{sinks, SearcherBuilder},
+    searcher::{SearcherBuilder, sinks},
 };
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
@@ -12,8 +12,8 @@ use std::{
     path::{Component, Path, PathBuf},
     process::Stdio,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     thread,
     time::{SystemTime, UNIX_EPOCH},
