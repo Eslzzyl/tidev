@@ -93,7 +93,9 @@ impl App {
             );
             self.conversation.prev_user_message_before(current_revert)
         } else {
-            crate::log_info!("undo_last_user_message: not in revert state, looking for last visible user message");
+            crate::log_info!(
+                "undo_last_user_message: not in revert state, looking for last visible user message"
+            );
             self.conversation.last_visible_user_message()
         };
 

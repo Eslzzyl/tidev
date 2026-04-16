@@ -1385,8 +1385,7 @@ impl App {
 
         frame.render_widget(
             Paragraph::new(options_text)
-                .style(Style::default().bg(palette.panel_alt).fg(palette.text))
-                .wrap(Wrap { trim: false }),
+                .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
             sections[2],
         );
 

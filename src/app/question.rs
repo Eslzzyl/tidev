@@ -282,7 +282,7 @@ impl QuestionDialogState {
         )
     }
 
-    pub(crate) fn options_lines(&self, width: u16) -> Vec<String> {
+    pub(crate) fn regular_options_lines(&self, width: u16) -> Vec<String> {
         let Some(question) = self.current_question() else {
             return vec!["No questions available.".to_string()];
         };
@@ -298,26 +298,6 @@ impl QuestionDialogState {
                     "No predefined options were provided. Type a freeform answer below."
                         .to_string(),
                 );
-                let selected = self.selected_index() == 0;
-                let cursor = if selected { ">" } else { " " };
-                let checked = if self.is_custom_answer_selected() {
-                    "✓"
-                } else {
-                    " "
-                };
-                push_wrapped_line(
-                    &mut lines,
-                    wrap_width,
-                    format!("{} 1. [{}] Type your own answer", cursor, checked),
-                );
-                if !self.editing_custom {
-                    let custom_input = self.current_custom_input().trim();
-                    if !custom_input.is_empty() {
-                        for wrapped in wrap(custom_input, wrap_width.saturating_sub(4).max(1)) {
-                            lines.push(format!("    {}", wrapped));
-                        }
-                    }
-                }
                 return lines;
             }
 
@@ -373,45 +353,63 @@ impl QuestionDialogState {
             }
         }
 
-        if question.custom.unwrap_or(true) {
-            let custom_index = question.options.len();
-            let selected = self.selected_index() == custom_index;
-            let checked = if self.is_custom_answer_selected() {
-                "✓"
-            } else {
-                " "
-            };
-            let cursor = if selected { ">" } else { " " };
-            push_wrapped_line(
-                &mut lines,
-                wrap_width,
-                format!(
-                    "{} {}. [{}] Type your own answer",
-                    cursor,
-                    custom_index + 1,
-                    checked
-                ),
-            );
+        lines
+    }
 
-            if !self.editing_custom {
-                let custom_input = self.current_custom_input().trim();
-                if !custom_input.is_empty() {
-                    for wrapped in wrap(custom_input, wrap_width.saturating_sub(4).max(1)) {
-                        lines.push(format!("    {}", wrapped));
-                    }
-                }
+    pub(crate) fn custom_option_lines(&self, width: u16) -> Vec<String> {
+        let Some(question) = self.current_question() else {
+            return Vec::new();
+        };
+
+        if !question.custom.unwrap_or(true) {
+            return Vec::new();
+        }
+
+        let wrap_width = width.max(1) as usize;
+        let custom_index = question.options.len();
+        let mut lines = Vec::new();
+        let selected = self.selected_index() == custom_index;
+        let checked = if self.is_custom_answer_selected() {
+            "✓"
+        } else {
+            " "
+        };
+        let cursor = if selected { ">" } else { " " };
+        push_wrapped_line(
+            &mut lines,
+            wrap_width,
+            format!(
+                "{} {}. [{}] Type your own answer",
+                cursor,
+                custom_index + 1,
+                checked
+            ),
+        );
+
+        let custom_input = self.current_custom_input().trim();
+        if !custom_input.is_empty() {
+            for wrapped in wrap(custom_input, wrap_width.saturating_sub(4).max(1)) {
+                lines.push(format!("    {}", wrapped));
             }
         }
 
         lines
     }
 
+    pub(crate) fn options_lines(&self, width: u16) -> Vec<String> {
+        let mut lines = self.regular_options_lines(width);
+        lines.extend(self.custom_option_lines(width));
+        lines
+    }
+
     pub(crate) fn prompt_height(&self, width: u16, input_height: u16) -> u16 {
-        let option_lines = self.options_lines(width.saturating_sub(2));
+        let regular_option_lines = self.regular_options_lines(width.saturating_sub(2));
+        let custom_option_lines = self.custom_option_lines(width.saturating_sub(2));
         let input_height = if self.editing_custom { input_height } else { 0 };
 
         2u16.saturating_add(2)
-            .saturating_add(option_lines.len() as u16)
+            .saturating_add(regular_option_lines.len() as u16)
+            .saturating_add(custom_option_lines.len() as u16)
             .saturating_add(input_height)
             .saturating_add(2)
     }
@@ -719,6 +717,17 @@ mod tests {
         let expanded = dialog.prompt_height(80, 4);
 
         assert!(expanded > collapsed);
+    }
+
+    #[test]
+    fn editing_custom_input_stays_visible_in_options() {
+        let mut dialog = question_dialog();
+        dialog.start_custom_editing();
+        dialog.sync_current_custom_input("Custom answer");
+
+        let lines = dialog.options_lines(80);
+
+        assert!(lines.iter().any(|line| line.contains("Custom answer")));
     }
 
     #[test]
