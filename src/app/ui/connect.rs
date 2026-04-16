@@ -263,6 +263,7 @@ impl App {
         let model = self
             .config
             .resolve_provider_default_model(&self.auth, &provider_id)?;
+
         self.active_model = model.clone();
         self.conversation.set_model(
             model.provider_id.clone(),
@@ -270,17 +271,23 @@ impl App {
             model.model_id.clone(),
             model.display_name.clone(),
         );
-        self.store.update_session_model(
-            self.conversation.session_id,
-            &model.provider_id,
-            &model.provider_display_name,
-            &model.model_id,
-            &model.display_name,
-        )?;
+
+        if self
+            .store
+            .load_session_record(self.conversation.session_id)?
+            .is_some()
+        {
+            self.store.update_session_model(
+                self.conversation.session_id,
+                &model.provider_id,
+                &model.provider_display_name,
+                &model.model_id,
+                &model.display_name,
+            )?;
+        }
 
         self.cancel_connect_dialog();
         self.last_notice = Some(format!("Connected to {}", model.provider_display_name));
-        self.push_system_message(format!("Connected to {}", model.provider_display_name))?;
         Ok(())
     }
 
@@ -306,6 +313,7 @@ impl App {
         let model = self
             .config
             .resolve_provider_default_model(&self.auth, &provider_id)?;
+
         self.active_model = model.clone();
         self.conversation.set_model(
             model.provider_id.clone(),
@@ -313,20 +321,26 @@ impl App {
             model.model_id.clone(),
             model.display_name.clone(),
         );
-        self.store.update_session_model(
-            self.conversation.session_id,
-            &model.provider_id,
-            &model.provider_display_name,
-            &model.model_id,
-            &model.display_name,
-        )?;
+
+        if self
+            .store
+            .load_session_record(self.conversation.session_id)?
+            .is_some()
+        {
+            self.store.update_session_model(
+                self.conversation.session_id,
+                &model.provider_id,
+                &model.provider_display_name,
+                &model.model_id,
+                &model.display_name,
+            )?;
+        }
 
         self.cancel_connect_dialog();
         self.last_notice = Some(format!(
             "Created provider '{provider_id}' and connected to {}",
             model.provider_display_name
         ));
-        self.push_system_message(format!("Connected to {}", model.provider_display_name))?;
         Ok(())
     }
 
