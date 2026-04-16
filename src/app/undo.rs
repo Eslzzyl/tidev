@@ -11,15 +11,24 @@ impl App {
         &mut self,
         runtime: &Runtime,
     ) -> Result<()> {
+        crate::log_info!("finalize_snapshot: starting");
+
         let last_user_message_id = {
             let Some(last_user_message) = self.conversation.last_visible_user_message() else {
+                crate::log_info!("finalize_snapshot: no visible user message");
                 return Ok(());
             };
 
-            let Some(_) = last_user_message.snapshot_hash.clone() else {
+            let Some(hash) = last_user_message.snapshot_hash.clone() else {
+                crate::log_info!("finalize_snapshot: message has no snapshot_hash");
                 return Ok(());
             };
 
+            crate::log_info!(
+                "finalize_snapshot: message id={}, snapshot_hash={}",
+                last_user_message.id,
+                hash
+            );
             last_user_message.id
         };
 
@@ -30,19 +39,26 @@ impl App {
                 .iter()
                 .find(|m| m.id == last_user_message_id)
             else {
+                crate::log_warn!("finalize_snapshot: message not found in messages list");
                 return Ok(());
             };
             msg.snapshot_hash.clone()
         };
 
         let Some(snapshot_hash) = snapshot_hash else {
+            crate::log_info!("finalize_snapshot: snapshot_hash is None");
             return Ok(());
         };
 
         let patch = runtime.block_on(self.snapshot.patch(&snapshot_hash))?;
+        crate::log_info!("finalize_snapshot: patch.files.len()={}", patch.files.len());
 
         if !patch.files.is_empty() {
             let patch_files = serde_json::to_string(&patch.files)?;
+            crate::log_info!(
+                "finalize_snapshot: saving patch_files, len={}",
+                patch_files.len()
+            );
             self.store.update_message_patch(
                 self.conversation.session_id,
                 last_user_message_id,
@@ -59,22 +75,49 @@ impl App {
             }
         }
 
+        crate::log_info!("finalize_snapshot: completed");
         Ok(())
     }
 
     pub(crate) fn undo_last_user_message(&mut self, runtime: &Runtime) -> Result<()> {
+        crate::log_info!("undo_last_user_message: starting");
+
         if self.pending_request {
             self.abort_current_request();
         }
 
         let Some(message) = self.conversation.last_visible_user_message().cloned() else {
+            crate::log_info!("undo_last_user_message: no visible user message found");
             self.last_notice = Some("No earlier user message to undo".to_string());
             return Ok(());
         };
 
-        let patches = self.collect_patches_after_message(message.id)?;
+        crate::log_info!(
+            "undo_last_user_message: found message id={}, content_len={}",
+            message.id,
+            message.content.len()
+        );
+        crate::log_info!(
+            "undo_last_user_message: message snapshot_hash={:?}, patch_files={:?}",
+            message.snapshot_hash,
+            message.patch_files.as_ref().map(|s| s.len())
+        );
 
-        if patches.is_empty() && self.conversation.revert_message_id.is_none() {
+        let patches = self.collect_patches_after_message(message.id)?;
+        let has_earlier_user_message = self.conversation.has_earlier_user_message(message.id);
+
+        crate::log_info!(
+            "undo_last_user_message: patches.len()={}, has_earlier_user_message={}, revert_message_id={:?}",
+            patches.len(),
+            has_earlier_user_message,
+            self.conversation.revert_message_id
+        );
+
+        if patches.is_empty()
+            && !has_earlier_user_message
+            && self.conversation.revert_message_id.is_none()
+        {
+            crate::log_info!("undo_last_user_message: no changes to undo, returning early");
             self.last_notice = Some("No changes to undo".to_string());
             return Ok(());
         }
@@ -85,12 +128,24 @@ impl App {
             .store
             .load_redo_snapshot(self.conversation.session_id)?
         {
+            crate::log_info!("undo_last_user_message: using existing redo_snapshot");
             existing
         } else {
+            crate::log_info!("undo_last_user_message: capturing new redo_snapshot");
             match runtime.block_on(self.snapshot.track()) {
-                Ok(Some(hash)) => hash,
-                Ok(None) => String::new(),
+                Ok(Some(hash)) => {
+                    crate::log_info!(
+                        "undo_last_user_message: captured redo_snapshot hash={}",
+                        hash
+                    );
+                    hash
+                }
+                Ok(None) => {
+                    crate::log_info!("undo_last_user_message: track() returned None (no changes)");
+                    String::new()
+                }
                 Err(error) => {
+                    crate::log_warn!("undo_last_user_message: track() failed: {}", error);
                     notice = Some(format!("Failed to capture redo snapshot: {error}"));
                     String::new()
                 }
@@ -101,15 +156,22 @@ impl App {
             .store
             .load_redo_snapshot(self.conversation.session_id)?
         {
+            crate::log_info!("undo_last_user_message: restoring redo_snapshot");
             runtime.block_on(self.snapshot.restore(&existing_snapshot))?;
         }
 
         if !patches.is_empty() {
+            crate::log_info!(
+                "undo_last_user_message: reverting {} patches",
+                patches.len()
+            );
             if let Err(error) = runtime.block_on(self.snapshot.revert(&patches)) {
+                crate::log_warn!("undo_last_user_message: revert failed: {}", error);
                 notice = Some(format!("Undo partially failed: {error}"));
             }
         }
 
+        crate::log_info!("undo_last_user_message: setting revert_message_id and updating UI");
         self.command_palette.clear();
         self.context_manager = ContextManager::new();
         self.set_revert_message_id(
@@ -124,6 +186,7 @@ impl App {
         self.screen = Screen::Chat;
         self.scroll_messages_to_bottom();
         self.last_notice = notice.or_else(|| Some("Undid previous user message".to_string()));
+        crate::log_info!("undo_last_user_message: completed successfully");
         Ok(())
     }
 
@@ -168,8 +231,11 @@ impl App {
         message_id: Uuid,
         runtime: &Runtime,
     ) -> Result<()> {
+        crate::log_info!("capture_prompt_snapshot: message_id={}", message_id);
+
         match runtime.block_on(self.snapshot.track()) {
             Ok(Some(hash)) => {
+                crate::log_info!("capture_prompt_snapshot: captured hash={}", hash);
                 self.store.update_message_snapshot(
                     self.conversation.session_id,
                     message_id,
@@ -185,9 +251,13 @@ impl App {
                     msg.snapshot_hash = Some(hash);
                 }
             }
-            Ok(None) => {}
+            Ok(None) => {
+                crate::log_info!(
+                    "capture_prompt_snapshot: track() returned None (not a git repo or no changes)"
+                );
+            }
             Err(error) => {
-                crate::log_warn!("failed to capture snapshot: {}", error);
+                crate::log_warn!("capture_prompt_snapshot: track() failed: {}", error);
             }
         }
 
@@ -217,6 +287,8 @@ impl App {
     }
 
     fn collect_patches_after_message(&self, message_id: Uuid) -> Result<Vec<Patch>> {
+        crate::log_info!("collect_patches: looking for message_id={}", message_id);
+
         let mut patches = Vec::new();
         let mut found = false;
 
@@ -225,6 +297,11 @@ impl App {
                 if let Some(patch_files_str) = &message.patch_files {
                     if let Some(snapshot_hash) = &message.snapshot_hash {
                         let files: Vec<String> = serde_json::from_str(patch_files_str)?;
+                        crate::log_info!(
+                            "collect_patches: found patch in subsequent message, hash={}, files={}",
+                            snapshot_hash,
+                            files.len()
+                        );
                         patches.push(Patch {
                             hash: snapshot_hash.clone(),
                             files,
@@ -236,9 +313,19 @@ impl App {
 
             if message.id == message_id {
                 found = true;
+                crate::log_info!(
+                    "collect_patches: found target message, snapshot_hash={:?}, patch_files={:?}",
+                    message.snapshot_hash,
+                    message.patch_files.as_ref().map(|s| s.len())
+                );
                 if let Some(patch_files_str) = &message.patch_files {
                     if let Some(snapshot_hash) = &message.snapshot_hash {
                         let files: Vec<String> = serde_json::from_str(patch_files_str)?;
+                        crate::log_info!(
+                            "collect_patches: target message has patch, hash={}, files={}",
+                            snapshot_hash,
+                            files.len()
+                        );
                         patches.push(Patch {
                             hash: snapshot_hash.clone(),
                             files,
@@ -248,6 +335,7 @@ impl App {
             }
         }
 
+        crate::log_info!("collect_patches: returning {} patches", patches.len());
         Ok(patches)
     }
 
