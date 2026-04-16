@@ -639,24 +639,25 @@ impl App {
         };
 
         if canonical_name == "bash"
-            && let Some(cmd) = get_field("command") {
-                let mut lines = Vec::new();
-                lines.push(Line::from(vec![
-                    Span::styled("Run ", Style::default().fg(palette.accent_soft)),
-                    Span::styled(
-                        "shell command",
-                        Style::default()
-                            .fg(palette.text)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ]));
+            && let Some(cmd) = get_field("command")
+        {
+            let mut lines = Vec::new();
+            lines.push(Line::from(vec![
+                Span::styled("Run ", Style::default().fg(palette.accent_soft)),
+                Span::styled(
+                    "shell command",
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
 
-                // Opencode style: command in its own block/lines
-                for line in cmd.lines() {
-                    lines.push(line_with_style(&format!("  {}", line), palette.text));
-                }
-                return lines;
+            // Opencode style: command in its own block/lines
+            for line in cmd.lines() {
+                lines.push(line_with_style(&format!("  {}", line), palette.text));
             }
+            return lines;
+        }
 
         let summary = summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width);
 
@@ -732,14 +733,7 @@ impl App {
             }
             "read" => {
                 let path = get_field("path").unwrap_or("file");
-                let offset = get_field("offset").and_then(|s| s.parse::<i64>().ok());
-                let limit = get_field("limit").and_then(|s| s.parse::<i64>().ok());
-                let label = if let (Some(off), Some(lim)) = (offset, limit) {
-                    format!("{} (line {}-{})", path, off, off + lim - 1)
-                } else {
-                    path.to_string()
-                };
-                ("Read", label)
+                ("Read", path.to_string())
             }
             _ => {
                 let summary =
@@ -813,8 +807,7 @@ impl App {
                     " → error".to_string()
                 } else {
                     // Try to parse line range from output (e.g., "Showing lines 10-50 of 100")
-                    let line_range =
-                        parse_line_range_from_read_output(output);
+                    let line_range = parse_line_range_from_read_output(output);
                     let truncated = self.tool_output_is_truncated(output);
                     match line_range {
                         Some((start, end)) => {
@@ -842,7 +835,7 @@ impl App {
     }
 
     fn tool_output_is_truncated(&self, output: &str) -> bool {
-        output.contains("Use offset=") || output.contains("(Output capped at")
+        output.contains("(Output capped at")
     }
 
     fn render_tool_result_detail_lines(
@@ -1453,10 +1446,18 @@ fn summarize_tool_arguments(tool_name: &str, arguments: &str) -> Vec<(String, St
                 fields.push(("path".to_string(), path));
             }
             // Extract offset and limit for read tool
-            if let Some(offset) = parsed.as_ref().and_then(|v| v.get("offset")).and_then(|v| v.as_i64()) {
+            if let Some(offset) = parsed
+                .as_ref()
+                .and_then(|v| v.get("offset"))
+                .and_then(|v| v.as_i64())
+            {
                 fields.push(("offset".to_string(), format!("{}", offset)));
             }
-            if let Some(limit) = parsed.as_ref().and_then(|v| v.get("limit")).and_then(|v| v.as_i64()) {
+            if let Some(limit) = parsed
+                .as_ref()
+                .and_then(|v| v.get("limit"))
+                .and_then(|v| v.as_i64())
+            {
                 fields.push(("limit".to_string(), format!("{}", limit)));
             }
         }
