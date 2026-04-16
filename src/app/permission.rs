@@ -177,6 +177,8 @@ impl App {
             return Ok(());
         }
 
+        let mut question_opened = false;
+
         loop {
             let Some((tool_call, current_index, total)) = self.pending_tool_snapshot() else {
                 crate::log_info!("process_pending_tool_execution: no more tool_calls in snapshot");
@@ -236,6 +238,37 @@ impl App {
                 continue;
             };
 
+            if tool_call.name == "question" {
+                let args = match serde_json::from_str::<QuestionArgs>(&tool_call.arguments) {
+                    Ok(args) => args,
+                    Err(error) => {
+                        self.record_tool_result(
+                            tool_call,
+                            ToolExecutionResult::new(format!(
+                                "Tool failed: failed to decode question arguments: {error}"
+                            )),
+                        )?;
+                        self.advance_pending_tool_execution();
+                        continue;
+                    }
+                };
+
+                if args.questions.is_empty() {
+                    self.record_tool_result(
+                        tool_call,
+                        ToolExecutionResult::new(
+                            "Tool failed: question tool requires at least one question",
+                        ),
+                    )?;
+                    self.advance_pending_tool_execution();
+                    continue;
+                }
+
+                self.begin_question_dialog(tool_call, args)?;
+                question_opened = true;
+                break;
+            }
+
             if definition.needs_confirmation() {
                 self.last_notice = Some(format!(
                     "Approve tool call {} of {}: {}",
@@ -267,6 +300,10 @@ impl App {
 
         if !ready_calls.is_empty() {
             return self.start_parallel_execution(ready_calls, runtime);
+        }
+
+        if question_opened {
+            return Ok(());
         }
 
         if self
@@ -585,13 +622,19 @@ impl App {
             self.last_notice = Some(format!("Running {}...", tool_calls[0].name));
         } else {
             let tool_names: Vec<_> = tool_calls.iter().map(|t| t.name.as_str()).collect();
-            self.last_notice = Some(format!("Running {} tools ({})...", count, tool_names.join(", ")));
+            self.last_notice = Some(format!(
+                "Running {} tools ({})...",
+                count,
+                tool_names.join(", ")
+            ));
         }
 
         for tool_call in tool_calls {
             match tool_call.name.as_str() {
                 "task" => {
-                    if let Err(error) = self.start_subagent_task_execution(tool_call.clone(), runtime) {
+                    if let Err(error) =
+                        self.start_subagent_task_execution(tool_call.clone(), runtime)
+                    {
                         crate::log_error!("start_subagent_task_execution failed: {}", error);
                         self.record_tool_result(
                             tool_call,
@@ -600,7 +643,8 @@ impl App {
                     }
                 }
                 "question" => {
-                    let parsed: Result<QuestionArgs, _> = serde_json::from_str(&tool_call.arguments);
+                    let parsed: Result<QuestionArgs, _> =
+                        serde_json::from_str(&tool_call.arguments);
                     match parsed {
                         Ok(args) if !args.questions.is_empty() => {
                             self.begin_question_dialog(tool_call, args)?;
@@ -627,14 +671,21 @@ impl App {
                                 self.conversation.session_id,
                                 &tool_call,
                             )
-                            .unwrap_or_else(|error| ToolExecutionResult::new(format!("Tool failed: {error}")));
+                            .unwrap_or_else(|error| {
+                                ToolExecutionResult::new(format!("Tool failed: {error}"))
+                            });
                         self.record_tool_result(tool_call, result)?;
                     }
                 }
             }
         }
 
-        if self.running_tool_executions.is_empty() && self.pending_tool_execution.as_ref().is_some_and(|p| p.is_finished()) {
+        if self.running_tool_executions.is_empty()
+            && self
+                .pending_tool_execution
+                .as_ref()
+                .is_some_and(|p| p.is_finished())
+        {
             self.pending_tool_execution = None;
             if self.running_subagent_executions.is_empty() {
                 self.start_assistant_turn(runtime)?;
@@ -682,7 +733,10 @@ impl App {
 
     pub(crate) fn try_start_parallel_execution(&mut self, runtime: &Runtime) -> Result<()> {
         if self.running_tool_executions.is_empty()
-            && self.pending_tool_execution.as_ref().is_some_and(|p| p.is_finished())
+            && self
+                .pending_tool_execution
+                .as_ref()
+                .is_some_and(|p| p.is_finished())
         {
             self.pending_tool_execution = None;
             if self.running_subagent_executions.is_empty() {

@@ -54,7 +54,7 @@ impl App {
 
         if let Some(dialog) = self.question_dialog.clone() {
             let question_height = dialog
-                .prompt_height(composer_height)
+                .prompt_height(main_area.width, composer_height)
                 .min(main_area.height.saturating_sub(3).max(6));
 
             let layout = Layout::vertical([

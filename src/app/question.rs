@@ -1,5 +1,6 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use textwrap::wrap;
 use tokio::runtime::Runtime;
 
 use crate::{
@@ -66,6 +67,68 @@ impl QuestionDialogState {
             .filter(|question| !question.is_empty())
             .unwrap_or("Ask a question")
             .to_string()
+    }
+
+    pub(crate) fn options_lines(&self, width: u16) -> Vec<String> {
+        let Some(question) = self.current_question() else {
+            return vec!["No questions available.".to_string()];
+        };
+
+        let raw_lines = if question.options.is_empty() {
+            vec!["No predefined options were provided. Type a freeform answer below.".to_string()]
+        } else {
+            let mut lines = Vec::with_capacity(question.options.len().saturating_add(2));
+            lines.push(format!(
+                "{}{}",
+                if question.multiple.unwrap_or(false) {
+                    "Select one or more options. "
+                } else {
+                    "Select one option. "
+                },
+                if question.custom.unwrap_or(true) {
+                    "Type your own answer if needed."
+                } else {
+                    "Type the option number or label."
+                }
+            ));
+
+            for (index, option) in question.options.iter().enumerate() {
+                if let Some(description) = option
+                    .description
+                    .as_deref()
+                    .filter(|text| !text.trim().is_empty())
+                {
+                    lines.push(format!(
+                        "  {}. {} - {}",
+                        index + 1,
+                        option.label,
+                        description
+                    ));
+                } else {
+                    lines.push(format!("  {}. {}", index + 1, option.label));
+                }
+            }
+
+            lines
+        };
+
+        let wrap_width = width.max(1) as usize;
+        let mut wrapped_lines = Vec::new();
+
+        for line in raw_lines {
+            let wrapped = wrap(&line, wrap_width);
+            if wrapped.is_empty() {
+                wrapped_lines.push(String::new());
+            } else {
+                wrapped_lines.extend(wrapped.into_iter().map(|line| line.into_owned()));
+            }
+        }
+
+        wrapped_lines
+    }
+
+    pub(crate) fn options_height(&self, width: u16) -> u16 {
+        self.options_lines(width).len().max(2) as u16
     }
 
     pub(crate) fn answer_placeholder(&self) -> String {
@@ -142,18 +205,8 @@ impl QuestionDialogState {
         )
     }
 
-    pub(crate) fn prompt_height(&self, input_height: u16) -> u16 {
-        let option_lines = self
-            .current_question()
-            .map(|question| {
-                let option_count = question.options.len() as u16;
-                if option_count == 0 {
-                    2
-                } else {
-                    option_count.saturating_add(1)
-                }
-            })
-            .unwrap_or(2);
+    pub(crate) fn prompt_height(&self, width: u16, input_height: u16) -> u16 {
+        let option_lines = self.options_height(width.saturating_sub(2));
 
         2u16.saturating_add(2)
             .saturating_add(option_lines)
@@ -337,4 +390,45 @@ fn parse_answer_text(text: &str, question: &QuestionInfo) -> Vec<String> {
     }
 
     answers
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn question_dialog() -> QuestionDialogState {
+        let tool_call = ToolCall {
+            id: "call-1".to_string(),
+            name: "question".to_string(),
+            arguments: "{}".to_string(),
+        };
+        let questions: Vec<QuestionInfo> = serde_json::from_value(json!([
+            {
+                "question": "Pick one",
+                "header": "Scope",
+                "options": [
+                    {
+                        "label": "Alpha",
+                        "description": "This description is intentionally long enough to wrap on a narrow terminal."
+                    }
+                ],
+                "multiple": false,
+                "custom": true
+            }
+        ]))
+        .expect("question fixture should deserialize");
+
+        QuestionDialogState::new(tool_call, questions)
+    }
+
+    #[test]
+    fn prompt_height_accounts_for_wrapped_options() {
+        let dialog = question_dialog();
+
+        let wide = dialog.prompt_height(80, 4);
+        let narrow = dialog.prompt_height(30, 4);
+
+        assert!(narrow > wide);
+    }
 }

@@ -1311,49 +1311,12 @@ impl App {
         dialog: &QuestionDialogState,
     ) {
         let palette = self.palette();
-        let current_question = dialog.current_question();
-        let options_text = current_question
-            .map(|question| {
-                if question.options.is_empty() {
-                    return "No predefined options were provided. Type a freeform answer below."
-                        .to_string();
-                }
-
-                let mut lines = Vec::with_capacity(question.options.len().saturating_add(2));
-                lines.push(format!(
-                    "{}{}",
-                    if question.multiple.unwrap_or(false) {
-                        "Select one or more options. "
-                    } else {
-                        "Select one option. "
-                    },
-                    if question.custom.unwrap_or(true) {
-                        "Type your own answer if needed."
-                    } else {
-                        "Type the option number or label."
-                    }
-                ));
-
-                for (index, option) in question.options.iter().enumerate() {
-                    if let Some(description) = option
-                        .description
-                        .as_deref()
-                        .filter(|text| !text.trim().is_empty())
-                    {
-                        lines.push(format!(
-                            "  {}. {} - {}",
-                            index + 1,
-                            option.label,
-                            description
-                        ));
-                    } else {
-                        lines.push(format!("  {}. {}", index + 1, option.label));
-                    }
-                }
-
-                lines.join("\n")
-            })
-            .unwrap_or_else(|| "No questions available.".to_string());
+        let inner = area.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+        let options_lines = dialog.options_lines(inner.width);
+        let options_text = options_lines.join("\n");
 
         frame.render_widget(Clear, area);
 
@@ -1364,27 +1327,17 @@ impl App {
             .title(" Question prompt ");
         frame.render_widget(block, area);
 
-        let inner = area.inner(Margin {
-            horizontal: 1,
-            vertical: 1,
-        });
-
+        let options_height = options_lines.len().max(2) as u16;
+        let available_input_height = inner
+            .height
+            .saturating_sub(options_height.saturating_add(6));
         let input_height = self
             .composer
             .preferred_height(
                 inner.width.saturating_sub(4),
                 self.config.ui.max_input_lines,
             )
-            .min(inner.height.saturating_sub(8).max(3));
-        let options_height = current_question
-            .map(|question| {
-                if question.options.is_empty() {
-                    2
-                } else {
-                    question.options.len() as u16 + 1
-                }
-            })
-            .unwrap_or(2);
+            .min(available_input_height.max(3));
 
         let sections = Layout::vertical([
             Constraint::Length(2),
