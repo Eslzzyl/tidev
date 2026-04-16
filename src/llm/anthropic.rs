@@ -279,24 +279,53 @@ fn build_anthropic_request(
     messages: Vec<Message>,
     tools: &[ToolDefinition],
 ) -> Result<AnthropicRequest> {
-    let mut system_prompt = String::new();
+    // Extract context summary from System messages (from context compaction)
+    // The System message, if present, contains the compression summary and should be
+    // combined with the model's system prompt into a single system prompt.
+    let context_summary: Option<String> = messages
+        .iter()
+        .filter(|message| !message.streaming)
+        .filter(|message| message.role == MessageRole::System)
+        .map(message_text_with_file_references)
+        .next();
+
+    // Build combined system prompt: model.system_prompt + context summary
+    let system_prompt = match (
+        model.system_prompt.trim().is_empty(),
+        context_summary.as_ref().map(|s| s.trim().is_empty()),
+    ) {
+        (false, Some(false)) => {
+            // Both present and non-empty: combine them
+            Some(format!(
+                "{}\n\n{}",
+                model.system_prompt.trim(),
+                context_summary.as_ref().unwrap().trim()
+            ))
+        }
+        (false, _) => {
+            // Only model.system_prompt present
+            Some(model.system_prompt.clone())
+        }
+        (true, Some(false)) => {
+            // Only context_summary present
+            context_summary
+        }
+        (true, _) => {
+            // Neither present
+            None
+        }
+    };
+
     let mut anthropic_messages = Vec::new();
 
-    if !model.system_prompt.trim().is_empty() {
-        system_prompt = model.system_prompt.clone();
-    }
-
+    // Process only User/Assistant/Tool messages (System messages already handled above)
     for message in messages {
         if message.streaming {
             continue;
         }
 
         match message.role {
-            MessageRole::System => {
-                if system_prompt.is_empty() {
-                    system_prompt = message_text_with_file_references(&message);
-                }
-            }
+            MessageRole::System => {}
             MessageRole::User => {
                 anthropic_messages.push(AnthropicMessage {
                     role: "user".to_string(),
@@ -355,11 +384,7 @@ fn build_anthropic_request(
     Ok(AnthropicRequest {
         model: model.request_model_id.clone(),
         max_tokens: model.max_output_tokens as u32,
-        system: if system_prompt.is_empty() {
-            None
-        } else {
-            Some(system_prompt)
-        },
+        system: system_prompt,
         messages: anthropic_messages,
         stream: true,
         temperature: model.temperature,

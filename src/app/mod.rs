@@ -206,6 +206,7 @@ struct App {
     context_usage: Option<(u32, u32, u32)>,
     snapshot: SnapshotService,
     cleanup_cancel: Arc<std::sync::atomic::AtomicBool>,
+    loaded_instruction_sources: Vec<String>,
 }
 
 pub fn run() -> Result<()> {
@@ -329,15 +330,15 @@ impl App {
 
         let llm = self.llm.clone();
         let (system_prompt, instruction_sources) = self.compose_system_prompt();
+        self.update_loaded_instruction_sources(&instruction_sources);
+
         let mut model = self.active_model.clone();
         model.system_prompt = system_prompt;
-
-        let _ = self.push_loaded_instruction_sources_message(&instruction_sources);
 
         let assistant_message = Message::streaming(MessageRole::Assistant, "");
         self.conversation.push(assistant_message);
 
-        let messages = self.conversation.visible_messages().to_vec();
+        let messages = self.context_manager.build_request_messages(&self.conversation);
         let tools = self.tools.available_definitions(self.mode);
         let tx = self.backend_tx.clone();
         let session_id = self.conversation.session_id;
@@ -389,26 +390,17 @@ impl App {
         (prompt, sources)
     }
 
-    fn push_loaded_instruction_sources_message(&mut self, sources: &[String]) -> Result<()> {
+    fn update_loaded_instruction_sources(&mut self, sources: &[String]) {
         if sources.is_empty() {
-            return Ok(());
-        }
-
-        let already_present = self.conversation.messages.iter().any(|message| {
-            matches!(message.role, MessageRole::System)
-                && message.content.starts_with("Loaded instruction sources:")
-        });
-
-        if already_present {
-            return Ok(());
+            return;
         }
 
         let display_sources: Vec<String> = sources
             .iter()
             .map(|source| self.display_instruction_source(source))
             .collect();
-        let content = format!("Loaded instruction sources: {}", display_sources.join(", "));
-        self.push_system_message(content)
+
+        self.loaded_instruction_sources = display_sources;
     }
 
     fn display_instruction_source(&self, source: &str) -> String {
@@ -426,10 +418,12 @@ impl App {
         source.to_string()
     }
 
+    #[allow(dead_code)]
     fn push_system_message(&mut self, content: impl Into<String>) -> Result<()> {
         self.push_message(MessageRole::System, content)
     }
 
+    #[allow(dead_code)]
     fn push_message(&mut self, role: MessageRole, content: impl Into<String>) -> Result<()> {
         let message = Message::new(role, content);
         self.conversation.push(message.clone());

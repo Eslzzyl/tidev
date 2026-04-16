@@ -279,20 +279,62 @@ fn build_openai_request(
 ) -> Result<ChatCompletionRequest> {
     let mut request_messages = Vec::new();
 
-    if !model.system_prompt.trim().is_empty() {
-        request_messages.push(ChatMessagePayload::system(model.system_prompt.clone()));
+    // Extract context summary from System messages (from context compaction)
+    // The System message, if present, contains the compression summary and should be
+    // combined with the model's system prompt into a single system message.
+    let context_summary: Option<String> = messages
+        .iter()
+        .filter(|message| !message.streaming)
+        .filter(|message| message.role == MessageRole::System)
+        .map(message_text_with_file_references)
+        .next();
+
+    let has_context_summary = context_summary.is_some();
+
+    // Build combined system prompt: model.system_prompt + context summary
+    // This ensures there is only one system message at the beginning, as required by
+    // most LLM APIs (e.g., SiliconFlow requires "System message must be at the beginning")
+    let combined_system_prompt = match (
+        model.system_prompt.trim().is_empty(),
+        context_summary.as_ref().map(|s| s.trim().is_empty()),
+    ) {
+        (false, Some(false)) => {
+            // Both present and non-empty: combine them
+            Some(format!(
+                "{}\n\n{}",
+                model.system_prompt.trim(),
+                context_summary.as_ref().unwrap().trim()
+            ))
+        }
+        (false, _) => {
+            // Only model.system_prompt present
+            Some(model.system_prompt.clone())
+        }
+        (true, Some(false)) => {
+            // Only context_summary present
+            context_summary
+        }
+        (true, _) => {
+            // Neither present
+            None
+        }
+    };
+
+    if let Some(prompt) = combined_system_prompt
+        && !prompt.trim().is_empty()
+    {
+        request_messages.push(ChatMessagePayload::system(prompt));
     }
 
-    for message in messages {
+    // Process only User/Assistant/Tool messages (System messages already handled above)
+    for message in &messages {
         if message.streaming {
             continue;
         }
 
         match message.role {
-            MessageRole::System => request_messages.push(ChatMessagePayload::system(
-                message_text_with_file_references(&message),
-            )),
-            MessageRole::User => request_messages.push(ChatMessagePayload::user(model, &message)?),
+            MessageRole::System => {}
+            MessageRole::User => request_messages.push(ChatMessagePayload::user(model, message)?),
             MessageRole::Assistant => {
                 let tool_calls = if message.tool_calls.is_empty() {
                     None
@@ -307,14 +349,14 @@ fn build_openai_request(
                 };
 
                 request_messages.push(ChatMessagePayload::assistant(
-                    message_text_with_file_references(&message),
+                    message_text_with_file_references(message),
                     tool_calls,
                 ))
             }
             MessageRole::Tool => request_messages.push(ChatMessagePayload::tool(
-                message_text_with_file_references(&message),
-                message.tool_call_id,
-                message.tool_name,
+                message_text_with_file_references(message),
+                message.tool_call_id.clone(),
+                message.tool_name.clone(),
             )),
             MessageRole::Error => {}
         }
@@ -325,6 +367,25 @@ fn build_openai_request(
     } else {
         Some(tools.iter().map(ChatToolSpec::from).collect())
     };
+
+    // let input_roles: Vec<_> = messages
+    //     .iter()
+    //     .filter(|message| !message.streaming)
+    //     .map(|message| message.role.label())
+    //     .collect();
+    // let final_roles: Vec<_> = request_messages
+    //     .iter()
+    //     .map(|msg| msg.role.as_str())
+    //     .collect();
+
+    // log_debug!(
+    //     "build_openai_request: model.system_prompt_present={} context_summary_present={} input_count={} input_roles={:?} final_roles={:?}",
+    //     !model.system_prompt.trim().is_empty(),
+    //     has_context_summary,
+    //     input_roles.len(),
+    //     input_roles,
+    //     final_roles,
+    // );
 
     Ok(ChatCompletionRequest {
         model: model.request_model_id.clone(),
@@ -469,6 +530,99 @@ fn user_message_content(model: &ActiveModel, message: &Message) -> Result<serde_
     }
 
     Ok(serde_json::Value::Array(parts))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        config::ActiveModel,
+        config::ApiType,
+        session::{Message, MessageRole},
+    };
+
+    #[test]
+    fn openai_system_messages_are_combined() {
+        let model = ActiveModel {
+            provider_id: "openai".to_string(),
+            provider_display_name: "OpenAI".to_string(),
+            base_url: "https://api.openai.com".to_string(),
+            api_type: ApiType::OpenAi,
+            model_id: "gpt-4".to_string(),
+            request_model_id: "gpt-4".to_string(),
+            display_name: "gpt-4".to_string(),
+            context_window: 8192,
+            max_output_tokens: 1024,
+            temperature: 0.7,
+            supports_images: false,
+            system_prompt: "base system prompt".to_string(),
+            api_key: None,
+            extra_body: None,
+        };
+
+        // System message in messages represents context compaction summary
+        let messages = vec![
+            Message::new(MessageRole::User, "Hello"),
+            Message::new(MessageRole::System, "Context summary"),
+            Message::new(MessageRole::Assistant, "Hi there"),
+        ];
+
+        let request = build_openai_request(&model, messages, false, &[]).expect("build request");
+        let roles: Vec<_> = request
+            .messages
+            .iter()
+            .map(|msg| msg.role.as_str())
+            .collect();
+
+        // Should have exactly one system message at the beginning
+        // The system prompt and context summary are combined into one
+        assert_eq!(roles, vec!["system", "user", "assistant"]);
+
+        // Verify the system message content is combined
+        let system_content = request.messages[0].content.as_ref().unwrap();
+        let system_text = system_content.as_str().unwrap();
+        assert!(system_text.contains("base system prompt"));
+        assert!(system_text.contains("Context summary"));
+    }
+
+    #[test]
+    fn openai_system_prompt_only() {
+        let model = ActiveModel {
+            provider_id: "openai".to_string(),
+            provider_display_name: "OpenAI".to_string(),
+            base_url: "https://api.openai.com".to_string(),
+            api_type: ApiType::OpenAi,
+            model_id: "gpt-4".to_string(),
+            request_model_id: "gpt-4".to_string(),
+            display_name: "gpt-4".to_string(),
+            context_window: 8192,
+            max_output_tokens: 1024,
+            temperature: 0.7,
+            supports_images: false,
+            system_prompt: "base system prompt".to_string(),
+            api_key: None,
+            extra_body: None,
+        };
+
+        // No System message in messages, only model.system_prompt
+        let messages = vec![
+            Message::new(MessageRole::User, "Hello"),
+            Message::new(MessageRole::Assistant, "Hi there"),
+        ];
+
+        let request = build_openai_request(&model, messages, false, &[]).expect("build request");
+        let roles: Vec<_> = request
+            .messages
+            .iter()
+            .map(|msg| msg.role.as_str())
+            .collect();
+
+        assert_eq!(roles, vec!["system", "user", "assistant"]);
+
+        let system_content = request.messages[0].content.as_ref().unwrap();
+        let system_text = system_content.as_str().unwrap();
+        assert_eq!(system_text, "base system prompt");
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]

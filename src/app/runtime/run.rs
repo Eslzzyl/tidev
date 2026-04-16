@@ -106,6 +106,7 @@ impl App {
             context_usage: None,
             snapshot,
             cleanup_cancel,
+            loaded_instruction_sources: Vec::new(),
         };
 
         app.at_mention
