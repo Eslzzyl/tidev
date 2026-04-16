@@ -1341,19 +1341,19 @@ impl App {
                 .min(available_input_height.max(3));
 
             Layout::vertical([
-                Constraint::Length(2),
-                Constraint::Length(2),
-                Constraint::Length(options_height),
-                Constraint::Length(input_height),
-                Constraint::Length(2),
+                Constraint::Length(1),
+                Constraint::Min(2),
+                Constraint::Min(options_height),
+                Constraint::Min(input_height),
+                Constraint::Length(1),
             ])
             .split(inner)
         } else {
             Layout::vertical([
-                Constraint::Length(2),
-                Constraint::Length(2),
-                Constraint::Length(options_height),
-                Constraint::Length(2),
+                Constraint::Length(1),
+                Constraint::Min(2),
+                Constraint::Min(options_height),
+                Constraint::Length(1),
             ])
             .split(inner)
         };
