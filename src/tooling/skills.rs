@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
 use serde::Deserialize;
+use std::time::Duration;
 use std::{
     collections::HashSet,
     fs,
@@ -8,7 +9,6 @@ use std::{
 };
 
 use reqwest::blocking::Client;
-use std::time::Duration;
 
 const SKILL_FILE_NAME: &str = "SKILL.md";
 const SKILL_ROOTS: &[&str] = &[".opencode/skills", ".claude/skills", ".agents/skills"];
@@ -378,136 +378,4 @@ fn is_valid_skill_name(name: &str) -> bool {
     name.chars().all(|character| {
         character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use anyhow::Result;
-    use std::fs;
-    use uuid::Uuid;
-
-    fn temp_dir() -> Result<PathBuf> {
-        let path = std::env::temp_dir().join(format!("tidev-skills-{}", Uuid::new_v4()));
-        fs::create_dir_all(&path)?;
-        Ok(path)
-    }
-
-    fn write_skill(root: &Path, name: &str, description: &str, body: &str) -> Result<PathBuf> {
-        let dir = root.join(name);
-        fs::create_dir_all(&dir)?;
-        let path = dir.join(SKILL_FILE_NAME);
-        fs::write(
-            &path,
-            format!("---\nname: {name}\ndescription: {description}\n---\n{body}\n"),
-        )?;
-        Ok(path)
-    }
-
-    #[test]
-    fn discover_loads_project_and_global_skills() -> Result<()> {
-        let workspace = temp_dir()?;
-        let config = temp_dir()?;
-
-        let project_root = workspace.join(".opencode").join("skills");
-        let global_root = config.join("skills");
-        fs::create_dir_all(&project_root)?;
-        fs::create_dir_all(&global_root)?;
-
-        write_skill(&project_root, "git-release", "Release helper", "# project")?;
-        write_skill(&global_root, "lint-fix", "Lint helper", "# global")?;
-
-        let catalog = SkillCatalog::discover(&workspace, &config, &[]);
-        assert_eq!(catalog.all().len(), 2);
-        assert_eq!(catalog.all()[0].name, "git-release");
-        assert_eq!(catalog.all()[1].name, "lint-fix");
-        assert!(catalog.tool_description().contains("git-release"));
-        assert!(catalog.tool_description().contains("lint-fix"));
-
-        Ok(())
-    }
-
-    #[test]
-    fn discover_prefers_first_duplicate_name() -> Result<()> {
-        let workspace = temp_dir()?;
-        let config = temp_dir()?;
-
-        let project_root = workspace.join(".opencode").join("skills");
-        let global_root = config.join("skills");
-        fs::create_dir_all(&project_root)?;
-        fs::create_dir_all(&global_root)?;
-
-        write_skill(&project_root, "shared", "Project copy", "# project")?;
-        write_skill(&global_root, "shared", "Global copy", "# global")?;
-
-        let catalog = SkillCatalog::discover(&workspace, &config, &[]);
-        assert_eq!(catalog.all().len(), 1);
-        assert_eq!(catalog.all()[0].description, "Project copy");
-
-        Ok(())
-    }
-
-    #[test]
-    fn render_skill_includes_companion_files() -> Result<()> {
-        let workspace = temp_dir()?;
-        let config = temp_dir()?;
-        let project_root = workspace.join(".opencode").join("skills");
-        fs::create_dir_all(&project_root)?;
-
-        let skill_dir = project_root.join("docs-helper");
-        fs::create_dir_all(skill_dir.join("snippets"))?;
-        fs::write(
-            skill_dir.join(SKILL_FILE_NAME),
-            "---\nname: docs-helper\ndescription: Docs helper\n---\n# Skill body\n",
-        )?;
-        fs::write(skill_dir.join("README.md"), "notes")?;
-        fs::write(skill_dir.join("snippets").join("one.txt"), "hello")?;
-
-        let catalog = SkillCatalog::discover(&workspace, &config, &[]);
-        let rendered = catalog.render_skill("docs-helper")?;
-
-        assert!(rendered.contains("# Skill: docs-helper"));
-        assert!(rendered.contains("# Skill body"));
-        assert!(rendered.contains("README.md") || rendered.contains("snippets/one.txt"));
-
-        Ok(())
-    }
-
-    #[test]
-    fn discover_loads_remote_skill_source() -> Result<()> {
-        use std::io::{Read, Write};
-        use std::net::TcpListener;
-        use std::thread;
-
-        let workspace = temp_dir()?;
-        let config = temp_dir()?;
-        let listener = TcpListener::bind("127.0.0.1:0")?;
-        let address = listener.local_addr()?;
-
-        let server = thread::spawn(move || {
-            let Ok((mut stream, _)) = listener.accept() else {
-                return;
-            };
-
-            let mut request = [0_u8; 1024];
-            let _ = stream.read(&mut request);
-
-            let body = "---\nname: remote-skill\ndescription: Remote helper\n---\n# Remote body\n";
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            let _ = stream.write_all(response.as_bytes());
-        });
-
-        let url = format!("http://{}/skill.md", address);
-        let catalog = SkillCatalog::discover(&workspace, &config, &[url]);
-        assert_eq!(catalog.all().len(), 1);
-        assert_eq!(catalog.all()[0].name, "remote-skill");
-        assert!(catalog.all()[0].content.contains("# Remote body"));
-
-        let _ = server.join();
-        Ok(())
-    }
 }

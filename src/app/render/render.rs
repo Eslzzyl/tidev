@@ -12,7 +12,7 @@ use unicode_width::UnicodeWidthStr;
 use super::{App, Screen};
 
 impl App {
-    pub(super) fn palette(&self) -> ThemePalette {
+    pub(crate) fn palette(&self) -> ThemePalette {
         self.theme.palette()
     }
 

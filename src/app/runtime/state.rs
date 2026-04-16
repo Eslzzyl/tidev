@@ -1,0 +1,93 @@
+use ratatui::{style::Color, text::Line};
+use std::time::Instant;
+use uuid::Uuid;
+
+use super::at_mention::AtMentionState;
+use super::mcp_panel::McpPanelState;
+use super::model_panel::ModelPanelState;
+use super::mouse_selection::MouseSelectionState;
+use super::permission::{
+    PendingToolExecution, PermissionDialogState, RunningSubagentExecution, RunningToolExecution,
+};
+use super::question::QuestionDialogState;
+use super::session_panel::SessionPanelState;
+use super::theme_panel::ThemePanelState;
+use crate::{
+    app::commands::CommandPaletteState,
+    config::ActiveModel,
+    context::ContextManager,
+    app::input::Composer,
+    provider_setup::ConnectDialog,
+    session::{Conversation, MessageAttachment},
+};
+
+pub(crate) const MESSAGE_RENDER_CACHE_MAX_ENTRIES: usize = 1200;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum MessageRenderCacheKind {
+    Cards,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct MessageRenderCacheKey {
+    pub(crate) session_id: Uuid,
+    pub(crate) message_id: Uuid,
+    pub(crate) width: usize,
+    pub(crate) kind: MessageRenderCacheKind,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum MessageRenderCacheValue {
+    Cards(Vec<(Color, Vec<Line<'static>>)>),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct MessageRenderCacheEntry {
+    pub(crate) value: MessageRenderCacheValue,
+    pub(crate) last_used_tick: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Screen {
+    Welcome,
+    Chat,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CachedSessionRuntime {
+    pub(crate) conversation: Conversation,
+    pub(crate) active_model: ActiveModel,
+    pub(crate) context_manager: ContextManager,
+    pub(crate) pending_tool_execution: Option<PendingToolExecution>,
+    pub(crate) permission_dialog: Option<PermissionDialogState>,
+    pub(crate) question_dialog: Option<QuestionDialogState>,
+    pub(crate) running_tool_executions: Vec<RunningToolExecution>,
+    pub(crate) running_subagent_executions: Vec<RunningSubagentExecution>,
+    pub(crate) pending_request: bool,
+    pub(crate) active_request_id: u64,
+    pub(crate) abort_confirmation_deadline: Option<Instant>,
+    pub(crate) retrying_hint: Option<(u32, u32, String, Option<u32>)>,
+    pub(crate) message_scroll_offset: usize,
+    pub(crate) message_follow_tail: bool,
+    pub(crate) message_viewport_lines: usize,
+    pub(crate) message_total_lines: usize,
+    pub(crate) context_usage: Option<(u32, u32, u32)>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct UiStateSnapshot {
+    pub(crate) screen: Screen,
+    pub(crate) connect_dialog: Option<ConnectDialog>,
+    pub(crate) theme_panel: Option<ThemePanelState>,
+    pub(crate) model_panel: Option<ModelPanelState>,
+    pub(crate) session_panel: Option<SessionPanelState>,
+    pub(crate) mcp_panel: Option<McpPanelState>,
+    pub(crate) at_mention: AtMentionState,
+    pub(crate) command_palette: CommandPaletteState,
+    pub(crate) leader_key_pending: bool,
+    pub(crate) composer: Composer,
+    pub(crate) draft_attachments: Vec<MessageAttachment>,
+    pub(crate) last_notice: Option<String>,
+    pub(crate) toast: Option<(String, Instant)>,
+    pub(crate) mouse_selection: MouseSelectionState,
+}

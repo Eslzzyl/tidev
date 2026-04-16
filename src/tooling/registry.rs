@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use crate::mcp::McpManager;
-use crate::skills::SkillCatalog;
+use crate::tooling::SkillCatalog;
 use crate::{
     config::PermissionConfig,
     prompts::SessionMode,

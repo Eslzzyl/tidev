@@ -149,7 +149,7 @@ impl SelectionRange {
 }
 
 impl App {
-    pub(super) fn finish_mouse_selection(&mut self, frame: &mut Frame<'_>) {
+    pub(crate) fn finish_mouse_selection(&mut self, frame: &mut Frame<'_>) {
         let palette = self.palette();
         let selection_style = Style::default()
             .bg(palette.selection_bg)

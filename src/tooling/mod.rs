@@ -1,12 +1,14 @@
+pub mod builtin;
 mod registry;
-mod schema;
+mod skills;
 mod tools;
 
 use serde_json::Value;
 
 pub use registry::ToolRegistry;
-pub use schema::ToolArgs;
+pub use skills::SkillCatalog;
 pub use tools::TodoItem;
+pub use tools::ToolArgs;
 pub(crate) use tools::{QuestionArgs, QuestionInfo, SkillArgs, TaskArgs};
 
 use crate::config::PermissionConfig;
@@ -203,6 +205,4 @@ fn sanitize_name(value: &str) -> String {
     }
 }
 
-pub use tools::{
-    execute_shell_tool_call, list_dir, read_file, run_shell, run_shell_with_cancel, write_file,
-};
+pub use tools::execute_shell_tool_call;

@@ -1,0 +1,1025 @@
+use anyhow::{Context, Result};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use crossterm::{
+    cursor::Show,
+    event::{
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
+        MouseEventKind,
+    },
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+};
+use image::ImageEncoder;
+use ratatui::layout::{Position, Rect};
+use std::{
+    cell::{Cell, RefCell},
+    env, io,
+    path::{Path, PathBuf},
+    sync::Arc,
+    sync::atomic::Ordering,
+    time::{Duration, Instant},
+};
+use tokio::{
+    runtime::Runtime,
+    sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
+};
+use uuid::Uuid;
+
+mod commands;
+mod input;
+mod render;
+mod runtime;
+mod ui;
+
+pub use commands::{CommandAction, CommandPaletteState, CommandRegistry};
+pub use input::Composer;
+pub use input::at_mention;
+pub use input::event;
+pub use input::mouse_selection;
+pub use render::diff_render;
+pub use render::render_chat;
+pub use render::render_dialog;
+pub use runtime::run;
+pub use runtime::state;
+pub use runtime::subagent;
+pub use runtime::undo;
+pub use ui::connect;
+pub use ui::mcp_panel;
+pub use ui::model_panel;
+pub use ui::permission;
+pub use ui::question;
+pub use ui::session_panel;
+pub use ui::theme_panel;
+
+use runtime::state::*;
+
+use crate::{
+    app::at_mention::{AtMentionKind, AtMentionState, current_at_fragment},
+    app::mcp_panel::McpPanelState,
+    app::model_panel::ModelPanelState,
+    app::mouse_selection::{ClipboardLease, MouseSelectionState},
+    app::permission::{
+        PendingToolExecution, PermissionDialogState, RunningSubagentExecution, RunningToolExecution,
+    },
+    app::question::QuestionDialogState,
+    app::session_panel::SessionPanelState,
+    app::theme_panel::ThemePanelState,
+    config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
+    context::ContextManager,
+    instructions,
+    llm::LlmClient,
+    mcp::McpManager,
+    prompts::SessionMode,
+    provider_setup::ConnectDialog,
+    session::{AssistantTurn, BackendEvent, Conversation, Message, MessageAttachment, MessageRole},
+    snapshot::SnapshotService,
+    storage::SessionStore,
+    theme::{ThemeManager, ThemeName},
+    tooling::ToolRegistry,
+};
+
+const INIT_COMMAND: &str = r#"Create or update `AGENTS.md` for this repository.
+
+The goal is a compact instruction file that helps future OpenCode sessions avoid mistakes and ramp up quickly. Every line should answer: "Would an agent likely miss this without help?" If not, leave it out.
+
+User-provided focus or constraints (honor these):
+$ARGUMENTS
+
+## How to investigate
+
+Read the highest-value sources first:
+- `README*`, root manifests, workspace config, lockfiles
+- build, test, lint, formatter, typecheck, and codegen config
+- CI workflows and pre-commit / task runner config
+- existing instruction files (`AGENTS.md`, `CLAUDE.md`, `.cursor/rules/`, `.cursorrules`, `.github/copilot-instructions.md`)
+- repo-local OpenCode config such as `opencode.json`
+
+If architecture is still unclear after reading config and docs, inspect a small number of representative code files to find the real entrypoints, package boundaries, and execution flow. Prefer reading the files that explain how the system is wired together over random leaf files.
+
+Prefer executable sources of truth over prose. If docs conflict with config or scripts, trust the executable source and only keep what you can verify.
+
+## What to extract
+
+Look for the highest-signal facts for an agent working in this repo:
+- exact developer commands, especially non-obvious ones
+- how to run a single test, a single package, or a focused verification step
+- required command order when it matters, such as `lint -> typecheck -> test`
+- monorepo or multi-package boundaries, ownership of major directories, and the real app/library entrypoints
+- framework or toolchain quirks: generated code, migrations, codegen, build artifacts, special env loading, dev servers, infra deploy flow
+- repo-specific style or workflow conventions that differ from defaults
+- testing quirks: fixtures, integration test prerequisites, snapshot workflows, required services, flaky or expensive suites
+- important constraints from existing instruction files worth preserving
+
+Good `AGENTS.md` content is usually hard-earned context that took reading multiple files to infer.
+
+## Questions
+
+Only ask the user questions if the repo cannot answer something important. Use the `question` tool for one short batch at most.
+
+Good questions:
+- undocumented team conventions
+- branch / PR / release expectations
+- missing setup or test prerequisites that are known but not written down
+
+Do not ask about anything the repo already makes clear.
+
+## Writing rules
+
+Include only high-signal, repo-specific guidance such as:
+- exact commands and shortcuts the agent would otherwise guess wrong
+- architecture notes that are not obvious from filenames alone
+- conventions that differ from language or framework defaults
+- setup requirements, environment quirks, and operational gotchas
+- references to existing instruction sources that matter
+
+Exclude:
+- generic software advice
+- long tutorials or exhaustive file trees
+- obvious language conventions
+- speculative claims or anything you could not verify
+- content better stored in another file referenced via `opencode.json` `instructions`
+
+When in doubt, omit.
+
+Prefer short sections and bullets. If the repo is simple, keep the file simple. If the repo is large, summarize the few structural facts that actually change how an agent should work.
+
+If `AGENTS.md` already exists at `${path}`, improve it in place rather than rewriting blindly. Preserve verified useful guidance, delete fluff or stale claims, and reconcile it with the current codebase."#;
+
+struct App {
+    should_quit: bool,
+    screen: Screen,
+    workspace_root: PathBuf,
+    paths: ConfigPaths,
+    config: AppConfig,
+    auth: AuthStore,
+    store: SessionStore,
+    llm: LlmClient,
+    theme: ThemeManager,
+    mode: SessionMode,
+    active_model: ActiveModel,
+    conversation: Conversation,
+    context_manager: ContextManager,
+    tools: ToolRegistry,
+    commands: CommandRegistry,
+    command_palette: CommandPaletteState,
+    connect_dialog: Option<ConnectDialog>,
+    theme_panel: Option<ThemePanelState>,
+    model_panel: Option<ModelPanelState>,
+    session_panel: Option<SessionPanelState>,
+    mcp_panel: Option<McpPanelState>,
+    at_mention: AtMentionState,
+    pending_tool_execution: Option<PendingToolExecution>,
+    permission_dialog: Option<PermissionDialogState>,
+    question_dialog: Option<QuestionDialogState>,
+    running_tool_executions: Vec<RunningToolExecution>,
+    running_subagent_executions: Vec<RunningSubagentExecution>,
+    pending_assistant_turns: std::collections::HashSet<Uuid>,
+    cached_sessions: std::collections::HashMap<Uuid, CachedSessionRuntime>,
+    compacting_sessions: std::collections::HashSet<Uuid>,
+    leader_key_pending: bool,
+    composer: Composer,
+    draft_attachments: Vec<MessageAttachment>,
+    pending_request: bool,
+    active_request_id: u64,
+    abort_confirmation_deadline: Option<Instant>,
+    last_notice: Option<String>,
+    toast: Option<(String, Instant)>,
+    mouse_selection: MouseSelectionState,
+    retrying_hint: Option<(u32, u32, String, Option<u32>)>,
+    message_scroll_offset: usize,
+    message_follow_tail: bool,
+    message_viewport_lines: usize,
+    message_total_lines: usize,
+    message_render_cache:
+        RefCell<std::collections::HashMap<MessageRenderCacheKey, MessageRenderCacheEntry>>,
+    message_render_cache_tick: Cell<u64>,
+    message_render_cache_hits: Cell<u64>,
+    message_render_cache_misses: Cell<u64>,
+    message_content_area: Option<Rect>,
+    sidebar_area: Option<Rect>,
+    selection_clipboard_lease: Option<ClipboardLease>,
+    backend_tx: UnboundedSender<BackendEvent>,
+    backend_rx: UnboundedReceiver<BackendEvent>,
+    loading_frame: usize,
+    context_usage: Option<(u32, u32, u32)>,
+    snapshot: SnapshotService,
+    cleanup_cancel: Arc<std::sync::atomic::AtomicBool>,
+}
+
+pub fn run() -> Result<()> {
+    let runtime = Runtime::new().context("failed to create runtime")?;
+    let mut app = App::new()?;
+    app.run(&runtime)
+}
+
+impl App {
+    fn build_prompt_attachments(&self, prompt: &str) -> Result<Vec<MessageAttachment>> {
+        let mut attachments = Vec::new();
+        let mut seen_paths = std::collections::BTreeSet::new();
+
+        for path in self.inline_file_references(prompt) {
+            if !seen_paths.insert(path.clone()) {
+                continue;
+            }
+
+            let absolute = self.resolve_workspace_path(&path);
+            match self.build_attachment_for_path(&path, &absolute)? {
+                Some(attachment) => attachments.push(attachment),
+                None => continue,
+            }
+        }
+
+        attachments.extend(self.draft_attachments.iter().cloned());
+        Ok(attachments)
+    }
+
+    fn build_attachment_for_path(
+        &self,
+        path: &str,
+        absolute: &Path,
+    ) -> Result<Option<MessageAttachment>> {
+        let metadata = match std::fs::metadata(absolute) {
+            Ok(metadata) => metadata,
+            Err(_error) => return Ok(None),
+        };
+
+        if metadata.is_dir() {
+            let tree = build_directory_tree(absolute, 2, 80)?;
+            return Ok(Some(MessageAttachment::DirectoryReference {
+                path: path.trim_end_matches(['/', '\\']).to_string(),
+                tree,
+            }));
+        }
+
+        if let Some(mime) = image_mime_from_path(absolute) {
+            let bytes = std::fs::read(absolute)?;
+            let filename = absolute
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or(path)
+                .to_string();
+            let data_url = format!("data:{mime};base64,{}", BASE64_STANDARD.encode(bytes));
+            return Ok(Some(MessageAttachment::Image {
+                filename,
+                mime: mime.to_string(),
+                data_url,
+            }));
+        }
+
+        let content = match std::fs::read_to_string(absolute) {
+            Ok(content) => content,
+            Err(_error) => return Ok(None),
+        };
+
+        Ok(Some(MessageAttachment::FileReference {
+            path: path.to_string(),
+            content,
+        }))
+    }
+
+    fn inline_file_references(&self, prompt: &str) -> Vec<String> {
+        let mut paths = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+
+        for token in prompt.split_whitespace() {
+            let Some(path) = token.strip_prefix('@') else {
+                continue;
+            };
+            let path = path.trim_matches(|ch: char| {
+                matches!(ch, ',' | '.' | ';' | ':' | ')' | ']' | '"' | '\'')
+            });
+            if path.is_empty() {
+                continue;
+            }
+            if !seen.insert(path.to_string()) {
+                continue;
+            }
+            paths.push(path.to_string());
+        }
+
+        paths
+    }
+
+    fn resolve_workspace_path(&self, path: &str) -> PathBuf {
+        let candidate = Path::new(path);
+        if candidate.is_absolute() {
+            return candidate.to_path_buf();
+        }
+        self.workspace_root.join(path)
+    }
+
+    fn start_assistant_turn(&mut self, runtime: &Runtime) -> Result<()> {
+        crate::log_info!(
+            "start_assistant_turn: session_id={}, message_count={}",
+            self.conversation.session_id,
+            self.conversation.messages.len()
+        );
+        self.refresh_tools();
+        self.pending_request = true;
+        self.abort_confirmation_deadline = None;
+        self.active_request_id = self.active_request_id.wrapping_add(1);
+        let request_id = self.active_request_id;
+        crate::log_info!("start_assistant_turn: new request_id={}", request_id);
+        self.last_notice = Some(match self.mode {
+            SessionMode::Plan => "Planning...".to_string(),
+            SessionMode::Build => "Thinking...".to_string(),
+        });
+
+        let llm = self.llm.clone();
+        let (system_prompt, instruction_sources) = self.compose_system_prompt();
+        let mut model = self.active_model.clone();
+        model.system_prompt = system_prompt;
+
+        let _ = self.push_loaded_instruction_sources_message(&instruction_sources);
+
+        let assistant_message = Message::streaming(MessageRole::Assistant, "");
+        self.conversation.push(assistant_message);
+
+        let messages = self.conversation.visible_messages().to_vec();
+        let tools = self.tools.available_definitions(self.mode);
+        let tx = self.backend_tx.clone();
+        let session_id = self.conversation.session_id;
+
+        runtime.spawn(async move {
+            llm.stream_chat(session_id, request_id, model, messages, tools, tx)
+                .await;
+        });
+
+        Ok(())
+    }
+
+    fn refresh_tools(&mut self) {
+        let mcp = self.tools.mcp_manager();
+        self.tools = ToolRegistry::new(
+            self.workspace_root.clone(),
+            self.paths.config_dir.clone(),
+            self.config.skills.clone(),
+            mcp,
+            self.config.permissions.clone(),
+        );
+    }
+
+    fn compose_system_prompt(&self) -> (String, Vec<String>) {
+        let base_prompt = self.active_model.system_prompt.trim();
+        let mode_reminder = self.mode.reminder();
+        let (instruction_prompt, sources) = instructions::system_prompt_and_sources(
+            &self.workspace_root,
+            &self.paths.config_dir,
+            &self.config.instructions,
+        )
+        .unwrap_or_default();
+
+        let mut prompt = String::new();
+        if !base_prompt.is_empty() {
+            prompt.push_str(base_prompt);
+        }
+        if !instruction_prompt.is_empty() {
+            if !prompt.is_empty() {
+                prompt.push_str("\n\n");
+            }
+            prompt.push_str(&instruction_prompt);
+        }
+        if !prompt.is_empty() {
+            prompt.push_str("\n\n");
+        }
+        prompt.push_str(mode_reminder);
+
+        (prompt, sources)
+    }
+
+    fn push_loaded_instruction_sources_message(&mut self, sources: &[String]) -> Result<()> {
+        if sources.is_empty() {
+            return Ok(());
+        }
+
+        let already_present = self.conversation.messages.iter().any(|message| {
+            matches!(message.role, MessageRole::System)
+                && message.content.starts_with("Loaded instruction sources:")
+        });
+
+        if already_present {
+            return Ok(());
+        }
+
+        let display_sources: Vec<String> = sources
+            .iter()
+            .map(|source| self.display_instruction_source(source))
+            .collect();
+        let content = format!("Loaded instruction sources: {}", display_sources.join(", "));
+        self.push_system_message(content)
+    }
+
+    fn display_instruction_source(&self, source: &str) -> String {
+        if source.starts_with("http://") || source.starts_with("https://") {
+            return source.to_string();
+        }
+
+        let path = Path::new(source);
+        if path.is_absolute()
+            && let Ok(rel) = path.strip_prefix(&self.workspace_root)
+        {
+            return rel.display().to_string();
+        }
+
+        source.to_string()
+    }
+
+    fn push_system_message(&mut self, content: impl Into<String>) -> Result<()> {
+        self.push_message(MessageRole::System, content)
+    }
+
+    fn push_message(&mut self, role: MessageRole, content: impl Into<String>) -> Result<()> {
+        let message = Message::new(role, content);
+        self.conversation.push(message.clone());
+        self.store
+            .append_message(self.conversation.session_id, &message)?;
+        self.screen = Screen::Chat;
+        Ok(())
+    }
+
+    fn process_backend_events(&mut self, runtime: &Runtime) -> Result<()> {
+        while let Ok(event) = self.backend_rx.try_recv() {
+            self.handle_backend_event(event, runtime)?;
+        }
+
+        Ok(())
+    }
+
+    fn handle_backend_event(&mut self, event: BackendEvent, runtime: &Runtime) -> Result<()> {
+        let session_id = event.session_id();
+        let request_id = event.request_id();
+        if session_id != self.conversation.session_id {
+            return self.with_temporary_session_context(session_id, |app| {
+                if let Some(request_id) = request_id {
+                    app.prime_active_request(request_id);
+                }
+                app.handle_backend_event_for_active(event, runtime)
+            });
+        }
+
+        if let Some(request_id) = request_id {
+            self.prime_active_request(request_id);
+        }
+
+        self.handle_backend_event_for_active(event, runtime)
+    }
+
+    fn prime_active_request(&mut self, request_id: u64) {
+        if self.active_request_id == 0 {
+            self.active_request_id = request_id;
+        }
+    }
+
+    fn handle_backend_event_for_active(
+        &mut self,
+        event: BackendEvent,
+        runtime: &Runtime,
+    ) -> Result<()> {
+        let event_type = match &event {
+            BackendEvent::Delta { .. } => "Delta",
+            BackendEvent::ReasoningDelta { .. } => "ReasoningDelta",
+            BackendEvent::Finished { request_id, .. } => {
+                crate::log_info!("handle_backend_event: Finished request_id={}", request_id);
+                "Finished"
+            }
+            BackendEvent::Retrying { .. } => "Retrying",
+            BackendEvent::Failed { request_id, .. } => {
+                crate::log_info!("handle_backend_event: Failed request_id={}", request_id);
+                "Failed"
+            }
+            BackendEvent::ToolCompleted { request_id, .. } => {
+                crate::log_info!(
+                    "handle_backend_event: ToolCompleted request_id={}",
+                    request_id
+                );
+                "ToolCompleted"
+            }
+            BackendEvent::SubagentStatus { .. } => "SubagentStatus",
+            BackendEvent::SubagentToolResult { .. } => "SubagentToolResult",
+            BackendEvent::SubagentCompleted { .. } => "SubagentCompleted",
+            BackendEvent::UsageStats { .. } => "UsageStats",
+            BackendEvent::ContextCompacted { .. } => "ContextCompacted",
+        };
+        if event_type != "Delta"
+            && event_type != "ReasoningDelta"
+            && event_type != "UsageStats"
+            && event_type != "SubagentStatus"
+            && event_type != "SubagentToolResult"
+        {
+            crate::log_debug!("handle_backend_event: {}", event_type);
+        }
+        match event {
+            BackendEvent::Delta {
+                session_id: _,
+                request_id,
+                content,
+            } => {
+                if !self.is_active_request(request_id) {
+                    return Ok(());
+                }
+
+                if let Some(message) = self.conversation.messages.last_mut()
+                    && message.streaming
+                    && matches!(message.role, MessageRole::Assistant)
+                {
+                    message.content.push_str(&content);
+                }
+            }
+            BackendEvent::ReasoningDelta {
+                session_id: _,
+                request_id,
+                content,
+            } => {
+                if !self.is_active_request(request_id) {
+                    return Ok(());
+                }
+
+                if let Some(message) = self.conversation.messages.last_mut()
+                    && message.streaming
+                    && matches!(message.role, MessageRole::Assistant)
+                {
+                    message.reasoning.push_str(&content);
+                }
+            }
+            BackendEvent::Finished {
+                session_id: _,
+                request_id,
+                turn,
+            } => {
+                if !self.is_active_request(request_id) {
+                    return Ok(());
+                }
+
+                self.finish_assistant_turn(turn, runtime)?;
+            }
+            BackendEvent::Retrying {
+                session_id: _,
+                request_id,
+                attempt,
+                max_attempts,
+                reason,
+                retry_after_secs,
+            } => {
+                if !self.is_active_request(request_id) {
+                    return Ok(());
+                }
+
+                self.retrying_hint = Some((attempt, max_attempts, reason, retry_after_secs));
+            }
+            BackendEvent::Failed {
+                session_id: _,
+                request_id,
+                error,
+            } => {
+                if !self.is_active_request(request_id) {
+                    return Ok(());
+                }
+
+                self.pending_request = false;
+                self.pending_tool_execution = None;
+                self.permission_dialog = None;
+                self.question_dialog = None;
+                self.running_tool_executions.clear();
+                self.cancel_running_subagents();
+                self.abort_confirmation_deadline = None;
+                self.retrying_hint = None;
+
+                if let Some(message) = self.conversation.messages.last_mut()
+                    && message.streaming
+                    && matches!(message.role, MessageRole::Assistant)
+                {
+                    message.role = MessageRole::Error;
+                    message.streaming = false;
+                    message.content = format!("Request failed: {error}");
+                    let persisted = message.clone();
+                    self.store
+                        .append_message(self.conversation.session_id, &persisted)?;
+                    self.last_notice = Some(error);
+                    return Ok(());
+                }
+
+                let message = Message::new(MessageRole::Error, format!("Request failed: {error}"));
+                self.conversation.push(message.clone());
+                self.store
+                    .append_message(self.conversation.session_id, &message)?;
+                self.last_notice = Some(error);
+            }
+            BackendEvent::ToolCompleted {
+                session_id: _,
+                request_id,
+                tool_call,
+                result,
+            } => {
+                if !self.is_active_request(request_id) {
+                    return Ok(());
+                }
+
+                let running_idx = self
+                    .running_tool_executions
+                    .iter()
+                    .position(|r| r.request_id == request_id && r.tool_call.id == tool_call.id);
+
+                if let Some(idx) = running_idx {
+                    let running = self.running_tool_executions.remove(idx);
+                    self.record_tool_result(running.tool_call, result)?;
+                    self.try_start_parallel_execution(runtime)?;
+                }
+            }
+            BackendEvent::SubagentStatus {
+                session_id: _,
+                request_id,
+                child_session_id,
+                status_text,
+                current_tool_call,
+                assistant_message,
+                content_delta: _,
+                reasoning_delta: _,
+            } => {
+                if !self.is_active_request(request_id) {
+                    return Ok(());
+                }
+
+                if let Some(execution) = self
+                    .running_subagent_executions
+                    .iter_mut()
+                    .find(|execution| execution.child_session_id == child_session_id)
+                {
+                    execution.status_text = status_text.clone();
+                    execution.current_tool_call = current_tool_call;
+                }
+
+                if self.conversation.session_id == child_session_id {
+                    let is_completed = status_text == "Completed";
+                    self.pending_request = !is_completed;
+
+                    if let Some(message) = assistant_message {
+                        let existing_index = self.conversation.messages.iter().position(|m| {
+                            matches!(m.role, MessageRole::Assistant) && m.id == message.id
+                        });
+
+                        if let Some(index) = existing_index {
+                            let existing = &mut self.conversation.messages[index];
+                            let message_id = existing.id;
+                            existing.content = message.content.clone();
+                            existing.reasoning = message.reasoning.clone();
+                            existing.tool_calls = message.tool_calls.clone();
+                            existing.streaming = message.streaming;
+                            self.invalidate_active_message_render_cache_for(message_id);
+                        } else {
+                            self.conversation.messages.push(message.clone());
+                        }
+                    }
+                }
+            }
+            BackendEvent::SubagentToolResult {
+                session_id: _,
+                request_id,
+                child_session_id,
+                message,
+            } => {
+                if !self.is_active_request(request_id) {
+                    return Ok(());
+                }
+
+                if self.conversation.session_id == child_session_id {
+                    let tool_call_id = message.tool_call_id.clone();
+                    let already_exists = self.conversation.messages.iter().any(|m| {
+                        matches!(m.role, MessageRole::Tool) && m.tool_call_id == tool_call_id
+                    });
+
+                    if !already_exists {
+                        self.conversation.messages.push(message);
+                    }
+                }
+            }
+            BackendEvent::SubagentCompleted {
+                session_id: _,
+                request_id,
+                tool_call,
+                child_session_id,
+                result,
+            } => {
+                crate::log_info!(
+                    "SubagentCompleted: request_id={}, active_request_id={}, child_session_id={}, tool_call_id={}",
+                    request_id,
+                    self.active_request_id,
+                    child_session_id,
+                    tool_call.id
+                );
+                if !self.is_active_request(request_id) {
+                    crate::log_warn!(
+                        "SubagentCompleted ignored: request_id {} != active_request_id {}",
+                        request_id,
+                        self.active_request_id
+                    );
+                    return Ok(());
+                }
+
+                let execution_index =
+                    self.running_subagent_executions
+                        .iter()
+                        .position(|execution| {
+                            execution.request_id == request_id
+                                && execution.child_session_id == child_session_id
+                                && execution.tool_call.id == tool_call.id
+                        });
+
+                let Some(index) = execution_index else {
+                    crate::log_warn!(
+                        "SubagentCompleted: no matching running_subagent_execution found"
+                    );
+                    return Ok(());
+                };
+
+                let execution = self.running_subagent_executions.remove(index);
+                let parent_session_id = execution.parent_session_id;
+                crate::log_info!(
+                    "Removed running_subagent_executions[{}], remaining count={}, parent_session_id={}",
+                    index,
+                    self.running_subagent_executions.len(),
+                    parent_session_id
+                );
+
+                let is_on_parent_session = self.conversation.session_id == parent_session_id;
+                crate::log_info!(
+                    "SubagentCompleted: is_on_parent_session={}, current_session_id={}",
+                    is_on_parent_session,
+                    self.conversation.session_id
+                );
+
+                if is_on_parent_session {
+                    self.record_tool_result(tool_call, result)?;
+                    crate::log_info!(
+                        "record_tool_result done, pending_tool_execution={}, running_subagent_executions={}",
+                        self.pending_tool_execution.is_some(),
+                        self.running_subagent_executions.len()
+                    );
+
+                    if self.pending_tool_execution.is_none()
+                        && self.running_subagent_executions.is_empty()
+                    {
+                        crate::log_info!("SubagentCompleted: calling start_assistant_turn");
+                        self.start_assistant_turn(runtime)?;
+                    } else if !self.running_subagent_executions.is_empty() {
+                        self.last_notice = Some(format!(
+                            "Waiting for {} subagent(s)...",
+                            self.running_subagent_executions.len()
+                        ));
+                    }
+                } else {
+                    crate::log_info!(
+                        "SubagentCompleted: user switched away from parent session, writing to database directly"
+                    );
+                    self.store.append_tool_event(
+                        parent_session_id,
+                        &tool_call.name,
+                        &tool_call.arguments,
+                        &result.output,
+                    )?;
+                    let message = Message::tool_result(tool_call.id, tool_call.name, result);
+                    self.store.append_message(parent_session_id, &message)?;
+                    self.pending_assistant_turns.insert(parent_session_id);
+                    crate::log_info!(
+                        "SubagentCompleted: marked parent_session_id={} as pending assistant turn",
+                        parent_session_id
+                    );
+                }
+            }
+            BackendEvent::UsageStats {
+                session_id: _,
+                request_id,
+                input_tokens,
+                output_tokens,
+                total_tokens,
+            } => {
+                if !self.is_active_request(request_id) {
+                    return Ok(());
+                }
+
+                self.context_usage = Some((input_tokens, output_tokens, total_tokens));
+            }
+            BackendEvent::ContextCompacted {
+                session_id,
+                compacted,
+                summary,
+                retained_from,
+                error,
+            } => {
+                self.apply_context_compaction(session_id, compacted, summary, retained_from, error);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn finish_assistant_turn(&mut self, turn: AssistantTurn, runtime: &Runtime) -> Result<()> {
+        crate::log_info!(
+            "finish_assistant_turn: tool_calls_count={}, finish_reason={:?}",
+            turn.tool_calls.len(),
+            turn.finish_reason
+        );
+        let mut persisted_message = None;
+
+        if let Some(message) = self.conversation.messages.last_mut()
+            && message.streaming
+            && matches!(message.role, MessageRole::Assistant)
+        {
+            message.content = turn.content.clone();
+            message.reasoning = turn.reasoning.clone();
+            message.tool_calls = turn.tool_calls.clone();
+            message.streaming = false;
+
+            if let Some((input_tokens, output_tokens, total_tokens)) = self.context_usage {
+                message.input_tokens = Some(input_tokens);
+                message.output_tokens = Some(output_tokens);
+                message.total_tokens = Some(total_tokens);
+            }
+
+            persisted_message = Some(message.clone());
+        }
+
+        if let Some(message) = persisted_message {
+            self.store
+                .append_message(self.conversation.session_id, &message)?;
+        }
+
+        if !turn.tool_calls.is_empty() {
+            let tool_names: Vec<_> = turn.tool_calls.iter().map(|tc| tc.name.as_str()).collect();
+            crate::log_info!(
+                "finish_assistant_turn: calling begin_tool_execution for {:?}",
+                tool_names
+            );
+            self.last_notice = Some(format!("Running {} tool call(s)...", turn.tool_calls.len()));
+
+            self.begin_tool_execution(turn.tool_calls, runtime)?;
+            return Ok(());
+        }
+
+        self.pending_request = false;
+        self.abort_confirmation_deadline = None;
+
+        if let Err(error) = self.finalize_snapshot_for_last_user_message_sync(runtime) {
+            crate::log_warn!("failed to finalize snapshot: {}", error);
+        }
+
+        self.last_notice = Some(match turn.finish_reason.as_deref() {
+            Some(reason) if reason != "stop" => format!("Response finished ({reason})"),
+            _ => "Response complete".to_string(),
+        });
+        self.schedule_context_compaction_for_session(self.conversation.session_id, runtime);
+
+        Ok(())
+    }
+
+    fn resolve_fallback_model(config: &AppConfig, auth: &AuthStore) -> Result<ActiveModel> {
+        if let Ok(model) = config.resolve_active_model(auth) {
+            return Ok(model);
+        }
+
+        let summary = config
+            .available_models()
+            .into_iter()
+            .next()
+            .context("no models are configured")?;
+
+        config.resolve_model_by_ids(auth, &summary.provider_id, &summary.model_id)
+    }
+
+    fn resolve_conversation_model(
+        config: &AppConfig,
+        auth: &AuthStore,
+        conversation: &Conversation,
+    ) -> Result<ActiveModel> {
+        config.resolve_model_by_ids(auth, &conversation.provider_id, &conversation.model_id)
+    }
+}
+
+fn png_data_url_from_clipboard_image(image: arboard::ImageData<'_>) -> Result<String> {
+    let mut png = Vec::new();
+    let encoder = image::codecs::png::PngEncoder::new(&mut png);
+    let width = image.width as u32;
+    let height = image.height as u32;
+    let rgba = image.bytes.into_owned();
+    encoder
+        .write_image(&rgba, width, height, image::ExtendedColorType::Rgba8)
+        .context("failed to encode clipboard image")?;
+    Ok(format!(
+        "data:image/png;base64,{}",
+        BASE64_STANDARD.encode(png)
+    ))
+}
+
+fn build_directory_tree(path: &Path, max_depth: usize, max_entries: usize) -> Result<String> {
+    let label = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| path.display().to_string());
+
+    let mut lines = vec![format!("{label}/")];
+    let mut entry_count = 0usize;
+    append_directory_tree(
+        path,
+        1,
+        max_depth,
+        max_entries,
+        &mut entry_count,
+        &mut lines,
+    )?;
+    Ok(lines.join("\n"))
+}
+
+fn append_directory_tree(
+    path: &Path,
+    depth: usize,
+    max_depth: usize,
+    max_entries: usize,
+    entry_count: &mut usize,
+    lines: &mut Vec<String>,
+) -> Result<()> {
+    if depth > max_depth || *entry_count >= max_entries {
+        return Ok(());
+    }
+
+    let mut entries = Vec::new();
+    for entry in
+        std::fs::read_dir(path).with_context(|| format!("failed to read {}", path.display()))?
+    {
+        let entry = entry.with_context(|| format!("failed to read entry in {}", path.display()))?;
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("failed to inspect {}", entry.path().display()))?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        entries.push((file_type.is_dir(), name, entry.path()));
+    }
+
+    entries.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| right.0.cmp(&left.0)));
+
+    for (is_dir, name, child_path) in entries {
+        if *entry_count >= max_entries {
+            lines.push(format!("{}...", "  ".repeat(depth)));
+            break;
+        }
+
+        let indent = "  ".repeat(depth);
+        if is_dir {
+            lines.push(format!("{indent}{name}/"));
+            *entry_count += 1;
+            append_directory_tree(
+                &child_path,
+                depth + 1,
+                max_depth,
+                max_entries,
+                entry_count,
+                lines,
+            )?;
+        } else {
+            lines.push(format!("{indent}{name}"));
+            *entry_count += 1;
+        }
+    }
+
+    Ok(())
+}
+
+fn image_mime_from_path(path: &Path) -> Option<&'static str> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    match extension.as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "webp" => Some("image/webp"),
+        "gif" => Some("image/gif"),
+        _ => None,
+    }
+}
+
+struct TerminalSession;
+
+impl TerminalSession {
+    fn enter() -> Result<Self> {
+        enable_raw_mode().context("failed to enable raw mode")?;
+        crossterm::execute!(
+            io::stdout(),
+            EnterAlternateScreen,
+            EnableBracketedPaste,
+            EnableMouseCapture,
+            crossterm::cursor::Hide,
+        )
+        .context("failed to enter alternate screen")?;
+
+        Ok(Self)
+    }
+}
+
+impl Drop for TerminalSession {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = crossterm::execute!(
+            io::stdout(),
+            LeaveAlternateScreen,
+            DisableBracketedPaste,
+            DisableMouseCapture,
+            Show,
+        );
+    }
+}
