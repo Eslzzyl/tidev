@@ -271,10 +271,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         action: CommandAction::Theme,
     },
     CommandSpec {
-        name: "clear",
-        aliases: &["new"],
+        name: "new",
+        aliases: &["clear"],
         description: "Start a new conversation",
-        usage: "/clear",
+        usage: "/new",
         action: CommandAction::Clear,
     },
     CommandSpec {
