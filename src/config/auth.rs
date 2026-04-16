@@ -77,7 +77,7 @@ pub struct ActiveModel {
 
 impl ActiveModel {
     pub fn label(&self) -> String {
-        format!("{}/{}", self.provider_id, self.model_id)
+        format!("{}/{}", self.provider_display_name, self.display_name)
     }
 
     pub fn api_key_present(&self) -> bool {
