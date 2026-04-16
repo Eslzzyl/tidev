@@ -377,6 +377,15 @@ impl Conversation {
             .find(|message| matches!(message.role, MessageRole::User))
     }
 
+    pub fn prev_user_message_before(&self, message_id: Uuid) -> Option<&Message> {
+        let end_index = self.message_index(message_id)?;
+        self.messages
+            .iter()
+            .take(end_index)
+            .rev()
+            .find(|message| matches!(message.role, MessageRole::User))
+    }
+
     pub fn next_user_message_after(&self, message_id: Uuid) -> Option<&Message> {
         let start_index = self.message_index(message_id)?;
         self.messages

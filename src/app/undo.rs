@@ -86,27 +86,85 @@ impl App {
             self.abort_current_request();
         }
 
-        let Some(message) = self.conversation.last_visible_user_message().cloned() else {
-            crate::log_info!("undo_last_user_message: no visible user message found");
+        let message = if let Some(current_revert) = self.conversation.revert_message_id {
+            crate::log_info!(
+                "undo_last_user_message: already in revert state, looking for prev user message before {}",
+                current_revert
+            );
+            self.conversation.prev_user_message_before(current_revert)
+        } else {
+            crate::log_info!("undo_last_user_message: not in revert state, looking for last visible user message");
+            self.conversation.last_visible_user_message()
+        };
+
+        let Some(message) = message else {
+            crate::log_info!("undo_last_user_message: no user message found");
             self.last_notice = Some("No earlier user message to undo".to_string());
             return Ok(());
         };
 
+        let message = message.clone();
         crate::log_info!(
             "undo_last_user_message: found message id={}, content_len={}",
             message.id,
             message.content.len()
         );
+
+        self.revert_to_message(message.id, message.content.clone(), runtime)?;
+        self.last_notice = Some("Undid previous user message".to_string());
+        crate::log_info!("undo_last_user_message: completed successfully");
+        Ok(())
+    }
+
+    pub(crate) fn redo_last_user_message(&mut self, runtime: &Runtime) -> Result<()> {
+        crate::log_info!("redo_last_user_message: starting");
+
+        if self.pending_request {
+            self.abort_current_request();
+        }
+
+        let Some(current_revert) = self.conversation.revert_message_id else {
+            crate::log_info!("redo_last_user_message: not in revert state");
+            self.last_notice = Some("Nothing to redo".to_string());
+            return Ok(());
+        };
+
         crate::log_info!(
-            "undo_last_user_message: message snapshot_hash={:?}, patch_files={:?}",
-            message.snapshot_hash,
-            message.patch_files.as_ref().map(|s| s.len())
+            "redo_last_user_message: looking for next user message after {}",
+            current_revert
         );
 
-        let patches = self.collect_patches_after_message(message.id)?;
+        if let Some(next_message) = self.conversation.next_user_message_after(current_revert) {
+            crate::log_info!(
+                "redo_last_user_message: found next user message id={}",
+                next_message.id
+            );
+            let message_id = next_message.id;
+            let content = next_message.content.clone();
+            self.revert_to_message(message_id, content, runtime)?;
+            self.last_notice = Some("Redo complete".to_string());
+        } else {
+            crate::log_info!("redo_last_user_message: no next user message, unreverting");
+            self.unrevert(runtime)?;
+            self.last_notice = Some("Redo complete".to_string());
+        }
+
+        crate::log_info!("redo_last_user_message: completed successfully");
+        Ok(())
+    }
+
+    fn revert_to_message(
+        &mut self,
+        message_id: Uuid,
+        message_content: String,
+        runtime: &Runtime,
+    ) -> Result<()> {
+        crate::log_info!("revert_to_message: message_id={}", message_id);
+
+        let patches = self.collect_patches_after_message(message_id)?;
 
         crate::log_info!(
-            "undo_last_user_message: patches.len()={}, revert_message_id={:?}",
+            "revert_to_message: patches.len()={}, revert_message_id={:?}",
             patches.len(),
             self.conversation.revert_message_id
         );
@@ -117,24 +175,21 @@ impl App {
             .store
             .load_redo_snapshot(self.conversation.session_id)?
         {
-            crate::log_info!("undo_last_user_message: using existing redo_snapshot");
+            crate::log_info!("revert_to_message: using existing redo_snapshot");
             existing
         } else {
-            crate::log_info!("undo_last_user_message: capturing new redo_snapshot");
+            crate::log_info!("revert_to_message: capturing new redo_snapshot");
             match runtime.block_on(self.snapshot.track()) {
                 Ok(Some(hash)) => {
-                    crate::log_info!(
-                        "undo_last_user_message: captured redo_snapshot hash={}",
-                        hash
-                    );
+                    crate::log_info!("revert_to_message: captured redo_snapshot hash={}", hash);
                     hash
                 }
                 Ok(None) => {
-                    crate::log_info!("undo_last_user_message: track() returned None (no changes)");
+                    crate::log_info!("revert_to_message: track() returned None (no changes)");
                     String::new()
                 }
                 Err(error) => {
-                    crate::log_warn!("undo_last_user_message: track() failed: {}", error);
+                    crate::log_warn!("revert_to_message: track() failed: {}", error);
                     notice = Some(format!("Failed to capture redo snapshot: {error}"));
                     String::new()
                 }
@@ -145,65 +200,54 @@ impl App {
             .store
             .load_redo_snapshot(self.conversation.session_id)?
         {
-            crate::log_info!("undo_last_user_message: restoring redo_snapshot");
+            crate::log_info!("revert_to_message: restoring redo_snapshot");
             runtime.block_on(self.snapshot.restore(&existing_snapshot))?;
         }
 
         if !patches.is_empty() {
-            crate::log_info!(
-                "undo_last_user_message: reverting {} patches",
-                patches.len()
-            );
+            crate::log_info!("revert_to_message: reverting {} patches", patches.len());
             if let Err(error) = runtime.block_on(self.snapshot.revert(&patches)) {
-                crate::log_warn!("undo_last_user_message: revert failed: {}", error);
-                notice = Some(format!("Undo partially failed: {error}"));
+                crate::log_warn!("revert_to_message: revert failed: {}", error);
+                notice = Some(format!("Revert partially failed: {error}"));
             }
         }
 
-        crate::log_info!("undo_last_user_message: setting revert_message_id and updating UI");
+        crate::log_info!("revert_to_message: setting revert_message_id and updating UI");
         self.command_palette.clear();
         self.context_manager = ContextManager::new();
         self.set_revert_message_id(
-            Some(message.id),
+            Some(message_id),
             if redo_snapshot.is_empty() {
                 None
             } else {
                 Some(&redo_snapshot)
             },
         )?;
-        self.composer.set_text(message.content);
+        self.composer.set_text(message_content);
         self.screen = Screen::Chat;
         self.scroll_messages_to_bottom();
-        self.last_notice = notice.or_else(|| Some("Undid previous user message".to_string()));
-        crate::log_info!("undo_last_user_message: completed successfully");
+        if let Some(n) = notice {
+            self.last_notice = Some(n);
+        }
         Ok(())
     }
 
-    pub(crate) fn redo_last_user_message(&mut self, runtime: &Runtime) -> Result<()> {
-        if self.pending_request {
-            self.abort_current_request();
-        }
-
-        let Some(_current_revert) = self.conversation.revert_message_id else {
-            self.last_notice = Some("Nothing to redo".to_string());
-            return Ok(());
-        };
-
-        self.command_palette.clear();
+    fn unrevert(&mut self, runtime: &Runtime) -> Result<()> {
+        crate::log_info!("unrevert: starting");
 
         let Some(redo_snapshot) = self
             .store
             .load_redo_snapshot(self.conversation.session_id)?
         else {
-            self.last_notice = Some("Redo state unavailable".to_string());
+            crate::log_info!("unrevert: no redo_snapshot found");
             self.clear_revert_state()?;
             return Ok(());
         };
 
-        let mut notice = None;
-
+        crate::log_info!("unrevert: restoring redo_snapshot");
         if let Err(error) = runtime.block_on(self.snapshot.restore(&redo_snapshot)) {
-            notice = Some(format!("Redo failed: {error}"));
+            crate::log_warn!("unrevert: restore failed: {}", error);
+            self.last_notice = Some(format!("Redo failed: {error}"));
         }
 
         self.clear_revert_state()?;
@@ -211,7 +255,7 @@ impl App {
         self.composer.clear();
         self.screen = Screen::Chat;
         self.scroll_messages_to_bottom();
-        self.last_notice = notice.or_else(|| Some("Redo complete".to_string()));
+        crate::log_info!("unrevert: completed");
         Ok(())
     }
 
