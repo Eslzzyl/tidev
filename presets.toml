@@ -155,3 +155,34 @@ max_output_tokens = 8192
 temperature = 0.7
 supports_streaming = true
 supports_images = false
+
+[providers.longcat]
+display_name = "LongCat"
+base_url = "https://api.longcat.chat/openai/v1"
+
+[providers.longcat.models.longcat-flash-chat]
+request_model_id = "LongCat-Flash-Chat"
+display_name = "LongCat-Flash-Chat"
+context_window = 256000
+max_output_tokens = 32768
+temperature = 0.7
+supports_streaming = true
+supports_images = false
+
+[providers.longcat.models.longcat-flash-thinking]
+request_model_id = "LongCat-Flash-Thinking"
+display_name = "LongCat-Flash-Thinking"
+context_window = 256000
+max_output_tokens = 32768
+temperature = 0.7
+supports_streaming = true
+supports_images = false
+
+[providers.longcat.models.longcat-flash-lite]
+request_model_id = "LongCat-Flash-Lite"
+display_name = "LongCat-Flash-Lite"
+context_window = 256000
+max_output_tokens = 32768
+temperature = 0.7
+supports_streaming = true
+supports_images = false
