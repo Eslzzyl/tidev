@@ -733,7 +733,14 @@ impl App {
             }
             "read" => {
                 let path = get_field("path").unwrap_or("file");
-                ("Read", path.to_string())
+                let offset = get_field("offset").and_then(|s| s.parse::<i64>().ok());
+                let limit = get_field("limit").and_then(|s| s.parse::<i64>().ok());
+                let label = if let (Some(off), Some(lim)) = (offset, limit) {
+                    format!("{} (line {}-{})", path, off, off + lim - 1)
+                } else {
+                    path.to_string()
+                };
+                ("Read", label)
             }
             _ => {
                 let summary =
@@ -806,16 +813,28 @@ impl App {
                 if tool_output_is_error(output) {
                     " → error".to_string()
                 } else {
-                    let total_lines = output.lines().count();
-                    if total_lines == 0 {
-                        " → empty".to_string()
-                    } else {
-                        let truncated = self.tool_output_is_truncated(output);
-                        let mut suffix = format!(" → {} lines", total_lines);
-                        if truncated {
-                            suffix.push_str(" (truncated)");
+                    // Try to parse line range from output (e.g., "Showing lines 10-50 of 100")
+                    let line_range =
+                        parse_line_range_from_read_output(output);
+                    let truncated = self.tool_output_is_truncated(output);
+                    match line_range {
+                        Some((start, end)) => {
+                            if truncated {
+                                format!(" → Line {}-{} (truncated)", start, end)
+                            } else {
+                                format!(" → Line {}-{}", start, end)
+                            }
                         }
-                        suffix
+                        None => {
+                            let total_lines = output.lines().count();
+                            if total_lines == 0 {
+                                " → empty".to_string()
+                            } else if truncated {
+                                format!(" → First {} lines (truncated)", total_lines)
+                            } else {
+                                format!(" → All {} lines", total_lines)
+                            }
+                        }
                     }
                 }
             }
@@ -1430,7 +1449,19 @@ fn summarize_tool_arguments(tool_name: &str, arguments: &str) -> Vec<(String, St
     };
 
     match canonical_name {
-        "read" | "write" | "edit" => {
+        "read" => {
+            if let Some(path) = string_field("path") {
+                fields.push(("path".to_string(), path));
+            }
+            // Extract offset and limit for read tool
+            if let Some(offset) = parsed.as_ref().and_then(|v| v.get("offset")).and_then(|v| v.as_i64()) {
+                fields.push(("offset".to_string(), format!("{}", offset)));
+            }
+            if let Some(limit) = parsed.as_ref().and_then(|v| v.get("limit")).and_then(|v| v.as_i64()) {
+                fields.push(("limit".to_string(), format!("{}", limit)));
+            }
+        }
+        "write" | "edit" => {
             if let Some(path) = string_field("path") {
                 fields.push(("path".to_string(), path));
             }
@@ -1524,6 +1555,41 @@ fn summarize_tool_arguments(tool_name: &str, arguments: &str) -> Vec<(String, St
     }
 
     fields
+}
+
+/// Parse line range from read tool output (e.g., "Showing lines 10-50 of 100")
+fn parse_line_range_from_read_output(output: &str) -> Option<(i64, i64)> {
+    // Match patterns like "Showing lines 10-50 of 100" or "Showing lines 10-50"
+    if let Some(start) = output.find("Showing lines ") {
+        let after_prefix = &output[start + 14..];
+        // Parse start number
+        let mut end_idx = 0;
+        let mut start_num = 0i64;
+        for (i, c) in after_prefix.chars().enumerate() {
+            if c.is_ascii_digit() {
+                start_num = start_num * 10 + (c as i64 - '0' as i64);
+                end_idx = i;
+            } else {
+                break;
+            }
+        }
+        // Look for "-{end}" after "Showing lines {start}-"
+        let after_start = &after_prefix[end_idx + 1..];
+        if after_start.starts_with('-') {
+            let mut end_num = 0i64;
+            for c in after_start[1..].chars() {
+                if c.is_ascii_digit() {
+                    end_num = end_num * 10 + (c as i64 - '0' as i64);
+                } else {
+                    break;
+                }
+            }
+            if end_num > start_num {
+                return Some((start_num, end_num));
+            }
+        }
+    }
+    None
 }
 
 fn pretty_tool_arguments(arguments: &str) -> String {
