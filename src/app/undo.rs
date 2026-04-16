@@ -104,23 +104,12 @@ impl App {
         );
 
         let patches = self.collect_patches_after_message(message.id)?;
-        let has_earlier_user_message = self.conversation.has_earlier_user_message(message.id);
 
         crate::log_info!(
-            "undo_last_user_message: patches.len()={}, has_earlier_user_message={}, revert_message_id={:?}",
+            "undo_last_user_message: patches.len()={}, revert_message_id={:?}",
             patches.len(),
-            has_earlier_user_message,
             self.conversation.revert_message_id
         );
-
-        if patches.is_empty()
-            && !has_earlier_user_message
-            && self.conversation.revert_message_id.is_none()
-        {
-            crate::log_info!("undo_last_user_message: no changes to undo, returning early");
-            self.last_notice = Some("No changes to undo".to_string());
-            return Ok(());
-        }
 
         let mut notice = None;
 

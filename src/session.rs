@@ -385,15 +385,6 @@ impl Conversation {
             .find(|message| matches!(message.role, MessageRole::User))
     }
 
-    pub fn has_earlier_user_message(&self, message_id: Uuid) -> bool {
-        let Some(index) = self.message_index(message_id) else {
-            return false;
-        };
-        self.messages[..index]
-            .iter()
-            .any(|m| matches!(m.role, MessageRole::User))
-    }
-
     pub fn title_from_prompt(prompt: &str) -> String {
         let first_line = prompt.lines().next().unwrap_or("Untitled session").trim();
 
