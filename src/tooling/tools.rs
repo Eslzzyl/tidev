@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     fs,
-    io::Read,
+    io::{BufRead, BufReader, Read},
     path::{Component, Path, PathBuf},
     process::Stdio,
     sync::{
@@ -27,6 +27,12 @@ use crate::{
     storage::SessionStore,
 };
 use uuid::Uuid;
+
+const DEFAULT_READ_LIMIT: usize = 2000;
+const MAX_READ_BYTES: usize = 50 * 1024;
+const MAX_LINE_LENGTH: usize = 2000;
+const MAX_LINE_SUFFIX: &str = "... (line truncated to 2000 chars)";
+const MAX_BYTES_LABEL: &str = "50 KB";
 
 use super::canonical_tool_name;
 use super::schema::ToolArgs;
@@ -180,6 +186,8 @@ macro_rules! tool_args {
 tool_args! {
     pub struct ReadArgs {
         path: string("Path to read relative to the workspace root"),
+        offset: optional_integer("1-indexed line number to start reading from"),
+        limit: optional_integer("Maximum number of lines to read"),
     }
 }
 
@@ -305,7 +313,7 @@ pub(super) fn tool_definitions(skill_description: String) -> Vec<ToolDefinition>
     vec![
         ToolDefinition::new::<ReadArgs>(
             "read",
-            "Read a text file inside the workspace",
+            "Read a text file inside the workspace, optionally using offset/limit to page large files",
             ToolPermission::Read,
         ),
         ToolDefinition::new::<WriteArgs>(
@@ -364,12 +372,104 @@ pub(super) fn tool_definitions(skill_description: String) -> Vec<ToolDefinition>
 }
 
 pub fn read_file(workspace_root: &Path, relative_path: impl AsRef<Path>) -> Result<String> {
-    let path = resolve_workspace_path(workspace_root, relative_path.as_ref())?;
-    let mut contents =
-        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    read_file_with_options(workspace_root, relative_path, None, None)
+}
 
-    truncate_in_place(&mut contents, 12_000);
-    Ok(contents)
+pub fn read_file_with_options(
+    workspace_root: &Path,
+    relative_path: impl AsRef<Path>,
+    offset: Option<i64>,
+    limit: Option<i64>,
+) -> Result<String> {
+    let path = resolve_workspace_path(workspace_root, relative_path.as_ref())?;
+    let file =
+        fs::File::open(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let mut reader = BufReader::new(file);
+
+    let offset = offset.unwrap_or(1);
+    let limit = limit.unwrap_or(DEFAULT_READ_LIMIT as i64);
+    if offset < 1 {
+        bail!("offset must be greater than or equal to 1");
+    }
+    if limit < 1 {
+        bail!("limit must be greater than or equal to 1");
+    }
+
+    let mut lines = Vec::new();
+    let mut total_lines = 0;
+    let mut bytes = 0;
+    let mut cut = false;
+    let mut more = false;
+    let mut raw_line = String::new();
+
+    while reader.read_line(&mut raw_line)? > 0 {
+        total_lines += 1;
+        if total_lines < offset as usize {
+            raw_line.clear();
+            continue;
+        }
+
+        if lines.len() >= limit as usize {
+            more = true;
+            raw_line.clear();
+            continue;
+        }
+
+        let trimmed = raw_line.trim_end_matches(&['\r', '\n'][..]);
+        let text = truncate_line_to_limit(trimmed);
+        let size = text.as_bytes().len() + if lines.is_empty() { 0 } else { 1 };
+        if bytes + size > MAX_READ_BYTES {
+            cut = true;
+            more = true;
+            break;
+        }
+
+        bytes += size;
+        lines.push(text);
+        raw_line.clear();
+    }
+
+    if total_lines < offset as usize && !(total_lines == 0 && offset == 1) {
+        bail!(
+            "Offset {} is out of range for this file ({} lines)",
+            offset,
+            total_lines
+        );
+    }
+
+    let start = offset as usize;
+    let last = start + lines.len().saturating_sub(1);
+    let next_offset = start as i64 + lines.len() as i64;
+    let mut output = lines
+        .into_iter()
+        .enumerate()
+        .map(|(i, line)| format!("{}: {}", start + i, line))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if cut {
+        output.push_str(&format!(
+            "\n\n(Output capped at {}. Showing lines {}-{}. Use offset={} to continue.)",
+            MAX_BYTES_LABEL, start, last, next_offset
+        ));
+    } else if more {
+        output.push_str(&format!(
+            "\n\n(Showing lines {}-{} of {}. Use offset={} to continue.)",
+            start, last, total_lines, next_offset
+        ));
+    } else {
+        output.push_str(&format!("\n\n(End of file - total {} lines)", total_lines));
+    }
+
+    Ok(output)
+}
+
+fn truncate_line_to_limit(line: &str) -> String {
+    if line.chars().count() <= MAX_LINE_LENGTH {
+        line.to_string()
+    } else {
+        line.chars().take(MAX_LINE_LENGTH).collect::<String>() + MAX_LINE_SUFFIX
+    }
 }
 
 pub fn write_file(
@@ -1001,7 +1101,7 @@ pub(super) fn execute_tool_call(
     let output = match canonical_tool_name(&call.name) {
         Some("read") => {
             let args = parse_arguments::<ReadArgs>(&call.name, arguments)?;
-            read_file(workspace_root, args.path)
+            read_file_with_options(workspace_root, args.path, args.offset, args.limit)
         }
         Some("write") => {
             let args = parse_arguments::<WriteArgs>(&call.name, arguments)?;
@@ -1174,5 +1274,29 @@ mod tests {
         let root = PathBuf::from("/tmp/tidev-workspace");
         let escaped = resolve_workspace_path(&root, Path::new("../outside"));
         assert!(escaped.is_err());
+    }
+
+    #[test]
+    fn read_file_with_options_pages_large_files() {
+        let root =
+            PathBuf::from(std::env::temp_dir()).join(format!("tidev-read-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("failed to create temp workspace");
+
+        let path = root.join("sample.txt");
+        let content = (1..=100)
+            .map(|i| format!("line {}\n", i))
+            .collect::<String>();
+        fs::write(&path, &content).expect("failed to write sample file");
+
+        let relative = path.strip_prefix(&root).expect("path should be relative");
+        let output =
+            read_file_with_options(&root, relative, Some(10), Some(5)).expect("read failed");
+
+        assert!(output.contains("10: line 10"));
+        assert!(output.contains("14: line 14"));
+        assert!(output.contains("Use offset=15 to continue"));
+
+        fs::remove_file(&path).expect("failed to remove temp file");
+        fs::remove_dir(&root).expect("failed to remove temp dir");
     }
 }
