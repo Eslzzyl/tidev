@@ -512,12 +512,11 @@ impl App {
             return;
         }
 
-        if let Some(cached) = self.cached_sessions.get_mut(&session_id) {
-            if compacted {
+        if let Some(cached) = self.cached_sessions.get_mut(&session_id)
+            && compacted {
                 cached.context_manager.summary = summary;
                 cached.context_manager.retained_from = retained_from;
             }
-        }
     }
 
     pub(crate) fn background_running_count(&self) -> usize {

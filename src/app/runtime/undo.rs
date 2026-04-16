@@ -329,8 +329,8 @@ impl App {
 
         for message in &self.conversation.messages {
             if found {
-                if let Some(patch_files_str) = &message.patch_files {
-                    if let Some(snapshot_hash) = &message.snapshot_hash {
+                if let Some(patch_files_str) = &message.patch_files
+                    && let Some(snapshot_hash) = &message.snapshot_hash {
                         let files: Vec<String> = serde_json::from_str(patch_files_str)?;
                         crate::log_info!(
                             "collect_patches: found patch in subsequent message, hash={}, files={}",
@@ -342,7 +342,6 @@ impl App {
                             files,
                         });
                     }
-                }
                 continue;
             }
 
@@ -353,8 +352,8 @@ impl App {
                     message.snapshot_hash,
                     message.patch_files.as_ref().map(|s| s.len())
                 );
-                if let Some(patch_files_str) = &message.patch_files {
-                    if let Some(snapshot_hash) = &message.snapshot_hash {
+                if let Some(patch_files_str) = &message.patch_files
+                    && let Some(snapshot_hash) = &message.snapshot_hash {
                         let files: Vec<String> = serde_json::from_str(patch_files_str)?;
                         crate::log_info!(
                             "collect_patches: target message has patch, hash={}, files={}",
@@ -366,7 +365,6 @@ impl App {
                             files,
                         });
                     }
-                }
             }
         }
 

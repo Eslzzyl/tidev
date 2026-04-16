@@ -371,12 +371,11 @@ impl App {
     }
 
     pub(crate) fn switch_to_all_sessions_view(&mut self) -> Result<()> {
-        if let Some(panel) = &mut self.session_panel {
-            if panel.view_mode == SessionViewMode::CurrentWorkspace {
+        if let Some(panel) = &mut self.session_panel
+            && panel.view_mode == SessionViewMode::CurrentWorkspace {
                 let sessions = self.store.load_all_sessions().unwrap_or_default();
                 *panel = SessionPanelState::new(sessions, SessionViewMode::AllSessions);
             }
-        }
         Ok(())
     }
 
@@ -409,13 +408,12 @@ impl App {
     }
 
     pub(crate) fn confirm_delete_session(&mut self) -> Result<()> {
-        if let Some(panel) = self.session_panel.take() {
-            if let SessionPanelDialog::DeleteConfirm { session_ids, .. } = panel.dialog {
+        if let Some(panel) = self.session_panel.take()
+            && let SessionPanelDialog::DeleteConfirm { session_ids, .. } = panel.dialog {
                 self.store.delete_sessions(&session_ids)?;
                 let count = session_ids.len();
                 self.last_notice = Some(format!("Deleted {} session(s)", count));
             }
-        }
 
         self.close_session_panel();
         self.open_session_panel(String::new())?;
@@ -440,8 +438,8 @@ impl App {
     }
 
     pub(crate) fn select_cleanup_duration(&mut self, duration: ChronoDuration) -> Result<()> {
-        if let Some(panel) = &mut self.session_panel {
-            if let SessionPanelDialog::Cleanup { .. } = &panel.dialog {
+        if let Some(panel) = &mut self.session_panel
+            && let SessionPanelDialog::Cleanup { .. } = &panel.dialog {
                 let sessions = self
                     .store
                     .get_sessions_older_than_preview(duration)
@@ -454,13 +452,12 @@ impl App {
                     cleanup_workspace: false,
                 };
             }
-        }
         Ok(())
     }
 
     pub(crate) fn select_cleanup_workspace(&mut self) -> Result<()> {
-        if let Some(panel) = &mut self.session_panel {
-            if let SessionPanelDialog::Cleanup {
+        if let Some(panel) = &mut self.session_panel
+            && let SessionPanelDialog::Cleanup {
                 preview: _,
                 selected_duration,
                 ..
@@ -482,17 +479,16 @@ impl App {
 
                 panel.dialog = SessionPanelDialog::Cleanup {
                     preview: new_preview,
-                    selected_duration: selected_duration.clone(),
+                    selected_duration: *selected_duration,
                     cleanup_workspace: true,
                 };
             }
-        }
         Ok(())
     }
 
     pub(crate) fn confirm_cleanup_sessions(&mut self) -> Result<()> {
-        if let Some(panel) = self.session_panel.take() {
-            if let SessionPanelDialog::Cleanup {
+        if let Some(panel) = self.session_panel.take()
+            && let SessionPanelDialog::Cleanup {
                 preview: _,
                 selected_duration,
                 cleanup_workspace,
@@ -511,7 +507,6 @@ impl App {
                     self.last_notice = Some(format!("Deleted {} old session(s)", count));
                 }
             }
-        }
 
         self.close_session_panel();
         self.open_session_panel(String::new())?;

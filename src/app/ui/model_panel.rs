@@ -5,6 +5,12 @@ pub struct ModelPanelState {
     pub selected_index: usize,
 }
 
+impl Default for ModelPanelState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ModelPanelState {
     pub fn new() -> Self {
         Self { selected_index: 0 }
@@ -15,15 +21,14 @@ impl ModelPanelState {
         items: &[ModelPanelItem],
         active_model: Option<(&str, &str)>,
     ) {
-        if let Some((provider_id, model_id)) = active_model {
-            if let Some(index) = items.iter().position(|item| {
+        if let Some((provider_id, model_id)) = active_model
+            && let Some(index) = items.iter().position(|item| {
                 matches!(item, ModelPanelItem::Model { summary }
                     if summary.provider_id == provider_id && summary.model_id == model_id)
             }) {
                 self.selected_index = index;
                 return;
             }
-        }
 
         self.selected_index = first_selectable_index(items).unwrap_or(0);
     }

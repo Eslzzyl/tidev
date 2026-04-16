@@ -10,7 +10,7 @@ use super::App;
 #[derive(Clone, Debug)]
 pub struct McpPanelState {
     pub selected_index: usize,
-    pub editor: Option<McpServerEditorState>,
+    pub(crate) editor: Option<McpServerEditorState>,
 }
 
 impl McpPanelState {
@@ -132,7 +132,7 @@ impl App {
                         .set_placeholder("Search MCP servers by name or transport");
                     self.reset_mcp_panel_selection();
                 }
-                KeyCode::Enter | KeyCode::Tab => match editor.apply_input(&self.composer.text()) {
+                KeyCode::Enter | KeyCode::Tab => match editor.apply_input(self.composer.text()) {
                     Ok(Some(result)) => match self.apply_mcp_server_draft(runtime, result) {
                         Ok(()) => {
                             let previous_query = editor.previous_query.clone();
@@ -385,11 +385,10 @@ impl App {
         self.config.mcp.servers.insert(name.clone(), config.clone());
         self.config.save(&self.paths)?;
 
-        if let Some(previous_name) = previous_name {
-            if self.tools.mcp_manager().has_server(&previous_name) {
+        if let Some(previous_name) = previous_name
+            && self.tools.mcp_manager().has_server(&previous_name) {
                 runtime.block_on(self.tools.mcp_manager().remove_server(&previous_name))?;
             }
-        }
 
         runtime.block_on(self.tools.mcp_manager().upsert_server(name.clone(), config))?;
 

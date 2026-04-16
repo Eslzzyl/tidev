@@ -638,8 +638,8 @@ impl App {
                 .map(|(_, v)| v.as_str())
         };
 
-        if canonical_name == "bash" {
-            if let Some(cmd) = get_field("command") {
+        if canonical_name == "bash"
+            && let Some(cmd) = get_field("command") {
                 let mut lines = Vec::new();
                 lines.push(Line::from(vec![
                     Span::styled("Run ", Style::default().fg(palette.accent_soft)),
@@ -657,7 +657,6 @@ impl App {
                 }
                 return lines;
             }
-        }
 
         let summary = summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width);
 
@@ -1575,9 +1574,9 @@ fn parse_line_range_from_read_output(output: &str) -> Option<(i64, i64)> {
         }
         // Look for "-{end}" after "Showing lines {start}-"
         let after_start = &after_prefix[end_idx + 1..];
-        if after_start.starts_with('-') {
+        if let Some(stripped) = after_start.strip_prefix('-') {
             let mut end_num = 0i64;
-            for c in after_start[1..].chars() {
+            for c in stripped.chars() {
                 if c.is_ascii_digit() {
                     end_num = end_num * 10 + (c as i64 - '0' as i64);
                 } else {

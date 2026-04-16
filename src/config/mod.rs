@@ -69,6 +69,7 @@ impl Default for AppConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct PermissionSettings {
     #[serde(default)]
     pub read: bool,
@@ -97,18 +98,6 @@ impl PermissionSettings {
     }
 }
 
-impl Default for PermissionSettings {
-    fn default() -> Self {
-        Self {
-            read: false,
-            search: false,
-            write: false,
-            edit: false,
-            execute: false,
-            session: false,
-        }
-    }
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PermissionConfig {

@@ -226,15 +226,14 @@ impl SnapshotService {
             .map(|op| op.1.as_str())
             .collect();
 
-        if !to_checkout.is_empty() {
-            if let Err(_) = git::checkout_files(&self.gitdir, &self.worktree, hash, &to_checkout) {
+        if !to_checkout.is_empty()
+            && let Err(_) = git::checkout_files(&self.gitdir, &self.worktree, hash, &to_checkout) {
                 for op in batch {
                     if have.contains(op.2.as_str()) {
                         self.revert_single(&op.0, &op.1, &op.2)?;
                     }
                 }
             }
-        }
 
         for op in batch {
             if !have.contains(op.2.as_str()) {

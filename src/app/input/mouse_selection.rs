@@ -197,7 +197,7 @@ pub(crate) fn copy_to_clipboard(text: &str) -> Result<Option<ClipboardLease>, St
         clipboard
             .set_text(text)
             .map_err(|error| format!("failed to set clipboard text: {error}"))?;
-        return Ok(Some(ClipboardLease::native_linux(clipboard)));
+        Ok(Some(ClipboardLease::native_linux(clipboard)))
     }
 
     #[cfg(not(target_os = "linux"))]

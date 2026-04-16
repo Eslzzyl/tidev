@@ -68,6 +68,7 @@ impl SessionStore {
         &self.path
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn create_session(
         &self,
         session_id: Uuid,
@@ -116,6 +117,7 @@ impl SessionStore {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn create_session_with_parent(
         &self,
         session_id: Uuid,

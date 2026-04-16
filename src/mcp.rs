@@ -1,7 +1,6 @@
 use anyhow::{Context, Result, bail};
 use rmcp::model::{
     CallToolRequestParams, ClientCapabilities, ClientInfo, Implementation, Tool as McpTool,
-    ToolAnnotations,
 };
 use rmcp::service::{RoleClient, RunningService, ServiceExt};
 use rmcp::transport::child_process::TokioChildProcess;
@@ -445,7 +444,7 @@ impl McpManager {
 }
 
 fn parse_tool(server_name: &str, tool: McpTool) -> Result<ToolDefinition> {
-    let annotations = tool.annotations.unwrap_or_else(ToolAnnotations::default);
+    let annotations = tool.annotations.unwrap_or_default();
     let remote_tool_name = tool.name.to_string();
     let permission = match remote_tool_name.as_str() {
         "websearch" => ToolPermission::Search,

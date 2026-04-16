@@ -84,7 +84,7 @@ pub fn execute_tool_call(
             let patch = diffy::Patch::from_str(&args.patch_text)
                 .with_context(|| format!("failed to parse patch for tool '{}'", call.name))?;
             let file_path = extract_patch_file_path(&patch)
-                .with_context(|| format!("failed to determine file path from patch"))?;
+                .with_context(|| "failed to determine file path from patch".to_string())?;
             let absolute_path = resolve_workspace_path(workspace_root, Path::new(&file_path))?;
             let old_content = read_existing_text(&absolute_path)?;
             let updated = apply_patch_contents(&old_content, &patch)?;
@@ -262,7 +262,7 @@ pub(super) fn read_file_with_options(
 
         let trimmed = raw_line.trim_end_matches(&['\r', '\n'][..]);
         let text = truncate_line_to_limit(trimmed);
-        let size = text.as_bytes().len() + if lines.is_empty() { 0 } else { 1 };
+        let size = text.len() + if lines.is_empty() { 0 } else { 1 };
         if bytes + size > 50 * 1024 {
             cut = true;
             more = true;
@@ -558,9 +558,11 @@ fn levenshtein(a: &str, b: &str) -> usize {
     }
 
     let mut matrix: Vec<Vec<usize>> = vec![vec![0; b.len() + 1]; a.len() + 1];
+    #[allow(clippy::needless_range_loop)]
     for i in 0..=a.len() {
         matrix[i][0] = i;
     }
+    #[allow(clippy::needless_range_loop)]
     for j in 0..=b.len() {
         matrix[0][j] = j;
     }
@@ -643,6 +645,7 @@ fn block_anchor_replacer(content: &str, find: &str) -> Vec<String> {
         if &original_trimmed[i] != first {
             continue;
         }
+        #[allow(clippy::needless_range_loop)]
         for j in i + 2..original_trimmed.len() {
             if &original_trimmed[j] == last {
                 candidates.push((i, j));
@@ -675,11 +678,10 @@ fn block_anchor_replacer(content: &str, find: &str) -> Vec<String> {
         }
     }
 
-    if max_similarity >= MULTIPLE_CANDIDATE_SIMILARITY_THRESHOLD {
-        if let Some((start, end)) = best_match {
+    if max_similarity >= MULTIPLE_CANDIDATE_SIMILARITY_THRESHOLD
+        && let Some((start, end)) = best_match {
             return vec![line_slice(content, &original_lines, start, end).to_string()];
         }
-    }
     Vec::new()
 }
 
