@@ -68,8 +68,7 @@ impl Default for AppConfig {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct PermissionSettings {
     #[serde(default)]
     pub read: bool,
@@ -97,7 +96,6 @@ impl PermissionSettings {
         }
     }
 }
-
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PermissionConfig {
@@ -457,6 +455,7 @@ fn bundled_provider_catalog() -> Result<BTreeMap<String, ProviderConfig>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     #[test]
     fn bundled_provider_catalog_loads() {
@@ -472,6 +471,65 @@ mod tests {
             config.provider_source("deepseek"),
             Some(ProviderSource::Bundled)
         );
+    }
+
+    #[test]
+    fn connected_models_only_includes_providers_with_api_keys() {
+        let mut config = AppConfig::default();
+        config.providers.insert(
+            "provider_one".to_string(),
+            ProviderConfig {
+                display_name: "Provider One".to_string(),
+                base_url: "https://api.provider.one".to_string(),
+                api_type: None,
+                models: BTreeMap::from([(
+                    "model-a".to_string(),
+                    ModelConfig {
+                        display_name: "Model A".to_string(),
+                        context_window: 1024,
+                        max_output_tokens: 1024,
+                        temperature: 0.7,
+                        system_prompt: None,
+                        supports_streaming: true,
+                        supports_images: false,
+                        extra_body: None,
+                        request_model_id: None,
+                    },
+                )]),
+            },
+        );
+
+        config.providers.insert(
+            "provider_two".to_string(),
+            ProviderConfig {
+                display_name: "Provider Two".to_string(),
+                base_url: "https://api.provider.two".to_string(),
+                api_type: None,
+                models: BTreeMap::from([(
+                    "model-b".to_string(),
+                    ModelConfig {
+                        display_name: "Model B".to_string(),
+                        context_window: 1024,
+                        max_output_tokens: 1024,
+                        temperature: 0.7,
+                        system_prompt: None,
+                        supports_streaming: true,
+                        supports_images: false,
+                        extra_body: None,
+                        request_model_id: None,
+                    },
+                )]),
+            },
+        );
+
+        let mut auth = AuthStore::default();
+        auth.set_api_key("provider_one", "sk-test-key");
+
+        let connected = config.connected_models(&auth);
+
+        assert_eq!(connected.len(), 1);
+        assert_eq!(connected[0].provider_id, "provider_one");
+        assert_eq!(connected[0].model_id, "model-a");
     }
 
     #[test]
