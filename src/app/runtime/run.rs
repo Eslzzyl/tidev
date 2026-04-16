@@ -68,6 +68,7 @@ impl App {
             theme_panel: None,
             model_panel: None,
             session_panel: None,
+            rename_dialog: None,
             mcp_panel: None,
             at_mention: AtMentionState::default(),
             pending_tool_execution: None,
@@ -197,6 +198,7 @@ impl App {
             theme_panel: self.theme_panel.clone(),
             model_panel: self.model_panel.clone(),
             session_panel: self.session_panel.clone(),
+            rename_dialog: self.rename_dialog.clone(),
             mcp_panel: self.mcp_panel.clone(),
             at_mention: self.at_mention.clone(),
             command_palette: self.command_palette.clone(),
@@ -215,6 +217,7 @@ impl App {
         self.theme_panel = snapshot.theme_panel;
         self.model_panel = snapshot.model_panel;
         self.session_panel = snapshot.session_panel;
+        self.rename_dialog = snapshot.rename_dialog;
         self.mcp_panel = snapshot.mcp_panel;
         self.at_mention = snapshot.at_mention;
         self.command_palette = snapshot.command_palette;
@@ -513,10 +516,11 @@ impl App {
         }
 
         if let Some(cached) = self.cached_sessions.get_mut(&session_id)
-            && compacted {
-                cached.context_manager.summary = summary;
-                cached.context_manager.retained_from = retained_from;
-            }
+            && compacted
+        {
+            cached.context_manager.summary = summary;
+            cached.context_manager.retained_from = retained_from;
+        }
     }
 
     pub(crate) fn background_running_count(&self) -> usize {

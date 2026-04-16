@@ -41,6 +41,9 @@ impl App {
             self.render_session_panel(frame, area, panel);
             self.render_session_panel_dialog(frame, area, panel);
         }
+        if let Some(dialog) = &self.rename_dialog {
+            self.render_rename_session_dialog(frame, area, dialog);
+        }
         if let Some(dialog) = &self.permission_dialog {
             self.render_permission_dialog(frame, area, dialog);
         }

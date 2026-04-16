@@ -375,6 +375,10 @@ impl App {
             return Ok(());
         }
 
+        if self.rename_dialog.is_some() {
+            return self.handle_rename_session_dialog_key(key, runtime);
+        }
+
         if self.theme_panel.is_some() {
             return self.handle_theme_panel_key(key);
         }
@@ -737,6 +741,9 @@ impl App {
             CommandAction::Session => {
                 self.open_session_panel(args.join(" "))?;
             }
+            CommandAction::Rename => {
+                self.open_rename_session_dialog()?;
+            }
             CommandAction::Clear => {
                 self.start_new_session()?;
             }
@@ -831,6 +838,70 @@ impl App {
         self.config.save(&self.paths)?;
         self.last_notice = Some(format!("Theme switched to {}", self.theme.name()));
         Ok(())
+    }
+
+    pub(crate) fn open_rename_session_dialog(&mut self) -> Result<()> {
+        self.command_palette.clear();
+        self.connect_dialog = None;
+        self.theme_panel = None;
+        self.model_panel = None;
+        self.session_panel = None;
+        self.mcp_panel = None;
+        self.at_mention.clear();
+        self.draft_attachments.clear();
+
+        self.rename_dialog = Some(RenameSessionDialogState::new(
+            self.conversation.title.clone(),
+        ));
+        self.composer.set_text(self.conversation.title.clone());
+        self.composer
+            .set_placeholder("Type the new session title and press Enter");
+        self.last_notice = Some("Rename the current session title".to_string());
+        Ok(())
+    }
+
+    pub(crate) fn close_rename_session_dialog(&mut self) {
+        self.rename_dialog = None;
+        self.composer.clear();
+        self.composer
+            .set_placeholder("Ask TiDev about your code, task, or question...");
+    }
+
+    pub(crate) fn confirm_rename_session(&mut self) -> Result<()> {
+        let mut title = self.composer.text().trim().to_string();
+        if title.is_empty() {
+            title = "Untitled session".to_string();
+        }
+
+        self.conversation.title = title.clone();
+        self.store
+            .update_session_title(self.conversation.session_id, &title)?;
+        self.last_notice = Some("Session title updated".to_string());
+        self.close_rename_session_dialog();
+        Ok(())
+    }
+
+    pub(crate) fn handle_rename_session_dialog_key(
+        &mut self,
+        key: KeyEvent,
+        _runtime: &Runtime,
+    ) -> Result<()> {
+        match key.code {
+            KeyCode::Esc => {
+                self.close_rename_session_dialog();
+                Ok(())
+            }
+            KeyCode::Enter
+                if !key.modifiers.contains(KeyModifiers::SHIFT)
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                self.confirm_rename_session()
+            }
+            _ => {
+                let _ = self.composer.handle_key_with_history(key, false);
+                Ok(())
+            }
+        }
     }
 
     pub(crate) fn switch_model(&mut self, selector: Option<&str>) -> Result<()> {

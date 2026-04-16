@@ -6,6 +6,7 @@ pub enum CommandAction {
     Mcp,
     Model,
     Session,
+    Rename,
     Clear,
     Undo,
     Redo,
@@ -254,6 +255,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         description: "Open the session panel",
         usage: "/session [query]",
         action: CommandAction::Session,
+    },
+    CommandSpec {
+        name: "rename",
+        aliases: &["title"],
+        description: "Rename the current session",
+        usage: "/rename",
+        action: CommandAction::Rename,
     },
     CommandSpec {
         name: "theme",

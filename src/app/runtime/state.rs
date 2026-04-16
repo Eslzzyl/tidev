@@ -12,11 +12,12 @@ use super::permission::{
 use super::question::QuestionDialogState;
 use super::session_panel::SessionPanelState;
 use super::theme_panel::ThemePanelState;
+use crate::app::ui::rename::RenameSessionDialogState;
 use crate::{
     app::commands::CommandPaletteState,
+    app::input::Composer,
     config::ActiveModel,
     context::ContextManager,
-    app::input::Composer,
     provider_setup::ConnectDialog,
     session::{Conversation, MessageAttachment},
 };
@@ -81,6 +82,7 @@ pub(crate) struct UiStateSnapshot {
     pub(crate) theme_panel: Option<ThemePanelState>,
     pub(crate) model_panel: Option<ModelPanelState>,
     pub(crate) session_panel: Option<SessionPanelState>,
+    pub(crate) rename_dialog: Option<RenameSessionDialogState>,
     pub(crate) mcp_panel: Option<McpPanelState>,
     pub(crate) at_mention: AtMentionState,
     pub(crate) command_palette: CommandPaletteState,

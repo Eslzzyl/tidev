@@ -6,6 +6,7 @@ use crate::{
     app::question::QuestionDialogState,
     app::session_panel::{SessionPanelDialog, SessionPanelState, SessionViewMode},
     app::theme_panel::ThemePanelState,
+    app::ui::rename::RenameSessionDialogState,
     config::ProviderSource,
     provider_setup::{ConnectDialog, EditProviderStep, NewProviderStep},
 };
@@ -1572,6 +1573,58 @@ impl App {
                 );
             }
         }
+    }
+
+    pub(super) fn render_rename_session_dialog(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        dialog: &RenameSessionDialogState,
+    ) {
+        let palette = self.palette();
+        let overlay = centered_rect(60, 12, area);
+        frame.render_widget(Clear, overlay);
+
+        let block = Block::default()
+            .style(Style::default().bg(palette.panel))
+            .title(dialog.title())
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.border_active()));
+        frame.render_widget(block, overlay);
+
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+        self.register_selection_region(inner);
+
+        let sections = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+        frame.render_widget(
+            Paragraph::new(dialog.description())
+                .style(Style::default().bg(palette.panel).fg(palette.text)),
+            sections[0],
+        );
+
+        frame.render_widget(
+            Paragraph::new("Press Enter to save, Esc to cancel")
+                .style(Style::default().bg(palette.panel).fg(palette.muted)),
+            sections[1],
+        );
+
+        frame.render_widget(
+            Paragraph::new(self.composer.text())
+                .style(Style::default().bg(palette.panel).fg(palette.text))
+                .wrap(Wrap { trim: false }),
+            sections[3],
+        );
     }
 }
 
