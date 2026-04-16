@@ -107,6 +107,8 @@ impl App {
             snapshot,
             cleanup_cancel,
             loaded_instruction_sources: Vec::new(),
+            expanded_tool_results: std::collections::HashSet::new(),
+            tool_result_card_bounds: Vec::new(),
         };
 
         app.at_mention

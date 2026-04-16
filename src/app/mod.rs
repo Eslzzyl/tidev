@@ -207,6 +207,8 @@ struct App {
     snapshot: SnapshotService,
     cleanup_cancel: Arc<std::sync::atomic::AtomicBool>,
     loaded_instruction_sources: Vec<String>,
+    expanded_tool_results: std::collections::HashSet<Uuid>,
+    tool_result_card_bounds: Vec<(Uuid, Rect)>,
 }
 
 pub fn run() -> Result<()> {

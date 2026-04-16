@@ -12,6 +12,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 use std::time::{Duration, Instant};
+use uuid::Uuid;
 
 use super::diff_render::render_unified_diff_text;
 use super::permission::RunningStatus;
@@ -20,6 +21,16 @@ use super::{
     App, MessageRenderCacheEntry, MessageRenderCacheKey, MessageRenderCacheKind,
     MessageRenderCacheValue, render::*,
 };
+
+const TOOL_OUTPUT_PREVIEW_LINES: usize = 5;
+const TOOL_OUTPUT_EXPANDED_MAX_LINES: usize = 100;
+
+#[derive(Clone, Debug)]
+struct ToolResultCardRange {
+    message_id: Uuid,
+    start_line: usize,
+    end_line: usize,
+}
 
 impl App {
     pub(super) fn render_chat(&mut self, frame: &mut Frame<'_>) {
@@ -131,7 +142,7 @@ impl App {
         let content_area = scrollbar_area.0;
         self.message_content_area = Some(content_area);
         let content_width = content_area.width.max(1) as usize;
-        let (mut text, mut total_lines) = self.messages_text(Some(content_width));
+        let (mut text, mut total_lines, card_ranges) = self.messages_text(Some(content_width));
 
         // Add tool running state
         for running in &self.running_tool_executions {
@@ -206,6 +217,30 @@ impl App {
         self.message_scroll_offset = scroll;
         self.message_follow_tail = scroll >= max_scroll;
 
+        // Calculate screen positions for tool result cards
+        self.tool_result_card_bounds.clear();
+        for card_range in card_ranges {
+            let screen_start = card_range.start_line.saturating_sub(scroll);
+            let screen_end = card_range.end_line.saturating_sub(scroll);
+            
+            if screen_end == 0 || screen_start >= self.message_viewport_lines {
+                continue;
+            }
+            
+            let visible_start = screen_start.max(0) as u16;
+            let visible_end = (screen_end.min(self.message_viewport_lines)) as u16;
+            
+            if visible_start < visible_end {
+                let card_rect = Rect {
+                    x: content_area.x,
+                    y: content_area.y.saturating_add(visible_start),
+                    width: content_area.width,
+                    height: visible_end.saturating_sub(visible_start),
+                };
+                self.tool_result_card_bounds.push((card_range.message_id, card_rect));
+            }
+        }
+
         let paragraph = Paragraph::new(text)
             .style(Style::default().bg(palette.background).fg(palette.text))
             .wrap(Wrap { trim: false })
@@ -278,7 +313,7 @@ impl App {
         frame.render_widget(paragraph, area);
     }
 
-    fn messages_text(&self, content_width: Option<usize>) -> (Text<'static>, usize) {
+    fn messages_text(&self, content_width: Option<usize>) -> (Text<'static>, usize, Vec<ToolResultCardRange>) {
         let started_at = Instant::now();
         let palette = self.palette();
         let width = content_width.unwrap_or(1).max(1);
@@ -286,6 +321,8 @@ impl App {
         let messages = self.conversation.visible_messages();
 
         let mut lines = Vec::new();
+        let mut card_ranges = Vec::new();
+        
         if self.conversation.parent_session_id.is_some() {
             lines.push(line_with_style(
                 "SUBSESSION active — viewing a child session.",
@@ -308,7 +345,7 @@ impl App {
                 palette.panel,
             ));
             let total_lines = lines.len().max(1);
-            return (Text::from(lines), total_lines);
+            return (Text::from(lines), total_lines, card_ranges);
         }
 
         let mut i = 0;
@@ -338,21 +375,25 @@ impl App {
                 };
 
                 if !message.tool_calls.is_empty() {
-                    let mut tool_cards = Vec::new();
                     for tool_call in &message.tool_calls {
                         let tool_result = tool_results_by_id.get(&tool_call.id).copied();
                         let card_lines =
                             self.render_tool_call_with_result(tool_call, tool_result, body_width);
                         if !card_lines.is_empty() {
-                            tool_cards.push((palette.panel_light, card_lines));
+                            let decorated = decorate_card_lines(card_lines, width, palette.panel_light);
+                            if let Some(result_msg) = tool_result {
+                                let start_line = lines.len();
+                                lines.extend(decorated);
+                                let end_line = lines.len();
+                                card_ranges.push(ToolResultCardRange {
+                                    message_id: result_msg.id,
+                                    start_line,
+                                    end_line,
+                                });
+                            } else {
+                                lines.extend(decorated);
+                            }
                         }
-                    }
-
-                    for (card_bg, card_lines) in tool_cards {
-                        if card_lines.is_empty() {
-                            continue;
-                        }
-                        lines.extend(decorate_card_lines(card_lines, width, card_bg));
                     }
                     lines.push(Line::from(""));
                 }
@@ -389,7 +430,7 @@ impl App {
                 palette.panel,
             );
             let total_lines = fallback.len().max(1);
-            return (Text::from(fallback), total_lines);
+            return (Text::from(fallback), total_lines, card_ranges);
         }
 
         let total_lines = lines.len().max(1);
@@ -406,7 +447,7 @@ impl App {
                 entries
             );
         }
-        (Text::from(lines), total_lines)
+        (Text::from(lines), total_lines, card_ranges)
     }
 
     fn cached_render_message_cards(
@@ -950,13 +991,13 @@ impl App {
 
         if matches!(canonical_name, "write" | "edit") {
             if tool_output_is_error(output) {
-                let error_lines = self.render_output_preview_lines(output, body_width, true);
+                let error_lines = self.render_output_preview_lines(output, body_width, true, Some(message.id));
                 lines.extend(error_lines);
                 lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
                 return lines;
             }
 
-            let out_lines = self.render_output_preview_lines(output, body_width, false);
+            let out_lines = self.render_output_preview_lines(output, body_width, false, Some(message.id));
             lines.extend(out_lines);
             lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
             return lines;
@@ -964,7 +1005,7 @@ impl App {
 
         if matches!(canonical_name, "read" | "list" | "todowrite") {
             if tool_output_is_error(output) {
-                let error_lines = self.render_output_preview_lines(output, body_width, true);
+                let error_lines = self.render_output_preview_lines(output, body_width, true, Some(message.id));
                 lines.extend(error_lines);
                 lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
                 return lines;
@@ -975,7 +1016,7 @@ impl App {
         }
 
         let preview_lines =
-            self.render_output_preview_lines(output, body_width, tool_output_is_error(output));
+            self.render_output_preview_lines(output, body_width, tool_output_is_error(output), Some(message.id));
         lines.extend(preview_lines);
         lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
         lines
@@ -1070,10 +1111,20 @@ impl App {
         output: &str,
         body_width: usize,
         is_error: bool,
+        message_id: Option<Uuid>,
     ) -> Vec<Line<'static>> {
         let palette = self.palette();
         let mut lines = Vec::new();
-        let max_lines = if is_error { 4 } else { 5 };
+        
+        let is_expanded = message_id.is_some_and(|id| self.expanded_tool_results.contains(&id));
+        let max_lines = if is_expanded {
+            TOOL_OUTPUT_EXPANDED_MAX_LINES
+        } else if is_error {
+            4
+        } else {
+            TOOL_OUTPUT_PREVIEW_LINES
+        };
+        
         let prefix = if is_error { "!" } else { "↳" };
         let fg = if is_error {
             palette.error
@@ -1081,6 +1132,8 @@ impl App {
             palette.text
         };
 
+        let total_output_lines = output.lines().count();
+        
         for line in output.lines().take(max_lines) {
             lines.push(line_with_prefix(
                 prefix,
@@ -1094,10 +1147,22 @@ impl App {
             ));
         }
 
-        if output.lines().count() > max_lines {
+        if total_output_lines > max_lines {
             lines.push(line_with_prefix(
                 prefix,
-                &format!("... {} more line(s)", output.lines().count() - max_lines),
+                &format!("... {} more line(s)", total_output_lines - max_lines),
+                Style::default().fg(palette.muted),
+                Style::default().fg(palette.muted),
+            ));
+        } else if total_output_lines > TOOL_OUTPUT_PREVIEW_LINES && message_id.is_some() {
+            let hint = if is_expanded {
+                "▲ Click to collapse"
+            } else {
+                "▼ Click to expand"
+            };
+            lines.push(line_with_prefix(
+                prefix,
+                hint,
                 Style::default().fg(palette.muted),
                 Style::default().fg(palette.muted),
             ));
@@ -1324,7 +1389,7 @@ mod tests {
         app.conversation
             .push(Message::new(MessageRole::Assistant, "old cached content"));
 
-        let (before, _) = app.messages_text(Some(80));
+        let (before, _, _) = app.messages_text(Some(80));
         let before_text = text_lines_to_string(&before.lines);
         assert!(before_text.contains("old cached content"));
 
@@ -1332,7 +1397,7 @@ mod tests {
         app.conversation.messages[0].content = "new refreshed content".to_string();
         app.invalidate_active_message_render_cache_for(message_id);
 
-        let (after, _) = app.messages_text(Some(80));
+        let (after, _, _) = app.messages_text(Some(80));
         let after_text = text_lines_to_string(&after.lines);
         assert!(after_text.contains("new refreshed content"));
     }

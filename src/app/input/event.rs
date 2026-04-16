@@ -40,8 +40,18 @@ impl App {
                     .drag(Position::new(mouse.column, mouse.row));
             }
             MouseEventKind::Up(MouseButton::Left) => {
-                self.mouse_selection
-                    .release(Position::new(mouse.column, mouse.row));
+                let position = Position::new(mouse.column, mouse.row);
+                
+                if !self.mouse_selection.is_dragging() {
+                    for (message_id, rect) in &self.tool_result_card_bounds {
+                        if rect.contains(position) {
+                            self.toggle_tool_result_expanded(*message_id);
+                            return;
+                        }
+                    }
+                }
+                
+                self.mouse_selection.release(position);
             }
             MouseEventKind::ScrollUp => {
                 if self.can_scroll_conversation() {
@@ -57,6 +67,15 @@ impl App {
             }
             _ => {}
         }
+    }
+    
+    pub(crate) fn toggle_tool_result_expanded(&mut self, message_id: Uuid) {
+        if self.expanded_tool_results.contains(&message_id) {
+            self.expanded_tool_results.remove(&message_id);
+        } else {
+            self.expanded_tool_results.insert(message_id);
+        }
+        self.clear_message_render_cache();
     }
 
     pub(crate) fn update_mouse_selection_auto_scroll(&mut self) {
