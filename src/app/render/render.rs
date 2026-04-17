@@ -347,22 +347,26 @@ impl App {
             return "Esc again to stop".to_string();
         }
 
+        let token_status = self.context_usage.map(|(_, _, total_tokens)| {
+            let max_context = self.active_model.context_window as u32;
+            let percent = total_tokens as f64 / max_context as f64 * 100.0;
+            let used_k = total_tokens / 1000;
+            let max_k = max_context / 1000;
+            format!("{:.1}% ({}K/{}K)", percent, used_k, max_k)
+        });
+
         if self.pending_request {
             let spinner = self.loading_spinner();
 
-            if self.conversation.parent_session_id.is_some() {
-                return format!("{} Thinking...", spinner);
-            }
-
-            if !self.running_subagent_executions.is_empty() {
-                return format!(
+            let status = if self.conversation.parent_session_id.is_some() {
+                format!("{} Thinking...", spinner)
+            } else if !self.running_subagent_executions.is_empty() {
+                format!(
                     "{} Waiting for {} subagent(s)",
                     spinner,
                     self.running_subagent_executions.len()
-                );
-            }
-
-            if !self.running_tool_executions.is_empty() {
+                )
+            } else if !self.running_tool_executions.is_empty() {
                 let tool_names: Vec<_> = self
                     .running_tool_executions
                     .iter()
@@ -370,29 +374,30 @@ impl App {
                     .collect();
                 let count = tool_names.len();
                 if count == 1 {
-                    return format!("{} Running {}", spinner, tool_names[0]);
+                    format!("{} Running {}", spinner, tool_names[0])
+                } else {
+                    format!(
+                        "{} Running {} tools ({})",
+                        spinner,
+                        count,
+                        tool_names.join(", ")
+                    )
                 }
-                return format!(
-                    "{} Running {} tools ({})",
-                    spinner,
-                    count,
-                    tool_names.join(", ")
-                );
+            } else if self.pending_tool_execution.is_some() {
+                format!("{} Running tools", spinner)
+            } else {
+                format!("{} {}", spinner, self.mode.title())
+            };
+
+            if let Some(token_status) = token_status {
+                return format!("{} · {}", status, token_status);
             }
 
-            if self.pending_tool_execution.is_some() {
-                return format!("{} Running tools", spinner);
-            }
-
-            return format!("{} {}", spinner, self.mode.title());
+            return status;
         }
 
-        if let Some((_, _, total_tokens)) = self.context_usage {
-            let max_context = self.active_model.context_window as u32;
-            let percent = total_tokens as f64 / max_context as f64 * 100.0;
-            let used_k = total_tokens / 1000;
-            let max_k = max_context / 1000;
-            return format!("{:.1}% ({}K/{}K)", percent, used_k, max_k);
+        if let Some(token_status) = token_status {
+            return token_status;
         }
 
         if let Some(message) = self.last_notice.as_deref() {
