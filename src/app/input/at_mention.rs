@@ -1,4 +1,5 @@
 use ignore::WalkBuilder;
+use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -401,13 +402,16 @@ fn score_entry(entry: &IndexedEntry, query: &str) -> Option<MatchCandidate> {
         AtMentionKind::Image => 8,
         AtMentionKind::File => 0,
     };
-    let depth_penalty = entry.path.bytes().filter(|byte| *byte == b'/').count() as u32 * 6;
+    let depth = entry.path.bytes().filter(|byte| *byte == b'/').count() as u32;
+    let depth_penalty = depth * 6;
+    let root_bonus = if depth == 0 { 50 } else { 0 };
 
     best.map(|mut candidate| {
         candidate.score = candidate
             .score
             .saturating_sub(depth_penalty)
-            .saturating_add(kind_bonus);
+            .saturating_add(kind_bonus)
+            .saturating_add(root_bonus);
         candidate
     })
 }
@@ -430,13 +434,13 @@ fn rank_indexed_entries(
         suggestions.truncate(MAX_SUGGESTIONS);
         suggestions
     } else {
-        let mut ranked = indexed_entries
-            .iter()
+        let mut ranked: Vec<_> = indexed_entries
+            .par_iter()
             .filter_map(|entry| {
                 score_entry(entry, query)
                     .map(|candidate| (candidate.score, entry, candidate.matched_indices))
             })
-            .collect::<Vec<_>>();
+            .collect();
 
         ranked.sort_by(|(left_score, left, _), (right_score, right, _)| {
             right_score
@@ -642,11 +646,9 @@ mod tests {
         let indexed_entries = index_workspace_entries(&workspace);
         let suggestions = search_entries(&indexed_entries, "match");
 
-        assert!(
-            suggestions
-                .iter()
-                .any(|suggestion| suggestion.path == "match-root.txt")
-        );
+        assert!(suggestions
+            .iter()
+            .any(|suggestion| suggestion.path == "match-root.txt"));
         assert!(suggestions.len() <= 12);
     }
 
@@ -658,11 +660,9 @@ mod tests {
         let indexed_entries = index_workspace_entries(&workspace);
         let suggestions = search_entries(&indexed_entries, "");
 
-        assert!(
-            suggestions
-                .iter()
-                .all(|suggestion| !suggestion.path.is_empty())
-        );
+        assert!(suggestions
+            .iter()
+            .all(|suggestion| !suggestion.path.is_empty()));
     }
 
     #[test]
@@ -692,11 +692,9 @@ mod tests {
         let indexed_entries = index_workspace_entries(&workspace);
         let suggestions = search_entries(&indexed_entries, "atmnr");
 
-        assert!(
-            suggestions
-                .iter()
-                .any(|suggestion| suggestion.path == "at_mention.rs")
-        );
+        assert!(suggestions
+            .iter()
+            .any(|suggestion| suggestion.path == "at_mention.rs"));
     }
 
     #[test]

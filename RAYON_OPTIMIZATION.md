@@ -25,7 +25,7 @@ let tool_results_map = render_units
 
 ### Priority 1: High Impact
 
-#### 1. @-mention File Search Scoring
+#### 1. @-mention File Search Scoring (Done)
 
 **File:** `src/app/input/at_mention.rs:433-439`
 
