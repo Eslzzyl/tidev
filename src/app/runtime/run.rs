@@ -5,8 +5,12 @@ use tokio::runtime::Runtime;
 
 impl App {
     pub(crate) fn new() -> Result<Self> {
-        let workspace_root = env::current_dir().context("failed to determine workspace root")?;
         let paths = ConfigPaths::discover()?;
+        Self::new_with_paths(paths)
+    }
+
+    pub(crate) fn new_with_paths(paths: ConfigPaths) -> Result<Self> {
+        let workspace_root = env::current_dir().context("failed to determine workspace root")?;
         let config = AppConfig::load_or_create(&paths)?;
         crate::logging::init(&paths.data_dir, config.logging.clone());
         crate::log_info!("App initializing, workspace={}", workspace_root.display());

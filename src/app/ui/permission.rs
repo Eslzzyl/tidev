@@ -705,14 +705,21 @@ impl App {
         tool_call: ToolCall,
         result: ToolExecutionResult,
     ) -> Result<()> {
+        let display_result = result.preview_for_storage(Some(tool_call.name.as_str()));
+        let message = crate::session::Message::tool_result(
+            tool_call.id,
+            tool_call.name.clone(),
+            display_result,
+        );
+
         self.store.append_tool_event(
             self.conversation.session_id,
+            message.id,
             &tool_call.name,
             &tool_call.arguments,
             &result.output,
         )?;
 
-        let message = crate::session::Message::tool_result(tool_call.id, tool_call.name, result);
         self.conversation.push(message.clone());
         self.store
             .append_message(self.conversation.session_id, &message)?;

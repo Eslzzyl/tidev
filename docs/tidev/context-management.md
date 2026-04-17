@@ -39,12 +39,13 @@ Tool result 会被存成普通的 Tool 消息，内容保存在 `Message.content
 当前还有一层模型侧预览降级：
 
 - 当 tool output 不大时，直接发送完整内容。
-- 当 tool output 很大时，会用 `tool_output_preview()` 生成首尾摘录：
+- 当 tool output 很大时，消息里只保留预览，完整输出会另外写入 `tool_events`，并通过 `message_id` 关联回对应的 tool result。
+- 预览文本由 `tool_output_preview()` 生成首尾摘录：
   - 前 3000 个字符
   - 后 1000 个字符
   - 同时附带原始输出字符数
 
-这只影响模型看到的文本，不影响数据库里的原始 tool output。
+这只影响模型请求里看到的文本，不影响完整输出的持久化；UI 在展开 tool result 时会按 `message_id` 取回完整内容。
 
 ### 1.4 上下文压缩什么时候触发
 
@@ -93,6 +94,8 @@ TiDev 现在会把压缩状态写回数据库，避免重启后丢失上下文�
 - 新会话、撤销、重做、丢弃 reverted branch 时，会清空上下文状态，避免旧摘要串到新上下文。
 
 如果你在旧数据库上运行当前代码，需要确保 `sessions` 表包含这两个字段。
+
+如果你想在界面里展开大 tool result，还需要 `tool_events` 表包含 `message_id`，以便从预览消息定位到完整输出。
 
 ## 2. 与 opencode 的对比
 

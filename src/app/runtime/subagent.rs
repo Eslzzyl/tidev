@@ -350,15 +350,21 @@ fn record_tool_result(
     result: &ToolExecutionResult,
 ) -> Result<()> {
     let store = SessionStore::open(&context.store_path)?;
+    let display_result = result.preview_for_storage(Some(tool_call.name.as_str()));
+    let message = Message::tool_result(
+        tool_call.id.clone(),
+        tool_call.name.clone(),
+        display_result,
+    );
+
     store.append_tool_event(
         context.child_session_id,
+        message.id,
         &tool_call.name,
         &tool_call.arguments,
         &result.output,
     )?;
 
-    let message =
-        Message::tool_result(tool_call.id.clone(), tool_call.name.clone(), result.clone());
     store.append_message(context.child_session_id, &message)?;
 
     let _ = context.tx.send(BackendEvent::SubagentToolResult {

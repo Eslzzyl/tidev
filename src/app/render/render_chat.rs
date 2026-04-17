@@ -12,7 +12,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 use rayon::prelude::*;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -46,6 +46,7 @@ struct RenderContext<'a> {
     #[allow(dead_code)]
     workspace_root: &'a Path,
     expanded_tool_results: &'a HashSet<Uuid>,
+    expanded_tool_outputs: &'a HashMap<Uuid, String>,
 }
 
 fn render_tool_call_with_result_standalone(
@@ -63,6 +64,7 @@ fn render_tool_call_with_result_standalone(
             tool_result,
             body_width,
             palette,
+            ctx,
         );
     }
 
@@ -89,6 +91,7 @@ fn render_tool_call_summary_line_standalone(
     tool_result: Option<&Message>,
     body_width: usize,
     palette: ThemePalette,
+    ctx: &RenderContext<'_>,
 ) -> Vec<Line<'static>> {
     let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
     let fields = summarize_tool_arguments(&tool_call.name, &tool_call.arguments);
@@ -131,7 +134,7 @@ fn render_tool_call_summary_line_standalone(
     };
 
     let result_suffix = if let Some(result_msg) = tool_result {
-        let output = result_msg.content.trim();
+        let output = standalone_tool_output(result_msg, ctx).trim();
         compute_tool_result_suffix_standalone(canonical_name, output)
     } else {
         " ...".to_string()
@@ -214,7 +217,10 @@ fn compute_tool_result_suffix_standalone(canonical_name: &str, output: &str) -> 
 }
 
 fn tool_output_is_truncated_standalone(output: &str) -> bool {
-    output.contains("... (truncated)")
+    output.contains("output truncated:")
+        || output.contains("... (truncated)")
+        || output.contains("(Output capped at")
+        || output.contains("[truncated]")
 }
 
 fn render_tool_call_lines_standalone(
@@ -297,16 +303,24 @@ fn render_tool_result_detail_lines_standalone(
     ctx: &RenderContext<'_>,
 ) -> Vec<Line<'static>> {
     let palette = ctx.palette;
-    let is_error = tool_output_is_error(&message.content);
+    let output = standalone_tool_output(message, ctx);
+    let is_error = tool_output_is_error(output);
 
     render_output_preview_lines_standalone(
-        &message.content,
+        output,
         body_width,
         is_error,
         Some(message.id),
         ctx.expanded_tool_results,
         palette,
     )
+}
+
+fn standalone_tool_output<'a>(message: &'a Message, ctx: &'a RenderContext<'_>) -> &'a str {
+    ctx.expanded_tool_outputs
+        .get(&message.id)
+        .map(|output| output.as_str())
+        .unwrap_or_else(|| message.content.as_str())
 }
 
 fn render_output_preview_lines_standalone(
@@ -870,11 +884,14 @@ impl App {
             i += 1;
         }
 
+        let expanded_tool_outputs = self.load_expanded_tool_outputs(messages);
+
         // Parallel render tool calls with rayon (only for units with tool results)
         let ctx = RenderContext {
             palette,
             workspace_root: self.workspace_root.as_path(),
             expanded_tool_results: &self.expanded_tool_results,
+            expanded_tool_outputs: &expanded_tool_outputs,
         };
 
         let tool_results_map: std::collections::HashMap<
@@ -1043,6 +1060,37 @@ impl App {
 
         self.prune_message_render_cache_if_needed();
         cards
+    }
+
+    fn load_expanded_tool_outputs(&self, messages: &[Message]) -> HashMap<Uuid, String> {
+        let mut outputs = HashMap::new();
+
+        for message in messages {
+            if !self.expanded_tool_results.contains(&message.id) {
+                continue;
+            }
+
+            if let Ok(Some(output)) = self
+                .store
+                .load_tool_event_output(self.conversation.session_id, message.id)
+            {
+                outputs.insert(message.id, output);
+            }
+        }
+
+        outputs
+    }
+
+    fn resolved_tool_output(&self, message: &Message) -> String {
+        if !self.expanded_tool_results.contains(&message.id) {
+            return message.content.clone();
+        }
+
+        self.store
+            .load_tool_event_output(self.conversation.session_id, message.id)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| message.content.clone())
     }
 
     fn render_message_cards(
@@ -1337,7 +1385,8 @@ impl App {
         };
 
         let result_suffix = if let Some(result_msg) = tool_result {
-            let output = result_msg.content.trim();
+            let output = self.resolved_tool_output(result_msg);
+            let output = output.trim();
             self.compute_tool_result_suffix(canonical_name, output)
         } else {
             " ...".to_string()
@@ -1424,7 +1473,9 @@ impl App {
     }
 
     fn tool_output_is_truncated(&self, output: &str) -> bool {
-        output.contains("(Output capped at")
+        output.contains("output truncated:")
+            || output.contains("(Output capped at")
+            || output.contains("[truncated]")
     }
 
     fn render_tool_result_detail_lines(
@@ -1457,7 +1508,8 @@ impl App {
         let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
 
         let mut header_lines = Vec::new();
-        let output = message.content.trim_end();
+        let output = self.resolved_tool_output(message);
+        let output = output.trim_end();
         let attachment_lines = message
             .attachments
             .iter()
@@ -2176,6 +2228,28 @@ mod tests {
         lines.iter().map(line_text).collect::<Vec<_>>().join("\n")
     }
 
+    fn test_app() -> super::App {
+        let temp_root =
+            std::env::temp_dir().join(format!("tidev-render-tests-{}", uuid::Uuid::new_v4()));
+        let paths = crate::config::ConfigPaths {
+            config_dir: temp_root.join(".config").join("tidev"),
+            data_dir: temp_root.join(".local").join("share").join("tidev"),
+            config_file: temp_root.join(".config").join("tidev").join("config.toml"),
+            auth_file: temp_root
+                .join(".local")
+                .join("share")
+                .join("tidev")
+                .join("auth.json"),
+            database_file: temp_root
+                .join(".local")
+                .join("share")
+                .join("tidev")
+                .join("sessions.sqlite3"),
+        };
+
+        super::App::new_with_paths(paths).unwrap()
+    }
+
     #[test]
     fn reasoning_lines_render_markdown_code_blocks() {
         let lines = render_reasoning_markdown_lines(
@@ -2220,7 +2294,7 @@ mod tests {
             ToolExecutionResult::new("./\nfile1.txt\nfile2.txt"),
         );
 
-        let app = super::App::new().unwrap();
+        let app = test_app();
         let lines = app.render_tool_result_lines(&message, 80);
         assert!(
             lines
@@ -2231,7 +2305,7 @@ mod tests {
 
     #[test]
     fn message_render_cache_hits_on_second_render_same_width() {
-        let mut app = super::App::new().unwrap();
+        let mut app = test_app();
         app.conversation
             .push(Message::new(MessageRole::User, "show file list"));
         app.conversation.push(Message::new(
@@ -2255,7 +2329,7 @@ mod tests {
 
     #[test]
     fn message_render_cache_width_change_causes_miss() {
-        let mut app = super::App::new().unwrap();
+        let mut app = test_app();
         app.conversation
             .push(Message::new(MessageRole::User, "open README"));
         app.conversation.push(Message::new(
@@ -2275,7 +2349,7 @@ mod tests {
 
     #[test]
     fn message_render_cache_invalidation_refreshes_updated_content() {
-        let mut app = super::App::new().unwrap();
+        let mut app = test_app();
         app.conversation
             .push(Message::new(MessageRole::Assistant, "old cached content"));
 
@@ -2294,7 +2368,7 @@ mod tests {
 
     #[test]
     fn virtualized_render_clamps_scroll_and_keeps_content_visible() {
-        let mut app = super::App::new().unwrap();
+        let mut app = test_app();
         app.message_viewport_lines = 8;
         app.message_follow_tail = false;
         app.message_scroll_offset = usize::MAX;

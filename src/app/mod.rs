@@ -778,13 +778,19 @@ impl App {
                     crate::log_info!(
                         "SubagentCompleted: user switched away from parent session, writing to database directly"
                     );
+                    let display_result = result.preview_for_storage(Some(tool_call.name.as_str()));
+                    let message = Message::tool_result(
+                        tool_call.id.clone(),
+                        tool_call.name.clone(),
+                        display_result,
+                    );
                     self.store.append_tool_event(
                         parent_session_id,
+                        message.id,
                         &tool_call.name,
                         &tool_call.arguments,
                         &result.output,
                     )?;
-                    let message = Message::tool_result(tool_call.id, tool_call.name, result);
                     self.store.append_message(parent_session_id, &message)?;
                     self.pending_assistant_turns.insert(parent_session_id);
                     crate::log_info!(

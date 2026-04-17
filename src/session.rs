@@ -91,6 +91,18 @@ impl ToolExecutionResult {
             attachments: Vec::new(),
         }
     }
+
+    pub fn preview_for_storage(&self, tool_name: Option<&str>) -> Self {
+        let output = tool_output_preview(tool_name, &self.output);
+        if output == self.output {
+            return self.clone();
+        }
+
+        Self {
+            output,
+            attachments: self.attachments.clone(),
+        }
+    }
 }
 
 fn truncate_preview(value: &str, max_chars: usize) -> String {

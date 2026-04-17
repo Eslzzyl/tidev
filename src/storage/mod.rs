@@ -13,7 +13,7 @@ use crate::{
     tooling::TodoItem,
 };
 
-const SCHEMA_VERSION: i64 = 10;
+const SCHEMA_VERSION: i64 = 11;
 const SESSION_SELECT_COLUMNS: &str = "s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, s.context_summary, s.context_retained_from, COALESCE(sw.workspace_root, '')";
 
 pub struct SessionStore {
@@ -301,6 +301,10 @@ impl SessionStore {
 
         for message_id in message_ids {
             self.connection.execute(
+                "DELETE FROM tool_events WHERE session_id = ?1 AND message_id = ?2",
+                params![session_id.to_string(), message_id.to_string()],
+            )?;
+            self.connection.execute(
                 "DELETE FROM messages WHERE session_id = ?1 AND id = ?2",
                 params![session_id.to_string(), message_id.to_string()],
             )?;
@@ -313,15 +317,17 @@ impl SessionStore {
     pub fn append_tool_event(
         &self,
         session_id: Uuid,
+        message_id: Uuid,
         tool_name: &str,
         input_json: &str,
         output_text: &str,
     ) -> Result<()> {
         self.connection.execute(
-            "INSERT INTO tool_events (id, session_id, tool_name, input_json, output_text, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO tool_events (id, session_id, message_id, tool_name, input_json, output_text, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 Uuid::new_v4().to_string(),
                 session_id.to_string(),
+                message_id.to_string(),
                 tool_name,
                 input_json,
                 output_text,
@@ -538,6 +544,24 @@ impl SessionStore {
             .flatten();
 
         Ok(snapshot)
+    }
+
+    pub fn load_tool_event_output(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Option<String>> {
+        let mut statement = self.connection.prepare(
+            "SELECT output_text FROM tool_events WHERE session_id = ?1 AND message_id = ?2 ORDER BY created_at DESC LIMIT 1",
+        )?;
+
+        let output = statement
+            .query_row(params![session_id.to_string(), message_id.to_string()], |row| {
+                row.get::<_, String>(0)
+            })
+            .optional()?;
+
+        Ok(output)
     }
 
     pub fn update_message_snapshot(
@@ -956,11 +980,15 @@ CREATE INDEX IF NOT EXISTS idx_messages_session_created_at
 CREATE TABLE IF NOT EXISTS tool_events (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    message_id TEXT NOT NULL,
     tool_name TEXT NOT NULL,
     input_json TEXT NOT NULL,
     output_text TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_tool_events_session_message
+    ON tool_events(session_id, message_id);
 
 CREATE INDEX IF NOT EXISTS idx_tool_events_session_created_at
     ON tool_events(session_id, created_at);
@@ -1158,6 +1186,51 @@ mod tests {
             assert_eq!(children.len(), 1);
             assert_eq!(children[0].session_id, child_session_id);
             assert_eq!(children[0].parent_session_id, Some(parent_session_id));
+        }
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn tool_event_output_round_trip() {
+        let path = std::env::temp_dir().join(format!(
+            "tidev-session-store-tool-output-{}.sqlite3",
+            uuid::Uuid::new_v4()
+        ));
+
+        {
+            let store = SessionStore::open(&path).expect("store should open");
+            let session_id = uuid::Uuid::new_v4();
+            let message_id = uuid::Uuid::new_v4();
+
+            store
+                .create_session(
+                    session_id,
+                    Path::new("/tmp/workspace"),
+                    "openai",
+                    "OpenAI",
+                    "gpt-4o",
+                    "GPT-4o",
+                    "Untitled session",
+                )
+                .expect("session should be created");
+
+            store
+                .append_tool_event(
+                    session_id,
+                    message_id,
+                    "grep",
+                    r#"{"pattern":"foo"}"#,
+                    "match-one\nmatch-two",
+                )
+                .expect("tool event should append");
+
+            let output = store
+                .load_tool_event_output(session_id, message_id)
+                .expect("tool output should load")
+                .expect("tool output should exist");
+
+            assert_eq!(output, "match-one\nmatch-two");
         }
 
         let _ = std::fs::remove_file(path);
