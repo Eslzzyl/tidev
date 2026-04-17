@@ -2,7 +2,7 @@ use crate::{
     markdown_render::{WrapOptions, render_markdown_text_with_width_and_cwd, word_wrap_line},
     session::{Message, MessageAttachment, MessageRole, ToolCall},
     theme::ThemePalette,
-    tooling::canonical_tool_name,
+    tooling::{TodoItem, canonical_tool_name},
 };
 use ratatui::{
     layout::{Constraint, Layout, Margin, Rect},
@@ -305,6 +305,39 @@ fn render_tool_result_detail_lines_standalone(
     let palette = ctx.palette;
     let output = standalone_tool_output(message, ctx);
     let is_error = tool_output_is_error(output);
+    let tool_name = message.tool_name.as_deref().unwrap_or(message.role.label());
+    let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
+
+    if canonical_name == "todowrite" && !is_error {
+        #[derive(serde::Deserialize)]
+        struct RawTodo {
+            content: String,
+            status: Option<String>,
+            priority: Option<String>,
+        }
+
+        let raw_todos = if let Ok(todos) = serde_json::from_str::<Vec<RawTodo>>(output) {
+            Some(todos)
+        } else if let Ok(value) = serde_json::from_str::<serde_json::Value>(output) {
+            value
+                .get("todos")
+                .and_then(|v| serde_json::from_value::<Vec<RawTodo>>(v.clone()).ok())
+        } else {
+            None
+        };
+
+        if let Some(raw_todos) = raw_todos {
+            let todos: Vec<TodoItem> = raw_todos
+                .into_iter()
+                .map(|r| TodoItem {
+                    content: r.content,
+                    status: r.status.unwrap_or_else(|| "pending".to_string()),
+                    priority: r.priority.unwrap_or_else(|| "medium".to_string()),
+                })
+                .collect();
+            return render_todos_checkbox_list_standalone(&todos, body_width, palette);
+        }
+    }
 
     render_output_preview_lines_standalone(
         output,
@@ -314,6 +347,51 @@ fn render_tool_result_detail_lines_standalone(
         ctx.expanded_tool_results,
         palette,
     )
+}
+
+fn render_todos_checkbox_list_standalone(
+    todos: &[TodoItem],
+    body_width: usize,
+    palette: ThemePalette,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![line_with_style("Updated todo list:", palette.accent_soft)];
+
+    if todos.is_empty() {
+        lines.push(line_with_style("  (no items)", palette.muted));
+        return lines;
+    }
+
+    let max_content_len = body_width.saturating_sub(6).max(1);
+
+    for todo in todos {
+        let (checkbox, style) = match todo.status.as_str() {
+            "completed" => (
+                "✔ ",
+                Style::default()
+                    .fg(palette.muted)
+                    .add_modifier(Modifier::CROSSED_OUT),
+            ),
+            "in_progress" => (
+                "● ",
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            "pending" => ("○ ", Style::default().fg(palette.text)),
+            "cancelled" => ("✗ ", Style::default().fg(palette.muted)),
+            _ => ("○ ", Style::default().fg(palette.text)),
+        };
+
+        let priority_marker = if todo.priority == "high" { "⚠ " } else { "" };
+
+        let content = shorten(&todo.content, max_content_len);
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {priority_marker}{checkbox}"), style),
+            Span::styled(content, style),
+        ]));
+    }
+
+    lines
 }
 
 fn standalone_tool_output<'a>(message: &'a Message, ctx: &'a RenderContext<'_>) -> &'a str {
@@ -673,8 +751,44 @@ impl App {
             32,
         )));
 
+        // Todos section
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![Span::styled(
+            format!("Todos ({})", self.todos.len()),
+            Style::default()
+                .fg(palette.accent)
+                .add_modifier(Modifier::BOLD),
+        )]));
+
+        let sidebar_width = self.config.ui.sidebar_width as usize;
+        let max_content_len = sidebar_width.saturating_sub(4);
+
+        for todo in &self.todos {
+            let (checkbox, style) = match todo.status.as_str() {
+                "completed" => (
+                    "✔ ",
+                    Style::default()
+                        .fg(palette.muted)
+                        .add_modifier(Modifier::CROSSED_OUT),
+                ),
+                "in_progress" => ("● ", Style::default().fg(palette.accent)),
+                "pending" => ("○ ", Style::default().fg(palette.text)),
+                "cancelled" => ("✗ ", Style::default().fg(palette.muted)),
+                _ => ("○ ", Style::default().fg(palette.text)),
+            };
+
+            let priority_marker = if todo.priority == "high" { "⚠ " } else { "" };
+
+            let content = shorten(&todo.content, max_content_len);
+            lines.push(Line::from(vec![
+                Span::styled(format!("{priority_marker}{checkbox}"), style),
+                Span::styled(content, style),
+            ]));
+        }
+
         // Undo state (only when active)
         if self.conversation.is_reverted() {
+            lines.push(Line::from(""));
             lines.push(Line::from(vec![Span::styled(
                 "⚠ Undo active",
                 Style::default().fg(palette.warning),
@@ -1614,6 +1728,44 @@ impl App {
                 return lines;
             }
 
+            if canonical_name == "todowrite" {
+                #[derive(serde::Deserialize)]
+                struct RawTodo {
+                    content: String,
+                    status: Option<String>,
+                    priority: Option<String>,
+                }
+
+                let raw_todos = if let Ok(todos) = serde_json::from_str::<Vec<RawTodo>>(output) {
+                    Some(todos)
+                } else if let Ok(value) = serde_json::from_str::<serde_json::Value>(output) {
+                    value
+                        .get("todos")
+                        .and_then(|v| serde_json::from_value::<Vec<RawTodo>>(v.clone()).ok())
+                } else {
+                    None
+                };
+
+                if let Some(raw_todos) = raw_todos {
+                    let todos: Vec<TodoItem> = raw_todos
+                        .into_iter()
+                        .map(|r| TodoItem {
+                            content: r.content,
+                            status: r.status.unwrap_or_else(|| "pending".to_string()),
+                            priority: r.priority.unwrap_or_else(|| "medium".to_string()),
+                        })
+                        .collect();
+                    lines.extend(self.render_todos_checkbox_list(&todos, body_width));
+                    return lines;
+                }
+
+                let preview_lines =
+                    self.render_output_preview_lines(output, body_width, false, Some(message.id));
+                lines.extend(preview_lines);
+                lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
+                return lines;
+            }
+
             lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
             return lines;
         }
@@ -1626,6 +1778,52 @@ impl App {
         );
         lines.extend(preview_lines);
         lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
+        lines
+    }
+
+    fn render_todos_checkbox_list(
+        &self,
+        todos: &[TodoItem],
+        body_width: usize,
+    ) -> Vec<Line<'static>> {
+        let palette = self.palette();
+        let mut lines = vec![line_with_style("Updated todo list:", palette.accent_soft)];
+
+        if todos.is_empty() {
+            lines.push(line_with_style("  (no items)", palette.muted));
+            return lines;
+        }
+
+        let max_content_len = body_width.saturating_sub(6).max(1);
+
+        for todo in todos {
+            let (checkbox, style) = match todo.status.as_str() {
+                "completed" => (
+                    "✔ ",
+                    Style::default()
+                        .fg(palette.muted)
+                        .add_modifier(Modifier::CROSSED_OUT),
+                ),
+                "in_progress" => (
+                    "● ",
+                    Style::default()
+                        .fg(palette.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                "pending" => ("○ ", Style::default().fg(palette.text)),
+                "cancelled" => ("✗ ", Style::default().fg(palette.muted)),
+                _ => ("○ ", Style::default().fg(palette.text)),
+            };
+
+            let priority_marker = if todo.priority == "high" { "⚠ " } else { "" };
+
+            let content = shorten(&todo.content, max_content_len);
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {priority_marker}{checkbox}"), style),
+                Span::styled(content, style),
+            ]));
+        }
+
         lines
     }
 
@@ -2301,6 +2499,49 @@ mod tests {
                 .iter()
                 .any(|line| line_text(line).contains("Listed 2 items"))
         );
+    }
+
+    #[test]
+    fn render_tool_result_lines_todowrite_formats_checkbox_list() {
+        use crate::session::{Message, ToolExecutionResult};
+        use crate::tooling::TodoItem;
+
+        let todos = vec![
+            TodoItem {
+                content: "Task 1".to_string(),
+                status: "completed".to_string(),
+                priority: "high".to_string(),
+            },
+            TodoItem {
+                content: "Task 2".to_string(),
+                status: "in_progress".to_string(),
+                priority: "medium".to_string(),
+            },
+            TodoItem {
+                content: "Task 3".to_string(),
+                status: "pending".to_string(),
+                priority: "low".to_string(),
+            },
+        ];
+        let output = serde_json::to_string_pretty(&todos).unwrap();
+        let message = Message::tool_result(
+            "tool-call-id",
+            "todowrite",
+            ToolExecutionResult::new(output),
+        );
+
+        let app = test_app();
+        let lines = app.render_tool_result_lines(&message, 80);
+
+        let text = text_lines_to_string(&lines);
+        assert!(
+            text.contains("Updated todo list"),
+            "should contain header: {}",
+            text
+        );
+        assert!(text.contains("Task 1"), "should contain Task 1: {}", text);
+        assert!(text.contains("Task 2"), "should contain Task 2: {}", text);
+        assert!(text.contains("Task 3"), "should contain Task 3: {}", text);
     }
 
     #[test]

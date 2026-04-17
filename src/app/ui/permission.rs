@@ -723,6 +723,11 @@ impl App {
         self.conversation.push(message.clone());
         self.store
             .append_message(self.conversation.session_id, &message)?;
+
+        if tool_call.name == "todowrite" {
+            self.todos = self.store.load_todos(self.conversation.session_id)?;
+        }
+
         Ok(())
     }
 

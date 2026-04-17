@@ -117,6 +117,7 @@ impl App {
             expanded_tool_results: std::collections::HashSet::new(),
             tool_result_card_bounds: Vec::new(),
             message_scroll_target: None,
+            todos: Vec::new(),
         };
 
         app.at_mention
@@ -290,6 +291,7 @@ impl App {
     }
 
     pub(crate) fn restore_cached_session_runtime(&mut self, cached: CachedSessionRuntime) {
+        let session_id = cached.conversation.session_id;
         self.conversation = cached.conversation;
         self.active_model = cached.active_model;
         self.context_manager = cached.context_manager;
@@ -308,6 +310,7 @@ impl App {
         self.message_viewport_lines = cached.message_viewport_lines;
         self.message_total_lines = cached.message_total_lines;
         self.context_usage = cached.context_usage;
+        self.todos = self.store.load_todos(session_id).unwrap_or_default();
     }
 
     pub(crate) fn clear_message_render_cache(&self) {

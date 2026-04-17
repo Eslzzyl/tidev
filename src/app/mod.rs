@@ -78,7 +78,7 @@ use crate::{
     snapshot::SnapshotService,
     storage::SessionStore,
     theme::{ThemeManager, ThemeName},
-    tooling::ToolRegistry,
+    tooling::{TodoItem, ToolRegistry},
 };
 
 const INIT_COMMAND: &str = r#"Create or update `AGENTS.md` for this repository.
@@ -218,6 +218,7 @@ struct App {
     expanded_tool_results: std::collections::HashSet<Uuid>,
     tool_result_card_bounds: Vec<(Uuid, Rect)>,
     message_scroll_target: Option<Uuid>,
+    todos: Vec<TodoItem>,
 }
 
 pub fn run() -> Result<()> {
