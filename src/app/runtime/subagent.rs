@@ -18,7 +18,7 @@ use crate::{
     prompts::SessionMode,
     session::{AssistantTurn, BackendEvent, Message, MessageRole, ToolCall, ToolExecutionResult},
     storage::SessionStore,
-    tooling::{TaskArgs, ToolRegistry, canonical_tool_name, execute_shell_tool_call},
+    tooling::{ToolRegistry, canonical_tool_name, execute_shell_tool_call},
 };
 
 #[derive(Clone, Debug)]
@@ -110,7 +110,15 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
             let store = SessionStore::open(&context.store_path)?;
             store.load_messages(context.child_session_id)?
         };
-        let tools = context.tools.available_definitions(context.mode);
+        let tools = context
+            .tools
+            .available_definitions(context.mode)
+            .into_iter()
+            .filter(|definition| match canonical_tool_name(&definition.name) {
+                Some("task") | Some("question") => false,
+                _ => true,
+            })
+            .collect::<Vec<_>>();
         let (stream_tx, mut stream_rx) = unbounded_channel();
         let llm = context.llm.clone();
         let model = context.model.clone();
@@ -307,47 +315,6 @@ async fn execute_child_tool_call(
     tool_call: &ToolCall,
 ) -> Result<ToolExecutionResult> {
     match canonical_tool_name(&tool_call.name) {
-        Some("task") => {
-            let args = serde_json::from_str::<TaskArgs>(&tool_call.arguments)?;
-            let description = args.description.trim();
-            let prompt = args.prompt.trim();
-            let subagent_type = args
-                .subagent_type
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .unwrap_or("general")
-                .to_string();
-
-            if description.is_empty() {
-                bail!("task description cannot be empty");
-            }
-            if prompt.is_empty() {
-                bail!("task prompt cannot be empty");
-            }
-
-            let nested_session_id = Uuid::new_v4();
-            let nested_context = SubagentTaskContext {
-                parent_request_id: context.parent_request_id,
-                parent_session_id: context.child_session_id,
-                child_session_id: nested_session_id,
-                description: description.to_string(),
-                prompt: prompt.to_string(),
-                subagent_type,
-                llm: context.llm.clone(),
-                tools: context.tools.clone(),
-                model: context.model.clone(),
-                workspace_root: context.workspace_root.clone(),
-                store_path: context.store_path.clone(),
-                tx: context.tx.clone(),
-                cancel_requested: context.cancel_requested.clone(),
-                runtime_handle: context.runtime_handle.clone(),
-                mode: context.mode,
-            };
-
-            let result = Box::pin(run_subagent_task(nested_context)).await?;
-            Ok(ToolExecutionResult::new(result))
-        }
         Some("bash") => {
             let output = execute_shell_tool_call(
                 &context.workspace_root,
@@ -357,9 +324,6 @@ async fn execute_child_tool_call(
             )?;
             Ok(ToolExecutionResult::new(output))
         }
-        Some("question") => Ok(ToolExecutionResult::new(
-            "Tool failed: question tool is not supported inside background subagents",
-        )),
         _ => {
             let result = tokio::task::block_in_place(|| {
                 let store = SessionStore::open(&context.store_path)?;
