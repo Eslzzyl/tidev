@@ -505,8 +505,10 @@ impl App {
 
         let content_area = scrollbar_area.0;
         self.message_content_area = Some(content_area);
+        self.message_viewport_lines = content_area.height as usize;
         let content_width = content_area.width.max(1) as usize;
-        let (mut text, mut total_lines, card_ranges) = self.messages_text(Some(content_width));
+        let (mut text, mut total_lines, card_ranges, rendered_virtualized) =
+            self.messages_text(Some(content_width));
 
         // Add tool running state
         for running in &self.running_tool_executions {
@@ -568,7 +570,6 @@ impl App {
             }
         }
 
-        self.message_viewport_lines = content_area.height as usize;
         self.message_total_lines = total_lines;
 
         let max_scroll = total_lines.saturating_sub(self.message_viewport_lines);
@@ -580,12 +581,13 @@ impl App {
 
         self.message_scroll_offset = scroll;
         self.message_follow_tail = scroll >= max_scroll;
+        let render_scroll = if rendered_virtualized { 0 } else { scroll };
 
         // Calculate screen positions for tool result cards
         self.tool_result_card_bounds.clear();
         for card_range in card_ranges {
-            let screen_start = card_range.start_line.saturating_sub(scroll);
-            let screen_end = card_range.end_line.saturating_sub(scroll);
+            let screen_start = card_range.start_line.saturating_sub(render_scroll);
+            let screen_end = card_range.end_line.saturating_sub(render_scroll);
 
             if screen_end == 0 || screen_start >= self.message_viewport_lines {
                 continue;
@@ -609,7 +611,7 @@ impl App {
         let paragraph = Paragraph::new(text)
             .style(Style::default().bg(palette.background).fg(palette.text))
             .wrap(Wrap { trim: false })
-            .scroll((scroll as u16, 0));
+            .scroll((render_scroll as u16, 0));
 
         frame.render_widget(paragraph, content_area);
 
@@ -681,7 +683,7 @@ impl App {
     fn messages_text(
         &mut self,
         content_width: Option<usize>,
-    ) -> (Text<'static>, usize, Vec<ToolResultCardRange>) {
+    ) -> (Text<'static>, usize, Vec<ToolResultCardRange>, bool) {
         let started_at = Instant::now();
         let palette = self.palette();
         let width = content_width.unwrap_or(1).max(1);
@@ -720,7 +722,7 @@ impl App {
                 palette.panel,
             ));
             let total_lines = lines.len().max(1);
-            return (Text::from(lines), total_lines, card_ranges);
+            return (Text::from(lines), total_lines, card_ranges, false);
         }
 
         // Check if there are streaming messages (need full render)
@@ -751,8 +753,15 @@ impl App {
             }
 
             // Calculate visible range based on scroll position
-            let scroll = self.message_scroll_offset;
             let viewport = self.message_viewport_lines.max(1);
+            let total_message_lines = self.message_layout_index.borrow().total_lines;
+            let max_scroll = total_message_lines.saturating_sub(viewport);
+            let scroll = if self.message_follow_tail {
+                max_scroll
+            } else {
+                self.message_scroll_offset.min(max_scroll)
+            };
+            self.message_scroll_offset = scroll;
 
             // Find visible blocks
             let visible_blocks = self.find_visible_message_blocks(scroll, viewport);
@@ -777,7 +786,7 @@ impl App {
             }
 
             // Calculate total lines from layout index
-            let total_lines = header_line_count + self.message_layout_index.borrow().total_lines;
+            let total_lines = header_line_count + total_message_lines;
 
             let elapsed = started_at.elapsed();
             if elapsed > Duration::from_millis(12) {
@@ -794,7 +803,7 @@ impl App {
                 );
             }
 
-            return (Text::from(lines), total_lines, card_ranges);
+            return (Text::from(lines), total_lines, card_ranges, true);
         }
 
         // Full render (for streaming or small conversations)
@@ -969,7 +978,7 @@ impl App {
                 palette.panel,
             );
             let total_lines = fallback.len().max(1);
-            return (Text::from(fallback), total_lines, card_ranges);
+            return (Text::from(fallback), total_lines, card_ranges, false);
         }
 
         let total_lines = lines.len().max(1);
@@ -986,7 +995,7 @@ impl App {
                 entries
             );
         }
-        (Text::from(lines), total_lines, card_ranges)
+        (Text::from(lines), total_lines, card_ranges, false)
     }
 
     fn cached_render_message_cards(
@@ -1927,8 +1936,14 @@ impl App {
             return Vec::new();
         }
 
-        let visible_start = scroll.saturating_sub(5); // Buffer above
-        let visible_end = scroll + viewport_height + 5; // Buffer below
+        let viewport_height = viewport_height.max(1);
+        let max_scroll = index.total_lines.saturating_sub(viewport_height);
+        let clamped_scroll = scroll.min(max_scroll);
+
+        let visible_start = clamped_scroll.saturating_sub(5); // Buffer above
+        let visible_end = clamped_scroll
+            .saturating_add(viewport_height)
+            .saturating_add(5); // Buffer below
 
         // Binary search for first block that could be visible
         let first_visible = index
@@ -2264,7 +2279,7 @@ mod tests {
         app.conversation
             .push(Message::new(MessageRole::Assistant, "old cached content"));
 
-        let (before, _, _) = app.messages_text(Some(80));
+        let (before, _, _, _) = app.messages_text(Some(80));
         let before_text = text_lines_to_string(&before.lines);
         assert!(before_text.contains("old cached content"));
 
@@ -2272,9 +2287,36 @@ mod tests {
         app.conversation.messages[0].content = "new refreshed content".to_string();
         app.invalidate_active_message_render_cache_for(message_id);
 
-        let (after, _, _) = app.messages_text(Some(80));
+        let (after, _, _, _) = app.messages_text(Some(80));
         let after_text = text_lines_to_string(&after.lines);
         assert!(after_text.contains("new refreshed content"));
+    }
+
+    #[test]
+    fn virtualized_render_clamps_scroll_and_keeps_content_visible() {
+        let mut app = super::App::new().unwrap();
+        app.message_viewport_lines = 8;
+        app.message_follow_tail = false;
+        app.message_scroll_offset = usize::MAX;
+
+        for idx in 0..24 {
+            app.conversation.push(Message::new(
+                MessageRole::Assistant,
+                format!(
+                    "message {idx}\n\n```rust\nfn item_{idx}() {{\n    println!(\"ok\");\n}}\n```"
+                ),
+            ));
+        }
+
+        let (text, total_lines, _, used_virtualization) = app.messages_text(Some(80));
+
+        assert!(used_virtualization);
+        assert!(total_lines > 0);
+        assert!(!text.lines.is_empty());
+        assert!(text_lines_to_string(&text.lines).contains("message"));
+
+        let max_scroll = total_lines.saturating_sub(app.message_viewport_lines.max(1));
+        assert!(app.message_scroll_offset <= max_scroll);
     }
 }
 
