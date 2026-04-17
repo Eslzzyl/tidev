@@ -556,9 +556,10 @@ impl SessionStore {
         )?;
 
         let output = statement
-            .query_row(params![session_id.to_string(), message_id.to_string()], |row| {
-                row.get::<_, String>(0)
-            })
+            .query_row(
+                params![session_id.to_string(), message_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
             .optional()?;
 
         Ok(output)

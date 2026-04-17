@@ -6,11 +6,14 @@ use grep::{
 };
 use ignore::WalkBuilder;
 use serde_json::Value;
-use std::{path::{Path, PathBuf}, time::SystemTime};
 use std::time::UNIX_EPOCH;
+use std::{
+    path::{Path, PathBuf},
+    time::SystemTime,
+};
 
-use crate::tooling::tools::{GlobArgs, GrepArgs};
 use super::utils::{display_workspace_relative, resolve_workspace_path, truncate_in_place};
+use crate::tooling::tools::{GlobArgs, GrepArgs};
 use crate::tooling::{ToolDefinition, ToolPermission};
 
 pub fn definitions() -> Vec<ToolDefinition> {

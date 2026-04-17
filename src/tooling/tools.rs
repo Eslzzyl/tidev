@@ -7,11 +7,11 @@ use std::{
 };
 use uuid::Uuid;
 
+use crate::tooling::SkillCatalog;
 use crate::{
     session::{ToolCall, ToolExecutionResult},
     storage::SessionStore,
 };
-use crate::tooling::SkillCatalog;
 
 use super::ToolDefinition;
 use super::builtin;

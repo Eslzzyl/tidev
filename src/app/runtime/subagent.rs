@@ -351,11 +351,8 @@ fn record_tool_result(
 ) -> Result<()> {
     let store = SessionStore::open(&context.store_path)?;
     let display_result = result.preview_for_storage(Some(tool_call.name.as_str()));
-    let message = Message::tool_result(
-        tool_call.id.clone(),
-        tool_call.name.clone(),
-        display_result,
-    );
+    let message =
+        Message::tool_result(tool_call.id.clone(), tool_call.name.clone(), display_result);
 
     store.append_tool_event(
         context.child_session_id,

@@ -646,9 +646,11 @@ mod tests {
         let indexed_entries = index_workspace_entries(&workspace);
         let suggestions = search_entries(&indexed_entries, "match");
 
-        assert!(suggestions
-            .iter()
-            .any(|suggestion| suggestion.path == "match-root.txt"));
+        assert!(
+            suggestions
+                .iter()
+                .any(|suggestion| suggestion.path == "match-root.txt")
+        );
         assert!(suggestions.len() <= 12);
     }
 
@@ -660,9 +662,11 @@ mod tests {
         let indexed_entries = index_workspace_entries(&workspace);
         let suggestions = search_entries(&indexed_entries, "");
 
-        assert!(suggestions
-            .iter()
-            .all(|suggestion| !suggestion.path.is_empty()));
+        assert!(
+            suggestions
+                .iter()
+                .all(|suggestion| !suggestion.path.is_empty())
+        );
     }
 
     #[test]
@@ -692,9 +696,11 @@ mod tests {
         let indexed_entries = index_workspace_entries(&workspace);
         let suggestions = search_entries(&indexed_entries, "atmnr");
 
-        assert!(suggestions
-            .iter()
-            .any(|suggestion| suggestion.path == "at_mention.rs"));
+        assert!(
+            suggestions
+                .iter()
+                .any(|suggestion| suggestion.path == "at_mention.rs")
+        );
     }
 
     #[test]

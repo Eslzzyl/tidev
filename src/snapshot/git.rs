@@ -68,9 +68,10 @@ pub fn sync_exclude(gitdir: &Path, worktree: &Path, extra: &[String]) -> Result<
     let mut content = String::new();
 
     if source_exclude.exists()
-        && let Ok(text) = fs::read_to_string(&source_exclude) {
-            content.push_str(&text);
-        }
+        && let Ok(text) = fs::read_to_string(&source_exclude)
+    {
+        content.push_str(&text);
+    }
 
     for item in extra {
         content.push_str(&format!("\n/{}", item.replace('\\', "/")));
@@ -163,9 +164,10 @@ fn should_ignore_path(path: &str) -> bool {
     let path = Path::new(path);
     path.components().any(|component| {
         if let std::path::Component::Normal(name) = component
-            && let Some(name_str) = name.to_str() {
-                return DEFAULT_IGNORED_DIRS.contains(&name_str);
-            }
+            && let Some(name_str) = name.to_str()
+        {
+            return DEFAULT_IGNORED_DIRS.contains(&name_str);
+        }
         false
     })
 }

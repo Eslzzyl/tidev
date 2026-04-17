@@ -386,9 +386,10 @@ impl App {
         self.config.save(&self.paths)?;
 
         if let Some(previous_name) = previous_name
-            && self.tools.mcp_manager().has_server(&previous_name) {
-                runtime.block_on(self.tools.mcp_manager().remove_server(&previous_name))?;
-            }
+            && self.tools.mcp_manager().has_server(&previous_name)
+        {
+            runtime.block_on(self.tools.mcp_manager().remove_server(&previous_name))?;
+        }
 
         runtime.block_on(self.tools.mcp_manager().upsert_server(name.clone(), config))?;
 

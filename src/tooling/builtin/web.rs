@@ -162,9 +162,10 @@ impl WebToolsClient {
             .to_ascii_lowercase();
 
         if let Some(length) = response.content_length()
-            && length > MAX_RESPONSE_BYTES as u64 {
-                bail!("response too large (exceeds 5MB limit)");
-            }
+            && length > MAX_RESPONSE_BYTES as u64
+        {
+            bail!("response too large (exceeds 5MB limit)");
+        }
 
         let bytes = response
             .bytes()

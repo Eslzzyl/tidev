@@ -679,9 +679,10 @@ fn block_anchor_replacer(content: &str, find: &str) -> Vec<String> {
     }
 
     if max_similarity >= MULTIPLE_CANDIDATE_SIMILARITY_THRESHOLD
-        && let Some((start, end)) = best_match {
-            return vec![line_slice(content, &original_lines, start, end).to_string()];
-        }
+        && let Some((start, end)) = best_match
+    {
+        return vec![line_slice(content, &original_lines, start, end).to_string()];
+    }
     Vec::new()
 }
 

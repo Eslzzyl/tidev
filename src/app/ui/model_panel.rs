@@ -25,10 +25,11 @@ impl ModelPanelState {
             && let Some(index) = items.iter().position(|item| {
                 matches!(item, ModelPanelItem::Model { summary }
                     if summary.provider_id == provider_id && summary.model_id == model_id)
-            }) {
-                self.selected_index = index;
-                return;
-            }
+            })
+        {
+            self.selected_index = index;
+            return;
+        }
 
         self.selected_index = first_selectable_index(items).unwrap_or(0);
     }

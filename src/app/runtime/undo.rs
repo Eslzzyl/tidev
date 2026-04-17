@@ -255,7 +255,7 @@ impl App {
 
         self.clear_revert_state()?;
         self.context_manager = ContextManager::new();
-    self.conversation.clear_context_state();
+        self.conversation.clear_context_state();
         self.composer.clear();
         self.screen = Screen::Chat;
         self.scroll_messages_to_bottom();
@@ -333,18 +333,19 @@ impl App {
         for message in &self.conversation.messages {
             if found {
                 if let Some(patch_files_str) = &message.patch_files
-                    && let Some(snapshot_hash) = &message.snapshot_hash {
-                        let files: Vec<String> = serde_json::from_str(patch_files_str)?;
-                        crate::log_info!(
-                            "collect_patches: found patch in subsequent message, hash={}, files={}",
-                            snapshot_hash,
-                            files.len()
-                        );
-                        patches.push(Patch {
-                            hash: snapshot_hash.clone(),
-                            files,
-                        });
-                    }
+                    && let Some(snapshot_hash) = &message.snapshot_hash
+                {
+                    let files: Vec<String> = serde_json::from_str(patch_files_str)?;
+                    crate::log_info!(
+                        "collect_patches: found patch in subsequent message, hash={}, files={}",
+                        snapshot_hash,
+                        files.len()
+                    );
+                    patches.push(Patch {
+                        hash: snapshot_hash.clone(),
+                        files,
+                    });
+                }
                 continue;
             }
 
@@ -356,18 +357,19 @@ impl App {
                     message.patch_files.as_ref().map(|s| s.len())
                 );
                 if let Some(patch_files_str) = &message.patch_files
-                    && let Some(snapshot_hash) = &message.snapshot_hash {
-                        let files: Vec<String> = serde_json::from_str(patch_files_str)?;
-                        crate::log_info!(
-                            "collect_patches: target message has patch, hash={}, files={}",
-                            snapshot_hash,
-                            files.len()
-                        );
-                        patches.push(Patch {
-                            hash: snapshot_hash.clone(),
-                            files,
-                        });
-                    }
+                    && let Some(snapshot_hash) = &message.snapshot_hash
+                {
+                    let files: Vec<String> = serde_json::from_str(patch_files_str)?;
+                    crate::log_info!(
+                        "collect_patches: target message has patch, hash={}, files={}",
+                        snapshot_hash,
+                        files.len()
+                    );
+                    patches.push(Patch {
+                        hash: snapshot_hash.clone(),
+                        files,
+                    });
+                }
             }
         }
 

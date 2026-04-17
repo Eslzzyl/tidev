@@ -372,10 +372,11 @@ impl App {
 
     pub(crate) fn switch_to_all_sessions_view(&mut self) -> Result<()> {
         if let Some(panel) = &mut self.session_panel
-            && panel.view_mode == SessionViewMode::CurrentWorkspace {
-                let sessions = self.store.load_all_sessions().unwrap_or_default();
-                *panel = SessionPanelState::new(sessions, SessionViewMode::AllSessions);
-            }
+            && panel.view_mode == SessionViewMode::CurrentWorkspace
+        {
+            let sessions = self.store.load_all_sessions().unwrap_or_default();
+            *panel = SessionPanelState::new(sessions, SessionViewMode::AllSessions);
+        }
         Ok(())
     }
 
@@ -409,11 +410,12 @@ impl App {
 
     pub(crate) fn confirm_delete_session(&mut self) -> Result<()> {
         if let Some(panel) = self.session_panel.take()
-            && let SessionPanelDialog::DeleteConfirm { session_ids, .. } = panel.dialog {
-                self.store.delete_sessions(&session_ids)?;
-                let count = session_ids.len();
-                self.last_notice = Some(format!("Deleted {} session(s)", count));
-            }
+            && let SessionPanelDialog::DeleteConfirm { session_ids, .. } = panel.dialog
+        {
+            self.store.delete_sessions(&session_ids)?;
+            let count = session_ids.len();
+            self.last_notice = Some(format!("Deleted {} session(s)", count));
+        }
 
         self.close_session_panel();
         self.open_session_panel(String::new())?;
@@ -439,19 +441,20 @@ impl App {
 
     pub(crate) fn select_cleanup_duration(&mut self, duration: ChronoDuration) -> Result<()> {
         if let Some(panel) = &mut self.session_panel
-            && let SessionPanelDialog::Cleanup { .. } = &panel.dialog {
-                let sessions = self
-                    .store
-                    .get_sessions_older_than_preview(duration)
-                    .unwrap_or_default();
-                let new_preview = CleanupPreview::from_sessions(sessions);
+            && let SessionPanelDialog::Cleanup { .. } = &panel.dialog
+        {
+            let sessions = self
+                .store
+                .get_sessions_older_than_preview(duration)
+                .unwrap_or_default();
+            let new_preview = CleanupPreview::from_sessions(sessions);
 
-                panel.dialog = SessionPanelDialog::Cleanup {
-                    preview: new_preview,
-                    selected_duration: Some(duration),
-                    cleanup_workspace: false,
-                };
-            }
+            panel.dialog = SessionPanelDialog::Cleanup {
+                preview: new_preview,
+                selected_duration: Some(duration),
+                cleanup_workspace: false,
+            };
+        }
         Ok(())
     }
 
@@ -462,27 +465,27 @@ impl App {
                 selected_duration,
                 ..
             } = &panel.dialog
-            {
-                let sessions = self
-                    .store
-                    .get_current_workspace_sessions_count(Path::new(&self.workspace_root))
-                    .unwrap_or(0);
+        {
+            let sessions = self
+                .store
+                .get_current_workspace_sessions_count(Path::new(&self.workspace_root))
+                .unwrap_or(0);
 
-                let new_preview = CleanupPreview {
-                    sessions: vec![],
-                    workspace_counts: vec![(
-                        self.workspace_root.to_string_lossy().to_string(),
-                        sessions as usize,
-                    )],
-                    total_count: sessions as usize,
-                };
+            let new_preview = CleanupPreview {
+                sessions: vec![],
+                workspace_counts: vec![(
+                    self.workspace_root.to_string_lossy().to_string(),
+                    sessions as usize,
+                )],
+                total_count: sessions as usize,
+            };
 
-                panel.dialog = SessionPanelDialog::Cleanup {
-                    preview: new_preview,
-                    selected_duration: *selected_duration,
-                    cleanup_workspace: true,
-                };
-            }
+            panel.dialog = SessionPanelDialog::Cleanup {
+                preview: new_preview,
+                selected_duration: *selected_duration,
+                cleanup_workspace: true,
+            };
+        }
         Ok(())
     }
 
@@ -493,20 +496,20 @@ impl App {
                 selected_duration,
                 cleanup_workspace,
             } = panel.dialog
-            {
-                if cleanup_workspace {
-                    let deleted = self
-                        .store
-                        .delete_sessions_in_workspace(Path::new(&self.workspace_root))?;
-                    let count = deleted.len();
-                    self.last_notice =
-                        Some(format!("Deleted {} session(s) in current workspace", count));
-                } else if let Some(duration) = selected_duration {
-                    let deleted = self.store.delete_sessions_older_than(duration)?;
-                    let count = deleted.len();
-                    self.last_notice = Some(format!("Deleted {} old session(s)", count));
-                }
+        {
+            if cleanup_workspace {
+                let deleted = self
+                    .store
+                    .delete_sessions_in_workspace(Path::new(&self.workspace_root))?;
+                let count = deleted.len();
+                self.last_notice =
+                    Some(format!("Deleted {} session(s) in current workspace", count));
+            } else if let Some(duration) = selected_duration {
+                let deleted = self.store.delete_sessions_older_than(duration)?;
+                let count = deleted.len();
+                self.last_notice = Some(format!("Deleted {} old session(s)", count));
             }
+        }
 
         self.close_session_panel();
         self.open_session_panel(String::new())?;
