@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use rusqlite::{Connection, OptionalExtension, params, types::Type};
+use rusqlite::{params, params_from_iter, types::Type, Connection, OptionalExtension};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -362,17 +362,20 @@ impl SessionStore {
             params![session_id.to_string()],
         )?;
 
-        for (position, todo) in todos.iter().enumerate() {
-            self.connection.execute(
-                "INSERT INTO todos (session_id, position, content, status, priority) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
+        if !todos.is_empty() {
+            let mut stmt = self.connection.prepare(
+                "INSERT INTO todos (session_id, position, content, status, priority) VALUES (?1, ?2, ?3, ?4, ?5)"
+            )?;
+
+            for (position, todo) in todos.iter().enumerate() {
+                stmt.execute(params![
                     session_id.to_string(),
                     position as i64,
                     &todo.content,
                     &todo.status,
                     &todo.priority,
-                ],
-            )?;
+                ])?;
+            }
         }
 
         self.touch_session(session_id)?;
@@ -663,12 +666,28 @@ impl SessionStore {
     }
 
     pub fn delete_sessions(&self, session_ids: &[Uuid]) -> Result<()> {
-        for session_id in session_ids {
-            self.connection.execute(
-                "DELETE FROM sessions WHERE id = ?1",
-                params![session_id.to_string()],
-            )?;
+        if session_ids.is_empty() {
+            return Ok(());
         }
+
+        let ids: Vec<String> = session_ids.iter().map(|id| id.to_string()).collect();
+        self.delete_sessions_by_ids(&ids)
+    }
+
+    fn delete_sessions_by_ids(&self, session_ids: &[String]) -> Result<()> {
+        if session_ids.is_empty() {
+            return Ok(());
+        }
+
+        let placeholders: Vec<&str> = session_ids.iter().map(|_| "?").collect();
+        let sql = format!(
+            "DELETE FROM sessions WHERE id IN ({})",
+            placeholders.join(",")
+        );
+
+        let params: Vec<String> = session_ids.to_vec();
+        self.connection.execute(&sql, params_from_iter(params))?;
+
         Ok(())
     }
 
@@ -691,10 +710,7 @@ impl SessionStore {
         }
 
         let session_ids: Vec<String> = records.iter().map(|r| r.session_id.to_string()).collect();
-        for session_id in session_ids {
-            self.connection
-                .execute("DELETE FROM sessions WHERE id = ?1", params![session_id])?;
-        }
+        self.delete_sessions_by_ids(&session_ids)?;
 
         Ok(records)
     }
@@ -717,10 +733,7 @@ impl SessionStore {
         }
 
         let session_ids: Vec<String> = records.iter().map(|r| r.session_id.to_string()).collect();
-        for session_id in session_ids {
-            self.connection
-                .execute("DELETE FROM sessions WHERE id = ?1", params![session_id])?;
-        }
+        self.delete_sessions_by_ids(&session_ids)?;
 
         Ok(records)
     }
