@@ -37,44 +37,47 @@ impl ContextManager {
         (text.chars().count() / 4).max(1)
     }
 
-    pub fn estimate_tokens_for_messages(messages: &[Message]) -> usize {
-        messages
+    fn message_tokens(message: &Message) -> usize {
+        if let Some(tokens) = message.total_tokens {
+            return tokens as usize;
+        }
+
+        let tool_tokens: usize = message
+            .tool_calls
             .iter()
-            .map(|message| {
-                let tool_tokens: usize = message
-                    .tool_calls
-                    .iter()
-                    .map(|tool_call| {
-                        Self::estimate_tokens_for_text(&tool_call.name)
-                            + Self::estimate_tokens_for_text(&tool_call.arguments)
-                    })
-                    .sum();
-
-                let attachment_tokens: usize = message
-                    .attachments
-                    .iter()
-                    .map(|attachment| match attachment {
-                        MessageAttachment::FileReference { content, .. } => {
-                            Self::estimate_tokens_for_text(content)
-                        }
-                        MessageAttachment::DirectoryReference { tree, .. } => {
-                            Self::estimate_tokens_for_text(tree)
-                        }
-                        MessageAttachment::Image { filename, mime, .. } => {
-                            Self::estimate_tokens_for_text(filename)
-                                + Self::estimate_tokens_for_text(mime)
-                                + 128
-                        }
-                    })
-                    .sum();
-
-                Self::estimate_tokens_for_text(&message.content)
-                    + Self::estimate_tokens_for_text(&message.reasoning)
-                    + tool_tokens
-                    + attachment_tokens
-                    + 8
+            .map(|tool_call| {
+                Self::estimate_tokens_for_text(&tool_call.name)
+                    + Self::estimate_tokens_for_text(&tool_call.arguments)
             })
-            .sum()
+            .sum();
+
+        let attachment_tokens: usize = message
+            .attachments
+            .iter()
+            .map(|attachment| match attachment {
+                MessageAttachment::FileReference { content, .. } => {
+                    Self::estimate_tokens_for_text(content)
+                }
+                MessageAttachment::DirectoryReference { tree, .. } => {
+                    Self::estimate_tokens_for_text(tree)
+                }
+                MessageAttachment::Image { filename, mime, .. } => {
+                    Self::estimate_tokens_for_text(filename)
+                        + Self::estimate_tokens_for_text(mime)
+                        + 128
+                }
+            })
+            .sum();
+
+        Self::estimate_tokens_for_text(&message.content)
+            + Self::estimate_tokens_for_text(&message.reasoning)
+            + tool_tokens
+            + attachment_tokens
+            + 8
+    }
+
+    pub fn estimate_tokens_for_messages(messages: &[Message]) -> usize {
+        messages.iter().map(Self::message_tokens).sum()
     }
 
     pub fn needs_compaction(&self, conversation: &Conversation) -> bool {
@@ -153,7 +156,7 @@ impl ContextManager {
         let mut keep_from = messages.len();
 
         for (index, message) in messages.iter().enumerate().rev() {
-            let message_tokens = Self::estimate_tokens_for_text(&message.content) + 8;
+            let message_tokens = Self::message_tokens(message);
             if token_budget < message_tokens {
                 keep_from = index + 1;
                 break;
