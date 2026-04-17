@@ -9,7 +9,7 @@ use ratatui::{
     prelude::{Frame, Modifier, Style, Text},
     style::Color,
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph},
 };
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -702,7 +702,6 @@ impl App {
 
         let paragraph = Paragraph::new(text)
             .style(Style::default().bg(palette.background).fg(palette.text))
-            .wrap(Wrap { trim: false })
             .scroll((render_scroll as u16, 0));
 
         frame.render_widget(paragraph, content_area);
@@ -802,8 +801,7 @@ impl App {
                     .border_style(Style::default().fg(palette.border_idle()))
                     .title("Sidebar"),
             )
-            .style(Style::default().fg(palette.text))
-            .wrap(Wrap { trim: false });
+            .style(Style::default().fg(palette.text));
 
         frame.render_widget(paragraph, area);
     }
