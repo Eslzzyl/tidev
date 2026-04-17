@@ -339,6 +339,8 @@ impl App {
     }
 
     fn footer_status_text(&mut self) -> String {
+        let queued_count = self.pending_prompt_queue.len();
+
         if self.pending_request
             && self
                 .abort_confirmation_deadline
@@ -387,6 +389,26 @@ impl App {
                 format!("{} Running tools", spinner)
             } else {
                 format!("{} {}", spinner, self.mode.title())
+            };
+
+            let status = if queued_count > 0 {
+                format!("{} · queued {}", status, queued_count)
+            } else {
+                status
+            };
+
+            if let Some(token_status) = token_status {
+                return format!("{} · {}", status, token_status);
+            }
+
+            return status;
+        }
+
+        if queued_count > 0 {
+            let status = if queued_count == 1 {
+                "1 queued message".to_string()
+            } else {
+                format!("{queued_count} queued messages")
             };
 
             if let Some(token_status) = token_status {

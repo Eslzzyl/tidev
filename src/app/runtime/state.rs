@@ -103,6 +103,21 @@ pub(crate) enum Screen {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct QueuedPrompt {
+    pub(crate) prompt: String,
+    pub(crate) attachments: Vec<MessageAttachment>,
+}
+
+impl QueuedPrompt {
+    pub(crate) fn new(prompt: impl Into<String>, attachments: Vec<MessageAttachment>) -> Self {
+        Self {
+            prompt: prompt.into(),
+            attachments,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct CachedSessionRuntime {
     pub(crate) conversation: Conversation,
     pub(crate) active_model: ActiveModel,
@@ -113,6 +128,7 @@ pub(crate) struct CachedSessionRuntime {
     pub(crate) running_tool_executions: Vec<RunningToolExecution>,
     pub(crate) running_subagent_executions: Vec<RunningSubagentExecution>,
     pub(crate) pending_request: bool,
+    pub(crate) pending_prompt_queue: std::collections::VecDeque<QueuedPrompt>,
     pub(crate) active_request_id: u64,
     pub(crate) abort_confirmation_deadline: Option<Instant>,
     pub(crate) retrying_hint: Option<(u32, u32, String, Option<u32>)>,

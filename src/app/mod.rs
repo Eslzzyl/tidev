@@ -184,6 +184,7 @@ struct App {
     leader_key_pending: bool,
     composer: Composer,
     draft_attachments: Vec<MessageAttachment>,
+    pending_prompt_queue: std::collections::VecDeque<QueuedPrompt>,
     pending_request: bool,
     active_request_id: u64,
     abort_confirmation_deadline: Option<Instant>,
@@ -603,6 +604,7 @@ impl App {
                     self.store
                         .append_message(self.conversation.session_id, &persisted)?;
                     self.last_notice = Some(error);
+                    self.drain_queued_prompts(runtime);
                     return Ok(());
                 }
 
@@ -611,6 +613,7 @@ impl App {
                 self.store
                     .append_message(self.conversation.session_id, &message)?;
                 self.last_notice = Some(error);
+                self.drain_queued_prompts(runtime);
             }
             BackendEvent::ToolCompleted {
                 session_id: _,
@@ -881,8 +884,115 @@ impl App {
             _ => "Response complete".to_string(),
         });
         self.schedule_context_compaction_for_session(self.conversation.session_id, runtime);
+        self.drain_queued_prompts(runtime);
 
         Ok(())
+    }
+
+    fn queue_prompt(&mut self, prompt: String, attachments: Vec<MessageAttachment>) {
+        self.pending_prompt_queue
+            .push_back(QueuedPrompt::new(prompt, attachments));
+    }
+
+    fn drain_queued_prompts(&mut self, runtime: &Runtime) {
+        while !self.pending_request {
+            let Some(queued_prompt) = self.pending_prompt_queue.pop_front() else {
+                break;
+            };
+
+            if let Err(error) =
+                self.submit_prompt_now(queued_prompt.prompt, queued_prompt.attachments, runtime)
+            {
+                self.last_notice = Some(error.to_string());
+                break;
+            }
+
+            if self.pending_request {
+                break;
+            }
+        }
+    }
+
+    fn submit_prompt_now(
+        &mut self,
+        prompt: String,
+        attachments: Vec<MessageAttachment>,
+        runtime: &Runtime,
+    ) -> Result<()> {
+        let prompt = prompt.trim().to_string();
+
+        if prompt.is_empty() && attachments.is_empty() {
+            return Ok(());
+        }
+
+        if self.screen == Screen::Welcome {
+            let session_exists = self
+                .store
+                .load_session_record(self.conversation.session_id)?
+                .is_some();
+
+            if !session_exists {
+                let session_id = Uuid::new_v4();
+                self.conversation.session_id = session_id;
+                self.conversation.clear_context_state();
+                self.store.create_session(
+                    session_id,
+                    self.workspace_root.as_path(),
+                    &self.active_model.provider_id,
+                    &self.active_model.provider_display_name,
+                    &self.active_model.model_id,
+                    &self.active_model.display_name,
+                    "Untitled session",
+                )?;
+            }
+            self.context_manager = ContextManager::new();
+            self.pending_tool_execution = None;
+            self.permission_dialog = None;
+            self.question_dialog = None;
+            self.running_tool_executions.clear();
+            self.abort_confirmation_deadline = None;
+            self.active_request_id = self.active_request_id.wrapping_add(1);
+        }
+
+        self.screen = Screen::Chat;
+        self.command_palette.clear();
+        self.connect_dialog = None;
+
+        if self.conversation.is_reverted() {
+            self.discard_reverted_branch()?;
+            self.context_manager = ContextManager::new();
+            self.conversation.clear_context_state();
+        }
+
+        if attachments.iter().any(MessageAttachment::is_image) && !self.active_model.supports_images
+        {
+            self.last_notice = Some("This model does not support image attachments".to_string());
+            return Ok(());
+        }
+
+        let mut user_message = Message::new(MessageRole::User, prompt.clone());
+        user_message.attachments = attachments;
+        self.conversation.push(user_message.clone());
+        self.store
+            .append_message(self.conversation.session_id, &user_message)?;
+
+        self.draft_attachments.clear();
+
+        if let Err(error) = self.capture_prompt_snapshot(user_message.id, runtime) {
+            self.last_notice = Some(format!("Workspace snapshot unavailable: {error}"));
+        }
+
+        if self.conversation.messages.len() == 1 || self.conversation.title == "Untitled session" {
+            self.conversation.update_title_from_prompt(&prompt);
+            self.store
+                .update_session_title(self.conversation.session_id, &self.conversation.title)?;
+        }
+
+        self.scroll_messages_to_bottom();
+
+        self.schedule_context_compaction_for_session(self.conversation.session_id, runtime);
+
+        self.start_assistant_turn(runtime)
     }
 
     fn resolve_fallback_model(config: &AppConfig, auth: &AuthStore) -> Result<ActiveModel> {

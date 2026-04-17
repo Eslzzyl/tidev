@@ -208,7 +208,11 @@ impl App {
         }
     }
 
-    pub(crate) fn handle_request_abort_key(&mut self, key: KeyEvent) -> Result<bool> {
+    pub(crate) fn handle_request_abort_key(
+        &mut self,
+        key: KeyEvent,
+        runtime: &Runtime,
+    ) -> Result<bool> {
         if key.code != KeyCode::Esc || !self.pending_request {
             return Ok(false);
         }
@@ -218,6 +222,7 @@ impl App {
             .is_some_and(|deadline| deadline > Instant::now())
         {
             self.abort_current_request();
+            self.drain_queued_prompts(runtime);
             return Ok(true);
         }
 
@@ -419,7 +424,7 @@ impl App {
             return self.handle_session_panel_key(key, runtime);
         }
 
-        if self.handle_request_abort_key(key)? {
+        if self.handle_request_abort_key(key, runtime)? {
             return Ok(());
         }
 
@@ -1104,52 +1109,8 @@ impl App {
 
     pub(crate) fn submit_prompt(&mut self, prompt: String, runtime: &Runtime) -> Result<()> {
         let prompt = prompt.trim().to_string();
-        if self.pending_request {
-            self.last_notice = Some("A response is already in progress".to_string());
-            return Ok(());
-        }
-
         if prompt.is_empty() && self.draft_attachments.is_empty() {
             return Ok(());
-        }
-
-        if self.screen == Screen::Welcome {
-            let session_exists = self
-                .store
-                .load_session_record(self.conversation.session_id)?
-                .is_some();
-
-            if !session_exists {
-                let session_id = Uuid::new_v4();
-                self.conversation.session_id = session_id;
-                self.conversation.clear_context_state();
-                self.store.create_session(
-                    session_id,
-                    self.workspace_root.as_path(),
-                    &self.active_model.provider_id,
-                    &self.active_model.provider_display_name,
-                    &self.active_model.model_id,
-                    &self.active_model.display_name,
-                    "Untitled session",
-                )?;
-            }
-            self.context_manager = ContextManager::new();
-            self.pending_tool_execution = None;
-            self.permission_dialog = None;
-            self.question_dialog = None;
-            self.running_tool_executions.clear();
-            self.abort_confirmation_deadline = None;
-            self.active_request_id = self.active_request_id.wrapping_add(1);
-        }
-
-        self.screen = Screen::Chat;
-        self.command_palette.clear();
-        self.connect_dialog = None;
-
-        if self.conversation.is_reverted() {
-            self.discard_reverted_branch()?;
-            self.context_manager = ContextManager::new();
-            self.conversation.clear_context_state();
         }
 
         let attachments = self.build_prompt_attachments(&prompt)?;
@@ -1159,28 +1120,12 @@ impl App {
             return Ok(());
         }
 
-        let mut user_message = Message::new(MessageRole::User, prompt.clone());
-        user_message.attachments = attachments;
-        self.conversation.push(user_message.clone());
-        self.store
-            .append_message(self.conversation.session_id, &user_message)?;
-
-        self.draft_attachments.clear();
-
-        if let Err(error) = self.capture_prompt_snapshot(user_message.id, runtime) {
-            self.last_notice = Some(format!("Workspace snapshot unavailable: {error}"));
+        if self.pending_request || !self.pending_prompt_queue.is_empty() {
+            self.queue_prompt(prompt, attachments);
+            self.draft_attachments.clear();
+            return Ok(());
         }
 
-        if self.conversation.messages.len() == 1 || self.conversation.title == "Untitled session" {
-            self.conversation.update_title_from_prompt(&prompt);
-            self.store
-                .update_session_title(self.conversation.session_id, &self.conversation.title)?;
-        }
-
-        self.scroll_messages_to_bottom();
-
-        self.schedule_context_compaction_for_session(self.conversation.session_id, runtime);
-
-        self.start_assistant_turn(runtime)
+        self.submit_prompt_now(prompt, attachments, runtime)
     }
 }

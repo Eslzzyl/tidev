@@ -87,6 +87,7 @@ impl App {
             leader_key_pending: false,
             composer,
             draft_attachments: Vec::new(),
+            pending_prompt_queue: std::collections::VecDeque::new(),
             pending_request: false,
             active_request_id: 0,
             abort_confirmation_deadline: None,
@@ -188,6 +189,7 @@ impl App {
             running_tool_executions: self.running_tool_executions.clone(),
             running_subagent_executions: self.running_subagent_executions.clone(),
             pending_request: self.pending_request,
+            pending_prompt_queue: self.pending_prompt_queue.clone(),
             active_request_id: self.active_request_id,
             abort_confirmation_deadline: self.abort_confirmation_deadline,
             retrying_hint: self.retrying_hint.clone(),
@@ -297,6 +299,7 @@ impl App {
         self.running_tool_executions = cached.running_tool_executions;
         self.running_subagent_executions = cached.running_subagent_executions;
         self.pending_request = cached.pending_request;
+        self.pending_prompt_queue = cached.pending_prompt_queue;
         self.active_request_id = cached.active_request_id;
         self.abort_confirmation_deadline = cached.abort_confirmation_deadline;
         self.retrying_hint = cached.retrying_hint;
@@ -377,6 +380,7 @@ impl App {
         self.running_tool_executions.clear();
         self.running_subagent_executions.clear();
         self.pending_request = false;
+        self.pending_prompt_queue.clear();
         self.abort_confirmation_deadline = None;
         self.retrying_hint = None;
         self.context_usage = None;
@@ -430,6 +434,7 @@ impl App {
             running_tool_executions: Vec::new(),
             running_subagent_executions: Vec::new(),
             pending_request: false,
+            pending_prompt_queue: std::collections::VecDeque::new(),
             active_request_id: 0,
             abort_confirmation_deadline: None,
             retrying_hint: None,
