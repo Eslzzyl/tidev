@@ -1,4 +1,5 @@
 use super::*;
+use crate::session::MessageRole;
 
 impl App {
     pub(crate) fn handle_event(&mut self, event: Event, runtime: &Runtime) -> Result<()> {
@@ -41,7 +42,7 @@ impl App {
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 let position = Position::new(mouse.column, mouse.row);
-                
+
                 if !self.mouse_selection.is_dragging() {
                     for (message_id, rect) in &self.tool_result_card_bounds {
                         if rect.contains(position) {
@@ -50,7 +51,7 @@ impl App {
                         }
                     }
                 }
-                
+
                 self.mouse_selection.release(position);
             }
             MouseEventKind::ScrollUp => {
@@ -68,7 +69,7 @@ impl App {
             _ => {}
         }
     }
-    
+
     pub(crate) fn toggle_tool_result_expanded(&mut self, message_id: Uuid) {
         if self.expanded_tool_results.contains(&message_id) {
             self.expanded_tool_results.remove(&message_id);
@@ -410,6 +411,10 @@ impl App {
             return self.handle_model_panel_key(key);
         }
 
+        if self.message_panel.is_some() {
+            return self.handle_message_panel_key(key);
+        }
+
         if self.session_panel.is_some() {
             return self.handle_session_panel_key(key, runtime);
         }
@@ -641,6 +646,7 @@ impl App {
             || self.connect_dialog.is_some()
             || self.theme_panel.is_some()
             || self.model_panel.is_some()
+            || self.message_panel.is_some()
             || self.session_panel.is_some()
             || self.mcp_panel.is_some()
             || self.question_dialog.is_some()
@@ -760,6 +766,9 @@ impl App {
             CommandAction::Session => {
                 self.open_session_panel(args.join(" "))?;
             }
+            CommandAction::Message => {
+                self.open_message_panel(args.join(" "))?;
+            }
             CommandAction::Rename => {
                 self.open_rename_session_dialog()?;
             }
@@ -832,6 +841,108 @@ impl App {
         self.composer.clear();
         self.composer
             .set_placeholder("Ask TiDev about your code, task, or question...");
+    }
+
+    pub(crate) fn open_message_panel(&mut self, initial_query: String) -> Result<()> {
+        self.command_palette.clear();
+        self.at_mention.clear();
+        self.draft_attachments.clear();
+        self.connect_dialog = None;
+        self.theme_panel = None;
+        self.model_panel = None;
+        self.session_panel = None;
+        self.mcp_panel = None;
+        self.composer.clear();
+        self.composer
+            .set_placeholder("Search user messages in the current session");
+        self.composer.set_text(initial_query);
+
+        let messages = self
+            .conversation
+            .visible_messages()
+            .iter()
+            .filter(|message| matches!(message.role, MessageRole::User))
+            .map(|message| crate::app::message_panel::MessagePanelMessage {
+                message_id: message.id,
+                content: message.content.clone(),
+                created_at: message.created_at,
+            })
+            .collect();
+
+        self.message_panel = Some(MessagePanelState::new(messages));
+        self.reset_message_panel_selection();
+        Ok(())
+    }
+
+    pub(crate) fn close_message_panel(&mut self) {
+        if self.message_panel.take().is_some() {
+            self.composer.clear();
+            self.composer
+                .set_placeholder("Ask TiDev about your code, task, or question...");
+        }
+    }
+
+    pub(crate) fn reset_message_panel_selection(&mut self) {
+        if let Some(panel) = &mut self.message_panel {
+            panel.reset_selection(&self.composer.text().to_string());
+        }
+    }
+
+    pub(crate) fn handle_message_panel_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Some(panel) = self.message_panel.clone() else {
+            return Ok(());
+        };
+
+        match key.code {
+            KeyCode::Up => {
+                let query = self.composer.text().to_string();
+                let mut next_panel = panel;
+                next_panel.move_selection(&query, -1);
+                self.message_panel = Some(next_panel);
+            }
+            KeyCode::Down => {
+                let query = self.composer.text().to_string();
+                let mut next_panel = panel;
+                next_panel.move_selection(&query, 1);
+                self.message_panel = Some(next_panel);
+            }
+            KeyCode::Enter => {
+                let query = self.composer.text().to_string();
+                if let Some(message) = panel.selected_message(&query) {
+                    self.scroll_messages_to_message(message.message_id);
+                    self.close_message_panel();
+                }
+            }
+            KeyCode::Esc => {
+                self.close_message_panel();
+            }
+            KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let query = self.composer.text().to_string();
+                let mut next_panel = panel;
+                next_panel.move_selection(&query, -1);
+                self.message_panel = Some(next_panel);
+            }
+            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let query = self.composer.text().to_string();
+                let mut next_panel = panel;
+                next_panel.move_selection(&query, 1);
+                self.message_panel = Some(next_panel);
+            }
+            _ => {
+                let previous_query = self.composer.text().to_string();
+                let _ = self.composer.handle_key_with_history(key, false);
+                if self.composer.text() != previous_query {
+                    self.reset_message_panel_selection();
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn scroll_messages_to_message(&mut self, message_id: Uuid) {
+        self.message_scroll_target = Some(message_id);
+        self.message_follow_tail = false;
     }
 
     pub(crate) async fn refresh_mcp_tools(&self) -> Result<()> {

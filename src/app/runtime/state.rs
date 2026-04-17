@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use super::at_mention::AtMentionState;
 use super::mcp_panel::McpPanelState;
+use super::message_panel::MessagePanelState;
 use super::model_panel::ModelPanelState;
 use super::mouse_selection::MouseSelectionState;
 use super::permission::{
@@ -128,6 +129,7 @@ pub(crate) struct UiStateSnapshot {
     pub(crate) connect_dialog: Option<ConnectDialog>,
     pub(crate) theme_panel: Option<ThemePanelState>,
     pub(crate) model_panel: Option<ModelPanelState>,
+    pub(crate) message_panel: Option<MessagePanelState>,
     pub(crate) session_panel: Option<SessionPanelState>,
     pub(crate) rename_dialog: Option<RenameSessionDialogState>,
     pub(crate) mcp_panel: Option<McpPanelState>,

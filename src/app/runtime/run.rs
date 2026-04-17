@@ -67,6 +67,7 @@ impl App {
             connect_dialog: None,
             theme_panel: None,
             model_panel: None,
+            message_panel: None,
             session_panel: None,
             rename_dialog: None,
             mcp_panel: None,
@@ -110,6 +111,7 @@ impl App {
             loaded_instruction_sources: Vec::new(),
             expanded_tool_results: std::collections::HashSet::new(),
             tool_result_card_bounds: Vec::new(),
+            message_scroll_target: None,
         };
 
         app.at_mention
@@ -204,6 +206,7 @@ impl App {
             session_panel: self.session_panel.clone(),
             rename_dialog: self.rename_dialog.clone(),
             mcp_panel: self.mcp_panel.clone(),
+            message_panel: self.message_panel.clone(),
             at_mention: self.at_mention.clone(),
             command_palette: self.command_palette.clone(),
             leader_key_pending: self.leader_key_pending,
@@ -220,6 +223,7 @@ impl App {
         self.connect_dialog = snapshot.connect_dialog;
         self.theme_panel = snapshot.theme_panel;
         self.model_panel = snapshot.model_panel;
+        self.message_panel = snapshot.message_panel;
         self.session_panel = snapshot.session_panel;
         self.rename_dialog = snapshot.rename_dialog;
         self.mcp_panel = snapshot.mcp_panel;

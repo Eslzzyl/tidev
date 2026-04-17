@@ -45,6 +45,7 @@ pub use runtime::subagent;
 pub use runtime::undo;
 pub use ui::connect;
 pub use ui::mcp_panel;
+pub use ui::message_panel;
 pub use ui::model_panel;
 pub use ui::permission;
 pub use ui::question;
@@ -56,6 +57,7 @@ use runtime::state::*;
 use crate::{
     app::at_mention::{AtMentionKind, AtMentionState, current_at_fragment},
     app::mcp_panel::McpPanelState,
+    app::message_panel::MessagePanelState,
     app::model_panel::ModelPanelState,
     app::mouse_selection::{ClipboardLease, MouseSelectionState},
     app::permission::{
@@ -166,6 +168,7 @@ struct App {
     connect_dialog: Option<ConnectDialog>,
     theme_panel: Option<ThemePanelState>,
     model_panel: Option<ModelPanelState>,
+    message_panel: Option<MessagePanelState>,
     session_panel: Option<SessionPanelState>,
     rename_dialog: Option<RenameSessionDialogState>,
     mcp_panel: Option<McpPanelState>,
@@ -213,6 +216,7 @@ struct App {
     loaded_instruction_sources: Vec<String>,
     expanded_tool_results: std::collections::HashSet<Uuid>,
     tool_result_card_bounds: Vec<(Uuid, Rect)>,
+    message_scroll_target: Option<Uuid>,
 }
 
 pub fn run() -> Result<()> {
@@ -344,7 +348,9 @@ impl App {
         let assistant_message = Message::streaming(MessageRole::Assistant, "");
         self.conversation.push(assistant_message);
 
-        let messages = self.context_manager.build_request_messages(&self.conversation);
+        let messages = self
+            .context_manager
+            .build_request_messages(&self.conversation);
         let tools = self.tools.available_definitions(self.mode);
         let tx = self.backend_tx.clone();
         let session_id = self.conversation.session_id;

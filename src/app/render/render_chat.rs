@@ -58,7 +58,12 @@ fn render_tool_call_with_result_standalone(
     let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
 
     if matches!(canonical_name, "list" | "grep" | "glob" | "read") {
-        return render_tool_call_summary_line_standalone(tool_call, tool_result, body_width, palette);
+        return render_tool_call_summary_line_standalone(
+            tool_call,
+            tool_result,
+            body_width,
+            palette,
+        );
     }
 
     let mut lines = Vec::new();
@@ -68,8 +73,7 @@ fn render_tool_call_with_result_standalone(
     lines.extend(call_lines);
 
     if let Some(result_msg) = tool_result {
-        let result_lines =
-            render_tool_result_detail_lines_standalone(result_msg, body_width, ctx);
+        let result_lines = render_tool_result_detail_lines_standalone(result_msg, body_width, ctx);
         if !result_lines.is_empty() {
             lines.push(Line::from(""));
             lines.extend(result_lines);
@@ -325,7 +329,11 @@ fn render_output_preview_lines_standalone(
     };
 
     let prefix = if is_error { "!" } else { "↳" };
-    let fg = if is_error { palette.error } else { palette.text };
+    let fg = if is_error {
+        palette.error
+    } else {
+        palette.text
+    };
     let prefix_style = Style::default().fg(if is_error {
         palette.error
     } else {
@@ -338,16 +346,16 @@ fn render_output_preview_lines_standalone(
     for line in output.lines().take(max_lines) {
         if is_expanded {
             let owned_line = Line::from(line.to_string());
-            let wrapped = word_wrap_line(
-                &owned_line,
-                WrapOptions::new(wrap_width).break_words(true),
-            );
+            let wrapped =
+                word_wrap_line(&owned_line, WrapOptions::new(wrap_width).break_words(true));
             for (wrap_idx, wrapped_line) in wrapped.iter().enumerate() {
                 let effective_prefix = if wrap_idx == 0 { prefix } else { " " };
                 let mut spans = vec![Span::styled(format!("{} ", effective_prefix), prefix_style)];
-                spans.extend(wrapped_line.spans.iter().map(|span| {
-                    Span::styled(span.content.to_string(), Style::default().fg(fg))
-                }));
+                spans.extend(
+                    wrapped_line.spans.iter().map(|span| {
+                        Span::styled(span.content.to_string(), Style::default().fg(fg))
+                    }),
+                );
                 lines.push(Line::from(spans));
             }
         } else {
@@ -578,14 +586,14 @@ impl App {
         for card_range in card_ranges {
             let screen_start = card_range.start_line.saturating_sub(scroll);
             let screen_end = card_range.end_line.saturating_sub(scroll);
-            
+
             if screen_end == 0 || screen_start >= self.message_viewport_lines {
                 continue;
             }
-            
+
             let visible_start = screen_start.max(0) as u16;
             let visible_end = (screen_end.min(self.message_viewport_lines)) as u16;
-            
+
             if visible_start < visible_end {
                 let card_rect = Rect {
                     x: content_area.x,
@@ -593,7 +601,8 @@ impl App {
                     width: content_area.width,
                     height: visible_end.saturating_sub(visible_start),
                 };
-                self.tool_result_card_bounds.push((card_range.message_id, card_rect));
+                self.tool_result_card_bounds
+                    .push((card_range.message_id, card_rect));
             }
         }
 
@@ -669,7 +678,10 @@ impl App {
         frame.render_widget(paragraph, area);
     }
 
-    fn messages_text(&self, content_width: Option<usize>) -> (Text<'static>, usize, Vec<ToolResultCardRange>) {
+    fn messages_text(
+        &mut self,
+        content_width: Option<usize>,
+    ) -> (Text<'static>, usize, Vec<ToolResultCardRange>) {
         let started_at = Instant::now();
         let palette = self.palette();
         let width = content_width.unwrap_or(1).max(1);
@@ -730,6 +742,13 @@ impl App {
         if use_virtualization {
             // Update layout index
             self.update_message_layout_index(width, body_width);
+            if let Some(scroll_offset) =
+                self.resolve_message_scroll_target(messages, width, body_width)
+            {
+                self.message_scroll_offset = scroll_offset;
+                self.message_follow_tail = false;
+                self.message_scroll_target = None;
+            }
 
             // Calculate visible range based on scroll position
             let scroll = self.message_scroll_offset;
@@ -780,6 +799,12 @@ impl App {
 
         // Full render (for streaming or small conversations)
         lines.extend(header_lines);
+        if let Some(scroll_offset) = self.resolve_message_scroll_target(messages, width, body_width)
+        {
+            self.message_scroll_offset = scroll_offset;
+            self.message_follow_tail = false;
+            self.message_scroll_target = None;
+        }
 
         // Collect render units for parallel processing, checking cache first
         let mut render_units: Vec<MessageRenderUnit> = Vec::new();
@@ -843,7 +868,10 @@ impl App {
             expanded_tool_results: &self.expanded_tool_results,
         };
 
-        let tool_results_map: std::collections::HashMap<usize, Vec<(Option<Uuid>, Color, Vec<Line<'static>>)>> = render_units
+        let tool_results_map: std::collections::HashMap<
+            usize,
+            Vec<(Option<Uuid>, Color, Vec<Line<'static>>)>,
+        > = render_units
             .par_iter()
             .map(|unit| {
                 let mut tool_cards = Vec::new();
@@ -1502,13 +1530,15 @@ impl App {
 
         if matches!(canonical_name, "write" | "edit") {
             if tool_output_is_error(output) {
-                let error_lines = self.render_output_preview_lines(output, body_width, true, Some(message.id));
+                let error_lines =
+                    self.render_output_preview_lines(output, body_width, true, Some(message.id));
                 lines.extend(error_lines);
                 lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
                 return lines;
             }
 
-            let out_lines = self.render_output_preview_lines(output, body_width, false, Some(message.id));
+            let out_lines =
+                self.render_output_preview_lines(output, body_width, false, Some(message.id));
             lines.extend(out_lines);
             lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
             return lines;
@@ -1516,7 +1546,8 @@ impl App {
 
         if matches!(canonical_name, "read" | "list" | "todowrite") {
             if tool_output_is_error(output) {
-                let error_lines = self.render_output_preview_lines(output, body_width, true, Some(message.id));
+                let error_lines =
+                    self.render_output_preview_lines(output, body_width, true, Some(message.id));
                 lines.extend(error_lines);
                 lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
                 return lines;
@@ -1526,8 +1557,12 @@ impl App {
             return lines;
         }
 
-        let preview_lines =
-            self.render_output_preview_lines(output, body_width, tool_output_is_error(output), Some(message.id));
+        let preview_lines = self.render_output_preview_lines(
+            output,
+            body_width,
+            tool_output_is_error(output),
+            Some(message.id),
+        );
         lines.extend(preview_lines);
         lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
         lines
@@ -1626,7 +1661,7 @@ impl App {
     ) -> Vec<Line<'static>> {
         let palette = self.palette();
         let mut lines = Vec::new();
-        
+
         let is_expanded = message_id.is_some_and(|id| self.expanded_tool_results.contains(&id));
         let max_lines = if is_expanded {
             TOOL_OUTPUT_EXPANDED_MAX_LINES
@@ -1635,7 +1670,7 @@ impl App {
         } else {
             TOOL_OUTPUT_PREVIEW_LINES
         };
-        
+
         let prefix = if is_error { "!" } else { "↳" };
         let fg = if is_error {
             palette.error
@@ -1650,19 +1685,16 @@ impl App {
 
         let total_output_lines = output.lines().count();
         let wrap_width = body_width.saturating_sub(2);
-        
+
         for line in output.lines().take(max_lines) {
             if is_expanded {
                 let owned_line = Line::from(line.to_string());
-                let wrapped = word_wrap_line(
-                    &owned_line,
-                    WrapOptions::new(wrap_width).break_words(true),
-                );
+                let wrapped =
+                    word_wrap_line(&owned_line, WrapOptions::new(wrap_width).break_words(true));
                 for (wrap_idx, wrapped_line) in wrapped.iter().enumerate() {
                     let effective_prefix = if wrap_idx == 0 { prefix } else { " " };
-                    let mut spans = vec![
-                        Span::styled(format!("{} ", effective_prefix), prefix_style),
-                    ];
+                    let mut spans =
+                        vec![Span::styled(format!("{} ", effective_prefix), prefix_style)];
                     spans.extend(wrapped_line.spans.iter().map(|span| {
                         Span::styled(span.content.to_string(), Style::default().fg(fg))
                     }));
@@ -1724,9 +1756,8 @@ impl App {
         let mut index = self.message_layout_index.borrow_mut();
 
         // Check if we need a full rebuild
-        let needs_full_rebuild = !index.valid
-            || index.width != width
-            || index.blocks.is_empty() && !messages.is_empty();
+        let needs_full_rebuild =
+            !index.valid || index.width != width || index.blocks.is_empty() && !messages.is_empty();
 
         if needs_full_rebuild {
             index.blocks.clear();
@@ -1759,6 +1790,31 @@ impl App {
         }
     }
 
+    fn resolve_message_scroll_target(
+        &self,
+        messages: &[Message],
+        width: usize,
+        body_width: usize,
+    ) -> Option<usize> {
+        let message_id = self.message_scroll_target?;
+
+        let mut offset = 0;
+        let mut i = 0;
+
+        while i < messages.len() {
+            if messages[i].id == message_id {
+                return Some(offset);
+            }
+
+            let (_message_id, message_count, line_count) =
+                self.build_message_block_data(messages, i, width, body_width);
+            offset += line_count;
+            i += message_count;
+        }
+
+        None
+    }
+
     /// Builds data for a single message block (without start_line).
     ///
     /// Returns (message_id, message_count, line_count).
@@ -1787,7 +1843,8 @@ impl App {
                 let cards = self.cached_render_message_cards(message, body_width);
                 let mut lines = 0;
                 for (_, card_lines) in &cards {
-                    lines += decorate_card_lines(card_lines.clone(), width, palette.background).len();
+                    lines +=
+                        decorate_card_lines(card_lines.clone(), width, palette.background).len();
                 }
 
                 // Calculate lines for tool calls with results
@@ -1809,7 +1866,8 @@ impl App {
                         let card_lines =
                             self.render_tool_call_with_result(tool_call, tool_result, body_width);
                         if !card_lines.is_empty() {
-                            lines += decorate_card_lines(card_lines, width, palette.panel_light).len();
+                            lines +=
+                                decorate_card_lines(card_lines, width, palette.panel_light).len();
                         }
                     }
                     lines += 1; // Empty line after tool calls
@@ -1821,7 +1879,8 @@ impl App {
                 let cards = self.cached_render_message_cards(message, body_width);
                 let mut lines = 0;
                 for (_, card_lines) in &cards {
-                    lines += decorate_card_lines(card_lines.clone(), width, palette.panel_alt).len();
+                    lines +=
+                        decorate_card_lines(card_lines.clone(), width, palette.panel_alt).len();
                 }
                 lines += 1; // Empty line after user message
                 (1, lines)
@@ -1830,7 +1889,8 @@ impl App {
                 let cards = self.cached_render_message_cards(message, body_width);
                 let mut lines = 0;
                 for (_, card_lines) in &cards {
-                    lines += decorate_card_lines(card_lines.clone(), width, palette.background).len();
+                    lines +=
+                        decorate_card_lines(card_lines.clone(), width, palette.background).len();
                 }
                 (1, lines)
             }
@@ -1838,7 +1898,8 @@ impl App {
                 let cards = self.cached_render_message_cards(message, body_width);
                 let mut lines = 0;
                 for (_, card_lines) in &cards {
-                    lines += decorate_card_lines(card_lines.clone(), width, palette.panel_light).len();
+                    lines +=
+                        decorate_card_lines(card_lines.clone(), width, palette.panel_light).len();
                 }
                 (1, lines)
             }
@@ -1870,9 +1931,9 @@ impl App {
         let visible_end = scroll + viewport_height + 5; // Buffer below
 
         // Binary search for first block that could be visible
-        let first_visible = index.blocks.partition_point(|block| {
-            block.start_line + block.line_count <= visible_start
-        });
+        let first_visible = index
+            .blocks
+            .partition_point(|block| block.start_line + block.line_count <= visible_start);
 
         // Collect all visible blocks
         let mut visible_blocks = Vec::new();

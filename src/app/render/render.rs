@@ -37,6 +37,9 @@ impl App {
         if let Some(panel) = &self.model_panel {
             self.render_model_panel(frame, area, panel);
         }
+        if let Some(panel) = &self.message_panel {
+            self.render_message_panel(frame, area, panel);
+        }
         if let Some(panel) = &self.session_panel {
             self.render_session_panel(frame, area, panel);
             self.render_session_panel_dialog(frame, area, panel);

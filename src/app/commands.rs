@@ -10,6 +10,7 @@ pub enum CommandAction {
     Clear,
     Undo,
     Redo,
+    Message,
     Theme,
     Quit,
     Init,
@@ -255,6 +256,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         description: "Open the session panel",
         usage: "/session [query]",
         action: CommandAction::Session,
+    },
+    CommandSpec {
+        name: "message",
+        aliases: &["msg"],
+        description: "Search current session user messages",
+        usage: "/message [query]",
+        action: CommandAction::Message,
     },
     CommandSpec {
         name: "rename",

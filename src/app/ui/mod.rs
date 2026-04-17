@@ -2,6 +2,7 @@ use super::*;
 
 pub mod connect;
 pub mod mcp_panel;
+pub mod message_panel;
 pub mod model_panel;
 pub mod permission;
 pub mod question;

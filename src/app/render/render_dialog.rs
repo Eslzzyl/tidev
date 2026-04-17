@@ -1,6 +1,7 @@
 use crate::{
     app::mcp_panel::McpPanelState,
     app::mcp_panel::McpServerEditorState,
+    app::message_panel::MessagePanelState,
     app::model_panel::{ModelPanelItem, ModelPanelState},
     app::permission::PermissionDialogState,
     app::question::QuestionDialogState,
@@ -927,6 +928,115 @@ impl App {
 
         frame.render_widget(
             Paragraph::new(help_text)
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(palette.panel).fg(palette.muted)),
+            sections[3],
+        );
+    }
+
+    pub(super) fn render_message_panel(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        panel: &MessagePanelState,
+    ) {
+        let palette = self.palette();
+        let overlay = centered_rect(area.width.min(112), area.height.min(36), area);
+        frame.render_widget(Clear, overlay);
+
+        let title = Block::default()
+            .style(Style::default().bg(palette.panel))
+            .title(" User messages ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.border_active()));
+        frame.render_widget(title, overlay);
+
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+        self.register_selection_region(inner);
+
+        let sections = Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Length(3),
+            Constraint::Min(8),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+        frame.render_widget(
+            Paragraph::new(
+                "Type to filter current session user messages. Enter jumps to the selected message.",
+            )
+            .alignment(Alignment::Center)
+            .style(Style::default().bg(palette.panel).fg(palette.muted)),
+            sections[0],
+        );
+
+        self.render_input_block(
+            frame,
+            sections[1],
+            "Search user messages",
+            self.composer.placeholder(),
+            false,
+        );
+
+        let query = self.composer.text().to_string();
+        let matches = panel.matching_indices(&query);
+
+        if matches.is_empty() {
+            frame.render_widget(
+                Paragraph::new("No user messages match this search.")
+                    .alignment(Alignment::Center)
+                    .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                sections[2],
+            );
+        } else {
+            let mut items: Vec<ListItem> = Vec::new();
+            for index in matches.iter() {
+                let message = &panel.messages[*index];
+                let timestamp = message.created_at.format("%Y-%m-%d %H:%M").to_string();
+                let spans = vec![
+                    Span::styled(
+                        format!("{}", timestamp),
+                        Style::default().fg(palette.accent_soft),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(
+                        shorten(&message.content, 64),
+                        Style::default()
+                            .fg(palette.text)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(
+                        format!("({})", message.message_id.as_simple()),
+                        Style::default().fg(palette.muted),
+                    ),
+                ];
+                items.push(ListItem::new(Line::from(spans)));
+            }
+
+            let mut state = ListState::default();
+            state.select(Some(
+                panel.selected_index.min(matches.len().saturating_sub(1)),
+            ));
+
+            let list = List::new(items)
+                .style(Style::default().bg(palette.panel).fg(palette.text))
+                .highlight_style(
+                    Style::default()
+                        .bg(palette.selection_bg)
+                        .fg(palette.selection_fg)
+                        .add_modifier(Modifier::BOLD),
+                );
+
+            frame.render_stateful_widget(list, sections[2], &mut state);
+        }
+
+        frame.render_widget(
+            Paragraph::new("Enter: jump · Esc: close · Ctrl+P/N: nav")
                 .alignment(Alignment::Center)
                 .style(Style::default().bg(palette.panel).fg(palette.muted)),
             sections[3],
