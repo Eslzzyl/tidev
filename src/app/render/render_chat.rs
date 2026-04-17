@@ -11,6 +11,9 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
+use rayon::prelude::*;
+use std::collections::HashSet;
+use std::path::Path;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
@@ -30,6 +33,359 @@ struct ToolResultCardRange {
     message_id: Uuid,
     start_line: usize,
     end_line: usize,
+}
+
+#[derive(Clone, Debug)]
+struct MessageRenderUnit {
+    message_idx: usize,
+    tool_results: Vec<(ToolCall, Option<Message>)>,
+}
+
+struct RenderContext<'a> {
+    palette: ThemePalette,
+    #[allow(dead_code)]
+    workspace_root: &'a Path,
+    expanded_tool_results: &'a HashSet<Uuid>,
+}
+
+fn render_tool_call_with_result_standalone(
+    tool_call: &ToolCall,
+    tool_result: Option<&Message>,
+    body_width: usize,
+    ctx: &RenderContext<'_>,
+) -> Vec<Line<'static>> {
+    let palette = ctx.palette;
+    let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
+
+    if matches!(canonical_name, "list" | "grep" | "glob" | "read") {
+        return render_tool_call_summary_line_standalone(tool_call, tool_result, body_width, palette);
+    }
+
+    let mut lines = Vec::new();
+    lines.push(Line::from(""));
+
+    let call_lines = render_tool_call_lines_standalone(tool_call, body_width, palette);
+    lines.extend(call_lines);
+
+    if let Some(result_msg) = tool_result {
+        let result_lines =
+            render_tool_result_detail_lines_standalone(result_msg, body_width, ctx);
+        if !result_lines.is_empty() {
+            lines.push(Line::from(""));
+            lines.extend(result_lines);
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines
+}
+
+fn render_tool_call_summary_line_standalone(
+    tool_call: &ToolCall,
+    tool_result: Option<&Message>,
+    body_width: usize,
+    palette: ThemePalette,
+) -> Vec<Line<'static>> {
+    let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
+    let fields = summarize_tool_arguments(&tool_call.name, &tool_call.arguments);
+
+    let get_field = |name: &str| {
+        fields
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
+    };
+
+    let (action_label, target) = match canonical_name {
+        "list" => {
+            let path = get_field("path").unwrap_or(".");
+            ("List", path.to_string())
+        }
+        "grep" => {
+            let pattern = get_field("pattern").unwrap_or("");
+            let path = get_field("path").unwrap_or(".");
+            ("Search", format!("\"{}\" in {}", pattern, path))
+        }
+        "glob" => {
+            let pattern = get_field("pattern").unwrap_or("*");
+            let path = get_field("path").unwrap_or(".");
+            ("Find", format!("{} in {}", pattern, path))
+        }
+        "read" => {
+            let path = get_field("path").unwrap_or("file");
+            ("Read", path.to_string())
+        }
+        _ => {
+            let summary = summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width);
+            return vec![Line::from(vec![Span::styled(
+                summary,
+                Style::default()
+                    .fg(palette.text)
+                    .add_modifier(Modifier::BOLD),
+            )])];
+        }
+    };
+
+    let result_suffix = if let Some(result_msg) = tool_result {
+        let output = result_msg.content.trim();
+        compute_tool_result_suffix_standalone(canonical_name, output)
+    } else {
+        " ...".to_string()
+    };
+
+    let line = Line::from(vec![
+        Span::styled(
+            format!("{} ", action_label),
+            Style::default().fg(palette.accent_soft),
+        ),
+        Span::styled(
+            target.clone(),
+            Style::default()
+                .fg(palette.text)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(result_suffix, Style::default().fg(palette.muted)),
+    ]);
+
+    vec![line]
+}
+
+fn compute_tool_result_suffix_standalone(canonical_name: &str, output: &str) -> String {
+    match canonical_name {
+        "list" => {
+            let count = if output.trim() == "(empty)" {
+                0
+            } else {
+                output
+                    .lines()
+                    .skip(1)
+                    .filter(|line| !line.trim().is_empty())
+                    .count()
+            };
+            format!(" → {} items", count)
+        }
+        "grep" | "glob" => {
+            if tool_output_is_error(output) {
+                let count = if output.is_empty() {
+                    0
+                } else {
+                    output.lines().count()
+                };
+                format!(" → failed ({} lines)", count)
+            } else {
+                let count = if output.is_empty() {
+                    0
+                } else {
+                    output.lines().count()
+                };
+                format!(" → {} matches", count)
+            }
+        }
+        "read" => {
+            if tool_output_is_error(output) {
+                " → error".to_string()
+            } else {
+                let line_range = parse_line_range_from_read_output(output);
+                let truncated = tool_output_is_truncated_standalone(output);
+                match line_range {
+                    Some((start, end)) => {
+                        if truncated {
+                            format!(" → Line {}-{} (truncated)", start, end)
+                        } else {
+                            format!(" → Line {}-{}", start, end)
+                        }
+                    }
+                    None => {
+                        if truncated {
+                            " → (truncated)".to_string()
+                        } else {
+                            " → ok".to_string()
+                        }
+                    }
+                }
+            }
+        }
+        _ => " → ok".to_string(),
+    }
+}
+
+fn tool_output_is_truncated_standalone(output: &str) -> bool {
+    output.contains("... (truncated)")
+}
+
+fn render_tool_call_lines_standalone(
+    tool_call: &ToolCall,
+    body_width: usize,
+    palette: ThemePalette,
+) -> Vec<Line<'static>> {
+    let fields = summarize_tool_arguments(&tool_call.name, &tool_call.arguments);
+
+    let get_field = |name: &str| {
+        fields
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
+    };
+
+    let mut lines = Vec::new();
+
+    let canonical_display = canonical_tool_name(&tool_call.name)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| tool_call.name.clone());
+
+    lines.push(Line::from(vec![
+        Span::styled("Tool: ", Style::default().fg(palette.muted)),
+        Span::styled(
+            canonical_display.clone(),
+            Style::default()
+                .fg(palette.text)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
+
+    let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or("");
+    match canonical_name {
+        "bash" => {
+            let command = get_field("command").unwrap_or("");
+            let desc = get_field("description");
+
+            if let Some(d) = desc {
+                lines.push(Line::from(vec![
+                    Span::styled("  Description: ", Style::default().fg(palette.muted)),
+                    Span::styled(d.to_string(), Style::default().fg(palette.text)),
+                ]));
+            }
+
+            for line in command.lines() {
+                lines.push(Line::from(vec![
+                    Span::styled("  $ ", Style::default().fg(palette.accent)),
+                    Span::styled(
+                        shorten_single_line(line, body_width.saturating_sub(4)),
+                        Style::default().fg(palette.text),
+                    ),
+                ]));
+            }
+        }
+        "write" => {
+            let path = get_field("path").unwrap_or("file");
+            lines.push(Line::from(vec![
+                Span::styled("  Path: ", Style::default().fg(palette.muted)),
+                Span::styled(path.to_string(), Style::default().fg(palette.text)),
+            ]));
+        }
+        _ => {
+            let summary = summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width);
+            for line in summary.lines() {
+                lines.push(Line::from(vec![
+                    Span::styled("  ", Style::default()),
+                    Span::styled(line.to_string(), Style::default().fg(palette.text)),
+                ]));
+            }
+        }
+    }
+
+    lines
+}
+
+fn render_tool_result_detail_lines_standalone(
+    message: &Message,
+    body_width: usize,
+    ctx: &RenderContext<'_>,
+) -> Vec<Line<'static>> {
+    let palette = ctx.palette;
+    let is_error = tool_output_is_error(&message.content);
+
+    render_output_preview_lines_standalone(
+        &message.content,
+        body_width,
+        is_error,
+        Some(message.id),
+        ctx.expanded_tool_results,
+        palette,
+    )
+}
+
+fn render_output_preview_lines_standalone(
+    output: &str,
+    body_width: usize,
+    is_error: bool,
+    message_id: Option<Uuid>,
+    expanded_tool_results: &HashSet<Uuid>,
+    palette: ThemePalette,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+
+    let is_expanded = message_id.is_some_and(|id| expanded_tool_results.contains(&id));
+    let max_lines = if is_expanded {
+        TOOL_OUTPUT_EXPANDED_MAX_LINES
+    } else if is_error {
+        4
+    } else {
+        TOOL_OUTPUT_PREVIEW_LINES
+    };
+
+    let prefix = if is_error { "!" } else { "↳" };
+    let fg = if is_error { palette.error } else { palette.text };
+    let prefix_style = Style::default().fg(if is_error {
+        palette.error
+    } else {
+        palette.accent_soft
+    });
+
+    let total_output_lines = output.lines().count();
+    let wrap_width = body_width.saturating_sub(2);
+
+    for line in output.lines().take(max_lines) {
+        if is_expanded {
+            let owned_line = Line::from(line.to_string());
+            let wrapped = word_wrap_line(
+                &owned_line,
+                WrapOptions::new(wrap_width).break_words(true),
+            );
+            for (wrap_idx, wrapped_line) in wrapped.iter().enumerate() {
+                let effective_prefix = if wrap_idx == 0 { prefix } else { " " };
+                let mut spans = vec![Span::styled(format!("{} ", effective_prefix), prefix_style)];
+                spans.extend(wrapped_line.spans.iter().map(|span| {
+                    Span::styled(span.content.to_string(), Style::default().fg(fg))
+                }));
+                lines.push(Line::from(spans));
+            }
+        } else {
+            lines.push(line_with_prefix(
+                prefix,
+                &shorten_single_line(line, wrap_width),
+                prefix_style,
+                Style::default().fg(fg),
+            ));
+        }
+    }
+
+    if total_output_lines > max_lines {
+        lines.push(line_with_prefix(
+            prefix,
+            &format!("... {} more line(s)", total_output_lines - max_lines),
+            Style::default().fg(palette.muted),
+            Style::default().fg(palette.muted),
+        ));
+    } else if total_output_lines > TOOL_OUTPUT_PREVIEW_LINES && message_id.is_some() {
+        let hint = if is_expanded {
+            "▲ Click to collapse"
+        } else {
+            "▼ Click to expand"
+        };
+        lines.push(line_with_prefix(
+            prefix,
+            hint,
+            Style::default().fg(palette.muted),
+            Style::default().fg(palette.muted),
+        ));
+    }
+
+    if lines.is_empty() {
+        lines.push(line_with_style("(no output)", palette.muted));
+    }
+
+    lines
 }
 
 impl App {
@@ -425,20 +781,21 @@ impl App {
         // Full render (for streaming or small conversations)
         lines.extend(header_lines);
 
+        // Collect render units for parallel processing, checking cache first
+        let mut render_units: Vec<MessageRenderUnit> = Vec::new();
+        let mut cached_results: std::collections::HashMap<usize, Vec<(Color, Vec<Line<'static>>)>> =
+            std::collections::HashMap::new();
         let mut i = 0;
         while i < messages.len() {
             let message = &messages[i];
 
             if matches!(message.role, MessageRole::Assistant) {
-                let assistant_cards = self.cached_render_message_cards(message, body_width);
+                // Check cache for assistant message cards
+                let cached_cards = self.cached_render_message_cards(message, body_width);
+                cached_results.insert(i, cached_cards);
 
-                for (card_bg, card_lines) in assistant_cards {
-                    if card_lines.is_empty() {
-                        continue;
-                    }
-                    lines.extend(decorate_card_lines(card_lines, width, card_bg));
-                }
-
+                // Collect tool results for rendering
+                let mut tool_results = Vec::new();
                 let tool_results_by_id: std::collections::HashMap<String, &Message> = {
                     let mut map = std::collections::HashMap::new();
                     let mut j = i + 1;
@@ -451,28 +808,16 @@ impl App {
                     map
                 };
 
-                if !message.tool_calls.is_empty() {
-                    for tool_call in &message.tool_calls {
-                        let tool_result = tool_results_by_id.get(&tool_call.id).copied();
-                        let card_lines =
-                            self.render_tool_call_with_result(tool_call, tool_result, body_width);
-                        if !card_lines.is_empty() {
-                            let decorated = decorate_card_lines(card_lines, width, palette.panel_light);
-                            if let Some(result_msg) = tool_result {
-                                let start_line = lines.len();
-                                lines.extend(decorated);
-                                let end_line = lines.len();
-                                card_ranges.push(ToolResultCardRange {
-                                    message_id: result_msg.id,
-                                    start_line,
-                                    end_line,
-                                });
-                            } else {
-                                lines.extend(decorated);
-                            }
-                        }
-                    }
-                    lines.push(Line::from(""));
+                for tool_call in &message.tool_calls {
+                    let tool_result = tool_results_by_id.get(&tool_call.id).copied();
+                    tool_results.push((tool_call.clone(), tool_result.cloned()));
+                }
+
+                if !tool_results.is_empty() {
+                    render_units.push(MessageRenderUnit {
+                        message_idx: i,
+                        tool_results,
+                    });
                 }
 
                 let next_i = i + 1 + tool_results_by_id.len();
@@ -485,13 +830,106 @@ impl App {
                 continue;
             }
 
-            for (card_bg, card_lines) in self.cached_render_message_cards(message, body_width) {
-                if card_lines.is_empty() {
-                    continue;
+            // Check cache for non-Assistant messages
+            let cached_cards = self.cached_render_message_cards(message, body_width);
+            cached_results.insert(i, cached_cards);
+            i += 1;
+        }
+
+        // Parallel render tool calls with rayon (only for units with tool results)
+        let ctx = RenderContext {
+            palette,
+            workspace_root: self.workspace_root.as_path(),
+            expanded_tool_results: &self.expanded_tool_results,
+        };
+
+        let tool_results_map: std::collections::HashMap<usize, Vec<(Option<Uuid>, Color, Vec<Line<'static>>)>> = render_units
+            .par_iter()
+            .map(|unit| {
+                let mut tool_cards = Vec::new();
+                for (tool_call, tool_result) in &unit.tool_results {
+                    let card_lines = render_tool_call_with_result_standalone(
+                        tool_call,
+                        tool_result.as_ref(),
+                        body_width,
+                        &ctx,
+                    );
+                    if !card_lines.is_empty() {
+                        let tool_result_id = tool_result.as_ref().map(|m| m.id);
+                        tool_cards.push((tool_result_id, palette.panel_light, card_lines));
+                    }
+                }
+                (unit.message_idx, tool_cards)
+            })
+            .collect();
+
+        // Merge results in order (using original loop order for consistency)
+        let mut i = 0;
+        while i < messages.len() {
+            let message = &messages[i];
+
+            if matches!(message.role, MessageRole::Assistant) {
+                // Use cached cards
+                if let Some(cards) = cached_results.get(&i) {
+                    for (card_bg, card_lines) in cards {
+                        if card_lines.is_empty() {
+                            continue;
+                        }
+                        lines.extend(decorate_card_lines(card_lines.clone(), width, *card_bg));
+                    }
                 }
 
-                lines.extend(decorate_card_lines(card_lines, width, card_bg));
-                lines.push(Line::from(""));
+                // Add tool call results
+                if let Some(tool_cards) = tool_results_map.get(&i) {
+                    for (tool_result_id, card_bg, card_lines) in tool_cards {
+                        if card_lines.is_empty() {
+                            continue;
+                        }
+                        let decorated = decorate_card_lines(card_lines.clone(), width, *card_bg);
+                        if let Some(msg_id) = tool_result_id {
+                            let start_line = lines.len();
+                            lines.extend(decorated);
+                            let end_line = lines.len();
+                            card_ranges.push(ToolResultCardRange {
+                                message_id: *msg_id,
+                                start_line,
+                                end_line,
+                            });
+                        } else {
+                            lines.extend(decorated);
+                        }
+                    }
+                    lines.push(Line::from(""));
+                }
+
+                // Skip tool result messages
+                let tool_results_count = {
+                    let mut count = 0;
+                    let mut j = i + 1;
+                    while j < messages.len() && matches!(messages[j].role, MessageRole::Tool) {
+                        count += 1;
+                        j += 1;
+                    }
+                    count
+                };
+                i += 1 + tool_results_count;
+                continue;
+            }
+
+            if matches!(message.role, MessageRole::Tool) {
+                i += 1;
+                continue;
+            }
+
+            // Use cached cards for non-Assistant messages
+            if let Some(cards) = cached_results.get(&i) {
+                for (card_bg, card_lines) in cards {
+                    if card_lines.is_empty() {
+                        continue;
+                    }
+                    lines.extend(decorate_card_lines(card_lines.clone(), width, *card_bg));
+                    lines.push(Line::from(""));
+                }
             }
             i += 1;
         }
