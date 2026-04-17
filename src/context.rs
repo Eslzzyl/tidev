@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::Result;
 
 use crate::{
@@ -87,6 +89,7 @@ impl ContextManager {
 
     pub fn build_request_messages(&self, conversation: &Conversation) -> Vec<Message> {
         let mut messages = Vec::new();
+        let mut pending_tool_calls = HashSet::new();
 
         if let Some(summary) = &self.summary {
             messages.push(Message::new(
@@ -95,20 +98,41 @@ impl ContextManager {
             ));
         }
 
-        messages.extend(
-            conversation
-                .visible_messages()
-                .iter()
-                .skip(self.retained_from)
-                .filter(|message| !message.streaming)
-                .filter(|message| {
-                    matches!(
-                        message.role,
-                        MessageRole::User | MessageRole::Assistant | MessageRole::Tool
-                    )
-                })
-                .cloned(),
-        );
+        for message in conversation
+            .visible_messages()
+            .iter()
+            .skip(self.retained_from)
+        {
+            if message.streaming {
+                continue;
+            }
+
+            match message.role {
+                MessageRole::System => {}
+                MessageRole::User => {
+                    pending_tool_calls.clear();
+                    messages.push(message.clone());
+                }
+                MessageRole::Assistant => {
+                    pending_tool_calls = message
+                        .tool_calls
+                        .iter()
+                        .map(|tool_call| tool_call.id.clone())
+                        .collect();
+                    messages.push(message.clone());
+                }
+                MessageRole::Tool => {
+                    let Some(tool_call_id) = message.tool_call_id.as_ref() else {
+                        continue;
+                    };
+
+                    if pending_tool_calls.remove(tool_call_id) {
+                        messages.push(message.clone());
+                    }
+                }
+                MessageRole::Error => {}
+            }
+        }
 
         messages
     }
@@ -166,7 +190,28 @@ impl ContextManager {
             keep_from = index;
         }
 
-        keep_from
+        self.align_split_index_to_tool_boundary(messages, keep_from)
+    }
+
+    fn align_split_index_to_tool_boundary(
+        &self,
+        messages: &[Message],
+        split_index: usize,
+    ) -> usize {
+        if split_index == 0 || split_index >= messages.len() {
+            return split_index;
+        }
+
+        if !matches!(messages[split_index].role, MessageRole::Tool) {
+            return split_index;
+        }
+
+        let mut aligned_index = split_index;
+        while aligned_index > 0 && matches!(messages[aligned_index].role, MessageRole::Tool) {
+            aligned_index -= 1;
+        }
+
+        aligned_index
     }
 
     fn build_compression_prompt(&self, messages: &[Message]) -> String {
@@ -263,4 +308,97 @@ fn truncate(value: &str, max_chars: usize) -> String {
     let mut shortened = value.chars().take(max_chars).collect::<String>();
     shortened.push_str("...");
     shortened
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::session::{Message, ToolCall, ToolExecutionResult};
+
+    fn message_with_tokens(role: MessageRole, content: &str, total_tokens: u32) -> Message {
+        let mut message = Message::new(role, content);
+        message.total_tokens = Some(total_tokens);
+        message
+    }
+
+    fn test_conversation(messages: Vec<Message>) -> Conversation {
+        Conversation {
+            session_id: Uuid::new_v4(),
+            parent_session_id: None,
+            workspace_root: String::new(),
+            provider_id: "provider".to_string(),
+            provider_display_name: "Provider".to_string(),
+            model_id: "model".to_string(),
+            model_display_name: "Model".to_string(),
+            title: "Test".to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            messages,
+            revert_message_id: None,
+        }
+    }
+
+    #[test]
+    fn choose_split_index_keeps_tool_block_together() {
+        let mut manager = ContextManager::new();
+        manager.retain_recent_tokens = 2;
+
+        let mut assistant = message_with_tokens(MessageRole::Assistant, "call tools", 1);
+        assistant.tool_calls = vec![ToolCall {
+            id: "tool-call-1".to_string(),
+            name: "grep".to_string(),
+            arguments: "{}".to_string(),
+        }];
+
+        let messages = vec![
+            message_with_tokens(MessageRole::User, "first", 1),
+            assistant,
+            message_with_tokens(MessageRole::Tool, "result", 1),
+            message_with_tokens(MessageRole::Assistant, "follow up", 1),
+        ];
+
+        assert_eq!(manager.choose_split_index(&messages), 1);
+    }
+
+    #[test]
+    fn build_request_messages_keeps_valid_tool_results_and_skips_orphans() {
+        let mut assistant = Message::new(MessageRole::Assistant, "call tools");
+        assistant.tool_calls = vec![ToolCall {
+            id: "tool-call-1".to_string(),
+            name: "grep".to_string(),
+            arguments: "{}".to_string(),
+        }];
+
+        let valid_conversation = test_conversation(vec![
+            Message::new(MessageRole::User, "question"),
+            assistant.clone(),
+            Message::tool_result("tool-call-1", "grep", ToolExecutionResult::new("found")),
+            Message::new(MessageRole::Assistant, "answer"),
+        ]);
+
+        let manager = ContextManager::new();
+        let valid_request_messages = manager.build_request_messages(&valid_conversation);
+        let valid_roles: Vec<_> = valid_request_messages
+            .iter()
+            .map(|message| message.role.label())
+            .collect();
+        assert_eq!(valid_roles, vec!["user", "assistant", "tool", "assistant"]);
+
+        let mut orphan_manager = ContextManager::new();
+        orphan_manager.retained_from = 2;
+        let orphan_request_messages = orphan_manager.build_request_messages(&valid_conversation);
+        let orphan_roles: Vec<_> = orphan_request_messages
+            .iter()
+            .map(|message| message.role.label())
+            .collect();
+        assert_eq!(orphan_roles, vec!["assistant"]);
+        assert!(
+            orphan_request_messages
+                .iter()
+                .all(|message| !matches!(message.role, MessageRole::Tool))
+        );
+    }
 }
