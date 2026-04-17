@@ -411,10 +411,15 @@ impl App {
             Self::resolve_conversation_model(&self.config, &self.auth, &conversation)
                 .unwrap_or_else(|_| fallback_model.clone());
 
+        let context_manager = ContextManager::from_state(
+            conversation.context_summary.clone(),
+            conversation.context_retained_from,
+        );
+
         let mut runtime = CachedSessionRuntime {
             conversation,
             active_model,
-            context_manager: ContextManager::new(),
+            context_manager,
             pending_tool_execution: None,
             permission_dialog: None,
             question_dialog: None,
@@ -516,8 +521,17 @@ impl App {
 
         if self.conversation.session_id == session_id {
             if compacted {
-                self.context_manager.summary = summary;
+                self.context_manager.summary = summary.clone();
                 self.context_manager.retained_from = retained_from;
+                self.conversation
+                    .set_context_state(summary.clone(), retained_from);
+                if let Err(error) = self.store.update_session_context_state(
+                    session_id,
+                    summary.as_deref(),
+                    retained_from,
+                ) {
+                    crate::log_warn!("failed to persist compacted context state: {}", error);
+                }
                 self.last_notice = Some("Context compacted".to_string());
             } else if let Some(error) = error {
                 self.last_notice = Some(error);
@@ -528,8 +542,18 @@ impl App {
         if let Some(cached) = self.cached_sessions.get_mut(&session_id)
             && compacted
         {
-            cached.context_manager.summary = summary;
+            cached.context_manager.summary = summary.clone();
             cached.context_manager.retained_from = retained_from;
+            cached
+                .conversation
+                .set_context_state(summary.clone(), retained_from);
+            if let Err(error) = self.store.update_session_context_state(
+                session_id,
+                summary.as_deref(),
+                retained_from,
+            ) {
+                crate::log_warn!("failed to persist compacted context state: {}", error);
+            }
         }
     }
 

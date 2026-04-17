@@ -6,7 +6,7 @@ use crate::{
     config::ActiveModel,
     llm::LlmClient,
     prompts::compression_system_prompt,
-    session::{Conversation, Message, MessageAttachment, MessageRole},
+    session::{Conversation, Message, MessageAttachment, MessageRole, tool_output_preview},
 };
 
 #[derive(Clone, Debug)]
@@ -33,6 +33,13 @@ impl ContextManager {
             retain_recent_tokens: 12_000,
             maximum_summary_chars: 8_000,
         }
+    }
+
+    pub fn from_state(summary: Option<String>, retained_from: usize) -> Self {
+        let mut manager = Self::new();
+        manager.summary = summary;
+        manager.retained_from = retained_from;
+        manager
     }
 
     pub fn estimate_tokens_for_text(text: &str) -> usize {
@@ -82,9 +89,29 @@ impl ContextManager {
         messages.iter().map(Self::message_tokens).sum()
     }
 
-    pub fn needs_compaction(&self, conversation: &Conversation) -> bool {
-        Self::estimate_tokens_for_messages(conversation.visible_messages())
-            > self.prune_threshold_tokens
+    fn compaction_budget_for_model(&self, model: &ActiveModel) -> (usize, usize) {
+        if model.context_window == 0 {
+            return (self.prune_threshold_tokens, self.retain_recent_tokens);
+        }
+
+        let context_window = model.context_window;
+        let reserved_tokens = model
+            .max_output_tokens
+            .max(context_window / 8)
+            .max(4_000)
+            .min(context_window.saturating_sub(1));
+        let trigger_tokens = context_window.saturating_sub(reserved_tokens).max(1);
+        let retain_recent_tokens = self
+            .retain_recent_tokens
+            .max(reserved_tokens)
+            .min(trigger_tokens);
+
+        (trigger_tokens, retain_recent_tokens)
+    }
+
+    pub fn needs_compaction(&self, conversation: &Conversation, model: &ActiveModel) -> bool {
+        let (trigger_tokens, _) = self.compaction_budget_for_model(model);
+        Self::estimate_tokens_for_messages(conversation.visible_messages()) >= trigger_tokens
     }
 
     pub fn build_request_messages(&self, conversation: &Conversation) -> Vec<Message> {
@@ -144,11 +171,12 @@ impl ContextManager {
         conversation: &Conversation,
     ) -> Result<bool> {
         let messages = conversation.visible_messages();
-        if !self.needs_compaction(conversation) || messages.is_empty() {
+        if !self.needs_compaction(conversation, model) || messages.is_empty() {
             return Ok(false);
         }
 
-        let split_index = self.choose_split_index(messages);
+        let (_, retain_recent_tokens) = self.compaction_budget_for_model(model);
+        let split_index = self.choose_split_index(messages, retain_recent_tokens);
         if split_index == 0 || split_index >= messages.len() {
             return Ok(false);
         }
@@ -175,8 +203,8 @@ impl ContextManager {
         self.retained_from
     }
 
-    fn choose_split_index(&self, messages: &[Message]) -> usize {
-        let mut token_budget = self.retain_recent_tokens;
+    fn choose_split_index(&self, messages: &[Message], retain_recent_tokens: usize) -> usize {
+        let mut token_budget = retain_recent_tokens;
         let mut keep_from = messages.len();
 
         for (index, message) in messages.iter().enumerate().rev() {
@@ -233,11 +261,12 @@ impl ContextManager {
                 .map(|attachment| attachment.summary())
                 .collect::<Vec<_>>()
                 .join(" ");
-            prompt.push_str(&format!(
-                "- {}: {}\n",
-                message.role.label(),
-                message.content
-            ));
+            let content = if matches!(message.role, MessageRole::Tool) {
+                tool_output_preview(message.tool_name.as_deref(), &message.content)
+            } else {
+                truncate(&message.content, 1_500)
+            };
+            prompt.push_str(&format!("- {}: {}\n", message.role.label(), content));
 
             if !attachment_summary.trim().is_empty() {
                 prompt.push_str(&format!(
@@ -316,6 +345,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+    use crate::config::{ActiveModel, ApiType};
     use crate::session::{Message, ToolCall, ToolExecutionResult};
 
     fn message_with_tokens(role: MessageRole, content: &str, total_tokens: u32) -> Message {
@@ -336,15 +366,36 @@ mod tests {
             title: "Test".to_string(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            context_summary: None,
+            context_retained_from: 0,
             messages,
             revert_message_id: None,
         }
     }
 
+    fn test_model(context_window: usize, max_output_tokens: usize) -> ActiveModel {
+        ActiveModel {
+            provider_id: "provider".to_string(),
+            provider_display_name: "Provider".to_string(),
+            base_url: "https://example.com".to_string(),
+            api_type: ApiType::OpenAi,
+            model_id: "model".to_string(),
+            request_model_id: "model".to_string(),
+            display_name: "Model".to_string(),
+            context_window,
+            max_output_tokens,
+            temperature: 0.0,
+            supports_images: false,
+            system_prompt: String::new(),
+            api_key: None,
+            extra_body: None,
+        }
+    }
+
     #[test]
     fn choose_split_index_keeps_tool_block_together() {
-        let mut manager = ContextManager::new();
-        manager.retain_recent_tokens = 2;
+        let manager = ContextManager::new();
+        let retain_recent_tokens = 2;
 
         let mut assistant = message_with_tokens(MessageRole::Assistant, "call tools", 1);
         assistant.tool_calls = vec![ToolCall {
@@ -360,7 +411,22 @@ mod tests {
             message_with_tokens(MessageRole::Assistant, "follow up", 1),
         ];
 
-        assert_eq!(manager.choose_split_index(&messages), 1);
+        assert_eq!(
+            manager.choose_split_index(&messages, retain_recent_tokens),
+            1
+        );
+        assert_eq!(manager.retain_recent_tokens, 12_000);
+    }
+
+    #[test]
+    fn compaction_budget_scales_with_model_window() {
+        let manager = ContextManager::new();
+        let model = test_model(128_000, 32_768);
+
+        let (trigger_tokens, retain_recent_tokens) = manager.compaction_budget_for_model(&model);
+
+        assert_eq!(trigger_tokens, 95_232);
+        assert_eq!(retain_recent_tokens, 32_768);
     }
 
     #[test]

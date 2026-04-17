@@ -62,6 +62,21 @@ impl MessageAttachment {
     }
 }
 
+pub fn tool_output_preview(tool_name: Option<&str>, output: &str) -> String {
+    let output_char_count = output.chars().count();
+    if output_char_count <= 8_000 {
+        return output.to_string();
+    }
+
+    let tool_name = tool_name.unwrap_or("tool");
+    let head = truncate_preview(output, 3_000);
+    let tail = tail_preview(output, 1_000);
+
+    format!(
+        "[{tool_name} output truncated: {output_char_count} chars]\n\nFirst excerpt:\n{head}\n\nLast excerpt:\n{tail}"
+    )
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolExecutionResult {
     pub output: String,
@@ -87,6 +102,19 @@ fn truncate_preview(value: &str, max_chars: usize) -> String {
     let mut shortened = value.chars().take(max_chars).collect::<String>();
     shortened.push_str("...");
     shortened
+}
+
+fn tail_preview(value: &str, max_chars: usize) -> String {
+    let count = value.chars().count();
+    if count <= max_chars {
+        return value.to_string();
+    }
+
+    let mut shortened = value.chars().rev().take(max_chars).collect::<String>();
+    shortened = shortened.chars().rev().collect();
+    let mut preview = String::from("...");
+    preview.push_str(&shortened);
+    preview
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -278,6 +306,8 @@ pub struct Conversation {
     pub title: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub context_summary: Option<String>,
+    pub context_retained_from: usize,
     pub messages: Vec<Message>,
     pub revert_message_id: Option<Uuid>,
 }
@@ -304,9 +334,20 @@ impl Conversation {
             title: title.into(),
             created_at: now,
             updated_at: now,
+            context_summary: None,
+            context_retained_from: 0,
             messages: Vec::new(),
             revert_message_id: None,
         }
+    }
+
+    pub fn set_context_state(&mut self, summary: Option<String>, retained_from: usize) {
+        self.context_summary = summary;
+        self.context_retained_from = retained_from;
+    }
+
+    pub fn clear_context_state(&mut self) {
+        self.set_context_state(None, 0);
     }
 
     pub fn set_model(
@@ -337,6 +378,7 @@ impl Conversation {
     pub fn clear_messages(&mut self) {
         self.messages.clear();
         self.revert_message_id = None;
+        self.clear_context_state();
         self.updated_at = Utc::now();
     }
 
@@ -559,6 +601,18 @@ mod tests {
         );
         assert_eq!(conversation.visible_messages()[0].id, first_user.id);
         assert_eq!(conversation.visible_messages()[1].content, "first answer");
+    }
+
+    #[test]
+    fn tool_output_preview_truncates_large_outputs() {
+        let output = "abcdef\n".repeat(2_000);
+
+        let preview = tool_output_preview(Some("grep"), &output);
+
+        assert!(preview.contains("grep output truncated"));
+        assert!(preview.contains("First excerpt"));
+        assert!(preview.contains("Last excerpt"));
+        assert!(preview.len() < output.len());
     }
 
     #[test]

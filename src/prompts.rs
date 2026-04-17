@@ -62,5 +62,5 @@ pub fn build_mode_reminder() -> &'static str {
 }
 
 pub fn compression_system_prompt() -> &'static str {
-    "You summarize coding context for continuation.\n- Preserve file paths, decisions, constraints, and open tasks.\n- Keep the summary dense and factual.\n- Do not add filler, encouragement, or apologies.\n- Prefer bullets over prose."
+    "You summarize coding context for continuation.\n- Preserve the goal, decisions, file paths, constraints, tool results, and open tasks.\n- Use short sections such as Goal, Decisions, Files, Tool Results, Open Tasks, and Constraints.\n- Keep the summary dense and factual.\n- Do not add filler, encouragement, or apologies.\n- Prefer bullets over prose."
 }

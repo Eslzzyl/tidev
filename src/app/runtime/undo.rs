@@ -217,6 +217,7 @@ impl App {
         crate::log_info!("revert_to_message: setting revert_message_id and updating UI");
         self.command_palette.clear();
         self.context_manager = ContextManager::new();
+        self.conversation.clear_context_state();
         self.set_revert_message_id(
             Some(message_id),
             if redo_snapshot.is_empty() {
@@ -254,6 +255,7 @@ impl App {
 
         self.clear_revert_state()?;
         self.context_manager = ContextManager::new();
+    self.conversation.clear_context_state();
         self.composer.clear();
         self.screen = Screen::Chat;
         self.scroll_messages_to_bottom();
@@ -318,6 +320,7 @@ impl App {
         let _ = self.conversation.take_hidden_messages();
         self.clear_revert_state()?;
         self.context_manager = ContextManager::new();
+        self.conversation.clear_context_state();
         Ok(())
     }
 

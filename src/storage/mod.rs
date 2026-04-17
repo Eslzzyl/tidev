@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use rusqlite::{params, params_from_iter, types::Type, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::Type};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -13,7 +13,8 @@ use crate::{
     tooling::TodoItem,
 };
 
-const SCHEMA_VERSION: i64 = 9;
+const SCHEMA_VERSION: i64 = 10;
+const SESSION_SELECT_COLUMNS: &str = "s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, s.context_summary, s.context_retained_from, COALESCE(sw.workspace_root, '')";
 
 pub struct SessionStore {
     connection: Connection,
@@ -32,6 +33,8 @@ pub struct SessionRecord {
     pub title: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub context_summary: Option<String>,
+    pub context_retained_from: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -85,7 +88,7 @@ impl SessionStore {
         let workspace_root = workspace_root.display().to_string();
 
         self.connection.execute(
-            "INSERT INTO sessions (id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO sessions (id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at, context_summary, context_retained_from) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 session_id_text.clone(),
                 provider_id,
@@ -95,6 +98,8 @@ impl SessionStore {
                 title,
                 now_text,
                 now_text,
+                "",
+                0_i64,
             ],
         )?;
 
@@ -114,6 +119,8 @@ impl SessionStore {
             title: title.to_string(),
             created_at: now,
             updated_at: now,
+            context_summary: None,
+            context_retained_from: 0,
         })
     }
 
@@ -136,7 +143,7 @@ impl SessionStore {
         let workspace_root = workspace_root.display().to_string();
 
         self.connection.execute(
-            "INSERT INTO sessions (id, parent_session_id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO sessions (id, parent_session_id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at, context_summary, context_retained_from) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 session_id_text.clone(),
                 parent_session_id_text,
@@ -147,6 +154,8 @@ impl SessionStore {
                 title,
                 now_text,
                 now_text,
+                "",
+                0_i64,
             ],
         )?;
 
@@ -166,7 +175,28 @@ impl SessionStore {
             title: title.to_string(),
             created_at: now,
             updated_at: now,
+            context_summary: None,
+            context_retained_from: 0,
         })
+    }
+
+    pub fn update_session_context_state(
+        &self,
+        session_id: Uuid,
+        summary: Option<&str>,
+        retained_from: usize,
+    ) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.connection.execute(
+            "UPDATE sessions SET context_summary = ?1, context_retained_from = ?2, updated_at = ?3 WHERE id = ?4",
+            params![
+                summary.unwrap_or(""),
+                retained_from as i64,
+                now,
+                session_id.to_string(),
+            ],
+        )?;
+        Ok(())
     }
 
     pub fn update_session_title(&self, session_id: Uuid, title: &str) -> Result<()> {
@@ -404,9 +434,10 @@ impl SessionStore {
     }
 
     pub fn load_latest_session(&self) -> Result<Option<SessionRecord>> {
-        let mut statement = self.connection.prepare(
-              "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, COALESCE(sw.workspace_root, '') FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.parent_session_id IS NULL ORDER BY s.updated_at DESC LIMIT 1",
-        )?;
+        let sql = format!(
+            "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.parent_session_id IS NULL ORDER BY s.updated_at DESC LIMIT 1"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
 
         let record = statement.query_row([], Self::session_from_row).optional()?;
 
@@ -433,6 +464,8 @@ impl SessionStore {
             title: record.title,
             created_at: record.created_at,
             updated_at: record.updated_at,
+            context_summary: record.context_summary,
+            context_retained_from: record.context_retained_from,
             messages,
             revert_message_id,
         }))
@@ -538,9 +571,10 @@ impl SessionStore {
     }
 
     pub fn load_session_record(&self, session_id: Uuid) -> Result<Option<SessionRecord>> {
-        let mut statement = self.connection.prepare(
-              "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, COALESCE(sw.workspace_root, '') FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.id = ?1 LIMIT 1",
-        )?;
+        let sql = format!(
+            "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.id = ?1 LIMIT 1"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
 
         let record = statement
             .query_row(params![session_id.to_string()], |row| {
@@ -610,9 +644,10 @@ impl SessionStore {
 
     pub fn load_sessions_for_workspace(&self, workspace_root: &Path) -> Result<Vec<SessionRecord>> {
         let workspace_root = workspace_root.display().to_string();
-        let mut statement = self.connection.prepare(
-              "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE sw.workspace_root = ?1 AND s.parent_session_id IS NULL ORDER BY s.updated_at DESC, s.created_at DESC",
-        )?;
+        let sql = format!(
+            "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE sw.workspace_root = ?1 AND s.parent_session_id IS NULL ORDER BY s.updated_at DESC, s.created_at DESC"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
 
         let rows = statement.query_map(params![workspace_root], Self::session_from_row)?;
 
@@ -625,9 +660,10 @@ impl SessionStore {
     }
 
     pub fn load_child_sessions(&self, parent_session_id: Uuid) -> Result<Vec<SessionRecord>> {
-        let mut statement = self.connection.prepare(
-                "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, COALESCE(sw.workspace_root, '') FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.parent_session_id = ?1 ORDER BY s.updated_at DESC, s.created_at DESC",
-            )?;
+        let sql = format!(
+            "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.parent_session_id = ?1 ORDER BY s.updated_at DESC, s.created_at DESC"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
 
         let rows = statement.query_map(
             params![parent_session_id.to_string()],
@@ -643,9 +679,10 @@ impl SessionStore {
     }
 
     pub fn load_all_sessions(&self) -> Result<Vec<SessionRecord>> {
-        let mut statement = self.connection.prepare(
-            "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.parent_session_id IS NULL ORDER BY s.updated_at DESC, s.created_at DESC",
-        )?;
+        let sql = format!(
+            "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.parent_session_id IS NULL ORDER BY s.updated_at DESC, s.created_at DESC"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
 
         let rows = statement.query_map([], Self::session_from_row)?;
 
@@ -698,9 +735,10 @@ impl SessionStore {
         let cutoff = Utc::now() - duration;
         let cutoff_text = cutoff.to_rfc3339();
 
-        let mut statement = self.connection.prepare(
-            "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.updated_at < ?1 AND s.parent_session_id IS NULL ORDER BY s.updated_at DESC",
-        )?;
+        let sql = format!(
+            "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.updated_at < ?1 AND s.parent_session_id IS NULL ORDER BY s.updated_at DESC"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
 
         let rows = statement.query_map(params![cutoff_text], Self::session_from_row)?;
 
@@ -721,9 +759,10 @@ impl SessionStore {
     ) -> Result<Vec<SessionRecord>> {
         let workspace_root = workspace_root.display().to_string();
 
-        let mut statement = self.connection.prepare(
-            "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE sw.workspace_root = ?1 AND s.parent_session_id IS NULL ORDER BY s.updated_at DESC",
-        )?;
+        let sql = format!(
+            "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE sw.workspace_root = ?1 AND s.parent_session_id IS NULL ORDER BY s.updated_at DESC"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
 
         let rows = statement.query_map(params![workspace_root], Self::session_from_row)?;
 
@@ -765,9 +804,10 @@ impl SessionStore {
         let cutoff = Utc::now() - duration;
         let cutoff_text = cutoff.to_rfc3339();
 
-        let mut statement = self.connection.prepare(
-            "SELECT s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, sw.workspace_root FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.updated_at < ?1 AND s.parent_session_id IS NULL ORDER BY sw.workspace_root, s.updated_at DESC",
-        )?;
+        let sql = format!(
+            "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.updated_at < ?1 AND s.parent_session_id IS NULL ORDER BY sw.workspace_root, s.updated_at DESC"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
 
         let rows = statement.query_map(params![cutoff_text], Self::session_from_row)?;
 
@@ -808,7 +848,9 @@ impl SessionStore {
         let title = row.get::<_, String>(6)?;
         let created_at = row.get::<_, String>(7)?;
         let updated_at = row.get::<_, String>(8)?;
-        let workspace_root = row.get::<_, String>(9)?;
+        let context_summary = row.get::<_, String>(9)?;
+        let context_retained_from = row.get::<_, i64>(10)? as usize;
+        let workspace_root = row.get::<_, String>(11)?;
 
         let parent_session_id = parent_session_id
             .map(|value| {
@@ -835,6 +877,12 @@ impl SessionStore {
             updated_at: parse_datetime(&updated_at).map_err(|error| {
                 rusqlite::Error::FromSqlConversionFailure(8, Type::Text, Box::new(error))
             })?,
+            context_summary: if context_summary.trim().is_empty() {
+                None
+            } else {
+                Some(context_summary)
+            },
+            context_retained_from,
         })
     }
 }
@@ -866,7 +914,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     model_display_name TEXT NOT NULL,
     title TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    context_summary TEXT NOT NULL DEFAULT '',
+    context_retained_from INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS session_workspaces (
@@ -971,6 +1021,8 @@ mod tests {
             assert_eq!(record.model_id, "deepseek-chat");
             assert_eq!(record.model_display_name, "DeepSeek Chat");
             assert_eq!(record.workspace_root, "/tmp/workspace");
+            assert_eq!(record.context_summary, None);
+            assert_eq!(record.context_retained_from, 0);
 
             let loaded = store
                 .load_session_record(session_id)
@@ -980,6 +1032,8 @@ mod tests {
             assert_eq!(loaded.provider_display_name, "DeepSeek");
             assert_eq!(loaded.model_display_name, "DeepSeek Chat");
             assert_eq!(loaded.workspace_root, "/tmp/workspace");
+            assert_eq!(loaded.context_summary, None);
+            assert_eq!(loaded.context_retained_from, 0);
 
             let conversation = store
                 .load_conversation(session_id)
@@ -989,6 +1043,65 @@ mod tests {
             assert_eq!(conversation.provider_display_name, "DeepSeek");
             assert_eq!(conversation.model_display_name, "DeepSeek Chat");
             assert_eq!(conversation.workspace_root, "/tmp/workspace");
+            assert_eq!(conversation.context_summary, None);
+            assert_eq!(conversation.context_retained_from, 0);
+        }
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn context_state_round_trip() {
+        let path = std::env::temp_dir().join(format!(
+            "tidev-session-store-context-{}.sqlite3",
+            uuid::Uuid::new_v4()
+        ));
+
+        {
+            let store = SessionStore::open(&path).expect("store should open");
+            let session_id = uuid::Uuid::new_v4();
+
+            store
+                .create_session(
+                    session_id,
+                    Path::new("/tmp/workspace"),
+                    "openai",
+                    "OpenAI",
+                    "gpt-4o",
+                    "GPT-4o",
+                    "Untitled session",
+                )
+                .expect("session should be created");
+
+            store
+                .update_session_context_state(
+                    session_id,
+                    Some("Context summary for continuation:\n- files: src/main.rs"),
+                    7,
+                )
+                .expect("context state should update");
+
+            let record = store
+                .load_session_record(session_id)
+                .expect("session should load")
+                .expect("session should exist");
+
+            assert_eq!(
+                record.context_summary.as_deref(),
+                Some("Context summary for continuation:\n- files: src/main.rs")
+            );
+            assert_eq!(record.context_retained_from, 7);
+
+            let conversation = store
+                .load_conversation(session_id)
+                .expect("conversation should load")
+                .expect("conversation should exist");
+
+            assert_eq!(
+                conversation.context_summary.as_deref(),
+                Some("Context summary for continuation:\n- files: src/main.rs")
+            );
+            assert_eq!(conversation.context_retained_from, 7);
         }
 
         let _ = std::fs::remove_file(path);

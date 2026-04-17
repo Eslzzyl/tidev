@@ -1122,6 +1122,7 @@ impl App {
             if !session_exists {
                 let session_id = Uuid::new_v4();
                 self.conversation.session_id = session_id;
+                self.conversation.clear_context_state();
                 self.store.create_session(
                     session_id,
                     self.workspace_root.as_path(),
@@ -1148,6 +1149,7 @@ impl App {
         if self.conversation.is_reverted() {
             self.discard_reverted_branch()?;
             self.context_manager = ContextManager::new();
+            self.conversation.clear_context_state();
         }
 
         let attachments = self.build_prompt_attachments(&prompt)?;
