@@ -9,6 +9,7 @@ Prefer `cargo check` over `cargo build` for faster verification.
 ```sh
 cargo check
 cargo clippy
+cargo clippy --fix  # run this first to automatically fix issues, then manually edit code to fix remaining issues.
 cargo test
 ```
 
