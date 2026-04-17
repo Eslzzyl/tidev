@@ -2100,8 +2100,10 @@ fn render_reasoning_markdown_lines(
     let mut lines = Vec::new();
     let label_style = Style::default()
         .fg(palette.muted)
-        .add_modifier(Modifier::BOLD);
-    let body_style = Style::default().fg(palette.muted);
+        .add_modifier(Modifier::DIM);
+    let body_style = Style::default()
+        .fg(palette.muted)
+        .add_modifier(Modifier::DIM);
 
     lines.push(Line::from(vec![
         Span::styled("┃ ", label_style),
@@ -2130,7 +2132,10 @@ fn render_reasoning_markdown_lines(
     for line in rendered.lines {
         let mut spans = Vec::with_capacity(line.spans.len().saturating_add(1));
         spans.push(Span::styled("┃ ", label_style));
-        spans.extend(line.spans);
+        spans.extend(line.spans.into_iter().map(|mut span| {
+            span.style = span.style.patch(body_style);
+            span
+        }));
         lines.push(Line::from(spans));
     }
 
