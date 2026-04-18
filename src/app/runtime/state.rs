@@ -21,6 +21,7 @@ use crate::{
     context::ContextManager,
     provider_setup::ConnectDialog,
     session::{Conversation, MessageAttachment},
+    tooling::TodoItem,
 };
 
 pub(crate) const MESSAGE_RENDER_CACHE_MAX_ENTRIES: usize = 1200;
@@ -149,6 +150,7 @@ pub(crate) struct CachedSessionRuntime {
     pub(crate) message_viewport_lines: usize,
     pub(crate) message_total_lines: usize,
     pub(crate) context_usage: Option<ContextUsage>,
+    pub(crate) todos: Vec<TodoItem>,
 }
 
 #[derive(Clone, Debug)]
