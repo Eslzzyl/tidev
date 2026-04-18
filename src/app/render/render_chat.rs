@@ -52,13 +52,7 @@ fn render_tool_call_with_result(
     let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
 
     if matches!(canonical_name, "list" | "grep" | "glob" | "read") {
-        return render_tool_call_summary_line(
-            tool_call,
-            tool_result,
-            body_width,
-            palette,
-            ctx,
-        );
+        return render_tool_call_summary_line(tool_call, tool_result, body_width, palette, ctx);
     }
 
     let mut lines = Vec::new();
@@ -602,8 +596,13 @@ impl App {
         self.message_content_area = Some(content_area);
         self.message_viewport_lines = content_area.height as usize;
         let content_width = content_area.width.max(1) as usize;
-        let (mut text, mut total_lines, card_ranges, rendered_virtualized, virtualized_render_scroll) =
-            self.messages_text(Some(content_width));
+        let (
+            mut text,
+            mut total_lines,
+            card_ranges,
+            rendered_virtualized,
+            virtualized_render_scroll,
+        ) = self.messages_text(Some(content_width));
 
         // Add tool running state
         for running in &self.running_tool_executions {
@@ -865,8 +864,7 @@ impl App {
 
         // Update layout index (force rebuild for streaming messages)
         self.update_message_layout_index(width, body_width, has_streaming);
-        if let Some(scroll_offset) =
-            self.resolve_message_scroll_target(messages, width, body_width)
+        if let Some(scroll_offset) = self.resolve_message_scroll_target(messages, width, body_width)
         {
             self.message_scroll_offset = scroll_offset;
             self.message_follow_tail = false;
@@ -952,7 +950,13 @@ impl App {
             );
         }
 
-        (Text::from(lines), total_lines, card_ranges, true, render_scroll)
+        (
+            Text::from(lines),
+            total_lines,
+            card_ranges,
+            true,
+            render_scroll,
+        )
     }
 
     fn cached_render_message_cards(
@@ -1392,9 +1396,11 @@ impl App {
             .map(|b| b.message_start_idx + b.message_count)
             .unwrap_or(0);
         let message_count_changed = indexed_message_count != messages.len();
+        let streaming_mode_changed = index.contains_streaming_messages != force_rebuild;
 
         // Check if we need a full rebuild
         let needs_full_rebuild = force_rebuild
+            || streaming_mode_changed
             || !index.valid
             || index.width != width
             || message_count_changed
@@ -1405,6 +1411,7 @@ impl App {
             index.total_lines = 0;
             index.width = width;
             index.valid = true;
+            index.contains_streaming_messages = force_rebuild;
 
             let expanded_tool_outputs = self.load_expanded_tool_outputs(messages);
             let ctx = RenderContext {
@@ -1810,7 +1817,7 @@ fn render_reasoning_markdown_lines(
 
 #[cfg(test)]
 mod tests {
-    use super::{render_reasoning_markdown_lines, render_tool_result_detail_lines, RenderContext};
+    use super::{RenderContext, render_reasoning_markdown_lines, render_tool_result_detail_lines};
     use crate::session::{Message, MessageRole};
     use crate::theme::ThemePalette;
     use ratatui::style::Style;
@@ -1978,7 +1985,10 @@ mod tests {
         assert!(misses_before >= 2, "first render should have cache misses");
         assert!(entries_before >= 2, "first render should populate cache");
         assert!(hits_after > 0, "second render should have cache hits");
-        assert_eq!(misses_after, misses_before, "second render should use cache");
+        assert_eq!(
+            misses_after, misses_before,
+            "second render should use cache"
+        );
         assert_eq!(entries_after, entries_before, "cache size should be stable");
     }
 
@@ -2019,6 +2029,35 @@ mod tests {
         let (after, _, _, _, _) = app.messages_text(Some(80));
         let after_text = text_lines_to_string(&after.lines);
         assert!(after_text.contains("new refreshed content"));
+    }
+
+    #[test]
+    fn messages_text_rebuilds_layout_after_streaming_markdown_finishes() {
+        let mut app = test_app();
+        app.message_viewport_lines = 4;
+        app.message_follow_tail = false;
+        app.message_scroll_offset = 0;
+
+        let mut message = Message::new(
+            MessageRole::Assistant,
+            "This markdown paragraph should wrap into multiple lines once streaming ends and markdown rendering is applied.",
+        );
+        message.streaming = true;
+        app.conversation.push(message);
+
+        let (_, streaming_total_lines, _, used_virtualization, _) = app.messages_text(Some(24));
+        assert!(used_virtualization);
+
+        app.conversation.messages[0].streaming = false;
+
+        let (_, final_total_lines, _, _, _) = app.messages_text(Some(24));
+
+        assert!(
+            final_total_lines > streaming_total_lines,
+            "layout index should rebuild after streaming finishes: streaming_total_lines={}, final_total_lines={}",
+            streaming_total_lines,
+            final_total_lines
+        );
     }
 
     #[test]

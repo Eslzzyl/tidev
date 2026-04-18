@@ -70,6 +70,8 @@ pub(crate) struct MessageLayoutIndex {
     pub(crate) width: usize,
     /// Whether the index is valid and up-to-date
     pub(crate) valid: bool,
+    /// Whether the index was last built while assistant streaming was active.
+    pub(crate) contains_streaming_messages: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

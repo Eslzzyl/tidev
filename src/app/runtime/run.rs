@@ -355,6 +355,10 @@ impl App {
         self.message_render_cache
             .borrow_mut()
             .retain(|key, _| !(key.session_id == session_id && key.message_id == message_id));
+
+        if session_id == self.conversation.session_id {
+            self.message_layout_index.borrow_mut().valid = false;
+        }
     }
 
     pub(crate) fn invalidate_active_message_render_cache_for(&self, message_id: Uuid) {
