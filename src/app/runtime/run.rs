@@ -109,7 +109,7 @@ impl App {
             selection_clipboard_lease: None,
             backend_tx,
             backend_rx,
-            loading_frame: 0,
+            spinner_start: Instant::now(),
             context_usage: None,
             snapshot,
             cleanup_cancel,
@@ -160,11 +160,38 @@ impl App {
                 break;
             }
 
-            if crossterm::event::poll(Duration::from_millis(50))
-                .context("failed to poll terminal events")?
-            {
-                let event = crossterm::event::read().context("failed to read terminal event")?;
-                self.handle_event(event, runtime)?;
+            // Batch process all pending input events to avoid lag
+            // during rapid scrolling or other high-frequency input
+            let mut events_processed = 0;
+            const MAX_EVENTS_PER_FRAME: usize = 32;
+            
+            while events_processed < MAX_EVENTS_PER_FRAME {
+                match crossterm::event::poll(Duration::from_millis(0)) {
+                    Ok(true) => {
+                        if let Ok(event) = crossterm::event::read() {
+                            self.handle_event(event, runtime)?;
+                            events_processed += 1;
+                            if self.should_quit {
+                                break;
+                            }
+                        }
+                    }
+                    Ok(false) => break,
+                    Err(e) => {
+                        return Err(anyhow::anyhow!("failed to poll terminal events: {}", e));
+                    }
+                }
+            }
+
+            // If no events were processed, wait a bit before next frame
+            if events_processed == 0 {
+                if crossterm::event::poll(Duration::from_millis(16))
+                    .context("failed to poll terminal events")?
+                {
+                    let event = crossterm::event::read()
+                        .context("failed to read terminal event")?;
+                    self.handle_event(event, runtime)?;
+                }
             }
 
             if self.should_quit {

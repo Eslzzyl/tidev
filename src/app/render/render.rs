@@ -450,11 +450,14 @@ impl App {
         "Ready".to_string()
     }
 
-    fn loading_spinner(&mut self) -> &'static str {
+    fn loading_spinner(&self) -> &'static str {
         const FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
-        let frame = FRAMES[self.loading_frame % FRAMES.len()];
-        self.loading_frame = self.loading_frame.wrapping_add(1);
-        frame
+        const FRAME_DURATION_MS: u128 = 100;
+
+        let elapsed = self.spinner_start.elapsed().as_millis();
+        let frame_index = (elapsed / FRAME_DURATION_MS) as usize;
+
+        FRAMES[frame_index % FRAMES.len()]
     }
 }
 

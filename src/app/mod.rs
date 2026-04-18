@@ -210,7 +210,7 @@ struct App {
     selection_clipboard_lease: Option<ClipboardLease>,
     backend_tx: UnboundedSender<BackendEvent>,
     backend_rx: UnboundedReceiver<BackendEvent>,
-    loading_frame: usize,
+    spinner_start: Instant,
     context_usage: Option<(u32, u32, u32)>,
     snapshot: SnapshotService,
     cleanup_cancel: Arc<std::sync::atomic::AtomicBool>,
