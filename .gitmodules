@@ -10,9 +10,4 @@
 	path = hermes-agent
 	url = https://github.com/NousResearch/hermes-agent.git
 	shallow = true
-[submodule "sqlite-zstd"]
-	path = sqlite-zstd
-	url = https://github.com/phiresky/sqlite-zstd
-[submodule "sqlite_zstd_vfs"]
-	path = sqlite_zstd_vfs
-	url = https://github.com/mlin/sqlite_zstd_vfs
+
