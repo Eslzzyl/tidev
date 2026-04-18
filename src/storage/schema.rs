@@ -1,4 +1,4 @@
-pub const SCHEMA_VERSION: i64 = 11;
+pub const SCHEMA_VERSION: i64 = 12;
 
 pub const SESSION_SELECT_COLUMNS: &str = "s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, s.context_summary, s.context_retained_from, COALESCE(sw.workspace_root, '')";
 
@@ -49,6 +49,9 @@ CREATE TABLE IF NOT EXISTS messages (
     input_tokens INTEGER,
     output_tokens INTEGER,
     total_tokens INTEGER,
+    cache_read_tokens INTEGER,
+    cache_write_tokens INTEGER,
+    model_id TEXT,
     snapshot_hash TEXT,
     patch_files TEXT
 );
@@ -94,4 +97,27 @@ CREATE TABLE IF NOT EXISTS tool_permissions (
 
 CREATE INDEX IF NOT EXISTS idx_tool_permissions_session_created_at
     ON tool_permissions(session_id, created_at);
+
+CREATE TABLE IF NOT EXISTS usage_stats (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider_id TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    time_bucket TEXT NOT NULL,
+    granularity TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    request_count INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(provider_id, model_id, time_bucket, granularity)
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_stats_time_bucket
+    ON usage_stats(time_bucket, granularity);
+
+CREATE INDEX IF NOT EXISTS idx_usage_stats_provider_model
+    ON usage_stats(provider_id, model_id);
 "#;

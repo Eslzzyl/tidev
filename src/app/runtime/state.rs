@@ -25,6 +25,16 @@ use crate::{
 
 pub(crate) const MESSAGE_RENDER_CACHE_MAX_ENTRIES: usize = 1200;
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ContextUsage {
+    pub(crate) input_tokens: u32,
+    pub(crate) output_tokens: u32,
+    pub(crate) total_tokens: u32,
+    pub(crate) cache_read_tokens: u32,
+    pub(crate) cache_write_tokens: u32,
+    pub(crate) model_id: String,
+}
+
 /// A block in the message layout index representing a renderable unit.
 ///
 /// Each block contains either:
@@ -138,7 +148,7 @@ pub(crate) struct CachedSessionRuntime {
     pub(crate) message_follow_tail: bool,
     pub(crate) message_viewport_lines: usize,
     pub(crate) message_total_lines: usize,
-    pub(crate) context_usage: Option<(u32, u32, u32)>,
+    pub(crate) context_usage: Option<ContextUsage>,
 }
 
 #[derive(Clone, Debug)]

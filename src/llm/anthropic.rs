@@ -189,6 +189,9 @@ pub(super) async fn stream_anthropic(
                                 input_tokens: usage.input_tokens,
                                 output_tokens: usage.output_tokens,
                                 total_tokens,
+                                cache_read_tokens: usage.cache_read_input_tokens,
+                                cache_write_tokens: usage.cache_creation_input_tokens,
+                                model_id: model.model_id.clone(),
                             });
                         }
                     }
@@ -600,4 +603,8 @@ struct AnthropicUsage {
     output_tokens: u32,
     #[serde(rename = "input_tokens", default)]
     input_tokens: u32,
+    #[serde(default)]
+    cache_read_input_tokens: u32,
+    #[serde(default)]
+    cache_creation_input_tokens: u32,
 }

@@ -226,6 +226,9 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
                     input_tokens,
                     output_tokens,
                     total_tokens,
+                    cache_read_tokens,
+                    cache_write_tokens,
+                    model_id,
                     ..
                 } => {
                     let _ = context.tx.send(BackendEvent::UsageStats {
@@ -234,6 +237,9 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
                         input_tokens,
                         output_tokens,
                         total_tokens,
+                        cache_read_tokens,
+                        cache_write_tokens,
+                        model_id: model_id.clone(),
                     });
                     let _ = context.tx.send(BackendEvent::UsageStats {
                         session_id: context.parent_session_id,
@@ -241,6 +247,9 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
                         input_tokens,
                         output_tokens,
                         total_tokens,
+                        cache_read_tokens,
+                        cache_write_tokens,
+                        model_id,
                     });
                 }
                 BackendEvent::ToolCompleted { .. } => {}

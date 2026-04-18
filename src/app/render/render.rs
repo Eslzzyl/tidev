@@ -45,6 +45,11 @@ impl App {
             self.render_session_panel(frame, area, panel);
             self.render_session_panel_dialog(frame, area, panel);
         }
+        if let Some(panel) = &self.stats_panel
+            && panel.active
+        {
+            self.render_stats_panel(frame, area);
+        }
         if let Some(dialog) = &self.rename_dialog {
             self.render_rename_session_dialog(frame, area, dialog);
         }
@@ -357,10 +362,10 @@ impl App {
             return "Esc again to stop".to_string();
         }
 
-        let token_status = self.context_usage.map(|(input_tokens, _, _)| {
+        let token_status = self.context_usage.as_ref().map(|usage| {
             let max_context = self.active_model.context_window as u32;
-            let percent = input_tokens as f64 / max_context as f64 * 100.0;
-            let used_k = input_tokens / 1000;
+            let percent = usage.input_tokens as f64 / max_context as f64 * 100.0;
+            let used_k = usage.input_tokens / 1000;
             let max_k = max_context / 1000;
             format!("{:.1}% ({}K/{}K)", percent, used_k, max_k)
         });

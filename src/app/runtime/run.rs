@@ -119,6 +119,7 @@ impl App {
             tool_result_card_bounds: Vec::new(),
             message_scroll_target: None,
             todos: Vec::new(),
+            stats_panel: None,
         };
 
         app.at_mention
@@ -229,7 +230,7 @@ impl App {
             message_follow_tail: self.message_follow_tail,
             message_viewport_lines: self.message_viewport_lines,
             message_total_lines: self.message_total_lines,
-            context_usage: self.context_usage,
+            context_usage: self.context_usage.clone(),
         };
 
         self.cached_sessions.insert(session_id, cached);
@@ -491,15 +492,18 @@ impl App {
                 .rev()
                 .find_map(|message| {
                     message.total_tokens.map(|total| {
-                        (
-                            message.input_tokens.unwrap_or(0),
-                            message.output_tokens.unwrap_or(0),
-                            total,
-                        )
+                        super::state::ContextUsage {
+                            input_tokens: message.input_tokens.unwrap_or(0),
+                            output_tokens: message.output_tokens.unwrap_or(0),
+                            total_tokens: total,
+                            cache_read_tokens: message.cache_read_tokens.unwrap_or(0),
+                            cache_write_tokens: message.cache_write_tokens.unwrap_or(0),
+                            model_id: message.model_id.clone().unwrap_or_default(),
+                        }
                     })
                 });
-            if let Some((input, output, total)) = last_token_usage {
-                runtime.context_usage = Some((input, output, total));
+            if let Some(usage) = last_token_usage {
+                runtime.context_usage = Some(usage);
             }
         }
 

@@ -209,6 +209,12 @@ pub struct Message {
     #[serde(default)]
     pub total_tokens: Option<u32>,
     #[serde(default)]
+    pub cache_read_tokens: Option<u32>,
+    #[serde(default)]
+    pub cache_write_tokens: Option<u32>,
+    #[serde(default)]
+    pub model_id: Option<String>,
+    #[serde(default)]
     pub snapshot_hash: Option<String>,
     #[serde(default)]
     pub patch_files: Option<String>,
@@ -230,6 +236,9 @@ impl Message {
             input_tokens: None,
             output_tokens: None,
             total_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            model_id: None,
             snapshot_hash: None,
             patch_files: None,
         }
@@ -250,6 +259,9 @@ impl Message {
             input_tokens: None,
             output_tokens: None,
             total_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            model_id: None,
             snapshot_hash: None,
             patch_files: None,
         }
@@ -276,6 +288,9 @@ impl Message {
             input_tokens: None,
             output_tokens: None,
             total_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            model_id: None,
             snapshot_hash: None,
             patch_files: None,
         }
@@ -300,6 +315,9 @@ impl Message {
             input_tokens: None,
             output_tokens: None,
             total_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            model_id: None,
             snapshot_hash: None,
             patch_files: None,
         }
@@ -550,6 +568,9 @@ pub enum BackendEvent {
         input_tokens: u32,
         output_tokens: u32,
         total_tokens: u32,
+        cache_read_tokens: u32,
+        cache_write_tokens: u32,
+        model_id: String,
     },
     ContextCompacted {
         session_id: Uuid,

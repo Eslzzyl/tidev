@@ -411,6 +411,11 @@ impl App {
             return Ok(());
         }
 
+        if matches!(key.code, KeyCode::Char('s')) && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.toggle_stats_panel();
+            return Ok(());
+        }
+
         if self.permission_dialog.is_some() {
             return self.handle_permission_dialog_key(key, runtime);
         }
@@ -446,6 +451,10 @@ impl App {
 
         if self.session_panel.is_some() {
             return self.handle_session_panel_key(key, runtime);
+        }
+
+        if self.stats_panel.as_ref().is_some_and(|p| p.active) {
+            return self.handle_stats_panel_key(key);
         }
 
         if self.handle_request_abort_key(key, runtime)? {
@@ -830,6 +839,9 @@ impl App {
             CommandAction::Theme => {
                 self.apply_theme_command(args)?;
             }
+            CommandAction::Stats => {
+                self.toggle_stats_panel();
+            }
             CommandAction::Quit => {
                 self.should_quit = true;
             }
@@ -1164,5 +1176,96 @@ impl App {
         }
 
         self.submit_prompt_now(prompt, attachments, runtime)
+    }
+
+    pub(crate) fn handle_stats_panel_key(&mut self, key: KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Esc => {
+                if let Some(panel) = &mut self.stats_panel {
+                    panel.active = false;
+                }
+            }
+            KeyCode::Tab => {
+                if let Some(panel) = &mut self.stats_panel {
+                    panel.next_chart();
+                    self.refresh_stats_panel();
+                }
+            }
+            KeyCode::BackTab => {
+                if let Some(panel) = &mut self.stats_panel {
+                    panel.prev_chart();
+                    self.refresh_stats_panel();
+                }
+            }
+            KeyCode::Char('h') | KeyCode::Left => {
+                if let Some(panel) = &mut self.stats_panel {
+                    panel.prev_granularity();
+                    self.refresh_stats_panel();
+                }
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                if let Some(panel) = &mut self.stats_panel {
+                    panel.next_granularity();
+                    self.refresh_stats_panel();
+                }
+            }
+            KeyCode::Char('1') => {
+                if let Some(panel) = &mut self.stats_panel {
+                    panel.granularity = crate::stats::Granularity::Hour;
+                    self.refresh_stats_panel();
+                }
+            }
+            KeyCode::Char('2') => {
+                if let Some(panel) = &mut self.stats_panel {
+                    panel.granularity = crate::stats::Granularity::Day;
+                    self.refresh_stats_panel();
+                }
+            }
+            KeyCode::Char('3') => {
+                if let Some(panel) = &mut self.stats_panel {
+                    panel.granularity = crate::stats::Granularity::Week;
+                    self.refresh_stats_panel();
+                }
+            }
+            KeyCode::Char('4') => {
+                if let Some(panel) = &mut self.stats_panel {
+                    panel.granularity = crate::stats::Granularity::Month;
+                    self.refresh_stats_panel();
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub(crate) fn toggle_stats_panel(&mut self) {
+        if let Some(panel) = &mut self.stats_panel {
+            panel.toggle();
+            if panel.active {
+                self.refresh_stats_panel();
+            }
+        } else {
+            let mut panel = crate::app::ui::stats_panel::StatsPanelState::new();
+            panel.active = true;
+            self.stats_panel = Some(panel);
+            self.refresh_stats_panel();
+        }
+    }
+
+    fn refresh_stats_panel(&mut self) {
+        if let Some(panel) = &mut self.stats_panel
+            && panel.needs_refresh()
+        {
+            let (start, end) = panel.granularity.default_range();
+            match self.store.get_time_range_stats(panel.granularity, start, end) {
+                Ok(stats) => {
+                    panel.cached_stats = Some(stats);
+                    panel.last_refresh = Some(chrono::Utc::now());
+                }
+                Err(e) => {
+                    crate::log_error!("Failed to refresh stats: {}", e);
+                }
+            }
+        }
     }
 }

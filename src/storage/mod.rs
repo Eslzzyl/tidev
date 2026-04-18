@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 use crate::{
     session::{Conversation, Message, MessageRole, ToolCall},
+    stats::{Granularity, ModelUsageEntry, StatsEntry, TimeRangeStats, UsageSummary},
     tooling::TodoItem,
 };
 
@@ -240,7 +241,7 @@ impl SessionStore {
         let attachments = serde_json::to_string(&message.attachments)
             .context("failed to serialize attachments")?;
         self.connection.execute(
-            "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, created_at, streaming, input_tokens, output_tokens, total_tokens, snapshot_hash, patch_files) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+            "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, created_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, snapshot_hash, patch_files) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             params![
                 message.id.to_string(),
                 session_id.to_string(),
@@ -256,6 +257,9 @@ impl SessionStore {
                 message.input_tokens,
                 message.output_tokens,
                 message.total_tokens,
+                message.cache_read_tokens,
+                message.cache_write_tokens,
+                message.model_id,
                 message.snapshot_hash,
                 message.patch_files,
             ],
@@ -272,7 +276,7 @@ impl SessionStore {
             .context("failed to serialize attachments")?;
 
         self.connection.execute(
-            "UPDATE messages SET role = ?3, content = ?4, attachments = ?5, reasoning = ?6, tool_calls = ?7, tool_call_id = ?8, tool_name = ?9, created_at = ?10, streaming = ?11, input_tokens = ?12, output_tokens = ?13, total_tokens = ?14, snapshot_hash = ?15, patch_files = ?16 WHERE session_id = ?1 AND id = ?2",
+            "UPDATE messages SET role = ?3, content = ?4, attachments = ?5, reasoning = ?6, tool_calls = ?7, tool_call_id = ?8, tool_name = ?9, created_at = ?10, streaming = ?11, input_tokens = ?12, output_tokens = ?13, total_tokens = ?14, cache_read_tokens = ?15, cache_write_tokens = ?16, model_id = ?17, snapshot_hash = ?18, patch_files = ?19 WHERE session_id = ?1 AND id = ?2",
             params![
                 session_id.to_string(),
                 message.id.to_string(),
@@ -288,6 +292,9 @@ impl SessionStore {
                 message.input_tokens,
                 message.output_tokens,
                 message.total_tokens,
+                message.cache_read_tokens,
+                message.cache_write_tokens,
+                message.model_id,
                 message.snapshot_hash,
                 message.patch_files,
             ],
@@ -615,7 +622,7 @@ impl SessionStore {
 
     pub fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, created_at, streaming, input_tokens, output_tokens, total_tokens, snapshot_hash, patch_files FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
+            "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, created_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, snapshot_hash, patch_files FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
         )?;
 
         let rows = statement.query_map(params![session_id.to_string()], |row| {
@@ -632,8 +639,11 @@ impl SessionStore {
             let input_tokens = row.get::<_, Option<u32>>(10)?;
             let output_tokens = row.get::<_, Option<u32>>(11)?;
             let total_tokens = row.get::<_, Option<u32>>(12)?;
-            let snapshot_hash = row.get::<_, Option<String>>(13)?;
-            let patch_files = row.get::<_, Option<String>>(14)?;
+            let cache_read_tokens = row.get::<_, Option<u32>>(13)?;
+            let cache_write_tokens = row.get::<_, Option<u32>>(14)?;
+            let model_id = row.get::<_, Option<String>>(15)?;
+            let snapshot_hash = row.get::<_, Option<String>>(16)?;
+            let patch_files = row.get::<_, Option<String>>(17)?;
 
             let attachments = serde_json::from_str(&attachments).unwrap_or_default();
             let tool_calls: Vec<ToolCall> = serde_json::from_str(&tool_calls).unwrap_or_default();
@@ -657,6 +667,9 @@ impl SessionStore {
             message.input_tokens = input_tokens;
             message.output_tokens = output_tokens;
             message.total_tokens = total_tokens;
+            message.cache_read_tokens = cache_read_tokens;
+            message.cache_write_tokens = cache_write_tokens;
+            message.model_id = model_id;
             message.snapshot_hash = snapshot_hash;
             message.patch_files = patch_files;
             Ok(message)
@@ -924,5 +937,194 @@ fn fallback_display_name(value: String, fallback: &str) -> String {
         fallback.to_string()
     } else {
         value
+    }
+}
+
+impl SessionStore {
+    pub fn record_usage(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+        input_tokens: u32,
+        output_tokens: u32,
+        cache_read_tokens: u32,
+        cache_write_tokens: u32,
+    ) -> Result<()> {
+        let now = Utc::now();
+        let time_bucket = Granularity::Hour.time_bucket(&now);
+        let now_text = now.to_rfc3339();
+        let total_tokens = input_tokens as i64 + output_tokens as i64;
+
+        self.connection.execute(
+            r#"
+            INSERT INTO usage_stats (
+                provider_id, model_id, time_bucket, granularity,
+                input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+                total_tokens, request_count, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, 'hour', ?4, ?5, ?6, ?7, ?8, 1, ?9, ?9)
+            ON CONFLICT(provider_id, model_id, time_bucket, granularity) DO UPDATE SET
+                input_tokens = input_tokens + excluded.input_tokens,
+                output_tokens = output_tokens + excluded.output_tokens,
+                cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
+                cache_write_tokens = cache_write_tokens + excluded.cache_write_tokens,
+                total_tokens = total_tokens + excluded.total_tokens,
+                request_count = request_count + 1,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                provider_id,
+                model_id,
+                time_bucket,
+                input_tokens as i64,
+                output_tokens as i64,
+                cache_read_tokens as i64,
+                cache_write_tokens as i64,
+                total_tokens,
+                now_text,
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn get_time_range_stats(
+        &self,
+        granularity: Granularity,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<TimeRangeStats> {
+        let mut entries = Vec::new();
+        let mut summary = UsageSummary::default();
+
+        let granularity_str = granularity.as_str();
+
+        let mut stmt = self.connection.prepare(
+            r#"
+            SELECT
+                time_bucket,
+                SUM(input_tokens) as input_tokens,
+                SUM(output_tokens) as output_tokens,
+                SUM(cache_read_tokens) as cache_read_tokens,
+                SUM(cache_write_tokens) as cache_write_tokens,
+                SUM(total_tokens) as total_tokens,
+                SUM(request_count) as request_count
+            FROM usage_stats
+            WHERE granularity = ?1
+            GROUP BY time_bucket
+            HAVING time_bucket >= ?2 AND time_bucket <= ?3
+            ORDER BY time_bucket ASC
+            "#,
+        )?;
+
+        let start_bucket = granularity.time_bucket(&start);
+        let end_bucket = granularity.time_bucket(&end);
+
+        let rows = stmt.query_map(params![granularity_str, start_bucket, end_bucket], |row| {
+            Ok(StatsEntry {
+                time_bucket: row.get(0)?,
+                input_tokens: row.get(1)?,
+                output_tokens: row.get(2)?,
+                cache_read_tokens: row.get(3)?,
+                cache_write_tokens: row.get(4)?,
+                total_tokens: row.get(5)?,
+                request_count: row.get(6)?,
+            })
+        })?;
+
+        for row in rows {
+            let entry = row?;
+            summary.total_input_tokens += entry.input_tokens;
+            summary.total_output_tokens += entry.output_tokens;
+            summary.total_cache_read_tokens += entry.cache_read_tokens;
+            summary.total_cache_write_tokens += entry.cache_write_tokens;
+            summary.total_tokens += entry.total_tokens;
+            summary.total_requests += entry.request_count;
+            entries.push(entry);
+        }
+
+        let model_usage = self.get_model_usage_stats(start, end)?;
+
+        Ok(TimeRangeStats {
+            granularity,
+            entries,
+            summary,
+            model_usage,
+        })
+    }
+
+    pub fn get_model_usage_stats(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<ModelUsageEntry>> {
+        let mut entries = Vec::new();
+
+        let start_text = start.to_rfc3339();
+        let end_text = end.to_rfc3339();
+
+        let mut stmt = self.connection.prepare(
+            r#"
+            SELECT
+                provider_id,
+                model_id,
+                SUM(input_tokens) as input_tokens,
+                SUM(output_tokens) as output_tokens,
+                SUM(cache_read_tokens) as cache_read_tokens,
+                SUM(cache_write_tokens) as cache_write_tokens,
+                SUM(total_tokens) as total_tokens,
+                SUM(request_count) as request_count
+            FROM usage_stats
+            WHERE created_at >= ?1 AND created_at <= ?2
+            GROUP BY provider_id, model_id
+            ORDER BY total_tokens DESC
+            "#,
+        )?;
+
+        let rows = stmt.query_map(params![start_text, end_text], |row| {
+            Ok(ModelUsageEntry {
+                provider_id: row.get(0)?,
+                model_id: row.get(1)?,
+                input_tokens: row.get(2)?,
+                output_tokens: row.get(3)?,
+                cache_read_tokens: row.get(4)?,
+                cache_write_tokens: row.get(5)?,
+                total_tokens: row.get(6)?,
+                request_count: row.get(7)?,
+            })
+        })?;
+
+        for row in rows {
+            entries.push(row?);
+        }
+
+        Ok(entries)
+    }
+
+    pub fn get_all_time_summary(&self) -> Result<UsageSummary> {
+        let mut stmt = self.connection.prepare(
+            r#"
+            SELECT
+                SUM(input_tokens),
+                SUM(output_tokens),
+                SUM(cache_read_tokens),
+                SUM(cache_write_tokens),
+                SUM(total_tokens),
+                SUM(request_count)
+            FROM usage_stats
+            "#,
+        )?;
+
+        let row = stmt.query_row([], |row| {
+            Ok(UsageSummary {
+                total_input_tokens: row.get::<_, Option<i64>>(0)?.unwrap_or(0),
+                total_output_tokens: row.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                total_cache_read_tokens: row.get::<_, Option<i64>>(2)?.unwrap_or(0),
+                total_cache_write_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or(0),
+                total_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or(0),
+                total_requests: row.get::<_, Option<i64>>(5)?.unwrap_or(0),
+            })
+        })?;
+
+        Ok(row)
     }
 }

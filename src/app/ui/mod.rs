@@ -8,4 +8,5 @@ pub mod permission;
 pub mod question;
 pub mod rename;
 pub mod session_panel;
+pub mod stats_panel;
 pub mod theme_panel;

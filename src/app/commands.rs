@@ -12,6 +12,7 @@ pub enum CommandAction {
     Redo,
     Message,
     Theme,
+    Stats,
     Quit,
     Init,
 }
@@ -277,6 +278,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         description: "Switch between built-in themes",
         usage: "/theme [dark|light|nord|one-dark|catppuccin|solarized|orng|github|material]",
         action: CommandAction::Theme,
+    },
+    CommandSpec {
+        name: "stats",
+        aliases: &["statistics"],
+        description: "Show token usage statistics",
+        usage: "/stats",
+        action: CommandAction::Stats,
     },
     CommandSpec {
         name: "new",

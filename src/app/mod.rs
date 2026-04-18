@@ -50,6 +50,7 @@ pub use ui::model_panel;
 pub use ui::permission;
 pub use ui::question;
 pub use ui::session_panel;
+pub use ui::stats_panel;
 pub use ui::theme_panel;
 
 use runtime::state::*;
@@ -212,7 +213,7 @@ struct App {
     backend_tx: UnboundedSender<BackendEvent>,
     backend_rx: UnboundedReceiver<BackendEvent>,
     spinner_start: Instant,
-    context_usage: Option<(u32, u32, u32)>,
+    context_usage: Option<state::ContextUsage>,
     snapshot: SnapshotService,
     cleanup_cancel: Arc<std::sync::atomic::AtomicBool>,
     loaded_instruction_sources: Vec<String>,
@@ -220,6 +221,7 @@ struct App {
     tool_result_card_bounds: Vec<(Uuid, Rect)>,
     message_scroll_target: Option<Uuid>,
     todos: Vec<TodoItem>,
+    stats_panel: Option<ui::stats_panel::StatsPanelState>,
 }
 
 pub fn run() -> Result<()> {
@@ -827,12 +829,31 @@ impl App {
                 input_tokens,
                 output_tokens,
                 total_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+                model_id,
             } => {
                 if !self.is_active_request(request_id) {
                     return Ok(());
                 }
 
-                self.context_usage = Some((input_tokens, output_tokens, total_tokens));
+                self.context_usage = Some(state::ContextUsage {
+                    input_tokens,
+                    output_tokens,
+                    total_tokens,
+                    cache_read_tokens,
+                    cache_write_tokens,
+                    model_id: model_id.clone(),
+                });
+
+                let _ = self.store.record_usage(
+                    &self.active_model.provider_id,
+                    &model_id,
+                    input_tokens,
+                    output_tokens,
+                    cache_read_tokens,
+                    cache_write_tokens,
+                );
             }
             BackendEvent::ContextCompacted {
                 session_id,
@@ -865,10 +886,13 @@ impl App {
             message.tool_calls = turn.tool_calls.clone();
             message.streaming = false;
 
-            if let Some((input_tokens, output_tokens, total_tokens)) = self.context_usage {
-                message.input_tokens = Some(input_tokens);
-                message.output_tokens = Some(output_tokens);
-                message.total_tokens = Some(total_tokens);
+            if let Some(ref usage) = self.context_usage {
+                message.input_tokens = Some(usage.input_tokens);
+                message.output_tokens = Some(usage.output_tokens);
+                message.total_tokens = Some(usage.total_tokens);
+                message.cache_read_tokens = Some(usage.cache_read_tokens);
+                message.cache_write_tokens = Some(usage.cache_write_tokens);
+                message.model_id = Some(usage.model_id.clone());
             }
 
             persisted_message = Some(message.clone());

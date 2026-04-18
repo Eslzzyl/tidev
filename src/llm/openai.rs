@@ -120,12 +120,20 @@ pub(super) async fn stream_openai(
                     serde_json::from_str(payload).context("failed to parse streaming response")?;
 
                 if let Some(usage) = event.usage {
+                    let cache_read_tokens = usage
+                        .prompt_tokens_details
+                        .as_ref()
+                        .map(|d| d.cached_tokens)
+                        .unwrap_or(0);
                     let _ = tx.send(BackendEvent::UsageStats {
                         session_id,
                         request_id,
                         input_tokens: usage.input_tokens,
                         output_tokens: usage.output_tokens,
                         total_tokens: usage.total_tokens,
+                        cache_read_tokens,
+                        cache_write_tokens: 0,
+                        model_id: model.model_id.clone(),
                     });
                 }
 
@@ -649,6 +657,14 @@ struct ChatCompletionUsage {
     output_tokens: u32,
     #[serde(rename = "total_tokens", default)]
     total_tokens: u32,
+    #[serde(default)]
+    prompt_tokens_details: Option<PromptTokensDetails>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct PromptTokensDetails {
+    #[serde(default)]
+    cached_tokens: u32,
 }
 
 #[derive(Clone, Debug, Deserialize)]
