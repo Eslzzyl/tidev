@@ -968,6 +968,7 @@ impl App {
         // Render visible blocks
         let mut current_line_offset = header_line_count + padding_lines;
         for block in &visible_blocks {
+            let is_round_end = block.message_start_idx + block.message_count >= messages.len();
             let block_lines = self.render_message_block_to_lines(
                 messages,
                 block,
@@ -976,6 +977,7 @@ impl App {
                 &mut card_ranges,
                 current_line_offset,
                 &ctx,
+                is_round_end,
             );
             current_line_offset += block_lines.len();
             lines.extend(block_lines);
@@ -1012,10 +1014,11 @@ impl App {
         &self,
         message: &Message,
         body_width: usize,
+        is_round_end: bool,
     ) -> Vec<(Color, Vec<Line<'static>>)> {
         if message.streaming && matches!(message.role, MessageRole::Assistant) {
             self.record_message_render_cache_miss();
-            return self.render_message_cards(message, body_width);
+            return self.render_message_cards(message, body_width, is_round_end);
         }
 
         let key = MessageRenderCacheKey {
@@ -1038,7 +1041,7 @@ impl App {
         }
 
         self.record_message_render_cache_miss();
-        let cards = self.render_message_cards(message, body_width);
+        let cards = self.render_message_cards(message, body_width, is_round_end);
 
         {
             let mut cache = self.message_render_cache.borrow_mut();
@@ -1527,7 +1530,7 @@ impl App {
             while i < messages.len() {
                 // Build block without start_line (calculated below)
                 let (message_id, message_count, line_count) =
-                    self.build_message_block_data(messages, i, width, body_width, &ctx);
+                    self.build_message_block_data(messages, i, width, body_width, &ctx, true);
 
                 let block = super::MessageBlock {
                     message_id,
@@ -1574,7 +1577,7 @@ impl App {
             }
 
             let (_message_id, message_count, line_count) =
-                self.build_message_block_data(messages, i, width, body_width, &ctx);
+                self.build_message_block_data(messages, i, width, body_width, &ctx, false);
             offset += line_count;
             i += message_count;
         }
@@ -1592,6 +1595,7 @@ impl App {
         width: usize,
         body_width: usize,
         ctx: &RenderContext<'_>,
+        is_round_end: bool,
     ) -> (Uuid, usize, usize) {
         let message = &messages[start_idx];
         let message_id = message.id;
@@ -1608,7 +1612,7 @@ impl App {
                 }
 
                 // Calculate lines for assistant message
-                let cards = self.cached_render_message_cards(message, body_width);
+                let cards = self.cached_render_message_cards(message, body_width, is_round_end);
                 let mut lines = 0;
                 for (_, card_lines) in &cards {
                     lines +=
@@ -1649,7 +1653,7 @@ impl App {
                 (count, lines)
             }
             MessageRole::User => {
-                let cards = self.cached_render_message_cards(message, body_width);
+                let cards = self.cached_render_message_cards(message, body_width, is_round_end);
                 let mut lines = 0;
                 for (_, card_lines) in &cards {
                     lines +=
@@ -1659,7 +1663,7 @@ impl App {
                 (1, lines)
             }
             MessageRole::System => {
-                let cards = self.cached_render_message_cards(message, body_width);
+                let cards = self.cached_render_message_cards(message, body_width, is_round_end);
                 let mut lines = 0;
                 for (_, card_lines) in &cards {
                     lines +=
@@ -1668,7 +1672,7 @@ impl App {
                 (1, lines)
             }
             MessageRole::Error => {
-                let cards = self.cached_render_message_cards(message, body_width);
+                let cards = self.cached_render_message_cards(message, body_width, is_round_end);
                 let mut lines = 0;
                 for (_, card_lines) in &cards {
                     lines +=
@@ -1738,6 +1742,7 @@ impl App {
         card_ranges: &mut Vec<ToolResultCardRange>,
         current_line_offset: usize,
         ctx: &RenderContext<'_>,
+        is_round_end: bool,
     ) -> Vec<Line<'static>> {
         let palette = self.palette();
         let mut lines = Vec::new();
@@ -1753,7 +1758,7 @@ impl App {
         match message.role {
             MessageRole::Assistant => {
                 // Render assistant message cards
-                let assistant_cards = self.cached_render_message_cards(message, body_width);
+                let assistant_cards = self.cached_render_message_cards(message, body_width, is_round_end);
                 for (card_bg, card_lines) in assistant_cards {
                     if !card_lines.is_empty() {
                         lines.extend(decorate_card_lines(card_lines, width, card_bg));
@@ -1807,7 +1812,7 @@ impl App {
                 }
             }
             MessageRole::User | MessageRole::System | MessageRole::Error => {
-                let cards = self.cached_render_message_cards(message, body_width);
+                let cards = self.cached_render_message_cards(message, body_width, is_round_end);
                 let bg = match message.role {
                     MessageRole::User => palette.panel_alt,
                     MessageRole::Error => palette.panel_light,
