@@ -197,6 +197,12 @@ impl App {
             Style::default().fg(palette.border_mode_color(self.mode))
         };
 
+        let inner = area.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+        self.input_area.set(Some(inner));
+
         let content = if self.composer.is_empty() {
             Text::from(Line::from(Span::styled(
                 placeholder.to_string(),
@@ -208,19 +214,19 @@ impl App {
                 Style::default().fg(palette.text),
             )))
         } else {
-            Text::from(self.composer.text().to_string())
+            let width = inner.width as usize;
+            let mut lines = Vec::new();
+            for range in self.composer.visual_lines(width) {
+                lines.push(Line::from(&self.composer.text()[range]));
+            }
+            Text::from(lines)
         };
 
-        let inner = area.inner(Margin {
-            horizontal: 1,
-            vertical: 1,
-        });
-        self.input_area.set(Some(inner));
         let visible_lines = inner.height.max(1) as usize;
         let total_lines = self.composer.display_line_count(inner.width as usize);
         let scroll = total_lines.saturating_sub(visible_lines) as u16;
 
-        let paragraph = Paragraph::new(content)
+        let mut paragraph = Paragraph::new(content)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
@@ -228,8 +234,11 @@ impl App {
                     .title(title),
             )
             .style(Style::default().fg(palette.text))
-            .wrap(Wrap { trim: false })
             .scroll((scroll, 0));
+
+        if self.composer.is_empty() || mask_input {
+            paragraph = paragraph.wrap(Wrap { trim: false });
+        }
 
         frame.render_widget(paragraph, area);
 
