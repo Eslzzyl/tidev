@@ -5,7 +5,7 @@ use anyhow::Result;
 use crate::{
     config::ActiveModel,
     llm::LlmClient,
-    prompts::compression_system_prompt,
+    prompts::{self, compression_system_prompt, SessionMode},
     session::{Conversation, Message, MessageAttachment, MessageRole, tool_output_preview},
 };
 
@@ -114,9 +114,10 @@ impl ContextManager {
         Self::estimate_tokens_for_messages(conversation.visible_messages()) >= trigger_tokens
     }
 
-    pub fn build_request_messages(&self, conversation: &Conversation) -> Vec<Message> {
+    pub fn build_request_messages(&self, conversation: &Conversation, current_mode: SessionMode) -> Vec<Message> {
         let mut messages = Vec::new();
         let mut pending_tool_calls = HashSet::new();
+        let mut was_plan_mode = false;
 
         if let Some(summary) = &self.summary {
             messages.push(Message::new(
@@ -138,9 +139,22 @@ impl ContextManager {
                 MessageRole::System => {}
                 MessageRole::User => {
                     pending_tool_calls.clear();
-                    messages.push(message.clone());
+
+                    if !was_plan_mode {
+                        messages.push(message.clone());
+                    } else if current_mode == SessionMode::Build {
+                        let mut msg = message.clone();
+                        msg.content = format!("{}\n\n{}", prompts::build_switch_reminder(), message.content);
+                        messages.push(msg);
+                    } else {
+                        messages.push(message.clone());
+                    }
+                    was_plan_mode = false;
                 }
                 MessageRole::Assistant => {
+                    if message.content.contains("PLAN MODE") || message.content.contains("read-only") {
+                        was_plan_mode = true;
+                    }
                     pending_tool_calls = message
                         .tool_calls
                         .iter()
@@ -158,6 +172,13 @@ impl ContextManager {
                     }
                 }
                 MessageRole::Error => {}
+            }
+        }
+
+        if current_mode == SessionMode::Plan && !was_plan_mode {
+            let reminder = prompts::plan_switch_reminder();
+            if let Some(first_msg) = messages.iter_mut().find(|m| m.role == MessageRole::User) {
+                first_msg.content = format!("{}\n\n{}", reminder, first_msg.content);
             }
         }
 
@@ -446,7 +467,7 @@ mod tests {
         ]);
 
         let manager = ContextManager::new();
-        let valid_request_messages = manager.build_request_messages(&valid_conversation);
+        let valid_request_messages = manager.build_request_messages(&valid_conversation, SessionMode::Build);
         let valid_roles: Vec<_> = valid_request_messages
             .iter()
             .map(|message| message.role.label())
@@ -455,7 +476,7 @@ mod tests {
 
         let mut orphan_manager = ContextManager::new();
         orphan_manager.retained_from = 2;
-        let orphan_request_messages = orphan_manager.build_request_messages(&valid_conversation);
+        let orphan_request_messages = orphan_manager.build_request_messages(&valid_conversation, SessionMode::Build);
         let orphan_roles: Vec<_> = orphan_request_messages
             .iter()
             .map(|message| message.role.label())
