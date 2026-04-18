@@ -269,6 +269,17 @@ impl McpManager {
             .collect()
     }
 
+    /// Returns all MCP tool definitions (unfiltered).
+    pub fn all_definitions(&self) -> Vec<ToolDefinition> {
+        let inner = self.inner.lock().unwrap();
+        inner
+            .servers
+            .values()
+            .filter(|state| matches!(state.status, McpConnectionStatus::Connected))
+            .flat_map(|state| state.tools.iter().cloned())
+            .collect()
+    }
+
     pub fn definition_for(&self, tool_name: &str) -> Option<ToolDefinition> {
         let inner = self.inner.lock().unwrap();
         inner

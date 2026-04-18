@@ -196,7 +196,7 @@ impl App {
 
             if !self.tools.can_execute(&tool_call.name, self.mode) {
                 let output = format!(
-                    "Tool '{}' is not available in {} mode",
+                    "Tool '{}' is disabled in {} mode",
                     tool_call.name,
                     self.mode.as_str()
                 );

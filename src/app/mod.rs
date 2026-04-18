@@ -289,7 +289,7 @@ impl App {
         let messages = self
             .context_manager
             .build_request_messages(&self.conversation, self.mode);
-        let tools = self.tools.available_definitions(self.mode);
+        let tools = self.tools.all_definitions();
         let tx = self.backend_tx.clone();
         let session_id = self.conversation.session_id;
 

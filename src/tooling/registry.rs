@@ -136,6 +136,14 @@ impl ToolRegistry {
         definitions
     }
 
+    /// Returns all tool definitions (unfiltered), used for LLM requests.
+    /// In plan mode, the LLM can see all tools, but execution will be blocked.
+    pub fn all_definitions(&self) -> Vec<ToolDefinition> {
+        let mut definitions = self.definitions.clone();
+        definitions.extend(self.mcp.all_definitions());
+        definitions
+    }
+
     pub fn max_output_bytes(&self) -> usize {
         self.max_output_bytes
     }
