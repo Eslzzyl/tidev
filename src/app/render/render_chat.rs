@@ -55,6 +55,7 @@ fn render_tool_call_with_result(
 
     if tool_result.is_none()
         && is_streaming
+        && !matches!(canonical_name, "read" | "list" | "glob" | "grep")
         && !tool_call_arguments_are_complete(&tool_call.arguments)
     {
         return render_tool_call_pending_lines(tool_call, body_width, palette, ctx.spinner);
