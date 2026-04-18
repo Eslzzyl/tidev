@@ -1,5 +1,6 @@
 use crate::{
     markdown_render::{WrapOptions, render_markdown_text_with_width_and_cwd, word_wrap_line},
+    prompts::SessionMode,
     session::{Message, MessageRole, ToolCall},
     theme::ThemePalette,
     tooling::{TodoItem, canonical_tool_name},
@@ -1077,6 +1078,7 @@ impl App {
         &self,
         message: &Message,
         body_width: usize,
+        is_round_end: bool,
     ) -> Vec<(Color, Vec<Line<'static>>)> {
         let palette = self.palette();
 
@@ -1111,7 +1113,7 @@ impl App {
             MessageRole::Assistant => {
                 let mut cards = Vec::new();
 
-                let body_lines = self.render_assistant_body_lines(message, body_width);
+                let body_lines = self.render_assistant_body_lines(message, body_width, is_round_end);
                 if !body_lines.is_empty() {
                     let mut lines_with_margin = Vec::new();
                     lines_with_margin.push(Line::from(""));
@@ -1157,6 +1159,7 @@ impl App {
         &self,
         message: &Message,
         body_width: usize,
+        is_round_end: bool,
     ) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
 
@@ -1192,6 +1195,47 @@ impl App {
             && message.tool_calls.is_empty()
         {
             lines.push(line_with_style("(empty)", self.palette().muted));
+        }
+
+        // Add model name, duration, end time, and mode at the end (only for round end)
+        if is_round_end && !message.streaming {
+            let model_display_name = message
+                .model_id
+                .as_ref()
+                .and_then(|model_id| {
+                    self.config
+                        .resolve_model_by_ids(&self.auth, &self.conversation.provider_id, model_id)
+                        .ok()
+                        .map(|model| model.display_name)
+                })
+                .unwrap_or_else(|| self.conversation.model_display_name.clone());
+
+            let duration = message.completed_at.map(|completed| {
+                let elapsed = completed - message.created_at;
+                let secs = elapsed.as_seconds_f64();
+                format!("{:.1}s", secs)
+            });
+
+            let end_time = message.completed_at.map(|completed| {
+                completed.format("%H:%M:%S").to_string()
+            });
+
+            let mode_label = match self.mode {
+                SessionMode::Plan => "Plan",
+                SessionMode::Build => "Build",
+            };
+
+            let suffix = match (duration, end_time) {
+                (Some(d), Some(t)) => format!("{model_display_name} · {d} · {t} · {mode_label}"),
+                (Some(d), None) => format!("{model_display_name} · {d} · {mode_label}"),
+                (None, Some(t)) => format!("{model_display_name} · {t} · {mode_label}"),
+                (None, None) => format!("{model_display_name} · {mode_label}"),
+            };
+            lines.push(line_with_style_right_aligned(
+                &suffix,
+                body_width,
+                self.palette().accent_soft,
+            ));
         }
 
         lines
