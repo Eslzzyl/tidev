@@ -1842,13 +1842,17 @@ fn render_reasoning_markdown_lines(
     let label_style = Style::default()
         .fg(palette.muted)
         .add_modifier(Modifier::DIM);
+    let label_italic_style = Style::default()
+        .fg(palette.muted)
+        .add_modifier(Modifier::DIM)
+        .add_modifier(Modifier::ITALIC);
     let body_style = Style::default()
         .fg(palette.muted)
         .add_modifier(Modifier::DIM);
 
     lines.push(Line::from(vec![
         Span::styled("┃ ", label_style),
-        Span::styled("Thinking:", body_style),
+        Span::styled("Thinking:", label_italic_style),
     ]));
 
     if reasoning.trim().is_empty() {
