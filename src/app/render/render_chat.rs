@@ -599,7 +599,7 @@ impl App {
         self.message_content_area = Some(content_area);
         self.message_viewport_lines = content_area.height as usize;
         let content_width = content_area.width.max(1) as usize;
-        let (mut text, mut total_lines, card_ranges, rendered_virtualized) =
+        let (mut text, mut total_lines, card_ranges, rendered_virtualized, virtualized_render_scroll) =
             self.messages_text(Some(content_width));
 
         // Add tool running state
@@ -673,7 +673,11 @@ impl App {
 
         self.message_scroll_offset = scroll;
         self.message_follow_tail = scroll >= max_scroll;
-        let render_scroll = if rendered_virtualized { 0 } else { scroll };
+        let render_scroll = if rendered_virtualized {
+            virtualized_render_scroll
+        } else {
+            scroll
+        };
 
         // Calculate screen positions for tool result cards
         self.tool_result_card_bounds.clear();
@@ -809,7 +813,7 @@ impl App {
     fn messages_text(
         &mut self,
         content_width: Option<usize>,
-    ) -> (Text<'static>, usize, Vec<ToolResultCardRange>, bool) {
+    ) -> (Text<'static>, usize, Vec<ToolResultCardRange>, bool, usize) {
         let started_at = Instant::now();
         let palette = self.palette();
         let width = content_width.unwrap_or(1).max(1);
@@ -848,7 +852,7 @@ impl App {
                 palette.panel,
             ));
             let total_lines = lines.len().max(1);
-            return (Text::from(lines), total_lines, card_ranges, false);
+            return (Text::from(lines), total_lines, card_ranges, false, 0);
         }
 
         // Check if there are streaming messages (need full render)
@@ -896,8 +900,26 @@ impl App {
             let header_line_count = header_lines.len();
             lines.extend(header_lines);
 
+            // Calculate render_scroll for virtualized rendering
+            // The visible blocks may start before 'scroll' (due to buffer zone),
+            // so we need to skip those lines when rendering.
+            // Also, if first block starts after 'scroll', we need padding.
+            let first_block_start = visible_blocks.first().map(|b| b.start_line).unwrap_or(0);
+            let (render_scroll, padding_lines) = if first_block_start < scroll {
+                (scroll - first_block_start, 0)
+            } else if first_block_start > scroll {
+                (0, first_block_start - scroll)
+            } else {
+                (0, 0)
+            };
+
+            // Add padding lines if first block starts after scroll position
+            for _ in 0..padding_lines {
+                lines.push(Line::from(""));
+            }
+
             // Render visible blocks
-            let mut current_line_offset = header_line_count;
+            let mut current_line_offset = header_line_count + padding_lines;
             for block in &visible_blocks {
                 let block_lines = self.render_message_block_to_lines(
                     messages,
@@ -929,7 +951,7 @@ impl App {
                 );
             }
 
-            return (Text::from(lines), total_lines, card_ranges, true);
+            return (Text::from(lines), total_lines, card_ranges, true, render_scroll);
         }
 
         // Full render (for streaming or small conversations)
@@ -1107,7 +1129,7 @@ impl App {
                 palette.panel,
             );
             let total_lines = fallback.len().max(1);
-            return (Text::from(fallback), total_lines, card_ranges, false);
+            return (Text::from(fallback), total_lines, card_ranges, false, 0);
         }
 
         let total_lines = lines.len().max(1);
@@ -1124,7 +1146,7 @@ impl App {
                 entries
             );
         }
-        (Text::from(lines), total_lines, card_ranges, false)
+        (Text::from(lines), total_lines, card_ranges, false, 0)
     }
 
     fn cached_render_message_cards(
@@ -2592,7 +2614,7 @@ mod tests {
         app.conversation
             .push(Message::new(MessageRole::Assistant, "old cached content"));
 
-        let (before, _, _, _) = app.messages_text(Some(80));
+        let (before, _, _, _, _) = app.messages_text(Some(80));
         let before_text = text_lines_to_string(&before.lines);
         assert!(before_text.contains("old cached content"));
 
@@ -2600,7 +2622,7 @@ mod tests {
         app.conversation.messages[0].content = "new refreshed content".to_string();
         app.invalidate_active_message_render_cache_for(message_id);
 
-        let (after, _, _, _) = app.messages_text(Some(80));
+        let (after, _, _, _, _) = app.messages_text(Some(80));
         let after_text = text_lines_to_string(&after.lines);
         assert!(after_text.contains("new refreshed content"));
     }
@@ -2621,7 +2643,7 @@ mod tests {
             ));
         }
 
-        let (text, total_lines, _, used_virtualization) = app.messages_text(Some(80));
+        let (text, total_lines, _, used_virtualization, _) = app.messages_text(Some(80));
 
         assert!(used_virtualization);
         assert!(total_lines > 0);

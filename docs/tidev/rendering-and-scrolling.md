@@ -15,6 +15,12 @@ TiDev 的聊天界面渲染由 `src/app/render/render_chat.rs` 负责。为了�
    - 渲染系统维护一个逻辑上的 `total_lines` 计数，它是所有预折行后的行数总和。
    - 滚动位置（`message_scroll_offset`）和视口底部（`max_scroll`）的准确性完全依赖于 `total_lines` 的计算值。
 
+3. **虚拟化渲染的滚动偏移计算**：
+   - 当消息数量超过阈值（当前为 20 条）时，系统启用虚拟化渲染以提升性能。
+   - 虚拟化渲染只渲染视口附近的可见块（包含上下各 5 行缓冲区）。
+   - **关键**：`render_scroll` 必须正确计算为 `scroll - first_block_start`，以跳过缓冲区中不需要显示的行。
+   - 如果第一个可见块的 `start_line` 大于 `scroll`，需要在渲染内容前添加空白行作为填充。
+
 ## 关键约束：UI 组件配置
 
 在 `src/app/render/render_chat.rs` 中使用 `ratatui::widgets::Paragraph` 渲染消息文本时，**严禁开启 `.wrap()` 属性**。
@@ -46,7 +52,8 @@ let paragraph = Paragraph::new(text)
 
 ## 故障排查
 
-如果再次发现消息无法滚动到底部：
+如果再次发现消息无法滚动到底部或滚动时有"死区"（滚动无响应的区域）：
 1. 检查 `src/app/render/render_chat.rs` 中是否意外引入了 `.wrap()`。
 2. 检查是否有新的 UI 元素（如 Tool Result 标题）生成的行宽超过了 `content_width` 但未被截断。
 3. 验证 `messages_text` 函数中对 `total_lines` 的累加逻辑是否覆盖了所有新增的卡片装饰行。
+4. **虚拟化渲染**：检查 `render_scroll` 的计算是否正确。在虚拟化渲染中，如果第一个可见块在 `scroll` 之前开始，需要正确计算 `render_scroll = scroll - first_block_start`；如果第一个可见块在 `scroll` 之后开始，需要添加空白行填充。
