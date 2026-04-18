@@ -57,14 +57,16 @@ pub fn execute_tool_call(
         Some("write") => {
             let args = serde_json::from_value::<WriteArgs>(arguments)
                 .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
-            write_file(workspace_root, &args.path, &args.content)?;
             let absolute_path = resolve_workspace_path(workspace_root, Path::new(&args.path))?;
+            let original_exists = absolute_path.exists();
+            write_file(workspace_root, &args.path, &args.content)?;
             Ok(file_change_output(
                 workspace_root,
                 &absolute_path,
                 "",
                 &args.content,
                 "Wrote",
+                original_exists,
             ))
         }
         Some("edit") => {
@@ -86,6 +88,7 @@ pub fn execute_tool_call(
             let file_path = extract_patch_file_path(&patch)
                 .with_context(|| "failed to determine file path from patch".to_string())?;
             let absolute_path = resolve_workspace_path(workspace_root, Path::new(&file_path))?;
+            let original_exists = absolute_path.exists();
             let old_content = read_existing_text(&absolute_path)?;
             let updated = apply_patch_contents(&old_content, &patch)?;
 
@@ -110,6 +113,7 @@ pub fn execute_tool_call(
                 &old_content,
                 &updated,
                 "Patched",
+                original_exists,
             ))
         }
         Some("list") => {
@@ -206,15 +210,22 @@ fn file_change_output(
     old_content: &str,
     new_content: &str,
     action: &str,
+    original_exists: bool,
 ) -> String {
     let relative = display_workspace_relative(workspace_root, absolute_path);
     let mut options = DiffOptions::new();
+    if !original_exists {
+        options.set_context_len(0);
+    }
     options.set_original_filename(format!("a/{relative}"));
     options.set_modified_filename(format!("b/{relative}"));
     let patch = options.create_patch(old_content, new_content);
 
     if patch.hunks().is_empty() {
         format!("{action} {relative} (no content changes)")
+    } else if !original_exists {
+        let patch_text = patch.to_string();
+        format!("new file mode 100644\n{patch_text}")
     } else {
         patch.to_string()
     }
@@ -368,6 +379,7 @@ pub(super) fn edit_file(
     replace_all: bool,
 ) -> Result<String> {
     let path = resolve_workspace_path(workspace_root, relative_path.as_ref())?;
+    let original_exists = path.exists();
     let old_contents =
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
 
@@ -381,6 +393,7 @@ pub(super) fn edit_file(
         &old_contents,
         &new_contents,
         "Edited",
+        original_exists,
     ))
 }
 

@@ -23,6 +23,7 @@ enum DiffLayout {
 
 #[derive(Clone)]
 struct DiffCell {
+    line_number: usize,
     text: String,
     kind: DiffLineKind,
 }
@@ -99,23 +100,40 @@ fn render_diff_section(
     width: usize,
     palette: ThemePalette,
 ) -> Option<Vec<Line<'static>>> {
-    let patch = Patch::from_str(section).ok()?;
+    let stripped_section = strip_render_only_diff_metadata(section);
+    let patch = Patch::from_str(&stripped_section).ok()?;
     let rows = collect_rows(&patch);
     if rows.is_empty() {
         return None;
     }
 
     let syntax_path = patch.modified().or_else(|| patch.original()).map(Path::new);
-    let layout = if width >= WIDE_LAYOUT_THRESHOLD {
+    let is_new_file = section
+        .lines()
+        .any(|line| line.trim() == "new file mode 100644");
+    let layout = if is_new_file {
+        DiffLayout::Narrow
+    } else if width >= WIDE_LAYOUT_THRESHOLD {
         DiffLayout::Wide
     } else {
         DiffLayout::Narrow
     };
+    let line_number_width = line_number_width_for_rows(&rows);
 
     Some(match layout {
-        DiffLayout::Wide => render_wide_rows(&rows, width, syntax_path, palette),
-        DiffLayout::Narrow => render_narrow_rows(&rows, width, syntax_path, palette),
+        DiffLayout::Wide => render_wide_rows(&rows, width, line_number_width, syntax_path, palette),
+        DiffLayout::Narrow => {
+            render_narrow_rows(&rows, width, line_number_width, syntax_path, palette)
+        }
     })
+}
+
+fn strip_render_only_diff_metadata(section: &str) -> String {
+    section
+        .lines()
+        .filter(|line| line.trim() != "new file mode 100644")
+        .map(|line| format!("{line}\n"))
+        .collect()
 }
 
 fn collect_rows(patch: &Patch<'_, str>) -> Vec<DiffRow> {
@@ -128,15 +146,19 @@ fn collect_rows(patch: &Patch<'_, str>) -> Vec<DiffRow> {
 
         let lines = hunk.lines();
         let mut cursor = 0usize;
+        let mut old_line_number = hunk.old_range().start();
+        let mut new_line_number = hunk.new_range().start();
 
         while cursor < lines.len() {
             match lines[cursor] {
                 DiffLine::Context(text) => {
                     rows.push(DiffRow {
                         kind: RowKind::Context,
-                        left: Some(DiffCell::new(text, DiffLineKind::Context)),
-                        right: Some(DiffCell::new(text, DiffLineKind::Context)),
+                        left: Some(DiffCell::new(old_line_number, text, DiffLineKind::Context)),
+                        right: Some(DiffCell::new(new_line_number, text, DiffLineKind::Context)),
                     });
+                    old_line_number += 1;
+                    new_line_number += 1;
                     cursor += 1;
                 }
                 DiffLine::Delete(_) => {
@@ -146,7 +168,8 @@ fn collect_rows(patch: &Patch<'_, str>) -> Vec<DiffRow> {
                     while cursor < lines.len() {
                         match lines[cursor] {
                             DiffLine::Delete(text) => {
-                                removed.push(text.to_string());
+                                removed.push((old_line_number, text.to_string()));
+                                old_line_number += 1;
                                 cursor += 1;
                             }
                             _ => break,
@@ -156,7 +179,8 @@ fn collect_rows(patch: &Patch<'_, str>) -> Vec<DiffRow> {
                     while cursor < lines.len() {
                         match lines[cursor] {
                             DiffLine::Insert(text) => {
-                                added.push(text.to_string());
+                                added.push((new_line_number, text.to_string()));
+                                new_line_number += 1;
                                 cursor += 1;
                             }
                             _ => break,
@@ -165,8 +189,14 @@ fn collect_rows(patch: &Patch<'_, str>) -> Vec<DiffRow> {
 
                     let count = removed.len().max(added.len());
                     for offset in 0..count {
-                        let left = removed.get(offset).cloned().map(DiffCell::delete);
-                        let right = added.get(offset).cloned().map(DiffCell::insert);
+                        let left = removed
+                            .get(offset)
+                            .cloned()
+                            .map(|(line_number, text)| DiffCell::delete(line_number, text));
+                        let right = added
+                            .get(offset)
+                            .cloned()
+                            .map(|(line_number, text)| DiffCell::insert(line_number, text));
                         let kind = match (left.as_ref(), right.as_ref()) {
                             (Some(_), Some(_)) => RowKind::Modified,
                             (Some(_), None) => RowKind::Removed,
@@ -180,8 +210,9 @@ fn collect_rows(patch: &Patch<'_, str>) -> Vec<DiffRow> {
                     rows.push(DiffRow {
                         kind: RowKind::Added,
                         left: None,
-                        right: Some(DiffCell::insert(text.to_string())),
+                        right: Some(DiffCell::insert(new_line_number, text.to_string())),
                     });
+                    new_line_number += 1;
                     cursor += 1;
                 }
             }
@@ -191,9 +222,20 @@ fn collect_rows(patch: &Patch<'_, str>) -> Vec<DiffRow> {
     rows
 }
 
+fn line_number_width_for_rows(rows: &[DiffRow]) -> usize {
+    let max_line_number = rows.iter().fold(0usize, |max_line_number, row| {
+        let left = row.left.as_ref().map(|cell| cell.line_number).unwrap_or(0);
+        let right = row.right.as_ref().map(|cell| cell.line_number).unwrap_or(0);
+        max_line_number.max(left.max(right))
+    });
+
+    line_number_width(max_line_number)
+}
+
 fn render_wide_rows(
     rows: &[DiffRow],
     width: usize,
+    line_number_width: usize,
     syntax_path: Option<&Path>,
     palette: ThemePalette,
 ) -> Vec<Line<'static>> {
@@ -212,12 +254,22 @@ fn render_wide_rows(
                 let left = row
                     .left
                     .as_ref()
-                    .map(|cell| render_cell_lines(cell, left_width, syntax_path, palette))
+                    .map(|cell| {
+                        render_cell_lines(cell, left_width, line_number_width, syntax_path, palette)
+                    })
                     .unwrap_or_else(|| vec![blank_cell_line(left_width, left_bg.flatten())]);
                 let right = row
                     .right
                     .as_ref()
-                    .map(|cell| render_cell_lines(cell, right_width, syntax_path, palette))
+                    .map(|cell| {
+                        render_cell_lines(
+                            cell,
+                            right_width,
+                            line_number_width,
+                            syntax_path,
+                            palette,
+                        )
+                    })
                     .unwrap_or_else(|| vec![blank_cell_line(right_width, right_bg.flatten())]);
                 out.extend(merge_columns(
                     left,
@@ -231,7 +283,9 @@ fn render_wide_rows(
                 let left = row
                     .left
                     .as_ref()
-                    .map(|cell| render_cell_lines(cell, left_width, syntax_path, palette))
+                    .map(|cell| {
+                        render_cell_lines(cell, left_width, line_number_width, syntax_path, palette)
+                    })
                     .unwrap_or_else(|| vec![blank_cell_line(left_width, left_bg.flatten())]);
                 let right = vec![blank_cell_line(right_width, right_bg.flatten())];
                 out.extend(merge_columns(
@@ -247,7 +301,15 @@ fn render_wide_rows(
                 let right = row
                     .right
                     .as_ref()
-                    .map(|cell| render_cell_lines(cell, right_width, syntax_path, palette))
+                    .map(|cell| {
+                        render_cell_lines(
+                            cell,
+                            right_width,
+                            line_number_width,
+                            syntax_path,
+                            palette,
+                        )
+                    })
                     .unwrap_or_else(|| vec![blank_cell_line(right_width, right_bg.flatten())]);
                 out.extend(merge_columns(
                     left,
@@ -261,12 +323,22 @@ fn render_wide_rows(
                 let left = row
                     .left
                     .as_ref()
-                    .map(|cell| render_cell_lines(cell, left_width, syntax_path, palette))
+                    .map(|cell| {
+                        render_cell_lines(cell, left_width, line_number_width, syntax_path, palette)
+                    })
                     .unwrap_or_else(|| vec![blank_cell_line(left_width, left_bg.flatten())]);
                 let right = row
                     .right
                     .as_ref()
-                    .map(|cell| render_cell_lines(cell, right_width, syntax_path, palette))
+                    .map(|cell| {
+                        render_cell_lines(
+                            cell,
+                            right_width,
+                            line_number_width,
+                            syntax_path,
+                            palette,
+                        )
+                    })
                     .unwrap_or_else(|| vec![blank_cell_line(right_width, right_bg.flatten())]);
                 out.extend(merge_columns(
                     left,
@@ -285,6 +357,7 @@ fn render_wide_rows(
 fn render_narrow_rows(
     rows: &[DiffRow],
     width: usize,
+    line_number_width: usize,
     syntax_path: Option<&Path>,
     palette: ThemePalette,
 ) -> Vec<Line<'static>> {
@@ -295,25 +368,55 @@ fn render_narrow_rows(
             RowKind::Blank => out.push(Line::from(String::new())),
             RowKind::Context => {
                 if let Some(cell) = row.left.as_ref() {
-                    out.extend(render_cell_lines(cell, width, syntax_path, palette));
+                    out.extend(render_cell_lines(
+                        cell,
+                        width,
+                        line_number_width,
+                        syntax_path,
+                        palette,
+                    ));
                 }
             }
             RowKind::Removed => {
                 if let Some(cell) = row.left.as_ref() {
-                    out.extend(render_cell_lines(cell, width, syntax_path, palette));
+                    out.extend(render_cell_lines(
+                        cell,
+                        width,
+                        line_number_width,
+                        syntax_path,
+                        palette,
+                    ));
                 }
             }
             RowKind::Added => {
                 if let Some(cell) = row.right.as_ref() {
-                    out.extend(render_cell_lines(cell, width, syntax_path, palette));
+                    out.extend(render_cell_lines(
+                        cell,
+                        width,
+                        line_number_width,
+                        syntax_path,
+                        palette,
+                    ));
                 }
             }
             RowKind::Modified => {
                 if let Some(cell) = row.left.as_ref() {
-                    out.extend(render_cell_lines(cell, width, syntax_path, palette));
+                    out.extend(render_cell_lines(
+                        cell,
+                        width,
+                        line_number_width,
+                        syntax_path,
+                        palette,
+                    ));
                 }
                 if let Some(cell) = row.right.as_ref() {
-                    out.extend(render_cell_lines(cell, width, syntax_path, palette));
+                    out.extend(render_cell_lines(
+                        cell,
+                        width,
+                        line_number_width,
+                        syntax_path,
+                        palette,
+                    ));
                 }
             }
         }
@@ -325,13 +428,14 @@ fn render_narrow_rows(
 fn render_cell_lines(
     cell: &DiffCell,
     width: usize,
+    line_number_width: usize,
     syntax_path: Option<&Path>,
     palette: ThemePalette,
 ) -> Vec<Line<'static>> {
     let width = width.max(2);
     let content = render_cell_content(cell, syntax_path, palette);
-    let initial_indent = cell_prefix(cell.kind, palette);
-    let subsequent_indent = blank_prefix();
+    let initial_indent = cell_prefix(cell.line_number, cell.kind, line_number_width, palette);
+    let subsequent_indent = blank_prefix(line_number_width);
     let bg = cell_bg(cell.kind, palette);
 
     let wrapped = adaptive_wrap_lines(
@@ -409,21 +513,33 @@ fn merge_columns(
     out
 }
 
-fn cell_prefix(cell: DiffLineKind, palette: ThemePalette) -> Line<'static> {
+fn cell_prefix(
+    line_number: usize,
+    cell: DiffLineKind,
+    line_number_width: usize,
+    palette: ThemePalette,
+) -> Line<'static> {
     let marker = match cell {
         DiffLineKind::Context => " ",
         DiffLineKind::Delete => "-",
         DiffLineKind::Insert => "+",
     };
 
+    let line_number = format!("{:>width$}", line_number, width = line_number_width.max(1));
+
     Line::from(vec![
+        Span::styled(line_number, Style::default().fg(palette.muted)),
+        Span::styled(" ", Style::default()),
         Span::styled(marker, marker_style(cell, palette)),
         Span::styled(" ", Style::default()),
     ])
 }
 
-fn blank_prefix() -> Line<'static> {
-    Line::from(vec![Span::styled("  ", Style::default())])
+fn blank_prefix(line_number_width: usize) -> Line<'static> {
+    Line::from(vec![Span::styled(
+        " ".repeat(line_number_width.max(1) + 3),
+        Style::default(),
+    )])
 }
 
 fn marker_style(kind: DiffLineKind, palette: ThemePalette) -> Style {
@@ -498,23 +614,34 @@ fn line_display_width(line: &Line<'static>) -> usize {
         .sum()
 }
 
+fn line_number_width(max_line_number: usize) -> usize {
+    if max_line_number == 0 {
+        1
+    } else {
+        max_line_number.to_string().len()
+    }
+}
+
 impl DiffCell {
-    fn new(text: &str, kind: DiffLineKind) -> Self {
+    fn new(line_number: usize, text: &str, kind: DiffLineKind) -> Self {
         Self {
+            line_number,
             text: text.to_string(),
             kind,
         }
     }
 
-    fn delete(text: String) -> Self {
+    fn delete(line_number: usize, text: String) -> Self {
         Self {
+            line_number,
             text,
             kind: DiffLineKind::Delete,
         }
     }
 
-    fn insert(text: String) -> Self {
+    fn insert(line_number: usize, text: String) -> Self {
         Self {
+            line_number,
             text,
             kind: DiffLineKind::Insert,
         }
@@ -571,6 +698,8 @@ index 1111111..2222222 100644
         assert!(!rendered.iter().any(|line| line.contains("--- a/foo.rs")));
         assert!(!rendered.iter().any(|line| line.contains("+++ b/foo.rs")));
         assert!(!rendered.iter().any(|line| line.contains("@@ -1,3 +1,3 @@")));
+        assert!(rendered.iter().any(|line| line.contains("2 - old")));
+        assert!(rendered.iter().any(|line| line.contains("2 + new")));
         assert!(rendered.iter().any(|line| line.contains("fn main() {")));
         assert!(rendered.iter().any(|line| line.contains("old")));
         assert!(rendered.iter().any(|line| line.contains("new")));
@@ -588,8 +717,43 @@ index 1111111..2222222 100644
         let lines = render_unified_diff_text(diff, 60, palette()).expect("diff should render");
         let rendered = flatten_lines(&lines);
 
-        assert!(rendered.iter().any(|line| line.contains("- fn main() {}")));
-        assert!(rendered.iter().any(|line| line.contains("+ fn main() {}")));
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("1 - fn main() {}"))
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("1 + fn main() {}"))
+        );
+    }
+
+    #[test]
+    fn uses_single_column_for_new_file_even_on_wide_width() {
+        let diff = r#"diff --git a/foo.rs b/foo.rs
+new file mode 100644
+--- a/foo.rs
++++ b/foo.rs
+@@ -0,0 +1,2 @@
++fn main() {}
++println!("hello");
+"#;
+
+        let lines = render_unified_diff_text(diff, 120, palette()).expect("diff should render");
+        let rendered = flatten_lines(&lines);
+
+        assert!(!rendered.iter().any(|line| line.contains("│")));
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("1 + fn main() {}"))
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("2 + println!(\"hello\");"))
+        );
     }
 
     #[test]
