@@ -29,7 +29,6 @@ static HIGHLIGHT_CACHE: OnceLock<RwLock<LruCache<HighlightCacheKey, Vec<Line<'st
     OnceLock::new();
 static HIGHLIGHT_CACHE_GEN: AtomicU64 = AtomicU64::new(0);
 
-static SYNTAX_SET_LOADING: AtomicBool = AtomicBool::new(false);
 static THEME_SET_LOADING: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -40,16 +39,6 @@ struct HighlightCacheKey {
 }
 
 pub fn spawn_background_load() {
-    if SYNTAX_SET_LOADING
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_ok()
-    {
-        thread::spawn(|| {
-            let set = SyntaxSet::load_defaults_newlines();
-            let _ = SYNTAX_SET.set(set);
-        });
-    }
-
     if THEME_SET_LOADING
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .is_ok()
@@ -70,7 +59,7 @@ fn highlight_cache() -> &'static RwLock<LruCache<HighlightCacheKey, Vec<Line<'st
 }
 
 fn syntax_set() -> &'static SyntaxSet {
-    SYNTAX_SET.get_or_init(SyntaxSet::load_defaults_newlines)
+    SYNTAX_SET.get_or_init(two_face::syntax::extra_newlines)
 }
 
 fn theme_set() -> &'static ThemeSet {
@@ -345,5 +334,32 @@ mod tests {
         let large_code = "x".repeat(MAX_HIGHLIGHT_BYTES + 1);
         let lines = highlight_code_to_lines(&large_code, "rust");
         assert!(lines.len() > 0);
+    }
+
+    #[test]
+    fn highlights_typescript_and_jsx() {
+        let ts_code = "const x: number = 42;";
+        let tsx_code = "const elem = <div>Hello</div>;";
+        let jsx_code = "const elem = <span>World</span>;";
+
+        for (code, lang) in [
+            (ts_code, "typescript"),
+            (ts_code, "ts"),
+            (tsx_code, "tsx"),
+            (jsx_code, "jsx"),
+        ] {
+            let lines = highlight_code_to_lines(code, lang);
+            let rendered = lines
+                .iter()
+                .map(|line| {
+                    line.spans
+                        .iter()
+                        .map(|span| span.content.as_ref())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert_eq!(rendered, code, "content should be preserved for lang={}", lang);
+        }
     }
 }
