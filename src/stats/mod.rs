@@ -1,6 +1,6 @@
 use anyhow::Result;
-use chrono::{DateTime, Datelike, Duration, Timelike, Utc};
-use rusqlite::{params, Connection};
+use chrono::{DateTime, Datelike, Duration, Local, Timelike, Utc};
+use rusqlite::{Connection, params};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Granularity {
@@ -32,59 +32,73 @@ impl Granularity {
 
     pub fn time_bucket(&self, dt: &DateTime<Utc>) -> String {
         match self {
-            Self::Hour => format!(
-                "{:04}-{:02}-{:02}T{:02}:00",
-                dt.year(),
-                dt.month(),
-                dt.day(),
-                dt.hour()
-            ),
-            Self::Day => format!("{:04}-{:02}-{:02}", dt.year(), dt.month(), dt.day()),
-            Self::Week => {
-                let iso_week = dt.iso_week();
-                format!("{:04}-W{:02}", iso_week.year(), iso_week.week())
+            Self::Hour => {
+                let d = dt.with_second(0).unwrap().with_nanosecond(0).unwrap();
+                d.to_rfc3339()
             }
-            Self::Month => format!("{:04}-{:02}", dt.year(), dt.month()),
+            Self::Day => {
+                let d = dt
+                    .with_hour(0)
+                    .unwrap()
+                    .with_minute(0)
+                    .unwrap()
+                    .with_second(0)
+                    .unwrap()
+                    .with_nanosecond(0)
+                    .unwrap();
+                d.to_rfc3339()
+            }
+            Self::Week => {
+                let weekday = dt.weekday().num_days_from_monday();
+                let d = (*dt - Duration::days(weekday as i64))
+                    .with_hour(0)
+                    .unwrap()
+                    .with_minute(0)
+                    .unwrap()
+                    .with_second(0)
+                    .unwrap()
+                    .with_nanosecond(0)
+                    .unwrap();
+                d.to_rfc3339()
+            }
+            Self::Month => {
+                let d = dt
+                    .with_day(1)
+                    .unwrap()
+                    .with_hour(0)
+                    .unwrap()
+                    .with_minute(0)
+                    .unwrap()
+                    .with_second(0)
+                    .unwrap()
+                    .with_nanosecond(0)
+                    .unwrap();
+                d.to_rfc3339()
+            }
         }
     }
 
     pub fn bucket_label(&self, bucket: &str) -> String {
+        let dt = match DateTime::parse_from_rfc3339(bucket) {
+            Ok(dt) => dt.with_timezone(&Local),
+            Err(_) => return bucket.to_string(),
+        };
+
         match self {
-            Self::Hour => {
-                if let Some(hour_part) = bucket.split('T').nth(1) {
-                    format!("{}:00", hour_part.trim_end_matches(":00"))
-                } else {
-                    bucket.to_string()
-                }
-            }
-            Self::Day => {
-                if let Some(day_part) = bucket.split('-').nth(2) {
-                    day_part.to_string()
-                } else {
-                    bucket.to_string()
-                }
-            }
-            Self::Week => {
-                if let Some(week_part) = bucket.split('W').nth(1) {
-                    format!("W{}", week_part)
-                } else {
-                    bucket.to_string()
-                }
-            }
+            Self::Hour => format!("{:02}:00", dt.hour()),
+            Self::Day => format!("{:02}", dt.day()),
+            Self::Week => format!("W{:02}", dt.iso_week().week()),
             Self::Month => {
-                let parts: Vec<&str> = bucket.split('-').collect();
-                if parts.len() >= 2 {
-                    let month_names = [
-                        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-                    ];
-                    if let Ok(month) = parts[1].parse::<usize>()
-                        && (1..=12).contains(&month)
-                    {
-                        return month_names[month - 1].to_string();
-                    }
+                let month_names = [
+                    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
+                    "Dec",
+                ];
+                let month = dt.month() as usize;
+                if (1..=12).contains(&month) {
+                    month_names[month - 1].to_string()
+                } else {
+                    bucket.to_string()
                 }
-                bucket.to_string()
             }
         }
     }

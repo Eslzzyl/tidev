@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::{
-    stats::{Granularity, TimeRangeStats, UsageSummary},
+    stats::{Granularity, TimeRangeStats},
     theme::ThemePalette,
 };
 
@@ -112,14 +112,8 @@ impl App {
                     StatsChart::TokenUsage => {
                         self.render_token_usage_chart(frame, area, stats, palette);
                     }
-                    StatsChart::InputOutput => {
-                        self.render_input_output_chart(frame, area, stats, palette);
-                    }
                     StatsChart::ModelUsage => {
                         self.render_model_usage_chart(frame, area, stats, palette);
-                    }
-                    StatsChart::CacheHitRate => {
-                        self.render_cache_stats(frame, area, stats, palette);
                     }
                 }
             } else {
@@ -153,62 +147,21 @@ impl App {
         let layout =
             Layout::vertical([Constraint::Percentage(60), Constraint::Percentage(40)]).split(area);
 
-        let bars: Vec<Bar> = stats
-            .entries
-            .iter()
-            .map(|entry| {
-                let label = stats.granularity.bucket_label(&entry.time_bucket);
-                Bar::with_label(label, entry.total_tokens as u64)
-                    .style(Color::Cyan)
-                    .value_style(Style::default().fg(Color::White))
-            })
-            .collect();
-
-        let chart = BarChart::vertical(bars)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(palette.border_idle()))
-                    .title(" Total Token Usage ")
-                    .style(Style::default().bg(palette.panel)),
-            )
-            .bar_width(6)
-            .bar_gap(1);
-
-        frame.render_widget(chart, layout[0]);
-
-        self.render_summary_block(frame, layout[1], &stats.summary, palette);
-    }
-
-    fn render_input_output_chart(
-        &self,
-        frame: &mut Frame<'_>,
-        area: Rect,
-        stats: &TimeRangeStats,
-        palette: ThemePalette,
-    ) {
-        if stats.entries.is_empty() {
-            let paragraph = Paragraph::new(Line::from(Span::styled(
-                "No data available for this time range",
-                Style::default().bg(palette.panel).fg(palette.muted),
-            )))
-            .style(Style::default().bg(palette.panel));
-            frame.render_widget(paragraph, area);
-            return;
-        }
-
-        let layout =
-            Layout::vertical([Constraint::Percentage(60), Constraint::Percentage(40)]).split(area);
-
         let mut bars = Vec::new();
         for entry in &stats.entries {
             let label = stats.granularity.bucket_label(&entry.time_bucket);
+            // Input
             bars.push(
-                Bar::with_label(format!("I-{}", label), entry.input_tokens as u64)
+                Bar::default()
+                    .value(entry.input_tokens as u64)
                     .style(Color::Blue),
             );
+            // Cache Read (shows label in middle bar for better centering)
+            bars.push(Bar::with_label(label, entry.cache_read_tokens as u64).style(Color::Cyan));
+            // Output
             bars.push(
-                Bar::with_label(format!("O-{}", label), entry.output_tokens as u64)
+                Bar::default()
+                    .value(entry.output_tokens as u64)
                     .style(Color::Green),
             );
         }
@@ -218,18 +171,36 @@ impl App {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(palette.border_idle()))
-                    .title(" Input vs Output Tokens (Blue=Input, Green=Output) ")
+                    .title(" Token Components (Blue:Input, Cyan:Cached, Green:Output) ")
                     .style(Style::default().bg(palette.panel)),
             )
-            .bar_width(4)
-            .bar_gap(0);
+            .bar_width(3)
+            .bar_gap(0)
+            .group_gap(1);
 
         frame.render_widget(chart, layout[0]);
 
         let mut lines = vec![Line::from("")];
+
+        // Total
         lines.push(Line::from(vec![
             Span::styled(
-                "Input Tokens:  ",
+                "Total Tokens:      ",
+                Style::default().bg(palette.panel).fg(palette.muted),
+            ),
+            Span::styled(
+                format_number(stats.summary.total_tokens),
+                Style::default()
+                    .bg(palette.panel)
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+
+        // Input
+        lines.push(Line::from(vec![
+            Span::styled(
+                "Input Tokens:      ",
                 Style::default().bg(palette.panel).fg(palette.muted),
             ),
             Span::styled(
@@ -240,9 +211,30 @@ impl App {
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
+
+        // Cache
         lines.push(Line::from(vec![
             Span::styled(
-                "Output Tokens: ",
+                "Cached Tokens:     ",
+                Style::default().bg(palette.panel).fg(palette.muted),
+            ),
+            Span::styled(
+                format_number(stats.summary.total_cache_read_tokens),
+                Style::default()
+                    .bg(palette.panel)
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" ({:.1}%)", stats.summary.cache_hit_rate()),
+                Style::default().bg(palette.panel).fg(palette.muted),
+            ),
+        ]));
+
+        // Output
+        lines.push(Line::from(vec![
+            Span::styled(
+                "Output Tokens:     ",
                 Style::default().bg(palette.panel).fg(palette.muted),
             ),
             Span::styled(
@@ -253,7 +245,21 @@ impl App {
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
-        lines.push(Line::from(""));
+
+        // Requests
+        lines.push(Line::from(vec![
+            Span::styled(
+                "Total Requests:    ",
+                Style::default().bg(palette.panel).fg(palette.muted),
+            ),
+            Span::styled(
+                format_number(stats.summary.total_requests),
+                Style::default()
+                    .bg(palette.panel)
+                    .fg(palette.text)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
 
         let paragraph = Paragraph::new(lines).style(Style::default().bg(palette.panel));
         frame.render_widget(paragraph, layout[1]);
@@ -335,131 +341,11 @@ impl App {
         frame.render_widget(paragraph, layout[1]);
     }
 
-    fn render_cache_stats(
-        &self,
-        frame: &mut Frame<'_>,
-        area: Rect,
-        stats: &TimeRangeStats,
-        palette: ThemePalette,
-    ) {
-        let layout =
-            Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).split(area);
-
-        let mut lines = vec![Line::from("")];
-        lines.push(Line::from(Span::styled(
-            "Cache Statistics",
-            Style::default()
-                .bg(palette.panel)
-                .fg(palette.accent)
-                .add_modifier(Modifier::BOLD),
-        )));
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled(
-                "Cache Read Tokens:  ",
-                Style::default().bg(palette.panel).fg(palette.muted),
-            ),
-            Span::styled(
-                format_number(stats.summary.total_cache_read_tokens),
-                Style::default()
-                    .bg(palette.panel)
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled(
-                "Cache Write Tokens: ",
-                Style::default().bg(palette.panel).fg(palette.muted),
-            ),
-            Span::styled(
-                format_number(stats.summary.total_cache_write_tokens),
-                Style::default()
-                    .bg(palette.panel)
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled(
-                "Cache Hit Rate: ",
-                Style::default().bg(palette.panel).fg(palette.muted),
-            ),
-            Span::styled(
-                format!("{:.1}%", stats.summary.cache_hit_rate()),
-                Style::default()
-                    .bg(palette.panel)
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
-        lines.push(Line::from(""));
-
-        let paragraph = Paragraph::new(lines).style(Style::default().bg(palette.panel));
-        frame.render_widget(paragraph, layout[0]);
-
-        self.render_summary_block(frame, layout[1], &stats.summary, palette);
-    }
-
-    fn render_summary_block(
-        &self,
-        frame: &mut Frame<'_>,
-        area: Rect,
-        summary: &UsageSummary,
-        palette: ThemePalette,
-    ) {
-        let mut lines = vec![Line::from("")];
-        lines.push(Line::from(Span::styled(
-            "Summary",
-            Style::default()
-                .bg(palette.panel)
-                .fg(palette.accent)
-                .add_modifier(Modifier::BOLD),
-        )));
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled(
-                "Total Tokens:   ",
-                Style::default().bg(palette.panel).fg(palette.muted),
-            ),
-            Span::styled(
-                format_number(summary.total_tokens),
-                Style::default()
-                    .bg(palette.panel)
-                    .fg(palette.text)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled(
-                "Total Requests: ",
-                Style::default().bg(palette.panel).fg(palette.muted),
-            ),
-            Span::styled(
-                format_number(summary.total_requests),
-                Style::default()
-                    .bg(palette.panel)
-                    .fg(palette.text)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
-        lines.push(Line::from(""));
-
-        let paragraph = Paragraph::new(lines).style(Style::default().bg(palette.panel));
-        frame.render_widget(paragraph, area);
-    }
-
     fn render_stats_footer(&self, frame: &mut Frame<'_>, area: Rect, palette: ThemePalette) {
         let stats_panel = self.stats_panel.as_ref();
 
-        let chart_labels = ["Tokens", "I/O", "Models", "Cache"];
-        let charts = [
-            StatsChart::TokenUsage,
-            StatsChart::InputOutput,
-            StatsChart::ModelUsage,
-            StatsChart::CacheHitRate,
-        ];
+        let chart_labels = ["Tokens", "Models"];
+        let charts = [StatsChart::TokenUsage, StatsChart::ModelUsage];
 
         let mut spans = vec![Span::styled(
             "Chart: ",

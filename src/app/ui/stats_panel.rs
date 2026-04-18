@@ -4,9 +4,7 @@ use chrono::{DateTime, Utc};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StatsChart {
     TokenUsage,
-    InputOutput,
     ModelUsage,
-    CacheHitRate,
 }
 
 #[derive(Clone, Debug)]
@@ -23,7 +21,7 @@ impl Default for StatsPanelState {
     fn default() -> Self {
         Self {
             active: false,
-            granularity: Granularity::Day,
+            granularity: Granularity::Hour,
             selected_chart: StatsChart::TokenUsage,
             cached_stats: None,
             last_refresh: None,
@@ -63,19 +61,15 @@ impl StatsPanelState {
 
     pub fn next_chart(&mut self) {
         self.selected_chart = match self.selected_chart {
-            StatsChart::TokenUsage => StatsChart::InputOutput,
-            StatsChart::InputOutput => StatsChart::ModelUsage,
-            StatsChart::ModelUsage => StatsChart::CacheHitRate,
-            StatsChart::CacheHitRate => StatsChart::TokenUsage,
+            StatsChart::TokenUsage => StatsChart::ModelUsage,
+            StatsChart::ModelUsage => StatsChart::TokenUsage,
         };
     }
 
     pub fn prev_chart(&mut self) {
         self.selected_chart = match self.selected_chart {
-            StatsChart::TokenUsage => StatsChart::CacheHitRate,
-            StatsChart::InputOutput => StatsChart::TokenUsage,
-            StatsChart::ModelUsage => StatsChart::InputOutput,
-            StatsChart::CacheHitRate => StatsChart::ModelUsage,
+            StatsChart::TokenUsage => StatsChart::ModelUsage,
+            StatsChart::ModelUsage => StatsChart::TokenUsage,
         };
     }
 
