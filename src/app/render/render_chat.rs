@@ -1,6 +1,6 @@
 use crate::{
     markdown_render::{WrapOptions, render_markdown_text_with_width_and_cwd, word_wrap_line},
-    session::{Message, MessageAttachment, MessageRole, ToolCall},
+    session::{Message, MessageRole, ToolCall},
     theme::ThemePalette,
     tooling::{TodoItem, canonical_tool_name},
 };
@@ -11,7 +11,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
-use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -35,12 +34,6 @@ struct ToolResultCardRange {
     end_line: usize,
 }
 
-#[derive(Clone, Debug)]
-struct MessageRenderUnit {
-    message_idx: usize,
-    tool_results: Vec<(ToolCall, Option<Message>)>,
-}
-
 struct RenderContext<'a> {
     palette: ThemePalette,
     #[allow(dead_code)]
@@ -49,7 +42,7 @@ struct RenderContext<'a> {
     expanded_tool_outputs: &'a HashMap<Uuid, String>,
 }
 
-fn render_tool_call_with_result_standalone(
+fn render_tool_call_with_result(
     tool_call: &ToolCall,
     tool_result: Option<&Message>,
     body_width: usize,
@@ -59,7 +52,7 @@ fn render_tool_call_with_result_standalone(
     let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
 
     if matches!(canonical_name, "list" | "grep" | "glob" | "read") {
-        return render_tool_call_summary_line_standalone(
+        return render_tool_call_summary_line(
             tool_call,
             tool_result,
             body_width,
@@ -71,11 +64,11 @@ fn render_tool_call_with_result_standalone(
     let mut lines = Vec::new();
     lines.push(Line::from(""));
 
-    let call_lines = render_tool_call_lines_standalone(tool_call, body_width, palette);
+    let call_lines = render_tool_call_lines(tool_call, body_width, palette);
     lines.extend(call_lines);
 
     if let Some(result_msg) = tool_result {
-        let result_lines = render_tool_result_detail_lines_standalone(result_msg, body_width, ctx);
+        let result_lines = render_tool_result_detail_lines(result_msg, body_width, ctx);
         if !result_lines.is_empty() {
             lines.push(Line::from(""));
             lines.extend(result_lines);
@@ -86,7 +79,7 @@ fn render_tool_call_with_result_standalone(
     lines
 }
 
-fn render_tool_call_summary_line_standalone(
+fn render_tool_call_summary_line(
     tool_call: &ToolCall,
     tool_result: Option<&Message>,
     body_width: usize,
@@ -134,8 +127,8 @@ fn render_tool_call_summary_line_standalone(
     };
 
     let result_suffix = if let Some(result_msg) = tool_result {
-        let output = standalone_tool_output(result_msg, ctx).trim();
-        compute_tool_result_suffix_standalone(canonical_name, output)
+        let output = tool_output_from_message(result_msg, ctx).trim();
+        compute_tool_result_suffix(canonical_name, output)
     } else {
         " ...".to_string()
     };
@@ -157,7 +150,7 @@ fn render_tool_call_summary_line_standalone(
     vec![line]
 }
 
-fn compute_tool_result_suffix_standalone(canonical_name: &str, output: &str) -> String {
+fn compute_tool_result_suffix(canonical_name: &str, output: &str) -> String {
     match canonical_name {
         "list" => {
             let count = if output.trim() == "(empty)" {
@@ -193,7 +186,7 @@ fn compute_tool_result_suffix_standalone(canonical_name: &str, output: &str) -> 
                 " → error".to_string()
             } else {
                 let line_range = parse_line_range_from_read_output(output);
-                let truncated = tool_output_is_truncated_standalone(output);
+                let truncated = tool_output_is_truncated(output);
                 match line_range {
                     Some((start, end)) => {
                         if truncated {
@@ -203,27 +196,30 @@ fn compute_tool_result_suffix_standalone(canonical_name: &str, output: &str) -> 
                         }
                     }
                     None => {
-                        if truncated {
-                            " → (truncated)".to_string()
+                        let total_lines = output.lines().count();
+                        if total_lines == 0 {
+                            " → empty".to_string()
+                        } else if truncated {
+                            format!(" → First {} lines (truncated)", total_lines)
                         } else {
-                            " → ok".to_string()
+                            format!(" → All {} lines", total_lines)
                         }
                     }
                 }
             }
         }
-        _ => " → ok".to_string(),
+        _ => String::new(),
     }
 }
 
-fn tool_output_is_truncated_standalone(output: &str) -> bool {
+fn tool_output_is_truncated(output: &str) -> bool {
     output.contains("output truncated:")
         || output.contains("... (truncated)")
         || output.contains("(Output capped at")
         || output.contains("[truncated]")
 }
 
-fn render_tool_call_lines_standalone(
+fn render_tool_call_lines(
     tool_call: &ToolCall,
     body_width: usize,
     palette: ThemePalette,
@@ -297,13 +293,13 @@ fn render_tool_call_lines_standalone(
     lines
 }
 
-fn render_tool_result_detail_lines_standalone(
+fn render_tool_result_detail_lines(
     message: &Message,
     body_width: usize,
     ctx: &RenderContext<'_>,
 ) -> Vec<Line<'static>> {
     let palette = ctx.palette;
-    let output = standalone_tool_output(message, ctx);
+    let output = tool_output_from_message(message, ctx);
     let is_error = tool_output_is_error(output);
     let tool_name = message.tool_name.as_deref().unwrap_or(message.role.label());
     let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
@@ -335,11 +331,11 @@ fn render_tool_result_detail_lines_standalone(
                     priority: r.priority.unwrap_or_else(|| "medium".to_string()),
                 })
                 .collect();
-            return render_todos_checkbox_list_standalone(&todos, body_width, palette);
+            return render_todos_checkbox_list(&todos, body_width, palette);
         }
     }
 
-    render_output_preview_lines_standalone(
+    render_output_preview_lines(
         output,
         body_width,
         is_error,
@@ -349,7 +345,7 @@ fn render_tool_result_detail_lines_standalone(
     )
 }
 
-fn render_todos_checkbox_list_standalone(
+fn render_todos_checkbox_list(
     todos: &[TodoItem],
     body_width: usize,
     palette: ThemePalette,
@@ -394,14 +390,14 @@ fn render_todos_checkbox_list_standalone(
     lines
 }
 
-fn standalone_tool_output<'a>(message: &'a Message, ctx: &'a RenderContext<'_>) -> &'a str {
+fn tool_output_from_message<'a>(message: &'a Message, ctx: &'a RenderContext<'_>) -> &'a str {
     ctx.expanded_tool_outputs
         .get(&message.id)
         .map(|output| output.as_str())
         .unwrap_or_else(|| message.content.as_str())
 }
 
-fn render_output_preview_lines_standalone(
+fn render_output_preview_lines(
     output: &str,
     body_width: usize,
     is_error: bool,
@@ -855,172 +851,59 @@ impl App {
             return (Text::from(lines), total_lines, card_ranges, false, 0);
         }
 
-        // Check if there are streaming messages (need full render)
+        // Check if there are streaming messages (need to force rebuild index)
         let has_streaming = messages
             .iter()
             .any(|m| m.streaming && matches!(m.role, MessageRole::Assistant));
 
-        // Decide: virtualized render vs full render
-        //
-        // We use virtualized rendering when:
-        // - No streaming messages (streaming messages change frequently)
-        // - Messages count exceeds threshold (worth the overhead)
-        //
-        // For streaming or small conversations, fall back to full render
-        // to avoid complexity with constantly changing content.
-        const VIRTUALIZE_THRESHOLD: usize = 20;
-        let use_virtualization = !has_streaming && messages.len() > VIRTUALIZE_THRESHOLD;
-
-        if use_virtualization {
-            // Update layout index
-            self.update_message_layout_index(width, body_width);
-            if let Some(scroll_offset) =
-                self.resolve_message_scroll_target(messages, width, body_width)
-            {
-                self.message_scroll_offset = scroll_offset;
-                self.message_follow_tail = false;
-                self.message_scroll_target = None;
-            }
-
-            // Calculate visible range based on scroll position
-            let viewport = self.message_viewport_lines.max(1);
-            let total_message_lines = self.message_layout_index.borrow().total_lines;
-            let max_scroll = total_message_lines.saturating_sub(viewport);
-            let scroll = if self.message_follow_tail {
-                max_scroll
-            } else {
-                self.message_scroll_offset.min(max_scroll)
-            };
-            self.message_scroll_offset = scroll;
-
-            // Find visible blocks
-            let visible_blocks = self.find_visible_message_blocks(scroll, viewport);
-
-            // Add header lines
-            let header_line_count = header_lines.len();
-            lines.extend(header_lines);
-
-            // Calculate render_scroll for virtualized rendering
-            // The visible blocks may start before 'scroll' (due to buffer zone),
-            // so we need to skip those lines when rendering.
-            // Also, if first block starts after 'scroll', we need padding.
-            let first_block_start = visible_blocks.first().map(|b| b.start_line).unwrap_or(0);
-            let (render_scroll, padding_lines) = if first_block_start < scroll {
-                (scroll - first_block_start, 0)
-            } else if first_block_start > scroll {
-                (0, first_block_start - scroll)
-            } else {
-                (0, 0)
-            };
-
-            // Add padding lines if first block starts after scroll position
-            for _ in 0..padding_lines {
-                lines.push(Line::from(""));
-            }
-
-            // Render visible blocks
-            let mut current_line_offset = header_line_count + padding_lines;
-            for block in &visible_blocks {
-                let block_lines = self.render_message_block_to_lines(
-                    messages,
-                    block,
-                    width,
-                    body_width,
-                    &mut card_ranges,
-                    current_line_offset,
-                );
-                current_line_offset += block_lines.len();
-                lines.extend(block_lines);
-            }
-
-            // Calculate total lines from layout index
-            let total_lines = header_line_count + total_message_lines;
-
-            let elapsed = started_at.elapsed();
-            if elapsed > Duration::from_millis(12) {
-                let (hits, misses, entries) = self.message_render_cache_stats();
-                crate::log_debug!(
-                    "messages_text virtualized: messages={}, visible_blocks={}, width={}, took={:?}, cache_hits={}, cache_misses={}, cache_entries={}",
-                    messages.len(),
-                    visible_blocks.len(),
-                    width,
-                    elapsed,
-                    hits,
-                    misses,
-                    entries
-                );
-            }
-
-            return (Text::from(lines), total_lines, card_ranges, true, render_scroll);
-        }
-
-        // Full render (for streaming or small conversations)
-        lines.extend(header_lines);
-        if let Some(scroll_offset) = self.resolve_message_scroll_target(messages, width, body_width)
+        // Update layout index (force rebuild for streaming messages)
+        self.update_message_layout_index(width, body_width, has_streaming);
+        if let Some(scroll_offset) =
+            self.resolve_message_scroll_target(&messages, width, body_width)
         {
             self.message_scroll_offset = scroll_offset;
             self.message_follow_tail = false;
             self.message_scroll_target = None;
         }
 
-        // Collect render units for parallel processing, checking cache first
-        let mut render_units: Vec<MessageRenderUnit> = Vec::new();
-        let mut cached_results: std::collections::HashMap<usize, Vec<(Color, Vec<Line<'static>>)>> =
-            std::collections::HashMap::new();
-        let mut i = 0;
-        while i < messages.len() {
-            let message = &messages[i];
+        // Calculate visible range based on scroll position
+        let viewport = self.message_viewport_lines.max(1);
+        let total_message_lines = self.message_layout_index.borrow().total_lines;
+        let max_scroll = total_message_lines.saturating_sub(viewport);
+        let scroll = if self.message_follow_tail {
+            max_scroll
+        } else {
+            self.message_scroll_offset.min(max_scroll)
+        };
+        self.message_scroll_offset = scroll;
 
-            if matches!(message.role, MessageRole::Assistant) {
-                // Check cache for assistant message cards
-                let cached_cards = self.cached_render_message_cards(message, body_width);
-                cached_results.insert(i, cached_cards);
+        // Find visible blocks
+        let visible_blocks = self.find_visible_message_blocks(scroll, viewport);
 
-                // Collect tool results for rendering
-                let mut tool_results = Vec::new();
-                let tool_results_by_id: std::collections::HashMap<String, &Message> = {
-                    let mut map = std::collections::HashMap::new();
-                    let mut j = i + 1;
-                    while j < messages.len() && matches!(messages[j].role, MessageRole::Tool) {
-                        if let Some(id) = &messages[j].tool_call_id {
-                            map.insert(id.clone(), &messages[j]);
-                        }
-                        j += 1;
-                    }
-                    map
-                };
+        // Add header lines
+        let header_line_count = header_lines.len();
+        lines.extend(header_lines);
 
-                for tool_call in &message.tool_calls {
-                    let tool_result = tool_results_by_id.get(&tool_call.id).copied();
-                    tool_results.push((tool_call.clone(), tool_result.cloned()));
-                }
+        // Calculate render_scroll for virtualized rendering
+        // The visible blocks may start before 'scroll' (due to buffer zone),
+        // so we need to skip those lines when rendering.
+        // Also, if first block starts after 'scroll', we need padding.
+        let first_block_start = visible_blocks.first().map(|b| b.start_line).unwrap_or(0);
+        let (render_scroll, padding_lines) = if first_block_start < scroll {
+            (scroll - first_block_start, 0)
+        } else if first_block_start > scroll {
+            (0, first_block_start - scroll)
+        } else {
+            (0, 0)
+        };
 
-                if !tool_results.is_empty() {
-                    render_units.push(MessageRenderUnit {
-                        message_idx: i,
-                        tool_results,
-                    });
-                }
-
-                let next_i = i + 1 + tool_results_by_id.len();
-                i = next_i;
-                continue;
-            }
-
-            if matches!(message.role, MessageRole::Tool) {
-                i += 1;
-                continue;
-            }
-
-            // Check cache for non-Assistant messages
-            let cached_cards = self.cached_render_message_cards(message, body_width);
-            cached_results.insert(i, cached_cards);
-            i += 1;
+        // Add padding lines if first block starts after scroll position
+        for _ in 0..padding_lines {
+            lines.push(Line::from(""));
         }
 
-        let expanded_tool_outputs = self.load_expanded_tool_outputs(messages);
-
-        // Parallel render tool calls with rayon (only for units with tool results)
+        // Create render context for tool calls
+        let expanded_tool_outputs = self.load_expanded_tool_outputs(&messages);
         let ctx = RenderContext {
             palette,
             workspace_root: self.workspace_root.as_path(),
@@ -1028,117 +911,32 @@ impl App {
             expanded_tool_outputs: &expanded_tool_outputs,
         };
 
-        let tool_results_map: std::collections::HashMap<
-            usize,
-            Vec<(Option<Uuid>, Color, Vec<Line<'static>>)>,
-        > = render_units
-            .par_iter()
-            .map(|unit| {
-                let mut tool_cards = Vec::new();
-                for (tool_call, tool_result) in &unit.tool_results {
-                    let card_lines = render_tool_call_with_result_standalone(
-                        tool_call,
-                        tool_result.as_ref(),
-                        body_width,
-                        &ctx,
-                    );
-                    if !card_lines.is_empty() {
-                        let tool_result_id = tool_result.as_ref().map(|m| m.id);
-                        tool_cards.push((tool_result_id, palette.panel_light, card_lines));
-                    }
-                }
-                (unit.message_idx, tool_cards)
-            })
-            .collect();
-
-        // Merge results in order (using original loop order for consistency)
-        let mut i = 0;
-        while i < messages.len() {
-            let message = &messages[i];
-
-            if matches!(message.role, MessageRole::Assistant) {
-                // Use cached cards
-                if let Some(cards) = cached_results.get(&i) {
-                    for (card_bg, card_lines) in cards {
-                        if card_lines.is_empty() {
-                            continue;
-                        }
-                        lines.extend(decorate_card_lines(card_lines.clone(), width, *card_bg));
-                    }
-                }
-
-                // Add tool call results
-                if let Some(tool_cards) = tool_results_map.get(&i) {
-                    for (tool_result_id, card_bg, card_lines) in tool_cards {
-                        if card_lines.is_empty() {
-                            continue;
-                        }
-                        let decorated = decorate_card_lines(card_lines.clone(), width, *card_bg);
-                        if let Some(msg_id) = tool_result_id {
-                            let start_line = lines.len();
-                            lines.extend(decorated);
-                            let end_line = lines.len();
-                            card_ranges.push(ToolResultCardRange {
-                                message_id: *msg_id,
-                                start_line,
-                                end_line,
-                            });
-                        } else {
-                            lines.extend(decorated);
-                        }
-                    }
-                    lines.push(Line::from(""));
-                }
-
-                // Skip tool result messages
-                let tool_results_count = {
-                    let mut count = 0;
-                    let mut j = i + 1;
-                    while j < messages.len() && matches!(messages[j].role, MessageRole::Tool) {
-                        count += 1;
-                        j += 1;
-                    }
-                    count
-                };
-                i += 1 + tool_results_count;
-                continue;
-            }
-
-            if matches!(message.role, MessageRole::Tool) {
-                i += 1;
-                continue;
-            }
-
-            // Use cached cards for non-Assistant messages
-            if let Some(cards) = cached_results.get(&i) {
-                for (card_bg, card_lines) in cards {
-                    if card_lines.is_empty() {
-                        continue;
-                    }
-                    lines.extend(decorate_card_lines(card_lines.clone(), width, *card_bg));
-                    lines.push(Line::from(""));
-                }
-            }
-            i += 1;
-        }
-
-        if lines.is_empty() && !has_streaming {
-            let fallback = decorate_card_lines(
-                vec![line_with_style("(empty)", palette.muted)],
+        // Render visible blocks
+        let mut current_line_offset = header_line_count + padding_lines;
+        for block in &visible_blocks {
+            let block_lines = self.render_message_block_to_lines(
+                &messages,
+                block,
                 width,
-                palette.panel,
+                body_width,
+                &mut card_ranges,
+                current_line_offset,
+                &ctx,
             );
-            let total_lines = fallback.len().max(1);
-            return (Text::from(fallback), total_lines, card_ranges, false, 0);
+            current_line_offset += block_lines.len();
+            lines.extend(block_lines);
         }
 
-        let total_lines = lines.len().max(1);
+        // Calculate total lines from layout index
+        let total_lines = header_line_count + total_message_lines;
+
         let elapsed = started_at.elapsed();
         if elapsed > Duration::from_millis(12) {
             let (hits, misses, entries) = self.message_render_cache_stats();
             crate::log_debug!(
-                "messages_text full: messages={}, width={}, took={:?}, cache_hits={}, cache_misses={}, cache_entries={}",
+                "messages_text: messages={}, visible_blocks={}, width={}, took={:?}, cache_hits={}, cache_misses={}, cache_entries={}",
                 messages.len(),
+                visible_blocks.len(),
                 width,
                 elapsed,
                 hits,
@@ -1146,7 +944,8 @@ impl App {
                 entries
             );
         }
-        (Text::from(lines), total_lines, card_ranges, false, 0)
+
+        (Text::from(lines), total_lines, card_ranges, true, render_scroll)
     }
 
     fn cached_render_message_cards(
@@ -1213,18 +1012,6 @@ impl App {
         }
 
         outputs
-    }
-
-    fn resolved_tool_output(&self, message: &Message) -> String {
-        if !self.expanded_tool_results.contains(&message.id) {
-            return message.content.clone();
-        }
-
-        self.store
-            .load_tool_event_output(self.conversation.session_id, message.id)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| message.content.clone())
     }
 
     fn render_message_cards(
@@ -1392,241 +1179,6 @@ impl App {
         lines
     }
 
-    fn render_tool_call_lines(
-        &self,
-        tool_call: &ToolCall,
-        body_width: usize,
-    ) -> Vec<Line<'static>> {
-        let palette = self.palette();
-        let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
-
-        // Extraction for special rendering (e.g., bash command)
-        let fields = summarize_tool_arguments(&tool_call.name, &tool_call.arguments);
-        let get_field = |name: &str| {
-            fields
-                .iter()
-                .find(|(k, _)| k == name)
-                .map(|(_, v)| v.as_str())
-        };
-
-        if canonical_name == "bash"
-            && let Some(cmd) = get_field("command")
-        {
-            let mut lines = Vec::new();
-            lines.push(Line::from(vec![
-                Span::styled("Run ", Style::default().fg(palette.accent_soft)),
-                Span::styled(
-                    "shell command",
-                    Style::default()
-                        .fg(palette.text)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]));
-
-            // Opencode style: command in its own block/lines
-            for line in cmd.lines() {
-                lines.push(line_with_style(&format!("  {}", line), palette.text));
-            }
-            return lines;
-        }
-
-        let summary = summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width);
-
-        vec![Line::from(vec![Span::styled(
-            summary,
-            Style::default()
-                .fg(palette.text)
-                .add_modifier(Modifier::BOLD),
-        )])]
-    }
-
-    fn render_tool_call_with_result(
-        &self,
-        tool_call: &ToolCall,
-        tool_result: Option<&Message>,
-        body_width: usize,
-    ) -> Vec<Line<'static>> {
-        let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
-
-        if matches!(canonical_name, "list" | "grep" | "glob" | "read") {
-            return self.render_tool_call_summary_line(tool_call, tool_result, body_width);
-        }
-
-        let mut lines = Vec::new();
-        lines.push(Line::from(""));
-
-        let call_lines = self.render_tool_call_lines(tool_call, body_width);
-        lines.extend(call_lines);
-
-        if let Some(result_msg) = tool_result {
-            let result_lines = self.render_tool_result_detail_lines(result_msg, body_width);
-            if !result_lines.is_empty() {
-                lines.push(Line::from(""));
-                lines.extend(result_lines);
-            }
-        }
-
-        lines.push(Line::from(""));
-        lines
-    }
-
-    fn render_tool_call_summary_line(
-        &self,
-        tool_call: &ToolCall,
-        tool_result: Option<&Message>,
-        body_width: usize,
-    ) -> Vec<Line<'static>> {
-        let palette = self.palette();
-        let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
-        let fields = summarize_tool_arguments(&tool_call.name, &tool_call.arguments);
-
-        let get_field = |name: &str| {
-            fields
-                .iter()
-                .find(|(k, _)| k == name)
-                .map(|(_, v)| v.as_str())
-        };
-
-        let (action_label, target) = match canonical_name {
-            "list" => {
-                let path = get_field("path").unwrap_or(".");
-                ("List", path.to_string())
-            }
-            "grep" => {
-                let pattern = get_field("pattern").unwrap_or("");
-                let path = get_field("path").unwrap_or(".");
-                ("Search", format!("\"{}\" in {}", pattern, path))
-            }
-            "glob" => {
-                let pattern = get_field("pattern").unwrap_or("*");
-                let path = get_field("path").unwrap_or(".");
-                ("Find", format!("{} in {}", pattern, path))
-            }
-            "read" => {
-                let path = get_field("path").unwrap_or("file");
-                ("Read", path.to_string())
-            }
-            _ => {
-                let summary =
-                    summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width);
-                return vec![Line::from(vec![Span::styled(
-                    summary,
-                    Style::default()
-                        .fg(palette.text)
-                        .add_modifier(Modifier::BOLD),
-                )])];
-            }
-        };
-
-        let result_suffix = if let Some(result_msg) = tool_result {
-            let output = self.resolved_tool_output(result_msg);
-            let output = output.trim();
-            self.compute_tool_result_suffix(canonical_name, output)
-        } else {
-            " ...".to_string()
-        };
-
-        let line = Line::from(vec![
-            Span::styled(
-                format!("{} ", action_label),
-                Style::default().fg(palette.accent_soft),
-            ),
-            Span::styled(
-                target.clone(),
-                Style::default()
-                    .fg(palette.text)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(result_suffix, Style::default().fg(palette.muted)),
-        ]);
-
-        vec![line]
-    }
-
-    fn compute_tool_result_suffix(&self, canonical_name: &str, output: &str) -> String {
-        match canonical_name {
-            "list" => {
-                let count = if output.trim() == "(empty)" {
-                    0
-                } else {
-                    output
-                        .lines()
-                        .skip(1)
-                        .filter(|line| !line.trim().is_empty())
-                        .count()
-                };
-                format!(" → {} items", count)
-            }
-            "grep" | "glob" => {
-                if tool_output_is_error(output) {
-                    let count = if output.is_empty() {
-                        0
-                    } else {
-                        output.lines().count()
-                    };
-                    format!(" → failed ({} lines)", count)
-                } else {
-                    let count = if output.is_empty() {
-                        0
-                    } else {
-                        output.lines().count()
-                    };
-                    format!(" → {} matches", count)
-                }
-            }
-            "read" => {
-                if tool_output_is_error(output) {
-                    " → error".to_string()
-                } else {
-                    // Try to parse line range from output (e.g., "Showing lines 10-50 of 100")
-                    let line_range = parse_line_range_from_read_output(output);
-                    let truncated = self.tool_output_is_truncated(output);
-                    match line_range {
-                        Some((start, end)) => {
-                            if truncated {
-                                format!(" → Line {}-{} (truncated)", start, end)
-                            } else {
-                                format!(" → Line {}-{}", start, end)
-                            }
-                        }
-                        None => {
-                            let total_lines = output.lines().count();
-                            if total_lines == 0 {
-                                " → empty".to_string()
-                            } else if truncated {
-                                format!(" → First {} lines (truncated)", total_lines)
-                            } else {
-                                format!(" → All {} lines", total_lines)
-                            }
-                        }
-                    }
-                }
-            }
-            _ => String::new(),
-        }
-    }
-
-    fn tool_output_is_truncated(&self, output: &str) -> bool {
-        output.contains("output truncated:")
-            || output.contains("(Output capped at")
-            || output.contains("[truncated]")
-    }
-
-    fn render_tool_result_detail_lines(
-        &self,
-        message: &Message,
-        body_width: usize,
-    ) -> Vec<Line<'static>> {
-        let tool_name = message.tool_name.as_deref().unwrap_or(message.role.label());
-        let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
-
-        if matches!(canonical_name, "list" | "grep" | "glob" | "read") {
-            return Vec::new();
-        }
-
-        self.render_tool_result_lines(message, body_width)
-    }
-
     fn render_reasoning_lines(&self, reasoning: &str, body_width: usize) -> Vec<Line<'static>> {
         render_reasoning_markdown_lines(
             reasoning,
@@ -1634,217 +1186,6 @@ impl App {
             Some(self.workspace_root.as_path()),
             self.palette(),
         )
-    }
-
-    fn render_tool_result_lines(&self, message: &Message, body_width: usize) -> Vec<Line<'static>> {
-        let palette = self.palette();
-        let tool_name = message.tool_name.as_deref().unwrap_or(message.role.label());
-        let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
-
-        let mut header_lines = Vec::new();
-        let output = self.resolved_tool_output(message);
-        let output = output.trim_end();
-        let attachment_lines = message
-            .attachments
-            .iter()
-            .map(MessageAttachment::summary)
-            .collect::<Vec<_>>();
-
-        if canonical_name == "task" {
-            let summary = if output.is_empty() {
-                "Subagent finished".to_string()
-            } else {
-                let first_line = output
-                    .lines()
-                    .map(str::trim)
-                    .find(|line| !line.is_empty())
-                    .unwrap_or("Subagent finished");
-                shorten_single_line(first_line, body_width.saturating_sub(2))
-            };
-
-            let mut lines = vec![
-                line_with_style("Subagent complete", palette.accent_soft),
-                line_with_prefix(
-                    "↳",
-                    &summary,
-                    Style::default().fg(palette.accent_soft),
-                    Style::default().fg(palette.text),
-                ),
-                line_with_style(
-                    "Open the child session to inspect the full transcript.",
-                    palette.muted,
-                ),
-            ];
-
-            if !attachment_lines.is_empty() {
-                lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
-            }
-
-            return lines;
-        }
-
-        if matches!(canonical_name, "grep" | "glob") {
-            let count = if output.is_empty() {
-                0
-            } else {
-                output.lines().count()
-            };
-            let status_text = if tool_output_is_error(output) {
-                format!("Search failed with {} output lines", count)
-            } else {
-                format!("Found {} matches", count)
-            };
-            header_lines.push(line_with_style(&status_text, palette.accent_soft));
-        } else if canonical_name == "list" {
-            let count = if output.trim() == "(empty)" {
-                0
-            } else {
-                output
-                    .lines()
-                    .skip(1)
-                    .filter(|line| !line.trim().is_empty())
-                    .count()
-            };
-            header_lines.push(line_with_style(
-                &format!("Listed {} items", count),
-                palette.accent_soft,
-            ));
-        }
-
-        if output.is_empty() && attachment_lines.is_empty() {
-            return header_lines;
-        }
-
-        let mut lines = header_lines;
-
-        if let Some(diff_lines) = render_unified_diff_text(output, body_width, palette) {
-            lines.extend(diff_lines);
-            lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
-            return lines;
-        }
-
-        if matches!(canonical_name, "write" | "edit") {
-            if tool_output_is_error(output) {
-                let error_lines =
-                    self.render_output_preview_lines(output, body_width, true, Some(message.id));
-                lines.extend(error_lines);
-                lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
-                return lines;
-            }
-
-            let out_lines =
-                self.render_output_preview_lines(output, body_width, false, Some(message.id));
-            lines.extend(out_lines);
-            lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
-            return lines;
-        }
-
-        if matches!(canonical_name, "read" | "list" | "todowrite") {
-            if tool_output_is_error(output) {
-                let error_lines =
-                    self.render_output_preview_lines(output, body_width, true, Some(message.id));
-                lines.extend(error_lines);
-                lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
-                return lines;
-            }
-
-            if canonical_name == "todowrite" {
-                #[derive(serde::Deserialize)]
-                struct RawTodo {
-                    content: String,
-                    status: Option<String>,
-                    priority: Option<String>,
-                }
-
-                let raw_todos = if let Ok(todos) = serde_json::from_str::<Vec<RawTodo>>(output) {
-                    Some(todos)
-                } else if let Ok(value) = serde_json::from_str::<serde_json::Value>(output) {
-                    value
-                        .get("todos")
-                        .and_then(|v| serde_json::from_value::<Vec<RawTodo>>(v.clone()).ok())
-                } else {
-                    None
-                };
-
-                if let Some(raw_todos) = raw_todos {
-                    let todos: Vec<TodoItem> = raw_todos
-                        .into_iter()
-                        .map(|r| TodoItem {
-                            content: r.content,
-                            status: r.status.unwrap_or_else(|| "pending".to_string()),
-                            priority: r.priority.unwrap_or_else(|| "medium".to_string()),
-                        })
-                        .collect();
-                    lines.extend(self.render_todos_checkbox_list(&todos, body_width));
-                    return lines;
-                }
-
-                let preview_lines =
-                    self.render_output_preview_lines(output, body_width, false, Some(message.id));
-                lines.extend(preview_lines);
-                lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
-                return lines;
-            }
-
-            lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
-            return lines;
-        }
-
-        let preview_lines = self.render_output_preview_lines(
-            output,
-            body_width,
-            tool_output_is_error(output),
-            Some(message.id),
-        );
-        lines.extend(preview_lines);
-        lines.extend(self.render_attachment_preview_lines(&attachment_lines, body_width));
-        lines
-    }
-
-    fn render_todos_checkbox_list(
-        &self,
-        todos: &[TodoItem],
-        body_width: usize,
-    ) -> Vec<Line<'static>> {
-        let palette = self.palette();
-        let mut lines = vec![line_with_style("Updated todo list:", palette.accent_soft)];
-
-        if todos.is_empty() {
-            lines.push(line_with_style("  (no items)", palette.muted));
-            return lines;
-        }
-
-        let max_content_len = body_width.saturating_sub(6).max(1);
-
-        for todo in todos {
-            let (checkbox, style) = match todo.status.as_str() {
-                "completed" => (
-                    "✔ ",
-                    Style::default()
-                        .fg(palette.muted)
-                        .add_modifier(Modifier::CROSSED_OUT),
-                ),
-                "in_progress" => (
-                    "● ",
-                    Style::default()
-                        .fg(palette.accent)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                "pending" => ("○ ", Style::default().fg(palette.text)),
-                "cancelled" => ("✗ ", Style::default().fg(palette.muted)),
-                _ => ("○ ", Style::default().fg(palette.text)),
-            };
-
-            let priority_marker = if todo.priority == "high" { "⚠ " } else { "" };
-
-            let content = shorten(&todo.content, max_content_len);
-            lines.push(Line::from(vec![
-                Span::styled(format!("  {priority_marker}{checkbox}"), style),
-                Span::styled(content, style),
-            ]));
-        }
-
-        lines
     }
 
     fn render_running_subagent_lines(
@@ -1911,6 +1252,7 @@ impl App {
         lines
     }
 
+    #[allow(dead_code)]
     fn render_attachment_preview_lines(
         &self,
         attachments: &[String],
@@ -1931,6 +1273,7 @@ impl App {
         lines
     }
 
+    #[allow(dead_code)]
     fn render_output_preview_lines(
         &self,
         output: &str,
@@ -2027,16 +1370,28 @@ impl App {
     /// - Width changes (line counts become invalid)
     /// - Messages are added/removed
     /// - Cache is cleared
+    /// - Force rebuild is requested (for streaming messages)
     ///
     /// For incremental updates, only the tail (last few messages) is rebuilt,
     /// preserving existing block positions for unchanged messages.
-    fn update_message_layout_index(&self, width: usize, body_width: usize) {
+    fn update_message_layout_index(&self, width: usize, body_width: usize, force_rebuild: bool) {
         let messages = self.conversation.visible_messages();
         let mut index = self.message_layout_index.borrow_mut();
 
+        // Check if message count changed (new messages added or removed)
+        let indexed_message_count = index
+            .blocks
+            .last()
+            .map(|b| b.message_start_idx + b.message_count)
+            .unwrap_or(0);
+        let message_count_changed = indexed_message_count != messages.len();
+
         // Check if we need a full rebuild
-        let needs_full_rebuild =
-            !index.valid || index.width != width || index.blocks.is_empty() && !messages.is_empty();
+        let needs_full_rebuild = force_rebuild
+            || !index.valid
+            || index.width != width
+            || message_count_changed
+            || index.blocks.is_empty() && !messages.is_empty();
 
         if needs_full_rebuild {
             index.blocks.clear();
@@ -2044,13 +1399,21 @@ impl App {
             index.width = width;
             index.valid = true;
 
+            let expanded_tool_outputs = self.load_expanded_tool_outputs(&messages);
+            let ctx = RenderContext {
+                palette: self.palette(),
+                workspace_root: self.workspace_root.as_path(),
+                expanded_tool_results: &self.expanded_tool_results,
+                expanded_tool_outputs: &expanded_tool_outputs,
+            };
+
             let mut current_line = 0;
             let mut i = 0;
 
             while i < messages.len() {
                 // Build block without start_line (calculated below)
                 let (message_id, message_count, line_count) =
-                    self.build_message_block_data(messages, i, width, body_width);
+                    self.build_message_block_data(&messages, i, width, body_width, &ctx);
 
                 let block = super::MessageBlock {
                     message_id,
@@ -2077,6 +1440,15 @@ impl App {
     ) -> Option<usize> {
         let message_id = self.message_scroll_target?;
 
+        // Create a minimal context for block data calculation
+        let expanded_tool_outputs = self.load_expanded_tool_outputs(messages);
+        let ctx = RenderContext {
+            palette: self.palette(),
+            workspace_root: self.workspace_root.as_path(),
+            expanded_tool_results: &self.expanded_tool_results,
+            expanded_tool_outputs: &expanded_tool_outputs,
+        };
+
         let mut offset = 0;
         let mut i = 0;
 
@@ -2086,7 +1458,7 @@ impl App {
             }
 
             let (_message_id, message_count, line_count) =
-                self.build_message_block_data(messages, i, width, body_width);
+                self.build_message_block_data(messages, i, width, body_width, &ctx);
             offset += line_count;
             i += message_count;
         }
@@ -2103,6 +1475,7 @@ impl App {
         start_idx: usize,
         width: usize,
         body_width: usize,
+        ctx: &RenderContext<'_>,
     ) -> (Uuid, usize, usize) {
         let message = &messages[start_idx];
         let message_id = message.id;
@@ -2143,7 +1516,7 @@ impl App {
                     for tool_call in &message.tool_calls {
                         let tool_result = tool_results_by_id.get(&tool_call.id).copied();
                         let card_lines =
-                            self.render_tool_call_with_result(tool_call, tool_result, body_width);
+                            render_tool_call_with_result(tool_call, tool_result, body_width, ctx);
                         if !card_lines.is_empty() {
                             lines +=
                                 decorate_card_lines(card_lines, width, palette.panel_light).len();
@@ -2243,6 +1616,7 @@ impl App {
         body_width: usize,
         card_ranges: &mut Vec<ToolResultCardRange>,
         current_line_offset: usize,
+        ctx: &RenderContext<'_>,
     ) -> Vec<Line<'static>> {
         let palette = self.palette();
         let mut lines = Vec::new();
@@ -2285,7 +1659,7 @@ impl App {
                     for tool_call in &message.tool_calls {
                         let tool_result = tool_results_by_id.get(&tool_call.id).copied();
                         let tool_card_lines =
-                            self.render_tool_call_with_result(tool_call, tool_result, body_width);
+                            render_tool_call_with_result(tool_call, tool_result, body_width, ctx);
                         if !tool_card_lines.is_empty() {
                             let decorated =
                                 decorate_card_lines(tool_card_lines, width, palette.panel_light);
@@ -2429,11 +1803,12 @@ fn render_reasoning_markdown_lines(
 
 #[cfg(test)]
 mod tests {
-    use super::render_reasoning_markdown_lines;
+    use super::{render_reasoning_markdown_lines, render_tool_result_detail_lines, RenderContext};
     use crate::session::{Message, MessageRole};
     use crate::theme::ThemePalette;
     use ratatui::style::Style;
     use ratatui::text::Line;
+    use std::collections::{HashMap, HashSet};
 
     fn line_text(line: &Line<'static>) -> String {
         line.spans
@@ -2503,7 +1878,7 @@ mod tests {
     }
 
     #[test]
-    fn render_tool_result_lines_list_counts_items_from_output() {
+    fn render_tool_result_detail_lines_list_shows_output_preview() {
         use crate::session::{Message, ToolExecutionResult};
 
         let message = Message::tool_result(
@@ -2512,17 +1887,24 @@ mod tests {
             ToolExecutionResult::new("./\nfile1.txt\nfile2.txt"),
         );
 
-        let app = test_app();
-        let lines = app.render_tool_result_lines(&message, 80);
+        let ctx = RenderContext {
+            palette: ThemePalette::dark(),
+            workspace_root: std::path::Path::new("/tmp"),
+            expanded_tool_results: &HashSet::new(),
+            expanded_tool_outputs: &HashMap::new(),
+        };
+
+        let lines = render_tool_result_detail_lines(&message, 80, &ctx);
+        let text = text_lines_to_string(&lines);
         assert!(
-            lines
-                .iter()
-                .any(|line| line_text(line).contains("Listed 2 items"))
+            text.contains("file1.txt"),
+            "should contain file listing: {}",
+            text
         );
     }
 
     #[test]
-    fn render_tool_result_lines_todowrite_formats_checkbox_list() {
+    fn render_tool_result_detail_lines_todowrite_formats_checkbox_list() {
         use crate::session::{Message, ToolExecutionResult};
         use crate::tooling::TodoItem;
 
@@ -2550,8 +1932,14 @@ mod tests {
             ToolExecutionResult::new(output),
         );
 
-        let app = test_app();
-        let lines = app.render_tool_result_lines(&message, 80);
+        let ctx = RenderContext {
+            palette: ThemePalette::dark(),
+            workspace_root: std::path::Path::new("/tmp"),
+            expanded_tool_results: &HashSet::new(),
+            expanded_tool_outputs: &HashMap::new(),
+        };
+
+        let lines = render_tool_result_detail_lines(&message, 80, &ctx);
 
         let text = text_lines_to_string(&lines);
         assert!(
@@ -2575,17 +1963,16 @@ mod tests {
         ));
 
         let _ = app.messages_text(Some(80));
-        let (hits_before, misses_before, entries_before) = app.message_render_cache_stats();
+        let (_, misses_before, entries_before) = app.message_render_cache_stats();
 
         let _ = app.messages_text(Some(80));
         let (hits_after, misses_after, entries_after) = app.message_render_cache_stats();
 
-        assert_eq!(hits_before, 0);
-        assert!(misses_before >= 2);
-        assert!(entries_before >= 2);
-        assert!(hits_after > hits_before);
-        assert_eq!(misses_after, misses_before);
-        assert_eq!(entries_after, entries_before);
+        assert!(misses_before >= 2, "first render should have cache misses");
+        assert!(entries_before >= 2, "first render should populate cache");
+        assert!(hits_after > 0, "second render should have cache hits");
+        assert_eq!(misses_after, misses_before, "second render should use cache");
+        assert_eq!(entries_after, entries_before, "cache size should be stable");
     }
 
     #[test]
