@@ -1,5 +1,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use std::{borrow::Cow, ops::Range};
+use textwrap::{Options, WordSeparator, WordSplitter, WrapAlgorithm};
 use unicode_width::UnicodeWidthChar;
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone, Debug)]
 pub struct Composer {
@@ -515,42 +518,85 @@ fn visual_lines(text: &str, width: usize) -> Vec<VisualLine> {
     }
 
     let mut lines = Vec::new();
-    let mut line_start = 0usize;
-    let mut current_width = 0usize;
+    let mut logical_start = 0usize;
 
-    for (byte_index, ch) in text.char_indices() {
-        if ch == '\n' {
+    for logical_line in text.split('\n') {
+        let line_ranges = wrap_logical_line_ranges(logical_line, logical_start, width);
+        if line_ranges.is_empty() {
             lines.push(VisualLine {
-                start: line_start,
-                end: byte_index,
-                width: current_width,
+                start: logical_start,
+                end: logical_start,
+                width: 0,
             });
-            line_start = byte_index + ch.len_utf8();
-            current_width = 0;
-            continue;
+        } else {
+            for range in line_ranges {
+                lines.push(VisualLine {
+                    start: range.start,
+                    end: range.end,
+                    width: UnicodeWidthStr::width(&text[range.clone()]),
+                });
+            }
         }
 
-        let char_width = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if current_width > 0 && current_width + char_width > width {
-            lines.push(VisualLine {
-                start: line_start,
-                end: byte_index,
-                width: current_width,
-            });
-            line_start = byte_index;
-            current_width = 0;
-        }
-
-        current_width += char_width;
+        logical_start += logical_line.len() + 1;
     }
 
-    lines.push(VisualLine {
-        start: line_start,
-        end: text.len(),
-        width: current_width,
-    });
-
     lines
+}
+
+fn wrap_logical_line_ranges(line: &str, line_start: usize, width: usize) -> Vec<Range<usize>> {
+    if line.is_empty() {
+        return vec![line_start..line_start];
+    }
+
+    let wrapped = textwrap::wrap(
+        line,
+        Options::new(width)
+            .break_words(true)
+            .wrap_algorithm(WrapAlgorithm::FirstFit)
+            .word_separator(WordSeparator::new())
+            .word_splitter(WordSplitter::HyphenSplitter),
+    );
+
+    if wrapped.is_empty() {
+        return vec![line_start..line_start];
+    }
+
+    let mut ranges = Vec::with_capacity(wrapped.len());
+    let mut cursor = 0usize;
+
+    for line_slice in wrapped {
+        match line_slice {
+            Cow::Borrowed(slice) => {
+                let relative_start = unsafe { slice.as_ptr().offset_from(line.as_ptr()) as usize };
+                let start = line_start + relative_start;
+                ranges.push(start..start + slice.len());
+                cursor = relative_start + slice.len();
+            }
+            Cow::Owned(slice) => {
+                let mapped = map_wrapped_line_to_range(line, cursor, &slice);
+                let start = line_start + mapped.start;
+                let end = line_start + mapped.end;
+                ranges.push(start..end);
+                cursor = mapped.end;
+            }
+        }
+    }
+
+    ranges
+}
+
+fn map_wrapped_line_to_range(text: &str, cursor: usize, wrapped: &str) -> Range<usize> {
+    if wrapped.is_empty() {
+        return cursor..cursor;
+    }
+
+    if let Some(relative_start) = text[cursor..].find(wrapped) {
+        let start = cursor + relative_start;
+        return start..start + wrapped.len();
+    }
+
+    cursor..cursor.saturating_add(wrapped.len().min(text.len().saturating_sub(cursor)))
 }
 
 fn display_width(text: &str) -> usize {
@@ -648,6 +694,17 @@ mod tests {
         composer.cursor = composer.text().len();
 
         assert_eq!(composer.cursor_position(4), (1, 4));
+    }
+
+    #[test]
+    fn cursor_position_follows_word_wrap_boundaries() {
+        let mut composer = Composer::new("placeholder");
+        composer.set_text("hello world ai".to_string());
+        composer.cursor = composer.text().len();
+
+        assert_eq!(composer.display_line_count(8), 2);
+        assert_eq!(composer.cursor_position(8), (1, 8));
+        assert!(composer.cursor_wraps_to_next_row(8));
     }
 
     #[test]
