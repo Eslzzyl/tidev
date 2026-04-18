@@ -106,6 +106,7 @@ impl App {
             message_layout_index: RefCell::new(MessageLayoutIndex::default()),
             message_content_area: None,
             sidebar_area: None,
+            input_area: Cell::new(None),
             selection_clipboard_lease: None,
             backend_tx,
             backend_rx,
@@ -169,7 +170,7 @@ impl App {
             // during rapid scrolling or other high-frequency input
             let mut events_processed = 0;
             const MAX_EVENTS_PER_FRAME: usize = 32;
-            
+
             while events_processed < MAX_EVENTS_PER_FRAME {
                 match crossterm::event::poll(Duration::from_millis(0)) {
                     Ok(true) => {
@@ -192,11 +193,10 @@ impl App {
             if events_processed == 0
                 && crossterm::event::poll(Duration::from_millis(16))
                     .context("failed to poll terminal events")?
-                {
-                    let event = crossterm::event::read()
-                        .context("failed to read terminal event")?;
-                    self.handle_event(event, runtime)?;
-                }
+            {
+                let event = crossterm::event::read().context("failed to read terminal event")?;
+                self.handle_event(event, runtime)?;
+            }
 
             if self.should_quit {
                 break;

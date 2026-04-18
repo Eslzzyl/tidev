@@ -5,6 +5,8 @@ use unicode_width::UnicodeWidthChar;
 pub struct Composer {
     text: String,
     cursor: usize,
+    preferred_column: Option<usize>,
+    visual_line_hint: Option<usize>,
     history: Vec<String>,
     history_cursor: Option<usize>,
     draft: String,
@@ -16,6 +18,8 @@ impl Composer {
         Self {
             text: String::new(),
             cursor: 0,
+            preferred_column: None,
+            visual_line_hint: None,
             history: Vec::new(),
             history_cursor: None,
             draft: String::new(),
@@ -42,6 +46,8 @@ impl Composer {
     pub fn clear(&mut self) {
         self.text.clear();
         self.cursor = 0;
+        self.preferred_column = None;
+        self.visual_line_hint = None;
         self.history_cursor = None;
         self.draft.clear();
     }
@@ -49,6 +55,8 @@ impl Composer {
     pub fn set_text(&mut self, text: String) {
         self.text = text;
         self.cursor = self.text.len();
+        self.preferred_column = None;
+        self.visual_line_hint = None;
         self.history_cursor = None;
     }
 
@@ -67,6 +75,8 @@ impl Composer {
             self.history.push(submission.to_string());
         }
 
+        self.preferred_column = None;
+        self.visual_line_hint = None;
         self.history_cursor = None;
         self.draft.clear();
     }
@@ -90,9 +100,11 @@ impl Composer {
             KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => match c {
                 'a' => {
                     self.cursor = 0;
+                    self.preferred_column = None;
                 }
                 'e' => {
                     self.cursor = self.text.len();
+                    self.preferred_column = None;
                 }
                 'j' => {
                     self.insert_char('\n');
@@ -100,9 +112,11 @@ impl Composer {
                 'u' => {
                     self.text.clear();
                     self.cursor = 0;
+                    self.preferred_column = None;
                 }
                 'k' => {
                     self.text.truncate(self.cursor);
+                    self.preferred_column = None;
                 }
                 'p' if allow_history_navigation => {
                     self.select_previous_history();
@@ -163,9 +177,11 @@ impl Composer {
             }
             KeyCode::Home => {
                 self.cursor = self.line_start(self.cursor);
+                self.preferred_column = None;
             }
             KeyCode::End => {
                 self.cursor = self.line_end(self.cursor);
+                self.preferred_column = None;
             }
             KeyCode::Tab => {
                 self.insert_str("    ");
@@ -177,7 +193,10 @@ impl Composer {
     }
 
     pub fn preferred_height(&self, width: u16, max_lines: u16) -> u16 {
-        let visible_lines = display_line_count(&self.text, width as usize) as u16;
+        let mut visible_lines = display_line_count(&self.text, width as usize) as u16;
+        if self.cursor_wraps_to_next_row(width as usize) {
+            visible_lines = visible_lines.saturating_add(1);
+        }
 
         visible_lines.min(max_lines).saturating_add(2)
     }
@@ -188,30 +207,72 @@ impl Composer {
             return (0, 0);
         }
 
-        let mut line = 0u16;
-        let mut column = 0u16;
+        let lines = visual_lines(&self.text, width);
+        let cursor = self.cursor.min(self.text.len());
+        let hinted_line = self.visual_line_hint.and_then(|line_index| {
+            lines.get(line_index).and_then(|line| {
+                if cursor >= line.start && cursor <= line.end {
+                    Some(line_index)
+                } else {
+                    None
+                }
+            })
+        });
+        let line_index = hinted_line
+            .or_else(|| {
+                lines
+                    .iter()
+                    .enumerate()
+                    .rposition(|(_, line)| line.start <= cursor)
+            })
+            .unwrap_or(0);
+        let line = lines[line_index];
+        let column = display_width(&self.text[line.start..cursor]);
 
-        for ch in self.text[..self.cursor].chars() {
-            if ch == '\n' {
-                line += 1;
-                column = 0;
-                continue;
-            }
+        (line_index as u16, column as u16)
+    }
 
-            let char_width = UnicodeWidthChar::width(ch).unwrap_or(0) as u16;
-            if column + char_width > width as u16 && column > 0 {
-                line += 1;
-                column = char_width;
-            } else {
-                column += char_width;
-            }
+    pub fn move_up(&mut self, width: u16) {
+        self.move_vertical(width, -1);
+    }
+
+    pub fn move_down(&mut self, width: u16) {
+        self.move_vertical(width, 1);
+    }
+
+    pub fn set_cursor_at_visual_position(&mut self, width: u16, line: u16, column: u16) {
+        let width = width as usize;
+        if width == 0 {
+            return;
         }
 
-        (line, column)
+        let lines = visual_lines(&self.text, width);
+        if lines.is_empty() {
+            self.cursor = 0;
+            self.preferred_column = Some(column as usize);
+            return;
+        }
+
+        let line_index = line.min(lines.len().saturating_sub(1) as u16) as usize;
+        let line = lines[line_index];
+        let column = column as usize;
+        self.cursor = cursor_from_visual_position(&self.text, line, column);
+        self.preferred_column = Some(column);
+        self.visual_line_hint = Some(line_index);
     }
 
     pub fn display_line_count(&self, width: usize) -> usize {
         display_line_count(&self.text, width)
+    }
+
+    pub fn cursor_wraps_to_next_row(&self, width: usize) -> bool {
+        if width == 0 || self.cursor != self.text.len() {
+            return false;
+        }
+
+        visual_lines(&self.text, width)
+            .last()
+            .is_some_and(|line| line.width == width)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -221,12 +282,16 @@ impl Composer {
     fn insert_char(&mut self, ch: char) {
         self.text.insert(self.cursor, ch);
         self.cursor += ch.len_utf8();
+        self.preferred_column = None;
+        self.visual_line_hint = None;
         self.history_cursor = None;
     }
 
     pub fn insert_str(&mut self, value: &str) {
         self.text.insert_str(self.cursor, value);
         self.cursor += value.len();
+        self.preferred_column = None;
+        self.visual_line_hint = None;
         self.history_cursor = None;
     }
 
@@ -235,6 +300,8 @@ impl Composer {
         let end = end.min(self.text.len()).max(start);
         self.text.replace_range(start..end, replacement);
         self.cursor = start + replacement.len();
+        self.preferred_column = None;
+        self.visual_line_hint = None;
         self.history_cursor = None;
     }
 
@@ -246,6 +313,8 @@ impl Composer {
         let previous = self.previous_char_boundary(self.cursor);
         self.text.drain(previous..self.cursor);
         self.cursor = previous;
+        self.preferred_column = None;
+        self.visual_line_hint = None;
         self.history_cursor = None;
     }
 
@@ -275,6 +344,8 @@ impl Composer {
 
         self.text.drain(boundary..self.cursor);
         self.cursor = boundary;
+        self.preferred_column = None;
+        self.visual_line_hint = None;
         self.history_cursor = None;
     }
 
@@ -286,6 +357,8 @@ impl Composer {
         let start = self.line_start(self.cursor);
         self.text.drain(start..self.cursor);
         self.cursor = start;
+        self.preferred_column = None;
+        self.visual_line_hint = None;
         self.history_cursor = None;
     }
 
@@ -296,15 +369,21 @@ impl Composer {
 
         let next = self.next_char_boundary(self.cursor);
         self.text.drain(self.cursor..next);
+        self.preferred_column = None;
+        self.visual_line_hint = None;
         self.history_cursor = None;
     }
 
     fn move_left(&mut self) {
         self.cursor = self.previous_char_boundary(self.cursor);
+        self.preferred_column = None;
+        self.visual_line_hint = None;
     }
 
     fn move_right(&mut self) {
         self.cursor = self.next_char_boundary(self.cursor);
+        self.preferred_column = None;
+        self.visual_line_hint = None;
     }
 
     fn select_previous_history(&mut self) {
@@ -325,6 +404,9 @@ impl Composer {
             self.text = self.history[index].clone();
             self.cursor = self.text.len();
         }
+
+        self.preferred_column = None;
+        self.visual_line_hint = None;
     }
 
     fn select_next_history(&mut self) {
@@ -341,6 +423,8 @@ impl Composer {
         }
 
         self.cursor = self.text.len();
+        self.preferred_column = None;
+        self.visual_line_hint = None;
     }
 
     fn previous_char_boundary(&self, index: usize) -> usize {
@@ -381,6 +465,29 @@ impl Composer {
             .map(|position| index + position)
             .unwrap_or(self.text.len())
     }
+
+    fn move_vertical(&mut self, width: u16, delta: isize) {
+        let width = width as usize;
+        if width == 0 || delta == 0 {
+            return;
+        }
+
+        let lines = visual_lines(&self.text, width);
+        let (current_line, current_column) = self.cursor_position(width as u16);
+        let desired_column = self.preferred_column.unwrap_or(current_column as usize);
+        let last_line = lines.len().saturating_sub(1) as isize;
+        let target_line = (current_line as isize + delta).clamp(0, last_line) as usize;
+
+        if target_line == current_line as usize {
+            self.preferred_column = Some(desired_column);
+            self.visual_line_hint = Some(target_line);
+            return;
+        }
+
+        self.cursor = cursor_from_visual_position(&self.text, lines[target_line], desired_column);
+        self.preferred_column = Some(desired_column);
+        self.visual_line_hint = Some(target_line);
+    }
 }
 
 fn display_line_count(text: &str, width: usize) -> usize {
@@ -388,31 +495,101 @@ fn display_line_count(text: &str, width: usize) -> usize {
         return text.split('\n').count().max(1);
     }
 
-    text.split('\n')
-        .map(|line| wrap_line_count(line, width))
-        .sum::<usize>()
-        .max(1)
+    visual_lines(text, width).len().max(1)
 }
 
-fn wrap_line_count(line: &str, width: usize) -> usize {
+#[derive(Clone, Copy, Debug)]
+struct VisualLine {
+    start: usize,
+    end: usize,
+    width: usize,
+}
+
+fn visual_lines(text: &str, width: usize) -> Vec<VisualLine> {
     if width == 0 {
-        return 1;
+        return vec![VisualLine {
+            start: 0,
+            end: text.len(),
+            width: 0,
+        }];
     }
 
-    let mut count = 1;
-    let mut current_width = 0;
+    let mut lines = Vec::new();
+    let mut line_start = 0usize;
+    let mut current_width = 0usize;
 
-    for ch in line.chars() {
-        let char_width = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if current_width + char_width > width && current_width > 0 {
-            count += 1;
-            current_width = char_width;
-        } else {
-            current_width += char_width;
+    for (byte_index, ch) in text.char_indices() {
+        if ch == '\n' {
+            lines.push(VisualLine {
+                start: line_start,
+                end: byte_index,
+                width: current_width,
+            });
+            line_start = byte_index + ch.len_utf8();
+            current_width = 0;
+            continue;
         }
+
+        let char_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if current_width > 0 && current_width + char_width > width {
+            lines.push(VisualLine {
+                start: line_start,
+                end: byte_index,
+                width: current_width,
+            });
+            line_start = byte_index;
+            current_width = 0;
+        }
+
+        current_width += char_width;
     }
 
-    count
+    lines.push(VisualLine {
+        start: line_start,
+        end: text.len(),
+        width: current_width,
+    });
+
+    lines
+}
+
+fn display_width(text: &str) -> usize {
+    text.chars()
+        .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))
+        .sum()
+}
+
+fn cursor_from_visual_position(text: &str, line: VisualLine, target_column: usize) -> usize {
+    let mut current_column = 0usize;
+    let mut cursor = line.start;
+
+    for (relative_index, ch) in text[line.start..line.end].char_indices() {
+        let char_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        let next_cursor = line.start + relative_index + ch.len_utf8();
+
+        if char_width == 0 {
+            cursor = next_cursor;
+            continue;
+        }
+
+        if target_column <= current_column {
+            return cursor;
+        }
+
+        if target_column < current_column + char_width {
+            if (target_column - current_column) * 2 < char_width {
+                return cursor;
+            }
+
+            return next_cursor;
+        }
+
+        current_column += char_width;
+        cursor = next_cursor;
+    }
+
+    let _ = line.width;
+    line.end
 }
 
 #[cfg(test)]
@@ -446,6 +623,15 @@ mod tests {
     }
 
     #[test]
+    fn preferred_height_adds_cursor_row_for_full_width_trailing_line() {
+        let mut composer = Composer::new("placeholder");
+        composer.set_text("abcd".to_string());
+
+        assert_eq!(composer.preferred_height(4, 10), 4);
+        assert!(composer.cursor_wraps_to_next_row(4));
+    }
+
+    #[test]
     fn cursor_position_wraps_long_lines() {
         let mut composer = Composer::new("placeholder");
         composer.set_text("abcdefg".to_string());
@@ -453,6 +639,40 @@ mod tests {
         composer.cursor = 7;
 
         assert_eq!(composer.cursor_position(4), (1, 3));
+    }
+
+    #[test]
+    fn cursor_position_tracks_mixed_width_wraps() {
+        let mut composer = Composer::new("placeholder");
+        composer.set_text("ab中文cd".to_string());
+        composer.cursor = composer.text().len();
+
+        assert_eq!(composer.cursor_position(4), (1, 4));
+    }
+
+    #[test]
+    fn vertical_movement_preserves_visual_column() {
+        let mut composer = Composer::new("placeholder");
+        composer.set_text("ab中文cd".to_string());
+        composer.cursor = composer.text().len();
+
+        composer.move_up(4);
+        assert_eq!(composer.cursor_position(4), (0, 4));
+
+        composer.move_down(4);
+        assert_eq!(composer.cursor_position(4), (1, 4));
+    }
+
+    #[test]
+    fn visual_position_mapping_follows_wrapped_lines() {
+        let mut composer = Composer::new("placeholder");
+        composer.set_text("ab中文cd".to_string());
+
+        composer.set_cursor_at_visual_position(4, 0, 2);
+        assert_eq!(composer.cursor_position(4), (0, 2));
+
+        composer.set_cursor_at_visual_position(4, 1, 4);
+        assert_eq!(composer.cursor_position(4), (1, 4));
     }
 
     #[test]

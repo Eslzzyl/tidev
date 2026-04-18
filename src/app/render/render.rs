@@ -19,6 +19,7 @@ impl App {
     pub(crate) fn render(&mut self, frame: &mut Frame<'_>) {
         self.message_content_area = None;
         self.sidebar_area = None;
+        self.input_area.set(None);
         if self.at_mention.visible {
             self.refresh_at_mention_state();
         }
@@ -154,11 +155,12 @@ impl App {
         frame.render_widget(subtitle, sections[1]);
 
         let prompt_title = self.mode.title().to_string();
+        let prompt_placeholder = self.composer.placeholder().to_string();
         self.render_input_block(
             frame,
             sections[2],
             &prompt_title,
-            self.composer.placeholder(),
+            &prompt_placeholder,
             false,
         );
 
@@ -208,6 +210,7 @@ impl App {
             horizontal: 1,
             vertical: 1,
         });
+        self.input_area.set(Some(inner));
         let visible_lines = inner.height.max(1) as usize;
         let total_lines = self.composer.display_line_count(inner.width as usize);
         let scroll = total_lines.saturating_sub(visible_lines) as u16;
@@ -227,10 +230,15 @@ impl App {
 
         if inner.width > 0 && inner.height > 0 {
             let (cursor_line, cursor_col) = self.composer.cursor_position(inner.width);
-            let cursor_line = cursor_line.saturating_sub(scroll);
-            let cursor_x = inner
-                .x
-                .saturating_add(cursor_col.min(inner.width.saturating_sub(1)));
+            let mut cursor_line = cursor_line.saturating_sub(scroll);
+            let mut cursor_col = cursor_col;
+
+            if self.composer.cursor_wraps_to_next_row(inner.width as usize) {
+                cursor_line = cursor_line.saturating_add(1);
+                cursor_col = 0;
+            }
+
+            let cursor_x = inner.x.saturating_add(cursor_col);
             let cursor_y = inner
                 .y
                 .saturating_add(cursor_line.min(inner.height.saturating_sub(1)));

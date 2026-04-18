@@ -29,6 +29,9 @@ impl App {
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 let position = Position::new(mouse.column, mouse.row);
+                if self.handle_input_area_mouse_down(position) {
+                    return;
+                }
                 if let Some(bounds) = self.selection_bounds_for_position(position) {
                     self.mouse_selection
                         .press_with_bounds(position, Some(bounds));
@@ -54,18 +57,41 @@ impl App {
 
                 self.mouse_selection.release(position);
             }
-            MouseEventKind::ScrollUp
-                if self.can_scroll_conversation() => {
-                    self.clear_mouse_selection();
-                    self.scroll_messages_up(3);
-                }
-            MouseEventKind::ScrollDown
-                if self.can_scroll_conversation() => {
-                    self.clear_mouse_selection();
-                    self.scroll_messages_down(3);
-                }
+            MouseEventKind::ScrollUp if self.can_scroll_conversation() => {
+                self.clear_mouse_selection();
+                self.scroll_messages_up(3);
+            }
+            MouseEventKind::ScrollDown if self.can_scroll_conversation() => {
+                self.clear_mouse_selection();
+                self.scroll_messages_down(3);
+            }
             _ => {}
         }
+    }
+
+    fn handle_input_area_mouse_down(&mut self, position: Position) -> bool {
+        let Some(inner) = self.input_area.get() else {
+            return false;
+        };
+
+        if !inner.contains(position) || inner.width == 0 || inner.height == 0 {
+            return false;
+        }
+
+        let visible_lines = inner.height.max(1) as usize;
+        let total_lines = self.composer.display_line_count(inner.width as usize);
+        let scroll = total_lines.saturating_sub(visible_lines) as u16;
+        let local_line = position.y.saturating_sub(inner.y);
+        let local_column = position.x.saturating_sub(inner.x);
+        let target_line = scroll.saturating_add(local_line);
+
+        self.composer
+            .set_cursor_at_visual_position(inner.width, target_line, local_column);
+        self.clear_mouse_selection();
+        self.refresh_at_mention_state();
+        self.command_palette
+            .sync(self.composer.text(), &self.commands);
+        true
     }
 
     pub(crate) fn toggle_tool_result_expanded(&mut self, message_id: Uuid) {
@@ -508,6 +534,24 @@ impl App {
             }
         }
 
+        if matches!(key.code, KeyCode::Up | KeyCode::Down) {
+            let Some(input_area) = self.input_area.get() else {
+                return Ok(());
+            };
+
+            let input_width = input_area.width;
+            match key.code {
+                KeyCode::Up => self.composer.move_up(input_width),
+                KeyCode::Down => self.composer.move_down(input_width),
+                _ => {}
+            }
+
+            self.refresh_at_mention_state();
+            self.command_palette
+                .sync(self.composer.text(), &self.commands);
+            return Ok(());
+        }
+
         if let Some(submission) = self.composer.handle_key_with_history(key, true) {
             self.handle_submission(submission, runtime)?;
             self.at_mention.clear();
@@ -535,11 +579,10 @@ impl App {
             .unwrap_or(current_session_id);
 
         match key.code {
-            KeyCode::Up
-                if parent_session_id != current_session_id => {
-                    self.switch_session(parent_session_id, runtime)?;
-                    return Ok(true);
-                }
+            KeyCode::Up if parent_session_id != current_session_id => {
+                self.switch_session(parent_session_id, runtime)?;
+                return Ok(true);
+            }
             KeyCode::Down | KeyCode::Right | KeyCode::Left => {
                 let children = self.store.load_child_sessions(parent_session_id)?;
                 if children.is_empty() {

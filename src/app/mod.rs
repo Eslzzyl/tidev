@@ -207,6 +207,7 @@ struct App {
     message_layout_index: RefCell<MessageLayoutIndex>,
     message_content_area: Option<Rect>,
     sidebar_area: Option<Rect>,
+    input_area: Cell<Option<Rect>>,
     selection_clipboard_lease: Option<ClipboardLease>,
     backend_tx: UnboundedSender<BackendEvent>,
     backend_rx: UnboundedReceiver<BackendEvent>,
