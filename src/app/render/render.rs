@@ -349,10 +349,10 @@ impl App {
             return "Esc again to stop".to_string();
         }
 
-        let token_status = self.context_usage.map(|(_, _, total_tokens)| {
+        let token_status = self.context_usage.map(|(input_tokens, _, _)| {
             let max_context = self.active_model.context_window as u32;
-            let percent = total_tokens as f64 / max_context as f64 * 100.0;
-            let used_k = total_tokens / 1000;
+            let percent = input_tokens as f64 / max_context as f64 * 100.0;
+            let used_k = input_tokens / 1000;
             let max_k = max_context / 1000;
             format!("{:.1}% ({}K/{}K)", percent, used_k, max_k)
         });

@@ -47,10 +47,6 @@ impl ContextManager {
     }
 
     fn message_tokens(message: &Message) -> usize {
-        if let Some(tokens) = message.total_tokens {
-            return tokens as usize;
-        }
-
         let tool_tokens: usize = message
             .tool_calls
             .iter()
@@ -111,7 +107,17 @@ impl ContextManager {
 
     pub fn needs_compaction(&self, conversation: &Conversation, model: &ActiveModel) -> bool {
         let (trigger_tokens, _) = self.compaction_budget_for_model(model);
-        Self::estimate_tokens_for_messages(conversation.visible_messages()) >= trigger_tokens
+        
+        let last_context_tokens = conversation
+            .visible_messages()
+            .iter()
+            .rev()
+            .find_map(|message| message.input_tokens.or(message.total_tokens));
+        
+        match last_context_tokens {
+            Some(tokens) => tokens as usize >= trigger_tokens,
+            None => Self::estimate_tokens_for_messages(conversation.visible_messages()) >= trigger_tokens,
+        }
     }
 
     pub fn build_request_messages(&self, conversation: &Conversation, current_mode: SessionMode) -> Vec<Message> {
@@ -369,12 +375,6 @@ mod tests {
     use crate::config::{ActiveModel, ApiType};
     use crate::session::{Message, ToolCall, ToolExecutionResult};
 
-    fn message_with_tokens(role: MessageRole, content: &str, total_tokens: u32) -> Message {
-        let mut message = Message::new(role, content);
-        message.total_tokens = Some(total_tokens);
-        message
-    }
-
     fn test_conversation(messages: Vec<Message>) -> Conversation {
         Conversation {
             session_id: Uuid::new_v4(),
@@ -416,21 +416,30 @@ mod tests {
     #[test]
     fn choose_split_index_keeps_tool_block_together() {
         let manager = ContextManager::new();
-        let retain_recent_tokens = 2;
-
-        let mut assistant = message_with_tokens(MessageRole::Assistant, "call tools", 1);
+        
+        let mut assistant = Message::new(MessageRole::Assistant, "call tools");
         assistant.tool_calls = vec![ToolCall {
             id: "tool-call-1".to_string(),
             name: "grep".to_string(),
             arguments: "{}".to_string(),
         }];
 
+        let tool_result = Message::tool_result(
+            "tool-call-1",
+            "grep",
+            crate::session::ToolExecutionResult::new("result"),
+        );
+
         let messages = vec![
-            message_with_tokens(MessageRole::User, "first", 1),
+            Message::new(MessageRole::User, "first"),
             assistant,
-            message_with_tokens(MessageRole::Tool, "result", 1),
-            message_with_tokens(MessageRole::Assistant, "follow up", 1),
+            tool_result,
+            Message::new(MessageRole::Assistant, "follow up"),
         ];
+
+        let total_tokens: usize = messages.iter().map(|m| ContextManager::message_tokens(m)).sum();
+        let first_msg_tokens = ContextManager::message_tokens(&messages[0]);
+        let retain_recent_tokens = total_tokens - first_msg_tokens;
 
         assert_eq!(
             manager.choose_split_index(&messages, retain_recent_tokens),
