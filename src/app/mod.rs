@@ -829,6 +829,7 @@ impl App {
                 message.cache_read_tokens = Some(usage.cache_read_tokens);
                 message.cache_write_tokens = Some(usage.cache_write_tokens);
                 message.model_id = Some(usage.model_id.clone());
+                message.completed_at = Some(chrono::Utc::now());
             }
 
             persisted_message = Some(message.clone());

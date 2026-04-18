@@ -241,7 +241,7 @@ impl SessionStore {
         let attachments = serde_json::to_string(&message.attachments)
             .context("failed to serialize attachments")?;
         self.connection.execute(
-            "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, created_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, snapshot_hash, patch_files) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+            "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, snapshot_hash, patch_files) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
             params![
                 message.id.to_string(),
                 session_id.to_string(),
@@ -253,6 +253,7 @@ impl SessionStore {
                 message.tool_call_id,
                 message.tool_name,
                 message.created_at.to_rfc3339(),
+                message.completed_at.map(|t| t.to_rfc3339()),
                 if message.streaming { 1_i64 } else { 0_i64 },
                 message.input_tokens,
                 message.output_tokens,
@@ -276,7 +277,7 @@ impl SessionStore {
             .context("failed to serialize attachments")?;
 
         self.connection.execute(
-            "UPDATE messages SET role = ?3, content = ?4, attachments = ?5, reasoning = ?6, tool_calls = ?7, tool_call_id = ?8, tool_name = ?9, created_at = ?10, streaming = ?11, input_tokens = ?12, output_tokens = ?13, total_tokens = ?14, cache_read_tokens = ?15, cache_write_tokens = ?16, model_id = ?17, snapshot_hash = ?18, patch_files = ?19 WHERE session_id = ?1 AND id = ?2",
+            "UPDATE messages SET role = ?3, content = ?4, attachments = ?5, reasoning = ?6, tool_calls = ?7, tool_call_id = ?8, tool_name = ?9, created_at = ?10, completed_at = ?11, streaming = ?12, input_tokens = ?13, output_tokens = ?14, total_tokens = ?15, cache_read_tokens = ?16, cache_write_tokens = ?17, model_id = ?18, snapshot_hash = ?19, patch_files = ?20 WHERE session_id = ?1 AND id = ?2",
             params![
                 session_id.to_string(),
                 message.id.to_string(),
@@ -288,6 +289,7 @@ impl SessionStore {
                 message.tool_call_id,
                 message.tool_name,
                 message.created_at.to_rfc3339(),
+                message.completed_at.map(|t| t.to_rfc3339()),
                 if message.streaming { 1_i64 } else { 0_i64 },
                 message.input_tokens,
                 message.output_tokens,
@@ -622,7 +624,7 @@ impl SessionStore {
 
     pub fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, created_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, snapshot_hash, patch_files FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
+            "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, snapshot_hash, patch_files FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
         )?;
 
         let rows = statement.query_map(params![session_id.to_string()], |row| {
@@ -635,15 +637,16 @@ impl SessionStore {
             let tool_call_id = row.get::<_, Option<String>>(6)?;
             let tool_name = row.get::<_, Option<String>>(7)?;
             let created_at = row.get::<_, String>(8)?;
-            let streaming = row.get::<_, i64>(9)? != 0;
-            let input_tokens = row.get::<_, Option<u32>>(10)?;
-            let output_tokens = row.get::<_, Option<u32>>(11)?;
-            let total_tokens = row.get::<_, Option<u32>>(12)?;
-            let cache_read_tokens = row.get::<_, Option<u32>>(13)?;
-            let cache_write_tokens = row.get::<_, Option<u32>>(14)?;
-            let model_id = row.get::<_, Option<String>>(15)?;
-            let snapshot_hash = row.get::<_, Option<String>>(16)?;
-            let patch_files = row.get::<_, Option<String>>(17)?;
+            let completed_at = row.get::<_, Option<String>>(9)?;
+            let streaming = row.get::<_, i64>(10)? != 0;
+            let input_tokens = row.get::<_, Option<u32>>(11)?;
+            let output_tokens = row.get::<_, Option<u32>>(12)?;
+            let total_tokens = row.get::<_, Option<u32>>(13)?;
+            let cache_read_tokens = row.get::<_, Option<u32>>(14)?;
+            let cache_write_tokens = row.get::<_, Option<u32>>(15)?;
+            let model_id = row.get::<_, Option<String>>(16)?;
+            let snapshot_hash = row.get::<_, Option<String>>(17)?;
+            let patch_files = row.get::<_, Option<String>>(18)?;
 
             let attachments = serde_json::from_str(&attachments).unwrap_or_default();
             let tool_calls: Vec<ToolCall> = serde_json::from_str(&tool_calls).unwrap_or_default();
@@ -672,6 +675,7 @@ impl SessionStore {
             message.model_id = model_id;
             message.snapshot_hash = snapshot_hash;
             message.patch_files = patch_files;
+            message.completed_at = completed_at.and_then(|s| parse_datetime(&s).ok());
             Ok(message)
         })?;
 

@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS messages (
     tool_call_id TEXT,
     tool_name TEXT,
     created_at TEXT NOT NULL,
+    completed_at TEXT,
     streaming INTEGER NOT NULL DEFAULT 0,
     input_tokens INTEGER,
     output_tokens INTEGER,
