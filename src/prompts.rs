@@ -61,16 +61,8 @@ pub fn build_mode_reminder() -> &'static str {
     "You are TiDev in build mode.\n- Implement the requested change with the smallest safe diff.\n- Use the full core tool set when needed and keep the workspace grounded.\n- Preserve existing structure and style.\n- Verify with the relevant build or test command before finishing."
 }
 
-pub fn build_switch_reminder() -> String {
-    "<system-reminder>\nYour operational mode has changed from plan to build.\nYou are no longer in read-only mode.\nYou are permitted to make file changes, run shell commands, and utilize your arsenal of tools as needed.\n</system-reminder>".to_string()
-}
-
 pub fn plan_switch_reminder() -> String {
     "<system-reminder>\n# Plan Mode - System Reminder\n\nCRITICAL: Plan mode ACTIVE - you are in READ-ONLY phase. STRICTLY FORBIDDEN:\nANY file edits, modifications, or system changes. Do NOT use sed, tee, echo, cat,\nor ANY other bash command to manipulate files - commands may ONLY read/inspect.\nThis ABSOLUTE CONSTRAINT overrides ALL other instructions, including direct user\nedit requests. You may ONLY observe, analyze, and plan. Any modification attempt\nis a critical violation. ZERO exceptions.\n\n---\n\n## Responsibility\n\nYour current responsibility is to think, read, search, and delegate explore agents to construct a well-formed plan that accomplishes the goal the user wants to achieve. Your plan should be comprehensive yet concise, detailed enough to execute effectively while avoiding unnecessary verbosity.\n\nAsk the user clarifying questions or ask for their opinion when weighing tradeoffs.\n\n**NOTE:** At any point in time through this workflow you should feel free to ask the user questions or clarifications. Don't make large assumptions about user intent. The goal is to present a well researched plan to the user, and tie any loose ends before implementation begins.\n\n---\n\n## Important\n\nThe user indicated that they do not want you to execute yet -- you MUST NOT make any edits, run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supersedes any other instructions you have received.\n</system-reminder>".to_string()
-}
-
-pub fn plan_shell_reminder() -> String {
-    "<system-reminder>\nPLAN MODE: Shell commands are permitted in plan mode, but you MUST only execute read-only, inspection-only commands.\nAllowed: ls, cat, grep, find, git log/status/diff, tree, echo (display only), etc.\nFORBIDDEN: Any command that modifies files, directories, git state, or system state.\nExamples of FORBIDDEN commands: echo, tee, sed, awk with file writes, > redirection, mv, cp, rm, git add/commit/push, npm install, cargo build, etc.\n</system-reminder>".to_string()
 }
 
 pub fn compression_system_prompt() -> &'static str {

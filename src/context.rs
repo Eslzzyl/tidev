@@ -145,16 +145,7 @@ impl ContextManager {
                 MessageRole::System => {}
                 MessageRole::User => {
                     pending_tool_calls.clear();
-
-                    if !was_plan_mode {
-                        messages.push(message.clone());
-                    } else if current_mode == SessionMode::Build {
-                        let mut msg = message.clone();
-                        msg.content = format!("{}\n\n{}", prompts::build_switch_reminder(), message.content);
-                        messages.push(msg);
-                    } else {
-                        messages.push(message.clone());
-                    }
+                    messages.push(message.clone());
                     was_plan_mode = false;
                 }
                 MessageRole::Assistant => {
