@@ -5,6 +5,8 @@
 [submodule "codex"]
 	path = codex
 	url = https://github.com/openai/codex.git
+	shallow = true
 [submodule "hermes-agent"]
 	path = hermes-agent
 	url = https://github.com/NousResearch/hermes-agent.git
+	shallow = true
