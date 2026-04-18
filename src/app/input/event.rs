@@ -846,7 +846,7 @@ impl App {
                 self.should_quit = true;
             }
             CommandAction::Init => {
-                self.composer.set_text(INIT_COMMAND.to_string());
+                self.composer.set_text(init_command().to_string());
                 self.last_notice = Some("Init prompt loaded".to_string());
             }
         }
