@@ -79,7 +79,7 @@ use crate::{
     snapshot::SnapshotService,
     storage::SessionStore,
     theme::{ThemeManager, ThemeName},
-    tooling::{TodoItem, ToolRegistry},
+    tooling::{FileReadTracker, TodoItem, ToolRegistry},
 };
 
 struct App {
@@ -97,6 +97,7 @@ struct App {
     conversation: Conversation,
     context_manager: ContextManager,
     tools: ToolRegistry,
+    file_read_tracker: Arc<FileReadTracker>,
     commands: CommandRegistry,
     command_palette: CommandPaletteState,
     connect_dialog: Option<ConnectDialog>,
@@ -303,12 +304,14 @@ impl App {
 
     fn refresh_tools(&mut self) {
         let mcp = self.tools.mcp_manager();
+        let file_read_tracker = self.tools.file_read_tracker();
         self.tools = ToolRegistry::new(
             self.workspace_root.clone(),
             self.paths.config_dir.clone(),
             self.config.skills.clone(),
             mcp,
             self.config.permissions.clone(),
+            file_read_tracker,
         );
     }
 

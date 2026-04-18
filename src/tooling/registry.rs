@@ -1,5 +1,6 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::mcp::McpManager;
@@ -12,7 +13,7 @@ use crate::{
 };
 
 use super::tools::{execute_tool_call, tool_definitions};
-use super::{ToolDefinition, canonical_tool_name};
+use super::{FileReadTracker, ToolDefinition, canonical_tool_name};
 
 #[derive(Clone, Debug)]
 pub struct ToolRegistry {
@@ -22,6 +23,7 @@ pub struct ToolRegistry {
     skills: SkillCatalog,
     mcp: McpManager,
     permission_config: PermissionConfig,
+    file_read_tracker: Arc<FileReadTracker>,
 }
 
 impl ToolRegistry {
@@ -31,6 +33,7 @@ impl ToolRegistry {
         skill_sources: Vec<String>,
         mcp: McpManager,
         permission_config: PermissionConfig,
+        file_read_tracker: Arc<FileReadTracker>,
     ) -> Self {
         let skills = SkillCatalog::discover(&workspace_root, &config_dir, &skill_sources);
         let definitions = tool_definitions(skills.tool_description());
@@ -42,7 +45,12 @@ impl ToolRegistry {
             skills,
             mcp,
             permission_config,
+            file_read_tracker,
         }
+    }
+
+    pub fn file_read_tracker(&self) -> Arc<FileReadTracker> {
+        self.file_read_tracker.clone()
     }
 
     pub fn workspace_root(&self) -> &Path {
@@ -190,6 +198,7 @@ impl ToolRegistry {
         execute_tool_call(
             &self.workspace_root,
             &self.skills,
+            &self.file_read_tracker,
             store,
             session_id,
             call,

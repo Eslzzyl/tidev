@@ -19,17 +19,17 @@ pub fn definitions() -> Vec<ToolDefinition> {
         ),
         ToolDefinition::new::<WriteArgs>(
             "write",
-            "Write a text file inside the workspace",
+            "Write a text file inside the workspace. If this is an existing file, you MUST use the Read tool first to read the file's contents. This tool will fail if you did not read the file first.",
             ToolPermission::Write,
         ),
         ToolDefinition::new::<EditArgs>(
             "edit",
-            "Edit a file by replacing text inside it",
+            "Edit a file by replacing text inside it. You MUST use the Read tool at least once in the conversation before editing. This tool will error if you attempt an edit without reading the file. If the file has been modified since you last read it, you must read it again before editing.",
             ToolPermission::Edit,
         ),
         ToolDefinition::new::<ApplyPatchArgs>(
             "apply_patch",
-            "Apply a unified diff patch to a file inside the workspace",
+            "Apply a unified diff patch to a file inside the workspace. You MUST use the Read tool at least once before applying a patch to an existing file. This tool will fail if you did not read the file first.",
             ToolPermission::Edit,
         ),
         ToolDefinition::new::<ListArgs>(

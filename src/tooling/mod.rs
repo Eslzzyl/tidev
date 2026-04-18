@@ -1,10 +1,12 @@
 pub mod builtin;
+mod file_read_tracker;
 mod registry;
 mod skills;
 mod tools;
 
 use serde_json::Value;
 
+pub use file_read_tracker::FileReadTracker;
 pub use registry::ToolRegistry;
 pub use skills::SkillCatalog;
 pub use tools::TodoItem;

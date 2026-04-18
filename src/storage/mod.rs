@@ -1127,4 +1127,69 @@ impl SessionStore {
 
         Ok(row)
     }
+
+    /// Record that a file was read by the model
+    pub fn record_file_read(
+        &self,
+        session_id: Uuid,
+        file_path: &str,
+        read_at: DateTime<Utc>,
+        mtime: Option<i64>,
+        size: Option<i64>,
+    ) -> Result<()> {
+        self.connection.execute(
+            r#"INSERT OR REPLACE INTO file_reads (session_id, file_path, read_at, mtime, size)
+               VALUES (?1, ?2, ?3, ?4, ?5)"#,
+            params![
+                session_id.to_string(),
+                file_path,
+                read_at.to_rfc3339(),
+                mtime,
+                size,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Load all file reads for a session
+    pub fn load_file_reads(&self, session_id: Uuid) -> Result<Vec<FileReadRecord>> {
+        let mut stmt = self.connection.prepare(
+            r#"SELECT file_path, read_at, mtime, size FROM file_reads WHERE session_id = ?1"#,
+        )?;
+
+        let records = stmt
+            .query_map(params![session_id.to_string()], |row| {
+                let read_at_str: String = row.get(1)?;
+                Ok(FileReadRecord {
+                    file_path: row.get(0)?,
+                    read_at: DateTime::parse_from_rfc3339(&read_at_str)
+                        .map(|dt| dt.with_timezone(&Utc))
+                        .unwrap_or_else(|_| Utc::now()),
+                    mtime: row.get(2)?,
+                    size: row.get(3)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(records)
+    }
+
+    /// Delete all file reads for a session
+    pub fn clear_file_reads(&self, session_id: Uuid) -> Result<()> {
+        self.connection.execute(
+            "DELETE FROM file_reads WHERE session_id = ?1",
+            params![session_id.to_string()],
+        )?;
+        Ok(())
+    }
+}
+
+/// Record of a file read by the model
+#[derive(Debug, Clone)]
+pub struct FileReadRecord {
+    pub file_path: String,
+    pub read_at: DateTime<Utc>,
+    pub mtime: Option<i64>,
+    pub size: Option<i64>,
 }

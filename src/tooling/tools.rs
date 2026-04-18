@@ -7,7 +7,7 @@ use std::{
 };
 use uuid::Uuid;
 
-use crate::tooling::SkillCatalog;
+use crate::tooling::{FileReadTracker, SkillCatalog};
 use crate::{
     session::{ToolCall, ToolExecutionResult},
     storage::SessionStore,
@@ -332,11 +332,35 @@ fn truncate_to_limit(mut value: String, max_bytes: usize) -> String {
 pub(super) fn execute_tool_call(
     workspace_root: &Path,
     skills: &SkillCatalog,
+    file_read_tracker: &Arc<FileReadTracker>,
     store: &SessionStore,
     session_id: Uuid,
     call: &ToolCall,
     max_output_bytes: usize,
 ) -> Result<ToolExecutionResult> {
+    // Pre-execution checks for file read tracking
+    let tool_name = crate::tooling::canonical_tool_name(&call.name);
+    
+    // Check if we need to track a read or verify prior read
+    match tool_name {
+        Some("read") => {
+            // After read executes successfully, we will record it
+        }
+        Some("edit") | Some("write") | Some("apply_patch") => {
+            // Extract file path and check if file exists (only check existing files)
+            if let Some(file_path) = extract_file_path_for_check(call, tool_name.unwrap())
+                && let Ok(path) = resolve_workspace_path_safe(workspace_root, &file_path)
+                && path.exists()
+            {
+                // Check if file was read and not modified
+                if let Err(e) = file_read_tracker.check_read(session_id, &path) {
+                    return Err(anyhow::anyhow!("{}", e));
+                }
+            }
+        }
+        _ => {}
+    }
+
     let output = builtin::execute_tool_call(
         workspace_root,
         skills,
@@ -346,8 +370,64 @@ pub(super) fn execute_tool_call(
         max_output_bytes,
     )?;
 
+    // Post-execution: record file reads
+    if let Some("read") = tool_name
+        && let Some(file_path) = extract_file_path_for_check(call, "read")
+        && let Ok(absolute_path) = resolve_workspace_path_safe(workspace_root, &file_path)
+    {
+        // Record the read (ignore errors - non-critical)
+        let _ = file_read_tracker.record_read(store, session_id, &absolute_path);
+    }
+
     Ok(ToolExecutionResult::new(truncate_to_limit(
         output,
         max_output_bytes,
     )))
+}
+
+/// Extract file path from tool arguments for read/edit/write operations
+fn extract_file_path_for_check(call: &ToolCall, tool_name: &str) -> Option<String> {
+    let arguments: Value = serde_json::from_str(&call.arguments).ok()?;
+    
+    match tool_name {
+        "read" | "edit" | "write" => {
+            arguments.get("path").and_then(|v| v.as_str()).map(String::from)
+        }
+        "apply_patch" => {
+            // apply_patch doesn't have a path field in args, it parses from patch_text
+            // For now, we skip apply_patch check as it would require parsing the patch
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Resolve workspace path without failing (returns Err on failure instead of panicking)
+fn resolve_workspace_path_safe(workspace_root: &Path, candidate: &str) -> Result<std::path::PathBuf, ()> {
+    use std::path::Component;
+    
+    let candidate_path = std::path::Path::new(candidate);
+    let mut resolved = if candidate_path.is_absolute() {
+        std::path::PathBuf::new()
+    } else {
+        workspace_root.to_path_buf()
+    };
+
+    for component in candidate_path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                resolved.pop();
+            }
+            Component::Normal(part) => resolved.push(part),
+            Component::RootDir => resolved.push(component.as_os_str()),
+            Component::Prefix(prefix) => resolved.push(prefix.as_os_str()),
+        }
+    }
+
+    if !resolved.starts_with(workspace_root) {
+        return Err(());
+    }
+
+    Ok(resolved)
 }

@@ -19,12 +19,14 @@ impl App {
         let llm = LlmClient::new()?;
         let theme = ThemeManager::new(&config.theme);
         let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
+        let file_read_tracker = Arc::new(FileReadTracker::new());
         let tools = ToolRegistry::new(
             workspace_root.clone(),
             paths.config_dir.clone(),
             config.skills.clone(),
             mcp,
             config.permissions.clone(),
+            file_read_tracker.clone(),
         );
         let commands = CommandRegistry::new();
         let command_palette = CommandPaletteState::default();
@@ -66,6 +68,7 @@ impl App {
             conversation,
             context_manager: ContextManager::new(),
             tools,
+            file_read_tracker,
             commands,
             command_palette,
             connect_dialog: None,
@@ -485,6 +488,11 @@ impl App {
             context_usage: None,
             todos: self.store.load_todos(session_id)?,
         };
+
+        // Load file reads from database into the tracker
+        if let Err(e) = self.file_read_tracker.load_from_store(&self.store, session_id) {
+            crate::log_warn!("Failed to load file reads for session {}: {}", session_id, e);
+        }
 
         if !runtime.conversation.visible_messages().is_empty() {
             let last_token_usage = runtime

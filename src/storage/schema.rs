@@ -1,4 +1,4 @@
-pub const SCHEMA_VERSION: i64 = 12;
+pub const SCHEMA_VERSION: i64 = 13;
 
 pub const SESSION_SELECT_COLUMNS: &str = "s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, s.context_summary, s.context_retained_from, COALESCE(sw.workspace_root, '')";
 
@@ -120,4 +120,16 @@ CREATE INDEX IF NOT EXISTS idx_usage_stats_time_bucket
 
 CREATE INDEX IF NOT EXISTS idx_usage_stats_provider_model
     ON usage_stats(provider_id, model_id);
+
+CREATE TABLE IF NOT EXISTS file_reads (
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    file_path TEXT NOT NULL,
+    read_at TEXT NOT NULL,
+    mtime INTEGER,
+    size INTEGER,
+    PRIMARY KEY(session_id, file_path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_file_reads_session
+    ON file_reads(session_id);
 "#;
