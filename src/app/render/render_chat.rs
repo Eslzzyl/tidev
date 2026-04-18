@@ -304,6 +304,13 @@ fn render_tool_result_detail_lines(
     let tool_name = message.tool_name.as_deref().unwrap_or(message.role.label());
     let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
 
+    if !is_error
+        && matches!(canonical_name, "edit" | "write" | "apply_patch")
+        && let Some(diff_lines) = render_unified_diff_text(output, body_width, palette)
+    {
+        return diff_lines;
+    }
+
     if canonical_name == "todowrite" && !is_error {
         #[derive(serde::Deserialize)]
         struct RawTodo {

@@ -368,15 +368,19 @@ pub(super) fn edit_file(
     replace_all: bool,
 ) -> Result<String> {
     let path = resolve_workspace_path(workspace_root, relative_path.as_ref())?;
-    let contents =
+    let old_contents =
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
 
-    let updated = apply_edit_contents(&contents, old_text, new_text, replace_all)?;
-    fs::write(&path, updated).with_context(|| format!("failed to write {}", path.display()))?;
+    let new_contents = apply_edit_contents(&old_contents, old_text, new_text, replace_all)?;
+    fs::write(&path, &new_contents)
+        .with_context(|| format!("failed to write {}", path.display()))?;
 
-    Ok(format!(
-        "Edited {}",
-        display_workspace_relative(workspace_root, &path)
+    Ok(file_change_output(
+        workspace_root,
+        &path,
+        &old_contents,
+        &new_contents,
+        "Edited",
     ))
 }
 
