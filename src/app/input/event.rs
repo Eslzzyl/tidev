@@ -948,10 +948,6 @@ impl App {
         self.message_follow_tail = false;
     }
 
-    pub(crate) async fn refresh_mcp_tools(&self) -> Result<()> {
-        self.tools.refresh_mcp_tools().await
-    }
-
     pub(crate) fn close_theme_panel(&mut self, apply: bool) -> Result<()> {
         if let Some(panel) = self.theme_panel.take() {
             if apply {

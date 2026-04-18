@@ -14,6 +14,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
 
 pub use highlight::set_syntax_theme_by_name;
+pub use highlight::spawn_background_load;
 pub(crate) use highlight::{highlight_code_to_lines, highlight_code_to_lines_for_path};
 pub use line::is_blank_line_spaces_only;
 use line::push_owned_lines;

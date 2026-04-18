@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
 use serde::Deserialize;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use std::{
     collections::HashSet,
@@ -14,6 +15,8 @@ const SKILL_FILE_NAME: &str = "SKILL.md";
 const SKILL_ROOTS: &[&str] = &[".opencode/skills", ".claude/skills", ".agents/skills"];
 const MAX_COMPANION_FILES: usize = 10;
 
+static CATALOG: OnceLock<Arc<SkillCatalogInner>> = OnceLock::new();
+
 #[derive(Clone, Debug)]
 pub struct SkillInfo {
     pub name: String,
@@ -24,9 +27,14 @@ pub struct SkillInfo {
     pub companion_files: Vec<PathBuf>,
 }
 
+#[derive(Debug, Default)]
+struct SkillCatalogInner {
+    skills: Vec<SkillInfo>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct SkillCatalog {
-    skills: Vec<SkillInfo>,
+    inner: Arc<SkillCatalogInner>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -35,45 +43,27 @@ struct SkillFrontmatter {
     description: String,
 }
 
-impl SkillCatalog {
-    pub fn discover(workspace_root: &Path, config_dir: &Path, extra_sources: &[String]) -> Self {
-        let mut skills = Vec::new();
-        let mut seen_names = HashSet::new();
-        let mut seen_locations = HashSet::new();
+fn discover_inner(
+    workspace_root: &Path,
+    config_dir: &Path,
+    extra_sources: &[String],
+) -> SkillCatalogInner {
+    let mut skills = Vec::new();
+    let mut seen_names = HashSet::new();
+    let mut seen_locations = HashSet::new();
 
-        for root in candidate_roots(workspace_root, config_dir) {
-            for skill_file in discover_skill_files(&root) {
-                let canonical_location = skill_file
-                    .canonicalize()
-                    .unwrap_or_else(|_| skill_file.clone());
-                if !seen_locations.insert(canonical_location) {
-                    continue;
-                }
-
-                let Ok(skill) = parse_skill_file(&skill_file) else {
-                    continue;
-                };
-
-                if !seen_names.insert(skill.name.clone()) {
-                    continue;
-                }
-
-                skills.push(skill);
-            }
-        }
-
-        for raw_source in extra_sources {
-            let Some(skill) = load_additional_skill_source(raw_source, workspace_root) else {
-                continue;
-            };
-
-            let canonical_location = skill
-                .location
+    for root in candidate_roots(workspace_root, config_dir) {
+        for skill_file in discover_skill_files(&root) {
+            let canonical_location = skill_file
                 .canonicalize()
-                .unwrap_or_else(|_| skill.location.clone());
+                .unwrap_or_else(|_| skill_file.clone());
             if !seen_locations.insert(canonical_location) {
                 continue;
             }
+
+            let Ok(skill) = parse_skill_file(&skill_file) else {
+                continue;
+            };
 
             if !seen_names.insert(skill.name.clone()) {
                 continue;
@@ -81,29 +71,61 @@ impl SkillCatalog {
 
             skills.push(skill);
         }
+    }
 
-        Self { skills }
+    for raw_source in extra_sources {
+        let Some(skill) = load_additional_skill_source(raw_source, workspace_root) else {
+            continue;
+        };
+
+        let canonical_location = skill
+            .location
+            .canonicalize()
+            .unwrap_or_else(|_| skill.location.clone());
+        if !seen_locations.insert(canonical_location) {
+            continue;
+        }
+
+        if !seen_names.insert(skill.name.clone()) {
+            continue;
+        }
+
+        skills.push(skill);
+    }
+
+    SkillCatalogInner { skills }
+}
+
+impl SkillCatalog {
+    pub fn discover(workspace_root: &Path, config_dir: &Path, skill_sources: &[String]) -> Self {
+        let inner = CATALOG
+            .get_or_init(|| {
+                let inner = discover_inner(workspace_root, config_dir, skill_sources);
+                Arc::new(inner)
+            })
+            .clone();
+        Self { inner }
     }
 
     pub fn all(&self) -> &[SkillInfo] {
-        &self.skills
+        &self.inner.skills
     }
 
     pub fn is_empty(&self) -> bool {
-        self.skills.is_empty()
+        self.inner.skills.is_empty()
     }
 
     pub fn get(&self, name: &str) -> Option<&SkillInfo> {
-        self.skills.iter().find(|skill| skill.name == name)
+        self.inner.skills.iter().find(|skill| skill.name == name)
     }
 
     pub fn tool_description(&self) -> String {
-        if self.skills.is_empty() {
+        if self.inner.skills.is_empty() {
             return String::from("Load a reusable skill by name. No skills were discovered.");
         }
 
         let mut description = String::from("Load a reusable skill by name. Available skills:\n");
-        for skill in &self.skills {
+        for skill in &self.inner.skills {
             description.push_str("- ");
             description.push_str(&skill.name);
             description.push_str(": ");

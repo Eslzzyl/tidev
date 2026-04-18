@@ -8,7 +8,8 @@ use std::num::NonZeroUsize;
 use std::path::Path;
 use std::sync::OnceLock;
 use std::sync::RwLock;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::thread;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::Color as SyntectColor;
 use syntect::highlighting::FontStyle;
@@ -28,11 +29,36 @@ static HIGHLIGHT_CACHE: OnceLock<RwLock<LruCache<HighlightCacheKey, Vec<Line<'st
     OnceLock::new();
 static HIGHLIGHT_CACHE_GEN: AtomicU64 = AtomicU64::new(0);
 
+static SYNTAX_SET_LOADING: AtomicBool = AtomicBool::new(false);
+static THEME_SET_LOADING: AtomicBool = AtomicBool::new(false);
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 struct HighlightCacheKey {
     theme_gen: u64,
     lang: String,
     code_hash: [u8; 32],
+}
+
+pub fn spawn_background_load() {
+    if SYNTAX_SET_LOADING
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+    {
+        thread::spawn(|| {
+            let set = SyntaxSet::load_defaults_newlines();
+            let _ = SYNTAX_SET.set(set);
+        });
+    }
+
+    if THEME_SET_LOADING
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+    {
+        thread::spawn(|| {
+            let set = ThemeSet::load_defaults();
+            let _ = THEME_SET.set(set);
+        });
+    }
 }
 
 fn highlight_cache() -> &'static RwLock<LruCache<HighlightCacheKey, Vec<Line<'static>>>> {

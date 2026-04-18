@@ -127,7 +127,12 @@ impl App {
     }
 
     pub(crate) fn run(&mut self, runtime: &Runtime) -> Result<()> {
-        runtime.block_on(self.refresh_mcp_tools())?;
+        let mcp_manager = self.tools.mcp_manager();
+        runtime.spawn(async move {
+            if let Err(e) = mcp_manager.refresh_all().await {
+                crate::log_warn!("MCP refresh failed: {}", e);
+            }
+        });
         let _session = super::TerminalSession::enter()?;
         let backend = CrosstermBackend::new(io::stdout());
         let mut terminal = Terminal::new(backend).context("failed to create terminal")?;
