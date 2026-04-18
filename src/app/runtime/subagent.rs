@@ -15,7 +15,6 @@ use uuid::Uuid;
 use crate::{
     config::ActiveModel,
     llm::LlmClient,
-    prompts::SessionMode,
     session::{AssistantTurn, BackendEvent, Message, MessageRole, ToolCall, ToolExecutionResult},
     storage::SessionStore,
     tooling::{ToolRegistry, canonical_tool_name, execute_shell_tool_call},
@@ -37,7 +36,6 @@ pub(crate) struct SubagentTaskContext {
     pub tx: UnboundedSender<BackendEvent>,
     pub cancel_requested: Arc<AtomicBool>,
     pub runtime_handle: Handle,
-    pub mode: SessionMode,
 }
 
 pub(crate) async fn run_subagent_task(context: SubagentTaskContext) -> Result<String> {
@@ -112,12 +110,15 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
         };
         let tools = context
             .tools
-            .available_definitions(context.mode)
-            .into_iter()
-            .filter(|definition| match canonical_tool_name(&definition.name) {
-                Some("task") | Some("question") => false,
-                _ => true,
+            .definitions()
+            .iter()
+            .filter(|definition| {
+                matches!(canonical_tool_name(&definition.name),
+                    Some("read") | Some("list") | Some("glob") | Some("grep")
+                    | Some("websearch") | Some("webfetch")
+                )
             })
+            .cloned()
             .collect::<Vec<_>>();
         let (stream_tx, mut stream_rx) = unbounded_channel();
         let llm = context.llm.clone();

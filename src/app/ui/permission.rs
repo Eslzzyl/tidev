@@ -504,7 +504,6 @@ impl App {
         let tools = self.tools.clone();
         let model = self.active_model.clone();
         let workspace_root = self.workspace_root.clone();
-        let mode = self.mode;
         let task_call = tool_call.clone();
 
         runtime.spawn(async move {
@@ -528,7 +527,6 @@ impl App {
                 tx: tx.clone(),
                 cancel_requested,
                 runtime_handle,
-                mode,
             };
 
             let output = match crate::app::subagent::run_subagent_task(context).await {
