@@ -450,7 +450,7 @@ impl App {
         "Ready".to_string()
     }
 
-    fn loading_spinner(&self) -> &'static str {
+    pub(crate) fn loading_spinner(&self) -> &'static str {
         const FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
         const FRAME_DURATION_MS: u128 = 100;
 

@@ -135,6 +135,14 @@ pub(super) async fn stream_anthropic(
                         AnthropicDelta::InputJsonDelta { partial_json } => {
                             let entry = tool_calls.entry(index).or_default();
                             entry.arguments.push_str(&partial_json);
+
+                            if !entry.id.is_empty() && !entry.name.is_empty() {
+                                let _ = tx.send(BackendEvent::ToolCallUpdated {
+                                    session_id,
+                                    request_id,
+                                    tool_call: entry.clone().into_tool_call(index),
+                                });
+                            }
                         }
                     },
                     AnthropicStreamEvent::ContentBlockStart {
@@ -146,6 +154,12 @@ pub(super) async fn stream_anthropic(
                             let entry = tool_calls.entry(index).or_default();
                             entry.id = id;
                             entry.name = name;
+
+                            let _ = tx.send(BackendEvent::ToolCallUpdated {
+                                session_id,
+                                request_id,
+                                tool_call: entry.clone().into_tool_call(index),
+                            });
                         }
                     },
                     AnthropicStreamEvent::MessageStop => {

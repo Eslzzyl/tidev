@@ -488,6 +488,7 @@ impl App {
         let event_type = match &event {
             BackendEvent::Delta { .. } => "Delta",
             BackendEvent::ReasoningDelta { .. } => "ReasoningDelta",
+            BackendEvent::ToolCallUpdated { .. } => "ToolCallUpdated",
             BackendEvent::Finished { request_id, .. } => {
                 crate::log_info!("handle_backend_event: Finished request_id={}", request_id);
                 "Finished"
@@ -549,6 +550,22 @@ impl App {
                     && matches!(message.role, MessageRole::Assistant)
                 {
                     message.reasoning.push_str(&content);
+                }
+            }
+            BackendEvent::ToolCallUpdated {
+                session_id: _,
+                request_id,
+                tool_call,
+            } => {
+                if !self.is_active_request(request_id) {
+                    return Ok(());
+                }
+
+                if let Some(message) = self.conversation.messages.last_mut()
+                    && message.streaming
+                    && matches!(message.role, MessageRole::Assistant)
+                {
+                    message.upsert_tool_call(tool_call);
                 }
             }
             BackendEvent::Finished {

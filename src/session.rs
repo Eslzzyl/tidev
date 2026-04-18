@@ -304,6 +304,18 @@ impl Message {
             patch_files: None,
         }
     }
+
+    pub fn upsert_tool_call(&mut self, tool_call: ToolCall) {
+        if let Some(existing) = self
+            .tool_calls
+            .iter_mut()
+            .find(|existing| existing.id == tool_call.id)
+        {
+            *existing = tool_call;
+        } else {
+            self.tool_calls.push(tool_call);
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -480,6 +492,11 @@ pub enum BackendEvent {
         request_id: u64,
         content: String,
     },
+    ToolCallUpdated {
+        session_id: Uuid,
+        request_id: u64,
+        tool_call: ToolCall,
+    },
     Finished {
         session_id: Uuid,
         request_id: u64,
@@ -548,6 +565,7 @@ impl BackendEvent {
         match self {
             Self::Delta { session_id, .. }
             | Self::ReasoningDelta { session_id, .. }
+            | Self::ToolCallUpdated { session_id, .. }
             | Self::Finished { session_id, .. }
             | Self::Failed { session_id, .. }
             | Self::Retrying { session_id, .. }
@@ -564,6 +582,7 @@ impl BackendEvent {
         match self {
             Self::Delta { request_id, .. }
             | Self::ReasoningDelta { request_id, .. }
+            | Self::ToolCallUpdated { request_id, .. }
             | Self::Finished { request_id, .. }
             | Self::Failed { request_id, .. }
             | Self::Retrying { request_id, .. }

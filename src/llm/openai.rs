@@ -179,6 +179,14 @@ pub(super) async fn stream_openai(
                                     entry.arguments.push_str(arguments);
                                 }
                             }
+
+                            if !entry.id.is_empty() && !entry.name.is_empty() {
+                                let _ = tx.send(BackendEvent::ToolCallUpdated {
+                                    session_id,
+                                    request_id,
+                                    tool_call: entry.clone().into_tool_call(index),
+                                });
+                            }
                         }
                     }
 

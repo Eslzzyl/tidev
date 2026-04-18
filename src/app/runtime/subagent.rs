@@ -155,6 +155,18 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
                         &mut last_sent_reasoning_len,
                     );
                 }
+                BackendEvent::ToolCallUpdated { tool_call, .. } => {
+                    assistant_message.upsert_tool_call(tool_call.clone());
+                    update_child_message(context, &assistant_message)?;
+                    send_status(
+                        context,
+                        "Thinking...",
+                        Some(tool_call),
+                        Some(&assistant_message),
+                        None,
+                        None,
+                    );
+                }
                 BackendEvent::ReasoningDelta { content, .. } => {
                     assistant_message.reasoning.push_str(&content);
                     update_child_message(context, &assistant_message)?;

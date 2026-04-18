@@ -36,6 +36,7 @@ struct ToolResultCardRange {
 
 struct RenderContext<'a> {
     palette: ThemePalette,
+    spinner: &'a str,
     #[allow(dead_code)]
     workspace_root: &'a Path,
     expanded_tool_results: &'a HashSet<Uuid>,
@@ -46,10 +47,18 @@ fn render_tool_call_with_result(
     tool_call: &ToolCall,
     tool_result: Option<&Message>,
     body_width: usize,
+    is_streaming: bool,
     ctx: &RenderContext<'_>,
 ) -> Vec<Line<'static>> {
     let palette = ctx.palette;
     let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
+
+    if tool_result.is_none()
+        && is_streaming
+        && !tool_call_arguments_are_complete(&tool_call.arguments)
+    {
+        return render_tool_call_pending_lines(tool_call, body_width, palette, ctx.spinner);
+    }
 
     if matches!(canonical_name, "list" | "grep" | "glob" | "read") {
         return render_tool_call_summary_line(tool_call, tool_result, body_width, palette, ctx);
@@ -71,6 +80,42 @@ fn render_tool_call_with_result(
 
     lines.push(Line::from(""));
     lines
+}
+
+fn render_tool_call_pending_lines(
+    tool_call: &ToolCall,
+    body_width: usize,
+    palette: ThemePalette,
+    spinner: &str,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let canonical_display = canonical_tool_name(&tool_call.name)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| tool_call.name.clone());
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("Tool: ", Style::default().fg(palette.muted)),
+        Span::styled(
+            canonical_display,
+            Style::default()
+                .fg(palette.text)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
+    lines.push(line_with_prefix(
+        spinner,
+        &shorten_single_line("Calling...", body_width.saturating_sub(2)),
+        Style::default().fg(palette.accent_soft),
+        Style::default().fg(palette.muted),
+    ));
+    lines.push(Line::from(""));
+
+    lines
+}
+
+fn tool_call_arguments_are_complete(arguments: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(arguments).is_ok()
 }
 
 fn render_tool_call_summary_line(
@@ -909,8 +954,10 @@ impl App {
 
         // Create render context for tool calls
         let expanded_tool_outputs = self.load_expanded_tool_outputs(messages);
+        let spinner = self.loading_spinner();
         let ctx = RenderContext {
             palette,
+            spinner,
             workspace_root: self.workspace_root.as_path(),
             expanded_tool_results: &self.expanded_tool_results,
             expanded_tool_outputs: &expanded_tool_outputs,
@@ -1239,8 +1286,14 @@ impl App {
         ));
 
         if let Some(tool_call) = &execution.current_tool_call {
-            let current_tool =
-                summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width);
+            let current_tool = if tool_call_arguments_are_complete(&tool_call.arguments) {
+                summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width)
+            } else {
+                let canonical_display = canonical_tool_name(&tool_call.name)
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| tool_call.name.clone());
+                format!("{} Calling {}", self.loading_spinner(), canonical_display)
+            };
             lines.push(line_with_prefix(
                 "↳",
                 &format!("Tool: {current_tool}"),
@@ -1414,8 +1467,10 @@ impl App {
             index.contains_streaming_messages = force_rebuild;
 
             let expanded_tool_outputs = self.load_expanded_tool_outputs(messages);
+            let spinner = self.loading_spinner();
             let ctx = RenderContext {
                 palette: self.palette(),
+                spinner,
                 workspace_root: self.workspace_root.as_path(),
                 expanded_tool_results: &self.expanded_tool_results,
                 expanded_tool_outputs: &expanded_tool_outputs,
@@ -1456,8 +1511,10 @@ impl App {
 
         // Create a minimal context for block data calculation
         let expanded_tool_outputs = self.load_expanded_tool_outputs(messages);
+        let spinner = self.loading_spinner();
         let ctx = RenderContext {
             palette: self.palette(),
+            spinner,
             workspace_root: self.workspace_root.as_path(),
             expanded_tool_results: &self.expanded_tool_results,
             expanded_tool_outputs: &expanded_tool_outputs,
@@ -1529,8 +1586,13 @@ impl App {
                 if !message.tool_calls.is_empty() {
                     for tool_call in &message.tool_calls {
                         let tool_result = tool_results_by_id.get(&tool_call.id).copied();
-                        let card_lines =
-                            render_tool_call_with_result(tool_call, tool_result, body_width, ctx);
+                        let card_lines = render_tool_call_with_result(
+                            tool_call,
+                            tool_result,
+                            body_width,
+                            message.streaming,
+                            ctx,
+                        );
                         if !card_lines.is_empty() {
                             lines +=
                                 decorate_card_lines(card_lines, width, palette.panel_light).len();
@@ -1672,8 +1734,13 @@ impl App {
                 if !message.tool_calls.is_empty() {
                     for tool_call in &message.tool_calls {
                         let tool_result = tool_results_by_id.get(&tool_call.id).copied();
-                        let tool_card_lines =
-                            render_tool_call_with_result(tool_call, tool_result, body_width, ctx);
+                        let tool_card_lines = render_tool_call_with_result(
+                            tool_call,
+                            tool_result,
+                            body_width,
+                            message.streaming,
+                            ctx,
+                        );
                         if !tool_card_lines.is_empty() {
                             let decorated =
                                 decorate_card_lines(tool_card_lines, width, palette.panel_light);
@@ -1817,7 +1884,10 @@ fn render_reasoning_markdown_lines(
 
 #[cfg(test)]
 mod tests {
-    use super::{RenderContext, render_reasoning_markdown_lines, render_tool_result_detail_lines};
+    use super::{
+        RenderContext, render_reasoning_markdown_lines, render_tool_call_with_result,
+        render_tool_result_detail_lines,
+    };
     use crate::session::{Message, MessageRole};
     use crate::theme::ThemePalette;
     use ratatui::style::Style;
@@ -1903,6 +1973,7 @@ mod tests {
 
         let ctx = RenderContext {
             palette: ThemePalette::dark(),
+            spinner: "|",
             workspace_root: std::path::Path::new("/tmp"),
             expanded_tool_results: &HashSet::new(),
             expanded_tool_outputs: &HashMap::new(),
@@ -1948,6 +2019,7 @@ mod tests {
 
         let ctx = RenderContext {
             palette: ThemePalette::dark(),
+            spinner: "|",
             workspace_root: std::path::Path::new("/tmp"),
             expanded_tool_results: &HashSet::new(),
             expanded_tool_outputs: &HashMap::new(),
@@ -1964,6 +2036,72 @@ mod tests {
         assert!(text.contains("Task 1"), "should contain Task 1: {}", text);
         assert!(text.contains("Task 2"), "should contain Task 2: {}", text);
         assert!(text.contains("Task 3"), "should contain Task 3: {}", text);
+    }
+
+    #[test]
+    fn streaming_tool_call_shows_pending_state_before_arguments_parse() {
+        use crate::session::ToolCall;
+
+        let tool_call = ToolCall {
+            id: "tool-call-id".to_string(),
+            name: "read".to_string(),
+            arguments: "{\"path\": \"/tmp/example.txt\"".to_string(),
+        };
+
+        let ctx = RenderContext {
+            palette: ThemePalette::dark(),
+            spinner: "|",
+            workspace_root: std::path::Path::new("/tmp"),
+            expanded_tool_results: &HashSet::new(),
+            expanded_tool_outputs: &HashMap::new(),
+        };
+
+        let lines = render_tool_call_with_result(&tool_call, None, 80, true, &ctx);
+        let text = text_lines_to_string(&lines);
+
+        assert!(
+            text.contains("Tool: read"),
+            "should show the tool name: {}",
+            text
+        );
+        assert!(
+            text.contains("Calling..."),
+            "should show the pending state: {}",
+            text
+        );
+    }
+
+    #[test]
+    fn streaming_tool_call_switches_to_summary_after_arguments_parse() {
+        use crate::session::ToolCall;
+
+        let tool_call = ToolCall {
+            id: "tool-call-id".to_string(),
+            name: "read".to_string(),
+            arguments: "{\"path\": \"/tmp/example.txt\"}".to_string(),
+        };
+
+        let ctx = RenderContext {
+            palette: ThemePalette::dark(),
+            spinner: "|",
+            workspace_root: std::path::Path::new("/tmp"),
+            expanded_tool_results: &HashSet::new(),
+            expanded_tool_outputs: &HashMap::new(),
+        };
+
+        let lines = render_tool_call_with_result(&tool_call, None, 80, true, &ctx);
+        let text = text_lines_to_string(&lines);
+
+        assert!(
+            text.contains("Read /tmp/example.txt"),
+            "should show parsed summary: {}",
+            text
+        );
+        assert!(
+            !text.contains("Calling..."),
+            "pending state should be replaced: {}",
+            text
+        );
     }
 
     #[test]
