@@ -705,7 +705,13 @@ impl App {
         tool_call: ToolCall,
         result: ToolExecutionResult,
     ) -> Result<()> {
-        let display_result = result.preview_for_storage(Some(tool_call.name.as_str()));
+        let display_result = if tool_call.name == "bash" && self.mode == crate::prompts::SessionMode::Plan {
+            let reminder = crate::prompts::plan_shell_reminder();
+            let original_output = result.output.clone();
+            ToolExecutionResult::new(format!("{}\n\n{}", reminder, original_output))
+        } else {
+            result.preview_for_storage(Some(tool_call.name.as_str()))
+        };
         let message = crate::session::Message::tool_result(
             tool_call.id,
             tool_call.name.clone(),

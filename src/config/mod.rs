@@ -122,7 +122,7 @@ impl Default for PermissionConfig {
                 search: true,
                 write: false,
                 edit: false,
-                execute: false,
+                execute: true,
                 session: true,
             },
             build: PermissionSettings {
@@ -195,8 +195,8 @@ skills = []
 #max_files = 5
 
 # Optional permission settings by mode.
-# By default plan mode allows read/search/session and build mode allows all permissions.
-#permissions = { plan = { read = true, search = true, session = true, write = false, edit = false, execute = false }, build = { read = true, search = true, session = true, write = true, edit = true, execute = true } }
+# By default plan mode allows read/search/session/execute (shell, but only for read-only commands) and build mode allows all permissions.
+#permissions = { plan = { read = true, search = true, session = true, execute = true, write = false, edit = false }, build = { read = true, search = true, session = true, write = true, edit = true, execute = true } }
 
 # MCP servers can be declared here. Supported transports: stdio, streamable HTTP, and SSE.
 # [mcp.servers.my_server]
@@ -570,9 +570,9 @@ mod tests {
         assert!(permissions.is_allowed(SessionMode::Plan, ToolPermission::Read));
         assert!(permissions.is_allowed(SessionMode::Plan, ToolPermission::Search));
         assert!(permissions.is_allowed(SessionMode::Plan, ToolPermission::Session));
+        assert!(permissions.is_allowed(SessionMode::Plan, ToolPermission::Execute));
         assert!(!permissions.is_allowed(SessionMode::Plan, ToolPermission::Write));
         assert!(!permissions.is_allowed(SessionMode::Plan, ToolPermission::Edit));
-        assert!(!permissions.is_allowed(SessionMode::Plan, ToolPermission::Execute));
 
         assert!(permissions.is_allowed(SessionMode::Build, ToolPermission::Read));
         assert!(permissions.is_allowed(SessionMode::Build, ToolPermission::Search));

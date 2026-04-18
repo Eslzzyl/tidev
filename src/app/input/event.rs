@@ -440,6 +440,7 @@ impl App {
 
         if !self.command_palette.visible && key.code == KeyCode::Tab {
             self.mode = self.mode.toggle();
+            self.refresh_tools();
             self.last_notice = Some(format!("Mode switched to {}", self.mode.as_str()));
             return Ok(());
         }
