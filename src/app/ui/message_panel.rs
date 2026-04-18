@@ -39,7 +39,7 @@ impl MessagePanelState {
 
     pub fn reset_selection(&mut self, query: &str) {
         let matches = self.matching_indices(query);
-        self.selected_index = matches.get(0).copied().unwrap_or(0);
+        self.selected_index = matches.first().copied().unwrap_or(0);
     }
 
     pub fn move_selection(&mut self, query: &str, delta: isize) {

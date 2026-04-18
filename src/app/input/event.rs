@@ -54,18 +54,16 @@ impl App {
 
                 self.mouse_selection.release(position);
             }
-            MouseEventKind::ScrollUp => {
-                if self.can_scroll_conversation() {
+            MouseEventKind::ScrollUp
+                if self.can_scroll_conversation() => {
                     self.clear_mouse_selection();
                     self.scroll_messages_up(3);
                 }
-            }
-            MouseEventKind::ScrollDown => {
-                if self.can_scroll_conversation() {
+            MouseEventKind::ScrollDown
+                if self.can_scroll_conversation() => {
                     self.clear_mouse_selection();
                     self.scroll_messages_down(3);
                 }
-            }
             _ => {}
         }
     }
@@ -537,12 +535,11 @@ impl App {
             .unwrap_or(current_session_id);
 
         match key.code {
-            KeyCode::Up => {
-                if parent_session_id != current_session_id {
+            KeyCode::Up
+                if parent_session_id != current_session_id => {
                     self.switch_session(parent_session_id, runtime)?;
                     return Ok(true);
                 }
-            }
             KeyCode::Down | KeyCode::Right | KeyCode::Left => {
                 let children = self.store.load_child_sessions(parent_session_id)?;
                 if children.is_empty() {
@@ -890,7 +887,7 @@ impl App {
 
     pub(crate) fn reset_message_panel_selection(&mut self) {
         if let Some(panel) = &mut self.message_panel {
-            panel.reset_selection(&self.composer.text().to_string());
+            panel.reset_selection(self.composer.text());
         }
     }
 

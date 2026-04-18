@@ -999,7 +999,7 @@ impl App {
                 let timestamp = message.created_at.format("%Y-%m-%d %H:%M").to_string();
                 let spans = vec![
                     Span::styled(
-                        format!("{}", timestamp),
+                        timestamp.to_string(),
                         Style::default().fg(palette.accent_soft),
                     ),
                     Span::raw("  "),

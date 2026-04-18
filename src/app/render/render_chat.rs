@@ -692,7 +692,7 @@ impl App {
                 continue;
             }
 
-            let visible_start = screen_start.max(0) as u16;
+            let visible_start = screen_start as u16;
             let visible_end = (screen_end.min(self.message_viewport_lines)) as u16;
 
             if visible_start < visible_end {
@@ -866,7 +866,7 @@ impl App {
         // Update layout index (force rebuild for streaming messages)
         self.update_message_layout_index(width, body_width, has_streaming);
         if let Some(scroll_offset) =
-            self.resolve_message_scroll_target(&messages, width, body_width)
+            self.resolve_message_scroll_target(messages, width, body_width)
         {
             self.message_scroll_offset = scroll_offset;
             self.message_follow_tail = false;
@@ -910,7 +910,7 @@ impl App {
         }
 
         // Create render context for tool calls
-        let expanded_tool_outputs = self.load_expanded_tool_outputs(&messages);
+        let expanded_tool_outputs = self.load_expanded_tool_outputs(messages);
         let ctx = RenderContext {
             palette,
             workspace_root: self.workspace_root.as_path(),
@@ -922,7 +922,7 @@ impl App {
         let mut current_line_offset = header_line_count + padding_lines;
         for block in &visible_blocks {
             let block_lines = self.render_message_block_to_lines(
-                &messages,
+                messages,
                 block,
                 width,
                 body_width,
@@ -1406,7 +1406,7 @@ impl App {
             index.width = width;
             index.valid = true;
 
-            let expanded_tool_outputs = self.load_expanded_tool_outputs(&messages);
+            let expanded_tool_outputs = self.load_expanded_tool_outputs(messages);
             let ctx = RenderContext {
                 palette: self.palette(),
                 workspace_root: self.workspace_root.as_path(),
@@ -1420,7 +1420,7 @@ impl App {
             while i < messages.len() {
                 // Build block without start_line (calculated below)
                 let (message_id, message_count, line_count) =
-                    self.build_message_block_data(&messages, i, width, body_width, &ctx);
+                    self.build_message_block_data(messages, i, width, body_width, &ctx);
 
                 let block = super::MessageBlock {
                     message_id,

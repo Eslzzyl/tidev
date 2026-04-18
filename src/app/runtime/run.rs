@@ -184,15 +184,14 @@ impl App {
             }
 
             // If no events were processed, wait a bit before next frame
-            if events_processed == 0 {
-                if crossterm::event::poll(Duration::from_millis(16))
+            if events_processed == 0
+                && crossterm::event::poll(Duration::from_millis(16))
                     .context("failed to poll terminal events")?
                 {
                     let event = crossterm::event::read()
                         .context("failed to read terminal event")?;
                     self.handle_event(event, runtime)?;
                 }
-            }
 
             if self.should_quit {
                 break;
