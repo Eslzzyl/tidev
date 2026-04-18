@@ -476,14 +476,22 @@ impl App {
         };
 
         if !runtime.conversation.visible_messages().is_empty() {
-            let total_tokens: u32 = runtime
+            let last_token_usage = runtime
                 .conversation
-                .messages
+                .visible_messages()
                 .iter()
-                .filter_map(|message| message.total_tokens)
-                .sum();
-            if total_tokens > 0 {
-                runtime.context_usage = Some((0, 0, total_tokens));
+                .rev()
+                .find_map(|message| {
+                    message.total_tokens.map(|total| {
+                        (
+                            message.input_tokens.unwrap_or(0),
+                            message.output_tokens.unwrap_or(0),
+                            total,
+                        )
+                    })
+                });
+            if let Some((input, output, total)) = last_token_usage {
+                runtime.context_usage = Some((input, output, total));
             }
         }
 
