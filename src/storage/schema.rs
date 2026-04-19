@@ -1,4 +1,4 @@
-pub const SCHEMA_VERSION: i64 = 15;
+pub const SCHEMA_VERSION: i64 = 16;
 
 pub const SESSION_SELECT_COLUMNS: &str = "s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, s.context_summary, s.context_retained_from, COALESCE(sw.workspace_root, '')";
 
@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS messages (
     tool_calls TEXT NOT NULL DEFAULT '[]',
     tool_call_id TEXT,
     tool_name TEXT,
+    metadata TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
     completed_at TEXT,
     streaming INTEGER NOT NULL DEFAULT 0,

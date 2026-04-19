@@ -78,10 +78,24 @@ pub fn tool_output_preview(tool_name: Option<&str>, output: &str) -> String {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ToolMetadata {
+    #[serde(default)]
+    pub filepath: Option<String>,
+    #[serde(default)]
+    pub diff: Option<String>,
+    #[serde(default)]
+    pub truncated: Option<bool>,
+    #[serde(default)]
+    pub exists: Option<bool>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolExecutionResult {
     pub output: String,
     #[serde(default)]
     pub attachments: Vec<MessageAttachment>,
+    #[serde(default)]
+    pub metadata: ToolMetadata,
 }
 
 impl ToolExecutionResult {
@@ -89,6 +103,7 @@ impl ToolExecutionResult {
         Self {
             output: output.into(),
             attachments: Vec::new(),
+            metadata: ToolMetadata::default(),
         }
     }
 
@@ -101,6 +116,7 @@ impl ToolExecutionResult {
         Self {
             output,
             attachments: self.attachments.clone(),
+            metadata: self.metadata.clone(),
         }
     }
 }
@@ -200,6 +216,8 @@ pub struct Message {
     pub tool_call_id: Option<String>,
     #[serde(default)]
     pub tool_name: Option<String>,
+    #[serde(default)]
+    pub metadata: ToolMetadata,
     pub created_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
     pub streaming: bool,
@@ -234,6 +252,7 @@ impl Message {
             tool_calls: Vec::new(),
             tool_call_id: None,
             tool_name: None,
+            metadata: ToolMetadata::default(),
             created_at: Utc::now(),
             completed_at: None,
             streaming: false,
@@ -259,6 +278,7 @@ impl Message {
             tool_calls: Vec::new(),
             tool_call_id: None,
             tool_name: None,
+            metadata: ToolMetadata::default(),
             created_at: Utc::now(),
             completed_at: None,
             streaming: true,
@@ -290,6 +310,7 @@ impl Message {
             tool_calls: Vec::new(),
             tool_call_id: None,
             tool_name: None,
+            metadata: ToolMetadata::default(),
             created_at,
             completed_at: None,
             streaming,
@@ -319,6 +340,7 @@ impl Message {
             tool_calls: Vec::new(),
             tool_call_id: Some(tool_call_id.into()),
             tool_name: Some(tool_name.into()),
+            metadata: result.metadata,
             created_at: Utc::now(),
             completed_at: None,
             streaming: false,

@@ -385,7 +385,14 @@ pub(super) fn execute_tool_call(
         let _ = file_read_tracker.record_read(store, session_id, &absolute_path);
     }
 
+    let original_output_len = result.output.len();
     result.output = truncate_to_limit(result.output, max_output_bytes);
+
+    // If output was truncated, mark it in metadata
+    if result.output.len() < original_output_len {
+        result.metadata.truncated = Some(true);
+    }
+
     Ok(result)
 }
 

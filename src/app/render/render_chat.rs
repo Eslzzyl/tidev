@@ -359,6 +359,16 @@ fn render_tool_result_detail_lines(
     let tool_name = message.tool_name.as_deref().unwrap_or(message.role.label());
     let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
 
+    // Try to render diff from metadata first (preferred, full diff not truncated)
+    if !is_error
+        && matches!(canonical_name, "edit" | "write" | "apply_patch")
+        && let Some(diff) = message.metadata.diff.as_ref()
+        && let Some(diff_lines) = render_unified_diff_text(diff, body_width, palette)
+    {
+        return diff_lines;
+    }
+
+    // Fallback: try to render diff from output (may be truncated)
     if !is_error
         && matches!(canonical_name, "edit" | "write" | "apply_patch")
         && let Some(diff_lines) = render_unified_diff_text(output, body_width, palette)

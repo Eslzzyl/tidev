@@ -14,7 +14,7 @@ use tokio::process::Command;
 use crate::config::PermissionConfig;
 use crate::config::mcp::McpServerConfig;
 use crate::prompts::SessionMode;
-use crate::session::{MessageAttachment, ToolCall, ToolExecutionResult};
+use crate::session::{MessageAttachment, ToolCall, ToolExecutionResult, ToolMetadata};
 use crate::tooling::{ToolDefinition, ToolPermission};
 
 type McpClient = RunningService<RoleClient, ClientInfo>;
@@ -555,6 +555,7 @@ fn call_tool_result_data(
     ToolExecutionResult {
         output,
         attachments,
+        metadata: ToolMetadata::default(),
     }
 }
 

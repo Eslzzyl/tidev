@@ -6,7 +6,7 @@ use std::{fs, io::BufRead, path::Path};
 
 use super::utils::{display_workspace_relative, read_existing_text, resolve_workspace_path};
 use crate::instructions::resolve_nearby_instructions;
-use crate::session::{MessageAttachment, ToolExecutionResult};
+use crate::session::{MessageAttachment, ToolExecutionResult, ToolMetadata};
 use crate::tooling::tools::{ApplyPatchArgs, EditArgs, ListArgs, ReadArgs, WriteArgs};
 use crate::tooling::{ToolDefinition, ToolPermission};
 
@@ -70,28 +70,25 @@ pub fn execute_tool_call(
             let absolute_path = resolve_workspace_path(workspace_root, Path::new(&args.path))?;
             let original_exists = absolute_path.exists();
             write_file(workspace_root, &args.path, &args.content)?;
-            Ok(crate::session::ToolExecutionResult::new(
-                file_change_output(
-                    workspace_root,
-                    &absolute_path,
-                    "",
-                    &args.content,
-                    "Wrote",
-                    original_exists,
-                ),
+            Ok(file_change_output(
+                workspace_root,
+                &absolute_path,
+                "",
+                &args.content,
+                "Wrote",
+                original_exists,
             ))
         }
         Some("edit") => {
             let args = serde_json::from_value::<EditArgs>(arguments)
                 .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
-            let output = edit_file(
+            edit_file(
                 workspace_root,
                 &args.path,
                 &args.old_text,
                 &args.new_text,
                 args.replace_all.unwrap_or(false),
-            )?;
-            Ok(crate::session::ToolExecutionResult::new(output))
+            )
         }
         Some("apply_patch") => {
             let args = serde_json::from_value::<ApplyPatchArgs>(arguments)
@@ -120,15 +117,13 @@ pub fn execute_tool_call(
                     .with_context(|| format!("failed to write {}", absolute_path.display()))?;
             }
 
-            Ok(crate::session::ToolExecutionResult::new(
-                file_change_output(
-                    workspace_root,
-                    &absolute_path,
-                    &old_content,
-                    &updated,
-                    "Patched",
-                    original_exists,
-                ),
+            Ok(file_change_output(
+                workspace_root,
+                &absolute_path,
+                &old_content,
+                &updated,
+                "Patched",
+                original_exists,
             ))
         }
         Some("list") => {
@@ -220,6 +215,8 @@ fn truncate_line_to_limit(line: &str) -> String {
     }
 }
 
+/// Generates diff and returns a ToolExecutionResult with diff in metadata.
+/// The output message is kept short for the LLM, while the full diff is stored in metadata.
 fn file_change_output(
     workspace_root: &Path,
     absolute_path: &Path,
@@ -227,7 +224,7 @@ fn file_change_output(
     new_content: &str,
     action: &str,
     original_exists: bool,
-) -> String {
+) -> ToolExecutionResult {
     let relative = display_workspace_relative(workspace_root, absolute_path);
     let mut options = DiffOptions::new();
     if !original_exists {
@@ -237,13 +234,26 @@ fn file_change_output(
     options.set_modified_filename(format!("b/{relative}"));
     let patch = options.create_patch(old_content, new_content);
 
-    if patch.hunks().is_empty() {
+    let mut metadata = ToolMetadata {
+        filepath: Some(relative.clone()),
+        exists: Some(original_exists),
+        ..Default::default()
+    };
+
+    let output = if patch.hunks().is_empty() {
         format!("{action} {relative} (no content changes)")
     } else if !original_exists {
-        let patch_text = patch.to_string();
-        format!("new file mode 100644\n{patch_text}")
+        metadata.diff = Some(patch.to_string());
+        format!("{action} {relative}")
     } else {
-        patch.to_string()
+        metadata.diff = Some(patch.to_string());
+        format!("{action} {relative}")
+    };
+
+    ToolExecutionResult {
+        output,
+        attachments: Vec::new(),
+        metadata,
     }
 }
 
@@ -527,7 +537,7 @@ pub(super) fn edit_file(
     old_text: &str,
     new_text: &str,
     replace_all: bool,
-) -> Result<String> {
+) -> Result<ToolExecutionResult> {
     let path = resolve_workspace_path(workspace_root, relative_path.as_ref())?;
     let original_exists = path.exists();
     let old_contents =
