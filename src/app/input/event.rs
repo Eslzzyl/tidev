@@ -37,6 +37,12 @@ impl App {
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 let position = Position::new(mouse.column, mouse.row);
+
+                // Check if clicking on scrollbar
+                if self.handle_scrollbar_mouse_down(position) {
+                    return;
+                }
+
                 if self.handle_input_area_mouse_down(position) {
                     return;
                 }
@@ -48,11 +54,18 @@ impl App {
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) => {
+                let position = Position::new(mouse.column, mouse.row);
+                if self.handle_scrollbar_drag(position) {
+                    return;
+                }
                 self.mouse_selection
                     .drag(Position::new(mouse.column, mouse.row));
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 let position = Position::new(mouse.column, mouse.row);
+
+                // Clear scrollbar drag state
+                self.scrollbar_drag_state = None;
 
                 if !self.mouse_selection.is_dragging() {
                     for (message_id, rect) in &self.tool_result_card_bounds {
@@ -75,6 +88,79 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    /// Handle mouse down on scrollbar area.
+    /// Returns true if the event was handled by the scrollbar.
+    fn handle_scrollbar_mouse_down(&mut self, position: Position) -> bool {
+        let Some(scrollbar_area) = self.message_scrollbar_area else {
+            return false;
+        };
+
+        if !scrollbar_area.contains(position) {
+            return false;
+        }
+
+        let max_scroll = self.message_scroll_max();
+        if max_scroll == 0 {
+            return false;
+        }
+
+        // Calculate target scroll position based on click position (click-to-jump)
+        let track_height = scrollbar_area.height as usize;
+        let click_y = position.y.saturating_sub(scrollbar_area.y) as f32;
+        let scroll_delta = (click_y / track_height as f32) * max_scroll as f32;
+        let target_scroll = scroll_delta.round() as usize;
+
+        self.message_scroll_offset = target_scroll.min(max_scroll);
+        self.message_follow_tail = self.message_scroll_offset >= max_scroll;
+
+        // Initialize drag state for continuous dragging after click
+        self.scrollbar_drag_state = Some(state::ScrollbarDragState {
+            start_scroll: self.message_scroll_offset,
+            start_mouse_y: position.y,
+            max_scroll,
+        });
+
+        // Clear mouse selection when scrolling via scrollbar
+        self.clear_mouse_selection();
+
+        true
+    }
+
+    /// Handle mouse drag on scrollbar.
+    /// Returns true if the event was handled by the scrollbar.
+    fn handle_scrollbar_drag(&mut self, position: Position) -> bool {
+        let Some(ref state) = self.scrollbar_drag_state else {
+            return false;
+        };
+
+        let Some(scrollbar_area) = self.message_scrollbar_area else {
+            return false;
+        };
+
+        if !scrollbar_area.contains(position) {
+            return false;
+        }
+
+        // Calculate the new scroll position based on mouse position
+        let track_height = scrollbar_area.height as usize;
+        let delta_y = position.y as i32 - state.start_mouse_y as i32;
+
+        if delta_y == 0 {
+            return true;
+        }
+
+        // Calculate scroll delta: each row change in scrollbar = max_scroll / track_height
+        let scroll_per_pixel = state.max_scroll as f32 / track_height.max(1) as f32;
+        let scroll_delta = (delta_y as f32 * scroll_per_pixel).round() as i32;
+
+        let new_scroll = (state.start_scroll as i32 + scroll_delta).clamp(0, state.max_scroll as i32);
+
+        self.message_scroll_offset = new_scroll as usize;
+        self.message_follow_tail = self.message_scroll_offset >= state.max_scroll;
+
+        true
     }
 
     fn handle_input_area_mouse_down(&mut self, position: Position) -> bool {

@@ -760,6 +760,7 @@ impl App {
         frame.render_widget(paragraph, content_area);
 
         if let Some(scrollbar_area) = scrollbar_area.1 {
+            self.message_scrollbar_area = Some(scrollbar_area);
             self.render_scrollbar(frame, scrollbar_area, scroll, max_scroll);
         }
     }

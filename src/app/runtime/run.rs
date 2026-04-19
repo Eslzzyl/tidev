@@ -110,6 +110,8 @@ impl App {
             message_render_cache_misses: Cell::new(0),
             message_layout_index: RefCell::new(MessageLayoutIndex::default()),
             message_content_area: None,
+            message_scrollbar_area: None,
+            scrollbar_drag_state: None,
             sidebar_area: None,
             input_area: Cell::new(None),
             selection_clipboard_lease: None,

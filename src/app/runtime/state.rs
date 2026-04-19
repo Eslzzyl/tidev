@@ -30,6 +30,17 @@ use crate::{
 
 pub(crate) const MESSAGE_RENDER_CACHE_MAX_ENTRIES: usize = 1200;
 
+/// State for scrollbar drag interaction.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ScrollbarDragState {
+    /// The scroll position (in content lines) at the start of the drag.
+    pub(crate) start_scroll: usize,
+    /// The mouse Y position at the start of the drag.
+    pub(crate) start_mouse_y: u16,
+    /// The maximum scroll value.
+    pub(crate) max_scroll: usize,
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ContextUsage {
     pub(crate) input_tokens: u32,

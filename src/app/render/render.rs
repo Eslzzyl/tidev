@@ -18,6 +18,7 @@ impl App {
 
     pub(crate) fn render(&mut self, frame: &mut Frame<'_>) {
         self.message_content_area = None;
+        self.message_scrollbar_area = None;
         self.sidebar_area = None;
         self.input_area.set(None);
         if self.at_mention.visible {

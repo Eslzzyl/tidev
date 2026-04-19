@@ -145,6 +145,8 @@ struct App {
     /// avoiding full traversal on every frame.
     message_layout_index: RefCell<MessageLayoutIndex>,
     message_content_area: Option<Rect>,
+    message_scrollbar_area: Option<Rect>,
+    scrollbar_drag_state: Option<state::ScrollbarDragState>,
     sidebar_area: Option<Rect>,
     input_area: Cell<Option<Rect>>,
     selection_clipboard_lease: Option<ClipboardLease>,
