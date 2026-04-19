@@ -6,6 +6,7 @@ use crate::{
     app::permission::PermissionDialogState,
     app::question::QuestionDialogState,
     app::session_panel::{SessionPanelDialog, SessionPanelState, SessionViewMode},
+    app::settings_panel::SettingsPanelState,
     app::theme_panel::ThemePanelState,
     app::ui::rename::RenameSessionDialogState,
     config::ProviderSource,
@@ -739,6 +740,85 @@ impl App {
                     .bg(current_palette.selection_bg)
                     .fg(current_palette.selection_fg)
                     .add_modifier(Modifier::BOLD),
+            );
+
+        frame.render_widget(Clear, overlay);
+        frame.render_widget(panel_block, overlay);
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+        self.register_selection_region(inner);
+        frame.render_stateful_widget(list, inner, &mut state);
+    }
+
+    pub(super) fn render_settings_panel(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        panel: &SettingsPanelState,
+    ) {
+        use crate::app::ui::settings_panel::SettingType;
+        let current_palette = self.palette();
+        let overlay = centered_rect(60, 12, area);
+
+        let items: Vec<ListItem> = panel
+            .items
+            .iter()
+            .map(|item| {
+                let status = match item.setting_type {
+                    SettingType::Toggle(true) => "[x]",
+                    SettingType::Toggle(false) => "[ ]",
+                };
+                ListItem::new(vec![
+                    Line::from(vec![
+                        Span::styled(
+                            format!(" {} ", status),
+                            Style::default()
+                                .fg(if matches!(item.setting_type, SettingType::Toggle(true)) {
+                                    current_palette.accent
+                                } else {
+                                    current_palette.muted
+                                })
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            &item.name,
+                            Style::default()
+                                .fg(current_palette.text)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]),
+                    Line::from(vec![
+                        Span::raw("    "),
+                        Span::styled(
+                            &item.description,
+                            Style::default().fg(current_palette.muted),
+                        ),
+                    ]),
+                ])
+            })
+            .collect();
+
+        let mut state = ListState::default();
+        state.select(Some(panel.selected_index));
+
+        let panel_block = Block::default()
+            .style(Style::default().bg(current_palette.panel_alt))
+            .title(" Settings ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(current_palette.border_active()));
+
+        let list = List::new(items)
+            .style(
+                Style::default()
+                    .bg(current_palette.panel_alt)
+                    .fg(current_palette.text),
+            )
+            .highlight_style(
+                Style::default()
+                    .bg(current_palette.selection_bg)
+                    .fg(current_palette.selection_fg),
             );
 
         frame.render_widget(Clear, overlay);

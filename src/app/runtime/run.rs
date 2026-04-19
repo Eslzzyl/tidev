@@ -77,6 +77,7 @@ impl App {
             model_panel: None,
             message_panel: None,
             session_panel: None,
+            settings_panel: None,
             rename_dialog: None,
             mcp_panel: None,
             at_mention: AtMentionState::default(),

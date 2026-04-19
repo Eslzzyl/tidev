@@ -13,6 +13,7 @@ pub enum CommandAction {
     Message,
     Theme,
     Stats,
+    Settings,
     Quit,
     Init,
 }
@@ -306,6 +307,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         description: "Move one step forward in undo history",
         usage: "/redo",
         action: CommandAction::Redo,
+    },
+    CommandSpec {
+        name: "settings",
+        aliases: &["config"],
+        description: "Open settings panel",
+        usage: "/settings",
+        action: CommandAction::Settings,
     },
     CommandSpec {
         name: "exit",

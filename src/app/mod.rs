@@ -50,6 +50,7 @@ pub use ui::model_panel;
 pub use ui::permission;
 pub use ui::question;
 pub use ui::session_panel;
+pub use ui::settings_panel;
 pub use ui::stats_panel;
 pub use ui::theme_panel;
 
@@ -66,6 +67,7 @@ use crate::{
     },
     app::question::QuestionDialogState,
     app::session_panel::SessionPanelState,
+    app::settings_panel::SettingsPanelState,
     app::theme_panel::ThemePanelState,
     app::ui::rename::RenameSessionDialogState,
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
@@ -106,6 +108,7 @@ struct App {
     model_panel: Option<ModelPanelState>,
     message_panel: Option<MessagePanelState>,
     session_panel: Option<SessionPanelState>,
+    settings_panel: Option<SettingsPanelState>,
     rename_dialog: Option<RenameSessionDialogState>,
     mcp_panel: Option<McpPanelState>,
     at_mention: AtMentionState,

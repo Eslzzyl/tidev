@@ -334,6 +334,27 @@ impl App {
         Ok(())
     }
 
+    pub(crate) fn handle_settings_panel_key(&mut self, key: KeyEvent) -> Result<()> {
+        if let Some(panel) = &mut self.settings_panel {
+            match key.code {
+                KeyCode::Up => {
+                    panel.move_up();
+                }
+                KeyCode::Down => {
+                    panel.move_down();
+                }
+                KeyCode::Enter | KeyCode::Char(' ') => {
+                    panel.toggle_selected();
+                }
+                KeyCode::Esc => {
+                    self.close_settings_panel(true)?;
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn handle_model_panel_key(&mut self, key: KeyEvent) -> Result<()> {
         let Some(panel) = self.model_panel.clone() else {
             return Ok(());
@@ -446,6 +467,10 @@ impl App {
 
         if self.mcp_panel.is_some() {
             return self.handle_mcp_panel_key(key, runtime);
+        }
+
+        if self.settings_panel.is_some() {
+            return self.handle_settings_panel_key(key);
         }
 
         if self.model_panel.is_some() {
@@ -846,6 +871,9 @@ impl App {
             CommandAction::Theme => {
                 self.apply_theme_command(args)?;
             }
+            CommandAction::Settings => {
+                self.open_settings_panel();
+            }
             CommandAction::Stats => {
                 self.toggle_stats_panel();
             }
@@ -876,6 +904,14 @@ impl App {
     pub(crate) fn open_theme_panel(&mut self) {
         self.mcp_panel = None;
         self.theme_panel = Some(ThemePanelState::new(self.theme.palette().name));
+    }
+
+    pub(crate) fn open_settings_panel(&mut self) {
+        self.mcp_panel = None;
+        self.theme_panel = None;
+        self.model_panel = None;
+        self.session_panel = None;
+        self.settings_panel = Some(SettingsPanelState::new(&self.config));
     }
 
     pub(crate) fn open_model_panel(&mut self, initial_query: String) {
@@ -1018,6 +1054,14 @@ impl App {
                 self.theme.set_mode(panel.original_theme);
                 self.clear_message_render_cache();
             }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn close_settings_panel(&mut self, _apply: bool) -> Result<()> {
+        if let Some(panel) = self.settings_panel.take() {
+            panel.apply_to_config(&mut self.config);
+            self.config.save(&self.paths)?;
         }
         Ok(())
     }
@@ -1264,7 +1308,10 @@ impl App {
             && panel.needs_refresh()
         {
             let (start, end) = panel.granularity.default_range();
-            match self.store.get_time_range_stats(panel.granularity, start, end) {
+            match self
+                .store
+                .get_time_range_stats(panel.granularity, start, end)
+            {
                 Ok(stats) => {
                     panel.cached_stats = Some(stats);
                     panel.last_refresh = Some(chrono::Utc::now());
