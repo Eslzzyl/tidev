@@ -251,6 +251,7 @@ impl App {
             message_total_lines: self.message_total_lines,
             context_usage: self.context_usage.clone(),
             todos: self.todos.clone(),
+            file_reads: self.file_read_tracker.extract_session_reads(session_id),
         };
 
         self.cached_sessions.insert(session_id, cached);
@@ -363,6 +364,11 @@ impl App {
         self.message_total_lines = cached.message_total_lines;
         self.context_usage = cached.context_usage;
         self.todos = cached.todos.clone();
+
+        // Restore cached file read records
+        if let Some(reads) = cached.file_reads {
+            self.file_read_tracker.restore_session_reads(self.conversation.session_id, reads);
+        }
     }
 
     pub(crate) fn clear_message_render_cache(&self) {
@@ -503,6 +509,7 @@ impl App {
             message_total_lines: 0,
             context_usage: None,
             todos: self.store.load_todos(session_id)?,
+            file_reads: None,
         };
 
         // Load file reads from database into the tracker

@@ -1,6 +1,10 @@
 use ratatui::{style::Color, text::Line};
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Instant;
 use uuid::Uuid;
+
+use crate::tooling::FileReadStamp;
 
 use super::at_mention::AtMentionState;
 use super::mcp_panel::McpPanelState;
@@ -153,6 +157,8 @@ pub(crate) struct CachedSessionRuntime {
     pub(crate) message_total_lines: usize,
     pub(crate) context_usage: Option<ContextUsage>,
     pub(crate) todos: Vec<TodoItem>,
+    /// Cached file read records for this session.
+    pub(crate) file_reads: Option<HashMap<PathBuf, FileReadStamp>>,
 }
 
 #[derive(Clone, Debug)]

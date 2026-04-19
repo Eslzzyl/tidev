@@ -170,6 +170,26 @@ impl FileReadTracker {
         let mut writes = self.reads.write().unwrap();
         writes.remove(&session_id);
     }
+
+    /// Extract and remove all reads for a session (used for caching).
+    /// Returns the reads map if the session had any cached reads.
+    pub fn extract_session_reads(
+        &self,
+        session_id: uuid::Uuid,
+    ) -> Option<HashMap<PathBuf, FileReadStamp>> {
+        let mut writes = self.reads.write().unwrap();
+        writes.remove(&session_id)
+    }
+
+    /// Restore reads for a session from cached data.
+    pub fn restore_session_reads(
+        &self,
+        session_id: uuid::Uuid,
+        reads: HashMap<PathBuf, FileReadStamp>,
+    ) {
+        let mut writes = self.reads.write().unwrap();
+        writes.insert(session_id, reads);
+    }
 }
 
 impl Default for FileReadTracker {
