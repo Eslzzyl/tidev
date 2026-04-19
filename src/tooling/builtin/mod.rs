@@ -37,6 +37,7 @@ pub fn definitions(skill_description: String) -> Vec<ToolDefinition> {
 
 pub fn execute_tool_call(
     workspace_root: &Path,
+    config_dir: &Path,
     skills: &SkillCatalog,
     store: &SessionStore,
     session_id: uuid::Uuid,
@@ -48,7 +49,7 @@ pub fn execute_tool_call(
 
     let output = match canonical_tool_name(&call.name) {
         Some("read") | Some("write") | Some("edit") | Some("apply_patch") | Some("list") => {
-            file::execute_tool_call(workspace_root, call, max_output_bytes)
+            file::execute_tool_call(workspace_root, config_dir, call, max_output_bytes)
         }
         Some("glob") | Some("grep") => {
             search::execute_tool_call(workspace_root, call, max_output_bytes)

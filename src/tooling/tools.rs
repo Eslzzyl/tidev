@@ -331,6 +331,7 @@ fn truncate_to_limit(mut value: String, max_bytes: usize) -> String {
 
 pub(super) fn execute_tool_call(
     workspace_root: &Path,
+    config_dir: &Path,
     skills: &SkillCatalog,
     file_read_tracker: &Arc<FileReadTracker>,
     store: &SessionStore,
@@ -363,6 +364,7 @@ pub(super) fn execute_tool_call(
 
     let output = builtin::execute_tool_call(
         workspace_root,
+        config_dir,
         skills,
         store,
         session_id,

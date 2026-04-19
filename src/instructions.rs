@@ -14,6 +14,65 @@ const INSTRUCTION_FILES: &[&str] = &[
     "CONTEXT.md",
 ];
 
+/// Find instruction files by walking up from a file path.
+/// Similar to opencode's Instruction.resolve() logic.
+/// Returns Vec of (filepath, content) for nearby instruction files.
+pub fn resolve_nearby_instructions(
+    workspace_root: &Path,
+    config_dir: &Path,
+    file_path: &Path,
+) -> Result<Vec<(PathBuf, String)>> {
+    let mut results = Vec::new();
+    let mut seen = HashSet::new();
+
+    let target = file_path.canonicalize().unwrap_or_else(|_| file_path.to_path_buf());
+    let root = workspace_root.canonicalize().unwrap_or_else(|_| workspace_root.to_path_buf());
+
+    // Collect system-wide instruction paths
+    let system_paths = system_paths(workspace_root, config_dir, &[])?;
+    let system_set: HashSet<_> = system_paths
+        .iter()
+        .map(|p| p.canonicalize().unwrap_or_else(|_| p.clone()))
+        .collect();
+
+    // Walk upward from the file being read
+    let mut current = target.parent().unwrap_or(&target);
+    while current.starts_with(&root) && current != root {
+        for file_name in INSTRUCTION_FILES {
+            let candidate = current.join(file_name);
+            let canonical = candidate.canonicalize().unwrap_or_else(|_| candidate.clone());
+
+            // Skip if already loaded, system-wide, or the file itself
+            if canonical == target {
+                continue;
+            }
+            if system_set.contains(&canonical) {
+                continue;
+            }
+            if seen.contains(&canonical) {
+                continue;
+            }
+
+            if candidate.exists() {
+                if let Ok(content) = fs::read_to_string(&candidate) {
+                    if !content.trim().is_empty() {
+                        seen.insert(canonical);
+                        results.push((candidate.clone(), format!(
+                            "Instructions from: {}\n{}",
+                            candidate.display(),
+                            content
+                        )));
+                    }
+                }
+            }
+        }
+
+        current = current.parent().unwrap_or(current);
+    }
+
+    Ok(results)
+}
+
 pub fn system_paths(
     workspace_root: &Path,
     config_dir: &Path,
@@ -256,48 +315,6 @@ fn fetch_remote(url: &str) -> Result<String> {
     response
         .text()
         .context("failed to read remote instruction body")
-}
-
-pub fn resolve_nearby_instructions(
-    workspace_root: &Path,
-    target: &Path,
-    excluded: &HashSet<PathBuf>,
-) -> Result<Vec<PathBuf>> {
-    let mut results = Vec::new();
-    let target = target
-        .canonicalize()
-        .unwrap_or_else(|_| target.to_path_buf());
-    let workspace_root = workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_root.to_path_buf());
-
-    let mut current = target.parent().unwrap_or(&target).to_path_buf();
-
-    while current.starts_with(&workspace_root) {
-        for file_name in INSTRUCTION_FILES {
-            let candidate = current.join(file_name);
-            if candidate.exists() {
-                let canonical = candidate.canonicalize().unwrap_or(candidate.clone());
-                if excluded.contains(&canonical) || results.contains(&canonical) {
-                    continue;
-                }
-                if canonical != target {
-                    results.push(canonical);
-                }
-                break;
-            }
-        }
-
-        if current == workspace_root {
-            break;
-        }
-        match current.parent() {
-            Some(parent) => current = parent.to_path_buf(),
-            None => break,
-        }
-    }
-
-    Ok(results)
 }
 
 #[cfg(test)]

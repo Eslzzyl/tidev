@@ -2,10 +2,12 @@ use anyhow::{Context, Result, anyhow, bail};
 use diffy::DiffOptions;
 use serde_json::Value;
 use std::{fs, io::BufRead, path::Path};
+use std::path::PathBuf;
 
 use super::utils::{display_workspace_relative, read_existing_text, resolve_workspace_path};
 use crate::tooling::tools::{ApplyPatchArgs, EditArgs, ListArgs, ReadArgs, WriteArgs};
 use crate::tooling::{ToolDefinition, ToolPermission};
+use crate::instructions::resolve_nearby_instructions;
 
 const MAX_LINE_LENGTH: usize = 2000;
 const MAX_LINE_SUFFIX: &str = "... (line truncated to 2000 chars)";
@@ -42,6 +44,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
 
 pub fn execute_tool_call(
     workspace_root: &Path,
+    config_dir: &Path,
     call: &crate::session::ToolCall,
     _max_output_bytes: usize,
 ) -> Result<String> {
@@ -52,7 +55,8 @@ pub fn execute_tool_call(
         Some("read") => {
             let args = serde_json::from_value::<ReadArgs>(arguments)
                 .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
-            read_file_with_options(workspace_root, args.path, args.offset, args.limit)
+            let result = read_file_with_options(workspace_root, config_dir, args.path, args.offset, args.limit)?;
+            Ok(result.output)
         }
         Some("write") => {
             let args = serde_json::from_value::<WriteArgs>(arguments)
@@ -231,12 +235,18 @@ fn file_change_output(
     }
 }
 
+pub(super) struct ReadFileResult {
+    pub output: String,
+    pub loaded: Vec<PathBuf>,
+}
+
 pub(super) fn read_file_with_options(
     workspace_root: &Path,
+    config_dir: &Path,
     relative_path: impl AsRef<Path>,
     offset: Option<i64>,
     limit: Option<i64>,
-) -> Result<String> {
+) -> Result<ReadFileResult> {
     let path = resolve_workspace_path(workspace_root, relative_path.as_ref())?;
     let file =
         fs::File::open(&path).with_context(|| format!("failed to read {}", path.display()))?;
@@ -296,7 +306,7 @@ pub(super) fn read_file_with_options(
     let start = offset as usize;
     let last = start + lines.len().saturating_sub(1);
     let next_offset = start as i64 + lines.len() as i64;
-    let mut output = lines
+    let mut content = lines
         .into_iter()
         .enumerate()
         .map(|(i, line)| format!("{}: {}", start + i, line))
@@ -304,20 +314,40 @@ pub(super) fn read_file_with_options(
         .join("\n");
 
     if cut {
-        output.push_str(&format!(
+        content.push_str(&format!(
             "\n\n(Output capped at 50 KB. Showing lines {}-{}. Use offset={} to continue.)",
             start, last, next_offset
         ));
     } else if more {
-        output.push_str(&format!(
+        content.push_str(&format!(
             "\n\n(Showing lines {}-{} of {}. Use offset={} to continue.)",
             start, last, total_lines, next_offset
         ));
     } else {
-        output.push_str(&format!("\n\n(End of file - total {} lines)", total_lines));
+        content.push_str(&format!("\n\n(End of file - total {} lines)", total_lines));
     }
 
-    Ok(output)
+    // Load nearby instruction files (similar to opencode's instruction.resolve())
+    let instructions = resolve_nearby_instructions(workspace_root, config_dir, &path)?;
+    let loaded: Vec<PathBuf> = instructions.iter().map(|(p, _)| p.clone()).collect();
+
+    // Build XML-style output (matching opencode format)
+    let mut output = format!(
+        "<path>{}</path>\n<type>file</type>\n<content>\n{}\n</content>",
+        display_workspace_relative(workspace_root, &path),
+        content
+    );
+
+    // Append loaded instructions if any
+    if !instructions.is_empty() {
+        let reminders: Vec<String> = instructions.into_iter().map(|(_, c)| c).collect();
+        output.push_str(&format!(
+            "\n\n<system-reminder>\n{}\n</system-reminder>",
+            reminders.join("\n\n")
+        ));
+    }
+
+    Ok(ReadFileResult { output, loaded })
 }
 
 pub(super) fn write_file(

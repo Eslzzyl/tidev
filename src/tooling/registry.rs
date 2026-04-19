@@ -18,6 +18,7 @@ use super::{FileReadTracker, ToolDefinition, canonical_tool_name};
 #[derive(Clone, Debug)]
 pub struct ToolRegistry {
     workspace_root: PathBuf,
+    config_dir: PathBuf,
     max_output_bytes: usize,
     definitions: Vec<ToolDefinition>,
     skills: SkillCatalog,
@@ -40,6 +41,7 @@ impl ToolRegistry {
 
         Self {
             workspace_root,
+            config_dir,
             max_output_bytes: 12_000,
             definitions,
             skills,
@@ -197,6 +199,7 @@ impl ToolRegistry {
 
         execute_tool_call(
             &self.workspace_root,
+            &self.config_dir,
             &self.skills,
             &self.file_read_tracker,
             store,
