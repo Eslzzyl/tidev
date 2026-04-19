@@ -284,6 +284,16 @@ skills = []
 sidebar_width = 30
 welcome_width = 72
 max_input_lines = 6
+# Scroll speed multiplier (default: 3)
+# scroll_speed = 3
+
+[notifications]
+# Enable notifications (default: true)
+# enabled = true
+# Notification method: "auto", "osc9", or "bel" (default: "auto")
+# method = "auto"
+# When to notify: "unfocused" or "always" (default: "unfocused")
+# condition = "unfocused"
 
 [gateway.telegram]
 enabled = false
