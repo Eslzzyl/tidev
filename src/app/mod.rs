@@ -518,7 +518,6 @@ impl App {
                     return Ok(());
                 }
 
-                self.notifications.notify("Response complete");
                 self.finish_assistant_turn(turn, runtime)?;
             }
             BackendEvent::Retrying {
@@ -893,6 +892,8 @@ impl App {
         });
         self.schedule_context_compaction_for_session(self.conversation.session_id, runtime);
         self.drain_queued_prompts(runtime);
+
+        self.notifications.notify("Response complete");
 
         Ok(())
     }
