@@ -44,6 +44,8 @@ pub struct AppConfig {
     pub permissions: PermissionConfig,
     #[serde(default)]
     pub notifications: NotificationConfig,
+    #[serde(default)]
+    pub gateway: GatewayConfig,
     #[serde(skip)]
     pub bundled_providers: BTreeMap<String, ProviderConfig>,
 }
@@ -66,7 +68,41 @@ impl Default for AppConfig {
             mcp: McpConfig::default(),
             permissions: PermissionConfig::default(),
             notifications: NotificationConfig::default(),
+            gateway: GatewayConfig::default(),
             bundled_providers: bundled_provider_catalog().unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct GatewayConfig {
+    #[serde(default)]
+    pub telegram: TelegramGatewayConfig,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TelegramGatewayConfig {
+    /// Enable Telegram polling gateway mode.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Allowed Telegram user/chat identifiers.
+    #[serde(default)]
+    pub allowlist: Vec<String>,
+    /// Long-poll timeout in seconds passed to getUpdates.
+    #[serde(default = "default_telegram_poll_timeout_secs")]
+    pub poll_timeout_secs: u64,
+}
+
+fn default_telegram_poll_timeout_secs() -> u64 {
+    30
+}
+
+impl Default for TelegramGatewayConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            allowlist: Vec::new(),
+            poll_timeout_secs: default_telegram_poll_timeout_secs(),
         }
     }
 }
@@ -248,6 +284,12 @@ skills = []
 sidebar_width = 30
 welcome_width = 72
 max_input_lines = 6
+
+[gateway.telegram]
+enabled = false
+# allowlist can contain Telegram user IDs or chat IDs as strings.
+allowlist = []
+poll_timeout_secs = 30
 "#
     }
 

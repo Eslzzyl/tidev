@@ -622,6 +622,50 @@ impl SessionStore {
         Ok(record)
     }
 
+    pub fn set_gateway_chat_session(
+        &self,
+        platform: &str,
+        chat_key: &str,
+        session_id: Uuid,
+    ) -> Result<()> {
+        self.connection.execute(
+            "INSERT INTO gateway_chat_sessions (platform, chat_key, session_id, updated_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(platform, chat_key) DO UPDATE SET session_id = excluded.session_id, updated_at = excluded.updated_at",
+            params![
+                platform,
+                chat_key,
+                session_id.to_string(),
+                Utc::now().to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn load_gateway_chat_session(
+        &self,
+        platform: &str,
+        chat_key: &str,
+    ) -> Result<Option<Uuid>> {
+        let mut statement = self.connection.prepare(
+            "SELECT session_id FROM gateway_chat_sessions WHERE platform = ?1 AND chat_key = ?2 LIMIT 1",
+        )?;
+
+        let value = statement
+            .query_row(params![platform, chat_key], |row| row.get::<_, String>(0))
+            .optional()?;
+
+        value
+            .map(|raw| Uuid::parse_str(&raw).context("invalid stored gateway session id"))
+            .transpose()
+    }
+
+    pub fn clear_gateway_chat_session(&self, platform: &str, chat_key: &str) -> Result<()> {
+        self.connection.execute(
+            "DELETE FROM gateway_chat_sessions WHERE platform = ?1 AND chat_key = ?2",
+            params![platform, chat_key],
+        )?;
+        Ok(())
+    }
+
     pub fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
         let mut statement = self.connection.prepare(
             "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, snapshot_hash, patch_files FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",

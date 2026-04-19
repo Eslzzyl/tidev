@@ -1,4 +1,4 @@
-pub const SCHEMA_VERSION: i64 = 13;
+pub const SCHEMA_VERSION: i64 = 14;
 
 pub const SESSION_SELECT_COLUMNS: &str = "s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, s.context_summary, s.context_retained_from, COALESCE(sw.workspace_root, '')";
 
@@ -98,6 +98,17 @@ CREATE TABLE IF NOT EXISTS tool_permissions (
 
 CREATE INDEX IF NOT EXISTS idx_tool_permissions_session_created_at
     ON tool_permissions(session_id, created_at);
+
+CREATE TABLE IF NOT EXISTS gateway_chat_sessions (
+    platform TEXT NOT NULL,
+    chat_key TEXT NOT NULL,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(platform, chat_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_gateway_chat_sessions_session
+    ON gateway_chat_sessions(session_id);
 
 CREATE TABLE IF NOT EXISTS usage_stats (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

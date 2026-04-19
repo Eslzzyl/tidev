@@ -49,6 +49,14 @@ impl AuthStore {
             .and_then(|provider| provider.api_key.as_deref())
             .filter(|value| !value.trim().is_empty())
     }
+
+    pub fn set_telegram_bot_token(&mut self, token: impl Into<String>) {
+        self.set_api_key("telegram", token);
+    }
+
+    pub fn telegram_bot_token(&self) -> Option<&str> {
+        self.api_key("telegram")
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

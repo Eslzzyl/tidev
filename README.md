@@ -46,6 +46,48 @@ How to Run:
 1. `cargo install --path .`
 1. Execute `tidev` in your working directory.
 
+Telegram Gateway（Phase 1）
+1. 在 `~/.config/tidev/config.toml` 添加或确认：
+	 ```toml
+	 [gateway.telegram]
+	 enabled = true
+	 allowlist = ["<telegram_user_or_chat_id>"]
+	 poll_timeout_secs = 30
+	 ```
+2. 在 `~/.local/share/tidev/auth.json` 为 `telegram` provider 设置 bot token：
+	 ```json
+	 {
+		 "providers": {
+			 "telegram": {
+				 "api_key": "<telegram_bot_token>"
+			 }
+		 }
+	 }
+	 ```
+3. 在工作目录启动：`tidev gateway`
+4. 在 Telegram 中发送 `/new` 会开始一个新的 session，两个 `/new` 之间的消息会进入同一个 session。
+
+Telegram Gateway (Phase 1)
+1. Add or verify this block in `~/.config/tidev/config.toml`:
+	 ```toml
+	 [gateway.telegram]
+	 enabled = true
+	 allowlist = ["<telegram_user_or_chat_id>"]
+	 poll_timeout_secs = 30
+	 ```
+2. Put the bot token in `~/.local/share/tidev/auth.json` under provider `telegram`:
+	 ```json
+	 {
+		 "providers": {
+			 "telegram": {
+				 "api_key": "<telegram_bot_token>"
+			 }
+		 }
+	 }
+	 ```
+3. Start from your workspace with `tidev gateway`.
+4. Sending `/new` in Telegram starts a fresh session; messages between two `/new` commands stay in the same session.
+
 由于在开发早期，我暂时不发布 Release。
 
 Since it's in the early stages of development, I'm not releasing a release yet.

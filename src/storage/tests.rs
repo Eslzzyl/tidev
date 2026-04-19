@@ -466,3 +466,77 @@ fn revert_marker_round_trips() {
 
     let _ = std::fs::remove_file(path);
 }
+
+#[test]
+fn gateway_chat_session_mapping_round_trip() {
+    let path = std::env::temp_dir().join(format!(
+        "tidev-session-store-gateway-map-{}.sqlite3",
+        uuid::Uuid::new_v4()
+    ));
+
+    {
+        let store = SessionStore::open(&path).expect("store should open");
+        let first_session = uuid::Uuid::new_v4();
+        let second_session = uuid::Uuid::new_v4();
+        let chat_key = "-100123456:42";
+
+        store
+            .create_session(
+                first_session,
+                Path::new("/workspace"),
+                "openai",
+                "OpenAI",
+                "gpt-4o-mini",
+                "GPT-4o mini",
+                "First",
+            )
+            .expect("first session should be created");
+
+        store
+            .set_gateway_chat_session("telegram", chat_key, first_session)
+            .expect("mapping should save");
+
+        assert_eq!(
+            store
+                .load_gateway_chat_session("telegram", chat_key)
+                .expect("mapping should load"),
+            Some(first_session)
+        );
+
+        store
+            .create_session(
+                second_session,
+                Path::new("/workspace"),
+                "openai",
+                "OpenAI",
+                "gpt-4o-mini",
+                "GPT-4o mini",
+                "Second",
+            )
+            .expect("second session should be created");
+
+        store
+            .set_gateway_chat_session("telegram", chat_key, second_session)
+            .expect("mapping should update");
+
+        assert_eq!(
+            store
+                .load_gateway_chat_session("telegram", chat_key)
+                .expect("updated mapping should load"),
+            Some(second_session)
+        );
+
+        store
+            .clear_gateway_chat_session("telegram", chat_key)
+            .expect("mapping should clear");
+
+        assert_eq!(
+            store
+                .load_gateway_chat_session("telegram", chat_key)
+                .expect("cleared mapping should load"),
+            None
+        );
+    }
+
+    let _ = std::fs::remove_file(path);
+}
