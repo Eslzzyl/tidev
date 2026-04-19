@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 
 use crate::storage::SessionStore;
 
@@ -61,7 +61,7 @@ impl FileReadTracker {
             .as_ref()
             .and_then(|m| m.modified().ok())
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64);
+            .map(|d| d.as_millis() as i64);
         
         let size = metadata.as_ref().map(|m| m.len() as i64);
         
@@ -124,7 +124,7 @@ impl FileReadTracker {
             .modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64);
+            .map(|d| d.as_millis() as i64);
         
         let current_size = metadata.len() as i64;
 
@@ -138,14 +138,27 @@ impl FileReadTracker {
         let size_changed = stamp.size != Some(current_size);
 
         if mtime_changed || size_changed {
+            // Format mtime as local time with millisecond precision
+            let mtime_str = current_mtime
+                .and_then(|t| DateTime::from_timestamp_millis(t))
+                .map(|dt| dt.with_timezone(&Local).format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string())
+                .unwrap_or_else(|| "Unknown".to_string());
+
+            // Format read_at as local time with millisecond precision
+            let read_at_str = stamp
+                .read_at
+                .with_timezone(&Local)
+                .format("%Y-%m-%dT%H:%M:%S%.3f%z")
+                .to_string();
+
             return Err(format!(
                 "File {} has been modified since it was last read.\n\
-                 Last modification: {:?}\n\
+                 Last modification: {}\n\
                  Last read: {}\n\n\
                  Please read the file again before editing it.",
                 path.display(),
-                current_mtime,
-                stamp.read_at.to_rfc3339()
+                mtime_str,
+                read_at_str
             ));
         }
 
