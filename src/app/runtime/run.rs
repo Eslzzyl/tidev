@@ -113,6 +113,8 @@ impl App {
             sidebar_area: None,
             input_area: Cell::new(None),
             selection_clipboard_lease: None,
+            last_render_time: Instant::now(),
+            render_throttled: false,
             backend_tx,
             backend_rx,
             spinner_start: Instant::now(),
@@ -165,9 +167,19 @@ impl App {
         loop {
             self.process_backend_events(runtime)?;
             self.update_mouse_selection_auto_scroll();
-            terminal
-                .draw(|frame| self.render(frame))
-                .context("failed to render frame")?;
+
+            // Throttle rendering during streaming to preserve responsiveness for input events
+            let now = Instant::now();
+            let elapsed = now.duration_since(self.last_render_time);
+            let frame_budget = Duration::from_millis(16); // 60fps
+
+            if elapsed >= frame_budget || !self.render_throttled {
+                terminal
+                    .draw(|frame| self.render(frame))
+                    .context("failed to render frame")?;
+                self.last_render_time = now;
+                self.render_throttled = true;
+            }
 
             if self.should_quit {
                 break;
@@ -184,6 +196,7 @@ impl App {
                         if let Ok(event) = crossterm::event::read() {
                             self.handle_event(event, runtime)?;
                             events_processed += 1;
+                            self.render_throttled = false; // Reset throttle on input
                             if self.should_quit {
                                 break;
                             }

@@ -927,13 +927,8 @@ impl App {
             return (Text::from(lines), total_lines, card_ranges, false, 0);
         }
 
-        // Check if there are streaming messages (need to force rebuild index)
-        let has_streaming = messages
-            .iter()
-            .any(|m| m.streaming && matches!(m.role, MessageRole::Assistant));
-
-        // Update layout index (force rebuild for streaming messages)
-        self.update_message_layout_index(width, body_width, has_streaming);
+        // Update layout index
+        self.update_message_layout_index(width, body_width, false);
         if let Some(scroll_offset) = self.resolve_message_scroll_target(messages, width, body_width)
         {
             self.message_scroll_offset = scroll_offset;
@@ -1042,11 +1037,6 @@ impl App {
         body_width: usize,
         is_round_end: bool,
     ) -> Vec<(Color, Vec<Line<'static>>)> {
-        if message.streaming && matches!(message.role, MessageRole::Assistant) {
-            self.record_message_render_cache_miss();
-            return self.render_message_cards(message, body_width, is_round_end);
-        }
-
         let key = MessageRenderCacheKey {
             session_id: self.conversation.session_id,
             message_id: message.id,
@@ -1069,6 +1059,11 @@ impl App {
 
         self.record_message_render_cache_miss();
         let cards = self.render_message_cards(message, body_width, is_round_end);
+
+        // Do not cache streaming messages to avoid memory bloat and stale content
+        if message.streaming && matches!(message.role, MessageRole::Assistant) {
+            return cards;
+        }
 
         {
             let mut cache = self.message_render_cache.borrow_mut();
@@ -1201,11 +1196,7 @@ impl App {
             }
         }
 
-        if message.streaming && matches!(message.role, MessageRole::Assistant) {
-            for line in message.content.lines().skip_while(|line| line.is_empty()) {
-                lines.push(Line::from(line.to_string()));
-            }
-        } else if !message.content.is_empty() {
+        if !message.content.is_empty() {
             if let Some(diff_lines) =
                 render_unified_diff_text(&message.content, body_width, self.palette())
             {

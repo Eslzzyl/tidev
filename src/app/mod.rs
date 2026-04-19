@@ -76,7 +76,7 @@ use crate::{
     llm::LlmClient,
     mcp::McpManager,
     notifications,
-    prompts::{init_command, SessionMode},
+    prompts::{SessionMode, init_command},
     provider_setup::ConnectDialog,
     session::{AssistantTurn, BackendEvent, Conversation, Message, MessageAttachment, MessageRole},
     snapshot::SnapshotService,
@@ -148,6 +148,8 @@ struct App {
     sidebar_area: Option<Rect>,
     input_area: Cell<Option<Rect>>,
     selection_clipboard_lease: Option<ClipboardLease>,
+    last_render_time: Instant,
+    render_throttled: bool,
     backend_tx: UnboundedSender<BackendEvent>,
     backend_rx: UnboundedReceiver<BackendEvent>,
     spinner_start: Instant,
@@ -478,6 +480,7 @@ impl App {
                     && matches!(message.role, MessageRole::Assistant)
                 {
                     message.content.push_str(&content);
+                    self.message_layout_index.borrow_mut().valid = false;
                 }
             }
             BackendEvent::ReasoningDelta {
@@ -494,6 +497,7 @@ impl App {
                     && matches!(message.role, MessageRole::Assistant)
                 {
                     message.reasoning.push_str(&content);
+                    self.message_layout_index.borrow_mut().valid = false;
                 }
             }
             BackendEvent::ToolCallUpdated {
@@ -555,7 +559,8 @@ impl App {
                 self.abort_confirmation_deadline = None;
                 self.retrying_hint = None;
 
-                self.notifications.notify(&format!("Request failed: {}", error));
+                self.notifications
+                    .notify(&format!("Request failed: {}", error));
 
                 if let Some(message) = self.conversation.messages.last_mut()
                     && message.streaming
