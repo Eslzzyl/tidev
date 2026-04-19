@@ -11,3 +11,7 @@
 	url = https://github.com/NousResearch/hermes-agent.git
 	shallow = true
 
+[submodule "zeroclaw"]
+	path = zeroclaw
+	url = https://github.com/zeroclaw-labs/zeroclaw.git
+	shallow = true
