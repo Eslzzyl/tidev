@@ -3,9 +3,9 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use crossterm::{
     cursor::Show,
     event::{
-        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-        Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
-        MouseEventKind,
+        DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
+        EnableFocusChange, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+        KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
     },
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -73,6 +73,7 @@ use crate::{
     instructions,
     llm::LlmClient,
     mcp::McpManager,
+    notifications,
     prompts::{init_command, SessionMode},
     provider_setup::ConnectDialog,
     session::{AssistantTurn, BackendEvent, Conversation, Message, MessageAttachment, MessageRole},
@@ -156,6 +157,7 @@ struct App {
     message_scroll_target: Option<Uuid>,
     todos: Vec<TodoItem>,
     stats_panel: Option<ui::stats_panel::StatsPanelState>,
+    notifications: notifications::NotificationManager,
 }
 
 pub fn run() -> Result<()> {
@@ -516,6 +518,7 @@ impl App {
                     return Ok(());
                 }
 
+                self.notifications.notify("Response complete");
                 self.finish_assistant_turn(turn, runtime)?;
             }
             BackendEvent::Retrying {
@@ -549,6 +552,8 @@ impl App {
                 self.cancel_running_subagents();
                 self.abort_confirmation_deadline = None;
                 self.retrying_hint = None;
+
+                self.notifications.notify(&format!("Request failed: {}", error));
 
                 if let Some(message) = self.conversation.messages.last_mut()
                     && message.streaming
@@ -758,6 +763,8 @@ impl App {
                         parent_session_id
                     );
                 }
+
+                self.notifications.notify("Subagent finished");
             }
             BackendEvent::UsageStats {
                 session_id: _,
@@ -1107,6 +1114,7 @@ impl TerminalSession {
             EnterAlternateScreen,
             EnableBracketedPaste,
             EnableMouseCapture,
+            EnableFocusChange,
             crossterm::cursor::Hide,
         )
         .context("failed to enter alternate screen")?;
@@ -1123,6 +1131,7 @@ impl Drop for TerminalSession {
             LeaveAlternateScreen,
             DisableBracketedPaste,
             DisableMouseCapture,
+            DisableFocusChange,
             Show,
         );
     }

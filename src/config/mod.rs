@@ -42,6 +42,8 @@ pub struct AppConfig {
     pub mcp: McpConfig,
     #[serde(default)]
     pub permissions: PermissionConfig,
+    #[serde(default)]
+    pub notifications: NotificationConfig,
     #[serde(skip)]
     pub bundled_providers: BTreeMap<String, ProviderConfig>,
 }
@@ -63,7 +65,35 @@ impl Default for AppConfig {
             skills: Vec::new(),
             mcp: McpConfig::default(),
             permissions: PermissionConfig::default(),
+            notifications: NotificationConfig::default(),
             bundled_providers: bundled_provider_catalog().unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NotificationConfig {
+    /// Enable notifications (default: true)
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Notification method: "auto", "osc9", or "bel" (default: "auto")
+    #[serde(default)]
+    pub method: String,
+    /// When to notify: "unfocused" or "always" (default: "unfocused")
+    #[serde(default)]
+    pub condition: String,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for NotificationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            method: "auto".to_string(),
+            condition: "unfocused".to_string(),
         }
     }
 }

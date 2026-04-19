@@ -52,6 +52,7 @@ impl App {
 
         let snapshot = SnapshotService::new(&workspace_root, &paths)?;
         let cleanup_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let notifications = notifications::NotificationManager::new(config.notifications.clone());
 
         let app = Self {
             should_quit: false,
@@ -123,6 +124,7 @@ impl App {
             message_scroll_target: None,
             todos: Vec::new(),
             stats_panel: None,
+            notifications,
         };
 
         app.at_mention
