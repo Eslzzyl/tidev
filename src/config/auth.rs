@@ -9,6 +9,8 @@ use super::provider::ApiType;
 pub struct AuthStore {
     #[serde(default)]
     pub providers: BTreeMap<String, ProviderAuth>,
+    #[serde(default)]
+    pub channels: BTreeMap<String, ChannelAuth>,
 }
 
 impl AuthStore {
@@ -51,12 +53,22 @@ impl AuthStore {
     }
 
     pub fn set_telegram_bot_token(&mut self, token: impl Into<String>) {
-        self.set_api_key("telegram", token);
+        let token = token.into();
+        self.channels.entry("telegram".to_string()).or_default().api_key = Some(token);
     }
 
     pub fn telegram_bot_token(&self) -> Option<&str> {
-        self.api_key("telegram")
+        self.channels
+            .get("telegram")
+            .and_then(|channel| channel.api_key.as_deref())
+            .filter(|value| !value.trim().is_empty())
     }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ChannelAuth {
+    #[serde(default)]
+    pub api_key: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

@@ -63,7 +63,7 @@ async fn run_async() -> Result<()> {
 
     let bot_token = auth
         .telegram_bot_token()
-        .context("missing Telegram bot token in auth.json for provider 'telegram'")?
+        .context("missing Telegram bot token in auth.json for channel 'telegram'")?
         .to_string();
 
     let default_model = config.resolve_active_model(&auth)?;
