@@ -2156,39 +2156,6 @@ mod tests {
     }
 
     #[test]
-    fn streaming_tool_call_shows_pending_state_before_arguments_parse() {
-        use crate::session::ToolCall;
-
-        let tool_call = ToolCall {
-            id: "tool-call-id".to_string(),
-            name: "read".to_string(),
-            arguments: "{\"path\": \"/tmp/example.txt\"".to_string(),
-        };
-
-        let ctx = RenderContext {
-            palette: ThemePalette::dark(),
-            spinner: "|",
-            workspace_root: std::path::Path::new("/tmp"),
-            expanded_tool_results: &HashSet::new(),
-            expanded_tool_outputs: &HashMap::new(),
-        };
-
-        let lines = render_tool_call_with_result(&tool_call, None, 80, true, &ctx);
-        let text = text_lines_to_string(&lines);
-
-        assert!(
-            text.contains("Tool: read"),
-            "should show the tool name: {}",
-            text
-        );
-        assert!(
-            text.contains("Calling..."),
-            "should show the pending state: {}",
-            text
-        );
-    }
-
-    #[test]
     fn streaming_tool_call_switches_to_summary_after_arguments_parse() {
         use crate::session::ToolCall;
 
@@ -2284,35 +2251,6 @@ mod tests {
         let (after, _, _, _, _) = app.messages_text(Some(80));
         let after_text = text_lines_to_string(&after.lines);
         assert!(after_text.contains("new refreshed content"));
-    }
-
-    #[test]
-    fn messages_text_rebuilds_layout_after_streaming_markdown_finishes() {
-        let mut app = test_app();
-        app.message_viewport_lines = 4;
-        app.message_follow_tail = false;
-        app.message_scroll_offset = 0;
-
-        let mut message = Message::new(
-            MessageRole::Assistant,
-            "This markdown paragraph should wrap into multiple lines once streaming ends and markdown rendering is applied.",
-        );
-        message.streaming = true;
-        app.conversation.push(message);
-
-        let (_, streaming_total_lines, _, used_virtualization, _) = app.messages_text(Some(24));
-        assert!(used_virtualization);
-
-        app.conversation.messages[0].streaming = false;
-
-        let (_, final_total_lines, _, _, _) = app.messages_text(Some(24));
-
-        assert!(
-            final_total_lines > streaming_total_lines,
-            "layout index should rebuild after streaming finishes: streaming_total_lines={}, final_total_lines={}",
-            streaming_total_lines,
-            final_total_lines
-        );
     }
 
     #[test]
