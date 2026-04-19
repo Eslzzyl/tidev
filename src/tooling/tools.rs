@@ -363,7 +363,7 @@ pub(super) fn execute_tool_call(
         _ => {}
     }
 
-    let output = builtin::execute_tool_call(
+    let mut result = builtin::execute_tool_call(
         workspace_root,
         config_dir,
         skills,
@@ -382,10 +382,8 @@ pub(super) fn execute_tool_call(
         let _ = file_read_tracker.record_read(store, session_id, &absolute_path);
     }
 
-    Ok(ToolExecutionResult::new(truncate_to_limit(
-        output,
-        max_output_bytes,
-    )))
+    result.output = truncate_to_limit(result.output, max_output_bytes);
+    Ok(result)
 }
 
 /// Extract file path from tool arguments for read/edit/write operations

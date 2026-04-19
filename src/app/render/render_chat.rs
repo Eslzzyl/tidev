@@ -195,16 +195,16 @@ fn render_tool_call_summary_line(
 fn compute_tool_result_suffix(canonical_name: &str, output: &str) -> String {
     match canonical_name {
         "list" => {
-            let count = if output.trim() == "(empty)" {
-                0
+            if output == "(empty)" {
+                " → empty".to_string()
             } else {
-                output
+                let count = output
                     .lines()
-                    .skip(1)
                     .filter(|line| !line.trim().is_empty())
                     .count()
-            };
-            format!(" → {} items", count)
+                    .saturating_sub(1); // Subtract the path line
+                format!(" → {} items", count)
+            }
         }
         "grep" | "glob" => {
             if tool_output_is_error(output) {
@@ -225,7 +225,20 @@ fn compute_tool_result_suffix(canonical_name: &str, output: &str) -> String {
         }
         "read" => {
             if tool_output_is_error(output) {
-                " → error".to_string()
+                if output.contains("file not found") && output.contains("Did you mean") {
+                    " → not found (with suggestions)".to_string()
+                } else {
+                    " → error".to_string()
+                }
+            } else if output.contains("Image read successfully") {
+                " → image".to_string()
+            } else if output.contains("<type>directory</type>") {
+                let count = output
+                    .lines()
+                    .filter(|line| !line.trim().is_empty())
+                    .count()
+                    .saturating_sub(2); // Approximate, list_dir output is different now
+                format!(" → directory ({} entries)", count)
             } else {
                 let line_range = parse_line_range_from_read_output(output);
                 let truncated = tool_output_is_truncated(output);
@@ -1259,9 +1272,12 @@ impl App {
                 format!("{:.1}s", secs)
             });
 
-            let end_time = message
-                .completed_at
-                .map(|completed| completed.with_timezone(&Local).format("%H:%M:%S").to_string());
+            let end_time = message.completed_at.map(|completed| {
+                completed
+                    .with_timezone(&Local)
+                    .format("%H:%M:%S")
+                    .to_string()
+            });
 
             let tps = message
                 .tokens_per_second
@@ -2309,6 +2325,8 @@ fn tool_output_is_error(output: &str) -> bool {
     first_line.starts_with("Tool failed:")
         || first_line.starts_with("Tool '")
         || first_line.starts_with("Request failed:")
+        || first_line.starts_with("failed to read")
+        || first_line.contains("Cannot read binary file")
         || (first_line.starts_with("[exit ") && !first_line.starts_with("[exit 0]"))
 }
 

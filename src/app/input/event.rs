@@ -155,7 +155,8 @@ impl App {
         let scroll_per_pixel = state.max_scroll as f32 / track_height.max(1) as f32;
         let scroll_delta = (delta_y as f32 * scroll_per_pixel).round() as i32;
 
-        let new_scroll = (state.start_scroll as i32 + scroll_delta).clamp(0, state.max_scroll as i32);
+        let new_scroll =
+            (state.start_scroll as i32 + scroll_delta).clamp(0, state.max_scroll as i32);
 
         self.message_scroll_offset = new_scroll as usize;
         self.message_follow_tail = self.message_scroll_offset >= state.max_scroll;
@@ -1234,6 +1235,7 @@ impl App {
     pub(crate) fn switch_model(&mut self, selector: Option<&str>) -> Result<()> {
         let model = self.config.resolve_model(&self.auth, selector)?;
         self.active_model = model.clone();
+        self.tools.set_active_model(model.clone());
         self.conversation.set_model(
             model.provider_id.clone(),
             model.provider_display_name.clone(),

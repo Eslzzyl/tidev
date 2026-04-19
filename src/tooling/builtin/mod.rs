@@ -11,7 +11,7 @@ pub mod file;
 pub mod search;
 pub mod task;
 pub mod todo;
-mod utils;
+pub mod utils;
 pub mod web;
 
 pub fn definitions(skill_description: String) -> Vec<ToolDefinition> {
@@ -43,30 +43,42 @@ pub fn execute_tool_call(
     session_id: uuid::Uuid,
     call: &ToolCall,
     max_output_bytes: usize,
-) -> Result<String> {
+) -> Result<crate::session::ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
 
-    let output = match canonical_tool_name(&call.name) {
+    let result = match canonical_tool_name(&call.name) {
         Some("read") | Some("write") | Some("edit") | Some("apply_patch") | Some("list") => {
-            file::execute_tool_call(workspace_root, config_dir, call, max_output_bytes)
+            file::execute_tool_call(workspace_root, config_dir, call, max_output_bytes)?
         }
         Some("glob") | Some("grep") => {
-            search::execute_tool_call(workspace_root, call, max_output_bytes)
+            let output = search::execute_tool_call(workspace_root, call, max_output_bytes)?;
+            crate::session::ToolExecutionResult::new(output)
         }
-        Some("bash") => exec::execute_tool_call(workspace_root, call, max_output_bytes),
-        Some("task") => task::execute_tool_call(workspace_root, store, session_id, call),
-        Some("todowrite") => todo::execute_tool_call(workspace_root, store, session_id, call),
+        Some("bash") => {
+            let output = exec::execute_tool_call(workspace_root, call, max_output_bytes)?;
+            crate::session::ToolExecutionResult::new(output)
+        }
+        Some("task") => {
+            let output = task::execute_tool_call(workspace_root, store, session_id, call)?;
+            crate::session::ToolExecutionResult::new(output)
+        }
+        Some("todowrite") => {
+            let output = todo::execute_tool_call(workspace_root, store, session_id, call)?;
+            crate::session::ToolExecutionResult::new(output)
+        }
         Some("skill") => {
             let args = super::tools::parse_arguments::<SkillArgs>(&call.name, arguments)?;
-            skills.render_skill(&args.name)
+            let output = skills.render_skill(&args.name)?;
+            crate::session::ToolExecutionResult::new(output)
         }
         Some("websearch") | Some("webfetch") => {
-            web::execute_tool_call(workspace_root, call, max_output_bytes)
+            let output = web::execute_tool_call(workspace_root, call, max_output_bytes)?;
+            crate::session::ToolExecutionResult::new(output)
         }
         None => bail!("unknown tool '{}'", call.name),
         Some(other) => bail!("unsupported tool '{}'", other),
-    }?;
+    };
 
-    Ok(output)
+    Ok(result)
 }

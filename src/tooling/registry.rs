@@ -1,18 +1,14 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use uuid::Uuid;
 
 use crate::mcp::McpManager;
 use crate::tooling::SkillCatalog;
 use crate::{
-    config::PermissionConfig,
-    prompts::SessionMode,
-    session::{ToolCall, ToolExecutionResult},
-    storage::SessionStore,
+    config::PermissionConfig, prompts::SessionMode, session::ToolCall, storage::SessionStore,
 };
 
-use super::tools::{execute_tool_call, tool_definitions};
+use super::tools::tool_definitions;
 use super::{FileReadTracker, ToolDefinition, canonical_tool_name};
 
 #[derive(Clone, Debug)]
@@ -25,6 +21,7 @@ pub struct ToolRegistry {
     mcp: McpManager,
     permission_config: PermissionConfig,
     file_read_tracker: Arc<FileReadTracker>,
+    active_model: Option<crate::config::ActiveModel>,
 }
 
 impl ToolRegistry {
@@ -48,7 +45,19 @@ impl ToolRegistry {
             mcp,
             permission_config,
             file_read_tracker,
+            active_model: None,
         }
+    }
+
+    pub fn set_active_model(&mut self, model: crate::config::ActiveModel) {
+        self.active_model = Some(model);
+    }
+
+    pub fn model_supports_images(&self) -> bool {
+        self.active_model
+            .as_ref()
+            .map(|m| m.supports_images)
+            .unwrap_or(false)
     }
 
     pub fn file_read_tracker(&self) -> Arc<FileReadTracker> {
@@ -190,22 +199,53 @@ impl ToolRegistry {
         &self,
         runtime: &tokio::runtime::Handle,
         store: &SessionStore,
-        session_id: Uuid,
-        call: &ToolCall,
-    ) -> Result<ToolExecutionResult> {
+        session_id: uuid::Uuid,
+        call: &crate::session::ToolCall,
+    ) -> Result<crate::session::ToolExecutionResult> {
         if self.mcp.definition_for(&call.name).is_some() {
             return runtime.block_on(self.mcp.execute_call(call));
         }
 
-        execute_tool_call(
+        let mut result = super::builtin::execute_tool_call(
             &self.workspace_root,
             &self.config_dir,
             &self.skills,
-            &self.file_read_tracker,
             store,
             session_id,
             call,
             self.max_output_bytes,
-        )
+        )?;
+
+        // Image capability check: If the result contains images but the model doesn't support them,
+        // we strip the image attachments and return a message indicating the limitation.
+        if !self.model_supports_images() && !result.attachments.is_empty() {
+            let had_images = result
+                .attachments
+                .iter()
+                .any(|a| matches!(a, crate::session::MessageAttachment::Image { .. }));
+            if had_images {
+                result
+                    .attachments
+                    .retain(|a| !matches!(a, crate::session::MessageAttachment::Image { .. }));
+                result.output.push_str("\n\n(Note: Image reading was attempted, but the current model does not support image input. Images have been removed from the request.)");
+            }
+        }
+
+        // For "read" tool, record the read if it was successful and didn't result in an attachment-only error
+        if super::canonical_tool_name(&call.name) == Some("read") {
+            let arguments: serde_json::Value = serde_json::from_str(&call.arguments)?;
+            if let Some(path_str) = arguments.get("path").and_then(|v| v.as_str()) {
+                let absolute_path = super::builtin::utils::resolve_workspace_path(
+                    &self.workspace_root,
+                    std::path::Path::new(path_str),
+                )?;
+                if absolute_path.exists() && absolute_path.is_file() {
+                    self.file_read_tracker
+                        .record_read(store, session_id, &absolute_path)?;
+                }
+            }
+        }
+
+        Ok(result)
     }
 }

@@ -1,10 +1,12 @@
 use anyhow::{Context, Result, anyhow, bail};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use diffy::DiffOptions;
 use serde_json::Value;
 use std::{fs, io::BufRead, path::Path};
 
 use super::utils::{display_workspace_relative, read_existing_text, resolve_workspace_path};
 use crate::instructions::resolve_nearby_instructions;
+use crate::session::{MessageAttachment, ToolExecutionResult};
 use crate::tooling::tools::{ApplyPatchArgs, EditArgs, ListArgs, ReadArgs, WriteArgs};
 use crate::tooling::{ToolDefinition, ToolPermission};
 
@@ -15,7 +17,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition::new::<ReadArgs>(
             "read",
-            "Read a text file inside the workspace, optionally using offset/limit to page large files",
+            "Read a file or directory inside the workspace. Supports text files (with pagination), images (as attachments), and directory listing.",
             ToolPermission::Read,
         ),
         ToolDefinition::new::<WriteArgs>(
@@ -46,7 +48,7 @@ pub fn execute_tool_call(
     config_dir: &Path,
     call: &crate::session::ToolCall,
     _max_output_bytes: usize,
-) -> Result<String> {
+) -> Result<crate::session::ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
 
@@ -54,7 +56,7 @@ pub fn execute_tool_call(
         Some("read") => {
             let args = serde_json::from_value::<ReadArgs>(arguments)
                 .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
-            read_file_with_options(
+            read_path(
                 workspace_root,
                 config_dir,
                 args.path,
@@ -68,25 +70,28 @@ pub fn execute_tool_call(
             let absolute_path = resolve_workspace_path(workspace_root, Path::new(&args.path))?;
             let original_exists = absolute_path.exists();
             write_file(workspace_root, &args.path, &args.content)?;
-            Ok(file_change_output(
-                workspace_root,
-                &absolute_path,
-                "",
-                &args.content,
-                "Wrote",
-                original_exists,
+            Ok(crate::session::ToolExecutionResult::new(
+                file_change_output(
+                    workspace_root,
+                    &absolute_path,
+                    "",
+                    &args.content,
+                    "Wrote",
+                    original_exists,
+                ),
             ))
         }
         Some("edit") => {
             let args = serde_json::from_value::<EditArgs>(arguments)
                 .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
-            edit_file(
+            let output = edit_file(
                 workspace_root,
                 &args.path,
                 &args.old_text,
                 &args.new_text,
                 args.replace_all.unwrap_or(false),
-            )
+            )?;
+            Ok(crate::session::ToolExecutionResult::new(output))
         }
         Some("apply_patch") => {
             let args = serde_json::from_value::<ApplyPatchArgs>(arguments)
@@ -115,20 +120,23 @@ pub fn execute_tool_call(
                     .with_context(|| format!("failed to write {}", absolute_path.display()))?;
             }
 
-            Ok(file_change_output(
-                workspace_root,
-                &absolute_path,
-                &old_content,
-                &updated,
-                "Patched",
-                original_exists,
+            Ok(crate::session::ToolExecutionResult::new(
+                file_change_output(
+                    workspace_root,
+                    &absolute_path,
+                    &old_content,
+                    &updated,
+                    "Patched",
+                    original_exists,
+                ),
             ))
         }
         Some("list") => {
             let args = serde_json::from_value::<ListArgs>(arguments)
                 .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
             let path = args.path.unwrap_or_else(|| ".".to_string());
-            list_dir(workspace_root, path)
+            let output = list_dir(workspace_root, path)?;
+            Ok(crate::session::ToolExecutionResult::new(output))
         }
         Some(other) => bail!("unsupported file tool '{}'", other),
         None => bail!("unknown tool '{}'", call.name),
@@ -239,14 +247,71 @@ fn file_change_output(
     }
 }
 
-pub(super) fn read_file_with_options(
+pub(super) fn read_path(
     workspace_root: &Path,
     config_dir: &Path,
     relative_path: impl AsRef<Path>,
     offset: Option<i64>,
     limit: Option<i64>,
-) -> Result<String> {
+) -> Result<ToolExecutionResult> {
     let path = resolve_workspace_path(workspace_root, relative_path.as_ref())?;
+
+    if !path.exists() {
+        let suggestions = find_fuzzy_suggestions(workspace_root, relative_path.as_ref())?;
+        if suggestions.is_empty() {
+            bail!("failed to read {}: file not found", path.display());
+        } else {
+            bail!(
+                "failed to read {}: file not found. Did you mean one of these?\n{}",
+                path.display(),
+                suggestions.join("\n")
+            );
+        }
+    }
+
+    if path.is_dir() {
+        let output = list_dir(workspace_root, &relative_path)?;
+        let mut result = ToolExecutionResult::new(output);
+        result
+            .attachments
+            .push(MessageAttachment::DirectoryReference {
+                path: display_workspace_relative(workspace_root, &path),
+                tree: "".to_string(),
+            });
+        return Ok(result);
+    }
+
+    // Treat as potential image
+    let mime = mime_guess::from_path(&path).first_or_octet_stream();
+    let mime_str = mime.to_string();
+
+    if mime_str.starts_with("image/") {
+        let content =
+            fs::read(&path).with_context(|| format!("failed to read image {}", path.display()))?;
+        let data_url = format!(
+            "data:{};base64,{}",
+            mime_str,
+            BASE64_STANDARD.encode(content)
+        );
+
+        let mut result = ToolExecutionResult::new("Image read successfully.");
+        result.attachments.push(MessageAttachment::Image {
+            filename: path
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default(),
+            mime: mime_str,
+            data_url,
+        });
+        return Ok(result);
+    }
+
+    // Detect if binary but not an image
+    if is_binary_file(&path)? {
+        bail!("Cannot read binary file: {}", path.display());
+    }
+
+    // Treat as text file
     let file =
         fs::File::open(&path).with_context(|| format!("failed to read {}", path.display()))?;
     let mut reader = std::io::BufReader::new(file);
@@ -305,7 +370,7 @@ pub(super) fn read_file_with_options(
     let start = offset as usize;
     let last = start + lines.len().saturating_sub(1);
     let next_offset = start as i64 + lines.len() as i64;
-    let mut content = lines
+    let mut content_str = lines
         .into_iter()
         .enumerate()
         .map(|(i, line)| format!("{}: {}", start + i, line))
@@ -313,30 +378,29 @@ pub(super) fn read_file_with_options(
         .join("\n");
 
     if cut {
-        content.push_str(&format!(
+        content_str.push_str(&format!(
             "\n\n(Output capped at 50 KB. Showing lines {}-{}. Use offset={} to continue.)",
             start, last, next_offset
         ));
     } else if more {
-        content.push_str(&format!(
+        content_str.push_str(&format!(
             "\n\n(Showing lines {}-{} of {}. Use offset={} to continue.)",
             start, last, total_lines, next_offset
         ));
     } else {
-        content.push_str(&format!("\n\n(End of file - total {} lines)", total_lines));
+        content_str.push_str(&format!("\n\n(End of file - total {} lines)", total_lines));
     }
 
-    // Load nearby instruction files (similar to opencode's instruction.resolve())
+    // Load nearby instruction files
     let instructions = resolve_nearby_instructions(workspace_root, config_dir, &path)?;
 
-    // Build XML-style output (matching opencode format)
+    // Build XML-style output
     let mut output = format!(
         "<path>{}</path>\n<type>file</type>\n<content>\n{}\n</content>",
         display_workspace_relative(workspace_root, &path),
-        content
+        content_str
     );
 
-    // Append loaded instructions if any
     if !instructions.is_empty() {
         let reminders: Vec<String> = instructions.into_iter().map(|(_, c)| c).collect();
         output.push_str(&format!(
@@ -345,7 +409,64 @@ pub(super) fn read_file_with_options(
         ));
     }
 
-    Ok(output)
+    Ok(ToolExecutionResult::new(output))
+}
+
+fn is_binary_file(path: &Path) -> Result<bool> {
+    use std::io::Read;
+    let mut f = fs::File::open(path)?;
+    let mut buf = [0u8; 1024];
+    let n = f.read(&mut buf)?;
+    Ok(buf[..n].iter().any(|&b| b == 0))
+}
+
+fn find_fuzzy_suggestions(workspace_root: &Path, relative_path: &Path) -> Result<Vec<String>> {
+    let parent = relative_path.parent().unwrap_or(Path::new("."));
+    let absolute_parent = resolve_workspace_path(workspace_root, parent)?;
+    if !absolute_parent.exists() || !absolute_parent.is_dir() {
+        return Ok(vec![]);
+    }
+
+    let target_name = relative_path
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if target_name.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(absolute_parent)? {
+        let entry = entry?;
+        entries.push(entry.file_name().to_string_lossy().to_string());
+    }
+
+    let mut suggestions: Vec<(f64, String)> = entries
+        .into_iter()
+        .map(|name| (strsim::jaro_winkler(&target_name, &name), name))
+        .filter(|(sim, _)| *sim > 0.8)
+        .collect();
+
+    suggestions.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+    Ok(suggestions
+        .into_iter()
+        .take(3)
+        .map(|(_, name)| {
+            let mut p = parent.to_path_buf();
+            p.push(name);
+            p.to_string_lossy().to_string()
+        })
+        .collect())
+}
+
+pub(super) fn read_file_with_options(
+    _workspace_root: &Path,
+    _config_dir: &Path,
+    _relative_path: impl AsRef<Path>,
+    _offset: Option<i64>,
+    _limit: Option<i64>,
+) -> Result<String> {
+    bail!("deprecated: use read_path instead")
 }
 
 pub(super) fn write_file(

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use std::path::{Component, Path, PathBuf};
 
-pub(super) fn resolve_workspace_path(workspace_root: &Path, candidate: &Path) -> Result<PathBuf> {
+pub fn resolve_workspace_path(workspace_root: &Path, candidate: &Path) -> Result<PathBuf> {
     let mut resolved = if candidate.is_absolute() {
         PathBuf::new()
     } else {
