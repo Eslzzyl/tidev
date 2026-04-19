@@ -5,7 +5,7 @@ use anyhow::Result;
 use crate::{
     config::ActiveModel,
     llm::LlmClient,
-    prompts::{self, compression_system_prompt, SessionMode},
+    prompts::{self, SessionMode, compression_system_prompt},
     session::{Conversation, Message, MessageAttachment, MessageRole, tool_output_preview},
 };
 
@@ -107,20 +107,27 @@ impl ContextManager {
 
     pub fn needs_compaction(&self, conversation: &Conversation, model: &ActiveModel) -> bool {
         let (trigger_tokens, _) = self.compaction_budget_for_model(model);
-        
+
         let last_context_tokens = conversation
             .visible_messages()
             .iter()
             .rev()
             .find_map(|message| message.input_tokens.or(message.total_tokens));
-        
+
         match last_context_tokens {
             Some(tokens) => tokens as usize >= trigger_tokens,
-            None => Self::estimate_tokens_for_messages(conversation.visible_messages()) >= trigger_tokens,
+            None => {
+                Self::estimate_tokens_for_messages(conversation.visible_messages())
+                    >= trigger_tokens
+            }
         }
     }
 
-    pub fn build_request_messages(&self, conversation: &Conversation, current_mode: SessionMode) -> Vec<Message> {
+    pub fn build_request_messages(
+        &self,
+        conversation: &Conversation,
+        current_mode: SessionMode,
+    ) -> Vec<Message> {
         let mut messages = Vec::new();
         let mut pending_tool_calls = HashSet::new();
         let mut was_plan_mode = false;
@@ -149,7 +156,9 @@ impl ContextManager {
                     was_plan_mode = false;
                 }
                 MessageRole::Assistant => {
-                    if message.content.contains("PLAN MODE") || message.content.contains("read-only") {
+                    if message.content.contains("PLAN MODE")
+                        || message.content.contains("read-only")
+                    {
                         was_plan_mode = true;
                     }
                     pending_tool_calls = message
@@ -407,7 +416,7 @@ mod tests {
     #[test]
     fn choose_split_index_keeps_tool_block_together() {
         let manager = ContextManager::new();
-        
+
         let mut assistant = Message::new(MessageRole::Assistant, "call tools");
         assistant.tool_calls = vec![ToolCall {
             id: "tool-call-1".to_string(),
@@ -428,7 +437,10 @@ mod tests {
             Message::new(MessageRole::Assistant, "follow up"),
         ];
 
-        let total_tokens: usize = messages.iter().map(|m| ContextManager::message_tokens(m)).sum();
+        let total_tokens: usize = messages
+            .iter()
+            .map(|m| ContextManager::message_tokens(m))
+            .sum();
         let first_msg_tokens = ContextManager::message_tokens(&messages[0]);
         let retain_recent_tokens = total_tokens - first_msg_tokens;
 
@@ -467,7 +479,8 @@ mod tests {
         ]);
 
         let manager = ContextManager::new();
-        let valid_request_messages = manager.build_request_messages(&valid_conversation, SessionMode::Build);
+        let valid_request_messages =
+            manager.build_request_messages(&valid_conversation, SessionMode::Build);
         let valid_roles: Vec<_> = valid_request_messages
             .iter()
             .map(|message| message.role.label())
@@ -476,7 +489,8 @@ mod tests {
 
         let mut orphan_manager = ContextManager::new();
         orphan_manager.retained_from = 2;
-        let orphan_request_messages = orphan_manager.build_request_messages(&valid_conversation, SessionMode::Build);
+        let orphan_request_messages =
+            orphan_manager.build_request_messages(&valid_conversation, SessionMode::Build);
         let orphan_roles: Vec<_> = orphan_request_messages
             .iter()
             .map(|message| message.role.label())

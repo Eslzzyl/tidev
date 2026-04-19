@@ -493,18 +493,11 @@ pub(super) fn line_with_style(text: &str, fg: Color) -> Line<'static> {
     )])
 }
 
-pub(super) fn line_with_style_right_aligned(
-    text: &str,
-    width: usize,
-    fg: Color,
-) -> Line<'static> {
+pub(super) fn line_with_style_right_aligned(text: &str, width: usize, fg: Color) -> Line<'static> {
     let text_width = UnicodeWidthStr::width(text);
     let padding = width.saturating_sub(text_width);
     let padded_text = format!("{}{}", " ".repeat(padding), text);
-    Line::from(vec![Span::styled(
-        padded_text,
-        Style::default().fg(fg),
-    )])
+    Line::from(vec![Span::styled(padded_text, Style::default().fg(fg))])
 }
 
 pub(super) fn line_with_prefix(

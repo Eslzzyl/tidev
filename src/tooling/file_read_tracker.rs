@@ -29,21 +29,28 @@ impl FileReadTracker {
     }
 
     /// Load file reads from database for a session
-    pub fn load_from_store(&self, store: &SessionStore, session_id: uuid::Uuid) -> anyhow::Result<()> {
+    pub fn load_from_store(
+        &self,
+        store: &SessionStore,
+        session_id: uuid::Uuid,
+    ) -> anyhow::Result<()> {
         let records = store.load_file_reads(session_id)?;
-        
+
         let mut writes = self.reads.write().unwrap();
         let mut session_map = HashMap::new();
-        
+
         for record in records {
             let path = PathBuf::from(&record.file_path);
-            session_map.insert(path, FileReadStamp {
-                read_at: record.read_at,
-                mtime: record.mtime,
-                size: record.size,
-            });
+            session_map.insert(
+                path,
+                FileReadStamp {
+                    read_at: record.read_at,
+                    mtime: record.mtime,
+                    size: record.size,
+                },
+            );
         }
-        
+
         writes.insert(session_id, session_map);
         Ok(())
     }
@@ -56,21 +63,21 @@ impl FileReadTracker {
         path: &Path,
     ) -> anyhow::Result<()> {
         let metadata = std::fs::metadata(path).ok();
-        
+
         let mtime = metadata
             .as_ref()
             .and_then(|m| m.modified().ok())
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as i64);
-        
+
         let size = metadata.as_ref().map(|m| m.len() as i64);
-        
+
         let stamp = FileReadStamp {
             read_at: Utc::now(),
             mtime,
             size,
         };
-        
+
         // Update in-memory cache
         {
             let mut writes = self.reads.write().unwrap();
@@ -79,7 +86,7 @@ impl FileReadTracker {
                 .or_default()
                 .insert(path.to_path_buf(), stamp.clone());
         }
-        
+
         // Persist to database
         store.record_file_read(
             session_id,
@@ -88,18 +95,15 @@ impl FileReadTracker {
             stamp.mtime,
             stamp.size,
         )?;
-        
+
         Ok(())
     }
 
     /// Check if a file has been read and not modified since
     pub fn check_read(&self, session_id: uuid::Uuid, path: &Path) -> Result<(), String> {
         let reads = self.reads.read().unwrap();
-        
-        let Some(stamp) = reads
-            .get(&session_id)
-            .and_then(|m| m.get(path))
-        else {
+
+        let Some(stamp) = reads.get(&session_id).and_then(|m| m.get(path)) else {
             return Err(format!(
                 "You must read file {} before editing it. Use the Read tool first.",
                 path.display()
@@ -125,7 +129,7 @@ impl FileReadTracker {
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as i64);
-        
+
         let current_size = metadata.len() as i64;
 
         // Check if file was modified
@@ -134,14 +138,18 @@ impl FileReadTracker {
             (None, None) => false,
             _ => true, // If we don't have mtime data, assume changed
         };
-        
+
         let size_changed = stamp.size != Some(current_size);
 
         if mtime_changed || size_changed {
             // Format mtime as local time with millisecond precision
             let mtime_str = current_mtime
                 .and_then(DateTime::from_timestamp_millis)
-                .map(|dt| dt.with_timezone(&Local).format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string())
+                .map(|dt| {
+                    dt.with_timezone(&Local)
+                        .format("%Y-%m-%dT%H:%M:%S%.3f%z")
+                        .to_string()
+                })
                 .unwrap_or_else(|| "Unknown".to_string());
 
             // Format read_at as local time with millisecond precision

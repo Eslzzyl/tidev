@@ -4,7 +4,7 @@ mod tests;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use rusqlite::{params, params_from_iter, types::Type, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::Type};
 use std::{
     fs,
     path::{Path, PathBuf},

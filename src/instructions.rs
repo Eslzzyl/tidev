@@ -25,8 +25,12 @@ pub fn resolve_nearby_instructions(
     let mut results = Vec::new();
     let mut seen = HashSet::new();
 
-    let target = file_path.canonicalize().unwrap_or_else(|_| file_path.to_path_buf());
-    let root = workspace_root.canonicalize().unwrap_or_else(|_| workspace_root.to_path_buf());
+    let target = file_path
+        .canonicalize()
+        .unwrap_or_else(|_| file_path.to_path_buf());
+    let root = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
 
     // Collect system-wide instruction paths
     let system_paths = system_paths(workspace_root, config_dir, &[])?;
@@ -40,7 +44,9 @@ pub fn resolve_nearby_instructions(
     while current.starts_with(&root) {
         for file_name in INSTRUCTION_FILES {
             let candidate = current.join(file_name);
-            let canonical = candidate.canonicalize().unwrap_or_else(|_| candidate.clone());
+            let canonical = candidate
+                .canonicalize()
+                .unwrap_or_else(|_| candidate.clone());
 
             // Skip if already loaded, system-wide, or the file itself
             if canonical == target {
@@ -55,13 +61,13 @@ pub fn resolve_nearby_instructions(
 
             if candidate.exists()
                 && let Ok(content) = fs::read_to_string(&candidate)
-                && !content.trim().is_empty() {
+                && !content.trim().is_empty()
+            {
                 seen.insert(canonical);
-                results.push((candidate.clone(), format!(
-                    "Instructions from: {}\n{}",
-                    candidate.display(),
-                    content
-                )));
+                results.push((
+                    candidate.clone(),
+                    format!("Instructions from: {}\n{}", candidate.display(), content),
+                ));
             }
         }
 
@@ -413,8 +419,9 @@ mod tests {
         // Use a config_dir outside the workspace to avoid system path conflicts
         let config_dir = std::env::temp_dir().join("tidev-test-config-unique");
         fs::create_dir_all(&config_dir)?;
-        let results = resolve_nearby_instructions(&workspace, &config_dir, &subdir.join("file.rs"))?;
-        
+        let results =
+            resolve_nearby_instructions(&workspace, &config_dir, &subdir.join("file.rs"))?;
+
         let expected_path = subdir
             .join(".github")
             .join("copilot-instructions.md")
@@ -442,7 +449,8 @@ mod tests {
         // Use a config_dir outside the workspace to avoid system path conflicts
         let config_dir = std::env::temp_dir().join("tidev-test-config-unique");
         fs::create_dir_all(&config_dir)?;
-        let results = resolve_nearby_instructions(&workspace, &config_dir, &subdir.join("file.rs"))?;
+        let results =
+            resolve_nearby_instructions(&workspace, &config_dir, &subdir.join("file.rs"))?;
         let expected_path = workspace.join("subdir").join("AGENTS.md").canonicalize()?;
         // Use canonicalized path for content format to match
         let expected_content = format!(

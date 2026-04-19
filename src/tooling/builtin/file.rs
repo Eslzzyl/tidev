@@ -4,9 +4,9 @@ use serde_json::Value;
 use std::{fs, io::BufRead, path::Path};
 
 use super::utils::{display_workspace_relative, read_existing_text, resolve_workspace_path};
+use crate::instructions::resolve_nearby_instructions;
 use crate::tooling::tools::{ApplyPatchArgs, EditArgs, ListArgs, ReadArgs, WriteArgs};
 use crate::tooling::{ToolDefinition, ToolPermission};
-use crate::instructions::resolve_nearby_instructions;
 
 const MAX_LINE_LENGTH: usize = 2000;
 const MAX_LINE_SUFFIX: &str = "... (line truncated to 2000 chars)";
@@ -54,7 +54,13 @@ pub fn execute_tool_call(
         Some("read") => {
             let args = serde_json::from_value::<ReadArgs>(arguments)
                 .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
-            read_file_with_options(workspace_root, config_dir, args.path, args.offset, args.limit)
+            read_file_with_options(
+                workspace_root,
+                config_dir,
+                args.path,
+                args.offset,
+                args.limit,
+            )
         }
         Some("write") => {
             let args = serde_json::from_value::<WriteArgs>(arguments)

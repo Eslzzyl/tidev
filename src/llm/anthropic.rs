@@ -197,7 +197,8 @@ pub(super) async fn stream_anthropic(
                         }
                         if let Some(usage) = usage {
                             let total_tokens = usage.input_tokens + usage.output_tokens;
-                            let duration_ms = first_delta_time.map(|start| start.elapsed().as_millis() as u64);
+                            let duration_ms =
+                                first_delta_time.map(|start| start.elapsed().as_millis() as u64);
                             let _ = tx.send(BackendEvent::UsageStats {
                                 session_id,
                                 request_id,

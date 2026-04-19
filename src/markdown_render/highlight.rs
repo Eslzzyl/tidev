@@ -359,7 +359,11 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            assert_eq!(rendered, code, "content should be preserved for lang={}", lang);
+            assert_eq!(
+                rendered, code,
+                "content should be preserved for lang={}",
+                lang
+            );
         }
     }
 }

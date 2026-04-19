@@ -342,7 +342,7 @@ pub(super) fn execute_tool_call(
 ) -> Result<ToolExecutionResult> {
     // Pre-execution checks for file read tracking
     let tool_name = crate::tooling::canonical_tool_name(&call.name);
-    
+
     // Check if we need to track a read or verify prior read
     match tool_name {
         Some("read") => {
@@ -391,11 +391,12 @@ pub(super) fn execute_tool_call(
 /// Extract file path from tool arguments for read/edit/write operations
 fn extract_file_path_for_check(call: &ToolCall, tool_name: &str) -> Option<String> {
     let arguments: Value = serde_json::from_str(&call.arguments).ok()?;
-    
+
     match tool_name {
-        "read" | "edit" | "write" => {
-            arguments.get("path").and_then(|v| v.as_str()).map(String::from)
-        }
+        "read" | "edit" | "write" => arguments
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(String::from),
         "apply_patch" => {
             // apply_patch doesn't have a path field in args, it parses from patch_text
             // For now, we skip apply_patch check as it would require parsing the patch
@@ -406,9 +407,12 @@ fn extract_file_path_for_check(call: &ToolCall, tool_name: &str) -> Option<Strin
 }
 
 /// Resolve workspace path without failing (returns Err on failure instead of panicking)
-fn resolve_workspace_path_safe(workspace_root: &Path, candidate: &str) -> Result<std::path::PathBuf, ()> {
+fn resolve_workspace_path_safe(
+    workspace_root: &Path,
+    candidate: &str,
+) -> Result<std::path::PathBuf, ()> {
     use std::path::Component;
-    
+
     let candidate_path = std::path::Path::new(candidate);
     let mut resolved = if candidate_path.is_absolute() {
         std::path::PathBuf::new()

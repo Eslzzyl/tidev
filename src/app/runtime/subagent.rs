@@ -113,9 +113,14 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
             .definitions()
             .iter()
             .filter(|definition| {
-                matches!(canonical_tool_name(&definition.name),
-                    Some("read") | Some("list") | Some("glob") | Some("grep")
-                    | Some("websearch") | Some("webfetch")
+                matches!(
+                    canonical_tool_name(&definition.name),
+                    Some("read")
+                        | Some("list")
+                        | Some("glob")
+                        | Some("grep")
+                        | Some("websearch")
+                        | Some("webfetch")
                 )
             })
             .cloned()

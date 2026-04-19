@@ -351,14 +351,14 @@ fn markdown_to_text(markdown: &str) -> String {
                 }
                 in_code_block = false;
             }
-            Event::Start(tag) if is_block_tag(&tag)
-                && !output.is_empty() && !output.ends_with('\n') => {
-                    output.push('\n');
-                }
-            Event::End(tag_end) if is_block_tag_end(&tag_end)
-                && !output.ends_with('\n') => {
-                    output.push('\n');
-                }
+            Event::Start(tag)
+                if is_block_tag(&tag) && !output.is_empty() && !output.ends_with('\n') =>
+            {
+                output.push('\n');
+            }
+            Event::End(tag_end) if is_block_tag_end(&tag_end) && !output.ends_with('\n') => {
+                output.push('\n');
+            }
             Event::Text(text)
             | Event::Code(text)
             | Event::Html(text)
@@ -367,10 +367,9 @@ fn markdown_to_text(markdown: &str) -> String {
             | Event::DisplayMath(text) => {
                 append_text_segment(&mut output, &text, in_code_block);
             }
-            Event::SoftBreak | Event::HardBreak
-                if !output.ends_with('\n') => {
-                    output.push('\n');
-                }
+            Event::SoftBreak | Event::HardBreak if !output.ends_with('\n') => {
+                output.push('\n');
+            }
             _ => {}
         }
     }

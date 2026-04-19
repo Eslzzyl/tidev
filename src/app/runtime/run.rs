@@ -367,7 +367,8 @@ impl App {
 
         // Restore cached file read records
         if let Some(reads) = cached.file_reads {
-            self.file_read_tracker.restore_session_reads(self.conversation.session_id, reads);
+            self.file_read_tracker
+                .restore_session_reads(self.conversation.session_id, reads);
         }
     }
 

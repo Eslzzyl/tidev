@@ -9,8 +9,8 @@ use std::io;
 use std::io::stdout;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crossterm::execute;
 use crossterm::Command;
+use crossterm::execute;
 
 use crate::config::NotificationConfig;
 
