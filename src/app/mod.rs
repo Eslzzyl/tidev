@@ -351,14 +351,33 @@ impl App {
     }
 
     fn update_loaded_instruction_sources(&mut self, sources: &[String]) {
-        if sources.is_empty() {
-            return;
-        }
-
         let display_sources: Vec<String> = sources
             .iter()
             .map(|source| self.display_instruction_source(source))
             .collect();
+
+        // Find newly loaded sources
+        let mut newly_loaded = Vec::new();
+        for source in &display_sources {
+            if !self.loaded_instruction_sources.contains(source) {
+                newly_loaded.push(source.clone());
+            }
+        }
+
+        if !newly_loaded.is_empty() {
+            let content = if newly_loaded.len() == 1 {
+                format!("Loaded instructions from {}", newly_loaded[0])
+            } else {
+                format!(
+                    "Loaded {} instruction files: {}",
+                    newly_loaded.len(),
+                    newly_loaded.join(", ")
+                )
+            };
+
+            self.conversation
+                .push(Message::new(MessageRole::System, content));
+        }
 
         self.loaded_instruction_sources = display_sources;
     }

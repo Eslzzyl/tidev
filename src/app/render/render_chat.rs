@@ -1159,6 +1159,25 @@ impl App {
                 Vec::new()
             }
             MessageRole::System => {
+                if message.content.starts_with("Loaded instructions from")
+                    || message.content.starts_with("Loaded ")
+                        && message.content.contains(" instruction files:")
+                {
+                    let mut lines = Vec::new();
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(vec![
+                        Span::styled("󱁤 ", Style::default().fg(palette.accent_soft)),
+                        Span::styled(
+                            message.content.clone(),
+                            Style::default()
+                                .fg(palette.text)
+                                .add_modifier(Modifier::ITALIC),
+                        ),
+                    ]));
+                    lines.push(Line::from(""));
+                    return vec![(palette.background, lines)];
+                }
+
                 let content_lines = self.render_text_body_lines(
                     &message.content,
                     body_width,

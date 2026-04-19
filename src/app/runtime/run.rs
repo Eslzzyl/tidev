@@ -54,7 +54,7 @@ impl App {
         let cleanup_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let notifications = notifications::NotificationManager::new(config.notifications.clone());
 
-        let app = Self {
+        let mut app = Self {
             should_quit: false,
             screen: Screen::Welcome,
             workspace_root,
@@ -129,6 +129,10 @@ impl App {
             stats_panel: None,
             notifications,
         };
+
+        // Initialize instructions and record messages if anyone loaded
+        let (_prompt, instruction_sources) = app.compose_system_prompt();
+        app.update_loaded_instruction_sources(&instruction_sources);
 
         app.at_mention
             .start_background_indexing(app.workspace_root.as_path());
