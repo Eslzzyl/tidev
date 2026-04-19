@@ -1,12 +1,16 @@
 use ignore::WalkBuilder;
+use notify::{
+    Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
+};
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 const MAX_SUGGESTIONS: usize = 12;
-const INDEX_BATCH_SIZE: usize = 128;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AtMentionKind {
@@ -89,14 +93,37 @@ impl AtMentionState {
     }
 }
 
+#[derive(Clone, Debug)]
+struct IndexSnapshot {
+    entries: Arc<Vec<IndexedEntry>>,
+    revision: u64,
+}
+
+impl Default for IndexSnapshot {
+    fn default() -> Self {
+        Self {
+            entries: Arc::new(Vec::new()),
+            revision: 0,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct WatcherHandle {
+    id: u64,
+    root: PathBuf,
+    stop_tx: mpsc::Sender<()>,
+}
+
 #[derive(Debug, Default)]
 struct AtMentionIndex {
     root: Mutex<Option<PathBuf>>,
-    entries: Mutex<Vec<IndexedEntry>>,
+    snapshot: Mutex<IndexSnapshot>,
+    watcher: Mutex<Option<WatcherHandle>>,
     current_generation: AtomicU64,
     completed_generation: AtomicU64,
     worker_generation: AtomicU64,
-    revision: AtomicU64,
+    watcher_id_seed: AtomicU64,
 }
 
 #[derive(Clone, Debug)]
@@ -135,6 +162,7 @@ impl IndexedEntry {
 impl AtMentionIndex {
     fn ensure_background_indexing(index: &Arc<Self>, workspace_root: &Path) {
         let generation = index.ensure_root(workspace_root);
+        index.ensure_workspace_watcher(workspace_root);
         if index.completed_generation.load(Ordering::Acquire) == generation {
             return;
         }
@@ -156,34 +184,184 @@ impl AtMentionIndex {
             self.current_generation.fetch_add(1, Ordering::AcqRel);
             self.completed_generation.store(0, Ordering::Release);
 
-            let mut entries = self.entries.lock().unwrap();
-            entries.clear();
-            self.revision.fetch_add(1, Ordering::AcqRel);
+            let mut snapshot = self.snapshot.lock().unwrap();
+            snapshot.entries = Arc::new(Vec::new());
+            snapshot.revision = snapshot.revision.wrapping_add(1);
         }
 
         self.current_generation.load(Ordering::Acquire)
     }
 
+    fn ensure_workspace_watcher(self: &Arc<Self>, workspace_root: &Path) {
+        {
+            let watcher_slot = self.watcher.lock().unwrap();
+            if watcher_slot
+                .as_ref()
+                .is_some_and(|handle| handle.root == workspace_root)
+            {
+                return;
+            }
+        }
+
+        let watcher_id = self
+            .watcher_id_seed
+            .fetch_add(1, Ordering::AcqRel)
+            .wrapping_add(1);
+        let (stop_tx, stop_rx) = mpsc::channel();
+        let (event_tx, event_rx) = mpsc::channel();
+
+        let mut watcher = match RecommendedWatcher::new(
+            move |result| {
+                let _ = event_tx.send(result);
+            },
+            NotifyConfig::default(),
+        ) {
+            Ok(watcher) => watcher,
+            Err(error) => {
+                crate::log_warn!("failed to initialize @mention file watcher: {}", error);
+                return;
+            }
+        };
+
+        if let Err(error) = watcher.watch(workspace_root, RecursiveMode::Recursive) {
+            crate::log_warn!(
+                "failed to watch workspace for @mention refreshes: {}",
+                error
+            );
+            return;
+        }
+
+        let old_handle = {
+            let mut watcher_slot = self.watcher.lock().unwrap();
+            if watcher_slot
+                .as_ref()
+                .is_some_and(|handle| handle.root == workspace_root)
+            {
+                return;
+            }
+
+            let old_handle = watcher_slot.take();
+            *watcher_slot = Some(WatcherHandle {
+                id: watcher_id,
+                root: workspace_root.to_path_buf(),
+                stop_tx,
+            });
+            old_handle
+        };
+
+        let index = Arc::clone(self);
+        let watch_root = workspace_root.to_path_buf();
+        thread::spawn(move || {
+            index.run_workspace_watcher(watcher_id, watch_root, watcher, event_rx, stop_rx)
+        });
+
+        if let Some(handle) = old_handle {
+            let _ = handle.stop_tx.send(());
+        }
+    }
+
+    fn run_workspace_watcher(
+        self: Arc<Self>,
+        watcher_id: u64,
+        workspace_root: PathBuf,
+        _watcher: RecommendedWatcher,
+        event_rx: mpsc::Receiver<notify::Result<Event>>,
+        stop_rx: mpsc::Receiver<()>,
+    ) {
+        let debounce = Duration::from_millis(150);
+        let mut pending_refresh = false;
+
+        loop {
+            if stop_rx.try_recv().is_ok() {
+                break;
+            }
+
+            match event_rx.recv_timeout(debounce) {
+                Ok(Ok(event)) => {
+                    if Self::event_should_refresh(&event) {
+                        pending_refresh = true;
+                    }
+                }
+                Ok(Err(error)) => {
+                    crate::log_warn!("@mention watcher event error: {}", error);
+                    pending_refresh = true;
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    if pending_refresh {
+                        pending_refresh = false;
+                        Self::request_refresh(&self, watcher_id, &workspace_root);
+                    }
+                }
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        }
+
+        self.clear_workspace_watcher(&workspace_root, watcher_id);
+    }
+
+    fn event_should_refresh(event: &Event) -> bool {
+        !matches!(event.kind, EventKind::Access(_))
+    }
+
+    fn clear_workspace_watcher(&self, workspace_root: &Path, watcher_id: u64) {
+        let mut watcher_slot = self.watcher.lock().unwrap();
+        if watcher_slot
+            .as_ref()
+            .is_some_and(|handle| handle.id == watcher_id && handle.root == workspace_root)
+        {
+            watcher_slot.take();
+        }
+    }
+
+    fn request_refresh(index: &Arc<Self>, watcher_id: u64, workspace_root: &Path) {
+        if !index.is_current_watcher(workspace_root, watcher_id) {
+            return;
+        }
+
+        Self::invalidate_and_refresh(index, workspace_root);
+    }
+
+    fn is_current_watcher(&self, workspace_root: &Path, watcher_id: u64) -> bool {
+        let watcher_slot = self.watcher.lock().unwrap();
+        watcher_slot
+            .as_ref()
+            .is_some_and(|handle| handle.id == watcher_id && handle.root == workspace_root)
+    }
+
+    fn is_current_root(&self, workspace_root: &Path) -> bool {
+        let root = self.root.lock().unwrap();
+        root.as_deref() == Some(workspace_root)
+    }
+
+    fn invalidate_and_refresh(index: &Arc<Self>, workspace_root: &Path) {
+        if !index.is_current_root(workspace_root) {
+            return;
+        }
+
+        index.current_generation.fetch_add(1, Ordering::AcqRel);
+        index.completed_generation.store(0, Ordering::Release);
+        Self::ensure_background_indexing(index, workspace_root);
+    }
+
     fn build_index(self: Arc<Self>, workspace_root: PathBuf, generation: u64) {
-        let mut batch = Vec::with_capacity(INDEX_BATCH_SIZE);
+        let mut entries = Vec::new();
         walk_workspace_entries(&workspace_root, |entry| {
             if self.current_generation.load(Ordering::Acquire) != generation {
                 return false;
             }
 
-            batch.push(entry);
-            if batch.len() >= INDEX_BATCH_SIZE {
-                self.flush_batch(generation, &mut batch);
-            }
-
+            entries.push(entry);
             true
         });
 
-        self.flush_batch(generation, &mut batch);
-
         if self.current_generation.load(Ordering::Acquire) == generation {
-            self.completed_generation
-                .store(generation, Ordering::Release);
+            let mut snapshot = self.snapshot.lock().unwrap();
+            if self.current_generation.load(Ordering::Acquire) == generation {
+                snapshot.entries = Arc::new(entries);
+                snapshot.revision = snapshot.revision.wrapping_add(1);
+                self.completed_generation
+                    .store(generation, Ordering::Release);
+            }
         }
 
         let _ = self.worker_generation.compare_exchange(
@@ -194,34 +372,16 @@ impl AtMentionIndex {
         );
     }
 
-    fn flush_batch(&self, generation: u64, batch: &mut Vec<IndexedEntry>) {
-        if batch.is_empty() {
-            return;
-        }
-
-        if self.current_generation.load(Ordering::Acquire) != generation {
-            batch.clear();
-            return;
-        }
-
-        let mut entries = self.entries.lock().unwrap();
-        if self.current_generation.load(Ordering::Acquire) != generation {
-            batch.clear();
-            return;
-        }
-
-        entries.extend(batch.drain(..));
-        self.revision.fetch_add(1, Ordering::AcqRel);
-    }
-
     fn revision(&self) -> u64 {
-        self.revision.load(Ordering::Acquire)
+        self.snapshot.lock().unwrap().revision
     }
 
     fn search_entries(&self, query: &str) -> SearchResult {
         let normalized = query.trim().to_ascii_lowercase();
-        let entries = self.entries.lock().unwrap();
-        let revision = self.revision();
+        let (entries, revision) = {
+            let snapshot = self.snapshot.lock().unwrap();
+            (Arc::clone(&snapshot.entries), snapshot.revision)
+        };
 
         rank_indexed_entries(entries.as_slice(), &normalized, revision)
     }
@@ -622,13 +782,37 @@ fn is_image_path(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{fs, path::PathBuf};
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::atomic::Ordering,
+        thread,
+        time::{Duration, Instant},
+    };
     use uuid::Uuid;
 
     fn make_temp_dir() -> PathBuf {
         let dir = std::env::temp_dir().join(format!("tidev-at-mention-{}", Uuid::new_v4()));
         fs::create_dir_all(&dir).expect("failed to create temp dir");
         dir
+    }
+
+    fn wait_for_index_ready(index: &AtMentionIndex, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let current_generation = index.current_generation.load(Ordering::Acquire);
+            let completed_generation = index.completed_generation.load(Ordering::Acquire);
+            let worker_generation = index.worker_generation.load(Ordering::Acquire);
+            if completed_generation == current_generation && worker_generation == 0 {
+                return;
+            }
+
+            if Instant::now() >= deadline {
+                panic!("index did not become ready before timeout");
+            }
+
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]
@@ -716,5 +900,43 @@ mod tests {
             .expect("expected suggestion");
 
         assert_eq!(suggestion.matched_indices, vec![0, 1, 3, 5, 11]);
+    }
+
+    #[test]
+    fn at_mention_refreshes_when_new_files_are_added() {
+        let workspace = make_temp_dir();
+        fs::write(workspace.join("alpha.txt"), "alpha").expect("failed to write file");
+
+        let mut state = AtMentionState::default();
+        state.start_background_indexing(&workspace);
+        wait_for_index_ready(&state.index, Duration::from_secs(5));
+
+        state.sync(&workspace, "@al", 3);
+        assert!(
+            state
+                .suggestions
+                .iter()
+                .any(|suggestion| suggestion.path == "alpha.txt")
+        );
+
+        state.sync(&workspace, "@be", 3);
+        assert!(
+            state
+                .suggestions
+                .iter()
+                .all(|suggestion| suggestion.path != "beta.txt")
+        );
+
+        fs::write(workspace.join("beta.txt"), "beta").expect("failed to write file");
+        AtMentionIndex::invalidate_and_refresh(&state.index, &workspace);
+        wait_for_index_ready(&state.index, Duration::from_secs(5));
+
+        state.sync(&workspace, "@be", 3);
+        assert!(
+            state
+                .suggestions
+                .iter()
+                .any(|suggestion| suggestion.path == "beta.txt")
+        );
     }
 }

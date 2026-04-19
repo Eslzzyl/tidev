@@ -14,6 +14,7 @@ futures-util = "0.3.32"
 globset = "0.4.18"
 grep = "0.4.1"
 ignore = "0.4.25"
+notify = "8.2.0"
 html2md = { package = "fast_html2md", version = "0.0.61", default-features = false, features = [
     "rewriter",
     "ignore_cookies",
