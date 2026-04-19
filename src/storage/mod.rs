@@ -666,6 +666,52 @@ impl SessionStore {
         Ok(())
     }
 
+    pub fn set_gateway_chat_model(
+        &self,
+        platform: &str,
+        chat_key: &str,
+        provider_id: &str,
+        model_id: &str,
+    ) -> Result<()> {
+        self.connection.execute(
+            "INSERT INTO gateway_chat_models (platform, chat_key, provider_id, model_id, updated_at) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(platform, chat_key) DO UPDATE SET provider_id = excluded.provider_id, model_id = excluded.model_id, updated_at = excluded.updated_at",
+            params![
+                platform,
+                chat_key,
+                provider_id,
+                model_id,
+                Utc::now().to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn load_gateway_chat_model(
+        &self,
+        platform: &str,
+        chat_key: &str,
+    ) -> Result<Option<(String, String)>> {
+        let mut statement = self.connection.prepare(
+            "SELECT provider_id, model_id FROM gateway_chat_models WHERE platform = ?1 AND chat_key = ?2 LIMIT 1",
+        )?;
+
+        let value = statement
+            .query_row(params![platform, chat_key], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .optional()?;
+
+        Ok(value)
+    }
+
+    pub fn clear_gateway_chat_model(&self, platform: &str, chat_key: &str) -> Result<()> {
+        self.connection.execute(
+            "DELETE FROM gateway_chat_models WHERE platform = ?1 AND chat_key = ?2",
+            params![platform, chat_key],
+        )?;
+        Ok(())
+    }
+
     pub fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
         let mut statement = self.connection.prepare(
             "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, snapshot_hash, patch_files FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",

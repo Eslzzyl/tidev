@@ -66,6 +66,12 @@ Telegram Gateway（Phase 1）
 	 ```
 3. 在工作目录启动：`tidev gateway`
 4. 在 Telegram 中发送 `/new` 会开始一个新的 session，两个 `/new` 之间的消息会进入同一个 session。
+5. 常用命令：
+	- `/session` 查看当前会话状态
+	- `/session new` 新建会话
+	- `/model list` 查看可用模型
+	- `/model <provider:model>` 为当前 chat 切换模型（会持久化）
+	- `/model reset` 清除当前 chat 的模型覆盖，恢复默认模型
 
 Telegram Gateway (Phase 1)
 1. Add or verify this block in `~/.config/tidev/config.toml`:
@@ -87,6 +93,12 @@ Telegram Gateway (Phase 1)
 	 ```
 3. Start from your workspace with `tidev gateway`.
 4. Sending `/new` in Telegram starts a fresh session; messages between two `/new` commands stay in the same session.
+5. Useful commands:
+	- `/session` shows current session status
+	- `/session new` starts a fresh session
+	- `/model list` lists available models
+	- `/model <provider:model>` switches model for the current chat (persisted)
+	- `/model reset` clears chat-level model override and uses default model
 
 由于在开发早期，我暂时不发布 Release。
 

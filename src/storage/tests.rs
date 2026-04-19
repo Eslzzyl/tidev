@@ -540,3 +540,51 @@ fn gateway_chat_session_mapping_round_trip() {
 
     let _ = std::fs::remove_file(path);
 }
+
+#[test]
+fn gateway_chat_model_mapping_round_trip() {
+    let path = std::env::temp_dir().join(format!(
+        "tidev-session-store-gateway-model-{}.sqlite3",
+        uuid::Uuid::new_v4()
+    ));
+
+    {
+        let store = SessionStore::open(&path).expect("store should open");
+        let chat_key = "12345";
+
+        store
+            .set_gateway_chat_model("telegram", chat_key, "openai", "gpt-4o-mini")
+            .expect("model mapping should save");
+
+        assert_eq!(
+            store
+                .load_gateway_chat_model("telegram", chat_key)
+                .expect("model mapping should load"),
+            Some(("openai".to_string(), "gpt-4o-mini".to_string()))
+        );
+
+        store
+            .set_gateway_chat_model("telegram", chat_key, "deepseek", "deepseek-chat")
+            .expect("model mapping should update");
+
+        assert_eq!(
+            store
+                .load_gateway_chat_model("telegram", chat_key)
+                .expect("updated model mapping should load"),
+            Some(("deepseek".to_string(), "deepseek-chat".to_string()))
+        );
+
+        store
+            .clear_gateway_chat_model("telegram", chat_key)
+            .expect("model mapping should clear");
+
+        assert_eq!(
+            store
+                .load_gateway_chat_model("telegram", chat_key)
+                .expect("cleared model mapping should load"),
+            None
+        );
+    }
+
+    let _ = std::fs::remove_file(path);
+}
