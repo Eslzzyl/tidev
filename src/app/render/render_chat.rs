@@ -657,73 +657,8 @@ impl App {
         self.message_content_area = Some(content_area);
         self.message_viewport_lines = content_area.height as usize;
         let content_width = content_area.width.max(1) as usize;
-        let (
-            mut text,
-            mut total_lines,
-            card_ranges,
-            rendered_virtualized,
-            virtualized_render_scroll,
-        ) = self.messages_text(Some(content_width));
-
-        // Add tool running state
-        for running in &self.running_tool_executions {
-            if running.status != RunningStatus::Running {
-                continue;
-            }
-            let canonical_name =
-                canonical_tool_name(&running.tool_call.name).unwrap_or(&running.tool_call.name);
-            let action = match canonical_name {
-                "edit" | "write" => "Editing",
-                "read" => "Reading",
-                "bash" => "Running",
-                "grep" | "glob" | "list" => "Searching",
-                _ => "Executing",
-            };
-
-            let fields =
-                summarize_tool_arguments(&running.tool_call.name, &running.tool_call.arguments);
-            let target = fields
-                .iter()
-                .find(|(k, _)| k == "path" || k == "filePath" || k == "command")
-                .map(|(_, v)| v.as_str())
-                .unwrap_or(&running.tool_call.name);
-
-            let line = Line::from(vec![
-                Span::styled(
-                    format!("{} ", action),
-                    Style::default().fg(palette.accent_soft),
-                ),
-                Span::styled(
-                    shorten(target, 64),
-                    Style::default()
-                        .fg(palette.text)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("...", Style::default().fg(palette.muted)),
-            ]);
-
-            let card_lines = decorate_card_lines(
-                vec![Line::from(""), line, Line::from("")],
-                content_width,
-                palette.panel_alt,
-            );
-            text.lines.extend(card_lines);
-            total_lines += 3;
-        }
-
-        if self.conversation.parent_session_id.is_none() {
-            for running_subagent in &self.running_subagent_executions {
-                let card_lines =
-                    self.render_running_subagent_lines(running_subagent, content_width);
-                if card_lines.is_empty() {
-                    continue;
-                }
-
-                let decorated_lines = decorate_card_lines(card_lines, content_width, palette.panel);
-                total_lines += decorated_lines.len();
-                text.lines.extend(decorated_lines);
-            }
-        }
+        let (text, total_lines, card_ranges, rendered_virtualized, virtualized_render_scroll) =
+            self.messages_text(Some(content_width));
 
         self.message_total_lines = total_lines;
 
@@ -951,10 +886,73 @@ impl App {
             self.message_scroll_target = None;
         }
 
+        let mut running_lines = Vec::new();
+        // Add tool running state
+        for running in &self.running_tool_executions {
+            if running.status != RunningStatus::Running {
+                continue;
+            }
+            let canonical_name = crate::tooling::canonical_tool_name(&running.tool_call.name)
+                .unwrap_or(&running.tool_call.name);
+            let action = match canonical_name {
+                "edit" | "write" => "Editing",
+                "read" => "Reading",
+                "bash" => "Running",
+                "grep" | "glob" | "list" => "Searching",
+                _ => "Executing",
+            };
+
+            let fields =
+                summarize_tool_arguments(&running.tool_call.name, &running.tool_call.arguments);
+            let target = fields
+                .iter()
+                .find(|(k, _)| *k == "path" || *k == "filePath" || *k == "command")
+                .map(|(_, v)| v.as_str())
+                .unwrap_or(&running.tool_call.name);
+
+            let line = Line::from(vec![
+                Span::styled(
+                    format!("{} ", action),
+                    Style::default().fg(palette.accent_soft),
+                ),
+                Span::styled(
+                    super::render::shorten(target, 64),
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("...", Style::default().fg(palette.muted)),
+            ]);
+
+            let card_lines = super::render::decorate_card_lines(
+                vec![Line::from(""), line, Line::from("")],
+                width,
+                palette.panel_alt,
+            );
+            running_lines.extend(card_lines);
+        }
+
+        if self.conversation.parent_session_id.is_none() {
+            for running_subagent in &self.running_subagent_executions {
+                let card_lines = self.render_running_subagent_lines(running_subagent, width);
+                if card_lines.is_empty() {
+                    continue;
+                }
+
+                let decorated_lines =
+                    super::render::decorate_card_lines(card_lines, width, palette.panel);
+                running_lines.extend(decorated_lines);
+            }
+        }
+        let total_running_lines = running_lines.len();
+
         // Calculate visible range based on scroll position
         let viewport = self.message_viewport_lines.max(1);
         let total_message_lines = self.message_layout_index.borrow().total_lines;
-        let max_scroll = total_message_lines.saturating_sub(viewport);
+        let total_overall_lines = total_message_lines + total_running_lines;
+        let header_line_count = header_lines.len();
+
+        let max_scroll = (header_line_count + total_overall_lines).saturating_sub(viewport);
         let scroll = if self.message_follow_tail {
             max_scroll
         } else {
@@ -962,25 +960,36 @@ impl App {
         };
         self.message_scroll_offset = scroll;
 
-        // Find visible blocks
-        let visible_blocks = self.find_visible_message_blocks(scroll, viewport);
+        // the 'scroll' includes header lines. To find the correct message block, we must
+        // offset the scroll past the header
+        let message_scroll = scroll.saturating_sub(header_line_count);
 
-        // Add header lines
-        let header_line_count = header_lines.len();
+        // Find visible blocks using the message-relative scroll
+        let visible_blocks = self.find_visible_message_blocks(message_scroll, viewport);
+
         lines.extend(header_lines);
 
         // Calculate render_scroll for virtualized rendering
-        // The visible blocks may start before 'scroll' (due to buffer zone),
+        // The visible blocks may start before 'message_scroll' (due to buffer zone),
         // so we need to skip those lines when rendering.
-        // Also, if first block starts after 'scroll', we need padding.
+        // Also, if first block starts after 'message_scroll', we need padding.
         let first_block_start = visible_blocks.first().map(|b| b.start_line).unwrap_or(0);
-        let (render_scroll, padding_lines) = if first_block_start < scroll {
-            (scroll - first_block_start, 0)
-        } else if first_block_start > scroll {
-            (0, first_block_start - scroll)
+
+        let (mut render_scroll, padding_lines) = if first_block_start < message_scroll {
+            (message_scroll - first_block_start, 0)
+        } else if first_block_start > message_scroll {
+            (0, first_block_start - message_scroll)
         } else {
             (0, 0)
         };
+
+        // Important: if we are scrolled inside the header, the render_scroll applies entirely to the header.
+        // Otherwise, it skips the entire header PLUS block-relative scroll.
+        if scroll < header_line_count {
+            render_scroll = scroll;
+        } else {
+            render_scroll += header_line_count;
+        }
 
         // Add padding lines if first block starts after scroll position
         for _ in 0..padding_lines {
@@ -1019,8 +1028,19 @@ impl App {
             lines.extend(block_lines);
         }
 
+        let last_block_end = visible_blocks
+            .last()
+            .map(|b| b.start_line + b.line_count)
+            .unwrap_or(0);
+        let missing_lines = total_message_lines.saturating_sub(last_block_end);
+        for _ in 0..missing_lines {
+            lines.push(Line::from(""));
+        }
+
+        lines.extend(running_lines);
+
         // Calculate total lines from layout index
-        let total_lines = header_line_count + total_message_lines;
+        let total_lines = header_line_count + total_overall_lines;
 
         let elapsed = started_at.elapsed();
         if elapsed > Duration::from_millis(12) {
