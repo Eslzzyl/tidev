@@ -246,8 +246,8 @@ impl App {
             ),
         ]));
 
-        if let Some(usage) = &self.context_usage {
-            if let Some(tps) = usage.tokens_per_second {
+        if let Some(usage) = &self.context_usage
+            && let Some(tps) = usage.tokens_per_second {
                 lines.push(Line::from(vec![
                     Span::styled(
                         "Last Speed:        ",
@@ -262,7 +262,6 @@ impl App {
                     ),
                 ]));
             }
-        }
 
         // Requests
         lines.push(Line::from(vec![

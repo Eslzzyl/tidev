@@ -2,7 +2,6 @@ use anyhow::{Context, Result, anyhow, bail};
 use diffy::DiffOptions;
 use serde_json::Value;
 use std::{fs, io::BufRead, path::Path};
-use std::path::PathBuf;
 
 use super::utils::{display_workspace_relative, read_existing_text, resolve_workspace_path};
 use crate::tooling::tools::{ApplyPatchArgs, EditArgs, ListArgs, ReadArgs, WriteArgs};
@@ -55,8 +54,7 @@ pub fn execute_tool_call(
         Some("read") => {
             let args = serde_json::from_value::<ReadArgs>(arguments)
                 .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
-            let result = read_file_with_options(workspace_root, config_dir, args.path, args.offset, args.limit)?;
-            Ok(result.output)
+            read_file_with_options(workspace_root, config_dir, args.path, args.offset, args.limit)
         }
         Some("write") => {
             let args = serde_json::from_value::<WriteArgs>(arguments)
@@ -235,18 +233,13 @@ fn file_change_output(
     }
 }
 
-pub(super) struct ReadFileResult {
-    pub output: String,
-    pub loaded: Vec<PathBuf>,
-}
-
 pub(super) fn read_file_with_options(
     workspace_root: &Path,
     config_dir: &Path,
     relative_path: impl AsRef<Path>,
     offset: Option<i64>,
     limit: Option<i64>,
-) -> Result<ReadFileResult> {
+) -> Result<String> {
     let path = resolve_workspace_path(workspace_root, relative_path.as_ref())?;
     let file =
         fs::File::open(&path).with_context(|| format!("failed to read {}", path.display()))?;
@@ -329,7 +322,6 @@ pub(super) fn read_file_with_options(
 
     // Load nearby instruction files (similar to opencode's instruction.resolve())
     let instructions = resolve_nearby_instructions(workspace_root, config_dir, &path)?;
-    let loaded: Vec<PathBuf> = instructions.iter().map(|(p, _)| p.clone()).collect();
 
     // Build XML-style output (matching opencode format)
     let mut output = format!(
@@ -347,7 +339,7 @@ pub(super) fn read_file_with_options(
         ));
     }
 
-    Ok(ReadFileResult { output, loaded })
+    Ok(output)
 }
 
 pub(super) fn write_file(

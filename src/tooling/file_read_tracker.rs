@@ -140,7 +140,7 @@ impl FileReadTracker {
         if mtime_changed || size_changed {
             // Format mtime as local time with millisecond precision
             let mtime_str = current_mtime
-                .and_then(|t| DateTime::from_timestamp_millis(t))
+                .and_then(DateTime::from_timestamp_millis)
                 .map(|dt| dt.with_timezone(&Local).format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string())
                 .unwrap_or_else(|| "Unknown".to_string());
 

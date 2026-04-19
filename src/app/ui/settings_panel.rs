@@ -74,31 +74,28 @@ impl SettingsPanelState {
 
     /// Toggle for Toggle type only
     pub fn toggle_selected(&mut self) {
-        if let Some(item) = self.items.get_mut(self.selected_index) {
-            if let SettingType::Toggle(val) = &mut item.setting_type {
+        if let Some(item) = self.items.get_mut(self.selected_index)
+            && let SettingType::Toggle(val) = &mut item.setting_type {
                 *val = !*val;
             }
-        }
     }
 
     /// Increase value for Number type only
     pub fn increase_selected(&mut self) {
-        if let Some(item) = self.items.get_mut(self.selected_index) {
-            if let SettingType::Number { value, min: _, max } = &mut item.setting_type {
+        if let Some(item) = self.items.get_mut(self.selected_index)
+            && let SettingType::Number { value, min: _, max } = &mut item.setting_type {
                 *value = (*value + 1.0).min(*max);
                 item.description = format!("Scroll speed multiplier: {:.1}", *value);
             }
-        }
     }
 
     /// Decrease value for Number type only
     pub fn decrease_selected(&mut self) {
-        if let Some(item) = self.items.get_mut(self.selected_index) {
-            if let SettingType::Number { value, min, max: _ } = &mut item.setting_type {
+        if let Some(item) = self.items.get_mut(self.selected_index)
+            && let SettingType::Number { value, min, max: _ } = &mut item.setting_type {
                 *value = (*value - 1.0).max(*min);
                 item.description = format!("Scroll speed multiplier: {:.1}", *value);
             }
-        }
     }
 
     pub fn apply_to_config(&self, config: &mut AppConfig) {

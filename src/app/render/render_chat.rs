@@ -1762,6 +1762,7 @@ impl App {
     /// Renders a single message block to lines.
     ///
     /// This is the actual rendering logic, extracted for reuse in virtualization.
+    #[allow(clippy::too_many_arguments)]
     fn render_message_block_to_lines(
         &self,
         messages: &[Message],

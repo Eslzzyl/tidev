@@ -53,17 +53,15 @@ pub fn resolve_nearby_instructions(
                 continue;
             }
 
-            if candidate.exists() {
-                if let Ok(content) = fs::read_to_string(&candidate) {
-                    if !content.trim().is_empty() {
-                        seen.insert(canonical);
-                        results.push((candidate.clone(), format!(
-                            "Instructions from: {}\n{}",
-                            candidate.display(),
-                            content
-                        )));
-                    }
-                }
+            if candidate.exists()
+                && let Ok(content) = fs::read_to_string(&candidate)
+                && !content.trim().is_empty() {
+                seen.insert(canonical);
+                results.push((candidate.clone(), format!(
+                    "Instructions from: {}\n{}",
+                    candidate.display(),
+                    content
+                )));
             }
         }
 

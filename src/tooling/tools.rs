@@ -329,6 +329,7 @@ fn truncate_to_limit(mut value: String, max_bytes: usize) -> String {
     value
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn execute_tool_call(
     workspace_root: &Path,
     config_dir: &Path,
