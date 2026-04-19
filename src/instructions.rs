@@ -37,7 +37,7 @@ pub fn resolve_nearby_instructions(
 
     // Walk upward from the file being read
     let mut current = target.parent().unwrap_or(&target);
-    while current.starts_with(&root) && current != root {
+    while current.starts_with(&root) {
         for file_name in INSTRUCTION_FILES {
             let candidate = current.join(file_name);
             let canonical = candidate.canonicalize().unwrap_or_else(|_| candidate.clone());
@@ -67,6 +67,9 @@ pub fn resolve_nearby_instructions(
             }
         }
 
+        if current == root {
+            break;
+        }
         current = current.parent().unwrap_or(current);
     }
 
@@ -400,24 +403,33 @@ mod tests {
         let workspace = make_temp_dir()?;
         let subdir = workspace.join("subdir").join("nested");
         fs::create_dir_all(&subdir)?;
-        fs::create_dir_all(workspace.join(".github"))?;
+        // Put the instruction file in a subdirectory, not in workspace root
+        // to avoid being excluded by find_project_instruction
+        fs::create_dir_all(subdir.join(".github"))?;
         fs::write(
-            workspace.join(".github").join("copilot-instructions.md"),
+            subdir.join(".github").join("copilot-instructions.md"),
             "# Copilot",
         )?;
         fs::write(subdir.join("file.rs"), "let x = 1;")?;
 
-        let excluded = HashSet::new();
-        let results = resolve_nearby_instructions(&workspace, &subdir.join("file.rs"), &excluded)?;
-        assert_eq!(
-            results,
-            vec![
-                workspace
-                    .join(".github")
-                    .join("copilot-instructions.md")
-                    .canonicalize()?
-            ]
+        // Use a config_dir outside the workspace to avoid system path conflicts
+        let config_dir = std::env::temp_dir().join("tidev-test-config-unique");
+        fs::create_dir_all(&config_dir)?;
+        let results = resolve_nearby_instructions(&workspace, &config_dir, &subdir.join("file.rs"))?;
+        
+        let expected_path = subdir
+            .join(".github")
+            .join("copilot-instructions.md")
+            .canonicalize()?;
+        // Use canonicalized path for content to match the function's output
+        let expected_content = format!(
+            "Instructions from: {}\n{}",
+            expected_path.display(),
+            "# Copilot"
         );
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, expected_path);
+        assert_eq!(results[0].1, expected_content);
         Ok(())
     }
 
@@ -429,12 +441,20 @@ mod tests {
         fs::write(workspace.join("subdir").join("AGENTS.md"), "# Subdir")?;
         fs::write(subdir.join("file.rs"), "let x = 1;")?;
 
-        let excluded = HashSet::new();
-        let results = resolve_nearby_instructions(&workspace, &subdir.join("file.rs"), &excluded)?;
-        assert_eq!(
-            results,
-            vec![workspace.join("subdir").join("AGENTS.md").canonicalize()?],
+        // Use a config_dir outside the workspace to avoid system path conflicts
+        let config_dir = std::env::temp_dir().join("tidev-test-config-unique");
+        fs::create_dir_all(&config_dir)?;
+        let results = resolve_nearby_instructions(&workspace, &config_dir, &subdir.join("file.rs"))?;
+        let expected_path = workspace.join("subdir").join("AGENTS.md").canonicalize()?;
+        // Use canonicalized path for content format to match
+        let expected_content = format!(
+            "Instructions from: {}\n{}",
+            expected_path.display(),
+            "# Subdir"
         );
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, expected_path);
+        assert_eq!(results[0].1, expected_content);
         Ok(())
     }
 }
