@@ -970,8 +970,8 @@ impl App {
         for block in &visible_blocks {
             // Round end = no next message (session end) OR next message is User (new round)
             let next_idx = block.message_start_idx + block.message_count;
-            let is_round_end = next_idx >= messages.len()
-                || matches!(messages[next_idx].role, MessageRole::User);
+            let is_round_end =
+                next_idx >= messages.len() || matches!(messages[next_idx].role, MessageRole::User);
             let block_lines = self.render_message_block_to_lines(
                 messages,
                 block,
@@ -1120,7 +1120,8 @@ impl App {
             MessageRole::Assistant => {
                 let mut cards = Vec::new();
 
-                let body_lines = self.render_assistant_body_lines(message, body_width, is_round_end);
+                let body_lines =
+                    self.render_assistant_body_lines(message, body_width, is_round_end);
                 if !body_lines.is_empty() {
                     let mut lines_with_margin = Vec::new();
                     lines_with_margin.push(Line::from(""));
@@ -1223,9 +1224,9 @@ impl App {
                 format!("{:.1}s", secs)
             });
 
-            let end_time = message.completed_at.map(|completed| {
-                completed.format("%H:%M:%S").to_string()
-            });
+            let end_time = message
+                .completed_at
+                .map(|completed| completed.format("%H:%M:%S").to_string());
 
             let mode_label = match self.mode {
                 SessionMode::Plan => "Plan",
@@ -1762,7 +1763,8 @@ impl App {
         match message.role {
             MessageRole::Assistant => {
                 // Render assistant message cards
-                let assistant_cards = self.cached_render_message_cards(message, body_width, is_round_end);
+                let assistant_cards =
+                    self.cached_render_message_cards(message, body_width, is_round_end);
                 for (card_bg, card_lines) in assistant_cards {
                     if !card_lines.is_empty() {
                         lines.extend(decorate_card_lines(card_lines, width, card_bg));
@@ -1909,10 +1911,6 @@ fn render_reasoning_markdown_lines(
     ]));
 
     if reasoning.trim().is_empty() {
-        lines.push(Line::from(vec![
-            Span::styled("┃ ", label_style),
-            Span::styled(String::new(), body_style),
-        ]));
         return lines;
     }
 
@@ -1920,18 +1918,56 @@ fn render_reasoning_markdown_lines(
     let rendered = render_markdown_text_with_width_and_cwd(reasoning, Some(content_width), cwd);
 
     if rendered.lines.is_empty() {
-        lines.push(Line::from(vec![
-            Span::styled("┃ ", label_style),
-            Span::styled(String::new(), body_style),
-        ]));
         return lines;
     }
 
-    for line in rendered.lines {
+    let mut rendered_lines = rendered.lines.into_iter();
+
+    // Skip leading blank lines to fix extra top spacing
+    let mut first_line = rendered_lines.next();
+    while let Some(line) = first_line {
+        if line
+            .spans
+            .iter()
+            .all(|s| s.content.trim().is_empty() && s.style == Style::default())
+        {
+            first_line = rendered_lines.next();
+        } else {
+            first_line = Some(line);
+            break;
+        }
+    }
+
+    if let Some(line) = first_line {
         let mut spans = Vec::with_capacity(line.spans.len().saturating_add(1));
         spans.push(Span::styled("┃ ", label_style));
         spans.extend(line.spans.into_iter().map(|mut span| {
-            span.style = span.style.patch(body_style);
+            // Apply dim modifier to all spans to ensure they look uniform
+            span.style = span.style.add_modifier(Modifier::DIM);
+
+            // Only patch fg() if it's not already set (e.g. by highlighter)
+            if span.style.fg.is_none() {
+                span.style = span.style.patch(body_style);
+            } else {
+                // Ensure background is set for highlighted spans too
+                span.style = span.style.bg(body_style.bg.unwrap_or(palette.background));
+            }
+            span
+        }));
+        lines.push(Line::from(spans));
+    }
+
+    for line in rendered_lines {
+        let mut spans = Vec::with_capacity(line.spans.len().saturating_add(1));
+        spans.push(Span::styled("┃ ", label_style));
+        spans.extend(line.spans.into_iter().map(|mut span| {
+            span.style = span.style.add_modifier(Modifier::DIM);
+
+            if span.style.fg.is_none() {
+                span.style = span.style.patch(body_style);
+            } else {
+                span.style = span.style.bg(body_style.bg.unwrap_or(palette.background));
+            }
             span
         }));
         lines.push(Line::from(spans));
@@ -2014,9 +2050,8 @@ mod tests {
     fn reasoning_lines_preserve_empty_state() {
         let lines = render_reasoning_markdown_lines("", 80, None, ThemePalette::dark());
 
-        assert_eq!(lines.len(), 2);
+        assert_eq!(lines.len(), 1);
         assert_eq!(line_text(&lines[0]), "┃ Thinking:");
-        assert_eq!(line_text(&lines[1]), "┃ ");
     }
 
     #[test]
