@@ -310,6 +310,7 @@ pub fn execute_shell_tool_call(
     builtin::exec::execute_tool_call_with_cancel(workspace_root, call, max_output_bytes, cancelled)
 }
 
+#[allow(dead_code)]
 fn truncate_in_place(value: &mut String, max_bytes: usize) {
     if value.len() <= max_bytes {
         return;
@@ -324,11 +325,13 @@ fn truncate_in_place(value: &mut String, max_bytes: usize) {
     value.push_str("\n[truncated]");
 }
 
+#[allow(dead_code)]
 fn truncate_to_limit(mut value: String, max_bytes: usize) -> String {
     truncate_in_place(&mut value, max_bytes);
     value
 }
 
+#[allow(dead_code)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn execute_tool_call(
     workspace_root: &Path,
@@ -387,6 +390,7 @@ pub(super) fn execute_tool_call(
 }
 
 /// Extract file path from tool arguments for read/edit/write operations
+#[allow(dead_code)]
 fn extract_file_path_for_check(call: &ToolCall, tool_name: &str) -> Option<String> {
     let arguments: Value = serde_json::from_str(&call.arguments).ok()?;
 
@@ -405,6 +409,7 @@ fn extract_file_path_for_check(call: &ToolCall, tool_name: &str) -> Option<Strin
 }
 
 /// Resolve workspace path without failing (returns Err on failure instead of panicking)
+#[allow(dead_code)]
 fn resolve_workspace_path_safe(
     workspace_root: &Path,
     candidate: &str,

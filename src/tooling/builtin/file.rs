@@ -459,6 +459,7 @@ fn find_fuzzy_suggestions(workspace_root: &Path, relative_path: &Path) -> Result
         .collect())
 }
 
+#[cfg(test)]
 pub(super) fn read_file_with_options(
     _workspace_root: &Path,
     _config_dir: &Path,
