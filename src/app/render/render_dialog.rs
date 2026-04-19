@@ -769,16 +769,16 @@ impl App {
                 let status = match item.setting_type {
                     SettingType::Toggle(true) => "[x]",
                     SettingType::Toggle(false) => "[ ]",
+                    SettingType::Number { .. } => "[~]",
                 };
                 ListItem::new(vec![
                     Line::from(vec![
                         Span::styled(
                             format!(" {} ", status),
                             Style::default()
-                                .fg(if matches!(item.setting_type, SettingType::Toggle(true)) {
-                                    current_palette.accent
-                                } else {
-                                    current_palette.muted
+                                .fg(match item.setting_type {
+                                    SettingType::Toggle(true) => current_palette.accent,
+                                    _ => current_palette.muted,
                                 })
                                 .add_modifier(Modifier::BOLD),
                         ),

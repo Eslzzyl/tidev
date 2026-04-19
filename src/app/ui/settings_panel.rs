@@ -3,6 +3,7 @@ use crate::config::AppConfig;
 #[derive(Clone, Debug)]
 pub enum SettingType {
     Toggle(bool),
+    Number { value: f32, min: f32, max: f32 },
 }
 
 #[derive(Clone, Debug)]
@@ -17,6 +18,7 @@ pub struct SettingItem {
 pub enum SettingKey {
     NotificationEnabled,
     LoggingEnabled,
+    ScrollSpeed,
 }
 
 #[derive(Clone, Debug)]
@@ -40,6 +42,16 @@ impl SettingsPanelState {
                 setting_type: SettingType::Toggle(config.logging.enabled),
                 key: SettingKey::LoggingEnabled,
             },
+            SettingItem {
+                name: "Scroll Speed".to_string(),
+                description: format!("Scroll speed multiplier: {:.1}", config.ui.scroll_speed),
+                setting_type: SettingType::Number {
+                    value: config.ui.scroll_speed,
+                    min: 1.0,
+                    max: 10.0,
+                },
+                key: SettingKey::ScrollSpeed,
+            },
         ];
 
         Self {
@@ -60,10 +72,31 @@ impl SettingsPanelState {
         }
     }
 
+    /// Toggle for Toggle type only
     pub fn toggle_selected(&mut self) {
         if let Some(item) = self.items.get_mut(self.selected_index) {
-            match &mut item.setting_type {
-                SettingType::Toggle(val) => *val = !*val,
+            if let SettingType::Toggle(val) = &mut item.setting_type {
+                *val = !*val;
+            }
+        }
+    }
+
+    /// Increase value for Number type only
+    pub fn increase_selected(&mut self) {
+        if let Some(item) = self.items.get_mut(self.selected_index) {
+            if let SettingType::Number { value, min: _, max } = &mut item.setting_type {
+                *value = (*value + 1.0).min(*max);
+                item.description = format!("Scroll speed multiplier: {:.1}", *value);
+            }
+        }
+    }
+
+    /// Decrease value for Number type only
+    pub fn decrease_selected(&mut self) {
+        if let Some(item) = self.items.get_mut(self.selected_index) {
+            if let SettingType::Number { value, min, max: _ } = &mut item.setting_type {
+                *value = (*value - 1.0).max(*min);
+                item.description = format!("Scroll speed multiplier: {:.1}", *value);
             }
         }
     }
@@ -72,12 +105,19 @@ impl SettingsPanelState {
         for item in &self.items {
             match item.key {
                 SettingKey::NotificationEnabled => {
-                    let SettingType::Toggle(val) = item.setting_type;
-                    config.notifications.enabled = val;
+                    if let SettingType::Toggle(val) = item.setting_type {
+                        config.notifications.enabled = val;
+                    }
                 }
                 SettingKey::LoggingEnabled => {
-                    let SettingType::Toggle(val) = item.setting_type;
-                    config.logging.enabled = val;
+                    if let SettingType::Toggle(val) = item.setting_type {
+                        config.logging.enabled = val;
+                    }
+                }
+                SettingKey::ScrollSpeed => {
+                    if let SettingType::Number { value, .. } = item.setting_type {
+                        config.ui.scroll_speed = value;
+                    }
                 }
             }
         }

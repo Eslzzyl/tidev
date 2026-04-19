@@ -67,11 +67,11 @@ impl App {
             }
             MouseEventKind::ScrollUp if self.can_scroll_conversation() => {
                 self.clear_mouse_selection();
-                self.scroll_messages_up(3);
+                self.scroll_messages_up(self.config.ui.scroll_speed as usize);
             }
             MouseEventKind::ScrollDown if self.can_scroll_conversation() => {
                 self.clear_mouse_selection();
-                self.scroll_messages_down(3);
+                self.scroll_messages_down(self.config.ui.scroll_speed as usize);
             }
             _ => {}
         }
@@ -134,9 +134,9 @@ impl App {
         let bottom_threshold = area.y.saturating_add(area.height.saturating_sub(2));
 
         if pointer.y <= top_threshold {
-            self.scroll_messages_up_internal(3);
+            self.scroll_messages_up_internal(self.config.ui.scroll_speed as usize);
         } else if pointer.y >= bottom_threshold {
-            self.scroll_messages_down_internal(3);
+            self.scroll_messages_down_internal(self.config.ui.scroll_speed as usize);
         }
     }
 
@@ -345,6 +345,12 @@ impl App {
                 }
                 KeyCode::Enter | KeyCode::Char(' ') => {
                     panel.toggle_selected();
+                }
+                KeyCode::Left => {
+                    panel.decrease_selected();
+                }
+                KeyCode::Right => {
+                    panel.increase_selected();
                 }
                 KeyCode::Esc => {
                     self.close_settings_panel(true)?;
