@@ -5,6 +5,7 @@ use crate::{
     theme::ThemePalette,
     tooling::{TodoItem, canonical_tool_name},
 };
+use chrono::Local;
 use ratatui::{
     layout::{Constraint, Layout, Margin, Rect},
     prelude::{Frame, Modifier, Style, Text},
@@ -1260,7 +1261,7 @@ impl App {
 
             let end_time = message
                 .completed_at
-                .map(|completed| completed.format("%H:%M:%S").to_string());
+                .map(|completed| completed.with_timezone(&Local).format("%H:%M:%S").to_string());
 
             let tps = message
                 .tokens_per_second
