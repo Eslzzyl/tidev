@@ -330,6 +330,10 @@ impl App {
         let mut patches = Vec::new();
         let mut found = false;
 
+        // We iterate through the messages in forward order to find the target.
+        // But for REVERTING, we should build the list such that we process them
+        // in reverse order (newest to oldest), which revert() handles by
+        // the order in the input slice.
         for message in &self.conversation.messages {
             if found {
                 if let Some(patch_files_str) = &message.patch_files
@@ -341,10 +345,14 @@ impl App {
                         snapshot_hash,
                         files.len()
                     );
-                    patches.push(Patch {
-                        hash: snapshot_hash.clone(),
-                        files,
-                    });
+                    // Add to the front so we revert the NEWEST changes first
+                    patches.insert(
+                        0,
+                        Patch {
+                            hash: snapshot_hash.clone(),
+                            files,
+                        },
+                    );
                 }
                 continue;
             }
@@ -365,10 +373,14 @@ impl App {
                         snapshot_hash,
                         files.len()
                     );
-                    patches.push(Patch {
-                        hash: snapshot_hash.clone(),
-                        files,
-                    });
+                    // Add to the front
+                    patches.insert(
+                        0,
+                        Patch {
+                            hash: snapshot_hash.clone(),
+                            files,
+                        },
+                    );
                 }
             }
         }
