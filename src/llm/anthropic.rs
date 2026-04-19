@@ -84,6 +84,7 @@ pub(super) async fn stream_anthropic(
     let mut finish_reason: Option<String> = None;
     let mut tool_calls: BTreeMap<usize, ToolCallBuilder> = BTreeMap::new();
     let mut think_parser = ThinkParser::default();
+    let mut first_delta_time: Option<std::time::Instant> = None;
 
     use futures_util::StreamExt;
 
@@ -114,6 +115,9 @@ pub(super) async fn stream_anthropic(
                 match event {
                     AnthropicStreamEvent::ContentBlockDelta { delta, index } => match delta {
                         AnthropicDelta::TextDelta { text } => {
+                            if first_delta_time.is_none() {
+                                first_delta_time = Some(std::time::Instant::now());
+                            }
                             let (visible, reasoning) = think_parser.push(&text);
                             if !visible.is_empty() {
                                 assistant_text.push_str(&visible);
@@ -133,6 +137,9 @@ pub(super) async fn stream_anthropic(
                             }
                         }
                         AnthropicDelta::InputJsonDelta { partial_json } => {
+                            if first_delta_time.is_none() {
+                                first_delta_time = Some(std::time::Instant::now());
+                            }
                             let entry = tool_calls.entry(index).or_default();
                             entry.arguments.push_str(&partial_json);
 
@@ -149,8 +156,15 @@ pub(super) async fn stream_anthropic(
                         index,
                         content_block,
                     } => match content_block {
-                        AnthropicContentBlockStart::Text { .. } => {}
+                        AnthropicContentBlockStart::Text { .. } => {
+                            if first_delta_time.is_none() {
+                                first_delta_time = Some(std::time::Instant::now());
+                            }
+                        }
                         AnthropicContentBlockStart::ToolUse { id, name } => {
+                            if first_delta_time.is_none() {
+                                first_delta_time = Some(std::time::Instant::now());
+                            }
                             let entry = tool_calls.entry(index).or_default();
                             entry.id = id;
                             entry.name = name;
@@ -183,6 +197,7 @@ pub(super) async fn stream_anthropic(
                         }
                         if let Some(usage) = usage {
                             let total_tokens = usage.input_tokens + usage.output_tokens;
+                            let duration_ms = first_delta_time.map(|start| start.elapsed().as_millis() as u64);
                             let _ = tx.send(BackendEvent::UsageStats {
                                 session_id,
                                 request_id,
@@ -192,6 +207,7 @@ pub(super) async fn stream_anthropic(
                                 cache_read_tokens: usage.cache_read_input_tokens,
                                 cache_write_tokens: usage.cache_creation_input_tokens,
                                 model_id: model.model_id.clone(),
+                                duration_ms,
                             });
                         }
                     }

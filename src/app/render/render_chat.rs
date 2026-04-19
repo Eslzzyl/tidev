@@ -795,6 +795,29 @@ impl App {
             },
         )]));
 
+        if let Some(usage) = &self.context_usage {
+            let session_tps: Vec<f32> = self
+                .conversation
+                .messages
+                .iter()
+                .filter(|m| matches!(m.role, MessageRole::Assistant))
+                .filter_map(|m| m.tokens_per_second)
+                .collect();
+
+            if !session_tps.is_empty() {
+                let avg_tps = session_tps.iter().sum::<f32>() / session_tps.len() as f32;
+                lines.push(Line::from(vec![Span::styled(
+                    format!("Speed: {:.1} t/s (avg)", avg_tps),
+                    Style::default().fg(palette.muted),
+                )]));
+            } else if let Some(current_tps) = usage.tokens_per_second {
+                lines.push(Line::from(vec![Span::styled(
+                    format!("Speed: {:.1} t/s", current_tps),
+                    Style::default().fg(palette.muted),
+                )]));
+            }
+        }
+
         lines.push(Line::from(""));
 
         // Working directory
@@ -1228,17 +1251,27 @@ impl App {
                 .completed_at
                 .map(|completed| completed.format("%H:%M:%S").to_string());
 
+            let tps = message
+                .tokens_per_second
+                .map(|val| format!("{:.1} t/s", val));
+
             let mode_label = match self.mode {
                 SessionMode::Plan => "Plan",
                 SessionMode::Build => "Build",
             };
 
-            let suffix = match (duration, end_time) {
-                (Some(d), Some(t)) => format!("{model_display_name} · {d} · {t} · {mode_label}"),
-                (Some(d), None) => format!("{model_display_name} · {d} · {mode_label}"),
-                (None, Some(t)) => format!("{model_display_name} · {t} · {mode_label}"),
-                (None, None) => format!("{model_display_name} · {mode_label}"),
-            };
+            let parts: Vec<String> = [
+                Some(model_display_name),
+                duration,
+                tps,
+                end_time,
+                Some(mode_label.to_string()),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+
+            let suffix = parts.join(" · ");
             lines.push(line_with_style_right_aligned(
                 &suffix,
                 body_width,

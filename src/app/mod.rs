@@ -775,10 +775,19 @@ impl App {
                 cache_read_tokens,
                 cache_write_tokens,
                 model_id,
+                duration_ms,
             } => {
                 if !self.is_active_request(request_id) {
                     return Ok(());
                 }
+
+                let tokens_per_second = if let Some(ms) = duration_ms
+                    && ms > 0
+                {
+                    Some((output_tokens as f32) / (ms as f32 / 1000.0))
+                } else {
+                    None
+                };
 
                 self.context_usage = Some(state::ContextUsage {
                     input_tokens,
@@ -787,7 +796,19 @@ impl App {
                     cache_read_tokens,
                     cache_write_tokens,
                     model_id: model_id.clone(),
+                    tokens_per_second,
                 });
+
+                if let Some(message) = self.conversation.messages.last_mut()
+                    && matches!(message.role, MessageRole::Assistant)
+                {
+                    message.input_tokens = Some(input_tokens);
+                    message.output_tokens = Some(output_tokens);
+                    message.total_tokens = Some(total_tokens);
+                    message.cache_read_tokens = Some(cache_read_tokens);
+                    message.cache_write_tokens = Some(cache_write_tokens);
+                    message.tokens_per_second = tokens_per_second;
+                }
 
                 let _ = self.store.record_usage(
                     &self.active_model.provider_id,

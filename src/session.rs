@@ -216,6 +216,8 @@ pub struct Message {
     #[serde(default)]
     pub model_id: Option<String>,
     #[serde(default)]
+    pub tokens_per_second: Option<f32>,
+    #[serde(default)]
     pub snapshot_hash: Option<String>,
     #[serde(default)]
     pub patch_files: Option<String>,
@@ -241,6 +243,7 @@ impl Message {
             cache_read_tokens: None,
             cache_write_tokens: None,
             model_id: None,
+            tokens_per_second: None,
             snapshot_hash: None,
             patch_files: None,
         }
@@ -265,6 +268,7 @@ impl Message {
             cache_read_tokens: None,
             cache_write_tokens: None,
             model_id: None,
+            tokens_per_second: None,
             snapshot_hash: None,
             patch_files: None,
         }
@@ -295,6 +299,7 @@ impl Message {
             cache_read_tokens: None,
             cache_write_tokens: None,
             model_id: None,
+            tokens_per_second: None,
             snapshot_hash: None,
             patch_files: None,
         }
@@ -323,6 +328,7 @@ impl Message {
             cache_read_tokens: None,
             cache_write_tokens: None,
             model_id: None,
+            tokens_per_second: None,
             snapshot_hash: None,
             patch_files: None,
         }
@@ -576,6 +582,7 @@ pub enum BackendEvent {
         cache_read_tokens: u32,
         cache_write_tokens: u32,
         model_id: String,
+        duration_ms: Option<u64>,
     },
     ContextCompacted {
         session_id: Uuid,

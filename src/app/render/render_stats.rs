@@ -246,6 +246,24 @@ impl App {
             ),
         ]));
 
+        if let Some(usage) = &self.context_usage {
+            if let Some(tps) = usage.tokens_per_second {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        "Last Speed:        ",
+                        Style::default().bg(palette.panel).fg(palette.muted),
+                    ),
+                    Span::styled(
+                        format!("{:.1} t/s", tps),
+                        Style::default()
+                            .bg(palette.panel)
+                            .fg(palette.accent)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+            }
+        }
+
         // Requests
         lines.push(Line::from(vec![
             Span::styled(

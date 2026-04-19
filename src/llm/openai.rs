@@ -82,6 +82,7 @@ pub(super) async fn stream_openai(
     let mut finish_reason: Option<String> = None;
     let mut tool_calls: BTreeMap<usize, ToolCallBuilder> = BTreeMap::new();
     let mut think_parser = ThinkParser::default();
+    let mut first_delta_time: Option<std::time::Instant> = None;
 
     use futures_util::StreamExt;
 
@@ -125,6 +126,8 @@ pub(super) async fn stream_openai(
                         .as_ref()
                         .map(|d| d.cached_tokens)
                         .unwrap_or(0);
+                    let duration_ms =
+                        first_delta_time.map(|start| start.elapsed().as_millis() as u64);
                     let _ = tx.send(BackendEvent::UsageStats {
                         session_id,
                         request_id,
@@ -134,11 +137,15 @@ pub(super) async fn stream_openai(
                         cache_read_tokens,
                         cache_write_tokens: 0,
                         model_id: model.model_id.clone(),
+                        duration_ms,
                     });
                 }
 
                 for choice in event.choices {
                     if let Some(reasoning) = choice.delta.reasoning_content {
+                        if first_delta_time.is_none() {
+                            first_delta_time = Some(std::time::Instant::now());
+                        }
                         reasoning_text.push_str(&reasoning);
                         let _ = tx.send(BackendEvent::ReasoningDelta {
                             session_id,
@@ -148,6 +155,9 @@ pub(super) async fn stream_openai(
                     }
 
                     if let Some(content) = choice.delta.content {
+                        if first_delta_time.is_none() {
+                            first_delta_time = Some(std::time::Instant::now());
+                        }
                         let (visible, reasoning) = think_parser.push(&content);
 
                         if !visible.is_empty() {
@@ -170,6 +180,9 @@ pub(super) async fn stream_openai(
                     }
 
                     if let Some(ref tool_calls_delta) = choice.delta.tool_calls {
+                        if first_delta_time.is_none() {
+                            first_delta_time = Some(std::time::Instant::now());
+                        }
                         for tool_call in tool_calls_delta {
                             let index = tool_call.index.unwrap_or(tool_calls.len());
                             let entry = tool_calls.entry(index).or_default();

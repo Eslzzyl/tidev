@@ -34,6 +34,7 @@ pub(crate) struct ContextUsage {
     pub(crate) cache_read_tokens: u32,
     pub(crate) cache_write_tokens: u32,
     pub(crate) model_id: String,
+    pub(crate) tokens_per_second: Option<f32>,
 }
 
 /// A block in the message layout index representing a renderable unit.

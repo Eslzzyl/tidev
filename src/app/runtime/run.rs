@@ -492,8 +492,15 @@ impl App {
         };
 
         // Load file reads from database into the tracker
-        if let Err(e) = self.file_read_tracker.load_from_store(&self.store, session_id) {
-            crate::log_warn!("Failed to load file reads for session {}: {}", session_id, e);
+        if let Err(e) = self
+            .file_read_tracker
+            .load_from_store(&self.store, session_id)
+        {
+            crate::log_warn!(
+                "Failed to load file reads for session {}: {}",
+                session_id,
+                e
+            );
         }
 
         if !runtime.conversation.visible_messages().is_empty() {
@@ -503,16 +510,17 @@ impl App {
                 .iter()
                 .rev()
                 .find_map(|message| {
-                    message.total_tokens.map(|total| {
-                        super::state::ContextUsage {
+                    message
+                        .total_tokens
+                        .map(|total| super::state::ContextUsage {
                             input_tokens: message.input_tokens.unwrap_or(0),
                             output_tokens: message.output_tokens.unwrap_or(0),
                             total_tokens: total,
                             cache_read_tokens: message.cache_read_tokens.unwrap_or(0),
                             cache_write_tokens: message.cache_write_tokens.unwrap_or(0),
                             model_id: message.model_id.clone().unwrap_or_default(),
-                        }
-                    })
+                            tokens_per_second: message.tokens_per_second,
+                        })
                 });
             if let Some(usage) = last_token_usage {
                 runtime.context_usage = Some(usage);
