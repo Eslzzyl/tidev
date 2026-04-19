@@ -156,8 +156,9 @@ impl App {
                     .value(entry.input_tokens as u64)
                     .style(Color::Blue),
             );
-            // Cache Read (shows label in middle bar for better centering)
-            bars.push(Bar::with_label(label, entry.cache_read_tokens as u64).style(Color::Cyan));
+            // Cache Read (shows label with formatted token count)
+            let cache_label = format!("{}\n{}", label, format_number(entry.cache_read_tokens));
+            bars.push(Bar::with_label(cache_label, entry.cache_read_tokens as u64).style(Color::Cyan));
             // Output
             bars.push(
                 Bar::default()
@@ -174,7 +175,7 @@ impl App {
                     .title(" Token Components (Blue:Input, Cyan:Cached, Green:Output) ")
                     .style(Style::default().bg(palette.panel)),
             )
-            .bar_width(3)
+            .bar_width(6)
             .bar_gap(0)
             .group_gap(1);
 
