@@ -95,6 +95,7 @@ pub(crate) struct MessageRenderCacheKey {
     pub(crate) session_id: Uuid,
     pub(crate) message_id: Uuid,
     pub(crate) width: usize,
+    pub(crate) is_round_end: bool,
     pub(crate) kind: MessageRenderCacheKind,
 }
 

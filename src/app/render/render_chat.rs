@@ -968,7 +968,10 @@ impl App {
         // Render visible blocks
         let mut current_line_offset = header_line_count + padding_lines;
         for block in &visible_blocks {
-            let is_round_end = block.message_start_idx + block.message_count >= messages.len();
+            // Round end = no next message (session end) OR next message is User (new round)
+            let next_idx = block.message_start_idx + block.message_count;
+            let is_round_end = next_idx >= messages.len()
+                || matches!(messages[next_idx].role, MessageRole::User);
             let block_lines = self.render_message_block_to_lines(
                 messages,
                 block,
@@ -1025,6 +1028,7 @@ impl App {
             session_id: self.conversation.session_id,
             message_id: message.id,
             width: body_width,
+            is_round_end,
             kind: MessageRenderCacheKind::Cards,
         };
         let tick = self.next_message_render_cache_tick();
