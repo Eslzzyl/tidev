@@ -70,7 +70,7 @@ impl QQGatewayRunner {
         crate::log_info!("QQ Gateway connected to {}", gateway_url);
 
         let mut heartbeat_interval = 45000;
-        let mut last_heartbeat_ack = Instant::now();
+        let mut _last_heartbeat_ack = Instant::now();
 
         // Handle Hello
         if let Some(msg) = read.next().await {
@@ -149,7 +149,7 @@ impl QQGatewayRunner {
                                     }
                                 }
                                 11 => { // Heartbeat ACK
-                                    last_heartbeat_ack = Instant::now();
+                                    _last_heartbeat_ack = Instant::now();
                                 }
                                 _ => {}
                             }
@@ -227,8 +227,8 @@ impl QQGatewayRunner {
         chat_key: &str,
         active_model: &crate::config::ActiveModel,
     ) -> Result<Conversation> {
-        if let Some(session_id) = self.store.load_gateway_chat_session("qq", chat_key)? {
-            if let Some(record) = self.store.load_session_record(session_id)? {
+        if let Some(session_id) = self.store.load_gateway_chat_session("qq", chat_key)?
+            && let Some(record) = self.store.load_session_record(session_id)? {
                 let messages = self.store.load_messages(session_id)?;
                 return Ok(Conversation {
                     session_id,
@@ -247,7 +247,6 @@ impl QQGatewayRunner {
                     revert_message_id: None,
                 });
             }
-        }
 
         let session_id = Uuid::new_v4();
         let title = "Untitled session".to_string();

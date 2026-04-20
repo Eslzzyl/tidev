@@ -11,17 +11,16 @@ use crate::{
     config::{ActiveModel, AppConfig, AuthStore},
     context::ContextManager,
     llm::LlmClient,
-    mcp::McpManager,
     prompts::SessionMode,
     session::{
         AssistantTurn, BackendEvent, Conversation, Message, MessageRole, ToolCall,
         ToolExecutionResult,
     },
     storage::SessionStore,
-    tooling::{FileReadTracker, ToolRegistry},
+    tooling::ToolRegistry,
 };
 
-use super::shared::{compose_instruction_prompt, compose_system_prompt};
+use super::shared::compose_system_prompt;
 
 pub const GATEWAY_PLATFORM_TELEGRAM: &str = "telegram";
 const TELEGRAM_MAX_MESSAGE_LENGTH: usize = 4096;
@@ -748,11 +747,10 @@ impl TelegramGatewayRunner {
                 if self.allowlist.contains(&user_id) {
                     return true;
                 }
-                if let Some(ref username) = user.username {
-                    if self.allowlist.contains(username) {
+                if let Some(ref username) = user.username
+                    && self.allowlist.contains(username) {
                         return true;
                     }
-                }
                 false
             })
             .unwrap_or(false)
@@ -838,6 +836,7 @@ fn normalize_assistant_output(value: &str) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn trim_for_telegram(value: &str) -> String {
     let mut out = String::new();
     for ch in value.chars().take(240) {

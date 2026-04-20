@@ -131,7 +131,7 @@ fn render_tool_call_pending_lines(
                             break;
                         }
                     }
-                    if end_quote > 0 || (content_start.len() > 0 && !args.ends_with('\"')) {
+                    if end_quote > 0 || (!content_start.is_empty() && !args.ends_with('\"')) {
                         // If no end quote found yet, take what we have
                         let len = if end_quote > 0 {
                             end_quote
@@ -1283,18 +1283,19 @@ impl App {
                     || message.content.starts_with("Loaded ")
                         && message.content.contains(" instruction files:")
                 {
-                    let mut lines = Vec::new();
-                    lines.push(Line::from(""));
-                    lines.push(Line::from(vec![
-                        Span::styled("󱁤 ", Style::default().fg(palette.accent_soft)),
-                        Span::styled(
-                            message.content.clone(),
-                            Style::default()
-                                .fg(palette.text)
-                                .add_modifier(Modifier::ITALIC),
-                        ),
-                    ]));
-                    lines.push(Line::from(""));
+                    let lines = vec![
+                        Line::from(""),
+                        Line::from(vec![
+                            Span::styled("󱁤 ", Style::default().fg(palette.accent_soft)),
+                            Span::styled(
+                                message.content.clone(),
+                                Style::default()
+                                    .fg(palette.text)
+                                    .add_modifier(Modifier::ITALIC),
+                            ),
+                        ]),
+                        Line::from(""),
+                    ];
                     return vec![(palette.background, lines)];
                 }
 

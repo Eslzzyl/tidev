@@ -100,6 +100,7 @@ fn default_telegram_poll_timeout_secs() -> u64 {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct QQGatewayConfig {
     /// Enable QQ Channel gateway mode.
     #[serde(default)]
@@ -112,15 +113,6 @@ pub struct QQGatewayConfig {
     pub sandbox: bool,
 }
 
-impl Default for QQGatewayConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            allowlist: Vec::new(),
-            sandbox: false,
-        }
-    }
-}
 
 impl Default for TelegramGatewayConfig {
     fn default() -> Self {

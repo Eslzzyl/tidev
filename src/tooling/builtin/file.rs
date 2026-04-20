@@ -242,9 +242,6 @@ fn file_change_output(
 
     let output = if patch.hunks().is_empty() {
         format!("{action} {relative} (no content changes)")
-    } else if !original_exists {
-        metadata.diff = Some(patch.to_string());
-        format!("{action} {relative}")
     } else {
         metadata.diff = Some(patch.to_string());
         format!("{action} {relative}")
@@ -427,7 +424,7 @@ fn is_binary_file(path: &Path) -> Result<bool> {
     let mut f = fs::File::open(path)?;
     let mut buf = [0u8; 1024];
     let n = f.read(&mut buf)?;
-    Ok(buf[..n].iter().any(|&b| b == 0))
+    Ok(buf[..n].contains(&0))
 }
 
 fn find_fuzzy_suggestions(workspace_root: &Path, relative_path: &Path) -> Result<Vec<String>> {

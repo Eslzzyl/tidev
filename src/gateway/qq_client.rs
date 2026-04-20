@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -47,20 +47,18 @@ impl QQClient {
     pub async fn get_access_token(&self) -> Result<String> {
         {
             let cache = self.token_cache.read().await;
-            if let Some((token, expiry)) = &*cache {
-                if Instant::now() < *expiry {
+            if let Some((token, expiry)) = &*cache
+                && Instant::now() < *expiry {
                     return Ok(token.clone());
                 }
-            }
         }
 
         let mut cache = self.token_cache.write().await;
         // Double check after acquiring write lock
-        if let Some((token, expiry)) = &*cache {
-            if Instant::now() < *expiry {
+        if let Some((token, expiry)) = &*cache
+            && Instant::now() < *expiry {
                 return Ok(token.clone());
             }
-        }
 
         let resp = self
             .client
