@@ -1632,8 +1632,30 @@ impl App {
 
             while i < messages.len() {
                 // Build block without start_line (calculated below)
-                let (message_id, message_count, line_count) =
-                    self.build_message_block_data(messages, i, width, body_width, &ctx, true);
+                // Determine is_round_end before generation
+                let count = if matches!(messages[i].role, MessageRole::Assistant) {
+                    let mut c = 1;
+                    while i + c < messages.len()
+                        && matches!(messages[i + c].role, MessageRole::Tool)
+                    {
+                        c += 1;
+                    }
+                    c
+                } else {
+                    1
+                };
+                let next_idx = i + count;
+                let is_round_end = next_idx >= messages.len()
+                    || matches!(messages[next_idx].role, MessageRole::User);
+
+                let (message_id, message_count, line_count) = self.build_message_block_data(
+                    messages,
+                    i,
+                    width,
+                    body_width,
+                    &ctx,
+                    is_round_end,
+                );
 
                 let block = super::MessageBlock {
                     message_id,
@@ -1679,8 +1701,21 @@ impl App {
                 return Some(offset);
             }
 
+            let count = if matches!(messages[i].role, MessageRole::Assistant) {
+                let mut c = 1;
+                while i + c < messages.len() && matches!(messages[i + c].role, MessageRole::Tool) {
+                    c += 1;
+                }
+                c
+            } else {
+                1
+            };
+            let next_idx = i + count;
+            let is_round_end =
+                next_idx >= messages.len() || matches!(messages[next_idx].role, MessageRole::User);
+
             let (_message_id, message_count, line_count) =
-                self.build_message_block_data(messages, i, width, body_width, &ctx, false);
+                self.build_message_block_data(messages, i, width, body_width, &ctx, is_round_end);
             offset += line_count;
             i += message_count;
         }
