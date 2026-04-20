@@ -206,7 +206,20 @@ fn render_tool_call_summary_line(
         Span::styled(result_suffix, Style::default().fg(palette.muted)),
     ]);
 
-    vec![line]
+    // Wrap the line if it exceeds body_width, with subsequent lines indented to align with target
+    let indent_width = UnicodeWidthStr::width(action_label) + 1; // +1 for the space after label
+    let indent = Line::from(" ".repeat(indent_width));
+    let wrapped = word_wrap_line(
+        &line,
+        WrapOptions::new(body_width)
+            .subsequent_indent(indent)
+            .break_words(true),
+    );
+    // Convert to owned lines to satisfy lifetime requirements
+    wrapped
+        .into_iter()
+        .map(|l| Line::from(l.spans.into_iter().map(|s| Span::styled(s.content.to_string(), s.style)).collect::<Vec<_>>()))
+        .collect()
 }
 
 fn compute_tool_result_suffix(canonical_name: &str, output: &str) -> String {
