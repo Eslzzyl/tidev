@@ -927,7 +927,7 @@ impl App {
             Some(reason) if reason != "stop" => format!("Response finished ({reason})"),
             _ => "Response complete".to_string(),
         });
-        self.schedule_context_compaction_for_session(self.conversation.session_id, runtime, false);
+        self.schedule_context_compaction_for_session(self.conversation.session_id, runtime, None);
         self.drain_queued_prompts(runtime);
 
         self.notifications.notify("Response complete");
@@ -1036,7 +1036,7 @@ impl App {
 
         self.scroll_messages_to_bottom();
 
-        self.schedule_context_compaction_for_session(self.conversation.session_id, runtime, false);
+        self.schedule_context_compaction_for_session(self.conversation.session_id, runtime, None);
 
         self.start_assistant_turn(runtime)
     }

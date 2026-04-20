@@ -196,12 +196,18 @@ impl ContextManager {
         llm: &LlmClient,
         model: &ActiveModel,
         conversation: &Conversation,
+        manual: bool,
+        stream_ctx: Option<(
+            u64,
+            tokio::sync::mpsc::UnboundedSender<crate::session::BackendEvent>,
+        )>,
     ) -> Result<bool> {
-        if !self.needs_compaction(conversation, model) {
+        if !self.needs_compaction(conversation, model) && !manual {
             return Ok(false);
         }
 
-        self.compact(llm, model, conversation).await
+        self.compact(llm, model, conversation, manual, stream_ctx)
+            .await
     }
 
     pub async fn compact(
@@ -209,37 +215,86 @@ impl ContextManager {
         llm: &LlmClient,
         model: &ActiveModel,
         conversation: &Conversation,
+        manual: bool,
+        stream_ctx: Option<(
+            u64,
+            tokio::sync::mpsc::UnboundedSender<crate::session::BackendEvent>,
+        )>,
     ) -> Result<bool> {
         let messages = conversation.visible_messages();
         if messages.is_empty() {
             return Ok(false);
         }
 
-        let (_, retain_recent_tokens) = self.compaction_budget_for_model(model);
+        let retain_recent_tokens = if manual {
+            0
+        } else {
+            self.compaction_budget_for_model(model).1
+        };
+
         let mut split_index = self.choose_split_index(messages, retain_recent_tokens);
-        if split_index == 0 || split_index >= messages.len() {
-            if messages.len() <= 1 {
+        if !manual {
+            if split_index == 0 || split_index >= messages.len() {
+                if messages.len() <= 1 {
+                    return Ok(false);
+                }
+
+                split_index = messages.len() - 1;
+            }
+            if split_index == 0 || split_index >= messages.len() {
                 return Ok(false);
             }
-
-            split_index = messages.len() - 1;
-        }
-        if split_index == 0 || split_index >= messages.len() {
-            return Ok(false);
+        } else if split_index == 0 {
+            split_index = messages.len();
         }
 
         let compressed_chunk = messages[..split_index].to_vec();
         let prompt = self.build_compression_prompt(&compressed_chunk);
-        let summary = llm
-            .complete_with_messages(
-                model.clone(),
-                vec![
-                    Message::new(MessageRole::System, self.compression_system_prompt()),
-                    Message::new(MessageRole::User, prompt),
-                ],
-            )
-            .await
-            .unwrap_or_else(|error| self.fallback_summary(&compressed_chunk, &error.to_string()));
+
+        let system_msg = Message::new(MessageRole::System, self.compression_system_prompt());
+        let user_msg = Message::new(MessageRole::User, prompt);
+
+        let summary = if let Some((request_id, ui_tx)) = stream_ctx {
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let llm_clone = llm.clone();
+            let model_clone = model.clone();
+            let msgs = vec![system_msg.clone(), user_msg.clone()];
+            let session_id = conversation.session_id;
+
+            tokio::spawn(async move {
+                llm_clone
+                    .stream_chat(session_id, request_id, model_clone, msgs, vec![], tx)
+                    .await;
+            });
+
+            let mut text = String::new();
+            while let Some(event) = rx.recv().await {
+                match &event {
+                    crate::session::BackendEvent::Delta { content, .. } => {
+                        text.push_str(content);
+                        let _ = ui_tx.send(event.clone());
+                    }
+                    crate::session::BackendEvent::Finished { .. } => {
+                        let _ = ui_tx.send(event.clone());
+                        break;
+                    }
+                    crate::session::BackendEvent::Failed { error, .. } => {
+                        let _ = ui_tx.send(event.clone());
+                        return Err(anyhow::anyhow!("compaction failed: {}", error));
+                    }
+                    _ => {
+                        let _ = ui_tx.send(event.clone());
+                    }
+                }
+            }
+            text
+        } else {
+            llm.complete_with_messages(model.clone(), vec![system_msg, user_msg])
+                .await
+                .unwrap_or_else(|error| {
+                    self.fallback_summary(&compressed_chunk, &error.to_string())
+                })
+        };
 
         self.summary = Some(summary.chars().take(self.maximum_summary_chars).collect());
         self.retained_from = split_index;

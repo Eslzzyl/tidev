@@ -947,10 +947,18 @@ impl App {
                 self.open_session_panel(args.join(" "))?;
             }
             CommandAction::Compact => {
+                self.active_request_id = self.active_request_id.wrapping_add(1);
+                let request_id = self.active_request_id;
+                let msg = crate::session::Message::streaming(
+                    crate::session::MessageRole::System,
+                    format!("{}\n\n", crate::session::COMPACTION_MESSAGE_LABEL),
+                );
+                self.conversation.push(msg);
+
                 self.schedule_context_compaction_for_session(
                     self.conversation.session_id,
                     runtime,
-                    true,
+                    Some(request_id),
                 );
             }
             CommandAction::Message => {

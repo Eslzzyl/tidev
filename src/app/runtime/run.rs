@@ -562,7 +562,7 @@ impl App {
         &mut self,
         session_id: Uuid,
         runtime: &Runtime,
-        manual: bool,
+        stream_request_id: Option<u64>,
     ) {
         if self.compacting_sessions.contains(&session_id) {
             return;
@@ -591,13 +591,22 @@ impl App {
         self.compacting_sessions.insert(session_id);
         let llm = self.llm.clone();
         let tx = self.backend_tx.clone();
+        let manual = stream_request_id.is_some();
 
         runtime.spawn(async move {
-            let result = if manual {
-                context_manager.compact(&llm, &model, &conversation).await
+            let result = if let Some(request_id) = stream_request_id {
+                context_manager
+                    .compact(
+                        &llm,
+                        &model,
+                        &conversation,
+                        true,
+                        Some((request_id, tx.clone())),
+                    )
+                    .await
             } else {
                 context_manager
-                    .compact_if_needed(&llm, &model, &conversation)
+                    .compact_if_needed(&llm, &model, &conversation, false, None)
                     .await
             };
 
@@ -646,16 +655,38 @@ impl App {
                 ) {
                     crate::log_warn!("failed to persist compacted context state: {}", error);
                 }
-                if manual
-                    && let Some(summary) = summary.as_ref()
-                {
-                    let compaction_message = crate::session::Message::compaction(summary.clone());
-                    self.conversation.push(compaction_message.clone());
-                    if let Err(error) = self
-                        .store
-                        .append_message(self.conversation.session_id, &compaction_message)
-                    {
-                        crate::log_warn!("failed to persist compaction message: {}", error);
+                if manual && let Some(summary) = summary.as_ref() {
+                    let mut updated_existing = false;
+                    if let Some(last_msg) = self.conversation.messages.last_mut() {
+                        if last_msg.streaming
+                            && last_msg.role == crate::session::MessageRole::System
+                        {
+                            last_msg.streaming = false;
+                            last_msg.content = format!(
+                                "{}\n\n{}",
+                                crate::session::COMPACTION_MESSAGE_LABEL,
+                                summary
+                            );
+                            updated_existing = true;
+
+                            if let Err(error) = self
+                                .store
+                                .append_message(self.conversation.session_id, last_msg)
+                            {
+                                crate::log_warn!("failed to persist compaction message: {}", error);
+                            }
+                        }
+                    }
+                    if !updated_existing {
+                        let compaction_message =
+                            crate::session::Message::compaction(summary.clone());
+                        self.conversation.push(compaction_message.clone());
+                        if let Err(error) = self
+                            .store
+                            .append_message(self.conversation.session_id, &compaction_message)
+                        {
+                            crate::log_warn!("failed to persist compaction message: {}", error);
+                        }
                     }
                     self.scroll_messages_to_bottom();
                     self.clear_message_render_cache();
