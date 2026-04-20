@@ -132,7 +132,7 @@ fn render_diff_section(
         DiffLayout::Wide => {
             let lines = render_wide_rows(&rows, width, line_number_width, syntax_path, palette);
             let left_width = width.saturating_sub(1) / 2;
-            let right_width = width.saturating_sub(1).saturating_sub(left_width);
+            let _right_width = width.saturating_sub(1).saturating_sub(left_width);
 
             let min_x_left = (line_number_width.max(1) + 3) as u16;
             let max_x_left = left_width as u16;
@@ -732,7 +732,8 @@ index 1111111..2222222 100644
  }
 "#;
 
-        let lines = render_unified_diff_text(diff, 120, palette()).expect("diff should render");
+        let (lines, _) =
+            render_unified_diff_text(diff, 120, palette()).expect("diff should render");
         let rendered = flatten_lines(&lines);
 
         assert!(!rendered.iter().any(|line| line.contains("diff --git")));
@@ -755,7 +756,7 @@ index 1111111..2222222 100644
 +fn main() {}
 "#;
 
-        let lines = render_unified_diff_text(diff, 60, palette()).expect("diff should render");
+        let (lines, _) = render_unified_diff_text(diff, 60, palette()).expect("diff should render");
         let rendered = flatten_lines(&lines);
 
         assert!(
@@ -781,7 +782,8 @@ new file mode 100644
 +println!("hello");
 "#;
 
-        let lines = render_unified_diff_text(diff, 120, palette()).expect("diff should render");
+        let (lines, _) =
+            render_unified_diff_text(diff, 120, palette()).expect("diff should render");
         let rendered = flatten_lines(&lines);
 
         assert!(!rendered.iter().any(|line| line.contains("│")));
@@ -811,7 +813,8 @@ new file mode 100644
 +fn main() {}
 "#;
 
-        let lines = render_unified_diff_text(diff, 120, palette()).expect("diff should render");
+        let (lines, _) =
+            render_unified_diff_text(diff, 120, palette()).expect("diff should render");
         let body_line = lines
             .iter()
             .find(|line| {

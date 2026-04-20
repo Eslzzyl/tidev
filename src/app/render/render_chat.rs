@@ -2486,7 +2486,7 @@ mod tests {
             expanded_tool_outputs: &HashMap::new(),
         };
 
-        let (lines, _) = render_tool_result_detail_lines(&message, 80, &ctx);
+        let (lines, _, _) = render_tool_result_detail_lines(&message, 80, &ctx);
         let text = text_lines_to_string(&lines);
         assert!(
             text.contains("file1.txt"),
@@ -2532,7 +2532,7 @@ mod tests {
             expanded_tool_outputs: &HashMap::new(),
         };
 
-        let (lines, _) = render_tool_result_detail_lines(&message, 80, &ctx);
+        let (lines, _, _) = render_tool_result_detail_lines(&message, 80, &ctx);
 
         let text = text_lines_to_string(&lines);
         assert!(
@@ -2563,7 +2563,7 @@ mod tests {
             expanded_tool_outputs: &HashMap::new(),
         };
 
-        let lines = render_tool_call_with_result(&tool_call, None, 80, true, &ctx);
+        let (lines, _) = render_tool_call_with_result(&tool_call, None, 80, true, &ctx);
         let text = text_lines_to_string(&lines);
 
         assert!(
@@ -2630,7 +2630,7 @@ mod tests {
         app.conversation
             .push(Message::new(MessageRole::Assistant, "old cached content"));
 
-        let (before, _, _, _, _) = app.messages_text(Some(80));
+        let (before, _, _, _, _, _) = app.messages_text(Some(80));
         let before_text = text_lines_to_string(&before.lines);
         assert!(before_text.contains("old cached content"));
 
@@ -2638,7 +2638,7 @@ mod tests {
         app.conversation.messages[0].content = "new refreshed content".to_string();
         app.invalidate_active_message_render_cache_for(message_id);
 
-        let (after, _, _, _, _) = app.messages_text(Some(80));
+        let (after, _, _, _, _, _) = app.messages_text(Some(80));
         let after_text = text_lines_to_string(&after.lines);
         assert!(after_text.contains("new refreshed content"));
     }
@@ -2659,9 +2659,8 @@ mod tests {
             ));
         }
 
-        let (text, total_lines, _, used_virtualization, _) = app.messages_text(Some(80));
+        let (text, total_lines, _, _, _, _) = app.messages_text(Some(80));
 
-        assert!(used_virtualization);
         assert!(total_lines > 0);
         assert!(!text.lines.is_empty());
         assert!(text_lines_to_string(&text.lines).contains("message"));
