@@ -1993,7 +1993,7 @@ fn render_reasoning_markdown_lines(
     palette: ThemePalette,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    let dimmed_color = crate::theme::mix_colors(palette.muted, palette.background, 0.2);
+    let dimmed_color = crate::theme::mix_colors(palette.muted, palette.background, 0.8);
     let label_style = Style::default().fg(dimmed_color);
     let label_italic_style = Style::default()
         .fg(dimmed_color)
@@ -2042,7 +2042,9 @@ fn render_reasoning_markdown_lines(
 
             // Mix the foreground color with background for all spans (including highlighted ones)
             if let Some(fg) = span.style.fg {
-                span.style = span.style.fg(crate::theme::mix_colors(fg, palette.background, 0.2));
+                span.style = span
+                    .style
+                    .fg(crate::theme::mix_colors(fg, palette.background, 0.2));
             } else {
                 span.style = span.style.patch(body_style);
             }
@@ -2059,7 +2061,9 @@ fn render_reasoning_markdown_lines(
 
             // Mix the foreground color with background for all spans (including highlighted ones)
             if let Some(fg) = span.style.fg {
-                span.style = span.style.fg(crate::theme::mix_colors(fg, palette.background, 0.2));
+                span.style = span
+                    .style
+                    .fg(crate::theme::mix_colors(fg, palette.background, 0.2));
             } else {
                 span.style = span.style.patch(body_style);
             }
