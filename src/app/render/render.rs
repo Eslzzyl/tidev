@@ -225,6 +225,13 @@ impl App {
         });
         self.input_area.set(Some(inner));
 
+        let visible_lines = inner.height.max(1) as usize;
+        let total_lines = self.composer.display_line_count(inner.width as usize);
+        let max_scroll = total_lines.saturating_sub(visible_lines);
+
+        // Use stored scroll offset, clamped to valid range
+        let scroll = self.input_scroll_offset.min(max_scroll) as u16;
+
         let content = if self.composer.is_empty() {
             Text::from(Line::from(Span::styled(
                 placeholder.to_string(),
@@ -237,16 +244,59 @@ impl App {
             )))
         } else {
             let width = inner.width as usize;
+            let selection = self.composer.selection_range();
+
+            // Build lines with selection highlighting
+            let visual_lines = self.composer.visual_lines(width);
             let mut lines = Vec::new();
-            for range in self.composer.visual_lines(width) {
-                lines.push(Line::from(&self.composer.text()[range]));
+
+            for range in visual_lines.iter() {
+                let line_text = &self.composer.text()[range.clone()];
+
+                if let Some((sel_start, sel_end)) = selection {
+                    // This line may have selection
+                    let line_start = range.start;
+                    let line_end = range.end;
+
+                    // Calculate intersection of selection with this line
+                    let sel_in_line_start = sel_start.max(line_start);
+                    let sel_in_line_end = sel_end.min(line_end);
+
+                    if sel_in_line_start < sel_in_line_end {
+                        // Selection overlaps this line
+                        let mut spans = Vec::new();
+
+                        // Before selection
+                        if sel_in_line_start > line_start {
+                            let before = &self.composer.text()[line_start..sel_in_line_start];
+                            spans.push(Span::styled(before.to_string(), Style::default().fg(palette.text)));
+                        }
+
+                        // Selection
+                        let selected = &self.composer.text()[sel_in_line_start..sel_in_line_end];
+                        spans.push(Span::styled(
+                            selected.to_string(),
+                            Style::default().fg(palette.text).bg(palette.accent),
+                        ));
+
+                        // After selection
+                        if sel_in_line_end < line_end {
+                            let after = &self.composer.text()[sel_in_line_end..line_end];
+                            spans.push(Span::styled(after.to_string(), Style::default().fg(palette.text)));
+                        }
+
+                        lines.push(Line::from(spans));
+                    } else {
+                        // No selection on this line
+                        lines.push(Line::from(line_text.to_string()));
+                    }
+                } else {
+                    lines.push(Line::from(line_text.to_string()));
+                }
             }
+
             Text::from(lines)
         };
-
-        let visible_lines = inner.height.max(1) as usize;
-        let total_lines = self.composer.display_line_count(inner.width as usize);
-        let scroll = total_lines.saturating_sub(visible_lines) as u16;
 
         let mut paragraph = Paragraph::new(content)
             .block(

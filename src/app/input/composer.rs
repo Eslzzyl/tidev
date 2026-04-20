@@ -12,6 +12,9 @@ pub struct Composer {
     history_cursor: Option<usize>,
     draft: String,
     placeholder: String,
+    /// Anchor position for text selection. When Some, there's an active selection
+    /// from min(anchor, cursor) to max(anchor, cursor).
+    selection_anchor: Option<usize>,
 }
 
 impl Composer {
@@ -25,6 +28,7 @@ impl Composer {
             history_cursor: None,
             draft: String::new(),
             placeholder: placeholder.into(),
+            selection_anchor: None,
         }
     }
 
@@ -51,6 +55,7 @@ impl Composer {
         self.visual_line_hint = None;
         self.history_cursor = None;
         self.draft.clear();
+        self.selection_anchor = None;
     }
 
     pub fn set_text(&mut self, text: String) {
@@ -59,6 +64,7 @@ impl Composer {
         self.preferred_column = None;
         self.visual_line_hint = None;
         self.history_cursor = None;
+        self.selection_anchor = None;
     }
 
     pub fn remember_submission(&mut self, submission: &str) {
@@ -100,12 +106,13 @@ impl Composer {
         match key.code {
             KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => match c {
                 'a' => {
-                    self.cursor = 0;
-                    self.preferred_column = None;
+                    // Ctrl+A: select all
+                    self.select_all();
                 }
                 'e' => {
                     self.cursor = self.text.len();
                     self.preferred_column = None;
+                    self.selection_anchor = None;
                 }
                 'j' => {
                     self.insert_char('\n');
@@ -114,10 +121,12 @@ impl Composer {
                     self.text.clear();
                     self.cursor = 0;
                     self.preferred_column = None;
+                    self.selection_anchor = None;
                 }
                 'k' => {
                     self.text.truncate(self.cursor);
                     self.preferred_column = None;
+                    self.selection_anchor = None;
                 }
                 'p' if allow_history_navigation => {
                     self.select_previous_history();
@@ -127,6 +136,16 @@ impl Composer {
                 }
                 _ => {}
             },
+            // Command+A on macOS (SUPER modifier)
+            KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::SUPER) => {
+                self.select_all();
+            }
+            // Command+E on macOS: move to end of line
+            KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::SUPER) => {
+                self.cursor = self.text.len();
+                self.preferred_column = None;
+                self.selection_anchor = None;
+            }
             KeyCode::Char(c) => {
                 self.insert_char(c);
             }
@@ -179,10 +198,12 @@ impl Composer {
             KeyCode::Home => {
                 self.cursor = self.line_start(self.cursor);
                 self.preferred_column = None;
+                self.selection_anchor = None;
             }
             KeyCode::End => {
                 self.cursor = self.line_end(self.cursor);
                 self.preferred_column = None;
+                self.selection_anchor = None;
             }
             KeyCode::Tab => {
                 self.insert_str("    ");
@@ -280,13 +301,88 @@ impl Composer {
         self.text.is_empty()
     }
 
+    // ========== Selection API ==========
+
+    /// Returns true if there's an active text selection.
+    pub fn has_selection(&self) -> bool {
+        self.selection_anchor.is_some_and(|anchor| anchor != self.cursor)
+    }
+
+    /// Returns the selection range as (start, end) byte indices, or None if no selection.
+    pub fn selection_range(&self) -> Option<(usize, usize)> {
+        self.selection_anchor.and_then(|anchor| {
+            if anchor == self.cursor {
+                None
+            } else {
+                let start = anchor.min(self.cursor);
+                let end = anchor.max(self.cursor);
+                Some((start, end))
+            }
+        })
+    }
+
+    /// Returns the selected text, or None if no selection.
+    pub fn selected_text(&self) -> Option<&str> {
+        self.selection_range()
+            .map(|(start, end)| &self.text[start..end])
+    }
+
+    /// Selects all text in the composer.
+    pub fn select_all(&mut self) {
+        if !self.text.is_empty() {
+            self.selection_anchor = Some(0);
+            self.cursor = self.text.len();
+            self.preferred_column = None;
+            self.visual_line_hint = None;
+        }
+    }
+
+    /// Clears the current selection without changing cursor position.
+    pub fn clear_selection(&mut self) {
+        self.selection_anchor = None;
+    }
+
+    /// Sets the selection anchor at the current cursor position.
+    /// Used when starting a mouse drag selection.
+    pub fn start_selection(&mut self) {
+        self.selection_anchor = Some(self.cursor);
+    }
+
+    /// Sets the selection to a specific range.
+    pub fn set_selection(&mut self, start: usize, end: usize) {
+        let start = start.min(self.text.len());
+        let end = end.min(self.text.len()).max(start);
+        self.selection_anchor = Some(start);
+        self.cursor = end;
+        self.preferred_column = None;
+        self.visual_line_hint = None;
+    }
+
+    /// Deletes the current selection if any, returns true if deletion occurred.
+    fn delete_selection(&mut self) -> bool {
+        if let Some((start, end)) = self.selection_range() {
+            self.text.drain(start..end);
+            self.cursor = start;
+            self.selection_anchor = None;
+            self.preferred_column = None;
+            self.visual_line_hint = None;
+            self.history_cursor = None;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn visual_lines(&self, width: usize) -> Vec<Range<usize>> {
         visual_lines(&self.text, width)
             .into_iter()
             .map(|l| l.start..l.end)
             .collect()
     }
+
     fn insert_char(&mut self, ch: char) {
+        // If there's a selection, replace it with the new character
+        self.delete_selection();
         self.text.insert(self.cursor, ch);
         self.cursor += ch.len_utf8();
         self.preferred_column = None;
@@ -295,6 +391,8 @@ impl Composer {
     }
 
     pub fn insert_str(&mut self, value: &str) {
+        // If there's a selection, replace it with the new text
+        self.delete_selection();
         self.text.insert_str(self.cursor, value);
         self.cursor += value.len();
         self.preferred_column = None;
@@ -313,6 +411,11 @@ impl Composer {
     }
 
     fn delete_previous_char(&mut self) {
+        // If there's a selection, delete it instead
+        if self.delete_selection() {
+            return;
+        }
+
         if self.cursor == 0 {
             return;
         }
@@ -326,6 +429,11 @@ impl Composer {
     }
 
     fn delete_previous_word(&mut self) {
+        // If there's a selection, delete it instead
+        if self.delete_selection() {
+            return;
+        }
+
         if self.cursor == 0 {
             return;
         }
@@ -357,6 +465,11 @@ impl Composer {
     }
 
     fn delete_to_line_start(&mut self) {
+        // If there's a selection, delete it instead
+        if self.delete_selection() {
+            return;
+        }
+
         if self.cursor == 0 {
             return;
         }
@@ -370,6 +483,11 @@ impl Composer {
     }
 
     fn delete_next_char(&mut self) {
+        // If there's a selection, delete it instead
+        if self.delete_selection() {
+            return;
+        }
+
         if self.cursor >= self.text.len() {
             return;
         }
@@ -385,12 +503,14 @@ impl Composer {
         self.cursor = self.previous_char_boundary(self.cursor);
         self.preferred_column = None;
         self.visual_line_hint = None;
+        self.selection_anchor = None; // Clear selection on cursor movement
     }
 
     fn move_right(&mut self) {
         self.cursor = self.next_char_boundary(self.cursor);
         self.preferred_column = None;
         self.visual_line_hint = None;
+        self.selection_anchor = None; // Clear selection on cursor movement
     }
 
     fn select_previous_history(&mut self) {
@@ -494,6 +614,7 @@ impl Composer {
         self.cursor = cursor_from_visual_position(&self.text, lines[target_line], desired_column);
         self.preferred_column = Some(desired_column);
         self.visual_line_hint = Some(target_line);
+        self.selection_anchor = None; // Clear selection on vertical movement
     }
 }
 

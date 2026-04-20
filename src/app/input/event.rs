@@ -61,14 +61,20 @@ impl App {
                 if self.handle_scrollbar_drag(position) {
                     return;
                 }
-                self.mouse_selection
-                    .drag(Position::new(mouse.column, mouse.row));
+                // Always update pointer position for auto-scroll
+                self.mouse_selection.drag(position);
+                self.handle_input_area_drag(position);
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 let position = Position::new(mouse.column, mouse.row);
 
                 // Clear scrollbar drag state
                 self.scrollbar_drag_state = None;
+
+                // Handle input area mouse up for selection
+                if self.handle_input_area_mouse_up(position) {
+                    return;
+                }
 
                 if !self.mouse_selection.is_dragging() {
                     for (message_id, rect) in &self.tool_result_card_bounds {
@@ -82,13 +88,25 @@ impl App {
                 self.mouse_selection
                     .release(position, self.message_scroll_offset);
             }
-            MouseEventKind::ScrollUp if self.can_scroll_conversation() => {
-                self.clear_mouse_selection();
-                self.scroll_messages_up(self.config.ui.scroll_speed as usize);
+            MouseEventKind::ScrollUp => {
+                let position = Position::new(mouse.column, mouse.row);
+                if self.handle_input_area_scroll_up(position) {
+                    return;
+                }
+                if self.can_scroll_conversation() {
+                    self.clear_mouse_selection();
+                    self.scroll_messages_up(self.config.ui.scroll_speed as usize);
+                }
             }
-            MouseEventKind::ScrollDown if self.can_scroll_conversation() => {
-                self.clear_mouse_selection();
-                self.scroll_messages_down(self.config.ui.scroll_speed as usize);
+            MouseEventKind::ScrollDown => {
+                let position = Position::new(mouse.column, mouse.row);
+                if self.handle_input_area_scroll_down(position) {
+                    return;
+                }
+                if self.can_scroll_conversation() {
+                    self.clear_mouse_selection();
+                    self.scroll_messages_down(self.config.ui.scroll_speed as usize);
+                }
             }
             _ => {}
         }
@@ -177,19 +195,129 @@ impl App {
             return false;
         }
 
-        let visible_lines = inner.height.max(1) as usize;
-        let total_lines = self.composer.display_line_count(inner.width as usize);
-        let scroll = total_lines.saturating_sub(visible_lines) as u16;
+        let scroll = self.input_scroll_offset as u16;
         let local_line = position.y.saturating_sub(inner.y);
         let local_column = position.x.saturating_sub(inner.x);
         let target_line = scroll.saturating_add(local_line);
 
         self.composer
             .set_cursor_at_visual_position(inner.width, target_line, local_column);
+        // Start a new selection at the current cursor position
+        self.composer.start_selection();
+        self.input_dragging = true;
         self.clear_mouse_selection();
         self.refresh_at_mention_state();
         self.command_palette
             .sync(self.composer.text(), &self.commands);
+        true
+    }
+
+    /// Handle mouse drag in input area for text selection.
+    fn handle_input_area_drag(&mut self, position: Position) -> bool {
+        if !self.input_dragging {
+            return false;
+        }
+
+        let Some(inner) = self.input_area.get() else {
+            return false;
+        };
+
+        if inner.width == 0 || inner.height == 0 {
+            return false;
+        }
+
+        // Allow dragging outside the input area for auto-scroll
+        // Clamp position to input area for cursor positioning
+        let clamped_y = position.y.clamp(inner.y, inner.y + inner.height.saturating_sub(1));
+        let clamped_x = position.x.clamp(inner.x, inner.x + inner.width.saturating_sub(1));
+
+        let scroll = self.input_scroll_offset as u16;
+        let local_line = clamped_y.saturating_sub(inner.y);
+        let local_column = clamped_x.saturating_sub(inner.x);
+        let target_line = scroll.saturating_add(local_line);
+
+        self.composer
+            .set_cursor_at_visual_position(inner.width, target_line, local_column);
+        // Selection anchor is already set, cursor movement extends selection
+        self.refresh_at_mention_state();
+        self.command_palette
+            .sync(self.composer.text(), &self.commands);
+        true
+    }
+
+    /// Handle mouse up in input area - finalize selection and auto-copy.
+    fn handle_input_area_mouse_up(&mut self, _position: Position) -> bool {
+        if !self.input_dragging {
+            return false;
+        }
+
+        self.input_dragging = false;
+
+        // If there's a selection, auto-copy it to clipboard
+        let selected_text = self.composer.selected_text().map(|s| s.to_string());
+        if let Some(selected_text) = selected_text
+            && !selected_text.is_empty()
+        {
+            self.copy_input_selection_to_clipboard(&selected_text);
+        }
+
+        true
+    }
+
+    /// Copy input area selection to clipboard.
+    fn copy_input_selection_to_clipboard(&mut self, text: &str) {
+        use mouse_selection::copy_to_clipboard;
+
+        match copy_to_clipboard(text) {
+            Ok(lease) => {
+                self.selection_clipboard_lease = lease;
+                self.toast = Some((
+                    "Selection copied to clipboard".to_string(),
+                    std::time::Instant::now() + std::time::Duration::from_secs(3),
+                ));
+            }
+            Err(error) => {
+                self.toast = Some((
+                    format!("Failed to copy selection: {error}"),
+                    std::time::Instant::now() + std::time::Duration::from_secs(3),
+                ));
+            }
+        }
+    }
+
+    /// Handle mouse scroll up in input area.
+    fn handle_input_area_scroll_up(&mut self, position: Position) -> bool {
+        let Some(inner) = self.input_area.get() else {
+            return false;
+        };
+
+        if !inner.contains(position) {
+            return false;
+        }
+
+        if self.input_scroll_offset > 0 {
+            self.input_scroll_offset -= 1;
+        }
+        true
+    }
+
+    /// Handle mouse scroll down in input area.
+    fn handle_input_area_scroll_down(&mut self, position: Position) -> bool {
+        let Some(inner) = self.input_area.get() else {
+            return false;
+        };
+
+        if !inner.contains(position) {
+            return false;
+        }
+
+        let visible_lines = inner.height as usize;
+        let total_lines = self.composer.display_line_count(inner.width as usize);
+        let max_scroll = total_lines.saturating_sub(visible_lines);
+
+        if self.input_scroll_offset < max_scroll {
+            self.input_scroll_offset += 1;
+        }
         true
     }
 
@@ -203,6 +331,11 @@ impl App {
     }
 
     pub(crate) fn update_mouse_selection_auto_scroll(&mut self) {
+        // Handle input area auto-scroll first
+        if self.update_input_area_auto_scroll() {
+            return;
+        }
+
         if !self.mouse_selection.is_dragging() || !self.can_scroll_conversation() {
             return;
         }
@@ -229,6 +362,55 @@ impl App {
         } else if pointer.y >= bottom_threshold {
             self.scroll_messages_down_internal(self.config.ui.scroll_speed as usize);
         }
+    }
+
+    /// Update input area scroll based on mouse drag position.
+    /// Returns true if auto-scroll was performed.
+    fn update_input_area_auto_scroll(&mut self) -> bool {
+        if !self.input_dragging {
+            return false;
+        }
+
+        let Some(inner) = self.input_area.get() else {
+            return false;
+        };
+
+        // Get current mouse position from the last drag event
+        let Some(pointer) = self.mouse_selection.pointer() else {
+            return false;
+        };
+
+        let top_threshold = inner.y.saturating_add(1);
+        let bottom_threshold = inner.y.saturating_add(inner.height.saturating_sub(2));
+
+        let scrolled = if pointer.y <= top_threshold && self.input_scroll_offset > 0 {
+            self.input_scroll_offset -= 1;
+            true
+        } else if pointer.y >= bottom_threshold {
+            let visible_lines = inner.height as usize;
+            let total_lines = self.composer.display_line_count(inner.width as usize);
+            let max_scroll = total_lines.saturating_sub(visible_lines);
+            if self.input_scroll_offset < max_scroll {
+                self.input_scroll_offset += 1;
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        // If we scrolled, update cursor position to follow
+        if scrolled {
+            let scroll = self.input_scroll_offset as u16;
+            let clamped_y = pointer.y.clamp(inner.y, inner.y + inner.height.saturating_sub(1));
+            let local_line = clamped_y.saturating_sub(inner.y);
+            let target_line = scroll.saturating_add(local_line);
+            self.composer
+                .set_cursor_at_visual_position(inner.width, target_line, pointer.x.saturating_sub(inner.x));
+        }
+
+        scrolled
     }
 
     pub(crate) fn clear_mouse_selection(&mut self) {
@@ -691,9 +873,28 @@ impl App {
             };
 
             let input_width = input_area.width;
+            let visible_lines = input_area.height as usize;
+            let (cursor_line, _) = self.composer.cursor_position(input_width);
+            let cursor_line = cursor_line as usize;
+            let total_lines = self.composer.display_line_count(input_width as usize);
+            let max_scroll = total_lines.saturating_sub(visible_lines);
+
             match key.code {
-                KeyCode::Up => self.composer.move_up(input_width),
-                KeyCode::Down => self.composer.move_down(input_width),
+                KeyCode::Up => {
+                    // If cursor is at the first visible line and we can scroll up
+                    if cursor_line == self.input_scroll_offset && self.input_scroll_offset > 0 {
+                        self.input_scroll_offset -= 1;
+                    }
+                    self.composer.move_up(input_width);
+                }
+                KeyCode::Down => {
+                    // If cursor is at the last visible line and we can scroll down
+                    let last_visible_line = self.input_scroll_offset + visible_lines.saturating_sub(1);
+                    if cursor_line >= last_visible_line && self.input_scroll_offset < max_scroll {
+                        self.input_scroll_offset += 1;
+                    }
+                    self.composer.move_down(input_width);
+                }
                 _ => {}
             }
 
@@ -717,9 +918,38 @@ impl App {
             self.refresh_at_mention_state();
         }
 
+        // Ensure cursor is visible after any key handling
+        self.ensure_input_cursor_visible();
+
         self.command_palette
             .sync(self.composer.text(), &self.commands);
         Ok(())
+    }
+
+    /// Ensure the cursor in the input area is visible by adjusting scroll offset.
+    fn ensure_input_cursor_visible(&mut self) {
+        let Some(input_area) = self.input_area.get() else {
+            return;
+        };
+
+        let input_width = input_area.width;
+        let visible_lines = input_area.height as usize;
+        let (cursor_line, _) = self.composer.cursor_position(input_width);
+        let cursor_line = cursor_line as usize;
+        let total_lines = self.composer.display_line_count(input_width as usize);
+        let max_scroll = total_lines.saturating_sub(visible_lines);
+
+        // If cursor is above the visible area
+        if cursor_line < self.input_scroll_offset {
+            self.input_scroll_offset = cursor_line;
+        }
+        // If cursor is below the visible area
+        else if cursor_line >= self.input_scroll_offset + visible_lines {
+            self.input_scroll_offset = (cursor_line + 1).saturating_sub(visible_lines);
+        }
+
+        // Clamp to valid range
+        self.input_scroll_offset = self.input_scroll_offset.min(max_scroll);
     }
 
     pub(crate) fn handle_leader_key(&mut self, key: KeyEvent, runtime: &Runtime) -> Result<bool> {

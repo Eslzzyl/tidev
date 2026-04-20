@@ -149,6 +149,10 @@ struct App {
     scrollbar_drag_state: Option<state::ScrollbarDragState>,
     sidebar_area: Option<Rect>,
     input_area: Cell<Option<Rect>>,
+    /// Scroll offset for the input box when content exceeds visible area.
+    input_scroll_offset: usize,
+    /// Whether we're currently dragging in the input area (for text selection).
+    input_dragging: bool,
     selection_clipboard_lease: Option<ClipboardLease>,
     last_render_time: Instant,
     render_throttled: bool,

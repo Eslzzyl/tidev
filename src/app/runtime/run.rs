@@ -114,6 +114,8 @@ impl App {
             scrollbar_drag_state: None,
             sidebar_area: None,
             input_area: Cell::new(None),
+            input_scroll_offset: 0,
+            input_dragging: false,
             selection_clipboard_lease: None,
             last_render_time: Instant::now(),
             render_throttled: false,
