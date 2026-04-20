@@ -182,6 +182,13 @@ impl App {
             sections[3],
         );
 
+        let workspace_path = self.workspace_root.display().to_string();
+        let display_path = workspace_path.replace(&dirs::home_dir().unwrap_or_default().display().to_string(), "~");
+        let workspace_line = Line::from(Span::styled(display_path, Style::default().fg(palette.muted)));
+
+        let workspace_area = Rect::new(area.x + 1, area.bottom() - 1, area.width.saturating_sub(2), 1);
+        frame.render_widget(Paragraph::new(workspace_line), workspace_area);
+
         self.render_at_mention_palette(frame, sections[2]);
         self.render_command_palette(frame, sections[2]);
     }
