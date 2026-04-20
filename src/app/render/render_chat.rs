@@ -56,30 +56,41 @@ fn render_tool_call_with_result(
     let palette = ctx.palette;
     let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
 
-    if tool_result.is_none()
+    // Check if this is a pending call (arguments not complete)
+    let is_pending = tool_result.is_none()
         && is_streaming
         && !matches!(canonical_name, "read" | "list" | "glob" | "grep")
-        && !tool_call_arguments_are_complete(&tool_call.arguments)
-    {
-        return render_tool_call_pending_lines(tool_call, body_width, palette, ctx.spinner);
-    }
+        && !tool_call_arguments_are_complete(&tool_call.arguments);
 
     if matches!(canonical_name, "list" | "grep" | "glob" | "read") {
         return render_tool_call_summary_line(tool_call, tool_result, body_width, palette, ctx);
     }
 
+    // Get result lines and exit code (for bash)
+    let (result_lines, exit_code) = if let Some(result_msg) = tool_result {
+        render_tool_result_detail_lines(result_msg, body_width, ctx)
+    } else {
+        (Vec::new(), None)
+    };
+
     let mut lines = Vec::new();
     lines.push(Line::from(""));
 
-    let call_lines = render_tool_call_lines(tool_call, body_width, palette);
+    let call_lines = render_tool_call_lines(tool_call, body_width, palette, exit_code);
     lines.extend(call_lines);
 
-    if let Some(result_msg) = tool_result {
-        let result_lines = render_tool_result_detail_lines(result_msg, body_width, ctx);
-        if !result_lines.is_empty() {
-            lines.push(Line::from(""));
-            lines.extend(result_lines);
-        }
+    if is_pending {
+        // Show calling status inline
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} ", ctx.spinner),
+                Style::default().fg(palette.accent_soft),
+            ),
+            Span::styled("Calling...", Style::default().fg(palette.muted)),
+        ]));
+    } else if !result_lines.is_empty() {
+        lines.push(Line::from(""));
+        lines.extend(result_lines);
     }
 
     lines.push(Line::from(""));
@@ -121,39 +132,6 @@ fn render_compaction_divider_line(
     }
 
     Line::from(spans)
-}
-
-fn render_tool_call_pending_lines(
-    tool_call: &ToolCall,
-    body_width: usize,
-    palette: ThemePalette,
-    spinner: &str,
-) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
-    let canonical_display = canonical_tool_name(&tool_call.name)
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| tool_call.name.clone());
-
-    lines.push(Line::from(""));
-    lines.push(Line::from(vec![
-        Span::styled("Tool: ", Style::default().fg(palette.muted)),
-        Span::styled(
-            canonical_display,
-            Style::default()
-                .fg(palette.text)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]));
-
-    lines.push(line_with_prefix(
-        spinner,
-        &shorten_single_line("Calling...", body_width.saturating_sub(2)),
-        Style::default().fg(palette.accent_soft),
-        Style::default().fg(palette.muted),
-    ));
-    lines.push(Line::from(""));
-
-    lines
 }
 
 fn tool_call_arguments_are_complete(arguments: &str) -> bool {
@@ -313,10 +291,30 @@ fn tool_output_is_truncated(output: &str) -> bool {
         || output.contains("[truncated]")
 }
 
+/// Parse bash output to extract exit code and remaining output.
+/// Format: "[exit N]\n<output>"
+fn parse_bash_exit_code(output: &str) -> (Option<i32>, &str) {
+    // Look for "[exit N]" prefix
+    if let Some(stripped) = output.strip_prefix("[exit ") {
+        // Find the closing bracket
+        if let Some(end_idx) = stripped.find(']') {
+            let code_str = &stripped[..end_idx];
+            if let Ok(code) = code_str.parse::<i32>() {
+                // Skip the "] " or "]" and newline
+                let remaining = &stripped[end_idx + 1..];
+                let remaining = remaining.strip_prefix('\n').unwrap_or(remaining);
+                return (Some(code), remaining);
+            }
+        }
+    }
+    (None, output)
+}
+
 fn render_tool_call_lines(
     tool_call: &ToolCall,
     body_width: usize,
     palette: ThemePalette,
+    exit_code: Option<i32>,
 ) -> Vec<Line<'static>> {
     let fields = summarize_tool_arguments(&tool_call.name, &tool_call.arguments);
 
@@ -333,17 +331,61 @@ fn render_tool_call_lines(
         .map(|s| s.to_string())
         .unwrap_or_else(|| tool_call.name.clone());
 
-    lines.push(Line::from(vec![
-        Span::styled("Tool: ", Style::default().fg(palette.muted)),
-        Span::styled(
-            canonical_display.clone(),
-            Style::default()
-                .fg(palette.text)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]));
-
     let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or("");
+
+    // Build title line with optional exit code for bash
+    let title_spans = if canonical_name == "bash" {
+        if let Some(code) = exit_code {
+            if code == 0 {
+                vec![
+                    Span::styled("Tool: ", Style::default().fg(palette.muted)),
+                    Span::styled(
+                        canonical_display.clone(),
+                        Style::default()
+                            .fg(palette.text)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" ✓", Style::default().fg(palette.success)),
+                ]
+            } else {
+                vec![
+                    Span::styled("Tool: ", Style::default().fg(palette.muted)),
+                    Span::styled(
+                        canonical_display.clone(),
+                        Style::default()
+                            .fg(palette.text)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(" ✗ {}", code),
+                        Style::default().fg(palette.error),
+                    ),
+                ]
+            }
+        } else {
+            vec![
+                Span::styled("Tool: ", Style::default().fg(palette.muted)),
+                Span::styled(
+                    canonical_display.clone(),
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]
+        }
+    } else {
+        vec![
+            Span::styled("Tool: ", Style::default().fg(palette.muted)),
+            Span::styled(
+                canonical_display.clone(),
+                Style::default()
+                    .fg(palette.text)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]
+    };
+    lines.push(Line::from(title_spans));
+
     match canonical_name {
         "bash" => {
             let command = get_field("command").unwrap_or("");
@@ -391,12 +433,20 @@ fn render_tool_result_detail_lines(
     message: &Message,
     body_width: usize,
     ctx: &RenderContext<'_>,
-) -> Vec<Line<'static>> {
+) -> (Vec<Line<'static>>, Option<i32>) {
     let palette = ctx.palette;
     let output = tool_output_from_message(message, ctx);
-    let is_error = tool_output_is_error(output);
     let tool_name = message.tool_name.as_deref().unwrap_or(message.role.label());
     let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
+
+    // For bash, parse exit code and strip it from output
+    let (exit_code, effective_output) = if canonical_name == "bash" {
+        parse_bash_exit_code(output)
+    } else {
+        (None, output)
+    };
+
+    let is_error = tool_output_is_error(effective_output);
 
     // Try to render diff from metadata first (preferred, full diff not truncated)
     if !is_error
@@ -404,15 +454,15 @@ fn render_tool_result_detail_lines(
         && let Some(diff) = message.metadata.diff.as_ref()
         && let Some(diff_lines) = render_unified_diff_text(diff, body_width, palette)
     {
-        return diff_lines;
+        return (diff_lines, None);
     }
 
     // Fallback: try to render diff from output (may be truncated)
     if !is_error
         && matches!(canonical_name, "edit" | "write" | "apply_patch")
-        && let Some(diff_lines) = render_unified_diff_text(output, body_width, palette)
+        && let Some(diff_lines) = render_unified_diff_text(effective_output, body_width, palette)
     {
-        return diff_lines;
+        return (diff_lines, None);
     }
 
     if canonical_name == "todowrite" && !is_error {
@@ -423,9 +473,9 @@ fn render_tool_result_detail_lines(
             priority: Option<String>,
         }
 
-        let raw_todos = if let Ok(todos) = serde_json::from_str::<Vec<RawTodo>>(output) {
+        let raw_todos = if let Ok(todos) = serde_json::from_str::<Vec<RawTodo>>(effective_output) {
             Some(todos)
-        } else if let Ok(value) = serde_json::from_str::<serde_json::Value>(output) {
+        } else if let Ok(value) = serde_json::from_str::<serde_json::Value>(effective_output) {
             value
                 .get("todos")
                 .and_then(|v| serde_json::from_value::<Vec<RawTodo>>(v.clone()).ok())
@@ -442,17 +492,20 @@ fn render_tool_result_detail_lines(
                     priority: r.priority.unwrap_or_else(|| "medium".to_string()),
                 })
                 .collect();
-            return render_todos_checkbox_list(&todos, body_width, palette);
+            return (render_todos_checkbox_list(&todos, body_width, palette), None);
         }
     }
 
-    render_output_preview_lines(
-        output,
-        body_width,
-        is_error,
-        Some(message.id),
-        ctx.expanded_tool_results,
-        palette,
+    (
+        render_output_preview_lines(
+            effective_output,
+            body_width,
+            is_error,
+            Some(message.id),
+            ctx.expanded_tool_results,
+            palette,
+        ),
+        exit_code,
     )
 }
 
@@ -527,17 +580,11 @@ fn render_output_preview_lines(
         TOOL_OUTPUT_PREVIEW_LINES
     };
 
-    let prefix = if is_error { "!" } else { "↳" };
     let fg = if is_error {
         palette.error
     } else {
         palette.text
     };
-    let prefix_style = Style::default().fg(if is_error {
-        palette.error
-    } else {
-        palette.accent_soft
-    });
 
     let total_output_lines = output.lines().count();
     let wrap_width = body_width.saturating_sub(2);
@@ -547,9 +594,8 @@ fn render_output_preview_lines(
             let owned_line = Line::from(line.to_string());
             let wrapped =
                 word_wrap_line(&owned_line, WrapOptions::new(wrap_width).break_words(true));
-            for (wrap_idx, wrapped_line) in wrapped.iter().enumerate() {
-                let effective_prefix = if wrap_idx == 0 { prefix } else { " " };
-                let mut spans = vec![Span::styled(format!("{} ", effective_prefix), prefix_style)];
+            for wrapped_line in wrapped.iter() {
+                let mut spans = Vec::new();
                 spans.extend(
                     wrapped_line.spans.iter().map(|span| {
                         Span::styled(span.content.to_string(), Style::default().fg(fg))
@@ -558,34 +604,28 @@ fn render_output_preview_lines(
                 lines.push(Line::from(spans));
             }
         } else {
-            lines.push(line_with_prefix(
-                prefix,
-                &shorten_single_line(line, wrap_width),
-                prefix_style,
+            lines.push(Line::from(vec![Span::styled(
+                shorten_single_line(line, wrap_width),
                 Style::default().fg(fg),
-            ));
+            )]));
         }
     }
 
     if total_output_lines > max_lines {
-        lines.push(line_with_prefix(
-            prefix,
-            &format!("... {} more line(s)", total_output_lines - max_lines),
+        lines.push(Line::from(vec![Span::styled(
+            format!("... {} more line(s)", total_output_lines - max_lines),
             Style::default().fg(palette.muted),
-            Style::default().fg(palette.muted),
-        ));
+        )]));
     } else if total_output_lines > TOOL_OUTPUT_PREVIEW_LINES && message_id.is_some() {
         let hint = if is_expanded {
             "▲ Click to collapse"
         } else {
             "▼ Click to expand"
         };
-        lines.push(line_with_prefix(
-            prefix,
+        lines.push(Line::from(vec![Span::styled(
             hint,
             Style::default().fg(palette.muted),
-            Style::default().fg(palette.muted),
-        ));
+        )]));
     }
 
     if lines.is_empty() {
@@ -2270,7 +2310,7 @@ mod tests {
             expanded_tool_outputs: &HashMap::new(),
         };
 
-        let lines = render_tool_result_detail_lines(&message, 80, &ctx);
+        let (lines, _) = render_tool_result_detail_lines(&message, 80, &ctx);
         let text = text_lines_to_string(&lines);
         assert!(
             text.contains("file1.txt"),
@@ -2316,7 +2356,7 @@ mod tests {
             expanded_tool_outputs: &HashMap::new(),
         };
 
-        let lines = render_tool_result_detail_lines(&message, 80, &ctx);
+        let (lines, _) = render_tool_result_detail_lines(&message, 80, &ctx);
 
         let text = text_lines_to_string(&lines);
         assert!(
