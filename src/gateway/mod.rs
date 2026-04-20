@@ -909,7 +909,15 @@ impl TelegramGatewayRunner {
             .as_ref()
             .map(|user| {
                 let user_id = user.id.to_string();
-                self.allowlist.contains(&user_id)
+                if self.allowlist.contains(&user_id) {
+                    return true;
+                }
+                if let Some(ref username) = user.username {
+                    if self.allowlist.contains(username) {
+                        return true;
+                    }
+                }
+                false
             })
             .unwrap_or(false)
     }
@@ -1280,6 +1288,8 @@ struct TelegramChat {
 #[derive(Debug, Deserialize)]
 struct TelegramUser {
     id: i64,
+    #[serde(default)]
+    username: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
