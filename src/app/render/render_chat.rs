@@ -1,7 +1,7 @@
 use crate::{
     markdown_render::{WrapOptions, render_markdown_text_with_width_and_cwd, word_wrap_line},
     prompts::SessionMode,
-    session::{Message, MessageRole, ToolCall},
+    session::{COMPACTION_MESSAGE_LABEL, Message, MessageRole, ToolCall},
     theme::ThemePalette,
     tooling::{TodoItem, canonical_tool_name},
 };
@@ -16,6 +16,7 @@ use ratatui::{
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::{Duration, Instant};
+use unicode_width::UnicodeWidthStr;
 use uuid::Uuid;
 
 use super::diff_render::render_unified_diff_text;
@@ -83,6 +84,43 @@ fn render_tool_call_with_result(
 
     lines.push(Line::from(""));
     lines
+}
+
+fn render_compaction_divider_line(
+    label: &str,
+    width: usize,
+    palette: ThemePalette,
+) -> Line<'static> {
+    let label_width = UnicodeWidthStr::width(label);
+    if width <= label_width.saturating_add(2) {
+        return line_with_style(label, palette.accent_soft);
+    }
+
+    let remaining = width - label_width - 2;
+    let left = remaining / 2;
+    let right = remaining - left;
+
+    let mut spans = Vec::new();
+    if left > 0 {
+        spans.push(Span::styled(
+            "─".repeat(left),
+            Style::default().fg(palette.muted),
+        ));
+        spans.push(Span::raw(" "));
+    }
+    spans.push(Span::styled(
+        label.to_string(),
+        Style::default().fg(palette.accent_soft),
+    ));
+    spans.push(Span::raw(" "));
+    if right > 0 {
+        spans.push(Span::styled(
+            "─".repeat(right),
+            Style::default().fg(palette.muted),
+        ));
+    }
+
+    Line::from(spans)
 }
 
 fn render_tool_call_pending_lines(
@@ -1205,6 +1243,30 @@ impl App {
                 Vec::new()
             }
             MessageRole::System => {
+                if message.content.starts_with(COMPACTION_MESSAGE_LABEL) {
+                    let summary = message
+                        .content
+                        .split_once("\n\n")
+                        .map(|(_, summary)| summary)
+                        .unwrap_or("");
+
+                    let mut lines = Vec::new();
+                    lines.push(Line::from(""));
+                    lines.push(render_compaction_divider_line(
+                        COMPACTION_MESSAGE_LABEL,
+                        body_width,
+                        palette,
+                    ));
+                    lines.push(Line::from(""));
+                    lines.extend(self.render_text_body_lines(
+                        summary,
+                        body_width,
+                        Some(self.workspace_root.as_path()),
+                    ));
+                    lines.push(Line::from(""));
+                    return vec![(palette.background, lines)];
+                }
+
                 if message.content.starts_with("Loaded instructions from")
                     || message.content.starts_with("Loaded ")
                         && message.content.contains(" instruction files:")

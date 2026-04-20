@@ -182,6 +182,8 @@ impl MessageRole {
     }
 }
 
+pub const COMPACTION_MESSAGE_LABEL: &str = "Session compacted";
+
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ToolCall {
     pub id: String,
@@ -266,6 +268,13 @@ impl Message {
             snapshot_hash: None,
             patch_files: None,
         }
+    }
+
+    pub fn compaction(summary: impl Into<String>) -> Self {
+        Self::new(
+            MessageRole::System,
+            format!("{COMPACTION_MESSAGE_LABEL}\n\n{}", summary.into()),
+        )
     }
 
     pub fn streaming(role: MessageRole, content: impl Into<String>) -> Self {
@@ -609,6 +618,7 @@ pub enum BackendEvent {
     ContextCompacted {
         session_id: Uuid,
         compacted: bool,
+        manual: bool,
         summary: Option<String>,
         retained_from: usize,
         error: Option<String>,

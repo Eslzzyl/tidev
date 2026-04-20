@@ -6,6 +6,7 @@ pub enum CommandAction {
     Mcp,
     Model,
     Session,
+    Compact,
     Rename,
     Clear,
     Undo,
@@ -258,6 +259,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         description: "Open the session panel",
         usage: "/session [query]",
         action: CommandAction::Session,
+    },
+    CommandSpec {
+        name: "compact",
+        aliases: &[],
+        description: "Compact the current session context",
+        usage: "/compact",
+        action: CommandAction::Compact,
     },
     CommandSpec {
         name: "message",

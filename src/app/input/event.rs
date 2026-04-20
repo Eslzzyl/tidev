@@ -946,6 +946,13 @@ impl App {
             CommandAction::Session => {
                 self.open_session_panel(args.join(" "))?;
             }
+            CommandAction::Compact => {
+                self.schedule_context_compaction_for_session(
+                    self.conversation.session_id,
+                    runtime,
+                    true,
+                );
+            }
             CommandAction::Message => {
                 self.open_message_panel(args.join(" "))?;
             }

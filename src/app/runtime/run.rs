@@ -562,6 +562,7 @@ impl App {
         &mut self,
         session_id: Uuid,
         runtime: &Runtime,
+        manual: bool,
     ) {
         if self.compacting_sessions.contains(&session_id) {
             return;
@@ -592,9 +593,13 @@ impl App {
         let tx = self.backend_tx.clone();
 
         runtime.spawn(async move {
-            let result = context_manager
-                .compact_if_needed(&llm, &model, &conversation)
-                .await;
+            let result = if manual {
+                context_manager.compact(&llm, &model, &conversation).await
+            } else {
+                context_manager
+                    .compact_if_needed(&llm, &model, &conversation)
+                    .await
+            };
 
             let (compacted, summary, retained_from, error) = match result {
                 Ok(compacted) => (
@@ -609,6 +614,7 @@ impl App {
             let _ = tx.send(BackendEvent::ContextCompacted {
                 session_id,
                 compacted,
+                manual,
                 summary,
                 retained_from,
                 error,
@@ -620,6 +626,7 @@ impl App {
         &mut self,
         session_id: Uuid,
         compacted: bool,
+        manual: bool,
         summary: Option<String>,
         retained_from: usize,
         error: Option<String>,
@@ -638,6 +645,20 @@ impl App {
                     retained_from,
                 ) {
                     crate::log_warn!("failed to persist compacted context state: {}", error);
+                }
+                if manual
+                    && let Some(summary) = summary.as_ref()
+                {
+                    let compaction_message = crate::session::Message::compaction(summary.clone());
+                    self.conversation.push(compaction_message.clone());
+                    if let Err(error) = self
+                        .store
+                        .append_message(self.conversation.session_id, &compaction_message)
+                    {
+                        crate::log_warn!("failed to persist compaction message: {}", error);
+                    }
+                    self.scroll_messages_to_bottom();
+                    self.clear_message_render_cache();
                 }
                 self.last_notice = Some("Context compacted".to_string());
             } else if let Some(error) = error {

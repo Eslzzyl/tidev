@@ -197,13 +197,33 @@ impl ContextManager {
         model: &ActiveModel,
         conversation: &Conversation,
     ) -> Result<bool> {
+        if !self.needs_compaction(conversation, model) {
+            return Ok(false);
+        }
+
+        self.compact(llm, model, conversation).await
+    }
+
+    pub async fn compact(
+        &mut self,
+        llm: &LlmClient,
+        model: &ActiveModel,
+        conversation: &Conversation,
+    ) -> Result<bool> {
         let messages = conversation.visible_messages();
-        if !self.needs_compaction(conversation, model) || messages.is_empty() {
+        if messages.is_empty() {
             return Ok(false);
         }
 
         let (_, retain_recent_tokens) = self.compaction_budget_for_model(model);
-        let split_index = self.choose_split_index(messages, retain_recent_tokens);
+        let mut split_index = self.choose_split_index(messages, retain_recent_tokens);
+        if split_index == 0 || split_index >= messages.len() {
+            if messages.len() <= 1 {
+                return Ok(false);
+            }
+
+            split_index = messages.len() - 1;
+        }
         if split_index == 0 || split_index >= messages.len() {
             return Ok(false);
         }
