@@ -707,8 +707,7 @@ mod tests {
             "gateway model should use gateway_system_prompt"
         );
         assert_ne!(
-            gateway_model.system_prompt,
-            tui_model.system_prompt,
+            gateway_model.system_prompt, tui_model.system_prompt,
             "gateway model should have different system_prompt from tui model"
         );
 

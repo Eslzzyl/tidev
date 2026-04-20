@@ -16,7 +16,7 @@ use crate::{
     tooling::ToolRegistry,
 };
 
-use super::commands::{gateway_help_text, parse_command, session_help_text, CommandInvocation};
+use super::commands::{CommandInvocation, gateway_help_text, parse_command, session_help_text};
 use super::qq_client::QQClient;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -477,7 +477,15 @@ impl QQGatewayRunner {
             }
             "session" => {
                 if let Some(new_model) = self
-                    .handle_session_command(channel_id, msg_id, chat_key, conversation, active_model, command.args, None)
+                    .handle_session_command(
+                        channel_id,
+                        msg_id,
+                        chat_key,
+                        conversation,
+                        active_model,
+                        command.args,
+                        None,
+                    )
                     .await?
                 {
                     *active_model = new_model;
@@ -499,7 +507,11 @@ impl QQGatewayRunner {
                 self.client
                     .send_message(
                         channel_id,
-                        &format!("Unknown command: {}\n\n{}", command.name, gateway_help_text()),
+                        &format!(
+                            "Unknown command: {}\n\n{}",
+                            command.name,
+                            gateway_help_text()
+                        ),
                         Some(msg_id),
                     )
                     .await?;
@@ -523,7 +535,9 @@ impl QQGatewayRunner {
         match args.first().map(|s| s.as_str()) {
             None | Some("") | Some("current") => {
                 let text = format_session_summary(conversation, active_model);
-                self.client.send_message(channel_id, &text, Some(msg_id)).await?;
+                self.client
+                    .send_message(channel_id, &text, Some(msg_id))
+                    .await?;
             }
             Some("new") => {
                 let new_conversation = self.rotate_chat_session(chat_key, active_model)?;
@@ -531,7 +545,9 @@ impl QQGatewayRunner {
                     "Session rotated. New session_id: {}",
                     new_conversation.session_id
                 );
-                self.client.send_message(channel_id, &text, Some(msg_id)).await?;
+                self.client
+                    .send_message(channel_id, &text, Some(msg_id))
+                    .await?;
             }
             Some("reset-model") => {
                 self.store.clear_gateway_chat_model("qq", chat_key)?;
@@ -541,7 +557,9 @@ impl QQGatewayRunner {
                     "Model override cleared, now using default: {}/{}",
                     active_model.provider_id, active_model.model_id
                 );
-                self.client.send_message(channel_id, &text, Some(msg_id)).await?;
+                self.client
+                    .send_message(channel_id, &text, Some(msg_id))
+                    .await?;
             }
             _ => {
                 let text = format!(
@@ -549,7 +567,9 @@ impl QQGatewayRunner {
                     args.first().unwrap(),
                     session_help_text()
                 );
-                self.client.send_message(channel_id, &text, Some(msg_id)).await?;
+                self.client
+                    .send_message(channel_id, &text, Some(msg_id))
+                    .await?;
             }
         }
 
@@ -572,7 +592,9 @@ impl QQGatewayRunner {
                     active_model.model_id,
                     self.format_model_list()
                 );
-                self.client.send_message(channel_id, &text, Some(msg_id)).await?;
+                self.client
+                    .send_message(channel_id, &text, Some(msg_id))
+                    .await?;
             }
             Some("list") => {
                 self.client
@@ -587,7 +609,9 @@ impl QQGatewayRunner {
                     "Reset to default model: {}/{}",
                     active_model.provider_id, active_model.model_id
                 );
-                self.client.send_message(channel_id, &text, Some(msg_id)).await?;
+                self.client
+                    .send_message(channel_id, &text, Some(msg_id))
+                    .await?;
             }
             Some(selector) => {
                 let selected = self
@@ -607,7 +631,9 @@ impl QQGatewayRunner {
                     "Switched model for this chat to {}/{}",
                     active_model.provider_id, active_model.model_id
                 );
-                self.client.send_message(channel_id, &text, Some(msg_id)).await?;
+                self.client
+                    .send_message(channel_id, &text, Some(msg_id))
+                    .await?;
             }
         }
 

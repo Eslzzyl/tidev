@@ -20,7 +20,9 @@ use crate::{
     tooling::ToolRegistry,
 };
 
-use super::commands::{CommandInvocation, GATEWAY_COMMANDS, gateway_help_text, parse_command, session_help_text};
+use super::commands::{
+    CommandInvocation, GATEWAY_COMMANDS, gateway_help_text, parse_command, session_help_text,
+};
 use super::shared::compose_system_prompt;
 
 pub const GATEWAY_PLATFORM_TELEGRAM: &str = "telegram";

@@ -518,7 +518,7 @@ mod tests {
         selection.release(Position::new(1, 1), 0);
 
         let text = selection.selected_text(&buffer, 0, &[]).unwrap();
-        // The current implementation of extract_selected_text joins lines with a space 
+        // The current implementation of extract_selected_text joins lines with a space
         // if it thinks it's a wrapped line.
         assert_eq!(text, "bcd ef");
     }
