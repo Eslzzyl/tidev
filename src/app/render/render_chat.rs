@@ -92,9 +92,8 @@ fn render_tool_call_pending_lines(
     spinner: &str,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    let canonical_display = canonical_tool_name(&tool_call.name)
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| tool_call.name.clone());
+    let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
+    let canonical_display = canonical_name.to_string();
 
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
@@ -106,9 +105,85 @@ fn render_tool_call_pending_lines(
                 .add_modifier(Modifier::BOLD),
         ),
     ]));
+
+    let mut status_text = "Calling...".to_string();
+
+    // Fast heuristic parsing for streaming arguments
+    if matches!(canonical_name, "write" | "edit" | "apply_patch") {
+        let args = &tool_call.arguments;
+
+        let find_field = |key: &str| -> Option<String> {
+            let key_marker = format!("\"{}\":", key);
+            if let Some(pos) = args.find(&key_marker) {
+                let rest = &args[pos + key_marker.len()..];
+                if let Some(start_quote) = rest.find('\"') {
+                    let content_start = &rest[start_quote + 1..];
+                    // Find the end quote, but handle escaped quotes
+                    let mut end_quote = 0;
+                    let mut escaped = false;
+                    for (i, c) in content_start.char_indices() {
+                        if escaped {
+                            escaped = false;
+                        } else if c == '\\' {
+                            escaped = true;
+                        } else if c == '\"' {
+                            end_quote = i;
+                            break;
+                        }
+                    }
+                    if end_quote > 0 || (content_start.len() > 0 && !args.ends_with('\"')) {
+                        // If no end quote found yet, take what we have
+                        let len = if end_quote > 0 {
+                            end_quote
+                        } else {
+                            content_start.len()
+                        };
+                        return Some(content_start[..len].to_string());
+                    }
+                }
+            }
+            None
+        };
+
+        match canonical_name {
+            "write" => {
+                let path = find_field("path");
+                let content = find_field("content");
+                let lines_count = content.as_ref().map(|c| c.lines().count()).unwrap_or(0);
+                status_text = match path {
+                    Some(p) => format!("Preparing write to {}... ({} lines)", p, lines_count),
+                    None => format!("Preparing write... ({} lines)", lines_count),
+                };
+            }
+            "edit" => {
+                let path = find_field("path");
+                let old_text = find_field("old_text");
+                let new_text = find_field("new_text");
+                let old_lines = old_text.as_ref().map(|c| c.lines().count()).unwrap_or(0);
+                let new_lines = new_text.as_ref().map(|c| c.lines().count()).unwrap_or(0);
+                status_text = match path {
+                    Some(p) => format!(
+                        "Preparing edit to {}... (replacing {} lines with {} lines)",
+                        p, old_lines, new_lines
+                    ),
+                    None => format!(
+                        "Preparing edit... (replacing {} lines with {} lines)",
+                        old_lines, new_lines
+                    ),
+                };
+            }
+            "apply_patch" => {
+                let patch = find_field("patch_text");
+                let lines_count = patch.as_ref().map(|p| p.lines().count()).unwrap_or(0);
+                status_text = format!("Preparing patch... ({} lines of diff)", lines_count);
+            }
+            _ => {}
+        }
+    }
+
     lines.push(line_with_prefix(
         spinner,
-        &shorten_single_line("Calling...", body_width.saturating_sub(2)),
+        &shorten_single_line(&status_text, body_width.saturating_sub(2)),
         Style::default().fg(palette.accent_soft),
         Style::default().fg(palette.muted),
     ));
@@ -2519,6 +2594,11 @@ fn summarize_tool_arguments(tool_name: &str, arguments: &str) -> Vec<(String, St
         "write" | "edit" => {
             if let Some(path) = string_field("path") {
                 fields.push(("path".to_string(), path));
+            }
+        }
+        "apply_patch" => {
+            if let Some(patch) = string_field("patch_text") {
+                fields.push(("patch_text".to_string(), patch));
             }
         }
         "list" => {
