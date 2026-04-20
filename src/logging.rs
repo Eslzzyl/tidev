@@ -6,6 +6,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
+use crossterm::style::{Color, Stylize};
 
 use crate::config::LogConfig;
 
@@ -117,24 +118,33 @@ pub fn log(level: &str, target: &str, message: &str) {
         rotate_if_needed(&mut guard);
 
         let timestamp: DateTime<Utc> = Utc::now();
-        let line = format!(
-            "[{} {} {}] {}",
-            timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
-            level,
-            target,
-            message
-        );
+        let formatted_timestamp = timestamp.format("%Y-%m-%d %H:%M:%S%.3f").to_string();
 
-        // Write to file
+        // Write to file (always uncolored)
         if let Some(ref mut file) = guard.file {
-            let _ = file.write_all(line.as_bytes());
+            let file_line = format!("[{} {} {}] {}", formatted_timestamp, level, target, message);
+            let _ = file.write_all(file_line.as_bytes());
             let _ = file.write_all(b"\n");
             let _ = file.flush();
         }
 
         // Write to console (stderr) if enabled
         if guard.config.console {
-            eprintln!("{}", line);
+            let colored_level = match level.to_uppercase().as_str() {
+                "DEBUG" => level.with(Color::Grey),
+                "INFO" => level.with(Color::Green),
+                "WARN" => level.with(Color::Yellow),
+                "ERROR" => level.with(Color::Red),
+                _ => level.stylize(),
+            };
+
+            let colored_target = target.with(Color::Cyan);
+            let colored_timestamp = formatted_timestamp.with(Color::DarkGrey);
+
+            eprintln!(
+                "[{}] [{}] [{}] {}",
+                colored_timestamp, colored_level, colored_target, message
+            );
         }
     }
 }
