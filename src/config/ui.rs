@@ -17,7 +17,7 @@ fn default_scroll_speed() -> f32 {
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
-            sidebar_width: 30,
+            sidebar_width: 35,
             welcome_width: 72,
             max_input_lines: 6,
             scroll_speed: 3.0,

@@ -565,7 +565,7 @@ impl App {
             area,
         );
 
-        let sidebar_visible = area.width >= self.config.ui.sidebar_width.saturating_add(55);
+        let sidebar_visible = area.width >= self.config.ui.sidebar_width.saturating_add(70);
         let main_area = if sidebar_visible {
             let split = Layout::horizontal([
                 Constraint::Min(20),
