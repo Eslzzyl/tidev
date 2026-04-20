@@ -384,19 +384,17 @@ impl TelegramGatewayRunner {
         let runtime = tokio::runtime::Handle::current();
         for tool_call in tool_calls {
             crate::log_info!("Executing tool: {}", tool_call.name);
-            let result = self.tools.execute_call(
-                &runtime,
-                &self.store,
-                conversation.session_id,
-                &tool_call,
-            );
+            let result =
+                self.tools
+                    .execute_call(&runtime, &self.store, conversation.session_id, &tool_call);
 
             let execution_result = match result {
                 Ok(res) => res,
                 Err(error) => ToolExecutionResult::new(format!("Error: {error}")),
             };
 
-            let display_result = execution_result.preview_for_storage(Some(tool_call.name.as_str()));
+            let display_result =
+                execution_result.preview_for_storage(Some(tool_call.name.as_str()));
             let output_for_tool_event = display_result.output.clone();
             let tool_message =
                 Message::tool_result(tool_call.id.clone(), tool_call.name.clone(), display_result);
@@ -485,15 +483,16 @@ impl TelegramGatewayRunner {
                 Ok(true)
             }
             "session" => {
-                if let Some(new_model) = self.handle_session_command(
-                    source_message,
-                    chat_key,
-                    conversation,
-                    active_model,
-                    command.args,
-                    None,
-                )
-                .await?
+                if let Some(new_model) = self
+                    .handle_session_command(
+                        source_message,
+                        chat_key,
+                        conversation,
+                        active_model,
+                        command.args,
+                        None,
+                    )
+                    .await?
                 {
                     *active_model = new_model;
                 }
@@ -512,7 +511,11 @@ impl TelegramGatewayRunner {
             _ => {
                 self.send_reply_chunks(
                     source_message,
-                    &format!("Unknown command: {}\n\n{}", command.name, gateway_help_text()),
+                    &format!(
+                        "Unknown command: {}\n\n{}",
+                        command.name,
+                        gateway_help_text()
+                    ),
                 )
                 .await?;
                 Ok(true)
@@ -530,7 +533,7 @@ impl TelegramGatewayRunner {
         new_active_model: Option<ActiveModel>,
     ) -> Result<Option<ActiveModel>> {
         let mut updated_model = new_active_model;
-        
+
         match args.first().map(|s| s.as_str()) {
             None | Some("") | Some("current") => {
                 let text = format_session_summary(conversation, active_model);
@@ -748,9 +751,10 @@ impl TelegramGatewayRunner {
                     return true;
                 }
                 if let Some(ref username) = user.username
-                    && self.allowlist.contains(username) {
-                        return true;
-                    }
+                    && self.allowlist.contains(username)
+                {
+                    return true;
+                }
                 false
             })
             .unwrap_or(false)

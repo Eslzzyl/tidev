@@ -48,17 +48,19 @@ impl QQClient {
         {
             let cache = self.token_cache.read().await;
             if let Some((token, expiry)) = &*cache
-                && Instant::now() < *expiry {
-                    return Ok(token.clone());
-                }
+                && Instant::now() < *expiry
+            {
+                return Ok(token.clone());
+            }
         }
 
         let mut cache = self.token_cache.write().await;
         // Double check after acquiring write lock
         if let Some((token, expiry)) = &*cache
-            && Instant::now() < *expiry {
-                return Ok(token.clone());
-            }
+            && Instant::now() < *expiry
+        {
+            return Ok(token.clone());
+        }
 
         let resp = self
             .client

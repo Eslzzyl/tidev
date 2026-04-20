@@ -1,9 +1,6 @@
 use std::path::Path;
 
-use crate::{
-    config::ConfigPaths,
-    prompts::SessionMode,
-};
+use crate::{config::ConfigPaths, prompts::SessionMode};
 
 /// Compose the instruction prompt from config and instruction files.
 /// Shared by all gateway channels.

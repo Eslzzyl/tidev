@@ -228,25 +228,26 @@ impl QQGatewayRunner {
         active_model: &crate::config::ActiveModel,
     ) -> Result<Conversation> {
         if let Some(session_id) = self.store.load_gateway_chat_session("qq", chat_key)?
-            && let Some(record) = self.store.load_session_record(session_id)? {
-                let messages = self.store.load_messages(session_id)?;
-                return Ok(Conversation {
-                    session_id,
-                    parent_session_id: record.parent_session_id,
-                    workspace_root: record.workspace_root,
-                    provider_id: record.provider_id,
-                    provider_display_name: record.provider_display_name,
-                    model_id: record.model_id,
-                    model_display_name: record.model_display_name,
-                    title: record.title,
-                    created_at: record.created_at,
-                    updated_at: record.updated_at,
-                    context_summary: record.context_summary,
-                    context_retained_from: record.context_retained_from,
-                    messages,
-                    revert_message_id: None,
-                });
-            }
+            && let Some(record) = self.store.load_session_record(session_id)?
+        {
+            let messages = self.store.load_messages(session_id)?;
+            return Ok(Conversation {
+                session_id,
+                parent_session_id: record.parent_session_id,
+                workspace_root: record.workspace_root,
+                provider_id: record.provider_id,
+                provider_display_name: record.provider_display_name,
+                model_id: record.model_id,
+                model_display_name: record.model_display_name,
+                title: record.title,
+                created_at: record.created_at,
+                updated_at: record.updated_at,
+                context_summary: record.context_summary,
+                context_retained_from: record.context_retained_from,
+                messages,
+                revert_message_id: None,
+            });
+        }
 
         let session_id = Uuid::new_v4();
         let title = "Untitled session".to_string();
