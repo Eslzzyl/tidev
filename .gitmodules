@@ -15,3 +15,6 @@
 	path = zeroclaw
 	url = https://github.com/zeroclaw-labs/zeroclaw.git
 	shallow = true
+[submodule "nanobot"]
+	path = nanobot
+	url = https://github.com/HKUDS/nanobot.git
