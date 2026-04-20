@@ -2040,12 +2040,11 @@ fn render_reasoning_markdown_lines(
             // Apply dim modifier to all spans to ensure they look uniform
             span.style = span.style.add_modifier(Modifier::DIM);
 
-            // Only patch fg() if it's not already set (e.g. by highlighter)
-            if span.style.fg.is_none() {
-                span.style = span.style.patch(body_style);
+            // Mix the foreground color with background for all spans (including highlighted ones)
+            if let Some(fg) = span.style.fg {
+                span.style = span.style.fg(crate::theme::mix_colors(fg, palette.background, 0.2));
             } else {
-                // Ensure background is set for highlighted spans too
-                span.style = span.style.bg(body_style.bg.unwrap_or(palette.background));
+                span.style = span.style.patch(body_style);
             }
             span
         }));
@@ -2058,10 +2057,11 @@ fn render_reasoning_markdown_lines(
         spans.extend(line.spans.into_iter().map(|mut span| {
             span.style = span.style.add_modifier(Modifier::DIM);
 
-            if span.style.fg.is_none() {
-                span.style = span.style.patch(body_style);
+            // Mix the foreground color with background for all spans (including highlighted ones)
+            if let Some(fg) = span.style.fg {
+                span.style = span.style.fg(crate::theme::mix_colors(fg, palette.background, 0.2));
             } else {
-                span.style = span.style.bg(body_style.bg.unwrap_or(palette.background));
+                span.style = span.style.patch(body_style);
             }
             span
         }));
