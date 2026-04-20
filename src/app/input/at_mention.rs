@@ -1,6 +1,7 @@
 use ignore::WalkBuilder;
 use notify::{
-    Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
+    event::ModifyKind, Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode,
+    Watcher,
 };
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
@@ -300,7 +301,31 @@ impl AtMentionIndex {
     }
 
     fn event_should_refresh(event: &Event) -> bool {
-        !matches!(event.kind, EventKind::Access(_))
+        match event.kind {
+            // 忽略：纯访问操作（读、打开、关闭、执行）
+            EventKind::Access(_) => false,
+
+            // 忽略：文件内容修改（索引只依赖路径和类型，不依赖内容）
+            EventKind::Modify(ModifyKind::Data(_)) => false,
+
+            // 忽略：元数据修改（权限、时间戳等不影响路径索引）
+            EventKind::Modify(ModifyKind::Metadata(_)) => false,
+
+            // 需要重建：创建文件或目录
+            EventKind::Create(_) => true,
+
+            // 需要重建：删除文件或目录
+            EventKind::Remove(_) => true,
+
+            // 需要重建：重命名/移动
+            EventKind::Modify(ModifyKind::Name(_)) => true,
+
+            // 其他未知事件保守处理：重建
+            EventKind::Any
+            | EventKind::Other
+            | EventKind::Modify(ModifyKind::Any)
+            | EventKind::Modify(ModifyKind::Other) => true,
+        }
     }
 
     fn clear_workspace_watcher(&self, workspace_root: &Path, watcher_id: u64) {
