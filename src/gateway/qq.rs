@@ -9,13 +9,14 @@ use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessa
 use uuid::Uuid;
 
 use crate::{
-    config::{AppConfig, AuthStore},
+    config::{ActiveModel, AppConfig, AuthStore},
     llm::LlmClient,
     session::{AssistantTurn, Conversation, Message, MessageRole, ToolCall, ToolExecutionResult},
     storage::SessionStore,
     tooling::ToolRegistry,
 };
 
+use super::commands::{gateway_help_text, parse_command, session_help_text, CommandInvocation};
 use super::qq_client::QQClient;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -181,7 +182,7 @@ impl QQGatewayRunner {
             return Ok(());
         }
 
-        // Clean @bot if present
+        // Clean @bot if present (QQ mentions are like <@!123456>)
         let clean_content = if let Some(pos) = content.find(' ') {
             &content[pos + 1..]
         } else {
@@ -189,6 +190,29 @@ impl QQGatewayRunner {
         };
 
         crate::log_info!("QQ Message from {}: {}", author_id, clean_content);
+
+        // Check if this is a slash command
+        if let Some(command) = parse_command(clean_content) {
+            crate::log_info!("QQ Executing command: /{} {:?}", command.name, command.args);
+            let mut active_model = self.config.resolve_active_model_for_gateway(&self.auth)?;
+            let chat_key = format!("qq:{}", channel_id);
+            let mut conversation = self.load_or_create_conversation(&chat_key, &active_model)?;
+
+            let handled = self
+                .handle_command(
+                    &channel_id,
+                    &msg_id,
+                    &chat_key,
+                    &mut conversation,
+                    &mut active_model,
+                    command,
+                )
+                .await?;
+
+            if handled {
+                return Ok(());
+            }
+        }
 
         let active_model = self.config.resolve_active_model_for_gateway(&self.auth)?;
         let chat_key = format!("qq:{}", channel_id);
@@ -433,4 +457,225 @@ impl QQGatewayRunner {
         }
         Ok(())
     }
+
+    async fn handle_command(
+        &mut self,
+        channel_id: &str,
+        msg_id: &str,
+        chat_key: &str,
+        conversation: &mut Conversation,
+        active_model: &mut ActiveModel,
+        command: CommandInvocation,
+    ) -> Result<bool> {
+        match command.name.as_str() {
+            "new" => {
+                *conversation = self.rotate_chat_session(chat_key, active_model)?;
+                self.client
+                    .send_message(channel_id, "Started a fresh session.", Some(msg_id))
+                    .await?;
+                Ok(true)
+            }
+            "session" => {
+                if let Some(new_model) = self
+                    .handle_session_command(channel_id, msg_id, chat_key, conversation, active_model, command.args, None)
+                    .await?
+                {
+                    *active_model = new_model;
+                }
+                Ok(true)
+            }
+            "model" => {
+                self.handle_model_command(channel_id, msg_id, chat_key, active_model, command.args)
+                    .await?;
+                Ok(true)
+            }
+            "help" | "start" => {
+                self.client
+                    .send_message(channel_id, &gateway_help_text(), Some(msg_id))
+                    .await?;
+                Ok(true)
+            }
+            _ => {
+                self.client
+                    .send_message(
+                        channel_id,
+                        &format!("Unknown command: {}\n\n{}", command.name, gateway_help_text()),
+                        Some(msg_id),
+                    )
+                    .await?;
+                Ok(true)
+            }
+        }
+    }
+
+    async fn handle_session_command(
+        &self,
+        channel_id: &str,
+        msg_id: &str,
+        chat_key: &str,
+        conversation: &Conversation,
+        active_model: &ActiveModel,
+        args: Vec<String>,
+        new_active_model: Option<ActiveModel>,
+    ) -> Result<Option<ActiveModel>> {
+        let mut updated_model = new_active_model;
+
+        match args.first().map(|s| s.as_str()) {
+            None | Some("") | Some("current") => {
+                let text = format_session_summary(conversation, active_model);
+                self.client.send_message(channel_id, &text, Some(msg_id)).await?;
+            }
+            Some("new") => {
+                let new_conversation = self.rotate_chat_session(chat_key, active_model)?;
+                let text = format!(
+                    "Session rotated. New session_id: {}",
+                    new_conversation.session_id
+                );
+                self.client.send_message(channel_id, &text, Some(msg_id)).await?;
+            }
+            Some("reset-model") => {
+                self.store.clear_gateway_chat_model("qq", chat_key)?;
+                let default_model = self.config.resolve_active_model(&self.auth)?;
+                updated_model = Some(default_model);
+                let text = format!(
+                    "Model override cleared, now using default: {}/{}",
+                    active_model.provider_id, active_model.model_id
+                );
+                self.client.send_message(channel_id, &text, Some(msg_id)).await?;
+            }
+            _ => {
+                let text = format!(
+                    "Unknown /session subcommand: {}\n\n{}",
+                    args.first().unwrap(),
+                    session_help_text()
+                );
+                self.client.send_message(channel_id, &text, Some(msg_id)).await?;
+            }
+        }
+
+        Ok(updated_model)
+    }
+
+    async fn handle_model_command(
+        &mut self,
+        channel_id: &str,
+        msg_id: &str,
+        chat_key: &str,
+        active_model: &mut ActiveModel,
+        args: Vec<String>,
+    ) -> Result<()> {
+        match args.first().map(|s| s.as_str()) {
+            None | Some("") | Some("current") => {
+                let text = format!(
+                    "Current model: {}/{}\n\n{}",
+                    active_model.provider_id,
+                    active_model.model_id,
+                    self.format_model_list()
+                );
+                self.client.send_message(channel_id, &text, Some(msg_id)).await?;
+            }
+            Some("list") => {
+                self.client
+                    .send_message(channel_id, &self.format_model_list(), Some(msg_id))
+                    .await?;
+            }
+            Some("reset") => {
+                self.store.clear_gateway_chat_model("qq", chat_key)?;
+                let default_model = self.config.resolve_active_model(&self.auth)?;
+                *active_model = default_model;
+                let text = format!(
+                    "Reset to default model: {}/{}",
+                    active_model.provider_id, active_model.model_id
+                );
+                self.client.send_message(channel_id, &text, Some(msg_id)).await?;
+            }
+            Some(selector) => {
+                let selected = self
+                    .config
+                    .resolve_model(&self.auth, Some(selector))
+                    .with_context(|| format!("invalid model selector '{selector}'"))?;
+
+                self.store.set_gateway_chat_model(
+                    "qq",
+                    chat_key,
+                    &selected.provider_id,
+                    &selected.model_id,
+                )?;
+
+                *active_model = selected;
+                let text = format!(
+                    "Switched model for this chat to {}/{}",
+                    active_model.provider_id, active_model.model_id
+                );
+                self.client.send_message(channel_id, &text, Some(msg_id)).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn format_model_list(&self) -> String {
+        let models = self.config.available_models();
+        let total = models.len();
+        let mut lines = Vec::new();
+
+        for model in models.iter().take(20) {
+            lines.push(format!("- {}/{}", model.provider_id, model.model_id));
+        }
+
+        if total > 20 {
+            lines.push(format!("... and {} more model(s)", total - 20));
+        }
+
+        format!(
+            "Available models ({total}):\n{}\n\nUse: /model <provider:model>",
+            lines.join("\n")
+        )
+    }
+
+    fn rotate_chat_session(
+        &self,
+        chat_key: &str,
+        active_model: &ActiveModel,
+    ) -> Result<Conversation> {
+        let conversation = self.create_gateway_session(active_model)?;
+        self.store
+            .set_gateway_chat_session("qq", chat_key, conversation.session_id)?;
+        Ok(conversation)
+    }
+
+    fn create_gateway_session(&self, active_model: &ActiveModel) -> Result<Conversation> {
+        let session_id = Uuid::new_v4();
+        let title = "Untitled session".to_string();
+        let conversation = Conversation::new(
+            session_id,
+            self.workspace_root.display().to_string(),
+            active_model.provider_id.clone(),
+            active_model.provider_display_name.clone(),
+            active_model.model_id.clone(),
+            active_model.display_name.clone(),
+            title,
+        );
+        self.store.create_session(
+            session_id,
+            &self.workspace_root,
+            &active_model.provider_id,
+            &active_model.provider_display_name,
+            &active_model.model_id,
+            &active_model.display_name,
+            &conversation.title,
+        )?;
+        Ok(conversation)
+    }
+}
+
+fn format_session_summary(conversation: &Conversation, active_model: &ActiveModel) -> String {
+    format!(
+        "Session status\n- session_id: {}\n- title: {}\n- message_count: {}\n- model: {}/{}",
+        conversation.session_id,
+        conversation.title,
+        conversation.messages.len(),
+        active_model.provider_id,
+        active_model.model_id
+    )
 }

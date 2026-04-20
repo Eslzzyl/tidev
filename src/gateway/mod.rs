@@ -1,3 +1,4 @@
+mod commands;
 mod qq;
 mod qq_client;
 mod shared;

@@ -20,6 +20,7 @@ use crate::{
     tooling::ToolRegistry,
 };
 
+use super::commands::{CommandInvocation, GATEWAY_COMMANDS, gateway_help_text, parse_command, session_help_text};
 use super::shared::compose_system_prompt;
 
 pub const GATEWAY_PLATFORM_TELEGRAM: &str = "telegram";
@@ -55,13 +56,10 @@ impl TelegramGatewayRunner {
     }
 
     async fn register_commands(&self) -> Result<()> {
-        let commands = vec![
-            ("start".to_string(), "Show help".to_string()),
-            ("help".to_string(), "Show help".to_string()),
-            ("new".to_string(), "Start a fresh session".to_string()),
-            ("session".to_string(), "Manage current session".to_string()),
-            ("model".to_string(), "Manage model settings".to_string()),
-        ];
+        let commands: Vec<(String, String)> = GATEWAY_COMMANDS
+            .iter()
+            .map(|spec| (spec.name.to_string(), spec.description.to_string()))
+            .collect();
         self.bot.set_my_commands(commands).await?;
         Ok(())
     }
@@ -835,32 +833,6 @@ fn format_session_summary(conversation: &Conversation, active_model: &ActiveMode
     )
 }
 
-fn gateway_help_text() -> String {
-    [
-        "Gateway command help",
-        "/new - start a fresh session",
-        "/session - show current session status",
-        "/session new - start a fresh session",
-        "/session reset-model - clear model override for this chat",
-        "/model - show current model",
-        "/model list - list available models",
-        "/model <provider:model> - switch model for this chat",
-        "/model reset - reset to default model",
-    ]
-    .join("\n")
-}
-
-fn session_help_text() -> String {
-    [
-        "Session command help",
-        "/session",
-        "/session current",
-        "/session new",
-        "/session reset-model",
-    ]
-    .join("\n")
-}
-
 fn normalize_assistant_output(value: &str) -> String {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -945,41 +917,6 @@ fn split_message_for_telegram(message: &str) -> Vec<String> {
     } else {
         chunks
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct CommandInvocation {
-    name: String,
-    args: Vec<String>,
-}
-
-fn parse_command(content: &str) -> Option<CommandInvocation> {
-    let mut parts = content.split_whitespace();
-    let first = parts.next()?;
-    if !first.starts_with('/') {
-        return None;
-    }
-
-    let raw_name = first.trim_start_matches('/');
-    if raw_name.is_empty() {
-        return None;
-    }
-
-    let name = raw_name
-        .split('@')
-        .next()
-        .unwrap_or(raw_name)
-        .trim()
-        .to_ascii_lowercase();
-
-    if name.is_empty() {
-        return None;
-    }
-
-    Some(CommandInvocation {
-        name,
-        args: parts.map(str::to_string).collect(),
-    })
 }
 
 pub struct TelegramBot {
@@ -1272,20 +1209,6 @@ enum ReactionType {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parses_command_with_bot_mention() {
-        let cmd = parse_command("/model@my_bot deepseek:deepseek-chat").expect("command");
-        assert_eq!(cmd.name, "model");
-        assert_eq!(cmd.args, vec!["deepseek:deepseek-chat"]);
-    }
-
-    #[test]
-    fn parses_session_command_without_args() {
-        let cmd = parse_command("/session").expect("command");
-        assert_eq!(cmd.name, "session");
-        assert!(cmd.args.is_empty());
-    }
 
     #[test]
     fn split_message_respects_telegram_limit() {
