@@ -72,7 +72,7 @@ async fn run_async() -> Result<()> {
             .to_string();
         crate::log_info!("Telegram Bot token loaded");
 
-        let default_model = config.resolve_active_model(&auth)?;
+        let default_model = config.resolve_active_model_for_gateway(&auth)?;
         let instruction_prompt = compose_instruction_prompt(&workspace_root, &paths, &config);
         let llm = LlmClient::new()?;
         let store = SessionStore::open(paths.default_database_path())?;
@@ -143,7 +143,7 @@ async fn run_async() -> Result<()> {
             .context("missing QQ AppSecret in auth.json")?
             .to_string();
 
-        let default_model = config.resolve_active_model(&auth)?;
+        let default_model = config.resolve_active_model_for_gateway(&auth)?;
         let instruction_prompt = compose_instruction_prompt(&workspace_root, &paths, &config);
         let llm = LlmClient::new()?;
         let store = SessionStore::open(paths.default_database_path())?;

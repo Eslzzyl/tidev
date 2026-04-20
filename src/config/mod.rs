@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::prompts::{SessionMode, default_system_prompt};
+use crate::prompts::{SessionMode, default_system_prompt, gateway_system_prompt};
 use crate::theme::ThemeName;
 use crate::tooling::ToolPermission;
 
@@ -376,6 +376,13 @@ poll_timeout_secs = 30
 
     pub fn resolve_active_model(&self, auth: &AuthStore) -> Result<ActiveModel> {
         self.resolve_model(auth, None)
+    }
+
+    /// Resolve active model for gateway mode with its own system prompt.
+    pub fn resolve_active_model_for_gateway(&self, auth: &AuthStore) -> Result<ActiveModel> {
+        let mut model = self.resolve_active_model(auth)?;
+        model.system_prompt = gateway_system_prompt();
+        Ok(model)
     }
 
     pub fn resolve_provider_default_model(
