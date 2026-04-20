@@ -4,6 +4,7 @@ use notify::{
     Watcher,
 };
 use rayon::prelude::*;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -96,14 +97,18 @@ impl AtMentionState {
 
 #[derive(Clone, Debug)]
 struct IndexSnapshot {
-    entries: Arc<Vec<IndexedEntry>>,
+    /// 目录路径（相对路径） -> 该目录下的直接子条目
+    segments: Arc<HashMap<String, Vec<IndexedEntry>>>,
+    /// 扁平化缓存，用于搜索
+    flat_cache: Arc<Vec<IndexedEntry>>,
     revision: u64,
 }
 
 impl Default for IndexSnapshot {
     fn default() -> Self {
         Self {
-            entries: Arc::new(Vec::new()),
+            segments: Arc::new(HashMap::new()),
+            flat_cache: Arc::new(Vec::new()),
             revision: 0,
         }
     }
@@ -186,7 +191,8 @@ impl AtMentionIndex {
             self.completed_generation.store(0, Ordering::Release);
 
             let mut snapshot = self.snapshot.lock().unwrap();
-            snapshot.entries = Arc::new(Vec::new());
+            snapshot.segments = Arc::new(HashMap::new());
+            snapshot.flat_cache = Arc::new(Vec::new());
             snapshot.revision = snapshot.revision.wrapping_add(1);
         }
 
@@ -270,7 +276,8 @@ impl AtMentionIndex {
         stop_rx: mpsc::Receiver<()>,
     ) {
         let debounce = Duration::from_millis(150);
-        let mut pending_refresh = false;
+        let mut pending_dirs: Vec<String> = Vec::new();
+        let mut needs_full_rebuild = false;
 
         loop {
             if stop_rx.try_recv().is_ok() {
@@ -279,18 +286,30 @@ impl AtMentionIndex {
 
             match event_rx.recv_timeout(debounce) {
                 Ok(Ok(event)) => {
-                    if Self::event_should_refresh(&event) {
-                        pending_refresh = true;
+                    if Self::is_ignore_file_event(&event, &workspace_root) {
+                        // .gitignore 等忽略规则文件变化，需要全量重建
+                        needs_full_rebuild = true;
+                    } else if Self::event_should_refresh(&event) {
+                        // 收集受影响的目录
+                        for dir in Self::extract_affected_dirs(&event, &workspace_root) {
+                            if !pending_dirs.contains(&dir) {
+                                pending_dirs.push(dir);
+                            }
+                        }
                     }
                 }
                 Ok(Err(error)) => {
                     crate::log_warn!("@mention watcher event error: {}", error);
-                    pending_refresh = true;
+                    needs_full_rebuild = true;
                 }
                 Err(RecvTimeoutError::Timeout) => {
-                    if pending_refresh {
-                        pending_refresh = false;
-                        Self::request_refresh(&self, watcher_id, &workspace_root);
+                    if needs_full_rebuild {
+                        needs_full_rebuild = false;
+                        pending_dirs.clear();
+                        Self::request_full_refresh(&self, watcher_id, &workspace_root);
+                    } else if !pending_dirs.is_empty() {
+                        let dirs = std::mem::take(&mut pending_dirs);
+                        Self::request_incremental_refresh(&self, watcher_id, &workspace_root, dirs);
                     }
                 }
                 Err(RecvTimeoutError::Disconnected) => break,
@@ -298,6 +317,34 @@ impl AtMentionIndex {
         }
 
         self.clear_workspace_watcher(&workspace_root, watcher_id);
+    }
+
+    /// 检查是否是忽略规则文件的变化（需要全量重建）
+    fn is_ignore_file_event(event: &Event, workspace_root: &Path) -> bool {
+        const IGNORE_FILES: &[&str] = &[".gitignore", ".ignore"];
+
+        event.paths.iter().any(|path| {
+            // 检查是否是 .gitignore 或 .ignore 文件
+            path.file_name()
+                .is_some_and(|name| IGNORE_FILES.iter().any(|ignore| name == *ignore))
+                || // 检查是否在 .git/info/exclude
+                path
+                    .strip_prefix(workspace_root)
+                    .is_ok_and(|rel| rel == Path::new(".git/info/exclude"))
+        })
+    }
+
+    /// 从事件中提取受影响的目录（相对路径）
+    fn extract_affected_dirs(event: &Event, workspace_root: &Path) -> Vec<String> {
+        event
+            .paths
+            .iter()
+            .filter_map(|path| {
+                let rel = path.strip_prefix(workspace_root).ok()?;
+                let parent = rel.parent()?;
+                Some(parent.to_string_lossy().into_owned())
+            })
+            .collect()
     }
 
     fn event_should_refresh(event: &Event) -> bool {
@@ -338,12 +385,25 @@ impl AtMentionIndex {
         }
     }
 
-    fn request_refresh(index: &Arc<Self>, watcher_id: u64, workspace_root: &Path) {
+    fn request_full_refresh(index: &Arc<Self>, watcher_id: u64, workspace_root: &Path) {
         if !index.is_current_watcher(workspace_root, watcher_id) {
             return;
         }
 
         Self::invalidate_and_refresh(index, workspace_root);
+    }
+
+    fn request_incremental_refresh(
+        index: &Arc<Self>,
+        watcher_id: u64,
+        workspace_root: &Path,
+        dirs: Vec<String>,
+    ) {
+        if !index.is_current_watcher(workspace_root, watcher_id) {
+            return;
+        }
+
+        index.rebuild_dirs_incremental(workspace_root, dirs);
     }
 
     fn is_current_watcher(&self, workspace_root: &Path, watcher_id: u64) -> bool {
@@ -369,20 +429,28 @@ impl AtMentionIndex {
     }
 
     fn build_index(self: Arc<Self>, workspace_root: PathBuf, generation: u64) {
-        let mut entries = Vec::new();
+        let mut segments: HashMap<String, Vec<IndexedEntry>> = HashMap::new();
         walk_workspace_entries(&workspace_root, |entry| {
             if self.current_generation.load(Ordering::Acquire) != generation {
                 return false;
             }
 
-            entries.push(entry);
+            // 根据路径确定所属目录
+            let dir = Path::new(&entry.path)
+                .parent()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            segments.entry(dir).or_default().push(entry);
             true
         });
 
         if self.current_generation.load(Ordering::Acquire) == generation {
             let mut snapshot = self.snapshot.lock().unwrap();
             if self.current_generation.load(Ordering::Acquire) == generation {
-                snapshot.entries = Arc::new(entries);
+                // 构建扁平化缓存
+                let flat_cache: Vec<IndexedEntry> = segments.values().flatten().cloned().collect();
+                snapshot.segments = Arc::new(segments);
+                snapshot.flat_cache = Arc::new(flat_cache);
                 snapshot.revision = snapshot.revision.wrapping_add(1);
                 self.completed_generation
                     .store(generation, Ordering::Release);
@@ -397,6 +465,33 @@ impl AtMentionIndex {
         );
     }
 
+    /// 增量重建指定目录
+    fn rebuild_dirs_incremental(&self, workspace_root: &Path, dirs: Vec<String>) {
+        if dirs.is_empty() {
+            return;
+        }
+
+        // 获取当前 snapshot 的 segments
+        let mut snapshot = self.snapshot.lock().unwrap();
+        let mut segments = (*snapshot.segments).clone();
+
+        // 重建每个受影响的目录
+        for dir in dirs {
+            let new_entries = scan_directory_entries(workspace_root, &dir);
+            if new_entries.is_empty() {
+                segments.remove(&dir);
+            } else {
+                segments.insert(dir, new_entries);
+            }
+        }
+
+        // 重建扁平化缓存
+        let flat_cache: Vec<IndexedEntry> = segments.values().flatten().cloned().collect();
+        snapshot.segments = Arc::new(segments);
+        snapshot.flat_cache = Arc::new(flat_cache);
+        snapshot.revision = snapshot.revision.wrapping_add(1);
+    }
+
     fn revision(&self) -> u64 {
         self.snapshot.lock().unwrap().revision
     }
@@ -405,7 +500,7 @@ impl AtMentionIndex {
         let normalized = query.trim().to_ascii_lowercase();
         let (entries, revision) = {
             let snapshot = self.snapshot.lock().unwrap();
-            (Arc::clone(&snapshot.entries), snapshot.revision)
+            (Arc::clone(&snapshot.flat_cache), snapshot.revision)
         };
 
         rank_indexed_entries(entries.as_slice(), &normalized, revision)
@@ -472,6 +567,53 @@ where
             break;
         }
     }
+}
+
+/// 扫描指定目录下的直接子条目（不递归）
+fn scan_directory_entries(workspace_root: &Path, dir: &str) -> Vec<IndexedEntry> {
+    let dir_path = if dir.is_empty() {
+        workspace_root.to_path_buf()
+    } else {
+        workspace_root.join(dir)
+    };
+
+    let Ok(read_dir) = std::fs::read_dir(&dir_path) else {
+        return Vec::new();
+    };
+
+    let mut entries = Vec::new();
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        let Ok(rel) = path.strip_prefix(workspace_root) else {
+            continue;
+        };
+        if rel.as_os_str().is_empty() {
+            continue;
+        }
+
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let is_dir = metadata.is_dir();
+
+        // 跳过隐藏文件（以 . 开头）
+        let file_name = rel.file_name();
+        if file_name.is_some_and(|name| {
+            name.to_string_lossy()
+                .chars()
+                .next()
+                .is_some_and(|c| c == '.')
+        }) {
+            continue;
+        }
+
+        let Some(indexed_entry) = build_indexed_entry(rel, &path, is_dir) else {
+            continue;
+        };
+        entries.push(indexed_entry);
+    }
+
+    entries
 }
 
 #[cfg(test)]
