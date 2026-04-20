@@ -190,7 +190,7 @@ impl QQGatewayRunner {
 
         crate::log_info!("QQ Message from {}: {}", author_id, clean_content);
 
-        let active_model = self.config.resolve_active_model(&self.auth)?;
+        let active_model = self.config.resolve_active_model_for_gateway(&self.auth)?;
         let chat_key = format!("qq:{}", channel_id);
 
         let mut conversation = self.load_or_create_conversation(&chat_key, &active_model)?;

@@ -11,7 +11,7 @@ use crate::{
     config::{ActiveModel, AppConfig, AuthStore},
     context::ContextManager,
     llm::LlmClient,
-    prompts::SessionMode,
+    prompts::{SessionMode, gateway_system_prompt},
     session::{
         AssistantTurn, BackendEvent, Conversation, Message, MessageRole, ToolCall,
         ToolExecutionResult,
@@ -727,7 +727,10 @@ impl TelegramGatewayRunner {
                 .config
                 .resolve_model_by_ids(&self.auth, &provider_id, &model_id)
             {
-                Ok(model) => return Ok(model),
+                Ok(mut model) => {
+                    model.system_prompt = gateway_system_prompt();
+                    return Ok(model);
+                }
                 Err(_) => {
                     self.store
                         .clear_gateway_chat_model(GATEWAY_PLATFORM_TELEGRAM, chat_key)?;
@@ -735,7 +738,7 @@ impl TelegramGatewayRunner {
             }
         }
 
-        self.config.resolve_active_model(&self.auth)
+        self.config.resolve_active_model_for_gateway(&self.auth)
     }
 
     fn create_gateway_session(&self, active_model: &ActiveModel) -> Result<Conversation> {

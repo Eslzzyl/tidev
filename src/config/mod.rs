@@ -685,4 +685,38 @@ mod tests {
         assert!(permissions.is_allowed(SessionMode::Build, ToolPermission::Edit));
         assert!(permissions.is_allowed(SessionMode::Build, ToolPermission::Execute));
     }
+
+    #[test]
+    fn gateway_mode_uses_separate_system_prompt() {
+        use crate::prompts::{default_system_prompt, gateway_system_prompt};
+
+        let auth = AuthStore::default();
+        let mut config = AppConfig::default();
+        // Use bundled providers to avoid "unknown provider" error
+        config.providers = config.bundled_providers.clone();
+        config.default_provider = "deepseek".to_string();
+        config.default_model = "deepseek-chat".to_string();
+
+        let tui_model = config.resolve_active_model(&auth).unwrap();
+        let gateway_model = config.resolve_active_model_for_gateway(&auth).unwrap();
+
+        // Verify gateway uses a different prompt than tui mode
+        assert_eq!(
+            gateway_model.system_prompt,
+            gateway_system_prompt(),
+            "gateway model should use gateway_system_prompt"
+        );
+        assert_ne!(
+            gateway_model.system_prompt,
+            tui_model.system_prompt,
+            "gateway model should have different system_prompt from tui model"
+        );
+
+        // Verify tui mode still uses default prompt
+        assert_eq!(
+            tui_model.system_prompt,
+            default_system_prompt(),
+            "tui model should use default_system_prompt"
+        );
+    }
 }
