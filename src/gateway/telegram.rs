@@ -49,6 +49,20 @@ impl TelegramGatewayRunner {
         if let Some(last) = updates.last() {
             self.offset = last.update_id.saturating_add(1);
         }
+
+        self.register_commands().await?;
+        Ok(())
+    }
+
+    async fn register_commands(&self) -> Result<()> {
+        let commands = vec![
+            ("start".to_string(), "Show help".to_string()),
+            ("help".to_string(), "Show help".to_string()),
+            ("new".to_string(), "Start a fresh session".to_string()),
+            ("session".to_string(), "Manage current session".to_string()),
+            ("model".to_string(), "Manage model settings".to_string()),
+        ];
+        self.bot.set_my_commands(commands).await?;
         Ok(())
     }
 
@@ -98,6 +112,19 @@ impl TelegramGatewayRunner {
                 message.chat.id
             );
             return Ok(());
+        }
+
+        // Add receipt reaction
+        if let Err(e) = self
+            .bot
+            .set_message_reaction(message.chat.id, message.message_id, "👀")
+            .await
+        {
+            crate::log_warn!(
+                "Failed to set message reaction for chat_id={}: {}",
+                message.chat.id,
+                e
+            );
         }
 
         let Some(content) = message
@@ -1066,6 +1093,66 @@ impl TelegramBot {
         }
     }
 
+    pub async fn set_my_commands(&self, commands: Vec<(String, String)>) -> Result<()> {
+        let body = SetMyCommandsRequest {
+            commands: commands
+                .into_iter()
+                .map(|(command, description)| BotCommand {
+                    command,
+                    description,
+                })
+                .collect(),
+        };
+
+        let response = self
+            .http
+            .post(self.api_url("setMyCommands"))
+            .json(&body)
+            .send()
+            .await
+            .context("failed to call Telegram setMyCommands")?;
+
+        let payload: TelegramApiResponse<bool> = response
+            .json()
+            .await
+            .context("failed to parse Telegram setMyCommands response")?;
+
+        payload.into_result("setMyCommands")?;
+        Ok(())
+    }
+
+    pub async fn set_message_reaction(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+        emoji: &str,
+    ) -> Result<()> {
+        let body = SetMessageReactionRequest {
+            chat_id,
+            message_id,
+            reaction: vec![ReactionType::Emoji {
+                emoji: emoji.to_string(),
+            }],
+            is_big: None,
+        };
+
+        let response = self
+            .http
+            .post(self.api_url("setMessageReaction"))
+            .json(&body)
+            .send()
+            .await
+            .context("failed to call Telegram setMessageReaction")?;
+
+        let payload: TelegramApiResponse<bool> = response
+            .json()
+            .await
+            .context("failed to parse Telegram setMessageReaction response")?;
+
+        payload.into_result("setMessageReaction")?;
+        Ok(())
+    }
+
     fn api_url(&self, method: &str) -> String {
         format!("https://api.telegram.org/bot{}/{}", self.token, method)
     }
@@ -1150,6 +1237,33 @@ struct EditMessageTextRequest<'a> {
     chat_id: i64,
     message_id: i64,
     text: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct SetMyCommandsRequest {
+    commands: Vec<BotCommand>,
+}
+
+#[derive(Debug, Serialize)]
+struct BotCommand {
+    command: String,
+    description: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SetMessageReactionRequest {
+    chat_id: i64,
+    message_id: i64,
+    reaction: Vec<ReactionType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    is_big: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type")]
+enum ReactionType {
+    #[serde(rename = "emoji")]
+    Emoji { emoji: String },
 }
 
 #[cfg(test)]
