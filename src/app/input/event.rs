@@ -1016,6 +1016,7 @@ impl App {
     pub(crate) fn handle_text_paste(&mut self, text: &str) -> Result<()> {
         let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
         self.composer.insert_str(&normalized);
+        self.ensure_input_cursor_visible();
         self.refresh_at_mention_state();
         self.command_palette
             .sync(self.composer.text(), &self.commands);
