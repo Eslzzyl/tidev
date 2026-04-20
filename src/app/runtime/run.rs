@@ -126,6 +126,7 @@ impl App {
             loaded_instruction_sources: Vec::new(),
             expanded_tool_results: std::collections::HashSet::new(),
             tool_result_card_bounds: Vec::new(),
+            selectable_regions: Vec::new(),
             message_scroll_target: None,
             todos: Vec::new(),
             stats_panel: None,

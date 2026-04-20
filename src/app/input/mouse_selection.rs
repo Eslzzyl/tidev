@@ -18,6 +18,7 @@ pub(crate) struct MouseSelectionState {
     dragging: bool,
     moved: bool,
     pending_copy: bool,
+    anchor_scroll_offset: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,7 +46,12 @@ impl MouseSelectionState {
         *self = Self::default();
     }
 
-    pub(crate) fn press_with_bounds(&mut self, position: Position, bounds: Option<Rect>) {
+    pub(crate) fn press_with_bounds(
+        &mut self,
+        position: Position,
+        bounds: Option<Rect>,
+        scroll_offset: usize,
+    ) {
         let bounded = clamp_to_bounds(position, bounds);
         self.anchor = Some(bounded);
         self.focus = Some(bounded);
@@ -54,6 +60,7 @@ impl MouseSelectionState {
         self.dragging = false;
         self.moved = false;
         self.pending_copy = false;
+        self.anchor_scroll_offset = scroll_offset;
     }
 
     pub(crate) fn drag(&mut self, position: Position) {
@@ -68,7 +75,7 @@ impl MouseSelectionState {
         self.moved |= anchor != bounded;
     }
 
-    pub(crate) fn release(&mut self, position: Position) {
+    pub(crate) fn release(&mut self, position: Position, current_scroll: usize) {
         self.pointer = Some(position);
 
         if self.anchor.is_none() {
@@ -78,7 +85,7 @@ impl MouseSelectionState {
 
         self.focus = Some(clamp_to_bounds(position, self.bounds));
 
-        if self.dragging && self.moved && self.has_selection() {
+        if self.has_selection(current_scroll) {
             self.pending_copy = true;
             self.dragging = false;
             return;
@@ -95,45 +102,72 @@ impl MouseSelectionState {
         self.dragging
     }
 
-    pub(crate) fn has_selection(&self) -> bool {
-        matches!((self.anchor, self.focus), (Some(anchor), Some(focus)) if anchor != focus)
+    pub(crate) fn has_selection(&self, current_scroll: usize) -> bool {
+        self.range(current_scroll).is_some()
     }
 
-    pub(crate) fn selection_range(&self) -> Option<(Position, Position)> {
-        let range = self.range()?;
+    pub(crate) fn selection_range(&self, current_scroll: usize) -> Option<(Position, Position)> {
+        let range = self.range(current_scroll)?;
         Some((range.start, range.end))
     }
 
-    pub(crate) fn apply_overlay(&self, buffer: &mut Buffer, style: Style) {
-        let Some(range) = self.range() else {
+    pub(crate) fn apply_overlay(
+        &self,
+        buffer: &mut Buffer,
+        current_scroll: usize,
+        selectable_regions: &[Rect],
+        style: Style,
+    ) {
+        let Some(range) = self.range(current_scroll) else {
             return;
         };
 
-        apply_selection_style(buffer, range, self.bounds, style);
+        apply_selection_style(buffer, range, self.bounds, selectable_regions, style);
     }
 
-    pub(crate) fn selected_text(&self, buffer: &Buffer) -> Option<String> {
-        let range = self.range()?;
-        let text = extract_selected_text(buffer, range, self.bounds);
+    pub(crate) fn selected_text(
+        &self,
+        buffer: &Buffer,
+        current_scroll: usize,
+        selectable_regions: &[Rect],
+    ) -> Option<String> {
+        let range = self.range(current_scroll)?;
+        let text = extract_selected_text(buffer, range, self.bounds, selectable_regions);
         Some(text)
     }
 
-    pub(crate) fn take_pending_copy(&mut self) -> Option<(Position, Position)> {
+    pub(crate) fn take_pending_copy(
+        &mut self,
+        current_scroll: usize,
+    ) -> Option<(Position, Position)> {
         if !self.pending_copy {
             return None;
         }
 
         self.pending_copy = false;
-        self.selection_range()
+        self.selection_range(current_scroll)
     }
 
-    fn range(&self) -> Option<SelectionRange> {
-        let (anchor, focus) = match (self.anchor, self.focus) {
-            (Some(anchor), Some(focus)) if self.moved || anchor != focus => (anchor, focus),
+    fn range(&self, current_scroll: usize) -> Option<SelectionRange> {
+        let (mut anchor, focus) = match (self.anchor, self.focus) {
+            (Some(anchor), Some(focus)) => (anchor, focus),
             _ => return None,
         };
 
-        Some(SelectionRange::new(anchor, focus))
+        let dy = current_scroll as i32 - self.anchor_scroll_offset as i32;
+        anchor.y = (anchor.y as i32 - dy).clamp(0, u16::MAX as i32) as u16;
+
+        // Allow single character selection if we just clicked without moving,
+        // so long as it passes the later is_empty checks inside applicable regions.
+        if !self.moved && anchor == focus {
+            return Some(SelectionRange::new(anchor, focus));
+        }
+
+        if self.moved || anchor != focus {
+            Some(SelectionRange::new(anchor, focus))
+        } else {
+            None
+        }
     }
 }
 
@@ -156,13 +190,25 @@ impl App {
             .fg(palette.selection_fg);
 
         let buffer = frame.buffer_mut();
-        self.mouse_selection.apply_overlay(buffer, selection_style);
+        self.mouse_selection.apply_overlay(
+            buffer,
+            self.message_scroll_offset,
+            &self.selectable_regions,
+            selection_style,
+        );
 
-        let Some(_) = self.mouse_selection.take_pending_copy() else {
+        let Some(_) = self
+            .mouse_selection
+            .take_pending_copy(self.message_scroll_offset)
+        else {
             return;
         };
 
-        let Some(text) = self.mouse_selection.selected_text(buffer) else {
+        let Some(text) = self.mouse_selection.selected_text(
+            buffer,
+            self.message_scroll_offset,
+            &self.selectable_regions,
+        ) else {
             return;
         };
 
@@ -215,6 +261,7 @@ fn apply_selection_style(
     buffer: &mut Buffer,
     range: SelectionRange,
     bounds: Option<Rect>,
+    selectable_regions: &[Rect],
     style: Style,
 ) {
     let effective_area = effective_area(buffer.area, bounds);
@@ -248,11 +295,31 @@ fn apply_selection_style(
             continue;
         }
 
-        buffer.set_style(Rect::new(row_start, y, row_end - row_start + 1, 1), style);
+        if !selectable_regions.is_empty() {
+            for region in selectable_regions {
+                if y >= region.y && y < region.y + region.height {
+                    let rect_start = row_start.max(region.x);
+                    let rect_end = row_end.min(region.x + region.width - 1);
+                    if rect_start <= rect_end {
+                        buffer.set_style(
+                            Rect::new(rect_start, y, rect_end - rect_start + 1, 1),
+                            style,
+                        );
+                    }
+                }
+            }
+        } else {
+            buffer.set_style(Rect::new(row_start, y, row_end - row_start + 1, 1), style);
+        }
     }
 }
 
-fn extract_selected_text(buffer: &Buffer, range: SelectionRange, bounds: Option<Rect>) -> String {
+fn extract_selected_text(
+    buffer: &Buffer,
+    range: SelectionRange,
+    bounds: Option<Rect>,
+    selectable_regions: &[Rect],
+) -> String {
     let effective_area = effective_area(buffer.area, bounds);
     if effective_area.width == 0 || effective_area.height == 0 {
         return String::new();
@@ -286,7 +353,30 @@ fn extract_selected_text(buffer: &Buffer, range: SelectionRange, bounds: Option<
             continue;
         }
 
-        lines.push(extract_row_text(buffer, y, row_start, row_end));
+        if !selectable_regions.is_empty() {
+            let mut row_segments = Vec::new();
+            for region in selectable_regions {
+                if y >= region.y && y < region.y + region.height {
+                    let rect_start = row_start.max(region.x);
+                    let rect_end = row_end.min(region.x + region.width - 1);
+                    if rect_start <= rect_end {
+                        row_segments.push((rect_start, rect_end));
+                    }
+                }
+            }
+            if row_segments.is_empty() {
+                lines.push(String::new());
+            } else {
+                row_segments.sort_by_key(|r| r.0);
+                let mut row_text = String::new();
+                for (rect_start, rect_end) in row_segments {
+                    row_text.push_str(&extract_row_text(buffer, y, rect_start, rect_end));
+                }
+                lines.push(row_text);
+            }
+        } else {
+            lines.push(extract_row_text(buffer, y, row_start, row_end));
+        }
     }
 
     while lines.last().is_some_and(|line| line.is_empty()) {

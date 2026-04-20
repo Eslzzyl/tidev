@@ -31,6 +31,14 @@ const TOOL_OUTPUT_PREVIEW_LINES: usize = 5;
 const TOOL_OUTPUT_EXPANDED_MAX_LINES: usize = 100;
 
 #[derive(Clone, Debug)]
+pub(crate) struct SelectableRegionRange {
+    pub start_line: usize,
+    pub end_line: usize,
+    pub min_x: u16,
+    pub max_x: Option<u16>,
+}
+
+#[derive(Clone, Debug)]
 struct ToolResultCardRange {
     message_id: Uuid,
     start_line: usize,
@@ -52,7 +60,7 @@ fn render_tool_call_with_result(
     body_width: usize,
     is_streaming: bool,
     ctx: &RenderContext<'_>,
-) -> Vec<Line<'static>> {
+) -> (Vec<Line<'static>>, Vec<SelectableRegionRange>) {
     let palette = ctx.palette;
     let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
 
@@ -63,14 +71,17 @@ fn render_tool_call_with_result(
         && !tool_call_arguments_are_complete(&tool_call.arguments);
 
     if matches!(canonical_name, "list" | "grep" | "glob" | "read") {
-        return render_tool_call_summary_line(tool_call, tool_result, body_width, palette, ctx);
+        return (
+            render_tool_call_summary_line(tool_call, tool_result, body_width, palette, ctx),
+            vec![],
+        );
     }
 
     // Get result lines and exit code (for bash)
-    let (result_lines, exit_code) = if let Some(result_msg) = tool_result {
+    let (result_lines, exit_code, mut regions) = if let Some(result_msg) = tool_result {
         render_tool_result_detail_lines(result_msg, body_width, ctx)
     } else {
-        (Vec::new(), None)
+        (Vec::new(), None, vec![])
     };
 
     let mut lines = Vec::new();
@@ -90,11 +101,16 @@ fn render_tool_call_with_result(
         ]));
     } else if !result_lines.is_empty() {
         lines.push(Line::from(""));
+        let offset = lines.len();
+        for r in &mut regions {
+            r.start_line += offset;
+            r.end_line += offset;
+        }
         lines.extend(result_lines);
     }
 
     lines.push(Line::from(""));
-    lines
+    (lines, regions)
 }
 
 fn render_compaction_divider_line(
@@ -218,7 +234,14 @@ fn render_tool_call_summary_line(
     // Convert to owned lines to satisfy lifetime requirements
     wrapped
         .into_iter()
-        .map(|l| Line::from(l.spans.into_iter().map(|s| Span::styled(s.content.to_string(), s.style)).collect::<Vec<_>>()))
+        .map(|l| {
+            Line::from(
+                l.spans
+                    .into_iter()
+                    .map(|s| Span::styled(s.content.to_string(), s.style))
+                    .collect::<Vec<_>>(),
+            )
+        })
         .collect()
 }
 
@@ -369,10 +392,7 @@ fn render_tool_call_lines(
                             .fg(palette.text)
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(
-                        format!(" ✗ {}", code),
-                        Style::default().fg(palette.error),
-                    ),
+                    Span::styled(format!(" ✗ {}", code), Style::default().fg(palette.error)),
                 ]
             }
         } else {
@@ -446,7 +466,7 @@ fn render_tool_result_detail_lines(
     message: &Message,
     body_width: usize,
     ctx: &RenderContext<'_>,
-) -> (Vec<Line<'static>>, Option<i32>) {
+) -> (Vec<Line<'static>>, Option<i32>, Vec<SelectableRegionRange>) {
     let palette = ctx.palette;
     let output = tool_output_from_message(message, ctx);
     let tool_name = message.tool_name.as_deref().unwrap_or(message.role.label());
@@ -465,17 +485,18 @@ fn render_tool_result_detail_lines(
     if !is_error
         && matches!(canonical_name, "edit" | "write" | "apply_patch")
         && let Some(diff) = message.metadata.diff.as_ref()
-        && let Some(diff_lines) = render_unified_diff_text(diff, body_width, palette)
+        && let Some((diff_lines, regions)) = render_unified_diff_text(diff, body_width, palette)
     {
-        return (diff_lines, None);
+        return (diff_lines, None, regions);
     }
 
     // Fallback: try to render diff from output (may be truncated)
     if !is_error
         && matches!(canonical_name, "edit" | "write" | "apply_patch")
-        && let Some(diff_lines) = render_unified_diff_text(effective_output, body_width, palette)
+        && let Some((diff_lines, regions)) =
+            render_unified_diff_text(effective_output, body_width, palette)
     {
-        return (diff_lines, None);
+        return (diff_lines, None, regions);
     }
 
     if canonical_name == "todowrite" && !is_error {
@@ -505,7 +526,11 @@ fn render_tool_result_detail_lines(
                     priority: r.priority.unwrap_or_else(|| "medium".to_string()),
                 })
                 .collect();
-            return (render_todos_checkbox_list(&todos, body_width, palette), None);
+            return (
+                render_todos_checkbox_list(&todos, body_width, palette),
+                None,
+                vec![],
+            );
         }
     }
 
@@ -519,6 +544,7 @@ fn render_tool_result_detail_lines(
             palette,
         ),
         exit_code,
+        vec![],
     )
 }
 
@@ -759,8 +785,14 @@ impl App {
         self.message_content_area = Some(content_area);
         self.message_viewport_lines = content_area.height as usize;
         let content_width = content_area.width.max(1) as usize;
-        let (text, total_lines, card_ranges, rendered_virtualized, virtualized_render_scroll) =
-            self.messages_text(Some(content_width));
+        let (
+            text,
+            total_lines,
+            card_ranges,
+            selectable_regions_ranges,
+            rendered_virtualized,
+            virtualized_render_scroll,
+        ) = self.messages_text(Some(content_width));
 
         self.message_total_lines = total_lines;
 
@@ -778,6 +810,35 @@ impl App {
         } else {
             scroll
         };
+
+        self.selectable_regions.clear();
+        for r in selectable_regions_ranges {
+            let screen_start = r.start_line.saturating_sub(render_scroll);
+            let screen_end = r.end_line.saturating_sub(render_scroll);
+            if screen_end == 0 || screen_start >= self.message_viewport_lines {
+                continue;
+            }
+            let visible_start = screen_start as u16;
+            let visible_end = (screen_end.min(self.message_viewport_lines)) as u16;
+            if visible_start < visible_end {
+                let y = content_area.y.saturating_add(visible_start);
+                let height = visible_end.saturating_sub(visible_start);
+                let min_x = content_area.x.saturating_add(r.min_x);
+                let max_x = r
+                    .max_x
+                    .map(|mx| content_area.x.saturating_add(mx))
+                    .unwrap_or(content_area.x.saturating_add(content_area.width));
+                let width = max_x.saturating_sub(min_x);
+                if width > 0 {
+                    self.selectable_regions.push(Rect {
+                        x: min_x,
+                        y,
+                        width,
+                        height,
+                    });
+                }
+            }
+        }
 
         // Calculate screen positions for tool result cards
         self.tool_result_card_bounds.clear();
@@ -937,7 +998,14 @@ impl App {
     fn messages_text(
         &mut self,
         content_width: Option<usize>,
-    ) -> (Text<'static>, usize, Vec<ToolResultCardRange>, bool, usize) {
+    ) -> (
+        Text<'static>,
+        usize,
+        Vec<ToolResultCardRange>,
+        Vec<SelectableRegionRange>,
+        bool,
+        usize,
+    ) {
         let started_at = Instant::now();
         let palette = self.palette();
         let width = content_width.unwrap_or(1).max(1);
@@ -946,6 +1014,7 @@ impl App {
 
         let mut lines = Vec::new();
         let mut card_ranges = Vec::new();
+        let mut selectable_regions_ranges = Vec::new();
 
         // Header for subsessions (always visible at top)
         let header_lines = if self.conversation.parent_session_id.is_some() {
@@ -976,7 +1045,14 @@ impl App {
                 palette.panel,
             ));
             let total_lines = lines.len().max(1);
-            return (Text::from(lines), total_lines, card_ranges, false, 0);
+            return (
+                Text::from(lines),
+                total_lines,
+                card_ranges,
+                selectable_regions_ranges,
+                false,
+                0,
+            );
         }
 
         // Update layout index
@@ -1122,6 +1198,7 @@ impl App {
                 width,
                 body_width,
                 &mut card_ranges,
+                &mut selectable_regions_ranges,
                 current_line_offset,
                 &ctx,
                 is_round_end,
@@ -1163,6 +1240,7 @@ impl App {
             Text::from(lines),
             total_lines,
             card_ranges,
+            selectable_regions_ranges,
             true,
             render_scroll,
         )
@@ -1378,7 +1456,7 @@ impl App {
         }
 
         if !message.content.is_empty() {
-            if let Some(diff_lines) =
+            if let Some((diff_lines, _)) =
                 render_unified_diff_text(&message.content, body_width, self.palette())
             {
                 lines.extend(diff_lines);
@@ -1890,7 +1968,7 @@ impl App {
                 if !message.tool_calls.is_empty() {
                     for tool_call in &message.tool_calls {
                         let tool_result = tool_results_by_id.get(&tool_call.id).copied();
-                        let card_lines = render_tool_call_with_result(
+                        let (card_lines, _) = render_tool_call_with_result(
                             tool_call,
                             tool_result,
                             body_width,
@@ -1996,6 +2074,7 @@ impl App {
         width: usize,
         body_width: usize,
         card_ranges: &mut Vec<ToolResultCardRange>,
+        selectable_regions_ranges: &mut Vec<SelectableRegionRange>,
         current_line_offset: usize,
         ctx: &RenderContext<'_>,
         is_round_end: bool,
@@ -2018,6 +2097,37 @@ impl App {
                     self.cached_render_message_cards(message, body_width, is_round_end);
                 for (card_bg, card_lines) in assistant_cards {
                     if !card_lines.is_empty() {
+                        let start_line = current_line_offset + lines.len();
+
+                        let mut block_start = start_line;
+                        let mut current_min_x = 1;
+                        for (i, line) in card_lines.iter().enumerate() {
+                            let is_reasoning =
+                                line.spans.first().map_or(false, |s| s.content == "┃ ");
+                            let line_min_x = if is_reasoning { 3 } else { 1 };
+
+                            if line_min_x != current_min_x {
+                                if i > 0 {
+                                    selectable_regions_ranges.push(SelectableRegionRange {
+                                        start_line: block_start,
+                                        end_line: start_line + i,
+                                        min_x: current_min_x,
+                                        max_x: None,
+                                    });
+                                }
+                                block_start = start_line + i;
+                                current_min_x = line_min_x;
+                            }
+                        }
+                        if block_start < start_line + card_lines.len() {
+                            selectable_regions_ranges.push(SelectableRegionRange {
+                                start_line: block_start,
+                                end_line: start_line + card_lines.len(),
+                                min_x: current_min_x,
+                                max_x: None,
+                            });
+                        }
+
                         lines.extend(decorate_card_lines(card_lines, width, card_bg));
                     }
                 }
@@ -2041,7 +2151,7 @@ impl App {
                 if !message.tool_calls.is_empty() {
                     for tool_call in &message.tool_calls {
                         let tool_result = tool_results_by_id.get(&tool_call.id).copied();
-                        let tool_card_lines = render_tool_call_with_result(
+                        let (tool_card_lines, mut regions) = render_tool_call_with_result(
                             tool_call,
                             tool_result,
                             body_width,
@@ -2049,10 +2159,32 @@ impl App {
                             ctx,
                         );
                         if !tool_card_lines.is_empty() {
+                            let start_line = current_line_offset + lines.len();
+
+                            // Adjust regions mapping
+                            for r in &mut regions {
+                                r.start_line += start_line;
+                                r.end_line += start_line;
+                                r.min_x += 1; // decorate_card_lines left padding
+                                if let Some(max_x) = &mut r.max_x {
+                                    *max_x += 1;
+                                }
+                                selectable_regions_ranges.push(r.clone());
+                            }
+
+                            // Calculate fallback region for bash or non-diff output
+                            if regions.is_empty() {
+                                selectable_regions_ranges.push(SelectableRegionRange {
+                                    start_line,
+                                    end_line: start_line + tool_card_lines.len(),
+                                    min_x: 1,
+                                    max_x: None,
+                                });
+                            }
+
                             let decorated =
                                 decorate_card_lines(tool_card_lines, width, palette.panel_light);
                             if let Some(result_msg) = tool_result {
-                                let start_line = current_line_offset + lines.len();
                                 lines.extend(decorated);
                                 let end_line = current_line_offset + lines.len();
                                 card_ranges.push(ToolResultCardRange {
@@ -2077,6 +2209,37 @@ impl App {
                 };
                 for (_, card_lines) in cards {
                     if !card_lines.is_empty() {
+                        let start_line = current_line_offset + lines.len();
+
+                        let mut block_start = start_line;
+                        let mut current_min_x = 1;
+                        for (i, line) in card_lines.iter().enumerate() {
+                            let is_reasoning =
+                                line.spans.first().map_or(false, |s| s.content == "┃ ");
+                            let line_min_x = if is_reasoning { 3 } else { 1 };
+
+                            if line_min_x != current_min_x {
+                                if i > 0 {
+                                    selectable_regions_ranges.push(SelectableRegionRange {
+                                        start_line: block_start,
+                                        end_line: start_line + i,
+                                        min_x: current_min_x,
+                                        max_x: None,
+                                    });
+                                }
+                                block_start = start_line + i;
+                                current_min_x = line_min_x;
+                            }
+                        }
+                        if block_start < start_line + card_lines.len() {
+                            selectable_regions_ranges.push(SelectableRegionRange {
+                                start_line: block_start,
+                                end_line: start_line + card_lines.len(),
+                                min_x: current_min_x,
+                                max_x: None,
+                            });
+                        }
+
                         lines.extend(decorate_card_lines(card_lines, width, bg));
                     }
                 }

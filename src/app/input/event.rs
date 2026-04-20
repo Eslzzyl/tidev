@@ -47,8 +47,11 @@ impl App {
                     return;
                 }
                 if let Some(bounds) = self.selection_bounds_for_position(position) {
-                    self.mouse_selection
-                        .press_with_bounds(position, Some(bounds));
+                    self.mouse_selection.press_with_bounds(
+                        position,
+                        Some(bounds),
+                        self.message_scroll_offset,
+                    );
                 } else {
                     self.clear_mouse_selection();
                 }
@@ -76,7 +79,8 @@ impl App {
                     }
                 }
 
-                self.mouse_selection.release(position);
+                self.mouse_selection
+                    .release(position, self.message_scroll_offset);
             }
             MouseEventKind::ScrollUp if self.can_scroll_conversation() => {
                 self.clear_mouse_selection();
@@ -235,13 +239,26 @@ impl App {
         if let Some(area) = self.message_content_area
             && area.contains(position)
         {
+            for rect in &self.selectable_regions {
+                if rect.contains(position) {
+                    return Some(Rect {
+                        x: rect.x,
+                        y: area.y,
+                        width: rect.width,
+                        height: area.height,
+                    });
+                }
+            }
             return Some(area);
         }
 
         if let Some(area) = self.sidebar_area
             && area.contains(position)
         {
-            return Some(area);
+            return Some(area.inner(ratatui::layout::Margin {
+                horizontal: 1,
+                vertical: 1,
+            }));
         }
 
         None

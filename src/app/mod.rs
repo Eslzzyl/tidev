@@ -161,6 +161,7 @@ struct App {
     loaded_instruction_sources: Vec<String>,
     expanded_tool_results: std::collections::HashSet<Uuid>,
     tool_result_card_bounds: Vec<(Uuid, Rect)>,
+    pub(crate) selectable_regions: Vec<Rect>,
     message_scroll_target: Option<Uuid>,
     todos: Vec<TodoItem>,
     stats_panel: Option<ui::stats_panel::StatsPanelState>,

@@ -1,3 +1,4 @@
+use crate::app::render::render_chat::SelectableRegionRange;
 use crate::markdown_render::{WrapOptions, adaptive_wrap_lines, highlight_code_to_lines_for_path};
 use crate::theme::{ThemeName, ThemePalette};
 use diffy::{Line as DiffLine, Patch};
@@ -54,23 +55,30 @@ pub(super) fn render_unified_diff_text(
     text: &str,
     width: usize,
     palette: ThemePalette,
-) -> Option<Vec<Line<'static>>> {
+) -> Option<(Vec<Line<'static>>, Vec<SelectableRegionRange>)> {
     let sections = split_diff_sections(text);
     let mut out = Vec::new();
+    let mut regions = Vec::new();
     let mut rendered_any = false;
 
     for section in sections {
-        let section_lines = render_diff_section(&section, width, palette)?;
+        let (section_lines, section_regions) = render_diff_section(&section, width, palette)?;
         if !section_lines.is_empty() {
             if rendered_any {
                 out.push(Line::from(String::new()));
+            }
+            let start_offset = out.len();
+            for mut r in section_regions {
+                r.start_line += start_offset;
+                r.end_line += start_offset;
+                regions.push(r);
             }
             out.extend(section_lines);
             rendered_any = true;
         }
     }
 
-    rendered_any.then_some(out)
+    rendered_any.then_some((out, regions))
 }
 
 fn split_diff_sections(text: &str) -> Vec<String> {
@@ -99,7 +107,7 @@ fn render_diff_section(
     section: &str,
     width: usize,
     palette: ThemePalette,
-) -> Option<Vec<Line<'static>>> {
+) -> Option<(Vec<Line<'static>>, Vec<SelectableRegionRange>)> {
     let stripped_section = strip_render_only_diff_metadata(section);
     let patch = Patch::from_str(&stripped_section).ok()?;
     let rows = collect_rows(&patch);
@@ -121,9 +129,42 @@ fn render_diff_section(
     let line_number_width = line_number_width_for_rows(&rows);
 
     Some(match layout {
-        DiffLayout::Wide => render_wide_rows(&rows, width, line_number_width, syntax_path, palette),
+        DiffLayout::Wide => {
+            let lines = render_wide_rows(&rows, width, line_number_width, syntax_path, palette);
+            let left_width = width.saturating_sub(1) / 2;
+            let right_width = width.saturating_sub(1).saturating_sub(left_width);
+
+            let min_x_left = (line_number_width.max(1) + 3) as u16;
+            let max_x_left = left_width as u16;
+
+            let min_x_right = (left_width + 1 + line_number_width.max(1) + 3) as u16;
+            let max_x_right = width as u16;
+
+            let region1 = SelectableRegionRange {
+                start_line: 0,
+                end_line: lines.len(),
+                min_x: min_x_left,
+                max_x: Some(max_x_left),
+            };
+            let region2 = SelectableRegionRange {
+                start_line: 0,
+                end_line: lines.len(),
+                min_x: min_x_right,
+                max_x: Some(max_x_right),
+            };
+
+            (lines, vec![region1, region2])
+        }
         DiffLayout::Narrow => {
-            render_narrow_rows(&rows, width, line_number_width, syntax_path, palette)
+            let lines = render_narrow_rows(&rows, width, line_number_width, syntax_path, palette);
+            let min_x = (line_number_width.max(1) + 3) as u16;
+            let region = SelectableRegionRange {
+                start_line: 0,
+                end_line: lines.len(),
+                min_x,
+                max_x: Some(width as u16),
+            };
+            (lines, vec![region])
         }
     })
 }
