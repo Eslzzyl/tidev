@@ -269,6 +269,12 @@ fn apply_selection_style(
         return;
     }
 
+    let relevant_regions: Vec<Rect> = selectable_regions
+        .iter()
+        .filter(|&r| r.intersects(effective_area))
+        .copied()
+        .collect();
+
     let area_left = effective_area.x;
     let area_top = effective_area.y;
     let area_right = effective_area.x.saturating_add(effective_area.width);
@@ -295,21 +301,47 @@ fn apply_selection_style(
             continue;
         }
 
-        if !selectable_regions.is_empty() {
-            for region in selectable_regions {
+        if !relevant_regions.is_empty() {
+            for region in &relevant_regions {
                 if y >= region.y && y < region.y + region.height {
                     let rect_start = row_start.max(region.x);
                     let rect_end = row_end.min(region.x + region.width - 1);
                     if rect_start <= rect_end {
-                        buffer.set_style(
-                            Rect::new(rect_start, y, rect_end - rect_start + 1, 1),
-                            style,
-                        );
+                        let mut actual_end = None;
+                        for x in (rect_start..=rect_end).rev() {
+                            if let Some(cell) = buffer.cell((x, y)) {
+                                let sym = cell.symbol();
+                                if sym != " " && !sym.is_empty() {
+                                    actual_end = Some(x);
+                                    break;
+                                }
+                            }
+                        }
+                        if let Some(e) = actual_end {
+                            buffer
+                                .set_style(Rect::new(rect_start, y, e - rect_start + 1, 1), style);
+                        } else if rect_start == row_start {
+                            buffer.set_style(Rect::new(rect_start, y, 1, 1), style);
+                        }
                     }
                 }
             }
         } else {
-            buffer.set_style(Rect::new(row_start, y, row_end - row_start + 1, 1), style);
+            let mut actual_end = None;
+            for x in (row_start..=row_end).rev() {
+                if let Some(cell) = buffer.cell((x, y)) {
+                    let sym = cell.symbol();
+                    if sym != " " && !sym.is_empty() {
+                        actual_end = Some(x);
+                        break;
+                    }
+                }
+            }
+            if let Some(e) = actual_end {
+                buffer.set_style(Rect::new(row_start, y, e - row_start + 1, 1), style);
+            } else {
+                buffer.set_style(Rect::new(row_start, y, 1, 1), style);
+            }
         }
     }
 }
@@ -324,6 +356,12 @@ fn extract_selected_text(
     if effective_area.width == 0 || effective_area.height == 0 {
         return String::new();
     }
+
+    let relevant_regions: Vec<Rect> = selectable_regions
+        .iter()
+        .filter(|&r| r.intersects(effective_area))
+        .copied()
+        .collect();
 
     let area_left = effective_area.x;
     let area_top = effective_area.y;
@@ -353,9 +391,9 @@ fn extract_selected_text(
             continue;
         }
 
-        if !selectable_regions.is_empty() {
+        if !relevant_regions.is_empty() {
             let mut row_segments = Vec::new();
-            for region in selectable_regions {
+            for region in &relevant_regions {
                 if y >= region.y && y < region.y + region.height {
                     let rect_start = row_start.max(region.x);
                     let rect_end = row_end.min(region.x + region.width - 1);
@@ -383,11 +421,38 @@ fn extract_selected_text(
         lines.pop();
     }
 
-    lines
-        .into_iter()
-        .map(|line| line.trim_end_matches(' ').to_string())
-        .collect::<Vec<_>>()
-        .join("\n")
+    let mut joined_text = String::new();
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_end_matches(' ');
+        let trailing_spaces = line.chars().count() - trimmed.chars().count();
+        joined_text.push_str(trimmed);
+
+        if i + 1 < lines.len() {
+            let next_line = &lines[i + 1];
+            let next_line_trimmed = next_line.trim_start_matches(' ');
+            if next_line_trimmed.is_empty() {
+                joined_text.push('\n');
+            } else {
+                let first_word_width = next_line_trimmed
+                    .split(' ')
+                    .next()
+                    .unwrap_or("")
+                    .chars()
+                    .count();
+                if trailing_spaces < first_word_width || trailing_spaces == 0 {
+                    let last_char = trimmed.chars().last().unwrap_or(' ');
+                    let first_next_char = next_line_trimmed.chars().next().unwrap_or(' ');
+                    if trailing_spaces > 0 || (last_char.is_ascii() && first_next_char.is_ascii()) {
+                        joined_text.push(' ');
+                    }
+                } else {
+                    joined_text.push('\n');
+                }
+            }
+        }
+    }
+
+    joined_text
 }
 
 fn effective_area(frame_area: Rect, bounds: Option<Rect>) -> Rect {
