@@ -1,3 +1,6 @@
+mod qq;
+mod qq_client;
+
 use anyhow::{Context, Result, anyhow, bail};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -34,7 +37,8 @@ const MAX_MODEL_LIST_LINES: usize = 48;
 
 pub fn run() -> Result<()> {
     let runtime = Runtime::new().context("failed to create runtime")?;
-    runtime.block_on(run_async())
+    let local = tokio::task::LocalSet::new();
+    local.block_on(&runtime, run_async())
 }
 
 async fn run_async() -> Result<()> {
@@ -51,81 +55,155 @@ async fn run_async() -> Result<()> {
     let auth = AuthStore::load_or_create(&paths)?;
     crate::log_info!("Auth store loaded");
 
-    if !config.gateway.telegram.enabled {
-        bail!("gateway.telegram.enabled is false; set it to true in config.toml");
-    }
-    crate::log_info!("Telegram gateway enabled");
-
-    let allowlist = config
-        .gateway
-        .telegram
-        .allowlist
-        .iter()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .collect::<HashSet<_>>();
-
-    crate::log_info!("Allowlist loaded, {} entries", allowlist.len());
-
-    if allowlist.is_empty() {
-        bail!("gateway.telegram.allowlist is empty; configure at least one Telegram user/chat id");
+    if !config.gateway.telegram.enabled && !config.gateway.qq.enabled {
+        bail!(
+            "No gateway enabled; set either gateway.telegram.enabled or gateway.qq.enabled to true in config.toml"
+        );
     }
 
-    let bot_token = auth
-        .telegram_bot_token()
-        .context("missing Telegram bot token in auth.json for channel 'telegram'")?
-        .to_string();
-    crate::log_info!("Bot token loaded");
+    if config.gateway.telegram.enabled {
+        crate::log_info!("Telegram gateway enabled");
 
-    let default_model = config.resolve_active_model(&auth)?;
-    crate::log_info!("Default model resolved: {}", default_model.label());
+        let allowlist = config
+            .gateway
+            .telegram
+            .allowlist
+            .iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect::<HashSet<_>>();
 
-    let instruction_prompt = compose_instruction_prompt(&workspace_root, &paths, &config);
-    crate::log_info!("Instruction prompt loaded");
+        crate::log_info!("Telegram allowlist loaded, {} entries", allowlist.len());
 
-    let llm = LlmClient::new()?;
-    crate::log_info!("LLM client initialized");
+        if allowlist.is_empty() {
+            bail!(
+                "gateway.telegram.allowlist is empty; configure at least one Telegram user/chat id"
+            );
+        }
 
-    let store = SessionStore::open(paths.default_database_path())?;
-    crate::log_info!("Session store opened: {}", paths.default_database_path().display());
+        let bot_token = auth
+            .telegram_bot_token()
+            .context("missing Telegram bot token in auth.json for channel 'telegram'")?
+            .to_string();
+        crate::log_info!("Telegram Bot token loaded");
 
-    let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
-    crate::log_info!("MCP manager initialized");
+        let default_model = config.resolve_active_model(&auth)?;
+        let instruction_prompt = compose_instruction_prompt(&workspace_root, &paths, &config);
+        let llm = LlmClient::new()?;
+        let store = SessionStore::open(paths.default_database_path())?;
+        let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
+        let file_read_tracker = Arc::new(FileReadTracker::new());
+        let mut tools = ToolRegistry::new(
+            workspace_root.clone(),
+            paths.config_dir.clone(),
+            config.skills.clone(),
+            mcp,
+            config.permissions.clone(),
+            file_read_tracker,
+        );
+        tools.set_active_model(default_model.clone());
 
-    let file_read_tracker = Arc::new(FileReadTracker::new());
-    let mut tools = ToolRegistry::new(
-        workspace_root.clone(),
-        paths.config_dir.clone(),
-        config.skills.clone(),
-        mcp,
-        config.permissions.clone(),
-        file_read_tracker,
-    );
-    tools.set_active_model(default_model.clone());
-    crate::log_info!("Tool registry initialized");
+        let poll_timeout_secs = config.gateway.telegram.poll_timeout_secs.max(1);
 
-    let poll_timeout_secs = config.gateway.telegram.poll_timeout_secs.max(1);
+        let mut runner = TelegramGatewayRunner {
+            workspace_root: workspace_root.clone(),
+            config: config.clone(),
+            auth: auth.clone(),
+            store: store,
+            llm: llm,
+            tools: tools,
+            instruction_prompt: instruction_prompt,
+            allowlist,
+            poll_timeout_secs,
+            bot: TelegramBot::new(bot_token),
+            offset: 0,
+            request_seq: 0,
+        };
 
-    let mut runner = TelegramGatewayRunner {
-        workspace_root,
-        config,
-        auth,
-        store,
-        llm,
-        tools,
-        instruction_prompt,
-        allowlist,
-        poll_timeout_secs,
-        bot: TelegramBot::new(bot_token),
-        offset: 0,
-        request_seq: 0,
-    };
+        runner.bootstrap_offset().await?;
+        crate::log_info!("Telegram Bootstrap offset initialized: {}", runner.offset);
 
-    runner.bootstrap_offset().await?;
-    crate::log_info!("Bootstrap offset initialized: {}", runner.offset);
+        crate::log_info!("Telegram Gateway ready, entering main loop");
+        // We use block_in_place or similar if we really wanted to run it in parallel without spawning.
+        // However, the original code ran runner.run_loop().await directly.
+        // For now, to avoid Send issues with runner, we run it in the main task if it's the only one,
+        // or we need to fix the Send issues in runner's implementation (RefCell, etc).
 
-    crate::log_info!("Gateway ready, entering main loop");
-    runner.run_loop().await
+        // As a temporary fix to allow compilation:
+        let runner_handle = tokio::task::spawn_local(async move {
+            if let Err(e) = runner.run_loop().await {
+                crate::log_error!("Telegram Gateway loop failed: {e}");
+            }
+        });
+        // Note: this requires a LocalSet or similar if we're not already in one.
+    }
+
+    if config.gateway.qq.enabled {
+        crate::log_info!("QQ gateway enabled");
+
+        let allowlist = config
+            .gateway
+            .qq
+            .allowlist
+            .iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect::<HashSet<_>>();
+
+        crate::log_info!("QQ allowlist loaded, {} entries", allowlist.len());
+
+        if allowlist.is_empty() {
+            bail!("gateway.qq.allowlist is empty; configure at least one QQ user/channel id");
+        }
+
+        let app_id = auth
+            .qq_app_id()
+            .context("missing QQ AppID in auth.json")?
+            .to_string();
+        let app_secret = auth
+            .qq_app_secret()
+            .context("missing QQ AppSecret in auth.json")?
+            .to_string();
+
+        let default_model = config.resolve_active_model(&auth)?;
+        let instruction_prompt = compose_instruction_prompt(&workspace_root, &paths, &config);
+        let llm = LlmClient::new()?;
+        let store = SessionStore::open(paths.default_database_path())?;
+        let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
+        let file_read_tracker = Arc::new(FileReadTracker::new());
+        let mut tools = ToolRegistry::new(
+            workspace_root.clone(),
+            paths.config_dir.clone(),
+            config.skills.clone(),
+            mcp,
+            config.permissions.clone(),
+            file_read_tracker,
+        );
+        tools.set_active_model(default_model.clone());
+
+        let runner = qq::QQGatewayRunner {
+            workspace_root: workspace_root.clone(),
+            config: config.clone(),
+            auth: auth.clone(),
+            store: store,
+            llm: llm,
+            tools: tools,
+            instruction_prompt: instruction_prompt,
+            allowlist,
+            client: qq_client::QQClient::new(app_id, app_secret, config.gateway.qq.sandbox),
+            session_id: None,
+            last_seq: None,
+        };
+
+        crate::log_info!("QQ Gateway ready, entering main loop");
+        let mut runner = runner;
+        runner.run_loop().await?;
+    }
+
+    // Keep the main thread alive if we spawned gateways
+    loop {
+        tokio::time::sleep(Duration::from_secs(3600)).await;
+    }
 }
 
 fn compose_instruction_prompt(
@@ -229,7 +307,10 @@ impl TelegramGatewayRunner {
 
     async fn handle_message(&mut self, message: TelegramMessage) -> Result<()> {
         if !self.is_allowed(&message) {
-            crate::log_debug!("Message from chat_id={} not in allowlist, skipping", message.chat.id);
+            crate::log_debug!(
+                "Message from chat_id={} not in allowlist, skipping",
+                message.chat.id
+            );
             return Ok(());
         }
 
@@ -240,7 +321,10 @@ impl TelegramGatewayRunner {
             .map(str::trim)
             .filter(|value| !value.is_empty())
         else {
-            crate::log_debug!("Message chat_id={} has no text content, skipping", message.chat.id);
+            crate::log_debug!(
+                "Message chat_id={} has no text content, skipping",
+                message.chat.id
+            );
             return Ok(());
         };
 
@@ -256,11 +340,7 @@ impl TelegramGatewayRunner {
         );
 
         if let Some(command) = parse_command(content) {
-            crate::log_info!(
-                "Executing command: /{} {:?}",
-                command.name,
-                command.args
-            );
+            crate::log_info!("Executing command: /{} {:?}", command.name, command.args);
             if self
                 .handle_command(
                     &message,
@@ -608,7 +688,11 @@ impl TelegramGatewayRunner {
         self.bot
             .edit_message_text(source_message.chat.id, draft_message_id, first_chunk)
             .await?;
-        crate::log_debug!("Sent final response: chat_id={}, msg_id={}", source_message.chat.id, draft_message_id);
+        crate::log_debug!(
+            "Sent final response: chat_id={}, msg_id={}",
+            source_message.chat.id,
+            draft_message_id
+        );
 
         for chunk in chunks.iter().skip(1) {
             self.bot

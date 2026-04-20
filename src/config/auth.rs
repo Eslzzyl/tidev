@@ -54,7 +54,10 @@ impl AuthStore {
 
     pub fn set_telegram_bot_token(&mut self, token: impl Into<String>) {
         let token = token.into();
-        self.channels.entry("telegram".to_string()).or_default().api_key = Some(token);
+        self.channels
+            .entry("telegram".to_string())
+            .or_default()
+            .api_key = Some(token);
     }
 
     pub fn telegram_bot_token(&self) -> Option<&str> {
@@ -63,12 +66,38 @@ impl AuthStore {
             .and_then(|channel| channel.api_key.as_deref())
             .filter(|value| !value.trim().is_empty())
     }
+
+    pub fn set_qq_credentials(&mut self, app_id: impl Into<String>, app_secret: impl Into<String>) {
+        let auth = self.channels.entry("qq".to_string()).or_default();
+        auth.api_key = Some(app_id.into());
+        auth.extra.insert(
+            "app_secret".to_string(),
+            serde_json::Value::String(app_secret.into()),
+        );
+    }
+
+    pub fn qq_app_id(&self) -> Option<&str> {
+        self.channels
+            .get("qq")
+            .and_then(|channel| channel.api_key.as_deref())
+            .filter(|value| !value.trim().is_empty())
+    }
+
+    pub fn qq_app_secret(&self) -> Option<&str> {
+        self.channels
+            .get("qq")
+            .and_then(|channel| channel.extra.get("app_secret"))
+            .and_then(|v| v.as_str())
+            .filter(|value| !value.trim().is_empty())
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ChannelAuth {
     #[serde(default)]
     pub api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
