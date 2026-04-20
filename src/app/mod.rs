@@ -536,6 +536,8 @@ impl App {
                     && matches!(message.role, MessageRole::Assistant)
                 {
                     message.upsert_tool_call(tool_call);
+                    let message_id = message.id;
+                    self.invalidate_active_message_render_cache_for(message_id);
                 }
             }
             BackendEvent::Finished {
@@ -592,9 +594,11 @@ impl App {
                     message.streaming = false;
                     message.content = format!("Request failed: {error}");
                     let persisted = message.clone();
+                    let message_id = message.id;
+                    self.invalidate_active_message_render_cache_for(message_id);
                     self.store
                         .append_message(self.conversation.session_id, &persisted)?;
-                    self.last_notice = Some(error);
+                    self.last_notice = Some(error.clone());
                     self.drain_queued_prompts(runtime);
                     return Ok(());
                 }

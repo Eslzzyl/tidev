@@ -1065,51 +1065,6 @@ impl App {
         }
 
         let mut running_lines = Vec::new();
-        // Add tool running state
-        for running in &self.running_tool_executions {
-            if running.status != RunningStatus::Running {
-                continue;
-            }
-            let canonical_name = crate::tooling::canonical_tool_name(&running.tool_call.name)
-                .unwrap_or(&running.tool_call.name);
-            let action = match canonical_name {
-                "edit" | "write" => "Editing",
-                "read" => "Reading",
-                "bash" => "Running",
-                "grep" | "glob" | "list" => "Searching",
-                _ => "Executing",
-            };
-
-            let fields =
-                summarize_tool_arguments(&running.tool_call.name, &running.tool_call.arguments);
-            let target = fields
-                .iter()
-                .find(|(k, _)| *k == "path" || *k == "filePath" || *k == "command")
-                .map(|(_, v)| v.as_str())
-                .unwrap_or(&running.tool_call.name);
-
-            let line = Line::from(vec![
-                Span::styled(
-                    format!("{} ", action),
-                    Style::default().fg(palette.accent_soft),
-                ),
-                Span::styled(
-                    super::render::shorten(target, 64),
-                    Style::default()
-                        .fg(palette.text)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("...", Style::default().fg(palette.muted)),
-            ]);
-
-            let card_lines = super::render::decorate_card_lines(
-                vec![Line::from(""), line, Line::from("")],
-                width,
-                palette.panel_alt,
-            );
-            running_lines.extend(card_lines);
-        }
-
         if self.conversation.parent_session_id.is_none() {
             for running_subagent in &self.running_subagent_executions {
                 let card_lines = self.render_running_subagent_lines(running_subagent, width);
