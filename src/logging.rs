@@ -116,17 +116,25 @@ pub fn log(level: &str, target: &str, message: &str) {
 
         rotate_if_needed(&mut guard);
 
+        let timestamp: DateTime<Utc> = Utc::now();
+        let line = format!(
+            "[{} {} {}] {}",
+            timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+            level,
+            target,
+            message
+        );
+
+        // Write to file
         if let Some(ref mut file) = guard.file {
-            let timestamp: DateTime<Utc> = Utc::now();
-            let line = format!(
-                "[{} {} {}] {}\n",
-                timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
-                level,
-                target,
-                message
-            );
             let _ = file.write_all(line.as_bytes());
+            let _ = file.write_all(b"\n");
             let _ = file.flush();
+        }
+
+        // Write to console (stderr) if enabled
+        if guard.config.console {
+            eprintln!("{}", line);
         }
     }
 }

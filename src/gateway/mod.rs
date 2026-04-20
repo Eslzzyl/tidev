@@ -41,12 +41,20 @@ async fn run_async() -> Result<()> {
     let workspace_root = env::current_dir().context("failed to determine workspace root")?;
     let paths = ConfigPaths::discover()?;
     let config = AppConfig::load_or_create(&paths)?;
-    crate::logging::init(&paths.data_dir, config.logging.clone());
+    crate::log_info!("Gateway starting, config loaded");
+
+    let mut logging_config = config.logging.clone();
+    logging_config.console = true;
+    crate::logging::init(&paths.data_dir, logging_config);
+    crate::log_info!("Logging initialized (console: true)");
+
     let auth = AuthStore::load_or_create(&paths)?;
+    crate::log_info!("Auth store loaded");
 
     if !config.gateway.telegram.enabled {
         bail!("gateway.telegram.enabled is false; set it to true in config.toml");
     }
+    crate::log_info!("Telegram gateway enabled");
 
     let allowlist = config
         .gateway
@@ -57,6 +65,8 @@ async fn run_async() -> Result<()> {
         .filter(|value| !value.is_empty())
         .collect::<HashSet<_>>();
 
+    crate::log_info!("Allowlist loaded, {} entries", allowlist.len());
+
     if allowlist.is_empty() {
         bail!("gateway.telegram.allowlist is empty; configure at least one Telegram user/chat id");
     }
@@ -65,13 +75,23 @@ async fn run_async() -> Result<()> {
         .telegram_bot_token()
         .context("missing Telegram bot token in auth.json for channel 'telegram'")?
         .to_string();
+    crate::log_info!("Bot token loaded");
 
     let default_model = config.resolve_active_model(&auth)?;
+    crate::log_info!("Default model resolved: {}", default_model.label());
+
     let instruction_prompt = compose_instruction_prompt(&workspace_root, &paths, &config);
+    crate::log_info!("Instruction prompt loaded");
+
     let llm = LlmClient::new()?;
+    crate::log_info!("LLM client initialized");
+
     let store = SessionStore::open(paths.default_database_path())?;
+    crate::log_info!("Session store opened: {}", paths.default_database_path().display());
 
     let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
+    crate::log_info!("MCP manager initialized");
+
     let file_read_tracker = Arc::new(FileReadTracker::new());
     let mut tools = ToolRegistry::new(
         workspace_root.clone(),
@@ -82,6 +102,7 @@ async fn run_async() -> Result<()> {
         file_read_tracker,
     );
     tools.set_active_model(default_model.clone());
+    crate::log_info!("Tool registry initialized");
 
     let poll_timeout_secs = config.gateway.telegram.poll_timeout_secs.max(1);
 
@@ -101,6 +122,9 @@ async fn run_async() -> Result<()> {
     };
 
     runner.bootstrap_offset().await?;
+    crate::log_info!("Bootstrap offset initialized: {}", runner.offset);
+
+    crate::log_info!("Gateway ready, entering main loop");
     runner.run_loop().await
 }
 
@@ -173,11 +197,15 @@ impl TelegramGatewayRunner {
             {
                 Ok(updates) => updates,
                 Err(error) => {
-                    eprintln!("telegram getUpdates failed: {error}");
+                    crate::log_error!("Telegram getUpdates failed: {error}");
                     sleep(Duration::from_secs(2)).await;
                     continue;
                 }
             };
+
+            if updates.is_empty() {
+                continue;
+            }
 
             for update in updates {
                 self.offset = update.update_id.saturating_add(1);
@@ -185,8 +213,15 @@ impl TelegramGatewayRunner {
                     continue;
                 };
 
+                crate::log_info!(
+                    "Received message: chat_id={}, msg_id={}, user={}",
+                    message.chat.id,
+                    message.message_id,
+                    message.from.as_ref().map(|u| &u.id).unwrap_or(&0)
+                );
+
                 if let Err(error) = self.handle_message(message).await {
-                    eprintln!("telegram message handling failed: {error}");
+                    crate::log_error!("Message handling failed: {error}");
                 }
             }
         }
@@ -194,6 +229,7 @@ impl TelegramGatewayRunner {
 
     async fn handle_message(&mut self, message: TelegramMessage) -> Result<()> {
         if !self.is_allowed(&message) {
+            crate::log_debug!("Message from chat_id={} not in allowlist, skipping", message.chat.id);
             return Ok(());
         }
 
@@ -204,6 +240,7 @@ impl TelegramGatewayRunner {
             .map(str::trim)
             .filter(|value| !value.is_empty())
         else {
+            crate::log_debug!("Message chat_id={} has no text content, skipping", message.chat.id);
             return Ok(());
         };
 
@@ -211,7 +248,19 @@ impl TelegramGatewayRunner {
         let mut active_model = self.resolve_chat_model(&chat_key)?;
         let mut conversation = self.load_or_create_chat_conversation(&chat_key, &active_model)?;
 
+        crate::log_info!(
+            "Processing message: chat_id={}, session_id={}, content_len={}",
+            message.chat.id,
+            conversation.session_id,
+            content.len()
+        );
+
         if let Some(command) = parse_command(content) {
+            crate::log_info!(
+                "Executing command: /{} {:?}",
+                command.name,
+                command.args
+            );
             if self
                 .handle_command(
                     &message,
@@ -257,6 +306,13 @@ impl TelegramGatewayRunner {
         conversation: &mut Conversation,
         active_model: &ActiveModel,
     ) -> Result<()> {
+        crate::log_info!(
+            "Starting agent: chat_id={}, model={}, session={}",
+            source_message.chat.id,
+            active_model.label(),
+            conversation.session_id
+        );
+
         let draft = self
             .bot
             .send_message(
@@ -267,6 +323,7 @@ impl TelegramGatewayRunner {
             )
             .await?;
         let draft_message_id = draft.message_id;
+        crate::log_debug!("Sent draft message: msg_id={}", draft_message_id);
 
         if let Err(error) = self
             .run_agent_with_tools_inner(
@@ -278,6 +335,10 @@ impl TelegramGatewayRunner {
             .await
         {
             let error_text = format!("Gateway error: {error}");
+            crate::log_error!(
+                "Agent failed: chat_id={}, error={error}",
+                source_message.chat.id
+            );
             let _ = self
                 .bot
                 .edit_message_text(source_message.chat.id, draft_message_id, &error_text)
@@ -295,7 +356,15 @@ impl TelegramGatewayRunner {
         active_model: &ActiveModel,
         draft_message_id: i64,
     ) -> Result<()> {
-        for _ in 0..MAX_TOOL_ROUNDS {
+        for round in 1..=MAX_TOOL_ROUNDS {
+            crate::log_debug!(
+                "Tool round {}/{}: chat_id={}, session={}",
+                round,
+                MAX_TOOL_ROUNDS,
+                source_message.chat.id,
+                conversation.session_id
+            );
+
             let turn = self
                 .run_single_streaming_turn(
                     source_message,
@@ -307,6 +376,11 @@ impl TelegramGatewayRunner {
 
             if turn.tool_calls.is_empty() {
                 let final_text = normalize_assistant_output(&turn.content);
+                crate::log_info!(
+                    "Agent completed: chat_id={}, response_len={}",
+                    source_message.chat.id,
+                    final_text.len()
+                );
                 self.finalize_draft_response(source_message, draft_message_id, &final_text)
                     .await?;
                 return Ok(());
@@ -466,6 +540,12 @@ impl TelegramGatewayRunner {
         let runtime_handle = tokio::runtime::Handle::current();
 
         for tool_call in tool_calls {
+            crate::log_info!(
+                "Executing tool: name={}, id={}",
+                tool_call.name,
+                tool_call.id
+            );
+
             let result = block_in_place(|| {
                 self.tools.execute_call(
                     &runtime_handle,
@@ -505,6 +585,12 @@ impl TelegramGatewayRunner {
         self.store
             .append_message(conversation.session_id, &tool_message)?;
 
+        crate::log_debug!(
+            "Tool result recorded: name={}, result_len={}",
+            tool_call.name,
+            output_for_tool_event.len()
+        );
+
         Ok(())
     }
 
@@ -522,6 +608,7 @@ impl TelegramGatewayRunner {
         self.bot
             .edit_message_text(source_message.chat.id, draft_message_id, first_chunk)
             .await?;
+        crate::log_debug!("Sent final response: chat_id={}, msg_id={}", source_message.chat.id, draft_message_id);
 
         for chunk in chunks.iter().skip(1) {
             self.bot
@@ -534,12 +621,18 @@ impl TelegramGatewayRunner {
                 .await?;
         }
 
+        crate::log_info!(
+            "Reply sent: chat_id={}, chunks={}",
+            source_message.chat.id,
+            chunks.len()
+        );
+
         Ok(())
     }
 
     async fn try_edit_draft_text(&self, chat_id: i64, message_id: i64, text: &str) {
         if let Err(error) = self.bot.edit_message_text(chat_id, message_id, text).await {
-            eprintln!("telegram editMessageText failed: {error}");
+            crate::log_warn!("Edit message failed: msg_id={}, error={error}", message_id);
         }
     }
 
@@ -830,6 +923,13 @@ impl TelegramGatewayRunner {
 
     async fn send_reply_chunks(&self, message: &TelegramMessage, text: &str) -> Result<()> {
         let chunks = split_message_for_telegram(text);
+        crate::log_info!(
+            "Sending reply: chat_id={}, chunks={}, total_len={}",
+            message.chat.id,
+            chunks.len(),
+            text.len()
+        );
+
         for (index, chunk) in chunks.iter().enumerate() {
             self.bot
                 .send_message(

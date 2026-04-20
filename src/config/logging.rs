@@ -10,6 +10,8 @@ pub struct LogConfig {
     pub max_size_mb: u32,
     #[serde(default = "default_max_files")]
     pub max_files: u32,
+    #[serde(default = "default_console")]
+    pub console: bool,
 }
 
 fn default_enabled() -> bool {
@@ -28,6 +30,10 @@ fn default_max_files() -> u32 {
     5
 }
 
+fn default_console() -> bool {
+    false
+}
+
 impl Default for LogConfig {
     fn default() -> Self {
         Self {
@@ -35,6 +41,7 @@ impl Default for LogConfig {
             level: "INFO".to_string(),
             max_size_mb: 10,
             max_files: 5,
+            console: false,
         }
     }
 }
