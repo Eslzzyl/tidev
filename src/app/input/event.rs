@@ -380,7 +380,7 @@ impl App {
         {
             message.role = MessageRole::Error;
             message.streaming = false;
-            message.content = "Request cancelled".to_string();
+            // Keep original reasoning and content intact to preserve thinking at interruption point
             let persisted = message.clone();
             let _ = self
                 .store

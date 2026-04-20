@@ -1359,8 +1359,15 @@ impl App {
     fn render_error_body_lines(&self, message: &Message, body_width: usize) -> Vec<Line<'static>> {
         let palette = self.palette();
         let mut lines = Vec::new();
+
+        // Render reasoning first if present (preserves thinking at interruption point)
+        if !message.reasoning.trim().is_empty() {
+            lines.extend(self.render_reasoning_lines(&message.reasoning, body_width));
+            lines.push(Line::from(""));
+        }
+
         let error_text = if message.content.trim().is_empty() {
-            "Request failed.".to_string()
+            "Request cancelled.".to_string()
         } else {
             message.content.clone()
         };
@@ -1375,7 +1382,7 @@ impl App {
         }
 
         if lines.is_empty() {
-            lines.push(line_with_style("! Request failed.", palette.error));
+            lines.push(line_with_style("! Request cancelled.", palette.error));
         }
 
         lines
