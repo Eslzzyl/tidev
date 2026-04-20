@@ -1986,16 +1986,12 @@ fn render_reasoning_markdown_lines(
     palette: ThemePalette,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    let label_style = Style::default()
-        .fg(palette.muted)
-        .add_modifier(Modifier::DIM);
+    let dimmed_color = crate::theme::mix_colors(palette.muted, palette.background, 0.2);
+    let label_style = Style::default().fg(dimmed_color);
     let label_italic_style = Style::default()
-        .fg(palette.muted)
-        .add_modifier(Modifier::DIM)
+        .fg(dimmed_color)
         .add_modifier(Modifier::ITALIC);
-    let body_style = Style::default()
-        .fg(palette.muted)
-        .add_modifier(Modifier::DIM);
+    let body_style = Style::default().fg(dimmed_color);
 
     lines.push(Line::from(vec![
         Span::styled("┃ ", label_style),

@@ -89,6 +89,17 @@ pub struct ThemePalette {
     pub mode_plan: Color,
 }
 
+pub fn mix_colors(fg: Color, bg: Color, weight: f32) -> Color {
+    if let (Color::Rgb(r1, g1, b1), Color::Rgb(r2, g2, b2)) = (fg, bg) {
+        let r = (r1 as f32 * weight + r2 as f32 * (1.0 - weight)) as u8;
+        let g = (g1 as f32 * weight + g2 as f32 * (1.0 - weight)) as u8;
+        let b = (b1 as f32 * weight + b2 as f32 * (1.0 - weight)) as u8;
+        Color::Rgb(r, g, b)
+    } else {
+        fg
+    }
+}
+
 impl ThemePalette {
     pub fn dark() -> Self {
         Self {
