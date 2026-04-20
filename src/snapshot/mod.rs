@@ -60,10 +60,6 @@ impl SnapshotService {
     pub async fn track(&self) -> Result<Option<String>> {
         let _guard = self.lock.lock().await;
 
-        if !git::is_git_repository(&self.worktree)? {
-            return Ok(None);
-        }
-
         let existed = self.gitdir.exists();
         std::fs::create_dir_all(&self.gitdir).with_context(|| {
             format!(
@@ -81,7 +77,7 @@ impl SnapshotService {
             return Ok(None);
         }
 
-        let ignored = git::check_ignored(&self.worktree, &all_files)?;
+        let ignored = git::check_ignored(&self.gitdir, &self.worktree, &all_files)?;
 
         if !ignored.is_empty() {
             let ignored_files: Vec<_> = ignored.iter().cloned().collect();
@@ -127,7 +123,7 @@ impl SnapshotService {
 
         let changed = git::diff_cached_names(&self.gitdir, &self.worktree, hash)?;
 
-        let ignored = git::check_ignored(&self.worktree, &changed)?;
+        let ignored = git::check_ignored(&self.gitdir, &self.worktree, &changed)?;
         let files: Vec<String> = changed
             .iter()
             .filter(|f| !ignored.contains(*f))
@@ -309,6 +305,7 @@ impl SnapshotService {
         }
 
         let ignored = git::check_ignored(
+            &self.gitdir,
             &self.worktree,
             &numstat
                 .iter()
@@ -351,7 +348,7 @@ impl SnapshotService {
             return Ok(());
         }
 
-        let ignored = git::check_ignored(&self.worktree, &all_files)?;
+        let ignored = git::check_ignored(&self.gitdir, &self.worktree, &all_files)?;
 
         if !ignored.is_empty() {
             let ignored_files: Vec<_> = ignored.iter().cloned().collect();

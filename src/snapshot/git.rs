@@ -17,16 +17,6 @@ const DEFAULT_IGNORED_DIRS: &[&str] = &[
     "target",
 ];
 
-pub fn is_git_repository(path: &Path) -> Result<bool> {
-    let output = Command::new("git")
-        .current_dir(path)
-        .args(["rev-parse", "--is-inside-work-tree"])
-        .output()
-        .context("failed to run git rev-parse")?;
-
-    Ok(output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "true")
-}
-
 pub fn init_snapshot_repo(gitdir: &Path) -> Result<()> {
     let status = Command::new("git")
         .args(["init"])
@@ -172,7 +162,7 @@ fn should_ignore_path(path: &str) -> bool {
     })
 }
 
-pub fn check_ignored(worktree: &Path, files: &[String]) -> Result<HashSet<String>> {
+pub fn check_ignored(gitdir: &Path, worktree: &Path, files: &[String]) -> Result<HashSet<String>> {
     if files.is_empty() {
         return Ok(HashSet::new());
     }
@@ -191,7 +181,7 @@ pub fn check_ignored(worktree: &Path, files: &[String]) -> Result<HashSet<String
             "-c",
             "core.quotepath=false",
             "--git-dir",
-            &worktree.join(".git").to_string_lossy(),
+            &gitdir.to_string_lossy(),
             "--work-tree",
             &worktree.to_string_lossy(),
             "check-ignore",
