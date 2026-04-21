@@ -104,7 +104,7 @@ impl SnippetState {
 
         // Clamp cursor to string length (cursor is byte offset)
         let cursor = cursor.min(input.len());
-        
+
         // Find the character index where cursor falls (how many complete chars before cursor)
         let mut char_count_before_cursor = 0;
         for (byte_pos, _c) in input.char_indices() {
@@ -113,13 +113,13 @@ impl SnippetState {
             }
             char_count_before_cursor += 1;
         }
-        
+
         // Now find word start by going backwards from cursor position
         let mut word_char_start = char_count_before_cursor;
-        
+
         // Get all chars for easy indexing
         let chars: Vec<char> = input.chars().collect();
-        
+
         for i in (0..char_count_before_cursor).rev() {
             if chars[i].is_whitespace() {
                 word_char_start = i + 1;
@@ -127,9 +127,11 @@ impl SnippetState {
             }
             word_char_start = i;
         }
-        
+
         // Extract the word
-        chars[word_char_start..char_count_before_cursor].iter().collect()
+        chars[word_char_start..char_count_before_cursor]
+            .iter()
+            .collect()
     }
 
     fn search_snippets(&mut self) {
@@ -179,7 +181,9 @@ impl SnippetState {
         let mut matched = Vec::new();
         let mut query_idx = 0;
         for (i, c) in snippet_chars.iter().enumerate() {
-            if query_idx < query_chars.len() && c.to_lowercase().next() == Some(query_chars[query_idx].to_ascii_lowercase()) {
+            if query_idx < query_chars.len()
+                && c.to_lowercase().next() == Some(query_chars[query_idx].to_ascii_lowercase())
+            {
                 matched.push(i);
                 query_idx += 1;
             }
@@ -245,11 +249,15 @@ another snippet
         let input = "  hello";
         let cursor = 3;
         let input_before_cursor = &input[..cursor.min(input.len())];
-        eprintln!("input_before_cursor: '{}' (len={})", input_before_cursor, input_before_cursor.len());
+        eprintln!(
+            "input_before_cursor: '{}' (len={})",
+            input_before_cursor,
+            input_before_cursor.len()
+        );
         for (i, c) in input_before_cursor.char_indices().rev() {
             eprintln!("  i={}, c='{}'", i, c);
         }
-        
+
         // The function returns the word fragment from cursor position backwards to word start
         // cursor positions in "hello world" (indices 0-11):
         // 0=h,1=e,2=l,3=l,4=o,5=space,6=w,7=o,8=r,9=l,10=d,11=end
@@ -293,25 +301,25 @@ another snippet
     }
 }
 
-    #[test]
-    fn test_cjk_support() {
-        // Test pure CJK matching
-        let (score, _) = SnippetState::calculate_score("你好世界", &['你', '好']);
-        eprintln!("CJK prefix match score: {}", score);
-        assert!(score > 0, "CJK prefix match should work");
-        
-        let (score, _) = SnippetState::calculate_score("你好世界", &['好', '世']);
-        eprintln!("CJK subsequence match score: {}", score);
-        assert!(score > 0, "CJK subsequence match should work");
-        
-        // Test current_word with CJK - use valid character boundaries
-        // "你好世界" = 你(0-2), 好(3-5), 世(6-8), 界(9-11)
-        // cursor=3 is at start of "好", should return "你"
-        assert_eq!(SnippetState::current_word("你好世界", 3), "你");
-        // cursor=6 is at start of "世", should return "你好"  
-        assert_eq!(SnippetState::current_word("你好世界", 6), "你好");
-        // cursor=9 is at start of "界", should return "你好世"
-        assert_eq!(SnippetState::current_word("你好世界", 9), "你好世");
-        // cursor=12 is at end, should return "你好世界"
-        assert_eq!(SnippetState::current_word("你好世界", 12), "你好世界");
-    }
+#[test]
+fn test_cjk_support() {
+    // Test pure CJK matching
+    let (score, _) = SnippetState::calculate_score("你好世界", &['你', '好']);
+    eprintln!("CJK prefix match score: {}", score);
+    assert!(score > 0, "CJK prefix match should work");
+
+    let (score, _) = SnippetState::calculate_score("你好世界", &['好', '世']);
+    eprintln!("CJK subsequence match score: {}", score);
+    assert!(score > 0, "CJK subsequence match should work");
+
+    // Test current_word with CJK - use valid character boundaries
+    // "你好世界" = 你(0-2), 好(3-5), 世(6-8), 界(9-11)
+    // cursor=3 is at start of "好", should return "你"
+    assert_eq!(SnippetState::current_word("你好世界", 3), "你");
+    // cursor=6 is at start of "世", should return "你好"
+    assert_eq!(SnippetState::current_word("你好世界", 6), "你好");
+    // cursor=9 is at start of "界", should return "你好世"
+    assert_eq!(SnippetState::current_word("你好世界", 9), "你好世");
+    // cursor=12 is at end, should return "你好世界"
+    assert_eq!(SnippetState::current_word("你好世界", 12), "你好世界");
+}

@@ -35,7 +35,14 @@ pub fn execute_tool_call(
     let args = serde_json::from_value::<BashArgs>(arguments)
         .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
     let timeout = args.timeout.unwrap_or(120_000) as u64; // default 2 minutes
-    run_shell_inner(workspace_root, &args.command, max_output_bytes, rtk_enabled, None, timeout)
+    run_shell_inner(
+        workspace_root,
+        &args.command,
+        max_output_bytes,
+        rtk_enabled,
+        None,
+        timeout,
+    )
 }
 
 pub fn execute_tool_call_with_cancel(
@@ -50,7 +57,14 @@ pub fn execute_tool_call_with_cancel(
     let args = serde_json::from_value::<BashArgs>(arguments)
         .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
     let timeout = args.timeout.unwrap_or(120_000) as u64; // default 2 minutes
-    run_shell_inner(workspace_root, &args.command, max_output_bytes, rtk_enabled, Some(cancelled), timeout)
+    run_shell_inner(
+        workspace_root,
+        &args.command,
+        max_output_bytes,
+        rtk_enabled,
+        Some(cancelled),
+        timeout,
+    )
 }
 
 fn run_shell_inner(

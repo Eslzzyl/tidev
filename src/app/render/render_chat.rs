@@ -1633,8 +1633,16 @@ impl App {
 
         // Header line with description and subagent type
         lines.push(Line::from(vec![
-            Span::styled(description, Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
-            Span::styled(format!(" (@{})", subagent_type), Style::default().fg(palette.muted)),
+            Span::styled(
+                description,
+                Style::default()
+                    .fg(palette.text)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" (@{})", subagent_type),
+                Style::default().fg(palette.muted),
+            ),
         ]));
 
         // Status line - always shown to maintain consistent height
@@ -1643,7 +1651,11 @@ impl App {
             SubagentStatus::Tool => {
                 if let Some(tool_call) = &execution.current_tool_call {
                     let tool_summary = if tool_call_arguments_are_complete(&tool_call.arguments) {
-                        summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width.saturating_sub(10))
+                        summarize_tool_call(
+                            &tool_call.name,
+                            &tool_call.arguments,
+                            body_width.saturating_sub(10),
+                        )
                     } else {
                         let canonical_display = canonical_tool_name(&tool_call.name)
                             .map(|s| s.to_string())
@@ -1666,11 +1678,17 @@ impl App {
         // Navigation hint
         lines.push(Line::from(vec![
             Span::styled("  ".to_string(), Style::default()),
-            Span::styled("Ctrl+X then ".to_string(), Style::default().fg(palette.muted)),
+            Span::styled(
+                "Ctrl+X then ".to_string(),
+                Style::default().fg(palette.muted),
+            ),
             Span::styled("Up".to_string(), Style::default().fg(palette.accent_soft)),
             Span::styled("/".to_string(), Style::default().fg(palette.muted)),
             Span::styled("Down".to_string(), Style::default().fg(palette.accent_soft)),
-            Span::styled(" to navigate".to_string(), Style::default().fg(palette.muted)),
+            Span::styled(
+                " to navigate".to_string(),
+                Style::default().fg(palette.muted),
+            ),
         ]));
 
         lines

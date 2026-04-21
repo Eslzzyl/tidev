@@ -305,7 +305,8 @@ impl Composer {
 
     /// Returns true if there's an active text selection.
     pub fn has_selection(&self) -> bool {
-        self.selection_anchor.is_some_and(|anchor| anchor != self.cursor)
+        self.selection_anchor
+            .is_some_and(|anchor| anchor != self.cursor)
     }
 
     /// Returns the selection range as (start, end) byte indices, or None if no selection.

@@ -273,7 +273,10 @@ impl App {
                         // Before selection
                         if sel_in_line_start > line_start {
                             let before = &self.composer.text()[line_start..sel_in_line_start];
-                            spans.push(Span::styled(before.to_string(), Style::default().fg(palette.text)));
+                            spans.push(Span::styled(
+                                before.to_string(),
+                                Style::default().fg(palette.text),
+                            ));
                         }
 
                         // Selection
@@ -286,7 +289,10 @@ impl App {
                         // After selection
                         if sel_in_line_end < line_end {
                             let after = &self.composer.text()[sel_in_line_end..line_end];
-                            spans.push(Span::styled(after.to_string(), Style::default().fg(palette.text)));
+                            spans.push(Span::styled(
+                                after.to_string(),
+                                Style::default().fg(palette.text),
+                            ));
                         }
 
                         lines.push(Line::from(spans));

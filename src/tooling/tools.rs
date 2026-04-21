@@ -309,7 +309,13 @@ pub fn execute_shell_tool_call(
     rtk_enabled: bool,
     cancelled: Arc<AtomicBool>,
 ) -> Result<String> {
-    builtin::exec::execute_tool_call_with_cancel(workspace_root, call, max_output_bytes, rtk_enabled, cancelled)
+    builtin::exec::execute_tool_call_with_cancel(
+        workspace_root,
+        call,
+        max_output_bytes,
+        rtk_enabled,
+        cancelled,
+    )
 }
 
 #[allow(dead_code)]

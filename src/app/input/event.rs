@@ -229,8 +229,12 @@ impl App {
 
         // Allow dragging outside the input area for auto-scroll
         // Clamp position to input area for cursor positioning
-        let clamped_y = position.y.clamp(inner.y, inner.y + inner.height.saturating_sub(1));
-        let clamped_x = position.x.clamp(inner.x, inner.x + inner.width.saturating_sub(1));
+        let clamped_y = position
+            .y
+            .clamp(inner.y, inner.y + inner.height.saturating_sub(1));
+        let clamped_x = position
+            .x
+            .clamp(inner.x, inner.x + inner.width.saturating_sub(1));
 
         let scroll = self.input_scroll_offset as u16;
         let local_line = clamped_y.saturating_sub(inner.y);
@@ -405,11 +409,16 @@ impl App {
         // If we scrolled, update cursor position to follow
         if scrolled {
             let scroll = self.input_scroll_offset as u16;
-            let clamped_y = pointer.y.clamp(inner.y, inner.y + inner.height.saturating_sub(1));
+            let clamped_y = pointer
+                .y
+                .clamp(inner.y, inner.y + inner.height.saturating_sub(1));
             let local_line = clamped_y.saturating_sub(inner.y);
             let target_line = scroll.saturating_add(local_line);
-            self.composer
-                .set_cursor_at_visual_position(inner.width, target_line, pointer.x.saturating_sub(inner.x));
+            self.composer.set_cursor_at_visual_position(
+                inner.width,
+                target_line,
+                pointer.x.saturating_sub(inner.x),
+            );
         }
 
         scrolled
@@ -931,7 +940,8 @@ impl App {
                 }
                 KeyCode::Down => {
                     // If cursor is at the last visible line and we can scroll down
-                    let last_visible_line = self.input_scroll_offset + visible_lines.saturating_sub(1);
+                    let last_visible_line =
+                        self.input_scroll_offset + visible_lines.saturating_sub(1);
                     if cursor_line >= last_visible_line && self.input_scroll_offset < max_scroll {
                         self.input_scroll_offset += 1;
                     }
@@ -1183,8 +1193,12 @@ impl App {
 
         let text = self.composer.text();
         let cursor = self.composer.cursor();
-        self.snippet_state
-            .sync(self.workspace_root.as_path(), &self.paths.config_dir, text, cursor);
+        self.snippet_state.sync(
+            self.workspace_root.as_path(),
+            &self.paths.config_dir,
+            text,
+            cursor,
+        );
     }
 
     pub(crate) fn accept_snippet(&mut self) {
