@@ -264,7 +264,7 @@ impl SessionStore {
             .mode
             .map(|m| serde_json::to_string(&m).unwrap_or_default());
         self.connection.execute(
-            "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, snapshot_hash, patch_files, mode, rtk_rewritten) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+            "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, mode, rtk_rewritten) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
             params![
                 message.id.to_string(),
                 session_id.to_string(),
@@ -285,6 +285,7 @@ impl SessionStore {
                 message.cache_read_tokens,
                 message.cache_write_tokens,
                 message.model_id,
+                message.tokens_per_second,
                 message.snapshot_hash,
                 message.patch_files,
                 mode,
@@ -308,7 +309,7 @@ impl SessionStore {
             .map(|m| serde_json::to_string(&m).unwrap_or_default());
 
         self.connection.execute(
-            "UPDATE messages SET role = ?3, content = ?4, attachments = ?5, reasoning = ?6, tool_calls = ?7, tool_call_id = ?8, tool_name = ?9, metadata = ?10, created_at = ?11, completed_at = ?12, streaming = ?13, input_tokens = ?14, output_tokens = ?15, total_tokens = ?16, cache_read_tokens = ?17, cache_write_tokens = ?18, model_id = ?19, snapshot_hash = ?20, patch_files = ?21, mode = ?22, rtk_rewritten = ?23 WHERE session_id = ?1 AND id = ?2",
+            "UPDATE messages SET role = ?3, content = ?4, attachments = ?5, reasoning = ?6, tool_calls = ?7, tool_call_id = ?8, tool_name = ?9, metadata = ?10, created_at = ?11, completed_at = ?12, streaming = ?13, input_tokens = ?14, output_tokens = ?15, total_tokens = ?16, cache_read_tokens = ?17, cache_write_tokens = ?18, model_id = ?19, tokens_per_second = ?20, snapshot_hash = ?21, patch_files = ?22, mode = ?23, rtk_rewritten = ?24 WHERE session_id = ?1 AND id = ?2",
             params![
                 session_id.to_string(),
                 message.id.to_string(),
@@ -329,6 +330,7 @@ impl SessionStore {
                 message.cache_read_tokens,
                 message.cache_write_tokens,
                 message.model_id,
+                message.tokens_per_second,
                 message.snapshot_hash,
                 message.patch_files,
                 mode,
@@ -748,7 +750,7 @@ impl SessionStore {
 
     pub fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, snapshot_hash, patch_files, mode, rtk_rewritten FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
+            "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, mode, rtk_rewritten FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
         )?;
 
         let rows = statement.query_map(params![session_id.to_string()], |row| {
@@ -763,7 +765,6 @@ impl SessionStore {
             let metadata = row.get::<_, String>(8)?;
             let created_at = row.get::<_, String>(9)?;
             let completed_at = row.get::<_, Option<String>>(10)?;
-            let _ = completed_at; // mark as used
             let streaming = row.get::<_, i64>(11)? != 0;
             let input_tokens = row.get::<_, Option<u32>>(12)?;
             let output_tokens = row.get::<_, Option<u32>>(13)?;
@@ -771,10 +772,11 @@ impl SessionStore {
             let cache_read_tokens = row.get::<_, Option<u32>>(15)?;
             let cache_write_tokens = row.get::<_, Option<u32>>(16)?;
             let model_id = row.get::<_, Option<String>>(17)?;
-            let snapshot_hash = row.get::<_, Option<String>>(18)?;
-            let patch_files = row.get::<_, Option<String>>(19)?;
-            let mode = row.get::<_, Option<String>>(20)?;
-            let rtk_rewritten = row.get::<_, i64>(21)? != 0;
+            let tokens_per_second = row.get::<_, Option<f32>>(18)?;
+            let snapshot_hash = row.get::<_, Option<String>>(19)?;
+            let patch_files = row.get::<_, Option<String>>(20)?;
+            let mode = row.get::<_, Option<String>>(21)?;
+            let rtk_rewritten = row.get::<_, i64>(22)? != 0;
 
             let attachments = serde_json::from_str(&attachments).unwrap_or_default();
             let tool_calls: Vec<ToolCall> = serde_json::from_str(&tool_calls).unwrap_or_default();
@@ -782,6 +784,8 @@ impl SessionStore {
                 serde_json::from_str(&metadata).unwrap_or_default();
             let mode: Option<crate::prompts::SessionMode> =
                 mode.and_then(|m| serde_json::from_str(&m).ok());
+            let completed_at = completed_at
+                .and_then(|s| parse_datetime(&s).ok());
 
             let mut message = Message::persisted(
                 Uuid::parse_str(&id).map_err(|error| {
@@ -800,12 +804,14 @@ impl SessionStore {
             message.tool_call_id = tool_call_id;
             message.tool_name = tool_name;
             message.metadata = metadata;
+            message.completed_at = completed_at;
             message.input_tokens = input_tokens;
             message.output_tokens = output_tokens;
             message.total_tokens = total_tokens;
             message.cache_read_tokens = cache_read_tokens;
             message.cache_write_tokens = cache_write_tokens;
             message.model_id = model_id;
+            message.tokens_per_second = tokens_per_second;
             message.snapshot_hash = snapshot_hash;
             message.patch_files = patch_files;
             message.mode = mode;
