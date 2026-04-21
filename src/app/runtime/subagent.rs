@@ -96,7 +96,7 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
         }
 
         request_sequence = request_sequence.wrapping_add(1);
-        send_status(context, "Thinking...", None, None, None, None);
+        send_status(context, "Thinking", None, None, None, None);
 
         let mut assistant_message = Message::streaming(MessageRole::Assistant, "");
         {
@@ -154,7 +154,7 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
                     update_child_message(context, &assistant_message)?;
                     send_status_with_delta(
                         context,
-                        "Thinking...",
+                        "Writing output",
                         None,
                         &assistant_message,
                         &mut last_sent_content_len,
@@ -166,7 +166,7 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
                     update_child_message(context, &assistant_message)?;
                     send_status(
                         context,
-                        "Thinking...",
+                        "Tool",
                         Some(tool_call),
                         Some(&assistant_message),
                         None,
@@ -178,7 +178,7 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
                     update_child_message(context, &assistant_message)?;
                     send_status_with_delta(
                         context,
-                        "Thinking...",
+                        "Thinking",
                         None,
                         &assistant_message,
                         &mut last_sent_content_len,
@@ -309,7 +309,7 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
             let summary = summarize_tool_call(&tool_call.name, &tool_call.arguments, 64);
             send_status(
                 context,
-                format!("Executing {summary}"),
+                format!("Tool: {summary}"),
                 Some(tool_call.clone()),
                 Some(&assistant_message),
                 None,
@@ -323,7 +323,7 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
             record_tool_result(context, &tool_call, &result)?;
             send_status(
                 context,
-                "Thinking...",
+                "Working",
                 None,
                 Some(&assistant_message),
                 None,

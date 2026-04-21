@@ -6,7 +6,7 @@ use crate::{
 };
 use chrono::Local;
 use ratatui::{
-    layout::{Constraint, Layout, Margin, Rect},
+    layout::{Alignment, Constraint, Layout, Margin, Rect},
     prelude::{Frame, Modifier, Style, Text},
     style::Color,
     text::{Line, Span},
@@ -19,7 +19,7 @@ use unicode_width::UnicodeWidthStr;
 use uuid::Uuid;
 
 use super::diff_render::render_unified_diff_text;
-use super::permission::RunningSubagentExecution;
+use super::permission::{RunningSubagentExecution, SubagentStatus};
 use super::{
     App, MessageRenderCacheEntry, MessageRenderCacheKey, MessageRenderCacheKind,
     MessageRenderCacheValue, render::*,
@@ -760,20 +760,58 @@ impl App {
         .split(main_area);
 
         self.render_messages(frame, layout[0]);
-        let prompt_title = self.mode.title().to_string();
-        self.render_input_block(
-            frame,
-            layout[1],
-            &prompt_title,
-            self.composer.placeholder(),
-            false,
-        );
-        self.render_at_mention_palette(frame, layout[1]);
-        self.render_snippet_palette(frame, layout[1]);
+
+        // In subsession, show navigation panel instead of input box
+        if self.conversation.parent_session_id.is_some() {
+            self.render_subsession_navigation(frame, layout[1]);
+        } else {
+            let prompt_title = self.mode.title().to_string();
+            self.render_input_block(
+                frame,
+                layout[1],
+                &prompt_title,
+                self.composer.placeholder(),
+                false,
+            );
+            self.render_at_mention_palette(frame, layout[1]);
+            self.render_snippet_palette(frame, layout[1]);
+            self.render_command_palette(frame, layout[1]);
+            self.render_snippet_palette(frame, layout[1]);
+        }
         self.render_prompt_footer(frame, layout[2]);
         self.render_retrying_hint(frame, layout[3]);
-        self.render_command_palette(frame, layout[1]);
-        self.render_snippet_palette(frame, layout[1]);
+    }
+
+    fn render_subsession_navigation(&self, frame: &mut Frame<'_>, area: Rect) {
+        let palette = self.palette();
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.border_idle()))
+            .title(" Subsession ");
+
+        frame.render_widget(block, area);
+
+        let inner = area.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+
+        // Center the navigation hints
+        let hint = Line::from(vec![
+            Span::styled("Up", Style::default().fg(palette.accent_soft)),
+            Span::styled(": return to parent  ", Style::default().fg(palette.muted)),
+            Span::styled("Left", Style::default().fg(palette.accent_soft)),
+            Span::styled("/", Style::default().fg(palette.muted)),
+            Span::styled("Right", Style::default().fg(palette.accent_soft)),
+            Span::styled(": switch subagent", Style::default().fg(palette.muted)),
+        ]);
+
+        let paragraph = Paragraph::new(hint)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(palette.text));
+
+        frame.render_widget(paragraph, inner);
     }
 
     pub(super) fn render_messages(&mut self, frame: &mut Frame<'_>, area: Rect) {
@@ -1586,66 +1624,54 @@ impl App {
         body_width: usize,
     ) -> Vec<Line<'static>> {
         let palette = self.palette();
-        let task_summary = summarize_tool_call(
-            &execution.tool_call.name,
-            &execution.tool_call.arguments,
-            body_width,
-        );
-        let child_session_label = self
-            .store
-            .load_session_record(execution.child_session_id)
-            .ok()
-            .flatten()
-            .map(|record| {
-                format!(
-                    "{} · {}",
-                    shorten(&record.title, 44),
-                    execution.child_session_id.simple()
-                )
-            })
-            .unwrap_or_else(|| execution.child_session_id.simple().to_string());
 
-        let mut lines = vec![line_with_style("Subagent running", palette.accent_soft)];
-        lines.push(line_with_prefix(
-            "↳",
-            &task_summary,
-            Style::default().fg(palette.accent_soft),
-            Style::default().fg(palette.text),
-        ));
-        lines.push(line_with_prefix(
-            "↳",
-            &execution.status_text,
-            Style::default().fg(palette.accent_soft),
-            Style::default().fg(palette.text),
-        ));
+        // Title line: description (@subagent_type)
+        let description = shorten(&execution.task_description, body_width.saturating_sub(30));
+        let subagent_type = execution.subagent_type.clone();
 
-        if let Some(tool_call) = &execution.current_tool_call {
-            let current_tool = if tool_call_arguments_are_complete(&tool_call.arguments) {
-                summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width)
-            } else {
-                let canonical_display = canonical_tool_name(&tool_call.name)
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| tool_call.name.clone());
-                format!("{} Calling {}", self.loading_spinner(), canonical_display)
-            };
-            lines.push(line_with_prefix(
-                "↳",
-                &format!("Tool: {current_tool}"),
-                Style::default().fg(palette.accent_soft),
-                Style::default().fg(palette.text),
-            ));
-        }
+        let mut lines = Vec::new();
 
-        lines.push(line_with_prefix(
-            "↳",
-            &format!("Session {child_session_label}"),
-            Style::default().fg(palette.accent_soft),
-            Style::default().fg(palette.text),
-        ));
-        lines.push(line_with_style(
-            "Ctrl+X then arrows to inspect the child session.",
-            palette.muted,
-        ));
+        // Header line with description and subagent type
+        lines.push(Line::from(vec![
+            Span::styled(description, Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
+            Span::styled(format!(" (@{})", subagent_type), Style::default().fg(palette.muted)),
+        ]));
+
+        // Status line - always shown to maintain consistent height
+        let status_text = execution.status.display();
+        let status_line = match &execution.status {
+            SubagentStatus::Tool => {
+                if let Some(tool_call) = &execution.current_tool_call {
+                    let tool_summary = if tool_call_arguments_are_complete(&tool_call.arguments) {
+                        summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width.saturating_sub(10))
+                    } else {
+                        let canonical_display = canonical_tool_name(&tool_call.name)
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| tool_call.name.clone());
+                        format!("{} ...", canonical_display)
+                    };
+                    format!("{}: {}", status_text, tool_summary)
+                } else {
+                    status_text.to_string()
+                }
+            }
+            _ => status_text.to_string(),
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled("  ".to_string(), Style::default()),
+            Span::styled(status_line, Style::default().fg(palette.accent_soft)),
+        ]));
+
+        // Navigation hint
+        lines.push(Line::from(vec![
+            Span::styled("  ".to_string(), Style::default()),
+            Span::styled("Ctrl+X then ".to_string(), Style::default().fg(palette.muted)),
+            Span::styled("Up".to_string(), Style::default().fg(palette.accent_soft)),
+            Span::styled("/".to_string(), Style::default().fg(palette.muted)),
+            Span::styled("Down".to_string(), Style::default().fg(palette.accent_soft)),
+            Span::styled(" to navigate".to_string(), Style::default().fg(palette.muted)),
+        ]));
 
         lines
     }

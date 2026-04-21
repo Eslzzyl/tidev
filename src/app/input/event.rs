@@ -710,10 +710,27 @@ impl App {
             return Ok(());
         }
 
+        // In subsession, arrow keys work directly for navigation
+        if self.conversation.parent_session_id.is_some() {
+            match key.code {
+                KeyCode::Up => {
+                    if let Some(parent_id) = self.conversation.parent_session_id {
+                        self.switch_session(parent_id, runtime)?;
+                        return Ok(());
+                    }
+                }
+                KeyCode::Down | KeyCode::Left | KeyCode::Right => {
+                    let _ = self.handle_leader_key(key, runtime)?;
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+
         if matches!(key.code, KeyCode::Char('x')) && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.leader_key_pending = true;
             self.last_notice =
-                Some("Leader key active: use arrows to navigate subagents".to_string());
+                Some("Up: parent session, Down/Left/Right: switch subagent".to_string());
             return Ok(());
         }
 

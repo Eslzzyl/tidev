@@ -48,6 +48,7 @@ pub use ui::mcp_panel;
 pub use ui::message_panel;
 pub use ui::model_panel;
 pub use ui::permission;
+use ui::permission::SubagentStatus;
 pub use ui::question;
 pub use ui::session_panel;
 pub use ui::settings_panel;
@@ -686,7 +687,7 @@ impl App {
                     .iter_mut()
                     .find(|execution| execution.child_session_id == child_session_id)
                 {
-                    execution.status_text = status_text.clone();
+                    execution.status = SubagentStatus::from_status_text(&status_text);
                     execution.current_tool_call = current_tool_call;
                 }
 

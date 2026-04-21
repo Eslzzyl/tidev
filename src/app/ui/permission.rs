@@ -101,33 +101,69 @@ impl RunningToolExecution {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub(crate) enum SubagentStatus {
+    #[default]
+    Thinking,
+    Working,
+    Tool,
+    WritingOutput,
+}
+
+impl SubagentStatus {
+    pub(crate) fn display(&self) -> &'static str {
+        match self {
+            Self::Thinking => "Thinking",
+            Self::Working => "Working",
+            Self::Tool => "Tool",
+            Self::WritingOutput => "Writing output",
+        }
+    }
+
+    pub(crate) fn from_status_text(text: &str) -> Self {
+        match text {
+            "Thinking" => Self::Thinking,
+            "Working" => Self::Working,
+            "Tool" => Self::Tool,
+            "Writing output" => Self::WritingOutput,
+            _ => Self::Thinking,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct RunningSubagentExecution {
     pub request_id: u64,
     pub parent_session_id: uuid::Uuid,
     pub tool_call: ToolCall,
     pub child_session_id: uuid::Uuid,
+    pub task_description: String,
+    pub subagent_type: String,
+    pub status: SubagentStatus,
     pub current_tool_call: Option<ToolCall>,
-    pub status_text: String,
     pub cancel_requested: Arc<AtomicBool>,
 }
 
 impl RunningSubagentExecution {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         request_id: u64,
         parent_session_id: uuid::Uuid,
         tool_call: ToolCall,
         child_session_id: uuid::Uuid,
+        task_description: String,
+        subagent_type: String,
         cancel_requested: Arc<AtomicBool>,
-        status_text: impl Into<String>,
     ) -> Self {
         Self {
             request_id,
             parent_session_id,
             tool_call,
             child_session_id,
+            task_description,
+            subagent_type,
+            status: SubagentStatus::Thinking,
             current_tool_call: None,
-            status_text: status_text.into(),
             cancel_requested,
         }
     }
@@ -498,8 +534,9 @@ impl App {
                 parent_session_id,
                 tool_call.clone(),
                 child_session_id,
+                description.clone(),
+                subagent_type.clone(),
                 cancel_requested.clone(),
-                "Starting subagent...",
             ));
         self.last_notice = Some(format!(
             "Running {} subagent(s)...",
