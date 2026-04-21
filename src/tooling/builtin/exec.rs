@@ -84,9 +84,8 @@ fn run_shell_inner(
 ) -> Result<BashExecutionResult> {
     // Try to get RTK rewritten command if RTK is enabled
     let (actual_command, rtk_rewritten) = if rtk_enabled {
-        let rewritten = rewrite_command(command);
-        let was_rewritten = rewritten != command;
-        (rewritten, was_rewritten)
+        let result = rewrite_command(command);
+        (result.command, result.rewritten)
     } else {
         (command.to_string(), false)
     };
@@ -172,14 +171,23 @@ fn run_shell_inner(
     }
 }
 
+/// Result of RTK rewrite operation.
+struct RewriteResult {
+    command: String,
+    rewritten: bool,
+}
+
 /// Try to rewrite a command using RTK's rewrite feature.
 /// Returns the RTK rewritten command if available, otherwise the original command.
 ///
-/// RTK rewrite works by:
-/// - Running `rtk rewrite <command>` to check if RTK has a filter for this command
-/// - If RTK returns a rewritten command (exit 0), use it
-/// - If RTK returns exit 1 (no equivalent), use the original command
-fn rewrite_command(command: &str) -> String {
+/// RTK rewrite exit codes:
+/// - Exit 0: Command rewritten and allowed
+/// - Exit 1: No RTK equivalent, use original command
+/// - Exit 2: Deny rule matched
+/// - Exit 3: Command rewritten but needs user confirmation (ask)
+///
+/// For exit 0 and 3, we use the rewritten command.
+fn rewrite_command(command: &str) -> RewriteResult {
     let output = std::process::Command::new("rtk")
         .arg("rewrite")
         .arg(command)
@@ -187,14 +195,26 @@ fn rewrite_command(command: &str) -> String {
         .ok();
 
     match output {
-        Some(output) if output.status.success() => {
-            let rewritten = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !rewritten.is_empty() && rewritten != command {
-                return rewritten;
+        Some(output) => {
+            let exit_code = output.status.code().unwrap_or(1);
+            // Exit 0 (allow) or Exit 3 (ask) means command was rewritten
+            if exit_code == 0 || exit_code == 3 {
+                let rewritten = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !rewritten.is_empty() && rewritten != command {
+                    return RewriteResult {
+                        command: rewritten,
+                        rewritten: true,
+                    };
+                }
+            }
+            RewriteResult {
+                command: command.to_string(),
+                rewritten: false,
             }
         }
-        _ => {}
+        None => RewriteResult {
+            command: command.to_string(),
+            rewritten: false,
+        },
     }
-
-    command.to_string()
 }
