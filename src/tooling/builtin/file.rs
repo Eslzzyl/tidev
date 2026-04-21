@@ -69,11 +69,17 @@ pub fn execute_tool_call(
                 .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
             let absolute_path = resolve_workspace_path(workspace_root, Path::new(&args.path))?;
             let original_exists = absolute_path.exists();
+            let old_content = if original_exists {
+                read_existing_text(&absolute_path).unwrap_or_default()
+            } else {
+                String::new()
+            };
+
             write_file(workspace_root, &args.path, &args.content)?;
             Ok(file_change_output(
                 workspace_root,
                 &absolute_path,
-                "",
+                &old_content,
                 &args.content,
                 "Wrote",
                 original_exists,
@@ -230,7 +236,11 @@ fn file_change_output(
     if !original_exists {
         options.set_context_len(0);
     }
-    options.set_original_filename(format!("a/{relative}"));
+    options.set_original_filename(if original_exists {
+        format!("a/{relative}")
+    } else {
+        String::new()
+    });
     options.set_modified_filename(format!("b/{relative}"));
     let patch = options.create_patch(old_content, new_content);
 

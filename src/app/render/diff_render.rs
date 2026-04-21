@@ -108,17 +108,14 @@ fn render_diff_section(
     width: usize,
     palette: ThemePalette,
 ) -> Option<(Vec<Line<'static>>, Vec<SelectableRegionRange>)> {
-    let stripped_section = strip_render_only_diff_metadata(section);
-    let patch = Patch::from_str(&stripped_section).ok()?;
+    let patch = Patch::from_str(section).ok()?;
     let rows = collect_rows(&patch);
     if rows.is_empty() {
         return None;
     }
 
     let syntax_path = patch.modified().or_else(|| patch.original()).map(Path::new);
-    let is_new_file = section
-        .lines()
-        .any(|line| line.trim() == "new file mode 100644");
+    let is_new_file = patch.original().is_none();
     let layout = if is_new_file {
         DiffLayout::Narrow
     } else if width >= WIDE_LAYOUT_THRESHOLD {
@@ -167,14 +164,6 @@ fn render_diff_section(
             (lines, vec![region])
         }
     })
-}
-
-fn strip_render_only_diff_metadata(section: &str) -> String {
-    section
-        .lines()
-        .filter(|line| line.trim() != "new file mode 100644")
-        .map(|line| format!("{line}\n"))
-        .collect()
 }
 
 fn collect_rows(patch: &Patch<'_, str>) -> Vec<DiffRow> {
