@@ -3,7 +3,9 @@ use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use tokio::time::{Duration, Instant, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 use uuid::Uuid;
@@ -16,8 +18,12 @@ use crate::{
     tooling::ToolRegistry,
 };
 
+use super::channel::Channel;
 use super::commands::{CommandInvocation, gateway_help_text, parse_command, session_help_text};
 use super::qq_client::QQClient;
+use super::shared;
+
+pub const GATEWAY_PLATFORM_QQ: &str = "qq";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct WsPayload {
@@ -39,7 +45,8 @@ struct ReadyData {
     user: serde_json::Value,
 }
 
-pub struct QQGatewayRunner {
+/// QQ gateway channel implementation.
+pub struct QQChannel {
     pub workspace_root: PathBuf,
     pub config: AppConfig,
     pub auth: AuthStore,
@@ -53,8 +60,37 @@ pub struct QQGatewayRunner {
     pub last_seq: Option<u32>,
 }
 
-impl QQGatewayRunner {
-    pub async fn run_loop(&mut self) -> Result<()> {
+impl QQChannel {
+    /// Create a new QQ channel.
+    pub fn new(
+        workspace_root: PathBuf,
+        config: AppConfig,
+        auth: AuthStore,
+        store: SessionStore,
+        llm: LlmClient,
+        tools: ToolRegistry,
+        instruction_prompt: String,
+        allowlist: HashSet<String>,
+        app_id: String,
+        app_secret: String,
+        sandbox: bool,
+    ) -> Self {
+        Self {
+            workspace_root,
+            config,
+            auth,
+            store,
+            llm,
+            tools,
+            instruction_prompt,
+            allowlist,
+            client: QQClient::new(app_id, app_secret, sandbox),
+            session_id: None,
+            last_seq: None,
+        }
+    }
+
+    async fn run_loop(&mut self) -> Result<()> {
         loop {
             if let Err(e) = self.connect_and_handle().await {
                 crate::log_error!("QQ Gateway connection error: {e}. Retrying in 5s...");
@@ -251,7 +287,7 @@ impl QQGatewayRunner {
         chat_key: &str,
         active_model: &crate::config::ActiveModel,
     ) -> Result<Conversation> {
-        if let Some(session_id) = self.store.load_gateway_chat_session("qq", chat_key)?
+        if let Some(session_id) = self.store.load_gateway_chat_session(GATEWAY_PLATFORM_QQ, chat_key)?
             && let Some(record) = self.store.load_session_record(session_id)?
         {
             let messages = self.store.load_messages(session_id)?;
@@ -285,7 +321,7 @@ impl QQGatewayRunner {
             &title,
         )?;
         self.store
-            .set_gateway_chat_session("qq", chat_key, session_id)?;
+            .set_gateway_chat_session(GATEWAY_PLATFORM_QQ, chat_key, session_id)?;
 
         let now = Utc::now();
         Ok(Conversation {
@@ -369,7 +405,7 @@ impl QQGatewayRunner {
 
         let mut request_model = active_model.clone();
         request_model.system_prompt =
-            super::compose_system_prompt(&active_model.system_prompt, &self.instruction_prompt);
+            shared::compose_system_prompt(&active_model.system_prompt, &self.instruction_prompt);
 
         let turn = self
             .llm_completion_turn(&request_model, request_messages, tool_definitions)
@@ -559,7 +595,7 @@ impl QQGatewayRunner {
                     .await?;
             }
             Some("reset-model") => {
-                self.store.clear_gateway_chat_model("qq", chat_key)?;
+                self.store.clear_gateway_chat_model(GATEWAY_PLATFORM_QQ, chat_key)?;
                 let default_model = self.config.resolve_active_model(&self.auth)?;
                 updated_model = Some(default_model);
                 let text = format!(
@@ -611,7 +647,7 @@ impl QQGatewayRunner {
                     .await?;
             }
             Some("reset") => {
-                self.store.clear_gateway_chat_model("qq", chat_key)?;
+                self.store.clear_gateway_chat_model(GATEWAY_PLATFORM_QQ, chat_key)?;
                 let default_model = self.config.resolve_active_model(&self.auth)?;
                 *active_model = default_model;
                 let text = format!(
@@ -629,7 +665,7 @@ impl QQGatewayRunner {
                     .with_context(|| format!("invalid model selector '{selector}'"))?;
 
                 self.store.set_gateway_chat_model(
-                    "qq",
+                    GATEWAY_PLATFORM_QQ,
                     chat_key,
                     &selected.provider_id,
                     &selected.model_id,
@@ -675,7 +711,7 @@ impl QQGatewayRunner {
     ) -> Result<Conversation> {
         let conversation = self.create_gateway_session(active_model)?;
         self.store
-            .set_gateway_chat_session("qq", chat_key, conversation.session_id)?;
+            .set_gateway_chat_session(GATEWAY_PLATFORM_QQ, chat_key, conversation.session_id)?;
         Ok(conversation)
     }
 
@@ -701,6 +737,19 @@ impl QQGatewayRunner {
             &conversation.title,
         )?;
         Ok(conversation)
+    }
+}
+
+impl Channel for QQChannel {
+    fn name(&self) -> &'static str {
+        GATEWAY_PLATFORM_QQ
+    }
+
+    fn run(&mut self) -> Pin<Box<dyn Future<Output = Result<()>> + '_>> {
+        Box::pin(async move {
+            crate::log_info!("QQ channel ready");
+            self.run_loop().await
+        })
     }
 }
 

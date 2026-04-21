@@ -2,7 +2,9 @@ use anyhow::{Context, Result, bail};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::time::{Duration, Instant, sleep};
 use uuid::Uuid;
@@ -20,6 +22,7 @@ use crate::{
     tooling::ToolRegistry,
 };
 
+use super::channel::Channel;
 use super::commands::{
     CommandInvocation, GATEWAY_COMMANDS, gateway_help_text, parse_command, session_help_text,
 };
@@ -31,7 +34,8 @@ const TELEGRAM_DRAFT_EDIT_INTERVAL_MS: u64 = 1200;
 const MAX_TOOL_ROUNDS: usize = 8;
 const MAX_MODEL_LIST_LINES: usize = 48;
 
-pub struct TelegramGatewayRunner {
+/// Telegram gateway channel implementation.
+pub struct TelegramChannel {
     pub workspace_root: PathBuf,
     pub config: AppConfig,
     pub auth: AuthStore,
@@ -46,8 +50,37 @@ pub struct TelegramGatewayRunner {
     pub request_seq: u64,
 }
 
-impl TelegramGatewayRunner {
-    pub async fn bootstrap_offset(&mut self) -> Result<()> {
+impl TelegramChannel {
+    /// Create a new Telegram channel.
+    pub fn new(
+        workspace_root: PathBuf,
+        config: AppConfig,
+        auth: AuthStore,
+        store: SessionStore,
+        llm: LlmClient,
+        tools: ToolRegistry,
+        instruction_prompt: String,
+        allowlist: HashSet<String>,
+        poll_timeout_secs: u64,
+        bot_token: String,
+    ) -> Self {
+        Self {
+            workspace_root,
+            config,
+            auth,
+            store,
+            llm,
+            tools,
+            instruction_prompt,
+            allowlist,
+            poll_timeout_secs,
+            bot: TelegramBot::new(bot_token),
+            offset: 0,
+            request_seq: 0,
+        }
+    }
+
+    async fn bootstrap_offset(&mut self) -> Result<()> {
         let updates = self.bot.get_updates(0, 0).await?;
         if let Some(last) = updates.last() {
             self.offset = last.update_id.saturating_add(1);
@@ -66,7 +99,7 @@ impl TelegramGatewayRunner {
         Ok(())
     }
 
-    pub async fn run_loop(&mut self) -> Result<()> {
+    async fn run_loop(&mut self) -> Result<()> {
         loop {
             let updates = match self
                 .bot
@@ -827,6 +860,20 @@ impl TelegramGatewayRunner {
                 .await?;
         }
         Ok(())
+    }
+}
+
+impl Channel for TelegramChannel {
+    fn name(&self) -> &'static str {
+        GATEWAY_PLATFORM_TELEGRAM
+    }
+
+    fn run(&mut self) -> Pin<Box<dyn Future<Output = Result<()>> + '_>> {
+        Box::pin(async move {
+            self.bootstrap_offset().await?;
+            crate::log_info!("Telegram channel ready, offset={}", self.offset);
+            self.run_loop().await
+        })
     }
 }
 

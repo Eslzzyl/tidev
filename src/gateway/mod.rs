@@ -1,4 +1,6 @@
+mod channel;
 mod commands;
+mod orchestrator;
 mod qq;
 mod qq_client;
 mod shared;
@@ -7,7 +9,6 @@ mod telegram;
 use std::env;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
-use tokio::time::Duration;
 
 use anyhow::{Context, Result, bail};
 
@@ -19,7 +20,8 @@ use crate::{
     tooling::{FileReadTracker, ToolRegistry},
 };
 
-use shared::{compose_instruction_prompt, compose_system_prompt};
+use orchestrator::ChannelOrchestrator;
+use shared::compose_instruction_prompt;
 
 pub fn run() -> Result<()> {
     let runtime = Runtime::new().context("failed to create runtime")?;
@@ -41,15 +43,14 @@ async fn run_async() -> Result<()> {
     let auth = AuthStore::load_or_create(&paths)?;
     crate::log_info!("Auth store loaded");
 
-    if !config.gateway.telegram.enabled && !config.gateway.qq.enabled {
-        bail!(
-            "No gateway enabled; set either gateway.telegram.enabled or gateway.qq.enabled to true in config.toml"
-        );
-    }
+    let default_model = config.resolve_active_model_for_gateway(&auth)?;
+    let instruction_prompt = compose_instruction_prompt(&workspace_root, &paths, &config);
+    let db_path = paths.default_database_path();
+
+    // Build orchestrator with enabled channels
+    let mut orchestrator = ChannelOrchestrator::new();
 
     if config.gateway.telegram.enabled {
-        crate::log_info!("Telegram gateway enabled");
-
         let allowlist = config
             .gateway
             .telegram
@@ -58,8 +59,6 @@ async fn run_async() -> Result<()> {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .collect::<std::collections::HashSet<_>>();
-
-        crate::log_info!("Telegram allowlist loaded, {} entries", allowlist.len());
 
         if allowlist.is_empty() {
             bail!(
@@ -71,12 +70,12 @@ async fn run_async() -> Result<()> {
             .telegram_bot_token()
             .context("missing Telegram bot token in auth.json for channel 'telegram'")?
             .to_string();
-        crate::log_info!("Telegram Bot token loaded");
 
-        let default_model = config.resolve_active_model_for_gateway(&auth)?;
-        let instruction_prompt = compose_instruction_prompt(&workspace_root, &paths, &config);
+        crate::log_info!("Telegram channel enabled, allowlist: {} entries", allowlist.len());
+
+        // Each channel gets its own resources
+        let store = SessionStore::open(db_path)?;
         let llm = LlmClient::new()?;
-        let store = SessionStore::open(paths.default_database_path())?;
         let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
         let file_read_tracker = Arc::new(FileReadTracker::new());
         let mut tools = ToolRegistry::new(
@@ -90,37 +89,23 @@ async fn run_async() -> Result<()> {
         );
         tools.set_active_model(default_model.clone());
 
-        let poll_timeout_secs = config.gateway.telegram.poll_timeout_secs.max(1);
-
-        let mut runner = telegram::TelegramGatewayRunner {
-            workspace_root: workspace_root.clone(),
-            config: config.clone(),
-            auth: auth.clone(),
+        let channel = telegram::TelegramChannel::new(
+            workspace_root.clone(),
+            config.clone(),
+            auth.clone(),
             store,
             llm,
             tools,
-            instruction_prompt,
+            instruction_prompt.clone(),
             allowlist,
-            poll_timeout_secs,
-            bot: telegram::TelegramBot::new(bot_token),
-            offset: 0,
-            request_seq: 0,
-        };
+            config.gateway.telegram.poll_timeout_secs.max(1),
+            bot_token,
+        );
 
-        runner.bootstrap_offset().await?;
-        crate::log_info!("Telegram Bootstrap offset initialized: {}", runner.offset);
-
-        crate::log_info!("Telegram Gateway ready, entering main loop");
-        let _runner_handle = tokio::task::spawn_local(async move {
-            if let Err(e) = runner.run_loop().await {
-                crate::log_error!("Telegram Gateway loop failed: {e}");
-            }
-        });
+        orchestrator.add(Box::new(channel));
     }
 
     if config.gateway.qq.enabled {
-        crate::log_info!("QQ gateway enabled");
-
         let allowlist = config
             .gateway
             .qq
@@ -129,8 +114,6 @@ async fn run_async() -> Result<()> {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .collect::<std::collections::HashSet<_>>();
-
-        crate::log_info!("QQ allowlist loaded, {} entries", allowlist.len());
 
         if allowlist.is_empty() {
             bail!("gateway.qq.allowlist is empty; configure at least one QQ user/channel id");
@@ -145,10 +128,11 @@ async fn run_async() -> Result<()> {
             .context("missing QQ AppSecret in auth.json")?
             .to_string();
 
-        let default_model = config.resolve_active_model_for_gateway(&auth)?;
-        let instruction_prompt = compose_instruction_prompt(&workspace_root, &paths, &config);
+        crate::log_info!("QQ channel enabled, allowlist: {} entries", allowlist.len());
+
+        // Each channel gets its own resources
+        let store = SessionStore::open(db_path)?;
         let llm = LlmClient::new()?;
-        let store = SessionStore::open(paths.default_database_path())?;
         let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
         let file_read_tracker = Arc::new(FileReadTracker::new());
         let mut tools = ToolRegistry::new(
@@ -162,26 +146,34 @@ async fn run_async() -> Result<()> {
         );
         tools.set_active_model(default_model.clone());
 
-        let mut runner = qq::QQGatewayRunner {
-            workspace_root: workspace_root.clone(),
-            config: config.clone(),
-            auth: auth.clone(),
+        let channel = qq::QQChannel::new(
+            workspace_root.clone(),
+            config.clone(),
+            auth.clone(),
             store,
             llm,
             tools,
-            instruction_prompt,
+            instruction_prompt.clone(),
             allowlist,
-            client: qq_client::QQClient::new(app_id, app_secret, config.gateway.qq.sandbox),
-            session_id: None,
-            last_seq: None,
-        };
+            app_id,
+            app_secret,
+            config.gateway.qq.sandbox,
+        );
 
-        crate::log_info!("QQ Gateway ready, entering main loop");
-        runner.run_loop().await?;
+        orchestrator.add(Box::new(channel));
     }
 
-    // Keep the main thread alive if we spawned gateways
-    loop {
-        tokio::time::sleep(Duration::from_secs(3600)).await;
+    if orchestrator.is_empty() {
+        bail!(
+            "No gateway enabled; set either gateway.telegram.enabled or gateway.qq.enabled to true in config.toml"
+        );
     }
+
+    crate::log_info!(
+        "Gateway ready, starting {} channel(s): {}",
+        orchestrator.channel_names().len(),
+        orchestrator.channel_names().join(", ")
+    );
+
+    orchestrator.run().await
 }
