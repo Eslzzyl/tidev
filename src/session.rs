@@ -241,6 +241,8 @@ pub struct Message {
     pub snapshot_hash: Option<String>,
     #[serde(default)]
     pub patch_files: Option<String>,
+    #[serde(default)]
+    pub mode: Option<crate::prompts::SessionMode>,
 }
 
 impl Message {
@@ -267,6 +269,7 @@ impl Message {
             tokens_per_second: None,
             snapshot_hash: None,
             patch_files: None,
+            mode: None,
         }
     }
 
@@ -300,6 +303,7 @@ impl Message {
             tokens_per_second: None,
             snapshot_hash: None,
             patch_files: None,
+            mode: None,
         }
     }
 
@@ -332,6 +336,7 @@ impl Message {
             tokens_per_second: None,
             snapshot_hash: None,
             patch_files: None,
+            mode: None,
         }
     }
 
@@ -362,6 +367,7 @@ impl Message {
             tokens_per_second: None,
             snapshot_hash: None,
             patch_files: None,
+            mode: None,
         }
     }
 

@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use std::sync::{Arc, atomic::AtomicBool};
 use tokio::runtime::Runtime;
 
-use crate::session::{ToolCall, ToolExecutionResult};
+use crate::session::{MessageRole, ToolCall, ToolExecutionResult};
 use crate::tooling::{QuestionArgs, TaskArgs, execute_shell_tool_call};
 
 use super::App;
@@ -194,11 +194,20 @@ impl App {
             let permission_key = self.tools.permission_key_for_call(&tool_call);
             let permission_label = self.tools.permission_label_for_call(&tool_call);
 
-            if !self.tools.can_execute(&tool_call.name, self.mode) {
+            let effective_mode = self
+                .conversation
+                .messages
+                .iter()
+                .filter(|m| m.role == MessageRole::Assistant)
+                .find(|m| m.tool_calls.iter().any(|tc| tc.id == tool_call.id))
+                .and_then(|m| m.mode)
+                .unwrap_or(self.mode);
+
+            if !self.tools.can_execute(&tool_call.name, effective_mode) {
                 let output = format!(
                     "Tool '{}' is disabled in {} mode",
                     tool_call.name,
-                    self.mode.as_str()
+                    effective_mode.as_str()
                 );
                 self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
                 self.advance_pending_tool_execution();

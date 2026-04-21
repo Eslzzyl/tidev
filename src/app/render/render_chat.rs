@@ -1,6 +1,5 @@
 use crate::{
     markdown_render::{WrapOptions, render_markdown_text_with_width_and_cwd, word_wrap_line},
-    prompts::SessionMode,
     session::{COMPACTION_MESSAGE_LABEL, Message, MessageRole, ToolCall},
     theme::ThemePalette,
     tooling::{TodoItem, canonical_tool_name},
@@ -1462,17 +1461,26 @@ impl App {
                 .tokens_per_second
                 .map(|val| format!("{:.1} t/s", val));
 
-            let mode_label = match self.mode {
-                SessionMode::Plan => "Plan",
-                SessionMode::Build => "Build",
-            };
+            let mode_label = message
+                .mode
+                .or_else(|| {
+                    // Fallback to the preceding user message mode if not set on assistant message
+                    self.conversation
+                        .messages
+                        .iter()
+                        .take_while(|m| m.id != message.id)
+                        .filter(|m| m.role == MessageRole::User)
+                        .last()
+                        .and_then(|m| m.mode)
+                })
+                .unwrap_or(self.mode);
 
             let parts: Vec<String> = [
                 Some(model_display_name),
                 duration,
                 tps,
                 end_time,
-                Some(mode_label.to_string()),
+                Some(mode_label.title().to_string()),
             ]
             .into_iter()
             .flatten()

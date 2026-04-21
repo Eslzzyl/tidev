@@ -298,7 +298,8 @@ impl App {
         let mut model = self.active_model.clone();
         model.system_prompt = system_prompt;
 
-        let assistant_message = Message::streaming(MessageRole::Assistant, "");
+        let mut assistant_message = Message::streaming(MessageRole::Assistant, "");
+        assistant_message.mode = Some(self.mode);
         self.conversation.push(assistant_message);
 
         let messages = self
@@ -362,8 +363,14 @@ impl App {
         let is_git = crate::system_info::is_git_repo(&self.workspace_root);
         prompt.push_str("\n\nHere is some useful information about the environment:\n<env>\n  ");
         prompt.push_str(&format!("Working directory: {}\n  ", working_dir));
-        prompt.push_str(&format!("Workspace root folder: {}\n  ", self.workspace_root.display()));
-        prompt.push_str(&format!("Is directory a git repo: {}\n  ", if is_git { "yes" } else { "no" }));
+        prompt.push_str(&format!(
+            "Workspace root folder: {}\n  ",
+            self.workspace_root.display()
+        ));
+        prompt.push_str(&format!(
+            "Is directory a git repo: {}\n  ",
+            if is_git { "yes" } else { "no" }
+        ));
         prompt.push_str(&system_info.format_env());
         prompt.push_str("\n</env>");
 
@@ -1040,6 +1047,7 @@ impl App {
 
         let mut user_message = Message::new(MessageRole::User, prompt.clone());
         user_message.attachments = attachments;
+        user_message.mode = Some(self.mode);
         self.conversation.push(user_message.clone());
         self.store
             .append_message(self.conversation.session_id, &user_message)?;
