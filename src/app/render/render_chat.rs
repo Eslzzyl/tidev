@@ -28,13 +28,7 @@ use super::{
 const TOOL_OUTPUT_PREVIEW_LINES: usize = 5;
 const TOOL_OUTPUT_EXPANDED_MAX_LINES: usize = 100;
 
-#[derive(Clone, Debug)]
-pub(crate) struct SelectableRegionRange {
-    pub start_line: usize,
-    pub end_line: usize,
-    pub min_x: u16,
-    pub max_x: Option<u16>,
-}
+use crate::app::runtime::state::SelectableRegionRange;
 
 #[derive(Clone, Debug)]
 struct ToolResultCardRange {
@@ -1267,6 +1261,60 @@ impl App {
         )
     }
 
+
+    fn cached_render_tool_call_with_result(
+        &self,
+        message: &Message,
+        tool_call: &ToolCall,
+        tool_result: Option<&Message>,
+        body_width: usize,
+        is_streaming: bool,
+        ctx: &RenderContext<'_>,
+    ) -> (Vec<Line<'static>>, Vec<SelectableRegionRange>) {
+        if body_width == 0 {
+            return (Vec::new(), Vec::new());
+        }
+        
+        let tick = self.next_message_render_cache_tick();
+        let key = MessageRenderCacheKey {
+            session_id: self.conversation.session_id,
+            message_id: message.id, // Binds the cache to the Assistant message hosting this tool call
+            width: body_width,
+            is_round_end: !is_streaming, // Approximation, cache differs when streaming is done
+            kind: MessageRenderCacheKind::ToolCall(tool_call.id.clone()),
+        };
+
+        {
+            let mut cache = self.message_render_cache.borrow_mut();
+            if let Some(entry) = cache.get_mut(&key) {
+                entry.last_used_tick = tick;
+                self.record_message_render_cache_hit();
+                match &entry.value {
+                    MessageRenderCacheValue::ToolResult(lines, regions) => {
+                        return (lines.clone(), regions.clone());
+                    }
+                    MessageRenderCacheValue::Cards(..) => {}
+                }
+            }
+        }
+
+        self.record_message_render_cache_miss();
+        let result = render_tool_call_with_result(tool_call, tool_result, body_width, is_streaming, ctx);
+
+        {
+            let mut cache = self.message_render_cache.borrow_mut();
+            cache.insert(
+                key,
+                MessageRenderCacheEntry {
+                    value: MessageRenderCacheValue::ToolResult(result.0.clone(), result.1.clone()),
+                    last_used_tick: tick,
+                },
+            );
+        }
+        
+        result
+    }
+
     fn cached_render_message_cards(
         &self,
         message: &Message,
@@ -1289,17 +1337,13 @@ impl App {
                 self.record_message_render_cache_hit();
                 match &entry.value {
                     MessageRenderCacheValue::Cards(cards) => return cards.clone(),
+                    MessageRenderCacheValue::ToolResult(..) => {} // Should never happen with .Cards kind
                 }
             }
         }
 
         self.record_message_render_cache_miss();
         let cards = self.render_message_cards(message, body_width, is_round_end);
-
-        // Do not cache streaming messages to avoid memory bloat and stale content
-        if message.streaming && matches!(message.role, MessageRole::Assistant) {
-            return cards;
-        }
 
         {
             let mut cache = self.message_render_cache.borrow_mut();
@@ -2000,7 +2044,8 @@ impl App {
                 if !message.tool_calls.is_empty() {
                     for tool_call in &message.tool_calls {
                         let tool_result = tool_results_by_id.get(&tool_call.id).copied();
-                        let (card_lines, _) = render_tool_call_with_result(
+                        let (card_lines, _) = self.cached_render_tool_call_with_result(
+                            message,
                             tool_call,
                             tool_result,
                             body_width,
@@ -2183,7 +2228,8 @@ impl App {
                 if !message.tool_calls.is_empty() {
                     for tool_call in &message.tool_calls {
                         let tool_result = tool_results_by_id.get(&tool_call.id).copied();
-                        let (tool_card_lines, mut regions) = render_tool_call_with_result(
+                        let (tool_card_lines, mut regions) = self.cached_render_tool_call_with_result(
+                            message,
                             tool_call,
                             tool_result,
                             body_width,

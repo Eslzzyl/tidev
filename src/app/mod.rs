@@ -546,7 +546,9 @@ impl App {
                     && matches!(message.role, MessageRole::Assistant)
                 {
                     message.content.push_str(&content);
+                    let message_id = message.id;
                     self.message_layout_index.borrow_mut().valid = false;
+                    self.invalidate_active_message_render_cache_for(message_id);
                 }
             }
             BackendEvent::ReasoningDelta {
@@ -563,7 +565,9 @@ impl App {
                     && matches!(message.role, MessageRole::Assistant)
                 {
                     message.reasoning.push_str(&content);
+                    let message_id = message.id;
                     self.message_layout_index.borrow_mut().valid = false;
+                    self.invalidate_active_message_render_cache_for(message_id);
                 }
             }
             BackendEvent::ToolCallUpdated {

@@ -439,7 +439,7 @@ impl App {
             .message_render_cache
             .borrow()
             .iter()
-            .map(|(key, entry)| (*key, entry.last_used_tick))
+            .map(|(key, entry)| (key.clone(), entry.last_used_tick))
             .collect::<Vec<_>>();
         evict_candidates.sort_by_key(|(_, tick)| *tick);
 

@@ -102,12 +102,21 @@ pub(crate) struct MessageLayoutIndex {
     pub(crate) contains_streaming_messages: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum MessageRenderCacheKind {
     Cards,
+    ToolCall(String),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug)]
+pub(crate) struct SelectableRegionRange {
+    pub start_line: usize,
+    pub end_line: usize,
+    pub min_x: u16,
+    pub max_x: Option<u16>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct MessageRenderCacheKey {
     pub(crate) session_id: Uuid,
     pub(crate) message_id: Uuid,
@@ -119,6 +128,7 @@ pub(crate) struct MessageRenderCacheKey {
 #[derive(Clone, Debug)]
 pub(crate) enum MessageRenderCacheValue {
     Cards(Vec<(Color, Vec<Line<'static>>)>),
+    ToolResult(Vec<Line<'static>>, Vec<SelectableRegionRange>),
 }
 
 #[derive(Clone, Debug)]
