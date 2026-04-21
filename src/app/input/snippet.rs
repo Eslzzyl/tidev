@@ -1,5 +1,4 @@
 use std::path::Path;
-use strsim::levenshtein;
 
 const MAX_SUGGESTIONS: usize = 12;
 
@@ -179,41 +178,11 @@ impl SnippetState {
     }
 
     fn calculate_score(snippet: &str, query_chars: &[char]) -> (i64, Vec<usize>) {
-        let snippet_chars: Vec<char> = snippet.chars().collect();
-
-        // Exact prefix match: highest score
+        // Only use simple prefix matching
         if snippet.starts_with(&String::from_iter(query_chars)) {
             let matched: Vec<usize> = (0..query_chars.len()).collect();
             let score = 1000 + query_chars.len() as i64;
             return (score, matched);
-        }
-
-        // Substring match (contains) - find query as a subsequence in snippet
-        let mut matched = Vec::new();
-        let mut query_idx = 0;
-        for (i, c) in snippet_chars.iter().enumerate() {
-            if query_idx < query_chars.len()
-                && c.to_lowercase().next() == Some(query_chars[query_idx].to_ascii_lowercase())
-            {
-                matched.push(i);
-                query_idx += 1;
-            }
-        }
-        if query_idx == query_chars.len() {
-            // Found all characters in order
-            let score = 500 + (matched.len() as i64);
-            return (score, matched);
-        }
-
-        // Fuzzy match using Levenshtein distance
-        let edit_dist = levenshtein(&String::from_iter(query_chars), snippet);
-        let max_len = query_chars.len().max(snippet_chars.len());
-        if max_len > 0 && edit_dist < max_len {
-            let similarity = ((max_len - edit_dist) as i64) * 100 / max_len as i64;
-            if similarity > 30 {
-                // Only return if similarity > 30%
-                return (similarity, vec![]);
-            }
         }
 
         (0, vec![])
@@ -293,35 +262,33 @@ another snippet
     }
 
     #[test]
-    fn test_substring_match() {
-        let (score, indices) = SnippetState::calculate_score("hello world", &['e', 'l', 'o']);
-        assert!(score > 500);
-        assert!(!indices.is_empty());
-    }
-
-    #[test]
-    fn test_fuzzy_match() {
-        let (score, _) = SnippetState::calculate_score("hello", &['h', 'a', 'l', 'o']);
-        assert!(score > 30);
-    }
-
-    #[test]
     fn test_no_match() {
         let (score, _) = SnippetState::calculate_score("abc", &['x', 'y', 'z']);
+        assert_eq!(score, 0);
+    }
+
+    #[test]
+    fn test_non_prefix_no_match() {
+        // Non-prefix queries should not match anymore (no fuzzy/subsequence matching)
+        let (score, _) = SnippetState::calculate_score("hello world", &['e', 'l', 'o']);
+        assert_eq!(score, 0);
+
+        let (score, _) = SnippetState::calculate_score("hello", &['h', 'a', 'l', 'o']);
         assert_eq!(score, 0);
     }
 }
 
 #[test]
 fn test_cjk_support() {
-    // Test pure CJK matching
+    // Test pure CJK prefix matching
     let (score, _) = SnippetState::calculate_score("你好世界", &['你', '好']);
     eprintln!("CJK prefix match score: {}", score);
     assert!(score > 0, "CJK prefix match should work");
 
+    // Non-prefix CJK queries should not match
     let (score, _) = SnippetState::calculate_score("你好世界", &['好', '世']);
-    eprintln!("CJK subsequence match score: {}", score);
-    assert!(score > 0, "CJK subsequence match should work");
+    eprintln!("CJK non-prefix match score: {}", score);
+    assert_eq!(score, 0, "CJK non-prefix should not match");
 
     // Test current_word with CJK - use valid character boundaries
     // "你好世界" = 你(0-2), 好(3-5), 世(6-8), 界(9-11)
