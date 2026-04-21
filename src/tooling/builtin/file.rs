@@ -917,6 +917,9 @@ fn anchor_similarity(
 
 fn whitespace_normalized_replacer(content: &str, find: &str) -> Vec<String> {
     let normalized_find = normalize_whitespace(find);
+    if normalized_find.is_empty() {
+        return Vec::new();
+    }
     let lines = split_lines_inclusive(content);
     let mut results = Vec::new();
 
@@ -1068,6 +1071,9 @@ fn context_aware_replacer(content: &str, find: &str) -> Vec<String> {
 }
 
 fn multi_occurrence_replacer(content: &str, find: &str) -> Vec<String> {
+    if find.is_empty() {
+        return Vec::new();
+    }
     let mut results = Vec::new();
     let mut offset = 0;
     while let Some(index) = content[offset..].find(find) {
