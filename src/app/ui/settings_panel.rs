@@ -19,6 +19,7 @@ pub enum SettingKey {
     NotificationEnabled,
     LoggingEnabled,
     ScrollSpeed,
+    RtkEnabled,
 }
 
 #[derive(Clone, Debug)]
@@ -29,7 +30,7 @@ pub struct SettingsPanelState {
 
 impl SettingsPanelState {
     pub fn new(config: &AppConfig) -> Self {
-        let items = vec![
+        let mut items = vec![
             SettingItem {
                 name: "Notifications".to_string(),
                 description: "Enable system notifications".to_string(),
@@ -54,6 +55,19 @@ impl SettingsPanelState {
             },
         ];
 
+        // Add RTK setting if installed, or show as disabled with message
+        let rtk_description = if config.rtk.installed {
+            "Enable RTK to compress command outputs and save tokens".to_string()
+        } else {
+            "RTK is not installed (install with: brew install rtk)".to_string()
+        };
+        items.push(SettingItem {
+            name: "RTK".to_string(),
+            description: rtk_description,
+            setting_type: SettingType::Toggle(config.rtk.enabled && config.rtk.installed),
+            key: SettingKey::RtkEnabled,
+        });
+
         Self {
             selected_index: 0,
             items,
@@ -73,10 +87,14 @@ impl SettingsPanelState {
     }
 
     /// Toggle for Toggle type only
-    pub fn toggle_selected(&mut self) {
+    pub fn toggle_selected(&mut self, rtk_installed: bool) {
         if let Some(item) = self.items.get_mut(self.selected_index)
             && let SettingType::Toggle(val) = &mut item.setting_type
         {
+            // Don't allow toggling RTK if it's not installed
+            if item.key == SettingKey::RtkEnabled && !rtk_installed {
+                return;
+            }
             *val = !*val;
         }
     }
@@ -117,6 +135,12 @@ impl SettingsPanelState {
                 SettingKey::ScrollSpeed => {
                     if let SettingType::Number { value, .. } = item.setting_type {
                         config.ui.scroll_speed = value;
+                    }
+                }
+                SettingKey::RtkEnabled => {
+                    if let SettingType::Toggle(val) = item.setting_type {
+                        // Only allow enabling RTK if it's installed
+                        config.rtk.enabled = val && config.rtk.installed;
                     }
                 }
             }

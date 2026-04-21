@@ -331,6 +331,7 @@ impl App {
             mcp,
             self.config.permissions.clone(),
             file_read_tracker,
+            self.config.rtk.enabled,
         );
     }
 

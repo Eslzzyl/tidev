@@ -305,9 +305,10 @@ pub fn execute_shell_tool_call(
     workspace_root: &Path,
     call: &ToolCall,
     max_output_bytes: usize,
+    rtk_enabled: bool,
     cancelled: Arc<AtomicBool>,
 ) -> Result<String> {
-    builtin::exec::execute_tool_call_with_cancel(workspace_root, call, max_output_bytes, cancelled)
+    builtin::exec::execute_tool_call_with_cancel(workspace_root, call, max_output_bytes, rtk_enabled, cancelled)
 }
 
 #[allow(dead_code)]
@@ -342,6 +343,7 @@ pub(super) fn execute_tool_call(
     session_id: Uuid,
     call: &ToolCall,
     max_output_bytes: usize,
+    rtk_enabled: bool,
 ) -> Result<ToolExecutionResult> {
     // Pre-execution checks for file read tracking
     let tool_name = crate::tooling::canonical_tool_name(&call.name);
@@ -374,6 +376,7 @@ pub(super) fn execute_tool_call(
         session_id,
         call,
         max_output_bytes,
+        rtk_enabled,
     )?;
 
     // Post-execution: record file reads

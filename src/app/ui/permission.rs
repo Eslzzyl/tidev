@@ -633,12 +633,14 @@ impl App {
         let tx = self.backend_tx.clone();
         let workspace_root = self.tools.workspace_root().to_path_buf();
         let max_output_bytes = self.tools.max_output_bytes();
+        let rtk_enabled = self.tools.rtk_enabled();
 
         runtime.spawn_blocking(move || {
             let output = execute_shell_tool_call(
                 &workspace_root,
                 &tool_call,
                 max_output_bytes,
+                rtk_enabled,
                 cancel_requested,
             )
             .unwrap_or_else(|error| format!("Tool failed: {error}"));

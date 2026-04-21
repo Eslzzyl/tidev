@@ -27,6 +27,7 @@ impl App {
             mcp,
             config.permissions.clone(),
             file_read_tracker.clone(),
+            config.rtk.enabled,
         );
         let commands = CommandRegistry::new();
         let command_palette = CommandPaletteState::default();

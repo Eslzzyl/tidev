@@ -22,6 +22,7 @@ pub struct ToolRegistry {
     permission_config: PermissionConfig,
     file_read_tracker: Arc<FileReadTracker>,
     active_model: Option<crate::config::ActiveModel>,
+    rtk_enabled: bool,
 }
 
 impl ToolRegistry {
@@ -32,6 +33,7 @@ impl ToolRegistry {
         mcp: McpManager,
         permission_config: PermissionConfig,
         file_read_tracker: Arc<FileReadTracker>,
+        rtk_enabled: bool,
     ) -> Self {
         let skills = SkillCatalog::discover(&workspace_root, &config_dir, &skill_sources);
         let definitions = tool_definitions(skills.tool_description());
@@ -46,6 +48,7 @@ impl ToolRegistry {
             permission_config,
             file_read_tracker,
             active_model: None,
+            rtk_enabled,
         }
     }
 
@@ -167,6 +170,10 @@ impl ToolRegistry {
         self.max_output_bytes
     }
 
+    pub fn rtk_enabled(&self) -> bool {
+        self.rtk_enabled
+    }
+
     pub fn can_execute(&self, tool_name: &str, mode: SessionMode) -> bool {
         self.definition_for(tool_name).is_some_and(|definition| {
             definition
@@ -214,6 +221,7 @@ impl ToolRegistry {
             session_id,
             call,
             self.max_output_bytes,
+            self.rtk_enabled,
         )?;
 
         // Image capability check: If the result contains images but the model doesn't support them,

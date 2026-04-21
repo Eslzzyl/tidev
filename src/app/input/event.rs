@@ -632,7 +632,7 @@ impl App {
                     panel.move_down();
                 }
                 KeyCode::Enter | KeyCode::Char(' ') => {
-                    panel.toggle_selected();
+                    panel.toggle_selected(self.config.rtk.installed);
                 }
                 KeyCode::Left => {
                     panel.decrease_selected();

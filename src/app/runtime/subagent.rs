@@ -351,6 +351,7 @@ async fn execute_child_tool_call(
                 &context.workspace_root,
                 tool_call,
                 context.tools.max_output_bytes(),
+                context.tools.rtk_enabled(),
                 context.cancel_requested.clone(),
             )?;
             Ok(ToolExecutionResult::new(output))

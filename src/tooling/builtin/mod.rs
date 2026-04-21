@@ -43,6 +43,7 @@ pub fn execute_tool_call(
     session_id: uuid::Uuid,
     call: &ToolCall,
     max_output_bytes: usize,
+    rtk_enabled: bool,
 ) -> Result<crate::session::ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
@@ -56,7 +57,7 @@ pub fn execute_tool_call(
             crate::session::ToolExecutionResult::new(output)
         }
         Some("bash") => {
-            let output = exec::execute_tool_call(workspace_root, call, max_output_bytes)?;
+            let output = exec::execute_tool_call(workspace_root, call, max_output_bytes, rtk_enabled)?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("task") => {

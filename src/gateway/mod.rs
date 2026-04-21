@@ -86,6 +86,7 @@ async fn run_async() -> Result<()> {
             mcp,
             config.permissions.clone(),
             file_read_tracker,
+            config.rtk.enabled,
         );
         tools.set_active_model(default_model.clone());
 
@@ -157,6 +158,7 @@ async fn run_async() -> Result<()> {
             mcp,
             config.permissions.clone(),
             file_read_tracker,
+            config.rtk.enabled,
         );
         tools.set_active_model(default_model.clone());
 
