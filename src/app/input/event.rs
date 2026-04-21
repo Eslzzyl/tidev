@@ -1172,6 +1172,15 @@ impl App {
     }
 
     pub(crate) fn refresh_snippet_state(&mut self) {
+        // If snippets haven't been loaded yet, we need to load them first
+        // to determine if they are available
+        if self.snippet_state.needs_load() {
+            self.snippet_state.load_snippets(
+                self.workspace_root.as_path(),
+                &self.paths.config_dir,
+            );
+        }
+
         // If no snippets available, skip entirely
         if !self.snippet_state.is_enabled() {
             return;

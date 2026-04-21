@@ -30,8 +30,19 @@ impl SnippetState {
     }
 
     /// Returns whether snippets are available and the feature should run.
+    /// Note: This only returns true if snippets have been loaded AND found.
+    /// For checking if snippets *should* be attempted to load, use needs_load() instead.
     pub fn is_enabled(&self) -> bool {
+        // If not loaded yet, we can't determine - return false to let sync handle loading
+        if !self.snippets_loaded {
+            return false;
+        }
         self.snippets_enabled
+    }
+
+    /// Returns whether snippets need to be loaded (hasn't been loaded yet)
+    pub fn needs_load(&self) -> bool {
+        !self.snippets_loaded
     }
 
     pub fn load_snippets(&mut self, workspace_root: &Path, config_dir: &Path) {
@@ -158,7 +169,7 @@ impl SnippetState {
             .collect();
 
         // Sort by score descending
-        results.sort_by(|a, b| b.score.cmp(&a.score));
+        results.sort_by_key(|b| std::cmp::Reverse(b.score));
 
         // Limit to max suggestions
         results.truncate(MAX_SUGGESTIONS);
