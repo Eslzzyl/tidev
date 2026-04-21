@@ -24,7 +24,7 @@ impl App {
         if self.at_mention.visible {
             self.refresh_at_mention_state();
         }
-        if self.snippet_state.visible {
+        if self.snippet_state.visible && self.snippet_state.is_enabled() {
             self.refresh_snippet_state();
         }
         match self.screen {

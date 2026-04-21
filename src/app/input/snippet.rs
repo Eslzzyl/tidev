@@ -17,6 +17,7 @@ pub struct SnippetState {
     pub selected_index: usize,
     pub snippets: Vec<Snippet>,
     snippets_loaded: bool,
+    snippets_enabled: bool,
     snippets_cache: Vec<String>,
 }
 
@@ -26,6 +27,11 @@ impl SnippetState {
         self.query.clear();
         self.selected_index = 0;
         self.snippets.clear();
+    }
+
+    /// Returns whether snippets are available and the feature should run.
+    pub fn is_enabled(&self) -> bool {
+        self.snippets_enabled
     }
 
     pub fn load_snippets(&mut self, workspace_root: &Path, config_dir: &Path) {
@@ -49,6 +55,7 @@ impl SnippetState {
 
         self.snippets_cache = snippets;
         self.snippets_loaded = true;
+        self.snippets_enabled = !self.snippets_cache.is_empty();
     }
 
     fn parse_snippets_from_content(content: &str, snippets: &mut Vec<String>) {
@@ -64,6 +71,12 @@ impl SnippetState {
     pub fn sync(&mut self, workspace_root: &Path, config_dir: &Path, input: &str, cursor: usize) {
         // Ensure snippets are loaded
         self.load_snippets(workspace_root, config_dir);
+
+        // If no snippets available, disable the feature entirely
+        if !self.snippets_enabled {
+            self.clear();
+            return;
+        }
 
         // Extract current word (from cursor position going backwards)
         let query = Self::current_word(input, cursor);

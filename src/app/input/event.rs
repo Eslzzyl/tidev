@@ -1145,6 +1145,11 @@ impl App {
     }
 
     pub(crate) fn refresh_snippet_state(&mut self) {
+        // If no snippets available, skip entirely
+        if !self.snippet_state.is_enabled() {
+            return;
+        }
+
         if self.command_palette.visible
             || self.connect_dialog.is_some()
             || self.theme_panel.is_some()
