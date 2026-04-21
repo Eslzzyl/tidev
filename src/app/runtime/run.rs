@@ -660,8 +660,8 @@ impl App {
                 }
                 if manual && let Some(summary) = summary.as_ref() {
                     let mut updated_existing = false;
-                    if let Some(last_msg) = self.conversation.messages.last_mut() {
-                        if last_msg.streaming
+                    if let Some(last_msg) = self.conversation.messages.last_mut()
+                        && last_msg.streaming
                             && last_msg.role == crate::session::MessageRole::System
                         {
                             last_msg.streaming = false;
@@ -679,7 +679,6 @@ impl App {
                                 crate::log_warn!("failed to persist compaction message: {}", error);
                             }
                         }
-                    }
                     if !updated_existing {
                         let compaction_message =
                             crate::session::Message::compaction(summary.clone());

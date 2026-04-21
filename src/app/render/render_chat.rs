@@ -20,7 +20,6 @@ use unicode_width::UnicodeWidthStr;
 use uuid::Uuid;
 
 use super::diff_render::render_unified_diff_text;
-use super::permission::RunningStatus;
 use super::permission::RunningSubagentExecution;
 use super::{
     App, MessageRenderCacheEntry, MessageRenderCacheKey, MessageRenderCacheKind,
@@ -2058,7 +2057,7 @@ impl App {
                         let mut current_min_x = 1;
                         for (i, line) in card_lines.iter().enumerate() {
                             let is_reasoning =
-                                line.spans.first().map_or(false, |s| s.content == "┃ ");
+                                line.spans.first().is_some_and(|s| s.content == "┃ ");
                             let line_min_x = if is_reasoning { 3 } else { 1 };
 
                             if line_min_x != current_min_x {
@@ -2170,7 +2169,7 @@ impl App {
                         let mut current_min_x = 1;
                         for (i, line) in card_lines.iter().enumerate() {
                             let is_reasoning =
-                                line.spans.first().map_or(false, |s| s.content == "┃ ");
+                                line.spans.first().is_some_and(|s| s.content == "┃ ");
                             let line_min_x = if is_reasoning { 3 } else { 1 };
 
                             if line_min_x != current_min_x {

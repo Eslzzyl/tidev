@@ -83,7 +83,7 @@ pub(crate) struct RunningToolExecution {
     pub request_id: u64,
     pub tool_call: ToolCall,
     pub cancel_requested: Arc<AtomicBool>,
-    pub status: RunningStatus,
+    pub _status: RunningStatus,
 }
 
 impl RunningToolExecution {
@@ -96,7 +96,7 @@ impl RunningToolExecution {
             request_id,
             tool_call,
             cancel_requested,
-            status: RunningStatus::Running,
+            _status: RunningStatus::Running,
         }
     }
 }
