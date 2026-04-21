@@ -334,6 +334,14 @@ impl QQGatewayRunner {
                         .send_message(channel_id, final_text, Some(msg_id))
                         .await?;
                 }
+
+                let mut assistant_message =
+                    Message::new(MessageRole::Assistant, turn.content.clone());
+                assistant_message.reasoning = turn.reasoning.clone();
+                conversation.push(assistant_message.clone());
+                self.store
+                    .append_message(conversation.session_id, &assistant_message)?;
+
                 return Ok(());
             }
 

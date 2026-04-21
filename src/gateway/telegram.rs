@@ -274,6 +274,12 @@ impl TelegramGatewayRunner {
                     source_message.chat.id,
                     final_text.len()
                 );
+
+                let assistant_message =
+                    Message::new(MessageRole::Assistant, final_text.clone());
+                conversation.push(assistant_message.clone());
+                self.store.append_message(conversation.session_id, &assistant_message)?;
+
                 self.finalize_draft_response(source_message, draft_message_id, &final_text)
                     .await?;
                 return Ok(());
