@@ -31,12 +31,17 @@ impl std::fmt::Display for NetworkError {
 impl std::error::Error for NetworkError {}
 
 /// Classifies a reqwest `Response` status code into a `NetworkError`.
-pub fn classify_response_status(
-    status: reqwest::StatusCode,
-    _body: Option<String>,
-) -> NetworkError {
+pub fn classify_response_status(status: reqwest::StatusCode, body: Option<String>) -> NetworkError {
     let code = status.as_u16();
-    let message = status.canonical_reason().unwrap_or("Unknown").to_string();
+    let message = if let Some(body_text) = body {
+        parse_error_body(status, &body_text)
+    } else {
+        format!(
+            "HTTP error {}: {}",
+            code,
+            status.canonical_reason().unwrap_or("Unknown")
+        )
+    };
 
     match code {
         // Retryable: server errors and rate limits
@@ -45,6 +50,68 @@ pub fn classify_response_status(
         401 | 403 | 404 | 413 => NetworkError::NonRetryable { message },
         // Unexpected but treat as non-retryable
         _ => NetworkError::NonRetryable { message },
+    }
+}
+
+/// Parses error body to a user-friendly message, extracting status code, message and detail.
+fn parse_error_body(status: reqwest::StatusCode, body: &str) -> String {
+    // Try to parse as JSON first
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(body) {
+        // Handle common error structures
+        // 1. Nested { "error": { "message": "...", "detail": "...", "code": ... } }
+        // 2. Flat { "message": "...", "detail": "..." }
+        // 3. Simple { "error": "..." }
+
+        let error_obj = val
+            .get("error")
+            .and_then(|e| e.as_object())
+            .or_else(|| val.as_object());
+
+        if let Some(obj) = error_obj {
+            let msg = obj
+                .get("message")
+                .and_then(|m| m.as_str())
+                .or_else(|| obj.get("error").and_then(|e| e.as_str()))
+                .or_else(|| val.get("error").and_then(|e| e.as_str()))
+                .unwrap_or_else(|| status.canonical_reason().unwrap_or("Unknown"));
+
+            let mut detail = obj
+                .get("detail")
+                .and_then(|d| d.as_str())
+                .or_else(|| obj.get("cause").and_then(|c| c.as_str()))
+                .map(|s| s.to_string());
+
+            // If detail/cause is itself a JSON string, try to parse it
+            if let Some(d) = detail.as_ref() {
+                if let Ok(inner_val) = serde_json::from_str::<serde_json::Value>(d) {
+                    if let Some(inner_detail) = inner_val.get("detail").and_then(|m| m.as_str()) {
+                        detail = Some(inner_detail.to_string());
+                    }
+                }
+            }
+
+            let mut result = format!("HTTP {} {}", status.as_u16(), msg);
+            if let Some(d) = detail {
+                result.push_str(&format!(" ({})", d));
+            }
+            return result;
+        }
+    }
+
+    // Fallback if not JSON or unexpected structure
+    if body.len() > 0 && body.len() < 200 {
+        format!(
+            "HTTP {} {}: {}",
+            status.as_u16(),
+            status.canonical_reason().unwrap_or("Unknown"),
+            body
+        )
+    } else {
+        format!(
+            "HTTP {} {}",
+            status.as_u16(),
+            status.canonical_reason().unwrap_or("Unknown")
+        )
     }
 }
 

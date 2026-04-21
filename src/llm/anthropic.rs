@@ -13,6 +13,7 @@ use crate::{
 };
 
 use super::attachments::{image_attachments, message_text_with_file_references};
+use super::error::classify_response_status;
 use super::think_parser::{ThinkParser, ToolCallBuilder, finalize_turn};
 
 pub(super) async fn stream_anthropic(
@@ -56,7 +57,7 @@ pub(super) async fn stream_anthropic(
                     status,
                     error_body
                 );
-                return Err(anyhow::anyhow!("HTTP error {}: {}", status, error_body));
+                return Err(classify_response_status(status, Some(error_body)).into());
             }
         }
         Err(e) => {
@@ -270,7 +271,7 @@ pub(super) async fn complete_anthropic(
                     status,
                     error_body
                 );
-                return Err(anyhow::anyhow!("HTTP error {}: {}", status, error_body));
+                return Err(classify_response_status(status, Some(error_body)).into());
             }
         }
         Err(e) => {
