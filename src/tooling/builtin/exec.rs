@@ -16,6 +16,13 @@ use super::utils::truncate_in_place;
 use crate::tooling::tools::BashArgs;
 use crate::tooling::{ToolDefinition, ToolPermission};
 
+/// Result of bash tool execution, including whether RTK rewrote the command.
+#[derive(Debug)]
+pub struct BashExecutionResult {
+    pub output: String,
+    pub rtk_rewritten: bool,
+}
+
 pub fn definitions() -> Vec<ToolDefinition> {
     vec![ToolDefinition::new::<BashArgs>(
         "bash",
@@ -29,7 +36,7 @@ pub fn execute_tool_call(
     call: &crate::session::ToolCall,
     max_output_bytes: usize,
     rtk_enabled: bool,
-) -> Result<String> {
+) -> Result<BashExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
     let args = serde_json::from_value::<BashArgs>(arguments)
@@ -51,7 +58,7 @@ pub fn execute_tool_call_with_cancel(
     max_output_bytes: usize,
     rtk_enabled: bool,
     cancelled: Arc<std::sync::atomic::AtomicBool>,
-) -> Result<String> {
+) -> Result<BashExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
     let args = serde_json::from_value::<BashArgs>(arguments)
@@ -74,12 +81,14 @@ fn run_shell_inner(
     rtk_enabled: bool,
     cancelled: Option<Arc<AtomicBool>>,
     timeout_ms: u64,
-) -> Result<String> {
+) -> Result<BashExecutionResult> {
     // Try to get RTK rewritten command if RTK is enabled
-    let actual_command = if rtk_enabled {
-        rewrite_command(command)
+    let (actual_command, rtk_rewritten) = if rtk_enabled {
+        let rewritten = rewrite_command(command);
+        let was_rewritten = rewritten != command;
+        (rewritten, was_rewritten)
     } else {
-        command.to_string()
+        (command.to_string(), false)
     };
 
     let mut process = if cfg!(target_os = "windows") {
@@ -153,7 +162,10 @@ fn run_shell_inner(
             truncate_in_place(&mut combined, max_output_bytes);
 
             let status = status.code().unwrap_or_default();
-            return Ok(format!("[exit {status}]\n{combined}"));
+            return Ok(BashExecutionResult {
+                output: format!("[exit {status}]\n{combined}"),
+                rtk_rewritten,
+            });
         }
 
         thread::sleep(Duration::from_millis(50));

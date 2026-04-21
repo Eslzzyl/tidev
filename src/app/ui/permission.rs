@@ -636,20 +636,20 @@ impl App {
         let rtk_enabled = self.tools.rtk_enabled();
 
         runtime.spawn_blocking(move || {
-            let output = execute_shell_tool_call(
+            let result = execute_shell_tool_call(
                 &workspace_root,
                 &tool_call,
                 max_output_bytes,
                 rtk_enabled,
                 cancel_requested,
             )
-            .unwrap_or_else(|error| format!("Tool failed: {error}"));
+            .unwrap_or_else(|error| ToolExecutionResult::new(format!("Tool failed: {error}")));
 
             let _ = tx.send(crate::session::BackendEvent::ToolCompleted {
                 session_id,
                 request_id,
                 tool_call,
-                result: ToolExecutionResult::new(output),
+                result,
             });
         });
 

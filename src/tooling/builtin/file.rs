@@ -262,6 +262,7 @@ fn file_change_output(
         attachments: Vec::new(),
         metadata,
         instruction_sources: Vec::new(),
+        rtk_rewritten: false,
     }
 }
 

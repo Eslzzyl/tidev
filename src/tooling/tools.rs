@@ -308,14 +308,16 @@ pub fn execute_shell_tool_call(
     max_output_bytes: usize,
     rtk_enabled: bool,
     cancelled: Arc<AtomicBool>,
-) -> Result<String> {
-    builtin::exec::execute_tool_call_with_cancel(
+) -> Result<crate::session::ToolExecutionResult> {
+    let result = builtin::exec::execute_tool_call_with_cancel(
         workspace_root,
         call,
         max_output_bytes,
         rtk_enabled,
         cancelled,
-    )
+    )?;
+    Ok(crate::session::ToolExecutionResult::new(result.output)
+        .with_rtk_rewritten(result.rtk_rewritten))
 }
 
 #[allow(dead_code)]

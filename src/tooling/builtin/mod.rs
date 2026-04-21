@@ -57,9 +57,10 @@ pub fn execute_tool_call(
             crate::session::ToolExecutionResult::new(output)
         }
         Some("bash") => {
-            let output =
+            let result =
                 exec::execute_tool_call(workspace_root, call, max_output_bytes, rtk_enabled)?;
-            crate::session::ToolExecutionResult::new(output)
+            crate::session::ToolExecutionResult::new(result.output)
+                .with_rtk_rewritten(result.rtk_rewritten)
         }
         Some("task") => {
             let output = task::execute_tool_call(workspace_root, store, session_id, call)?;

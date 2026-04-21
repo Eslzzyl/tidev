@@ -98,6 +98,8 @@ pub struct ToolExecutionResult {
     pub metadata: ToolMetadata,
     #[serde(default)]
     pub instruction_sources: Vec<String>,
+    #[serde(default)]
+    pub rtk_rewritten: bool,
 }
 
 impl ToolExecutionResult {
@@ -107,7 +109,13 @@ impl ToolExecutionResult {
             attachments: Vec::new(),
             metadata: ToolMetadata::default(),
             instruction_sources: Vec::new(),
+            rtk_rewritten: false,
         }
+    }
+
+    pub fn with_rtk_rewritten(mut self, rewritten: bool) -> Self {
+        self.rtk_rewritten = rewritten;
+        self
     }
 
     pub fn preview_for_storage(&self, tool_name: Option<&str>) -> Self {
@@ -121,6 +129,7 @@ impl ToolExecutionResult {
             attachments: self.attachments.clone(),
             metadata: self.metadata.clone(),
             instruction_sources: self.instruction_sources.clone(),
+            rtk_rewritten: self.rtk_rewritten,
         }
     }
 }
@@ -247,6 +256,8 @@ pub struct Message {
     pub patch_files: Option<String>,
     #[serde(default)]
     pub mode: Option<crate::prompts::SessionMode>,
+    #[serde(default)]
+    pub rtk_rewritten: bool,
 }
 
 impl Message {
@@ -274,6 +285,7 @@ impl Message {
             snapshot_hash: None,
             patch_files: None,
             mode: None,
+            rtk_rewritten: false,
         }
     }
 
@@ -308,6 +320,7 @@ impl Message {
             snapshot_hash: None,
             patch_files: None,
             mode: None,
+            rtk_rewritten: false,
         }
     }
 
@@ -341,6 +354,7 @@ impl Message {
             snapshot_hash: None,
             patch_files: None,
             mode: None,
+            rtk_rewritten: false,
         }
     }
 
@@ -372,6 +386,7 @@ impl Message {
             snapshot_hash: None,
             patch_files: None,
             mode: None,
+            rtk_rewritten: result.rtk_rewritten,
         }
     }
 

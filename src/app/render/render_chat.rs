@@ -76,10 +76,13 @@ fn render_tool_call_with_result(
         (Vec::new(), None, vec![])
     };
 
+    // Get rtk_rewritten from tool result message
+    let rtk_rewritten = tool_result.map(|m| m.rtk_rewritten).unwrap_or(false);
+
     let mut lines = Vec::new();
     lines.push(Line::from(""));
 
-    let call_lines = render_tool_call_lines(tool_call, body_width, palette, exit_code);
+    let call_lines = render_tool_call_lines(tool_call, body_width, palette, exit_code, rtk_rewritten);
     lines.extend(call_lines);
 
     if is_pending {
@@ -343,6 +346,7 @@ fn render_tool_call_lines(
     body_width: usize,
     palette: ThemePalette,
     exit_code: Option<i32>,
+    rtk_rewritten: bool,
 ) -> Vec<Line<'static>> {
     let fields = summarize_tool_arguments(&tool_call.name, &tool_call.arguments);
 
@@ -363,41 +367,37 @@ fn render_tool_call_lines(
 
     // Build title line with optional exit code for bash
     let title_spans = if canonical_name == "bash" {
+        // Build the base spans for bash tool
+        let mut spans = vec![
+            Span::styled("Tool: ", Style::default().fg(palette.muted)),
+            Span::styled(
+                canonical_display.clone(),
+                Style::default()
+                    .fg(palette.text)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ];
+
+        // Add [rtk] marker after tool name if command was rewritten
+        if rtk_rewritten {
+            spans.push(Span::styled(
+                " [rtk]",
+                Style::default().fg(palette.accent_soft),
+            ));
+        }
+
+        // Add exit code status
         if let Some(code) = exit_code {
             if code == 0 {
-                vec![
-                    Span::styled("Tool: ", Style::default().fg(palette.muted)),
-                    Span::styled(
-                        canonical_display.clone(),
-                        Style::default()
-                            .fg(palette.text)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" ✓", Style::default().fg(palette.success)),
-                ]
+                spans.push(Span::styled(" ✓", Style::default().fg(palette.success)));
             } else {
-                vec![
-                    Span::styled("Tool: ", Style::default().fg(palette.muted)),
-                    Span::styled(
-                        canonical_display.clone(),
-                        Style::default()
-                            .fg(palette.text)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(format!(" ✗ {}", code), Style::default().fg(palette.error)),
-                ]
+                spans.push(Span::styled(
+                    format!(" ✗ {}", code),
+                    Style::default().fg(palette.error),
+                ));
             }
-        } else {
-            vec![
-                Span::styled("Tool: ", Style::default().fg(palette.muted)),
-                Span::styled(
-                    canonical_display.clone(),
-                    Style::default()
-                        .fg(palette.text)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]
         }
+        spans
     } else {
         vec![
             Span::styled("Tool: ", Style::default().fg(palette.muted)),

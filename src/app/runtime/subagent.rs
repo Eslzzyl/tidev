@@ -347,14 +347,14 @@ async fn execute_child_tool_call(
 ) -> Result<ToolExecutionResult> {
     match canonical_tool_name(&tool_call.name) {
         Some("bash") => {
-            let output = execute_shell_tool_call(
+            let result = execute_shell_tool_call(
                 &context.workspace_root,
                 tool_call,
                 context.tools.max_output_bytes(),
                 context.tools.rtk_enabled(),
                 context.cancel_requested.clone(),
             )?;
-            Ok(ToolExecutionResult::new(output))
+            Ok(result)
         }
         _ => {
             let result = tokio::task::block_in_place(|| {
