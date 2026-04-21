@@ -14,6 +14,7 @@ pub mod session;
 pub mod snapshot;
 pub mod stats;
 pub mod storage;
+pub mod system_info;
 pub mod theme;
 pub mod tooling;
 

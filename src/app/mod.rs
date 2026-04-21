@@ -354,6 +354,19 @@ impl App {
         }
         prompt.push_str(mode_reminder);
 
+        // Add system environment information
+        let system_info = crate::system_info::SystemInfo::detect();
+        let working_dir = std::env::current_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        let is_git = crate::system_info::is_git_repo(&self.workspace_root);
+        prompt.push_str("\n\nHere is some useful information about the environment:\n<env>\n  ");
+        prompt.push_str(&format!("Working directory: {}\n  ", working_dir));
+        prompt.push_str(&format!("Workspace root folder: {}\n  ", self.workspace_root.display()));
+        prompt.push_str(&format!("Is directory a git repo: {}\n  ", if is_git { "yes" } else { "no" }));
+        prompt.push_str(&system_info.format_env());
+        prompt.push_str("\n</env>");
+
         (prompt, sources)
     }
 
