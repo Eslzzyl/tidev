@@ -797,6 +797,51 @@ impl App {
             return Ok(());
         }
 
+        // 自动补全弹窗的 Tab 处理优先于模式切换
+        if self.snippet_state.visible {
+            match key.code {
+                KeyCode::Esc => {
+                    self.snippet_state.clear();
+                    return Ok(());
+                }
+                KeyCode::Up => {
+                    self.snippet_state.move_selection(-1);
+                    return Ok(());
+                }
+                KeyCode::Down => {
+                    self.snippet_state.move_selection(1);
+                    return Ok(());
+                }
+                KeyCode::Tab => {
+                    self.accept_snippet();
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+
+        if self.at_mention.visible {
+            match key.code {
+                KeyCode::Esc => {
+                    self.at_mention.clear();
+                    return Ok(());
+                }
+                KeyCode::Up => {
+                    self.at_mention.move_selection(-1);
+                    return Ok(());
+                }
+                KeyCode::Down => {
+                    self.at_mention.move_selection(1);
+                    return Ok(());
+                }
+                KeyCode::Tab | KeyCode::Enter => {
+                    self.accept_at_mention();
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+
         if !self.command_palette.visible && key.code == KeyCode::Tab {
             self.mode = self.mode.toggle();
             self.refresh_tools();
@@ -845,50 +890,6 @@ impl App {
 
         if !self.command_palette.visible && self.handle_message_scroll_key(key) {
             return Ok(());
-        }
-
-        if self.at_mention.visible {
-            match key.code {
-                KeyCode::Esc => {
-                    self.at_mention.clear();
-                    return Ok(());
-                }
-                KeyCode::Up => {
-                    self.at_mention.move_selection(-1);
-                    return Ok(());
-                }
-                KeyCode::Down => {
-                    self.at_mention.move_selection(1);
-                    return Ok(());
-                }
-                KeyCode::Tab | KeyCode::Enter => {
-                    self.accept_at_mention();
-                    return Ok(());
-                }
-                _ => {}
-            }
-        }
-
-        if self.snippet_state.visible {
-            match key.code {
-                KeyCode::Esc => {
-                    self.snippet_state.clear();
-                    return Ok(());
-                }
-                KeyCode::Up => {
-                    self.snippet_state.move_selection(-1);
-                    return Ok(());
-                }
-                KeyCode::Down => {
-                    self.snippet_state.move_selection(1);
-                    return Ok(());
-                }
-                KeyCode::Tab => {
-                    self.accept_snippet();
-                    return Ok(());
-                }
-                _ => {}
-            }
         }
 
         if matches!(key.code, KeyCode::Up | KeyCode::Down) {
