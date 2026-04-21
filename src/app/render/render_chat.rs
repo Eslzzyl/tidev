@@ -741,9 +741,11 @@ impl App {
             false,
         );
         self.render_at_mention_palette(frame, layout[1]);
+        self.render_snippet_palette(frame, layout[1]);
         self.render_prompt_footer(frame, layout[2]);
         self.render_retrying_hint(frame, layout[3]);
         self.render_command_palette(frame, layout[1]);
+        self.render_snippet_palette(frame, layout[1]);
     }
 
     pub(super) fn render_messages(&mut self, frame: &mut Frame<'_>, area: Rect) {

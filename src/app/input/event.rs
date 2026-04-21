@@ -207,6 +207,7 @@ impl App {
         self.input_dragging = true;
         self.clear_mouse_selection();
         self.refresh_at_mention_state();
+        self.refresh_snippet_state();
         self.command_palette
             .sync(self.composer.text(), &self.commands);
         true
@@ -240,6 +241,7 @@ impl App {
             .set_cursor_at_visual_position(inner.width, target_line, local_column);
         // Selection anchor is already set, cursor movement extends selection
         self.refresh_at_mention_state();
+        self.refresh_snippet_state();
         self.command_palette
             .sync(self.composer.text(), &self.commands);
         true
@@ -867,6 +869,28 @@ impl App {
             }
         }
 
+        if self.snippet_state.visible {
+            match key.code {
+                KeyCode::Esc => {
+                    self.snippet_state.clear();
+                    return Ok(());
+                }
+                KeyCode::Up => {
+                    self.snippet_state.move_selection(-1);
+                    return Ok(());
+                }
+                KeyCode::Down => {
+                    self.snippet_state.move_selection(1);
+                    return Ok(());
+                }
+                KeyCode::Tab => {
+                    self.accept_snippet();
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+
         if matches!(key.code, KeyCode::Up | KeyCode::Down) {
             let Some(input_area) = self.input_area.get() else {
                 return Ok(());
@@ -907,15 +931,18 @@ impl App {
         if let Some(submission) = self.composer.handle_key_with_history(key, true) {
             self.handle_submission(submission, runtime)?;
             self.at_mention.clear();
+            self.snippet_state.clear();
         } else {
             if key.code == KeyCode::Enter && !self.draft_attachments.is_empty() {
                 self.handle_submission(String::new(), runtime)?;
                 self.at_mention.clear();
+                self.snippet_state.clear();
                 self.command_palette
                     .sync(self.composer.text(), &self.commands);
                 return Ok(());
             }
             self.refresh_at_mention_state();
+            self.refresh_snippet_state();
         }
 
         // Ensure cursor is visible after any key handling
@@ -1018,6 +1045,7 @@ impl App {
         self.composer.insert_str(&normalized);
         self.ensure_input_cursor_visible();
         self.refresh_at_mention_state();
+        self.refresh_snippet_state();
         self.command_palette
             .sync(self.composer.text(), &self.commands);
         Ok(())
@@ -1110,6 +1138,65 @@ impl App {
             .replace_range(start, self.composer.cursor(), &replacement);
         self.at_mention.clear();
         self.refresh_at_mention_state();
+        self.refresh_snippet_state();
+        self.command_palette
+            .sync(self.composer.text(), &self.commands);
+    }
+
+    pub(crate) fn refresh_snippet_state(&mut self) {
+        if self.command_palette.visible
+            || self.connect_dialog.is_some()
+            || self.theme_panel.is_some()
+            || self.model_panel.is_some()
+            || self.message_panel.is_some()
+            || self.session_panel.is_some()
+            || self.mcp_panel.is_some()
+            || self.question_dialog.is_some()
+            || self.at_mention.visible
+        {
+            self.snippet_state.clear();
+            return;
+        }
+
+        let text = self.composer.text();
+        let cursor = self.composer.cursor();
+        self.snippet_state
+            .sync(self.workspace_root.as_path(), &self.paths.config_dir, text, cursor);
+    }
+
+    pub(crate) fn accept_snippet(&mut self) {
+        let Some(completion) = self.snippet_state.apply_completion() else {
+            self.snippet_state.clear();
+            return;
+        };
+
+        // Get current word range and replace it
+        let text = self.composer.text();
+        let cursor = self.composer.cursor();
+        let query = self.snippet_state.query.clone();
+
+        // Find word start position
+        let word_start = if cursor > query.len() {
+            cursor.saturating_sub(query.len())
+        } else {
+            0
+        };
+
+        // Find the actual start of the word (skip whitespace)
+        let mut actual_start = word_start;
+        let chars: Vec<(usize, char)> = text.char_indices().take(word_start).collect();
+        for (i, c) in chars.iter().rev() {
+            if c.is_whitespace() {
+                actual_start = i + 1;
+                break;
+            }
+            actual_start = *i;
+        }
+
+        self.composer
+            .replace_range(actual_start, cursor, &completion);
+        self.snippet_state.clear();
+        self.refresh_snippet_state();
         self.command_palette
             .sync(self.composer.text(), &self.commands);
     }

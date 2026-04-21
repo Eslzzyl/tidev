@@ -58,6 +58,7 @@ use runtime::state::*;
 
 use crate::{
     app::at_mention::{AtMentionKind, AtMentionState, current_at_fragment},
+    app::input::SnippetState,
     app::mcp_panel::McpPanelState,
     app::message_panel::MessagePanelState,
     app::model_panel::ModelPanelState,
@@ -112,6 +113,7 @@ struct App {
     rename_dialog: Option<RenameSessionDialogState>,
     mcp_panel: Option<McpPanelState>,
     at_mention: AtMentionState,
+    snippet_state: SnippetState,
     pending_tool_execution: Option<PendingToolExecution>,
     permission_dialog: Option<PermissionDialogState>,
     question_dialog: Option<QuestionDialogState>,

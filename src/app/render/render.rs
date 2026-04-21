@@ -24,6 +24,9 @@ impl App {
         if self.at_mention.visible {
             self.refresh_at_mention_state();
         }
+        if self.snippet_state.visible {
+            self.refresh_snippet_state();
+        }
         match self.screen {
             Screen::Welcome => self.render_welcome(frame),
             Screen::Chat => self.render_chat(frame),
@@ -201,6 +204,7 @@ impl App {
         frame.render_widget(Paragraph::new(workspace_line), workspace_area);
 
         self.render_at_mention_palette(frame, sections[2]);
+        self.render_snippet_palette(frame, sections[2]);
         self.render_command_palette(frame, sections[2]);
     }
 

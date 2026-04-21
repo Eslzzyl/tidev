@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::tooling::FileReadStamp;
 
 use super::at_mention::AtMentionState;
+use super::input::SnippetState;
 use super::mcp_panel::McpPanelState;
 use super::message_panel::MessagePanelState;
 use super::model_panel::ModelPanelState;
@@ -183,6 +184,7 @@ pub(crate) struct UiStateSnapshot {
     pub(crate) rename_dialog: Option<RenameSessionDialogState>,
     pub(crate) mcp_panel: Option<McpPanelState>,
     pub(crate) at_mention: AtMentionState,
+    pub(crate) snippet_state: SnippetState,
     pub(crate) command_palette: CommandPaletteState,
     pub(crate) leader_key_pending: bool,
     pub(crate) composer: Composer,

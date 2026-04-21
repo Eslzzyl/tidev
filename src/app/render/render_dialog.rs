@@ -153,6 +153,69 @@ impl App {
         frame.render_stateful_widget(list, inner, &mut state);
     }
 
+    pub(super) fn render_snippet_palette(&self, frame: &mut Frame<'_>, area: Rect) {
+        if !self.snippet_state.visible || self.snippet_state.snippets.is_empty() {
+            return;
+        }
+
+        let palette = self.palette();
+        let width = area.width.min(72);
+        let height = (self.snippet_state.snippets.len() as u16)
+            .min(6)
+            .saturating_add(2);
+        let rect = Rect::new(area.x, area.y.saturating_sub(height), width, height);
+        let inner = rect.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+        self.register_selection_region(inner);
+
+        let items = self
+            .snippet_state
+            .snippets
+            .iter()
+            .map(|snippet| {
+                let text_style = Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD);
+                let highlight_style = Style::default()
+                    .fg(palette.accent_soft)
+                    .add_modifier(Modifier::BOLD);
+
+                let spans = spans_with_highlights(
+                    &snippet.text,
+                    &snippet.matched_indices,
+                    text_style,
+                    highlight_style,
+                );
+
+                ListItem::new(Line::from(spans))
+            })
+            .collect::<Vec<_>>();
+
+        let mut state = ListState::default();
+        state.select(Some(self.snippet_state.selected_index));
+
+        let panel = Block::default()
+            .style(Style::default().bg(palette.panel_alt))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.border_active()))
+            .title(format!("Snippets · {}", self.snippet_state.query));
+
+        let list = List::new(items)
+            .style(Style::default().bg(palette.panel_alt).fg(palette.text))
+            .highlight_style(
+                Style::default()
+                    .bg(palette.selection_bg)
+                    .fg(palette.selection_fg)
+                    .add_modifier(Modifier::BOLD),
+            );
+
+        frame.render_widget(Clear, rect);
+        frame.render_widget(panel, rect);
+        frame.render_stateful_widget(list, inner, &mut state);
+    }
+
     pub(super) fn render_connect_dialog(&self, frame: &mut Frame<'_>, area: Rect) {
         let Some(dialog) = &self.connect_dialog else {
             return;

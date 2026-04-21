@@ -81,6 +81,7 @@ impl App {
             rename_dialog: None,
             mcp_panel: None,
             at_mention: AtMentionState::default(),
+            snippet_state: SnippetState::default(),
             pending_tool_execution: None,
             permission_dialog: None,
             question_dialog: None,
@@ -277,6 +278,7 @@ impl App {
             mcp_panel: self.mcp_panel.clone(),
             message_panel: self.message_panel.clone(),
             at_mention: self.at_mention.clone(),
+            snippet_state: self.snippet_state.clone(),
             command_palette: self.command_palette.clone(),
             leader_key_pending: self.leader_key_pending,
             composer: self.composer.clone(),
@@ -297,6 +299,7 @@ impl App {
         self.rename_dialog = snapshot.rename_dialog;
         self.mcp_panel = snapshot.mcp_panel;
         self.at_mention = snapshot.at_mention;
+        self.snippet_state = snapshot.snippet_state;
         self.command_palette = snapshot.command_palette;
         self.leader_key_pending = snapshot.leader_key_pending;
         self.composer = snapshot.composer;
