@@ -14,12 +14,12 @@ A rough statistic:
 
 |页面/Page|OpenCode 内存/Memory|tidev 内存/Memory|
 |---|---|---|
-|启动页/Welcome page|~470MB|~10MB|
-|一个简单的 session 的对话/Chat page of a simple session|~580MB|~10MB|
+|启动页/Welcome page|~470MB|~16MB|
+|一个简单的 session 的对话/Chat page of a simple session|~580MB|~30MB|
 
 |OpenCode 体积/File size|tidev 体积/File size|
 |---|---|
-|121MB|12MB|
+|121MB|14MB|
 
 ![welcome](https://github-imagebed.eslzzyl.eu.org/tidev/welcome.webp)
 ![chat](https://github-imagebed.eslzzyl.eu.org/tidev/chat.webp)
