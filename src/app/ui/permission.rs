@@ -728,6 +728,10 @@ impl App {
             &output_for_tool_event,
         )?;
 
+        if !result.instruction_sources.is_empty() {
+            self.update_loaded_instruction_sources(&result.instruction_sources);
+        }
+
         self.conversation.push(message.clone());
         self.store
             .append_message(self.conversation.session_id, &message)?;

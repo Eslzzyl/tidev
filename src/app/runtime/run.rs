@@ -54,18 +54,18 @@ impl App {
         let cleanup_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let notifications = notifications::NotificationManager::new(config.notifications.clone());
 
-        let mut app = Self {
+        let app = Self {
             should_quit: false,
             screen: Screen::Welcome,
-            workspace_root,
-            paths,
-            config,
+            workspace_root: workspace_root.clone(),
+            paths: paths.clone(),
+            config: config.clone(),
             auth,
             store,
             llm,
             theme,
             mode,
-            active_model,
+            active_model: active_model.clone(),
             conversation,
             context_manager: ContextManager::new(),
             tools,
@@ -135,10 +135,6 @@ impl App {
             stats_panel: None,
             notifications,
         };
-
-        // Initialize instructions and record messages if anyone loaded
-        let (_prompt, instruction_sources) = app.compose_system_prompt();
-        app.update_loaded_instruction_sources(&instruction_sources);
 
         app.at_mention
             .start_background_indexing(app.workspace_root.as_path());
@@ -665,23 +661,23 @@ impl App {
                     let mut updated_existing = false;
                     if let Some(last_msg) = self.conversation.messages.last_mut()
                         && last_msg.streaming
-                            && last_msg.role == crate::session::MessageRole::System
-                        {
-                            last_msg.streaming = false;
-                            last_msg.content = format!(
-                                "{}\n\n{}",
-                                crate::session::COMPACTION_MESSAGE_LABEL,
-                                summary
-                            );
-                            updated_existing = true;
+                        && last_msg.role == crate::session::MessageRole::System
+                    {
+                        last_msg.streaming = false;
+                        last_msg.content = format!(
+                            "{}\n\n{}",
+                            crate::session::COMPACTION_MESSAGE_LABEL,
+                            summary
+                        );
+                        updated_existing = true;
 
-                            if let Err(error) = self
-                                .store
-                                .append_message(self.conversation.session_id, last_msg)
-                            {
-                                crate::log_warn!("failed to persist compaction message: {}", error);
-                            }
+                        if let Err(error) = self
+                            .store
+                            .append_message(self.conversation.session_id, last_msg)
+                        {
+                            crate::log_warn!("failed to persist compaction message: {}", error);
                         }
+                    }
                     if !updated_existing {
                         let compaction_message =
                             crate::session::Message::compaction(summary.clone());

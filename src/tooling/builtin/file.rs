@@ -251,6 +251,7 @@ fn file_change_output(
         output,
         attachments: Vec::new(),
         metadata,
+        instruction_sources: Vec::new(),
     }
 }
 
@@ -398,25 +399,34 @@ pub(super) fn read_path(
         content_str.push_str(&format!("\n\n(End of file - total {} lines)", total_lines));
     }
 
-    // Load nearby instruction files
-    let instructions = resolve_nearby_instructions(workspace_root, config_dir, &path)?;
-
     // Build XML-style output
-    let mut output = format!(
+    let output = format!(
         "<path>{}</path>\n<type>file</type>\n<content>\n{}\n</content>",
         display_workspace_relative(workspace_root, &path),
         content_str
     );
 
+    // Load nearby instruction files
+    let instructions = resolve_nearby_instructions(workspace_root, config_dir, &path)?;
+
+    let mut result = ToolExecutionResult::new(output);
+
     if !instructions.is_empty() {
-        let reminders: Vec<String> = instructions.into_iter().map(|(_, c)| c).collect();
-        output.push_str(&format!(
+        let mut instruction_sources = Vec::new();
+        let mut reminders = Vec::new();
+        for (path, content) in instructions {
+            instruction_sources.push(path.to_string_lossy().to_string());
+            reminders.push(content);
+        }
+
+        result.output.push_str(&format!(
             "\n\n<system-reminder>\n{}\n</system-reminder>",
             reminders.join("\n\n")
         ));
+        result.instruction_sources = instruction_sources;
     }
 
-    Ok(ToolExecutionResult::new(output))
+    Ok(result)
 }
 
 fn is_binary_file(path: &Path) -> Result<bool> {
@@ -598,7 +608,9 @@ fn apply_edit_contents(
              including whitespace, indentation, and line endings."
         );
     }
-    bail!("Found multiple matches for oldString. Provide more surrounding context to make the match unique.")
+    bail!(
+        "Found multiple matches for oldString. Provide more surrounding context to make the match unique."
+    )
 }
 
 fn normalize_line_endings(text: &str) -> String {

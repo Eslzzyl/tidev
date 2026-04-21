@@ -1385,19 +1385,15 @@ impl App {
                     || message.content.starts_with("Loaded ")
                         && message.content.contains(" instruction files:")
                 {
-                    let lines = vec![
-                        Line::from(""),
-                        Line::from(vec![
-                            Span::styled("󱁤 ", Style::default().fg(palette.accent_soft)),
-                            Span::styled(
-                                message.content.clone(),
-                                Style::default()
-                                    .fg(palette.text)
-                                    .add_modifier(Modifier::ITALIC),
-                            ),
-                        ]),
-                        Line::from(""),
-                    ];
+                    let lines = vec![Line::from(vec![
+                        Span::styled("󱁤 ", Style::default().fg(palette.accent_soft)),
+                        Span::styled(
+                            message.content.clone(),
+                            Style::default()
+                                .fg(palette.text)
+                                .add_modifier(Modifier::ITALIC),
+                        ),
+                    ])];
                     return vec![(palette.background, lines)];
                 }
 

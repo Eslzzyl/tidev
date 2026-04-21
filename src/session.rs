@@ -96,6 +96,8 @@ pub struct ToolExecutionResult {
     pub attachments: Vec<MessageAttachment>,
     #[serde(default)]
     pub metadata: ToolMetadata,
+    #[serde(default)]
+    pub instruction_sources: Vec<String>,
 }
 
 impl ToolExecutionResult {
@@ -104,6 +106,7 @@ impl ToolExecutionResult {
             output: output.into(),
             attachments: Vec::new(),
             metadata: ToolMetadata::default(),
+            instruction_sources: Vec::new(),
         }
     }
 
@@ -117,6 +120,7 @@ impl ToolExecutionResult {
             output,
             attachments: self.attachments.clone(),
             metadata: self.metadata.clone(),
+            instruction_sources: self.instruction_sources.clone(),
         }
     }
 }
@@ -581,6 +585,10 @@ pub enum BackendEvent {
         reason: String,
         retry_after_secs: Option<u32>,
     },
+    InstructionsLoaded {
+        session_id: Uuid,
+        sources: Vec<String>,
+    },
     ToolCompleted {
         session_id: Uuid,
         request_id: u64,
@@ -645,6 +653,7 @@ impl BackendEvent {
             | Self::SubagentToolResult { session_id, .. }
             | Self::SubagentCompleted { session_id, .. }
             | Self::UsageStats { session_id, .. }
+            | Self::InstructionsLoaded { session_id, .. }
             | Self::ContextCompacted { session_id, .. } => *session_id,
         }
     }
@@ -662,7 +671,7 @@ impl BackendEvent {
             | Self::SubagentToolResult { request_id, .. }
             | Self::SubagentCompleted { request_id, .. }
             | Self::UsageStats { request_id, .. } => Some(*request_id),
-            Self::ContextCompacted { .. } => None,
+            Self::InstructionsLoaded { .. } | Self::ContextCompacted { .. } => None,
         }
     }
 }

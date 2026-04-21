@@ -295,10 +295,11 @@ impl App {
 
         let llm = self.llm.clone();
         let (system_prompt, instruction_sources) = self.compose_system_prompt();
-        self.update_loaded_instruction_sources(&instruction_sources);
 
         let mut model = self.active_model.clone();
         model.system_prompt = system_prompt;
+
+        self.update_loaded_instruction_sources(&instruction_sources);
 
         let mut assistant_message = Message::streaming(MessageRole::Assistant, "");
         assistant_message.mode = Some(self.mode);
@@ -406,9 +407,16 @@ impl App {
 
             self.conversation
                 .push(Message::new(MessageRole::System, content));
-        }
 
-        self.loaded_instruction_sources = display_sources;
+            // Merge newly loaded sources instead of overwriting the entire list.
+            // This prevents previously loaded sources (like root AGENTS.md) from being
+            // "re-discovered" as new when deep directory instructions are added.
+            for source in newly_loaded {
+                if !self.loaded_instruction_sources.contains(&source) {
+                    self.loaded_instruction_sources.push(source);
+                }
+            }
+        }
     }
 
     fn display_instruction_source(&self, source: &str) -> String {
@@ -503,12 +511,14 @@ impl App {
             BackendEvent::SubagentToolResult { .. } => "SubagentToolResult",
             BackendEvent::SubagentCompleted { .. } => "SubagentCompleted",
             BackendEvent::UsageStats { .. } => "UsageStats",
+            BackendEvent::InstructionsLoaded { .. } => "InstructionsLoaded",
             BackendEvent::ContextCompacted { .. } => "ContextCompacted",
         };
         if event_type != "Delta"
             && event_type != "ReasoningDelta"
             && event_type != "UsageStats"
             && event_type != "SubagentStatus"
+            && event_type != "InstructionsLoaded"
             && event_type != "SubagentToolResult"
         {
             crate::log_debug!("handle_backend_event: {}", event_type);
@@ -877,6 +887,12 @@ impl App {
                     cache_read_tokens,
                     cache_write_tokens,
                 );
+            }
+            BackendEvent::InstructionsLoaded {
+                session_id: _,
+                sources,
+            } => {
+                self.update_loaded_instruction_sources(&sources);
             }
             BackendEvent::ContextCompacted {
                 session_id,
