@@ -115,7 +115,16 @@ fn render_diff_section(
     }
 
     let syntax_path = patch.modified().or_else(|| patch.original()).map(Path::new);
-    let is_new_file = patch.original().is_none();
+    // Check if this is a new file. We detect this by:
+    // 1. "new file mode" in the diff text (git format)
+    // 2. Original filename is empty or /dev/null (diffy-generated diff for new files)
+    // We can't rely on patch.original().is_none() because diffy still parses the
+    // "--- a/foo.rs" line even for new files from git diff.
+    let is_new_file = section.contains("new file mode")
+        || patch
+            .original()
+            .map(|s| s.is_empty() || s == "/dev/null")
+            .unwrap_or(true);
     let layout = if is_new_file {
         DiffLayout::Narrow
     } else if width >= WIDE_LAYOUT_THRESHOLD {
