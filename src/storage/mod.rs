@@ -235,6 +235,24 @@ impl SessionStore {
         Ok(())
     }
 
+    pub fn append_instruction_source(&self, session_id: Uuid, source: &str) -> Result<()> {
+        self.connection.execute(
+            "INSERT OR IGNORE INTO session_instruction_sources (session_id, source) VALUES (?1, ?2)",
+            params![session_id.to_string(), source],
+        )?;
+        Ok(())
+    }
+
+    pub fn load_instruction_sources(&self, session_id: Uuid) -> Result<Vec<String>> {
+        let mut stmt = self
+            .connection
+            .prepare("SELECT source FROM session_instruction_sources WHERE session_id = ?1")?;
+        let sources = stmt
+            .query_map(params![session_id.to_string()], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+        Ok(sources)
+    }
+
     pub fn append_message(&self, session_id: Uuid, message: &Message) -> Result<()> {
         let tool_calls =
             serde_json::to_string(&message.tool_calls).context("failed to serialize tool calls")?;

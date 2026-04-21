@@ -259,6 +259,7 @@ impl App {
             context_usage: self.context_usage.clone(),
             todos: self.todos.clone(),
             file_reads: self.file_read_tracker.extract_session_reads(session_id),
+            loaded_instruction_sources: self.loaded_instruction_sources.clone(),
         };
 
         self.cached_sessions.insert(session_id, cached);
@@ -373,6 +374,7 @@ impl App {
         self.message_total_lines = cached.message_total_lines;
         self.context_usage = cached.context_usage;
         self.todos = cached.todos.clone();
+        self.loaded_instruction_sources = cached.loaded_instruction_sources;
 
         // Restore cached file read records
         if let Some(reads) = cached.file_reads {
@@ -520,6 +522,7 @@ impl App {
             context_usage: None,
             todos: self.store.load_todos(session_id)?,
             file_reads: None,
+            loaded_instruction_sources: self.store.load_instruction_sources(session_id)?,
         };
 
         // Load file reads from database into the tracker

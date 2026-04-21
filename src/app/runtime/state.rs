@@ -171,6 +171,7 @@ pub(crate) struct CachedSessionRuntime {
     pub(crate) todos: Vec<TodoItem>,
     /// Cached file read records for this session.
     pub(crate) file_reads: Option<HashMap<PathBuf, FileReadStamp>>,
+    pub(crate) loaded_instruction_sources: Vec<String>,
 }
 
 #[derive(Clone, Debug)]

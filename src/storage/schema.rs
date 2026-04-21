@@ -27,6 +27,15 @@ CREATE TABLE IF NOT EXISTS session_workspaces (
     workspace_root TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS session_instruction_sources (
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    PRIMARY KEY(session_id, source)
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_instruction_sources_session
+    ON session_instruction_sources(session_id);
+
 CREATE TABLE IF NOT EXISTS session_reverts (
     session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
     message_id TEXT NOT NULL,

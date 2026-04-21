@@ -415,6 +415,12 @@ impl App {
             // "re-discovered" as new when deep directory instructions are added.
             for source in newly_loaded {
                 if !self.loaded_instruction_sources.contains(&source) {
+                    if let Err(e) = self
+                        .store
+                        .append_instruction_source(self.conversation.session_id, &source)
+                    {
+                        crate::log_warn!("Failed to save instruction source to database: {}", e);
+                    }
                     self.loaded_instruction_sources.push(source);
                 }
             }
