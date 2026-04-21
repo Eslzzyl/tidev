@@ -71,9 +71,9 @@ fn run_shell_inner(
     rtk_enabled: bool,
     cancelled: Option<Arc<AtomicBool>>,
 ) -> Result<String> {
-    // Wrap command with rtk if enabled
+    // Try to get RTK rewritten command if RTK is enabled
     let actual_command = if rtk_enabled {
-        format!("rtk run {}", command)
+        rewrite_command(command)
     } else {
         command.to_string()
     };
@@ -139,4 +139,31 @@ fn run_shell_inner(
 
         thread::sleep(std::time::Duration::from_millis(50));
     }
+}
+
+/// Try to rewrite a command using RTK's rewrite feature.
+/// Returns the RTK rewritten command if available, otherwise the original command.
+///
+/// RTK rewrite works by:
+/// - Running `rtk rewrite <command>` to check if RTK has a filter for this command
+/// - If RTK returns a rewritten command (exit 0), use it
+/// - If RTK returns exit 1 (no equivalent), use the original command
+fn rewrite_command(command: &str) -> String {
+    let output = std::process::Command::new("rtk")
+        .arg("rewrite")
+        .arg(command)
+        .output()
+        .ok();
+
+    match output {
+        Some(output) if output.status.success() => {
+            let rewritten = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !rewritten.is_empty() && rewritten != command {
+                return rewritten;
+            }
+        }
+        _ => {}
+    }
+
+    command.to_string()
 }
