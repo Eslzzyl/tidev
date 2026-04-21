@@ -569,30 +569,36 @@ fn apply_edit_contents(
     let new_text = convert_to_line_ending(&normalize_line_endings(new_text), ending);
 
     let candidates = find_edit_candidates(contents, &old);
+    let mut not_found = true;
+
     for candidate in candidates {
         if !contents.contains(&candidate) {
             continue;
         }
 
+        not_found = false;
         if replace_all {
             return Ok(contents.replace(&candidate, &new_text));
         }
 
-        let occurrences = contents.match_indices(&candidate).count();
-        if occurrences == 1 {
-            return Ok(replace_first_occurrence(contents, &candidate, &new_text));
+        // If replaceAll is false, only replace if there's exactly one occurrence.
+        // Otherwise, skip this candidate and continue to try others.
+        let index = contents.find(&candidate);
+        let last_index = contents.rfind(&candidate);
+        if index != last_index {
+            continue;
         }
+
+        return Ok(replace_first_occurrence(contents, &candidate, &new_text));
     }
 
-    let direct_matches = contents.match_indices(&old).count();
-    if direct_matches == 1 {
-        return Ok(replace_first_occurrence(contents, &old, &new_text));
+    if not_found {
+        bail!(
+            "Could not find oldString in the file. It must match exactly, \
+             including whitespace, indentation, and line endings."
+        );
     }
-    if direct_matches > 1 {
-        bail!("text occurs multiple times; set replace_all to true");
-    }
-
-    bail!("text not found in file")
+    bail!("Found multiple matches for oldString. Provide more surrounding context to make the match unique.")
 }
 
 fn normalize_line_endings(text: &str) -> String {
