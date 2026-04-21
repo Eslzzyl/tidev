@@ -1,27 +1,31 @@
 # TiDev
 
-A terminal AI coding assistant built with Rust and ratatui.
+A terminal AI coding assistant built with Rust.
 
-## Check
-
-Prefer `cargo check` over `cargo build` for faster verification.
+## Build & Verify
 
 ```sh
-cargo check
-cargo clippy
-cargo clippy --fix  # run this first to automatically fix issues, then manually edit code to fix remaining issues.
+cargo check          # faster than cargo build
+cargo clippy         # linting
+cargo clippy --fix   # auto-fix issues, then manually edit remaining ones
 cargo test
 ```
 
-## Architecture
+## Entry Points
 
-- `src/app.rs` — main run loop entrypoint (`app::run()`)
-- `src/storage.rs` — SQLite session persistence
+- `src/main.rs` → `pub fn run()` in `src/lib.rs`
+- Default mode: `app::run()` (terminal TUI)
+- Gateway mode: `tidev gateway telegram` runs `gateway::run()`
+
+## Architecture (key modules)
+
+- `src/app.rs` — main TUI run loop
+- `src/storage.rs` — SQLite session persistence (`SessionStore`)
 - `src/llm.rs` — LLM provider abstraction
 - `src/context.rs` — conversation context management
 - `src/tooling.rs` — agent tool definitions
 - `src/instructions.rs` — instruction file handling
-- `src/workspace_snapshot.rs` — file tree snapshots
+- `src/snapshot.rs` — file tree snapshots
 
 ## Storage Locations
 
@@ -31,17 +35,18 @@ cargo test
 
 ## Database Schema
 
-Current schema version: 6 (table `meta`).
-
 Tables: `meta`, `sessions`, `session_workspaces`, `session_reverts`, `messages`, `tool_events`, `todos`, `tool_permissions`.
 
-Do not add runtime migration code in `src/storage.rs`. If the schema changes, update `SCHEMA_SQL` in `src/storage.rs` directly and ask user to recreate the database.
+Do not add runtime migration code. If the schema changes, update `SCHEMA_SQL` in `src/storage/schema.rs` directly and require the user to recreate the database.
 
-## Bundled Provider Presets
+## Provider Presets
 
-`presets.toml` in the repo root is merged with user config at runtime. Bundled providers: `deepseek`. Do not put user credentials in this file. Do not modify this file to add new provider unless user ask you to do so.
+`presets.toml` in the repo root is merged with user config at runtime. Do not put user credentials in this file.
 
 ## Submodules
 
-- `opencode/` — git submodule pointing to `https://github.com/anomalyco/opencode.git` (shallow)
-- `codex/` — git submodule pointing to `https://github.com/openai/codex.git` (shallow)
+- `codex/`
+- `opencode/`
+- `rtk/`
+- `nanobot/`
+- `zeroclaw/`
