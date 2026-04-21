@@ -9,6 +9,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
+    time::Duration,
 };
 
 use super::utils::truncate_in_place;
@@ -33,7 +34,8 @@ pub fn execute_tool_call(
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
     let args = serde_json::from_value::<BashArgs>(arguments)
         .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
-    run_shell(workspace_root, &args.command, max_output_bytes, rtk_enabled)
+    let timeout = args.timeout.unwrap_or(120_000) as u64; // default 2 minutes
+    run_shell_inner(workspace_root, &args.command, max_output_bytes, rtk_enabled, None, timeout)
 }
 
 pub fn execute_tool_call_with_cancel(
@@ -47,21 +49,8 @@ pub fn execute_tool_call_with_cancel(
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
     let args = serde_json::from_value::<BashArgs>(arguments)
         .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
-    run_shell_with_cancel(workspace_root, &args.command, max_output_bytes, rtk_enabled, cancelled)
-}
-
-fn run_shell(workspace_root: &Path, command: &str, max_output_bytes: usize, rtk_enabled: bool) -> Result<String> {
-    run_shell_inner(workspace_root, command, max_output_bytes, rtk_enabled, None)
-}
-
-fn run_shell_with_cancel(
-    workspace_root: &Path,
-    command: &str,
-    max_output_bytes: usize,
-    rtk_enabled: bool,
-    cancelled: Arc<AtomicBool>,
-) -> Result<String> {
-    run_shell_inner(workspace_root, command, max_output_bytes, rtk_enabled, Some(cancelled))
+    let timeout = args.timeout.unwrap_or(120_000) as u64; // default 2 minutes
+    run_shell_inner(workspace_root, &args.command, max_output_bytes, rtk_enabled, Some(cancelled), timeout)
 }
 
 fn run_shell_inner(
@@ -70,6 +59,7 @@ fn run_shell_inner(
     max_output_bytes: usize,
     rtk_enabled: bool,
     cancelled: Option<Arc<AtomicBool>>,
+    timeout_ms: u64,
 ) -> Result<String> {
     // Try to get RTK rewritten command if RTK is enabled
     let actual_command = if rtk_enabled {
@@ -100,6 +90,9 @@ fn run_shell_inner(
     let mut stdout = process.stdout.take();
     let mut stderr = process.stderr.take();
 
+    let start_time = std::time::Instant::now();
+    let timeout = Duration::from_millis(timeout_ms);
+
     loop {
         if cancelled
             .as_ref()
@@ -108,6 +101,18 @@ fn run_shell_inner(
             let _ = process.kill();
             let _ = process.wait();
             return Err(anyhow::anyhow!("shell command cancelled"));
+        }
+
+        // Check timeout
+        if start_time.elapsed() > timeout {
+            let _ = process.kill();
+            let _ = process.wait();
+            return Err(anyhow::anyhow!(
+                "bash tool terminated command after exceeding timeout {} ms. \
+                 If this command is expected to take longer and is not waiting for interactive input, \
+                 retry with a larger timeout value in milliseconds.",
+                timeout_ms
+            ));
         }
 
         if let Some(status) = process
@@ -137,7 +142,7 @@ fn run_shell_inner(
             return Ok(format!("[exit {status}]\n{combined}"));
         }
 
-        thread::sleep(std::time::Duration::from_millis(50));
+        thread::sleep(Duration::from_millis(50));
     }
 }
 

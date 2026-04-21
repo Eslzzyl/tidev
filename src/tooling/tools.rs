@@ -219,6 +219,7 @@ tool_args! {
 tool_args! {
     pub struct BashArgs {
         command: string("Shell command to execute from the workspace root"),
+        timeout: optional_integer("Timeout in milliseconds (default: 120000, max: 600000)"),
     }
 }
 
