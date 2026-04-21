@@ -264,7 +264,7 @@ impl SessionStore {
             .mode
             .map(|m| serde_json::to_string(&m).unwrap_or_default());
         self.connection.execute(
-            "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, snapshot_hash, patch_files, mode) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+            "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, snapshot_hash, patch_files, mode, rtk_rewritten) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
             params![
                 message.id.to_string(),
                 session_id.to_string(),
@@ -288,6 +288,7 @@ impl SessionStore {
                 message.snapshot_hash,
                 message.patch_files,
                 mode,
+                if message.rtk_rewritten { 1_i64 } else { 0_i64 },
             ],
         )?;
 
@@ -307,7 +308,7 @@ impl SessionStore {
             .map(|m| serde_json::to_string(&m).unwrap_or_default());
 
         self.connection.execute(
-            "UPDATE messages SET role = ?3, content = ?4, attachments = ?5, reasoning = ?6, tool_calls = ?7, tool_call_id = ?8, tool_name = ?9, metadata = ?10, created_at = ?11, completed_at = ?12, streaming = ?13, input_tokens = ?14, output_tokens = ?15, total_tokens = ?16, cache_read_tokens = ?17, cache_write_tokens = ?18, model_id = ?19, snapshot_hash = ?20, patch_files = ?21, mode = ?22 WHERE session_id = ?1 AND id = ?2",
+            "UPDATE messages SET role = ?3, content = ?4, attachments = ?5, reasoning = ?6, tool_calls = ?7, tool_call_id = ?8, tool_name = ?9, metadata = ?10, created_at = ?11, completed_at = ?12, streaming = ?13, input_tokens = ?14, output_tokens = ?15, total_tokens = ?16, cache_read_tokens = ?17, cache_write_tokens = ?18, model_id = ?19, snapshot_hash = ?20, patch_files = ?21, mode = ?22, rtk_rewritten = ?23 WHERE session_id = ?1 AND id = ?2",
             params![
                 session_id.to_string(),
                 message.id.to_string(),
@@ -331,6 +332,7 @@ impl SessionStore {
                 message.snapshot_hash,
                 message.patch_files,
                 mode,
+                if message.rtk_rewritten { 1_i64 } else { 0_i64 },
             ],
         )?;
 
@@ -746,7 +748,7 @@ impl SessionStore {
 
     pub fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, snapshot_hash, patch_files, mode FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
+            "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, snapshot_hash, patch_files, mode, rtk_rewritten FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
         )?;
 
         let rows = statement.query_map(params![session_id.to_string()], |row| {
@@ -772,6 +774,7 @@ impl SessionStore {
             let snapshot_hash = row.get::<_, Option<String>>(18)?;
             let patch_files = row.get::<_, Option<String>>(19)?;
             let mode = row.get::<_, Option<String>>(20)?;
+            let rtk_rewritten = row.get::<_, i64>(21)? != 0;
 
             let attachments = serde_json::from_str(&attachments).unwrap_or_default();
             let tool_calls: Vec<ToolCall> = serde_json::from_str(&tool_calls).unwrap_or_default();
@@ -806,6 +809,7 @@ impl SessionStore {
             message.snapshot_hash = snapshot_hash;
             message.patch_files = patch_files;
             message.mode = mode;
+            message.rtk_rewritten = rtk_rewritten;
 
             Ok(message)
         })?;
