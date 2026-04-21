@@ -2386,7 +2386,10 @@ fn render_reasoning_markdown_lines(
     palette: ThemePalette,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    let dimmed_color = crate::theme::mix_colors(palette.muted, palette.background, 0.8);
+    // Use 0.5 ratio for a balanced dimmed appearance that works consistently across terminals
+    // This avoids the inconsistent behavior of Modifier::DIM which varies significantly
+    // between Windows Terminal (strong dimming) and Ghostty (weak/no dimming)
+    let dimmed_color = crate::theme::mix_colors(palette.muted, palette.background, 0.5);
     let label_style = Style::default().fg(dimmed_color);
     let label_italic_style = Style::default()
         .fg(dimmed_color)
@@ -2430,14 +2433,15 @@ fn render_reasoning_markdown_lines(
         let mut spans = Vec::with_capacity(line.spans.len().saturating_add(1));
         spans.push(Span::styled("┃ ", label_style));
         spans.extend(line.spans.into_iter().map(|mut span| {
-            // Apply dim modifier to all spans to ensure they look uniform
-            span.style = span.style.add_modifier(Modifier::DIM);
-
             // Mix the foreground color with background for all spans (including highlighted ones)
+            // Use 0.4 ratio for a slightly more visible dimmed text
+            // Note: We intentionally do NOT use Modifier::DIM here because its behavior
+            // varies significantly between terminals (Windows Terminal dims heavily,
+            // Ghostty barely dims at all), causing inconsistent appearance.
             if let Some(fg) = span.style.fg {
                 span.style = span
                     .style
-                    .fg(crate::theme::mix_colors(fg, palette.background, 0.2));
+                    .fg(crate::theme::mix_colors(fg, palette.background, 0.4));
             } else {
                 span.style = span.style.patch(body_style);
             }
@@ -2450,13 +2454,12 @@ fn render_reasoning_markdown_lines(
         let mut spans = Vec::with_capacity(line.spans.len().saturating_add(1));
         spans.push(Span::styled("┃ ", label_style));
         spans.extend(line.spans.into_iter().map(|mut span| {
-            span.style = span.style.add_modifier(Modifier::DIM);
-
             // Mix the foreground color with background for all spans (including highlighted ones)
+            // Use 0.4 ratio for a slightly more visible dimmed text
             if let Some(fg) = span.style.fg {
                 span.style = span
                     .style
-                    .fg(crate::theme::mix_colors(fg, palette.background, 0.2));
+                    .fg(crate::theme::mix_colors(fg, palette.background, 0.4));
             } else {
                 span.style = span.style.patch(body_style);
             }
