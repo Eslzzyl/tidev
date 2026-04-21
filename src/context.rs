@@ -153,10 +153,14 @@ impl ContextManager {
                 MessageRole::User => {
                     pending_tool_calls.clear();
                     messages.push(message.clone());
-                    was_plan_mode = false;
+                    if let Some(mode) = message.mode {
+                        was_plan_mode = mode == SessionMode::Plan;
+                    }
                 }
                 MessageRole::Assistant => {
-                    if message.content.contains("PLAN MODE")
+                    if let Some(mode) = message.mode {
+                        was_plan_mode = mode == SessionMode::Plan;
+                    } else if message.content.contains("PLAN MODE")
                         || message.content.contains("read-only")
                     {
                         was_plan_mode = true;
@@ -183,8 +187,21 @@ impl ContextManager {
 
         if current_mode == SessionMode::Plan && !was_plan_mode {
             let reminder = prompts::plan_switch_reminder();
-            if let Some(first_msg) = messages.iter_mut().find(|m| m.role == MessageRole::User) {
-                first_msg.content = format!("{}\n\n{}", reminder, first_msg.content);
+            if let Some(last_user_msg) = messages
+                .iter_mut()
+                .rev()
+                .find(|m| m.role == MessageRole::User)
+            {
+                last_user_msg.content = format!("{}\n\n{}", reminder, last_user_msg.content);
+            }
+        } else if current_mode == SessionMode::Build && was_plan_mode {
+            let reminder = prompts::build_switch_reminder();
+            if let Some(last_user_msg) = messages
+                .iter_mut()
+                .rev()
+                .find(|m| m.role == MessageRole::User)
+            {
+                last_user_msg.content = format!("{}\n\n{}", reminder, last_user_msg.content);
             }
         }
 
