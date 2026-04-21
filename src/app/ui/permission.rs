@@ -775,6 +775,10 @@ impl App {
         self.store
             .append_message(self.conversation.session_id, &message)?;
 
+        // Invalidate layout index and render cache since we added a new message
+        self.message_layout_index.borrow_mut().valid = false;
+        self.clear_message_render_cache();
+
         if tool_call.name == "todowrite" {
             self.todos = self.store.load_todos(self.conversation.session_id)?;
         }

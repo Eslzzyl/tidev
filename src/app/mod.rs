@@ -743,6 +743,9 @@ impl App {
 
                     if !already_exists {
                         self.conversation.messages.push(message);
+                        // Invalidate layout index and render cache since we added a new message
+                        self.message_layout_index.borrow_mut().valid = false;
+                        self.clear_message_render_cache();
                     }
                 }
             }
