@@ -130,7 +130,7 @@ impl ContextManager {
     ) -> Vec<Message> {
         let mut messages = Vec::new();
         let mut pending_tool_calls = HashSet::new();
-        let mut was_plan_mode = false;
+        let mut was_plan_mode = current_mode == SessionMode::Plan;
 
         if let Some(summary) = &self.summary {
             messages.push(Message::new(
