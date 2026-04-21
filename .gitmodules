@@ -6,13 +6,7 @@
 	path = codex
 	url = https://github.com/openai/codex.git
 	shallow = true
-[submodule "hermes-agent"]
-	path = hermes-agent
-	url = https://github.com/NousResearch/hermes-agent.git
-	shallow = true
-
-[submodule "zeroclaw"]
-	path = zeroclaw
+[submodule "zeroclaw"]	path = zeroclaw
 	url = https://github.com/zeroclaw-labs/zeroclaw.git
 	shallow = true
 [submodule "nanobot"]
