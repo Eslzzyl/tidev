@@ -664,19 +664,39 @@ where
             let style = self.current_line_style;
             let line = line.style(style);
 
-            let should_wrap = self.wrap_width.is_some_and(|width| width > 0)
-                && !self.current_line_in_code_block
-                && !line.spans.is_empty();
+            let should_wrap =
+                self.wrap_width.is_some_and(|width| width > 0) && !line.spans.is_empty();
 
             if should_wrap {
                 let width = self.wrap_width.expect("wrap_width checked above");
-                let wrapped = adaptive_wrap_line(
-                    &line,
-                    RtOptions::new(width)
-                        .initial_indent(Line::from(self.current_initial_indent.clone()))
-                        .subsequent_indent(Line::from(self.current_subsequent_indent.clone())),
-                );
-                push_owned_lines(&wrapped, &mut self.text.lines);
+                if self.current_line_in_code_block {
+                    // Code blocks should be wrapped as a whole line to preserve multiple spans (colors)
+                    let wrapped = word_wrap_line(
+                        &line,
+                        RtOptions::new(width)
+                            .initial_indent(Line::from(self.current_initial_indent.clone()))
+                            .subsequent_indent(Line::from(self.current_subsequent_indent.clone()))
+                            .break_words(true),
+                    );
+
+                    for w_line in wrapped {
+                        // Convert back to owned lines to satisfy 'static requirement
+                        let owned_spans: Vec<Span<'static>> = w_line
+                            .spans
+                            .into_iter()
+                            .map(|s| Span::styled(s.content.to_string(), s.style))
+                            .collect();
+                        self.text.lines.push(Line::from(owned_spans).style(style));
+                    }
+                } else {
+                    let wrapped = adaptive_wrap_line(
+                        &line,
+                        RtOptions::new(width)
+                            .initial_indent(Line::from(self.current_initial_indent.clone()))
+                            .subsequent_indent(Line::from(self.current_subsequent_indent.clone())),
+                    );
+                    push_owned_lines(&wrapped, &mut self.text.lines);
+                }
             } else {
                 let mut spans = self.current_initial_indent.clone();
                 let mut line = line;

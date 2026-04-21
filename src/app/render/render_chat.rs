@@ -430,13 +430,23 @@ fn render_tool_call_lines(
             }
 
             for line in command.lines() {
-                lines.push(Line::from(vec![
-                    Span::styled("  $ ", Style::default().fg(palette.accent)),
-                    Span::styled(
-                        shorten_single_line(line, body_width.saturating_sub(4)),
-                        Style::default().fg(palette.text),
-                    ),
-                ]));
+                let owned_line = Line::from(line.to_string());
+                let wrapped = word_wrap_line(
+                    &owned_line,
+                    WrapOptions::new(body_width.saturating_sub(4)).break_words(true),
+                );
+                for (i, wrapped_line) in wrapped.iter().enumerate() {
+                    let mut spans = Vec::new();
+                    if i == 0 {
+                        spans.push(Span::styled("  $ ", Style::default().fg(palette.accent)));
+                    } else {
+                        spans.push(Span::styled("    ", Style::default()));
+                    }
+                    spans.extend(wrapped_line.spans.iter().map(|s| {
+                        Span::styled(s.content.to_string(), Style::default().fg(palette.text))
+                    }));
+                    lines.push(Line::from(spans));
+                }
             }
         }
         "write" => {
@@ -627,8 +637,8 @@ fn render_output_preview_lines(
     let wrap_width = body_width.saturating_sub(2);
 
     for line in output.lines().take(max_lines) {
+        let owned_line = Line::from(line.to_string());
         if is_expanded {
-            let owned_line = Line::from(line.to_string());
             let wrapped =
                 word_wrap_line(&owned_line, WrapOptions::new(wrap_width).break_words(true));
             for wrapped_line in wrapped.iter() {
@@ -641,10 +651,28 @@ fn render_output_preview_lines(
                 lines.push(Line::from(spans));
             }
         } else {
-            lines.push(Line::from(vec![Span::styled(
-                shorten_single_line(line, wrap_width),
-                Style::default().fg(fg),
-            )]));
+            let wrapped =
+                word_wrap_line(&owned_line, WrapOptions::new(wrap_width).break_words(true));
+            if let Some(first_wrapped) = wrapped.first() {
+                let mut content = first_wrapped
+                    .spans
+                    .iter()
+                    .map(|s| &*s.content)
+                    .collect::<String>();
+                if wrapped.len() > 1 || total_output_lines > max_lines {
+                    // Try to fit "..."
+                    if content.width() >= wrap_width {
+                        content = shorten_single_line(&content, wrap_width.saturating_sub(3));
+                        content.push_str("...");
+                    } else {
+                        content.push_str("...");
+                    }
+                }
+                lines.push(Line::from(vec![Span::styled(
+                    content,
+                    Style::default().fg(fg),
+                )]));
+            }
         }
     }
 
