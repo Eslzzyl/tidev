@@ -216,7 +216,7 @@ impl App {
             let tree = build_directory_tree(absolute, 2, 80)?;
             return Ok(Some(MessageAttachment::DirectoryReference {
                 path: path.trim_end_matches(['/', '\\']).to_string(),
-                tree,
+                tree: Arc::new(tree),
             }));
         }
 
@@ -242,7 +242,7 @@ impl App {
 
         Ok(Some(MessageAttachment::FileReference {
             path: path.to_string(),
-            content,
+            content: Arc::new(content),
         }))
     }
 

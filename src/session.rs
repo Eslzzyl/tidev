@@ -2,16 +2,18 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use std::sync::Arc;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MessageAttachment {
     FileReference {
         path: String,
-        content: String,
+        content: Arc<String>,
     },
     DirectoryReference {
         path: String,
-        tree: String,
+        tree: Arc<String>,
     },
     Image {
         filename: String,

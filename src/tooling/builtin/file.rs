@@ -295,7 +295,7 @@ pub(super) fn read_path(
             .attachments
             .push(MessageAttachment::DirectoryReference {
                 path: display_workspace_relative(workspace_root, &path),
-                tree: "".to_string(),
+                tree: std::sync::Arc::new("".to_string()),
             });
         return Ok(result);
     }

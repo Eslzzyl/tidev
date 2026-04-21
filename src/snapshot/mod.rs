@@ -314,6 +314,8 @@ impl SnapshotService {
         )?;
 
         let mut result: Vec<FileDiff> = Vec::new();
+        let mut total_patch_size = 0;
+        let max_patch_size = 10 * 1024 * 1024; // 10MB limit
 
         for (adds, dels, file) in &numstat {
             if ignored.contains(file) {
@@ -327,7 +329,15 @@ impl SnapshotService {
             let patch = if binary {
                 String::new()
             } else {
-                git::diff_file(&self.gitdir, &self.worktree, from, to, file)?
+                let content = git::diff_file(&self.gitdir, &self.worktree, from, to, file)?;
+                total_patch_size += content.len();
+                if total_patch_size > max_patch_size {
+                    return Err(anyhow::anyhow!(
+                        "Total diff size exceeded limit of {} bytes",
+                        max_patch_size
+                    ));
+                }
+                content
             };
 
             result.push(FileDiff {

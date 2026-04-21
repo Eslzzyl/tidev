@@ -265,8 +265,8 @@ impl ContextManager {
             split_index = messages.len();
         }
 
-        let compressed_chunk = messages[..split_index].to_vec();
-        let prompt = self.build_compression_prompt(&compressed_chunk);
+        let compressed_chunk = &messages[..split_index];
+        let prompt = self.build_compression_prompt(compressed_chunk);
 
         let system_msg = Message::new(MessageRole::System, self.compression_system_prompt());
         let user_msg = Message::new(MessageRole::User, prompt);
@@ -308,9 +308,7 @@ impl ContextManager {
         } else {
             llm.complete_with_messages(model.clone(), vec![system_msg, user_msg])
                 .await
-                .unwrap_or_else(|error| {
-                    self.fallback_summary(&compressed_chunk, &error.to_string())
-                })
+                .unwrap_or_else(|error| self.fallback_summary(compressed_chunk, &error.to_string()))
         };
 
         self.summary = Some(summary.chars().take(self.maximum_summary_chars).collect());
