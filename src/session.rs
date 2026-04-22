@@ -218,6 +218,20 @@ pub struct AssistantTurn {
     pub finish_reason: Option<String>,
 }
 
+impl AssistantTurn {
+    pub fn upsert_tool_call(&mut self, tool_call: ToolCall) {
+        if let Some(existing) = self
+            .tool_calls
+            .iter_mut()
+            .find(|existing| existing.id == tool_call.id)
+        {
+            *existing = tool_call;
+        } else {
+            self.tool_calls.push(tool_call);
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message {
     pub id: Uuid,
@@ -753,5 +767,30 @@ mod tests {
         };
 
         assert_eq!(event.session_id(), session_id);
+    }
+
+    #[test]
+    fn assistant_turn_upserts_tool_calls_by_id() {
+        let mut turn = AssistantTurn::default();
+
+        turn.upsert_tool_call(ToolCall {
+            id: "tool-call-1".to_string(),
+            name: "bash".to_string(),
+            arguments: "{\"command\":\"ls\"}".to_string(),
+        });
+        turn.upsert_tool_call(ToolCall {
+            id: "tool-call-1".to_string(),
+            name: "bash".to_string(),
+            arguments: "{\"command\":\"ls -la\"}".to_string(),
+        });
+        turn.upsert_tool_call(ToolCall {
+            id: "tool-call-2".to_string(),
+            name: "read".to_string(),
+            arguments: "{\"path\":\"README.md\"}".to_string(),
+        });
+
+        assert_eq!(turn.tool_calls.len(), 2);
+        assert_eq!(turn.tool_calls[0].arguments, "{\"command\":\"ls -la\"}");
+        assert_eq!(turn.tool_calls[1].name, "read");
     }
 }

@@ -2,14 +2,14 @@ use anyhow::{Context, Result, bail};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
 use std::fmt::Write;
+use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::mpsc::unbounded_channel;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
+use tokio::sync::mpsc::unbounded_channel;
 use tokio::time::{Duration, sleep};
 use uuid::Uuid;
 
@@ -201,10 +201,11 @@ impl TelegramChannel {
         // Check if user is in interactive model selection state.
         // If so, handle selection input instead of normal message processing.
         if let Some(state) = self.model_selection_states.get(&message.chat.id).cloned() {
-            crate::log_info!("Handling model selection input: chat_id={}", message.chat.id);
-            return self
-                .handle_model_selection(&message, &state)
-                .await;
+            crate::log_info!(
+                "Handling model selection input: chat_id={}",
+                message.chat.id
+            );
+            return self.handle_model_selection(&message, &state).await;
         }
 
         let chat_key = self.chat_key(&message);
@@ -351,10 +352,10 @@ impl TelegramChannel {
                     final_text.len()
                 );
 
-                let assistant_message =
-                    Message::new(MessageRole::Assistant, final_text.clone());
+                let assistant_message = Message::new(MessageRole::Assistant, final_text.clone());
                 conversation.push(assistant_message.clone());
-                self.store.append_message(conversation.session_id, &assistant_message)?;
+                self.store
+                    .append_message(conversation.session_id, &assistant_message)?;
 
                 self.finalize_draft_response(source_message, draft_message_id, &final_text)
                     .await?;
@@ -365,7 +366,8 @@ impl TelegramChannel {
             self.try_edit_draft_text(source_message.chat.id, draft_message_id, &status)
                 .await;
 
-            self.execute_tool_calls(source_message, conversation, turn.tool_calls).await?;
+            self.execute_tool_calls(source_message, conversation, turn.tool_calls)
+                .await?;
         }
 
         bail!(
@@ -460,11 +462,13 @@ impl TelegramChannel {
                         final_turn = Some(AssistantTurn {
                             content: streamed_content.clone(),
                             reasoning: streamed_reasoning.clone(),
-                            tool_calls: vec![tool_call],
+                            tool_calls: Vec::new(),
                             finish_reason: None,
                         });
-                    } else if let Some(ref mut turn) = final_turn {
-                        turn.tool_calls.push(tool_call);
+                    }
+
+                    if let Some(ref mut turn) = final_turn {
+                        turn.upsert_tool_call(tool_call);
                     }
                 }
                 BackendEvent::Finished {
@@ -472,11 +476,24 @@ impl TelegramChannel {
                     request_id: event_request_id,
                     turn: finished_turn,
                 } if event_session_id == session_id && event_request_id == request_id => {
-                    if let Some(turn) = final_turn.take() {
-                        return Ok(turn);
+                    let turn = if let Some(turn) = final_turn.take() {
+                        turn
+                    } else {
+                        finished_turn
+                    };
+
+                    if !turn.tool_calls.is_empty() {
+                        let mut assistant_message =
+                            Message::new(MessageRole::Assistant, turn.content.clone());
+                        assistant_message.reasoning = turn.reasoning.clone();
+                        assistant_message.tool_calls = turn.tool_calls.clone();
+
+                        conversation.push(assistant_message.clone());
+                        self.store
+                            .append_message(conversation.session_id, &assistant_message)?;
                     }
-                    // If no turn was being built, return the finished turn
-                    return Ok(finished_turn);
+
+                    return Ok(turn);
                 }
                 _ => {}
             }
@@ -527,7 +544,8 @@ impl TelegramChannel {
                 tool_call.name,
                 truncate_for_markdown(&output_for_tool_event)
             );
-            self.send_reply_chunks(source_message, &tool_result_text).await?;
+            self.send_reply_chunks(source_message, &tool_result_text)
+                .await?;
 
             crate::log_debug!(
                 "Tool result recorded: name={}, result_len={}",
@@ -539,7 +557,7 @@ impl TelegramChannel {
         Ok(())
     }
 
-  async fn finalize_draft_response(
+    async fn finalize_draft_response(
         &self,
         source_message: &TelegramMessage,
         draft_message_id: i64,
@@ -570,16 +588,17 @@ impl TelegramChannel {
                 .await?;
         }
 
-        crate::log_info!(
-            "Reply sent: chunks={}",
-            chunks.len()
-        );
+        crate::log_info!("Reply sent: chunks={}", chunks.len());
 
         Ok(())
     }
 
     async fn try_edit_draft_text(&self, chat_id: i64, message_id: i64, text: &str) {
-        if let Err(error) = self.bot.edit_message_text_html(chat_id, message_id, text).await {
+        if let Err(error) = self
+            .bot
+            .edit_message_text_html(chat_id, message_id, text)
+            .await
+        {
             crate::log_warn!("Edit message failed: msg_id={}, error={error}", message_id);
         }
     }
@@ -697,8 +716,10 @@ impl TelegramChannel {
         self.send_reply_chunks(source_message, &text).await?;
 
         // Set state to waiting for provider selection
-        self.model_selection_states
-            .insert(source_message.chat.id, ModelSelectionState::WaitingForProvider);
+        self.model_selection_states.insert(
+            source_message.chat.id,
+            ModelSelectionState::WaitingForProvider,
+        );
 
         Ok(())
     }
@@ -767,10 +788,7 @@ impl TelegramChannel {
                 }
 
                 // Format model list
-                let mut text = format!(
-                    "Select a model for {} (enter number):\n\n",
-                    provider_id
-                );
+                let mut text = format!("Select a model for {} (enter number):\n\n", provider_id);
                 for (i, model) in models.iter().enumerate() {
                     text.push_str(&format!("{}. {}\n", i + 1, model.1));
                 }
@@ -845,9 +863,10 @@ impl TelegramChannel {
         // Check user-configured providers
         for (id, config) in &self.config.providers {
             if let Some(auth) = self.auth.providers.get(id)
-                && auth.api_key.as_ref().is_some_and(|k| !k.trim().is_empty()) {
-                    providers.push((id.clone(), config.display_name.clone()));
-                }
+                && auth.api_key.as_ref().is_some_and(|k| !k.trim().is_empty())
+            {
+                providers.push((id.clone(), config.display_name.clone()));
+            }
         }
 
         // Check bundled providers
@@ -857,9 +876,10 @@ impl TelegramChannel {
                 continue;
             }
             if let Some(auth) = self.auth.providers.get(id)
-                && auth.api_key.as_ref().is_some_and(|k| !k.trim().is_empty()) {
-                    providers.push((id.clone(), config.display_name.clone()));
-                }
+                && auth.api_key.as_ref().is_some_and(|k| !k.trim().is_empty())
+            {
+                providers.push((id.clone(), config.display_name.clone()));
+            }
         }
 
         providers
@@ -878,11 +898,12 @@ impl TelegramChannel {
 
         // Check bundled providers if not found
         if models.is_empty()
-            && let Some(config) = self.config.bundled_providers.get(provider_id) {
-                for (id, model_config) in &config.models {
-                    models.push((id.clone(), model_config.display_name.clone()));
-                }
+            && let Some(config) = self.config.bundled_providers.get(provider_id)
+        {
+            for (id, model_config) in &config.models {
+                models.push((id.clone(), model_config.display_name.clone()));
             }
+        }
 
         models
     }
@@ -1101,7 +1122,8 @@ impl TelegramChannel {
         // Check if there's already a task running
         if flag.load(Ordering::SeqCst) {
             // Already stopping
-            self.send_reply_chunks(source_message, "Already stopping...").await?;
+            self.send_reply_chunks(source_message, "Already stopping...")
+                .await?;
         } else {
             // Set the cancellation flag
             flag.store(true, Ordering::SeqCst);
@@ -1114,11 +1136,12 @@ impl TelegramChannel {
     /// Check and clear cancellation flag, return true if cancelled.
     fn check_cancellation(&self, chat_id: i64) -> bool {
         if let Some(flag) = self.cancellation_flags.get(&chat_id)
-            && flag.load(Ordering::SeqCst) {
-                // Clear the flag
-                flag.store(false, Ordering::SeqCst);
-                return true;
-            }
+            && flag.load(Ordering::SeqCst)
+        {
+            // Clear the flag
+            flag.store(false, Ordering::SeqCst);
+            return true;
+        }
         false
     }
 }
@@ -1230,7 +1253,7 @@ fn split_message_for_telegram(message: &str) -> Vec<String> {
         remaining = remaining[chunk_end..].trim_start();
     }
 
-     if chunks.is_empty() {
+    if chunks.is_empty() {
         vec!["(no content)".to_string()]
     } else {
         chunks
@@ -1252,7 +1275,6 @@ impl TelegramBot {
 
     /// Convert Markdown text to Telegram HTML format.
     fn markdown_to_telegram_html(text: &str) -> String {
-
         let lines: Vec<&str> = text.split('\n').collect();
         let mut result_lines: Vec<String> = Vec::new();
 
@@ -1816,15 +1838,16 @@ impl Channel for TelegramChannel {
 
                 // Check for orphaned user turn (crash mid-query)
                 if let Some(last) = messages.last()
-                    && last.role == MessageRole::User {
-                        // Close orphan with marker to prevent LLM from continuing the old request
-                        let marker = Message::new(
-                            MessageRole::Assistant,
-                            "[Session interrupted — not continuing this request]".to_string(),
-                        );
-                        store.append_message(session_id, &marker)?;
-                        orphans_closed += 1;
-                    }
+                    && last.role == MessageRole::User
+                {
+                    // Close orphan with marker to prevent LLM from continuing the old request
+                    let marker = Message::new(
+                        MessageRole::Assistant,
+                        "[Session interrupted — not continuing this request]".to_string(),
+                    );
+                    store.append_message(session_id, &marker)?;
+                    orphans_closed += 1;
+                }
 
                 count += 1;
                 crate::log_info!(
