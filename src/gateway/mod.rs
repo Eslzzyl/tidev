@@ -4,7 +4,7 @@ mod orchestrator;
 mod qq;
 mod qq_client;
 mod shared;
-mod telegram;
+pub mod telegram;
 
 use std::env;
 use std::sync::Arc;

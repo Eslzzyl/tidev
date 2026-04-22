@@ -1,15 +1,16 @@
-use anyhow::{Context, Result, bail};
-use async_trait::async_trait;
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::fmt::Write;
+//! Telegram channel implementation.
+
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
+
+use anyhow::{Context, Result, bail};
+use async_trait::async_trait;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::time::{Duration, sleep};
 use uuid::Uuid;
@@ -21,37 +22,24 @@ use crate::{
     prompts::{SessionMode, gateway_system_prompt},
     session::{
         AssistantTurn, BackendEvent, Conversation, Message, MessageRole, ToolCall,
-        ToolExecutionResult,
     },
     storage::SessionStore,
     tooling::ToolRegistry,
 };
 
-use super::channel::Channel;
-use super::channel::SendMessage;
-use super::commands::{
+use crate::gateway::channel::Channel;
+use crate::gateway::channel::SendMessage;
+use crate::gateway::commands::{
     CommandInvocation, GATEWAY_COMMANDS, format_status_summary, gateway_help_text, parse_command,
 };
-use super::shared::compose_system_prompt;
+use crate::gateway::shared::compose_system_prompt;
+use super::bot::TelegramBot;
+use super::types::TelegramMessage;
 
 pub const GATEWAY_PLATFORM_TELEGRAM: &str = "telegram";
-const TELEGRAM_MAX_MESSAGE_LENGTH: usize = 4096;
+pub const TELEGRAM_MAX_MESSAGE_LENGTH: usize = 4096;
 const TELEGRAM_DRAFT_EDIT_INTERVAL_MS: u64 = 1200;
 const MAX_TOOL_ROUNDS: usize = 8;
-
-/// Parse recipient string into (chat_id, thread_id).
-fn parse_telegram_recipient(recipient: &str) -> Result<(i64, Option<i64>)> {
-    let parts: Vec<&str> = recipient.split(':').collect();
-    let chat_id: i64 = parts[0]
-        .parse()
-        .context("invalid chat_id in recipient")?;
-    let thread_id = if parts.len() > 1 {
-        Some(parts[1].parse().context("invalid thread_id in recipient")?)
-    } else {
-        None
-    };
-    Ok((chat_id, thread_id))
-}
 
 /// Interactive model selection state for a chat.
 #[derive(Debug, Clone)]
@@ -301,99 +289,45 @@ impl TelegramChannel {
             .send_draft(&SendMessage::new("Thinking...", &recipient))
             .await?
         {
-            Some(id) => {
-                crate::log_debug!("Sent draft message: msg_id={}", id);
-                id
-            }
+            Some(id) => id,
             None => {
-                // Fallback: channel doesn't support drafts, use old behavior
-                let draft = self
-                    .bot
-                    .send_message(
-                        source_message.chat.id,
-                        source_message.message_thread_id,
-                        "Thinking...",
-                        Some(source_message.message_id),
-                    )
-                    .await?;
-                draft.message_id.to_string()
-            }
-        };
-
-        if let Err(error) = self
-            .run_agent_with_tools_inner(
-                source_message,
-                conversation,
-                active_model,
-                &recipient,
-                &draft_message_id,
-            )
-            .await
-        {
-            let error_text = format!("Gateway error: {error}");
-            crate::log_error!(
-                "Agent failed: chat_id={}, error={error}",
-                source_message.chat.id
-            );
-            // Try to update the draft with error message, fallback to sending new message
-            if self.update_draft(&recipient, &draft_message_id, &error_text).await.is_err() {
-                let _ = self
-                    .send_reply_chunks(source_message, &error_text)
-                    .await;
-            }
-            return Err(error);
-        }
-
-        Ok(())
-    }
-
-    async fn run_agent_with_tools_inner(
-        &mut self,
-        source_message: &TelegramMessage,
-        conversation: &mut Conversation,
-        active_model: &ActiveModel,
-        recipient: &str,
-        draft_message_id: &str,
-    ) -> Result<()> {
-        let mut has_tool_calls = false;
-
-        for round in 1..=MAX_TOOL_ROUNDS {
-            // Check for cancellation at the start of each round
-            if self.check_cancellation(source_message.chat.id) {
-                crate::log_info!("Task cancelled by user: chat_id={}", source_message.chat.id);
-
-                // Send cancellation confirmation
-                self.send_reply_chunks(source_message, "🛑 Task stopped.")
+                self.send_reply_chunks(source_message, "Thinking...")
                     .await?;
                 return Ok(());
             }
+        };
 
-            crate::log_debug!(
-                "Tool round {}/{}: chat_id={}, session={}",
-                round,
-                MAX_TOOL_ROUNDS,
-                source_message.chat.id,
-                conversation.session_id
-            );
+        let mut tool_rounds = 0;
+        let mut has_tool_calls = false;
+        let mut final_text = String::new();
+
+        loop {
+            if self.check_cancellation(source_message.chat.id) {
+                self.send_reply_chunks(source_message, "Stopped.")
+                    .await?;
+                return Ok(());
+            }
 
             let turn = self
                 .run_single_streaming_turn(
                     source_message,
                     conversation,
                     active_model,
-                    draft_message_id,
+                    &draft_message_id,
                 )
                 .await?;
 
             if turn.tool_calls.is_empty() {
-                let final_text = normalize_assistant_output(&turn.content);
+                final_text = normalize_assistant_output(&turn.content);
                 crate::log_info!(
-                    "Agent completed: chat_id={}, response_len={}",
-                    source_message.chat.id,
+                    "Agent completed: session={}, content_len={}",
+                    conversation.session_id,
                     final_text.len()
                 );
 
-                let assistant_message = Message::new(MessageRole::Assistant, final_text.clone());
+                // Persist assistant turn
+                let assistant_message =
+                    Message::new(MessageRole::Assistant, final_text.clone());
                 conversation.push(assistant_message.clone());
                 self.store
                     .append_message(conversation.session_id, &assistant_message)?;
@@ -402,13 +336,13 @@ impl TelegramChannel {
                 // instead of editing the draft (so it appears at the end)
                 if has_tool_calls {
                     // Delete the draft message first
-                    let _ = self.cancel_draft(recipient, draft_message_id).await;
+                    let _ = self.cancel_draft(&recipient, &draft_message_id).await;
                     // Send final response as new message
                     self.send_reply_chunks(source_message, &final_text)
                         .await?;
                 } else {
                     // No tool calls - use finalize_draft to update the initial message
-                    if self.finalize_draft(recipient, draft_message_id, &final_text).await.is_err() {
+                    if self.finalize_draft(&recipient, &draft_message_id, &final_text).await.is_err() {
                         // Fallback: send as new message
                         self.send_reply_chunks(source_message, &final_text)
                             .await?;
@@ -423,7 +357,7 @@ impl TelegramChannel {
             // Show tool call progress - use update_draft_progress
             let status = format!("🔧 Running {} tool call(s)...", turn.tool_calls.len());
             if self
-                .update_draft_progress(recipient, draft_message_id, &status)
+                .update_draft_progress(&recipient, &draft_message_id, &status)
                 .await
                 .is_err()
             {
@@ -433,11 +367,14 @@ impl TelegramChannel {
 
             self.execute_tool_calls(source_message, conversation, turn.tool_calls)
                 .await?;
-        }
 
-        bail!(
-            "assistant exceeded maximum tool rounds ({MAX_TOOL_ROUNDS}); aborting to prevent loop"
-        )
+            tool_rounds += 1;
+            if tool_rounds >= MAX_TOOL_ROUNDS {
+                bail!(
+                    "assistant exceeded maximum tool rounds ({MAX_TOOL_ROUNDS}); aborting to prevent loop"
+                )
+            }
+        }
     }
 
     async fn run_single_streaming_turn(
@@ -485,10 +422,9 @@ impl TelegramChannel {
             .await;
         });
 
-        let mut streamed_content = String::new();
+        let mut turn = AssistantTurn::default();
         let mut streamed_reasoning = String::new();
         let mut last_edit = Instant::now() - Duration::from_millis(TELEGRAM_DRAFT_EDIT_INTERVAL_MS);
-        let mut final_turn: Option<AssistantTurn> = None;
 
         // Build recipient for draft updates
         let recipient = if let Some(thread_id) = source_message.message_thread_id {
@@ -501,73 +437,82 @@ impl TelegramChannel {
             match event {
                 BackendEvent::Delta {
                     session_id: event_session_id,
-                    request_id: event_request_id,
+                    request_id: event_req_id,
                     content,
-                } if event_session_id == session_id && event_request_id == request_id => {
-                    streamed_content.push_str(&content);
-
-                    if last_edit.elapsed() >= Duration::from_millis(TELEGRAM_DRAFT_EDIT_INTERVAL_MS)
-                    {
-                        let preview = preview_for_streaming(&streamed_content);
-                        // Try to update draft, ignore errors
-                        let _ = self.update_draft(&recipient, draft_message_id, &preview).await;
-                        last_edit = Instant::now();
+                    ..
+                } if event_session_id == session_id && event_req_id == request_id => {
+                    if content.is_empty() {
+                        continue;
                     }
-                }
-                BackendEvent::ReasoningDelta {
+
+                    turn.content.push_str(&content);
+                    let preview = preview_for_streaming(&turn.content);
+
+                    if streamed_reasoning.len() < turn.content.len() {
+                        let new_reasoning = &turn.content[streamed_reasoning.len()..];
+                        streamed_reasoning.push_str(new_reasoning);
+                    }
+
+                  let now = Instant::now();
+                    if now.duration_since(last_edit).as_millis() as u64
+                        >= TELEGRAM_DRAFT_EDIT_INTERVAL_MS
+                        || turn.content.len() >= TELEGRAM_MAX_MESSAGE_LENGTH
+                    {
+                        if self
+                            .update_draft(&recipient, &draft_message_id, &preview)
+                            .await
+                            .is_err()
+                        {
+                            // Fallback: send as new message
+                            self.send_reply_chunks(source_message, &preview)
+                                .await?;
+                        }
+                        last_edit = now;
+                    }
+                }                BackendEvent::ReasoningDelta {
                     session_id: event_session_id,
-                    request_id: event_request_id,
+                    request_id: event_req_id,
                     content,
-                } if event_session_id == session_id && event_request_id == request_id => {
-                    streamed_reasoning.push_str(&content);
+                    ..
+                } if event_session_id == session_id && event_req_id == request_id => {
+                    turn.reasoning.push_str(&content);
                 }
                 BackendEvent::ToolCallUpdated {
                     session_id: event_session_id,
-                    request_id: event_request_id,
+                    request_id: event_req_id,
                     tool_call,
-                } if event_session_id == session_id && event_request_id == request_id => {
-                    if final_turn.is_none() {
-                        final_turn = Some(AssistantTurn {
-                            content: streamed_content.clone(),
-                            reasoning: streamed_reasoning.clone(),
-                            tool_calls: Vec::new(),
-                            finish_reason: None,
-                        });
+                    ..
+                } if event_session_id == session_id && event_req_id == request_id => {
+                    if let Some(existing) =
+                        turn.tool_calls.iter_mut().find(|tc| tc.id == tool_call.id)
+                    {
+                        *existing = tool_call;
+                    } else {
+                        turn.tool_calls.push(tool_call);
                     }
-
-                    if let Some(ref mut turn) = final_turn {
-                        turn.upsert_tool_call(tool_call);
-                    }
+                }
+                BackendEvent::Failed {
+                    session_id: event_session_id,
+                    request_id: event_req_id,
+                    error,
+                    ..
+                } if event_session_id == session_id && event_req_id == request_id => {
+                    bail!("LLM Error: {}", error);
                 }
                 BackendEvent::Finished {
                     session_id: event_session_id,
-                    request_id: event_request_id,
+                    request_id: event_req_id,
                     turn: finished_turn,
-                } if event_session_id == session_id && event_request_id == request_id => {
-                    let turn = if let Some(turn) = final_turn.take() {
-                        turn
-                    } else {
-                        finished_turn
-                    };
-
-                    if !turn.tool_calls.is_empty() {
-                        let mut assistant_message =
-                            Message::new(MessageRole::Assistant, turn.content.clone());
-                        assistant_message.reasoning = turn.reasoning.clone();
-                        assistant_message.tool_calls = turn.tool_calls.clone();
-
-                        conversation.push(assistant_message.clone());
-                        self.store
-                            .append_message(conversation.session_id, &assistant_message)?;
-                    }
-
-                    return Ok(turn);
+                    ..
+                } if event_session_id == session_id && event_req_id == request_id => {
+                    turn = finished_turn;
+                    break;
                 }
                 _ => {}
             }
         }
 
-        bail!("streaming ended without TurnEnd event")
+        Ok(turn)
     }
 
     async fn execute_tool_calls(
@@ -585,15 +530,18 @@ impl TelegramChannel {
 
             let execution_result = match result {
                 Ok(res) => res,
-                Err(error) => ToolExecutionResult::new(format!("Error: {error}")),
+                Err(error) => crate::session::ToolExecutionResult::new(format!("Error: {error}")),
             };
 
             let display_result =
                 execution_result.preview_for_storage(Some(tool_call.name.as_str()));
             let output_for_tool_event = display_result.output.clone();
-            let tool_message =
-                Message::tool_result(tool_call.id.clone(), tool_call.name.clone(), display_result);
 
+            let tool_message = Message::tool_result(
+                &tool_call.id,
+                &tool_call.name,
+                execution_result,
+            );
             self.store.append_tool_event(
                 conversation.session_id,
                 tool_message.id,
@@ -704,49 +652,87 @@ impl TelegramChannel {
             None | Some("") => {
                 let text = format_session_summary(conversation, active_model);
                 self.send_reply_chunks(source_message, &text).await?;
+                Ok(updated_model)
+            }
+            Some("new") => {
+                let new_conversation = self.rotate_chat_session("session:new", active_model)?;
+                self.send_reply_chunks(
+                    source_message,
+                    &format!("Session rotated. New session_id: {}", new_conversation.session_id),
+                )
+                .await?;
+                Ok(updated_model)
+            }
+            Some("clear") => {
+                // Clear session conversation
+                let new_conversation = self.rotate_chat_session("session:clear", active_model)?;
+                self.send_reply_chunks(
+                    source_message,
+                    &format!("Session cleared. New session_id: {}", new_conversation.session_id),
+                )
+                .await?;
+                Ok(updated_model)
+            }
+            Some("title") => {
+                if args.len() < 2 {
+                    self.send_reply_chunks(
+                        source_message,
+                        "Usage: /session title <new_title>",
+                    )
+                    .await?;
+                    return Ok(updated_model);
+                }
+                let new_title = args[1..].join(" ");
+                self.store.update_session_title(conversation.session_id, &new_title)?;
+                self.send_reply_chunks(
+                    source_message,
+                    &format!("Session title updated: {}", new_title),
+                )
+                .await?;
+                Ok(updated_model)
             }
             _ => {
-                self.send_reply_chunks(source_message, &gateway_help_text())
-                    .await?;
+                self.send_reply_chunks(
+                    source_message,
+                    "Usage: /session (show | new | clear | title <new_title>)",
+                )
+                .await?;
+                Ok(updated_model)
             }
         }
-
-        Ok(updated_model)
     }
 
-    /// Handle /model command - start interactive provider/model selection.
-    async fn handle_model_command(&mut self, source_message: &TelegramMessage) -> Result<()> {
-        // Get available providers (user config + bundled, only those with valid auth)
+    async fn handle_model_command(&mut self, message: &TelegramMessage) -> Result<()> {
         let providers = self.get_available_providers();
 
         if providers.is_empty() {
             self.send_reply_chunks(
-                source_message,
-                "No available providers found. Please check your configuration.",
+                message,
+                "No providers available. Configure API keys in auth.json.",
             )
             .await?;
             return Ok(());
         }
 
         // Format provider list
-        let mut text = String::from("Select a provider (enter number):\n\n");
-        for (i, provider) in providers.iter().enumerate() {
-            text.push_str(&format!("{}. {}\n", i + 1, provider.1));
+        let mut text =
+            String::from("Select a provider (enter number):\n\n");
+        for (i, (id, name)) in providers.iter().enumerate() {
+            text.push_str(&format!("{}. {} ({})\n", i + 1, name, id));
         }
         text.push_str("\n(Enter any other number to cancel)");
 
-        self.send_reply_chunks(source_message, &text).await?;
+        self.send_reply_chunks(message, &text).await?;
 
         // Set state to waiting for provider selection
         self.model_selection_states.insert(
-            source_message.chat.id,
+            message.chat.id,
             ModelSelectionState::WaitingForProvider,
         );
 
         Ok(())
     }
 
-    /// Handle interactive model selection input.
     async fn handle_model_selection(
         &mut self,
         message: &TelegramMessage,
@@ -755,22 +741,12 @@ impl TelegramChannel {
         let content = message
             .text
             .as_deref()
-            .or(message.caption.as_deref())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("");
-
-        // Check if it's a command - cancel selection if so
-        if content.starts_with('/') {
-            self.model_selection_states.remove(&message.chat.id);
-            self.send_reply_chunks(message, "Selection cancelled. Send /model to try again.")
-                .await?;
-            return Ok(());
-        }
+            .unwrap_or_default()
+            .trim();
 
         match state {
             ModelSelectionState::WaitingForProvider => {
-                // Parse provider selection
+                let providers = self.get_available_providers();
                 let selection: usize = match content.parse() {
                     Ok(n) => n,
                     Err(_) => {
@@ -784,7 +760,6 @@ impl TelegramChannel {
                     }
                 };
 
-                let providers = self.get_available_providers();
                 if selection < 1 || selection > providers.len() {
                     self.model_selection_states.remove(&message.chat.id);
                     self.send_reply_chunks(
@@ -797,21 +772,9 @@ impl TelegramChannel {
 
                 let (provider_id, _provider_name) = &providers[selection - 1];
 
-                // Get models for selected provider
-                let models = self.get_models_for_provider(provider_id);
-                if models.is_empty() {
-                    self.model_selection_states.remove(&message.chat.id);
-                    self.send_reply_chunks(
-                        message,
-                        "No models available for this provider. Selection cancelled.",
-                    )
-                    .await?;
-                    return Ok(());
-                }
-
                 // Format model list
                 let mut text = format!("Select a model for {} (enter number):\n\n", provider_id);
-                for (i, model) in models.iter().enumerate() {
+                for (i, model) in self.get_models_for_provider(provider_id).iter().enumerate() {
                     text.push_str(&format!("{}. {}\n", i + 1, model.1));
                 }
                 text.push_str("\n(Enter any other number to cancel)");
@@ -1066,7 +1029,7 @@ impl TelegramChannel {
                     message.message_thread_id,
                     chunk,
                     if index == 0 {
-                        Some(message.message_id)
+                        Some(message.message_id as i64)
                     } else {
                         None
                     },
@@ -1166,7 +1129,27 @@ impl TelegramChannel {
         }
         false
     }
+
+    /// Finalize draft message with final content.
+    async fn finalize_draft(&self, recipient: &str, message_id: &str, text: &str) -> Result<()> {
+        let msg_id: i64 = message_id.parse().context("invalid message_id")?;
+        self.bot
+            .edit_message_text_html(0, msg_id, text)
+            .await?;
+        Ok(())
+    }
+
+    /// Cancel draft by deleting the message.
+    async fn cancel_draft(&self, recipient: &str, message_id: &str) -> Result<()> {
+        let msg_id: i64 = message_id.parse().context("invalid message_id")?;
+        self.bot.delete_message(0, msg_id).await?;
+        Ok(())
+    }
 }
+
+// ===========================================================================
+// Helper functions
+// ===========================================================================
 
 fn format_session_summary(conversation: &Conversation, active_model: &ActiveModel) -> String {
     format!(
@@ -1282,547 +1265,9 @@ fn split_message_for_telegram(message: &str) -> Vec<String> {
     }
 }
 
-pub struct TelegramBot {
-    token: String,
-    http: Client,
-}
-
-impl TelegramBot {
-    pub fn new(token: String) -> Self {
-        Self {
-            token,
-            http: Client::new(),
-        }
-    }
-
-    /// Convert Markdown text to Telegram HTML format.
-    fn markdown_to_telegram_html(text: &str) -> String {
-        let lines: Vec<&str> = text.split('\n').collect();
-        let mut result_lines: Vec<String> = Vec::new();
-
-        for line in &lines {
-            let trimmed_line = line.trim_start();
-            if trimmed_line.starts_with("```") {
-                result_lines.push(trimmed_line.to_string());
-                continue;
-            }
-
-            let mut line_out = String::new();
-
-            // Handle headers: ## Title → <b>Title</b>
-            let stripped = line.trim_start_matches('#');
-            let header_level = line.len() - stripped.len();
-            if header_level > 0 && line.starts_with('#') && stripped.starts_with(' ') {
-                let title = Self::escape_html(stripped.trim());
-                result_lines.push(format!("<b>{title}</b>"));
-                continue;
-            }
-
-            // Inline formatting
-            let mut i = 0;
-            let bytes = line.as_bytes();
-            let len = bytes.len();
-            while i < len {
-                // Bold: **text** or __text__
-                if i + 1 < len
-                    && bytes[i] == b'*'
-                    && bytes[i + 1] == b'*'
-                    && let Some(end) = line[i + 2..].find("**")
-                {
-                    let inner = Self::escape_html(&line[i + 2..i + 2 + end]);
-                    let _ = write!(line_out, "<b>{inner}</b>");
-                    i += 4 + end;
-                    continue;
-                }
-                if i + 1 < len
-                    && bytes[i] == b'_'
-                    && bytes[i + 1] == b'_'
-                    && let Some(end) = line[i + 2..].find("__")
-                {
-                    let inner = Self::escape_html(&line[i + 2..i + 2 + end]);
-                    let _ = write!(line_out, "<b>{inner}</b>");
-                    i += 4 + end;
-                    continue;
-                }
-                // Italic: *text* or _text_ (single)
-                if bytes[i] == b'*'
-                    && (i == 0 || bytes[i - 1] != b'*')
-                    && let Some(end) = line[i + 1..].find('*')
-                    && end > 0
-                {
-                    let inner = Self::escape_html(&line[i + 1..i + 1 + end]);
-                    let _ = write!(line_out, "<i>{inner}</i>");
-                    i += 2 + end;
-                    continue;
-                }
-                if bytes[i] == b'_'
-                    && (i == 0 || bytes[i - 1] != b'_')
-                    && let Some(end) = line[i + 1..].find('_')
-                    && end > 0
-                {
-                    let inner = Self::escape_html(&line[i + 1..i + 1 + end]);
-                    let _ = write!(line_out, "<i>{inner}</i>");
-                    i += 2 + end;
-                    continue;
-                }
-                // Inline code: `code`
-                if bytes[i] == b'`'
-                    && (i == 0 || bytes[i - 1] != b'`')
-                    && let Some(end) = line[i + 1..].find('`')
-                {
-                    let inner = Self::escape_html(&line[i + 1..i + 1 + end]);
-                    let _ = write!(line_out, "<code>{inner}</code>");
-                    i += 2 + end;
-                    continue;
-                }
-                // Markdown link: [text](url)
-                if bytes[i] == b'['
-                    && let Some(bracket_end) = line[i + 1..].find(']')
-                {
-                    let text_part = &line[i + 1..i + 1 + bracket_end];
-                    let after_bracket = i + 1 + bracket_end + 1;
-                    if after_bracket < len
-                        && bytes[after_bracket] == b'('
-                        && let Some(paren_end) = line[after_bracket + 1..].find(')')
-                    {
-                        let url = &line[after_bracket + 1..after_bracket + 1 + paren_end];
-                        if url.starts_with("http://") || url.starts_with("https://") {
-                            let text_html = Self::escape_html(text_part);
-                            let url_html = Self::escape_html(url);
-                            let _ = write!(line_out, "<a href=\"{url_html}\">{text_html}</a>");
-                            i = after_bracket + 1 + paren_end + 1;
-                            continue;
-                        }
-                    }
-                }
-                // Strikethrough: ~~text~~
-                if i + 1 < len
-                    && bytes[i] == b'~'
-                    && bytes[i + 1] == b'~'
-                    && let Some(end) = line[i + 2..].find("~~")
-                {
-                    let inner = Self::escape_html(&line[i + 2..i + 2 + end]);
-                    let _ = write!(line_out, "<s>{inner}</s>");
-                    i += 4 + end;
-                    continue;
-                }
-                // Default: escape HTML entities
-                let ch = line[i..].chars().next().unwrap();
-                match ch {
-                    '<' => line_out.push_str("&lt;"),
-                    '>' => line_out.push_str("&gt;"),
-                    '&' => line_out.push_str("&amp;"),
-                    '"' => line_out.push_str("&quot;"),
-                    '\'' => line_out.push_str("&#39;"),
-                    _ => line_out.push(ch),
-                }
-                i += ch.len_utf8();
-            }
-            result_lines.push(line_out);
-        }
-
-        // Second pass: handle ``` code blocks across lines
-        let joined = result_lines.join("\n");
-        let mut final_out = String::with_capacity(joined.len());
-        let mut in_code_block = false;
-        let mut code_buf = String::new();
-
-        for line in joined.split('\n') {
-            let trimmed = line.trim();
-            if trimmed.starts_with("```") {
-                if in_code_block {
-                    in_code_block = false;
-                    let escaped = code_buf.trim_end_matches('\n');
-                    let _ = writeln!(final_out, "<pre><code>{escaped}</code></pre>");
-                    code_buf.clear();
-                } else {
-                    in_code_block = true;
-                    code_buf.clear();
-                }
-            } else if in_code_block {
-                code_buf.push_str(line);
-                code_buf.push('\n');
-            } else {
-                final_out.push_str(line);
-                final_out.push('\n');
-            }
-        }
-        if in_code_block && !code_buf.is_empty() {
-            let _ = writeln!(final_out, "<pre><code>{}</code></pre>", code_buf.trim_end());
-        }
-
-        final_out.trim_end_matches('\n').to_string()
-    }
-
-    /// Escape HTML special characters.
-    fn escape_html(s: &str) -> String {
-        s.replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;")
-            .replace('"', "&quot;")
-            .replace('\'', "&#39;")
-    }
-
-    async fn get_updates(&self, offset: i64, timeout_secs: u64) -> Result<Vec<TelegramUpdate>> {
-        let body = serde_json::json!({
-            "offset": offset,
-            "timeout": timeout_secs,
-            "allowed_updates": ["message"],
-        });
-
-        let response = self
-            .http
-            .post(self.api_url("getUpdates"))
-            .json(&body)
-            .send()
-            .await
-            .context("failed to call Telegram getUpdates")?;
-
-        let payload: TelegramApiResponse<Vec<TelegramUpdate>> = response
-            .json()
-            .await
-            .context("failed to parse Telegram getUpdates response")?;
-
-        payload.into_result("getUpdates")
-    }
-
-    async fn send_message(
-        &self,
-        chat_id: i64,
-        message_thread_id: Option<i64>,
-        text: &str,
-        reply_to_message_id: Option<i64>,
-    ) -> Result<TelegramSentMessage> {
-        let body = SendMessageRequest {
-            chat_id,
-            text,
-            parse_mode: None,
-            message_thread_id,
-            reply_to_message_id,
-        };
-
-        let response = self
-            .http
-            .post(self.api_url("sendMessage"))
-            .json(&body)
-            .send()
-            .await
-            .context("failed to call Telegram sendMessage")?;
-
-        let payload: TelegramApiResponse<TelegramSentMessage> = response
-            .json()
-            .await
-            .context("failed to parse Telegram sendMessage response")?;
-
-        payload.into_result("sendMessage")
-    }
-
-    /// Send message with HTML parse mode for Markdown rendering.
-    async fn send_message_html(
-        &self,
-        chat_id: i64,
-        message_thread_id: Option<i64>,
-        text: &str,
-        reply_to_message_id: Option<i64>,
-    ) -> Result<TelegramSentMessage> {
-        let html_text = Self::markdown_to_telegram_html(text);
-        let body = SendMessageRequest {
-            chat_id,
-            text: &html_text,
-            parse_mode: Some("HTML".to_string()),
-            message_thread_id,
-            reply_to_message_id,
-        };
-
-        let response = self
-            .http
-            .post(self.api_url("sendMessage"))
-            .json(&body)
-            .send()
-            .await
-            .context("failed to call Telegram sendMessage (HTML)")?;
-
-        let payload: TelegramApiResponse<TelegramSentMessage> = response
-            .json()
-            .await
-            .context("failed to parse Telegram sendMessage response")?;
-
-        payload.into_result("sendMessage")
-    }
-
-    /// Edit message text with HTML parse mode for Markdown rendering.
-    async fn edit_message_text_html(
-        &self,
-        chat_id: i64,
-        message_id: i64,
-        text: &str,
-    ) -> Result<()> {
-        let html_text = Self::markdown_to_telegram_html(text);
-        let body = EditMessageTextRequest {
-            chat_id,
-            message_id,
-            text: &html_text,
-            parse_mode: Some("HTML".to_string()),
-        };
-
-        let response = self
-            .http
-            .post(self.api_url("editMessageText"))
-            .json(&body)
-            .send()
-            .await
-            .context("failed to call Telegram editMessageText (HTML)")?;
-
-        let payload: TelegramApiResponse<serde_json::Value> = response
-            .json()
-            .await
-            .context("failed to parse Telegram editMessageText response")?;
-
-        if payload.ok {
-            return Ok(());
-        }
-
-        if payload
-            .description
-            .as_deref()
-            .is_some_and(|description| description.contains("message is not modified"))
-        {
-            return Ok(());
-        }
-
-        match payload.error_code {
-            Some(code) => bail!(
-                "telegram editMessageText HTML failed ({code}): {}",
-                payload
-                    .description
-                    .unwrap_or_else(|| "unknown telegram api error".to_string())
-            ),
-            None => bail!(
-                "telegram editMessageText HTML failed: {}",
-                payload
-                    .description
-                    .unwrap_or_else(|| "unknown telegram api error".to_string())
-            ),
-        }
-    }
-
-    /// Delete a message.
-    async fn delete_message(&self, chat_id: i64, message_id: i64) -> Result<()> {
-        let body = serde_json::json!({
-            "chat_id": chat_id,
-            "message_id": message_id,
-        });
-
-        let response = self
-            .http
-            .post(self.api_url("deleteMessage"))
-            .json(&body)
-            .send()
-            .await
-            .context("failed to call Telegram deleteMessage")?;
-
-        let payload: TelegramApiResponse<serde_json::Value> = response
-            .json()
-            .await
-            .context("failed to parse Telegram deleteMessage response")?;
-
-        if payload.ok {
-            return Ok(());
-        }
-
-        // Ignore "message to delete not found" errors
-        if payload
-            .description
-            .as_deref()
-            .is_some_and(|desc| desc.contains("message to delete not found"))
-        {
-            return Ok(());
-        }
-
-        bail!(
-            "telegram deleteMessage failed: {}",
-            payload
-                .description
-                .unwrap_or_else(|| "unknown telegram api error".to_string())
-        )
-    }
-
-    pub async fn set_my_commands(&self, commands: Vec<(String, String)>) -> Result<()> {
-        let body = SetMyCommandsRequest {
-            commands: commands
-                .into_iter()
-                .map(|(command, description)| BotCommand {
-                    command,
-                    description,
-                })
-                .collect(),
-        };
-
-        let response = self
-            .http
-            .post(self.api_url("setMyCommands"))
-            .json(&body)
-            .send()
-            .await
-            .context("failed to call Telegram setMyCommands")?;
-
-        let payload: TelegramApiResponse<bool> = response
-            .json()
-            .await
-            .context("failed to parse Telegram setMyCommands response")?;
-
-        payload.into_result("setMyCommands")?;
-        Ok(())
-    }
-
-    pub async fn set_message_reaction(
-        &self,
-        chat_id: i64,
-        message_id: i64,
-        emoji: &str,
-    ) -> Result<()> {
-        let body = SetMessageReactionRequest {
-            chat_id,
-            message_id,
-            reaction: vec![ReactionType::Emoji {
-                emoji: emoji.to_string(),
-            }],
-            is_big: None,
-        };
-
-        let response = self
-            .http
-            .post(self.api_url("setMessageReaction"))
-            .json(&body)
-            .send()
-            .await
-            .context("failed to call Telegram setMessageReaction")?;
-
-        let payload: TelegramApiResponse<bool> = response
-            .json()
-            .await
-            .context("failed to parse Telegram setMessageReaction response")?;
-
-        payload.into_result("setMessageReaction")?;
-        Ok(())
-    }
-
-    fn api_url(&self, method: &str) -> String {
-        format!("https://api.telegram.org/bot{}/{}", self.token, method)
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct TelegramApiResponse<T> {
-    ok: bool,
-    result: Option<T>,
-    description: Option<String>,
-    error_code: Option<i64>,
-}
-
-impl<T> TelegramApiResponse<T> {
-    fn into_result(self, method: &str) -> Result<T> {
-        if self.ok {
-            return self
-                .result
-                .with_context(|| format!("telegram {method} response missing result"));
-        }
-
-        let description = self
-            .description
-            .unwrap_or_else(|| "unknown telegram api error".to_string());
-        match self.error_code {
-            Some(code) => bail!("telegram {method} failed ({code}): {description}"),
-            None => bail!("telegram {method} failed: {description}"),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct TelegramUpdate {
-    update_id: i64,
-    #[serde(default)]
-    message: Option<TelegramMessage>,
-}
-
-#[derive(Debug, Deserialize)]
-struct TelegramMessage {
-    message_id: i64,
-    chat: TelegramChat,
-    #[serde(default)]
-    from: Option<TelegramUser>,
-    #[serde(default)]
-    text: Option<String>,
-    #[serde(default)]
-    caption: Option<String>,
-    #[serde(default)]
-    message_thread_id: Option<i64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct TelegramChat {
-    id: i64,
-}
-
-#[derive(Debug, Deserialize)]
-struct TelegramUser {
-    id: i64,
-    #[serde(default)]
-    username: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct TelegramSentMessage {
-    message_id: i64,
-}
-
-#[derive(Debug, Serialize)]
-struct SendMessageRequest<'a> {
-    chat_id: i64,
-    text: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parse_mode: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    message_thread_id: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reply_to_message_id: Option<i64>,
-}
-
-#[derive(Debug, Serialize)]
-struct EditMessageTextRequest<'a> {
-    chat_id: i64,
-    message_id: i64,
-    text: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parse_mode: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct SetMyCommandsRequest {
-    commands: Vec<BotCommand>,
-}
-
-#[derive(Debug, Serialize)]
-struct BotCommand {
-    command: String,
-    description: String,
-}
-
-#[derive(Debug, Serialize)]
-struct SetMessageReactionRequest {
-    chat_id: i64,
-    message_id: i64,
-    reaction: Vec<ReactionType>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    is_big: Option<bool>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(tag = "type")]
-enum ReactionType {
-    #[serde(rename = "emoji")]
-    Emoji { emoji: String },
-}
+// ===========================================================================
+// Channel trait implementation
+// ===========================================================================
 
 #[async_trait]
 impl Channel for TelegramChannel {
@@ -1836,8 +1281,8 @@ impl Channel for TelegramChannel {
 
     fn run(&mut self) -> Pin<Box<dyn Future<Output = Result<()>> + '_>> {
         Box::pin(async move {
+            crate::log_info!("Telegram channel ready");
             self.bootstrap_offset().await?;
-            crate::log_info!("Telegram channel ready, offset={}", self.offset);
             self.run_loop().await
         })
     }
@@ -1847,108 +1292,81 @@ impl Channel for TelegramChannel {
         let mut count = 0;
         let mut orphans_closed = 0;
 
-        for (chat_key, session_id) in sessions {
+        for (_chat_key, session_id) in sessions {
             if let Some(_conversation) = store.load_conversation(session_id)? {
                 let messages = store.load_messages(session_id)?;
 
                 // Check for orphaned user turn (crash mid-query)
-                if let Some(last) = messages.last()
-                    && last.role == MessageRole::User
-                {
-                    // Close orphan with marker to prevent LLM from continuing the old request
-                    let marker = Message::new(
-                        MessageRole::Assistant,
-                        "[Session interrupted — not continuing this request]".to_string(),
-                    );
-                    store.append_message(session_id, &marker)?;
+                if let Some(last) = messages.last() && last.role == MessageRole::User {
+                    crate::log_info!("Found orphaned user turn in session {}", session_id);
                     orphans_closed += 1;
                 }
 
                 count += 1;
-                crate::log_info!(
-                    "Restored Telegram session: chat_key={}, session_id={}, messages={}",
-                    chat_key,
-                    session_id,
-                    messages.len()
-                );
             }
         }
 
-        if count > 0 {
-            crate::log_info!("Restored {} Telegram session(s) from disk", count);
-        }
-        if orphans_closed > 0 {
-            crate::log_info!(
-                "Closed {} orphaned session turn(s) from previous crash",
-                orphans_closed
-            );
-        }
+        crate::log_info!(
+            "Telegram channel restored {} session(s), closed {} orphaned session(s)",
+            count,
+            orphans_closed
+        );
 
         Ok(count)
     }
-
-    // ── Draft API ─────────────────────────────────────────────────────
 
     fn supports_draft_updates(&self) -> bool {
         true
     }
 
     async fn send_draft(&mut self, message: &SendMessage) -> Result<Option<String>> {
-        let (chat_id, thread_id) = parse_telegram_recipient(&message.recipient)?;
+        let chat_id = message.recipient.parse::<i64>().context("invalid chat_id")?;
+        let thread_id = message.thread_ts.as_ref().map(|s| s.parse::<i64>().ok()).flatten();
         let sent = self
             .bot
-            .send_message_html(chat_id, thread_id, &message.content, None)
+            .send_message(
+                chat_id,
+                thread_id,
+                &message.content,
+                None,
+            )
             .await?;
+
         Ok(Some(sent.message_id.to_string()))
     }
 
-    async fn update_draft(&mut self, recipient: &str, message_id: &str, text: &str) -> Result<()> {
-        let (chat_id, _) = parse_telegram_recipient(recipient)?;
+    async fn update_draft(&mut self, _recipient: &str, message_id: &str, text: &str) -> Result<()> {
         let msg_id: i64 = message_id.parse().context("invalid message_id")?;
         self.bot
-            .edit_message_text_html(chat_id, msg_id, text)
+            .edit_message_text_html(0, msg_id, text)
             .await?;
         Ok(())
     }
 
     async fn update_draft_progress(
         &mut self,
-        recipient: &str,
+        _recipient: &str,
         message_id: &str,
-        text: &str,
+        status: &str,
     ) -> Result<()> {
-        // Same as update_draft for Telegram - both use editMessageText
-        self.update_draft(recipient, message_id, text).await
-    }
-
-    async fn finalize_draft(&mut self, recipient: &str, message_id: &str, text: &str) -> Result<()> {
-        let (chat_id, thread_id) = parse_telegram_recipient(recipient)?;
         let msg_id: i64 = message_id.parse().context("invalid message_id")?;
-
-        let chunks = split_message_for_telegram(text);
-        let Some(first_chunk) = chunks.first() else {
-            return Ok(());
-        };
-
-        // Edit the first chunk into the draft message
         self.bot
-            .edit_message_text_html(chat_id, msg_id, first_chunk)
+            .edit_message_text_html(0, msg_id, status)
             .await?;
-
-        // Send remaining chunks as new messages
-        for chunk in chunks.iter().skip(1) {
-            self.bot
-                .send_message_html(chat_id, thread_id, chunk, None)
-                .await?;
-        }
-
         Ok(())
     }
 
-    async fn cancel_draft(&mut self, recipient: &str, message_id: &str) -> Result<()> {
-        let (chat_id, _) = parse_telegram_recipient(recipient)?;
+    async fn finalize_draft(&mut self, _recipient: &str, message_id: &str, text: &str) -> Result<()> {
         let msg_id: i64 = message_id.parse().context("invalid message_id")?;
-        self.bot.delete_message(chat_id, msg_id).await?;
+        self.bot
+            .edit_message_text_html(0, msg_id, text)
+            .await?;
+        Ok(())
+    }
+
+    async fn cancel_draft(&mut self, _recipient: &str, message_id: &str) -> Result<()> {
+        let msg_id: i64 = message_id.parse().context("invalid message_id")?;
+        self.bot.delete_message(0, msg_id).await?;
         Ok(())
     }
 }
