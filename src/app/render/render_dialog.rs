@@ -1226,15 +1226,17 @@ impl App {
             sections[0],
         );
 
-        self.render_input_block(
+        self.render_input_block_with_composer(
             frame,
             sections[1],
             "Search models",
-            self.composer.placeholder(),
+            &panel.query,
+            panel.query.placeholder(),
+            false,
             false,
         );
 
-        let items = self.model_panel_items();
+        let items = self.model_panel_items(panel);
         let mut rows = Vec::new();
         for item in &items {
             match item {

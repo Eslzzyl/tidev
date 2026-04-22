@@ -8,7 +8,11 @@ impl App {
                 self.handle_key_event(key, runtime)?;
             }
             Event::Paste(text) => {
-                self.handle_text_paste(&text)?;
+                if self.model_panel.is_some() {
+                    self.handle_model_panel_paste(&text)?;
+                } else {
+                    self.handle_text_paste(&text)?;
+                }
             }
             Event::Mouse(mouse) => {
                 self.handle_mouse_event(mouse);
@@ -34,6 +38,10 @@ impl App {
     }
 
     pub(crate) fn handle_mouse_event(&mut self, mouse: MouseEvent) {
+        if self.model_panel.is_some() {
+            return;
+        }
+
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 let position = Position::new(mouse.column, mouse.row);
@@ -659,25 +667,25 @@ impl App {
     }
 
     pub(crate) fn handle_model_panel_key(&mut self, key: KeyEvent) -> Result<()> {
-        let Some(panel) = self.model_panel.clone() else {
+        let Some(mut panel) = self.model_panel.clone() else {
             return Ok(());
         };
 
         match key.code {
             KeyCode::Up => {
-                let items = self.model_panel_items();
+                let items = self.model_panel_items(&panel);
                 let mut next_panel = panel;
                 next_panel.move_selection(&items, -1);
                 self.model_panel = Some(next_panel);
             }
             KeyCode::Down => {
-                let items = self.model_panel_items();
+                let items = self.model_panel_items(&panel);
                 let mut next_panel = panel;
                 next_panel.move_selection(&items, 1);
                 self.model_panel = Some(next_panel);
             }
             KeyCode::Enter => {
-                let items = self.model_panel_items();
+                let items = self.model_panel_items(&panel);
                 if let Some(summary) = panel.selected_model(&items).cloned() {
                     self.switch_model(Some(&summary.label()))?;
                     self.close_model_panel();
@@ -687,7 +695,7 @@ impl App {
                 self.close_model_panel();
             }
             KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                let items = self.model_panel_items();
+                let items = self.model_panel_items(&panel);
                 if let Some(summary) = panel.selected_model(&items).cloned() {
                     self.close_model_panel();
                     self.begin_provider_edit_for_model(summary.provider_id, summary.model_id)?;
@@ -695,20 +703,43 @@ impl App {
             }
             KeyCode::Tab => {}
             _ => {
-                let previous_query = self.composer.text().to_string();
-                let _ = self.composer.handle_key_with_history(key, false);
-                if self.composer.text() != previous_query {
-                    let items = self.model_panel_items();
+                let previous_query = panel.query.text().to_string();
+                let _ = panel.query.handle_key_with_history(key, false);
+                if panel.query.text() != previous_query {
+                    let items = self.model_panel_items(&panel);
                     let mut next_panel = panel;
                     next_panel.reset_selection(
                         &items,
                         Some((&self.active_model.provider_id, &self.active_model.model_id)),
                     );
                     self.model_panel = Some(next_panel);
+                } else {
+                    self.model_panel = Some(panel);
                 }
             }
         }
 
+        Ok(())
+    }
+
+    pub(crate) fn handle_model_panel_paste(&mut self, text: &str) -> Result<()> {
+        let Some(mut panel) = self.model_panel.clone() else {
+            return Ok(());
+        };
+
+        let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+        let previous_query = panel.query.text().to_string();
+        panel.query.insert_str(&normalized);
+
+        if panel.query.text() != previous_query {
+            let items = self.model_panel_items(&panel);
+            panel.reset_selection(
+                &items,
+                Some((&self.active_model.provider_id, &self.active_model.model_id)),
+            );
+        }
+
+        self.model_panel = Some(panel);
         Ok(())
     }
 
@@ -1394,18 +1425,13 @@ impl App {
 
     pub(crate) fn open_model_panel(&mut self, initial_query: String) {
         self.command_palette.clear();
-        self.at_mention.clear();
-        self.draft_attachments.clear();
         self.connect_dialog = None;
         self.theme_panel = None;
         self.mcp_panel = None;
-        self.composer.clear();
-        self.composer
-            .set_placeholder("Search connected models by provider or model name");
-        self.composer.set_text(initial_query);
 
         let mut panel = ModelPanelState::new();
-        let items = self.model_panel_items();
+        panel.query.set_text(initial_query);
+        let items = self.model_panel_items(&panel);
         panel.reset_selection(
             &items,
             Some((&self.active_model.provider_id, &self.active_model.model_id)),
@@ -1415,11 +1441,6 @@ impl App {
 
     pub(crate) fn close_model_panel(&mut self) {
         self.model_panel = None;
-        self.at_mention.clear();
-        self.draft_attachments.clear();
-        self.composer.clear();
-        self.composer
-            .set_placeholder("Ask TiDev about your code, task, or question...");
     }
 
     pub(crate) fn open_message_panel(&mut self, initial_query: String) -> Result<()> {

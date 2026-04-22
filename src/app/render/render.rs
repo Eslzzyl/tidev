@@ -9,7 +9,7 @@ use ratatui::{
 use std::time::Instant;
 use unicode_width::UnicodeWidthStr;
 
-use super::{App, Screen};
+use super::{App, Composer, Screen};
 
 impl App {
     pub(crate) fn palette(&self) -> ThemePalette {
@@ -216,6 +216,27 @@ impl App {
         placeholder: &str,
         mask_input: bool,
     ) {
+        self.render_input_block_with_composer(
+            frame,
+            area,
+            title,
+            &self.composer,
+            placeholder,
+            mask_input,
+            true,
+        );
+    }
+
+    pub(super) fn render_input_block_with_composer(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        title: &str,
+        composer: &Composer,
+        placeholder: &str,
+        mask_input: bool,
+        register_input_area: bool,
+    ) {
         let palette = self.palette();
         let border_style = if self.pending_request {
             Style::default().fg(palette.warning)
@@ -227,35 +248,41 @@ impl App {
             horizontal: 1,
             vertical: 1,
         });
-        self.input_area.set(Some(inner));
+        if register_input_area {
+            self.input_area.set(Some(inner));
+        }
 
         let visible_lines = inner.height.max(1) as usize;
-        let total_lines = self.composer.display_line_count(inner.width as usize);
+        let total_lines = composer.display_line_count(inner.width as usize);
         let max_scroll = total_lines.saturating_sub(visible_lines);
 
         // Use stored scroll offset, clamped to valid range
-        let scroll = self.input_scroll_offset.min(max_scroll) as u16;
+        let scroll = if register_input_area {
+            self.input_scroll_offset.min(max_scroll) as u16
+        } else {
+            0
+        };
 
-        let content = if self.composer.is_empty() {
+        let content = if composer.is_empty() {
             Text::from(Line::from(Span::styled(
                 placeholder.to_string(),
                 Style::default().fg(palette.muted),
             )))
         } else if mask_input {
             Text::from(Line::from(Span::styled(
-                "•".repeat(self.composer.text().chars().count().max(1)),
+                "•".repeat(composer.text().chars().count().max(1)),
                 Style::default().fg(palette.text),
             )))
         } else {
             let width = inner.width as usize;
-            let selection = self.composer.selection_range();
+            let selection = composer.selection_range();
 
             // Build lines with selection highlighting
-            let visual_lines = self.composer.visual_lines(width);
+            let visual_lines = composer.visual_lines(width);
             let mut lines = Vec::new();
 
             for range in visual_lines.iter() {
-                let line_text = &self.composer.text()[range.clone()];
+                let line_text = &composer.text()[range.clone()];
 
                 if let Some((sel_start, sel_end)) = selection {
                     // This line may have selection
@@ -272,7 +299,7 @@ impl App {
 
                         // Before selection
                         if sel_in_line_start > line_start {
-                            let before = &self.composer.text()[line_start..sel_in_line_start];
+                            let before = &composer.text()[line_start..sel_in_line_start];
                             spans.push(Span::styled(
                                 before.to_string(),
                                 Style::default().fg(palette.text),
@@ -280,7 +307,7 @@ impl App {
                         }
 
                         // Selection
-                        let selected = &self.composer.text()[sel_in_line_start..sel_in_line_end];
+                        let selected = &composer.text()[sel_in_line_start..sel_in_line_end];
                         spans.push(Span::styled(
                             selected.to_string(),
                             Style::default().fg(palette.text).bg(palette.accent),
@@ -288,7 +315,7 @@ impl App {
 
                         // After selection
                         if sel_in_line_end < line_end {
-                            let after = &self.composer.text()[sel_in_line_end..line_end];
+                            let after = &composer.text()[sel_in_line_end..line_end];
                             spans.push(Span::styled(
                                 after.to_string(),
                                 Style::default().fg(palette.text),
@@ -318,18 +345,18 @@ impl App {
             .style(Style::default().fg(palette.text))
             .scroll((scroll, 0));
 
-        if self.composer.is_empty() || mask_input {
+        if composer.is_empty() || mask_input {
             paragraph = paragraph.wrap(Wrap { trim: false });
         }
 
         frame.render_widget(paragraph, area);
 
         if inner.width > 0 && inner.height > 0 {
-            let (cursor_line, cursor_col) = self.composer.cursor_position(inner.width);
+            let (cursor_line, cursor_col) = composer.cursor_position(inner.width);
             let mut cursor_line = cursor_line.saturating_sub(scroll);
             let mut cursor_col = cursor_col;
 
-            if self.composer.cursor_wraps_to_next_row(inner.width as usize) {
+            if composer.cursor_wraps_to_next_row(inner.width as usize) {
                 cursor_line = cursor_line.saturating_add(1);
                 cursor_col = 0;
             }

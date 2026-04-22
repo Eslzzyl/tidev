@@ -1,8 +1,9 @@
-use crate::config::ModelSummary;
+use crate::{app::Composer, config::ModelSummary};
 
 #[derive(Clone, Debug)]
 pub struct ModelPanelState {
     pub selected_index: usize,
+    pub(crate) query: Composer,
 }
 
 impl Default for ModelPanelState {
@@ -13,7 +14,10 @@ impl Default for ModelPanelState {
 
 impl ModelPanelState {
     pub fn new() -> Self {
-        Self { selected_index: 0 }
+        Self {
+            selected_index: 0,
+            query: Composer::new("Search connected models by provider or model name"),
+        }
     }
 
     pub fn reset_selection(
@@ -96,8 +100,8 @@ pub fn selectable_indices(items: &[ModelPanelItem]) -> Vec<usize> {
 use super::App;
 
 impl App {
-    pub(crate) fn model_panel_items(&self) -> Vec<ModelPanelItem> {
-        let query = self.composer.text().trim().to_ascii_lowercase();
+    pub(crate) fn model_panel_items(&self, panel: &ModelPanelState) -> Vec<ModelPanelItem> {
+        let query = panel.query.text().trim().to_ascii_lowercase();
         let mut items = Vec::new();
         let mut current_provider_id: Option<String> = None;
 
