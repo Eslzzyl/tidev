@@ -938,6 +938,27 @@ impl App {
             turn.tool_calls.len(),
             turn.finish_reason
         );
+        let turn_mode = self
+            .conversation
+            .messages
+            .iter()
+            .rev()
+            .find_map(|message| {
+                if matches!(message.role, MessageRole::Assistant) && message.streaming {
+                    message.mode
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                self.conversation
+                    .messages
+                    .iter()
+                    .rev()
+                    .find(|message| matches!(message.role, MessageRole::User))
+                    .and_then(|message| message.mode)
+            })
+            .unwrap_or(self.mode);
         let mut persisted_message = None;
 
         if let Some(message) = self.conversation.messages.last_mut()
@@ -948,6 +969,9 @@ impl App {
             message.reasoning = turn.reasoning.clone();
             message.tool_calls = turn.tool_calls.clone();
             message.streaming = false;
+            if message.mode.is_none() {
+                message.mode = Some(turn_mode);
+            }
 
             if let Some(ref usage) = self.context_usage {
                 message.input_tokens = Some(usage.input_tokens);
@@ -975,7 +999,7 @@ impl App {
             );
             self.last_notice = Some(format!("Running {} tool call(s)...", turn.tool_calls.len()));
 
-            self.begin_tool_execution(turn.tool_calls, runtime)?;
+            self.begin_tool_execution(turn.tool_calls, turn_mode, runtime)?;
             return Ok(());
         }
 

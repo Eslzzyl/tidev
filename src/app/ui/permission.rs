@@ -3,7 +3,8 @@ use crossterm::event::{KeyCode, KeyEvent};
 use std::sync::{Arc, atomic::AtomicBool};
 use tokio::runtime::Runtime;
 
-use crate::session::{MessageRole, ToolCall, ToolExecutionResult};
+use crate::prompts::SessionMode;
+use crate::session::{ToolCall, ToolExecutionResult};
 use crate::tooling::{QuestionArgs, TaskArgs, execute_shell_tool_call};
 
 use super::App;
@@ -11,14 +12,16 @@ use super::App;
 #[derive(Clone, Debug)]
 pub(crate) struct PendingToolExecution {
     tool_calls: Vec<ToolCall>,
+    execution_mode: SessionMode,
     next_index: usize,
     ready_tool_calls: Vec<ToolCall>,
 }
 
 impl PendingToolExecution {
-    pub(crate) fn new(tool_calls: Vec<ToolCall>) -> Self {
+    pub(crate) fn new(tool_calls: Vec<ToolCall>, execution_mode: SessionMode) -> Self {
         Self {
             tool_calls,
+            execution_mode,
             next_index: 0,
             ready_tool_calls: Vec::new(),
         }
@@ -34,6 +37,10 @@ impl PendingToolExecution {
 
     pub(crate) fn total(&self) -> usize {
         self.tool_calls.len()
+    }
+
+    pub(crate) fn mode(&self) -> SessionMode {
+        self.execution_mode
     }
 
     pub(crate) fn advance(&mut self) {
@@ -173,9 +180,10 @@ impl App {
     pub(crate) fn begin_tool_execution(
         &mut self,
         tool_calls: Vec<ToolCall>,
+        execution_mode: SessionMode,
         runtime: &Runtime,
     ) -> Result<()> {
-        self.pending_tool_execution = Some(PendingToolExecution::new(tool_calls));
+        self.pending_tool_execution = Some(PendingToolExecution::new(tool_calls, execution_mode));
         self.process_pending_tool_execution(runtime)
     }
 
@@ -216,7 +224,9 @@ impl App {
         let mut question_opened = false;
 
         loop {
-            let Some((tool_call, current_index, total)) = self.pending_tool_snapshot() else {
+            let Some((tool_call, current_index, total, effective_mode)) =
+                self.pending_tool_snapshot()
+            else {
                 crate::log_info!("process_pending_tool_execution: no more tool_calls in snapshot");
                 break;
             };
@@ -229,15 +239,6 @@ impl App {
             );
             let permission_key = self.tools.permission_key_for_call(&tool_call);
             let permission_label = self.tools.permission_label_for_call(&tool_call);
-
-            let effective_mode = self
-                .conversation
-                .messages
-                .iter()
-                .filter(|m| m.role == MessageRole::Assistant)
-                .find(|m| m.tool_calls.iter().any(|tc| tc.id == tool_call.id))
-                .and_then(|m| m.mode)
-                .unwrap_or(self.mode);
 
             if !self.tools.can_execute(&tool_call.name, effective_mode) {
                 let output = format!(
@@ -792,10 +793,15 @@ impl App {
         }
     }
 
-    fn pending_tool_snapshot(&self) -> Option<(ToolCall, usize, usize)> {
+    fn pending_tool_snapshot(&self) -> Option<(ToolCall, usize, usize, SessionMode)> {
         let execution = self.pending_tool_execution.as_ref()?;
         let tool_call = execution.current()?.clone();
-        Some((tool_call, execution.current_index(), execution.total()))
+        Some((
+            tool_call,
+            execution.current_index(),
+            execution.total(),
+            execution.mode(),
+        ))
     }
 
     pub(crate) fn try_start_parallel_execution(&mut self, runtime: &Runtime) -> Result<()> {
