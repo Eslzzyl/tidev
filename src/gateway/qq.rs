@@ -440,7 +440,7 @@ impl QQChannel {
                 return Ok(());
             }
 
-            self.execute_tool_calls(&runtime, conversation, turn.tool_calls)?;
+            self.execute_tool_calls(channel_id, msg_id, &runtime, conversation, turn.tool_calls).await?;
         }
 
         bail!("assistant exceeded maximum tool rounds; aborting to prevent loop")
@@ -535,8 +535,10 @@ impl QQChannel {
         Ok(turn)
     }
 
-    fn execute_tool_calls(
+    async fn execute_tool_calls(
         &mut self,
+        channel_id: &str,
+        msg_id: &str,
         runtime: &tokio::runtime::Handle,
         conversation: &mut Conversation,
         tool_calls: Vec<ToolCall>,
@@ -552,11 +554,23 @@ impl QQChannel {
                 Err(error) => ToolExecutionResult::new(format!("Error: {error}")),
             };
 
+            let display_result =
+                execution_result.preview_for_storage(Some(tool_call.name.as_str()));
+            let output_for_tool_event = display_result.output.clone();
+
             let tool_message =
                 Message::tool_result(&tool_call.id, &tool_call.name, execution_result);
             conversation.push(tool_message.clone());
             self.store
                 .append_message(conversation.session_id, &tool_message)?;
+
+            // Send tool result to user
+            let tool_result_text = format!(
+                "🔧 *{}*\n```\n{}\n```",
+                tool_call.name,
+                truncate_for_markdown(&output_for_tool_event)
+            );
+            self.send_markdown(channel_id, &tool_result_text, Some(msg_id)).await?;
         }
         Ok(())
     }
@@ -1047,4 +1061,21 @@ fn format_session_summary(conversation: &Conversation, active_model: &ActiveMode
         active_model.provider_id,
         active_model.model_id
     )
+}
+
+fn truncate_for_markdown(value: &str) -> String {
+    const MAX_CHARS: usize = 500;
+    let mut out = String::new();
+    for ch in value.chars().take(MAX_CHARS) {
+        // Escape backticks to avoid breaking markdown code blocks
+        if ch == '`' {
+            out.push_str("\\`");
+        } else {
+            out.push(ch);
+        }
+    }
+    if value.chars().count() > MAX_CHARS {
+        out.push_str("\n... (truncated)");
+    }
+    out
 }

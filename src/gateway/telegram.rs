@@ -365,7 +365,7 @@ impl TelegramChannel {
             self.try_edit_draft_text(source_message.chat.id, draft_message_id, &status)
                 .await;
 
-            self.execute_tool_calls(conversation, turn.tool_calls)?;
+            self.execute_tool_calls(source_message, conversation, turn.tool_calls).await?;
         }
 
         bail!(
@@ -485,8 +485,9 @@ impl TelegramChannel {
         bail!("streaming ended without TurnEnd event")
     }
 
-    fn execute_tool_calls(
+    async fn execute_tool_calls(
         &mut self,
+        source_message: &TelegramMessage,
         conversation: &mut Conversation,
         tool_calls: Vec<ToolCall>,
     ) -> Result<()> {
@@ -519,6 +520,14 @@ impl TelegramChannel {
             conversation.push(tool_message.clone());
             self.store
                 .append_message(conversation.session_id, &tool_message)?;
+
+            // Send tool result to user
+            let tool_result_text = format!(
+                "🔧 *{}*\n```\n{}\n```",
+                tool_call.name,
+                truncate_for_markdown(&output_for_tool_event)
+            );
+            self.send_reply_chunks(source_message, &tool_result_text).await?;
 
             crate::log_debug!(
                 "Tool result recorded: name={}, result_len={}",
@@ -1146,6 +1155,23 @@ fn trim_for_telegram(value: &str) -> String {
     }
     if value.chars().count() > 240 {
         out.push_str("...");
+    }
+    out
+}
+
+fn truncate_for_markdown(value: &str) -> String {
+    const MAX_CHARS: usize = 500;
+    let mut out = String::new();
+    for ch in value.chars().take(MAX_CHARS) {
+        // Escape backticks to avoid breaking markdown code blocks
+        if ch == '`' {
+            out.push_str("\\`");
+        } else {
+            out.push(ch);
+        }
+    }
+    if value.chars().count() > MAX_CHARS {
+        out.push_str("\n... (truncated)");
     }
     out
 }
