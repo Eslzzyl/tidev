@@ -3,6 +3,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::fmt::Write;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -529,7 +530,7 @@ impl TelegramChannel {
         Ok(())
     }
 
-    async fn finalize_draft_response(
+  async fn finalize_draft_response(
         &self,
         source_message: &TelegramMessage,
         draft_message_id: i64,
@@ -541,7 +542,7 @@ impl TelegramChannel {
         };
 
         self.bot
-            .edit_message_text(source_message.chat.id, draft_message_id, first_chunk)
+            .edit_message_text_html(source_message.chat.id, draft_message_id, first_chunk)
             .await?;
         crate::log_debug!(
             "Sent final response: chat_id={}, msg_id={}",
@@ -551,7 +552,7 @@ impl TelegramChannel {
 
         for chunk in chunks.iter().skip(1) {
             self.bot
-                .send_message(
+                .send_message_html(
                     source_message.chat.id,
                     source_message.message_thread_id,
                     chunk,
@@ -561,8 +562,7 @@ impl TelegramChannel {
         }
 
         crate::log_info!(
-            "Reply sent: chat_id={}, chunks={}",
-            source_message.chat.id,
+            "Reply sent: chunks={}",
             chunks.len()
         );
 
@@ -570,7 +570,7 @@ impl TelegramChannel {
     }
 
     async fn try_edit_draft_text(&self, chat_id: i64, message_id: i64, text: &str) {
-        if let Err(error) = self.bot.edit_message_text(chat_id, message_id, text).await {
+        if let Err(error) = self.bot.edit_message_text_html(chat_id, message_id, text).await {
             crate::log_warn!("Edit message failed: msg_id={}, error={error}", message_id);
         }
     }
@@ -1012,7 +1012,7 @@ impl TelegramChannel {
 
         for (index, chunk) in chunks.iter().enumerate() {
             self.bot
-                .send_message(
+                .send_message_html(
                     message.chat.id,
                     message.message_thread_id,
                     chunk,
@@ -1208,7 +1208,7 @@ fn split_message_for_telegram(message: &str) -> Vec<String> {
         remaining = remaining[chunk_end..].trim_start();
     }
 
-    if chunks.is_empty() {
+     if chunks.is_empty() {
         vec!["(no content)".to_string()]
     } else {
         chunks
@@ -1226,6 +1226,175 @@ impl TelegramBot {
             token,
             http: Client::new(),
         }
+    }
+
+    /// Convert Markdown text to Telegram HTML format.
+    fn markdown_to_telegram_html(text: &str) -> String {
+
+        let lines: Vec<&str> = text.split('\n').collect();
+        let mut result_lines: Vec<String> = Vec::new();
+
+        for line in &lines {
+            let trimmed_line = line.trim_start();
+            if trimmed_line.starts_with("```") {
+                result_lines.push(trimmed_line.to_string());
+                continue;
+            }
+
+            let mut line_out = String::new();
+
+            // Handle headers: ## Title → <b>Title</b>
+            let stripped = line.trim_start_matches('#');
+            let header_level = line.len() - stripped.len();
+            if header_level > 0 && line.starts_with('#') && stripped.starts_with(' ') {
+                let title = Self::escape_html(stripped.trim());
+                result_lines.push(format!("<b>{title}</b>"));
+                continue;
+            }
+
+            // Inline formatting
+            let mut i = 0;
+            let bytes = line.as_bytes();
+            let len = bytes.len();
+            while i < len {
+                // Bold: **text** or __text__
+                if i + 1 < len
+                    && bytes[i] == b'*'
+                    && bytes[i + 1] == b'*'
+                    && let Some(end) = line[i + 2..].find("**")
+                {
+                    let inner = Self::escape_html(&line[i + 2..i + 2 + end]);
+                    let _ = write!(line_out, "<b>{inner}</b>");
+                    i += 4 + end;
+                    continue;
+                }
+                if i + 1 < len
+                    && bytes[i] == b'_'
+                    && bytes[i + 1] == b'_'
+                    && let Some(end) = line[i + 2..].find("__")
+                {
+                    let inner = Self::escape_html(&line[i + 2..i + 2 + end]);
+                    let _ = write!(line_out, "<b>{inner}</b>");
+                    i += 4 + end;
+                    continue;
+                }
+                // Italic: *text* or _text_ (single)
+                if bytes[i] == b'*'
+                    && (i == 0 || bytes[i - 1] != b'*')
+                    && let Some(end) = line[i + 1..].find('*')
+                    && end > 0
+                {
+                    let inner = Self::escape_html(&line[i + 1..i + 1 + end]);
+                    let _ = write!(line_out, "<i>{inner}</i>");
+                    i += 2 + end;
+                    continue;
+                }
+                if bytes[i] == b'_'
+                    && (i == 0 || bytes[i - 1] != b'_')
+                    && let Some(end) = line[i + 1..].find('_')
+                    && end > 0
+                {
+                    let inner = Self::escape_html(&line[i + 1..i + 1 + end]);
+                    let _ = write!(line_out, "<i>{inner}</i>");
+                    i += 2 + end;
+                    continue;
+                }
+                // Inline code: `code`
+                if bytes[i] == b'`'
+                    && (i == 0 || bytes[i - 1] != b'`')
+                    && let Some(end) = line[i + 1..].find('`')
+                {
+                    let inner = Self::escape_html(&line[i + 1..i + 1 + end]);
+                    let _ = write!(line_out, "<code>{inner}</code>");
+                    i += 2 + end;
+                    continue;
+                }
+                // Markdown link: [text](url)
+                if bytes[i] == b'['
+                    && let Some(bracket_end) = line[i + 1..].find(']')
+                {
+                    let text_part = &line[i + 1..i + 1 + bracket_end];
+                    let after_bracket = i + 1 + bracket_end + 1;
+                    if after_bracket < len
+                        && bytes[after_bracket] == b'('
+                        && let Some(paren_end) = line[after_bracket + 1..].find(')')
+                    {
+                        let url = &line[after_bracket + 1..after_bracket + 1 + paren_end];
+                        if url.starts_with("http://") || url.starts_with("https://") {
+                            let text_html = Self::escape_html(text_part);
+                            let url_html = Self::escape_html(url);
+                            let _ = write!(line_out, "<a href=\"{url_html}\">{text_html}</a>");
+                            i = after_bracket + 1 + paren_end + 1;
+                            continue;
+                        }
+                    }
+                }
+                // Strikethrough: ~~text~~
+                if i + 1 < len
+                    && bytes[i] == b'~'
+                    && bytes[i + 1] == b'~'
+                    && let Some(end) = line[i + 2..].find("~~")
+                {
+                    let inner = Self::escape_html(&line[i + 2..i + 2 + end]);
+                    let _ = write!(line_out, "<s>{inner}</s>");
+                    i += 4 + end;
+                    continue;
+                }
+                // Default: escape HTML entities
+                let ch = line[i..].chars().next().unwrap();
+                match ch {
+                    '<' => line_out.push_str("&lt;"),
+                    '>' => line_out.push_str("&gt;"),
+                    '&' => line_out.push_str("&amp;"),
+                    '"' => line_out.push_str("&quot;"),
+                    '\'' => line_out.push_str("&#39;"),
+                    _ => line_out.push(ch),
+                }
+                i += ch.len_utf8();
+            }
+            result_lines.push(line_out);
+        }
+
+        // Second pass: handle ``` code blocks across lines
+        let joined = result_lines.join("\n");
+        let mut final_out = String::with_capacity(joined.len());
+        let mut in_code_block = false;
+        let mut code_buf = String::new();
+
+        for line in joined.split('\n') {
+            let trimmed = line.trim();
+            if trimmed.starts_with("```") {
+                if in_code_block {
+                    in_code_block = false;
+                    let escaped = code_buf.trim_end_matches('\n');
+                    let _ = writeln!(final_out, "<pre><code>{escaped}</code></pre>");
+                    code_buf.clear();
+                } else {
+                    in_code_block = true;
+                    code_buf.clear();
+                }
+            } else if in_code_block {
+                code_buf.push_str(line);
+                code_buf.push('\n');
+            } else {
+                final_out.push_str(line);
+                final_out.push('\n');
+            }
+        }
+        if in_code_block && !code_buf.is_empty() {
+            let _ = writeln!(final_out, "<pre><code>{}</code></pre>", code_buf.trim_end());
+        }
+
+        final_out.trim_end_matches('\n').to_string()
+    }
+
+    /// Escape HTML special characters.
+    fn escape_html(s: &str) -> String {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&#39;")
     }
 
     async fn get_updates(&self, offset: i64, timeout_secs: u64) -> Result<Vec<TelegramUpdate>> {
@@ -1261,6 +1430,7 @@ impl TelegramBot {
         let body = SendMessageRequest {
             chat_id,
             text,
+            parse_mode: None,
             message_thread_id,
             reply_to_message_id,
         };
@@ -1281,11 +1451,45 @@ impl TelegramBot {
         payload.into_result("sendMessage")
     }
 
+    /// Send message with HTML parse mode for Markdown rendering.
+    async fn send_message_html(
+        &self,
+        chat_id: i64,
+        message_thread_id: Option<i64>,
+        text: &str,
+        reply_to_message_id: Option<i64>,
+    ) -> Result<TelegramSentMessage> {
+        let html_text = Self::markdown_to_telegram_html(text);
+        let body = SendMessageRequest {
+            chat_id,
+            text: &html_text,
+            parse_mode: Some("HTML".to_string()),
+            message_thread_id,
+            reply_to_message_id,
+        };
+
+        let response = self
+            .http
+            .post(self.api_url("sendMessage"))
+            .json(&body)
+            .send()
+            .await
+            .context("failed to call Telegram sendMessage (HTML)")?;
+
+        let payload: TelegramApiResponse<TelegramSentMessage> = response
+            .json()
+            .await
+            .context("failed to parse Telegram sendMessage response")?;
+
+        payload.into_result("sendMessage")
+    }
+
     async fn edit_message_text(&self, chat_id: i64, message_id: i64, text: &str) -> Result<()> {
         let body = EditMessageTextRequest {
             chat_id,
             message_id,
             text,
+            parse_mode: None,
         };
 
         let response = self
@@ -1322,6 +1526,62 @@ impl TelegramBot {
             ),
             None => bail!(
                 "telegram editMessageText failed: {}",
+                payload
+                    .description
+                    .unwrap_or_else(|| "unknown telegram api error".to_string())
+            ),
+        }
+    }
+
+    /// Edit message text with HTML parse mode for Markdown rendering.
+    async fn edit_message_text_html(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+        text: &str,
+    ) -> Result<()> {
+        let html_text = Self::markdown_to_telegram_html(text);
+        let body = EditMessageTextRequest {
+            chat_id,
+            message_id,
+            text: &html_text,
+            parse_mode: Some("HTML".to_string()),
+        };
+
+        let response = self
+            .http
+            .post(self.api_url("editMessageText"))
+            .json(&body)
+            .send()
+            .await
+            .context("failed to call Telegram editMessageText (HTML)")?;
+
+        let payload: TelegramApiResponse<serde_json::Value> = response
+            .json()
+            .await
+            .context("failed to parse Telegram editMessageText response")?;
+
+        if payload.ok {
+            return Ok(());
+        }
+
+        if payload
+            .description
+            .as_deref()
+            .is_some_and(|description| description.contains("message is not modified"))
+        {
+            return Ok(());
+        }
+
+        match payload.error_code {
+            Some(code) => bail!(
+                "telegram editMessageText HTML failed ({code}): {}",
+                payload
+                    .description
+                    .unwrap_or_else(|| "unknown telegram api error".to_string())
+            ),
+            None => bail!(
+                "telegram editMessageText HTML failed: {}",
                 payload
                     .description
                     .unwrap_or_else(|| "unknown telegram api error".to_string())
@@ -1463,6 +1723,8 @@ struct SendMessageRequest<'a> {
     chat_id: i64,
     text: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
+    parse_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     message_thread_id: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     reply_to_message_id: Option<i64>,
@@ -1473,6 +1735,8 @@ struct EditMessageTextRequest<'a> {
     chat_id: i64,
     message_id: i64,
     text: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parse_mode: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
