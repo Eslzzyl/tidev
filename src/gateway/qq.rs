@@ -6,6 +6,8 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::time::{Duration, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
@@ -70,6 +72,9 @@ pub struct QQChannel {
     pub last_seq: Option<u32>,
     /// Gateway start time for uptime calculation.
     pub start_time: Instant,
+    /// Cancellation flags per channel_id for /stop command.
+    /// When set to true, the current task will be stopped after current streaming completes.
+    cancellation_flags: HashMap<String, Arc<AtomicBool>>,
     /// Interactive model selection state per channel_id.
     /// When a user is in this state, their next message is handled as selection input,
     /// not sent to the agent.
@@ -104,6 +109,7 @@ impl QQChannel {
             session_id: None,
             last_seq: None,
             start_time: Instant::now(),
+            cancellation_flags: HashMap::new(),
             model_selection_states: HashMap::new(),
         }
     }
@@ -386,6 +392,17 @@ impl QQChannel {
         let runtime = tokio::runtime::Handle::current();
 
         for _ in 1..=8 {
+            // Check for cancellation at the start of each round
+            if self.check_cancellation(channel_id) {
+                crate::log_info!("Task cancelled by user: channel_id={}", channel_id);
+
+                // Send cancellation confirmation
+                self.client
+                    .send_message(channel_id, "🛑 Task stopped.", Some(msg_id))
+                    .await?;
+                return Ok(());
+            }
+
             let turn = self
                 .run_single_streaming_turn(conversation, active_model)
                 .await?;
@@ -576,6 +593,10 @@ impl QQChannel {
             "status" => {
                 self.handle_status_command(channel_id, msg_id, conversation, active_model)
                     .await?;
+                Ok(true)
+            }
+            "stop" => {
+                self.handle_stop_command(channel_id, msg_id, channel_id).await?;
                 Ok(true)
             }
             _ => {
@@ -912,6 +933,46 @@ impl QQChannel {
         );
 
         self.client.send_message(channel_id, &text, Some(msg_id)).await
+    }
+
+    /// Handle /stop command - set cancellation flag for current task.
+    async fn handle_stop_command(
+        &mut self,
+        channel_id: &str,
+        msg_id: &str,
+        _chat_key: &str,
+    ) -> Result<()> {
+        // Get or create cancellation flag for this channel
+        let flag = self
+            .cancellation_flags
+            .entry(channel_id.to_string())
+            .or_insert_with(|| Arc::new(AtomicBool::new(false)));
+
+        // Check if there's already a task running
+        if flag.load(Ordering::SeqCst) {
+            // Already stopping
+            self.client
+                .send_message(channel_id, "Already stopping...", Some(msg_id))
+                .await?;
+        } else {
+            // Set the cancellation flag
+            flag.store(true, Ordering::SeqCst);
+            // We'll send confirmation after the task actually stops
+            // The actual stopping is handled in run_agent_with_tools
+        }
+        Ok(())
+    }
+
+    /// Check and clear cancellation flag, return true if cancelled.
+    fn check_cancellation(&self, channel_id: &str) -> bool {
+        if let Some(flag) = self.cancellation_flags.get(channel_id) {
+            if flag.load(Ordering::SeqCst) {
+                // Clear the flag
+                flag.store(false, Ordering::SeqCst);
+                return true;
+            }
+        }
+        false
     }
 }
 

@@ -5,6 +5,8 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tokio::sync::mpsc::unbounded_channel;
 use std::time::Instant;
 use tokio::time::{Duration, sleep};
@@ -59,6 +61,9 @@ pub struct TelegramChannel {
     pub request_seq: u64,
     /// Gateway start time for uptime calculation.
     pub start_time: Instant,
+    /// Cancellation flags per chat_id for /stop command.
+    /// When set to true, the current task will be stopped after current streaming completes.
+    cancellation_flags: HashMap<i64, Arc<AtomicBool>>,
     /// Interactive model selection state per chat_id.
     /// When a user is in this state, their next message is handled as selection input,
     /// not sent to the agent.
@@ -93,6 +98,7 @@ impl TelegramChannel {
             offset: 0,
             request_seq: 0,
             start_time: Instant::now(),
+            cancellation_flags: HashMap::new(),
             model_selection_states: HashMap::new(),
         }
     }
@@ -309,6 +315,16 @@ impl TelegramChannel {
         draft_message_id: i64,
     ) -> Result<()> {
         for round in 1..=MAX_TOOL_ROUNDS {
+            // Check for cancellation at the start of each round
+            if self.check_cancellation(source_message.chat.id) {
+                crate::log_info!("Task cancelled by user: chat_id={}", source_message.chat.id);
+
+                // Send cancellation confirmation
+                self.send_reply_chunks(source_message, "🛑 Task stopped.")
+                    .await?;
+                return Ok(());
+            }
+
             crate::log_debug!(
                 "Tool round {}/{}: chat_id={}, session={}",
                 round,
@@ -602,6 +618,10 @@ impl TelegramChannel {
             "status" => {
                 self.handle_status_command(source_message, conversation, active_model)
                     .await?;
+                Ok(true)
+            }
+            "stop" => {
+                self.handle_stop_command(source_message, chat_key).await?;
                 Ok(true)
             }
             _ => {
@@ -1058,6 +1078,43 @@ impl TelegramChannel {
         );
 
         self.send_reply_chunks(source_message, &text).await
+    }
+
+    /// Handle /stop command - set cancellation flag for current task.
+    async fn handle_stop_command(
+        &mut self,
+        source_message: &TelegramMessage,
+        _chat_key: &str,
+    ) -> Result<()> {
+        // Get or create cancellation flag for this chat
+        let flag = self
+            .cancellation_flags
+            .entry(source_message.chat.id)
+            .or_insert_with(|| Arc::new(AtomicBool::new(false)));
+
+        // Check if there's already a task running
+        if flag.load(Ordering::SeqCst) {
+            // Already stopping
+            self.send_reply_chunks(source_message, "Already stopping...").await?;
+        } else {
+            // Set the cancellation flag
+            flag.store(true, Ordering::SeqCst);
+            // We'll send confirmation after the task actually stops
+            // The actual stopping is handled in run_agent_with_tools_inner
+        }
+        Ok(())
+    }
+
+    /// Check and clear cancellation flag, return true if cancelled.
+    fn check_cancellation(&self, chat_id: i64) -> bool {
+        if let Some(flag) = self.cancellation_flags.get(&chat_id) {
+            if flag.load(Ordering::SeqCst) {
+                // Clear the flag
+                flag.store(false, Ordering::SeqCst);
+                return true;
+            }
+        }
+        false
     }
 }
 
