@@ -597,6 +597,7 @@ impl App {
                     return Ok(());
                 }
 
+                self.retrying_hint = None;
                 self.finish_assistant_turn(turn, runtime)?;
             }
             BackendEvent::Retrying {
