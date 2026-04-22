@@ -1175,10 +1175,8 @@ impl App {
         // If snippets haven't been loaded yet, we need to load them first
         // to determine if they are available
         if self.snippet_state.needs_load() {
-            self.snippet_state.load_snippets(
-                self.workspace_root.as_path(),
-                &self.paths.config_dir,
-            );
+            self.snippet_state
+                .load_snippets(self.workspace_root.as_path(), &self.paths.config_dir);
         }
 
         // If no snippets available, skip entirely
@@ -1217,27 +1215,12 @@ impl App {
         };
 
         // Get current word range and replace it
-        let text = self.composer.text();
         let cursor = self.composer.cursor();
         let query = self.snippet_state.query.clone();
 
-        // Find word start position
-        let word_start = if cursor > query.len() {
-            cursor.saturating_sub(query.len())
-        } else {
-            0
-        };
-
-        // Find the actual start of the word (skip whitespace)
-        let mut actual_start = word_start;
-        let chars: Vec<(usize, char)> = text.char_indices().take(word_start).collect();
-        for (i, c) in chars.iter().rev() {
-            if c.is_whitespace() {
-                actual_start = i + 1;
-                break;
-            }
-            actual_start = *i;
-        }
+        // Since query is the exact substring extracted going backwards from cursor,
+        // its byte length exactly corresponds to the byte offset of the word start.
+        let actual_start = cursor.saturating_sub(query.len());
 
         self.composer
             .replace_range(actual_start, cursor, &completion);

@@ -89,9 +89,39 @@ impl SnippetState {
         }
 
         // Extract current word (from cursor position going backwards)
-        let query = Self::current_word(input, cursor);
+        let mut query = Self::current_word(input, cursor);
 
-        // If query is too short or empty, hide menu
+        // Try to find the longest suffix of the current word that matches a snippet prefix.
+        // This allows triggering snippets like "你好世界" when typing "请你输出你好" without spacing.
+        let mut best_query = String::new();
+        let full_word_chars: Vec<char> = query.chars().collect();
+
+        for start_idx in 0..full_word_chars.len() {
+            let possible_query: String = full_word_chars[start_idx..].iter().collect();
+            if possible_query.len() < 2 {
+                break;
+            }
+
+            let query_lower = possible_query.to_lowercase();
+            let query_chars: Vec<char> = query_lower.chars().collect();
+
+            let has_match = self.snippets_cache.iter().any(|snippet| {
+                snippet
+                    .to_lowercase()
+                    .starts_with(&String::from_iter(&query_chars))
+            });
+
+            if has_match {
+                best_query = possible_query;
+                break;
+            }
+        }
+
+        if !best_query.is_empty() {
+            query = best_query;
+        }
+
+        // If query byte length is too short or empty, hide menu
         if query.len() < 2 {
             self.clear();
             return;
@@ -131,7 +161,8 @@ impl SnippetState {
         let chars: Vec<char> = input.chars().collect();
 
         for i in (0..char_count_before_cursor).rev() {
-            if chars[i].is_whitespace() {
+            let c = chars[i];
+            if c.is_whitespace() || (!c.is_alphanumeric() && c != '_') {
                 word_char_start = i + 1;
                 break;
             }
