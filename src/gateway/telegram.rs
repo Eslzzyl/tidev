@@ -755,20 +755,6 @@ impl TelegramChannel {
     }
 }
 
-impl Channel for TelegramChannel {
-    fn name(&self) -> &'static str {
-        GATEWAY_PLATFORM_TELEGRAM
-    }
-
-    fn run(&mut self) -> Pin<Box<dyn Future<Output = Result<()>> + '_>> {
-        Box::pin(async move {
-            self.bootstrap_offset().await?;
-            crate::log_info!("Telegram channel ready, offset={}", self.offset);
-            self.run_loop().await
-        })
-    }
-}
-
 fn format_session_summary(conversation: &Conversation, active_model: &ActiveModel) -> String {
     format!(
         "Session status\n- session_id: {}\n- title: {}\n- message_count: {}\n- model: {}/{}",
@@ -1151,6 +1137,69 @@ struct SetMessageReactionRequest {
 enum ReactionType {
     #[serde(rename = "emoji")]
     Emoji { emoji: String },
+}
+
+impl Channel for TelegramChannel {
+    fn name(&self) -> &'static str {
+        GATEWAY_PLATFORM_TELEGRAM
+    }
+
+    fn store(&self) -> Option<&SessionStore> {
+        Some(&self.store)
+    }
+
+    fn run(&mut self) -> Pin<Box<dyn Future<Output = Result<()>> + '_>> {
+        Box::pin(async move {
+            self.bootstrap_offset().await?;
+            crate::log_info!("Telegram channel ready, offset={}", self.offset);
+            self.run_loop().await
+        })
+    }
+
+    fn restore_sessions(&mut self, store: SessionStore) -> Result<usize> {
+        let sessions = store.list_gateway_chat_sessions(GATEWAY_PLATFORM_TELEGRAM)?;
+        let mut count = 0;
+        let mut orphans_closed = 0;
+
+        for (chat_key, session_id) in sessions {
+            if let Some(_conversation) = store.load_conversation(session_id)? {
+                let messages = store.load_messages(session_id)?;
+
+                // Check for orphaned user turn (crash mid-query)
+                if let Some(last) = messages.last() {
+                    if last.role == MessageRole::User {
+                        // Close orphan with marker to prevent LLM from continuing the old request
+                        let marker = Message::new(
+                            MessageRole::Assistant,
+                            "[Session interrupted — not continuing this request]".to_string(),
+                        );
+                        store.append_message(session_id, &marker)?;
+                        orphans_closed += 1;
+                    }
+                }
+
+                count += 1;
+                crate::log_info!(
+                    "Restored Telegram session: chat_key={}, session_id={}, messages={}",
+                    chat_key,
+                    session_id,
+                    messages.len()
+                );
+            }
+        }
+
+        if count > 0 {
+            crate::log_info!("Restored {} Telegram session(s) from disk", count);
+        }
+        if orphans_closed > 0 {
+            crate::log_info!(
+                "Closed {} orphaned session turn(s) from previous crash",
+                orphans_closed
+            );
+        }
+
+        Ok(count)
+    }
 }
 
 #[cfg(test)]

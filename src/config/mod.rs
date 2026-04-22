@@ -89,6 +89,14 @@ pub struct GatewayConfig {
     /// Default model for gateway mode (falls back to global default if empty).
     #[serde(default)]
     pub default_model: String,
+    /// Enable session persistence for gateway mode.
+    /// When enabled, sessions are persisted to SQLite and restored on restart.
+    #[serde(default = "default_gateway_session_persistence")]
+    pub session_persistence: bool,
+}
+
+fn default_gateway_session_persistence() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

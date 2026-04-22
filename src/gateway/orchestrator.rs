@@ -46,9 +46,31 @@ impl ChannelOrchestrator {
         let names = self.channel_names();
         crate::log_info!("Starting {} channel(s): {}", names.len(), names.join(", "));
 
+        // Restore sessions from persistent storage before starting channels.
+        // Each channel has its own SessionStore, so we call restore_sessions on each.
+        let mut total_restored = 0usize;
+        let mut channels = self.channels;
+        for channel in channels.iter_mut() {
+            if let Some(store) = channel.store() {
+                match channel.restore_sessions(store.clone()) {
+                    Ok(count) => total_restored += count,
+                    Err(e) => {
+                        crate::log_error!(
+                            "Failed to restore sessions for {}: {}",
+                            channel.name(),
+                            e
+                        );
+                    }
+                }
+            }
+        }
+        if total_restored > 0 {
+            crate::log_info!("Restored {} session(s) from disk", total_restored);
+        }
+
         // Spawn each channel in its own local task
         let mut handles = Vec::new();
-        for mut channel in self.channels {
+        for mut channel in channels {
             let handle = tokio::task::spawn_local(async move {
                 let name = channel.name();
                 if let Err(e) = channel.run().await {

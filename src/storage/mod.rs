@@ -25,6 +25,13 @@ pub struct SessionStore {
     path: PathBuf,
 }
 
+impl Clone for SessionStore {
+    fn clone(&self) -> Self {
+        // Re-open the database to get a new connection
+        Self::open(&self.path).expect("failed to clone SessionStore")
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SessionRecord {
     pub session_id: Uuid,
@@ -746,6 +753,39 @@ impl SessionStore {
             params![platform, chat_key],
         )?;
         Ok(())
+    }
+
+    /// List all gateway chat sessions for a given platform.
+    /// Returns a list of (chat_key, session_id) tuples sorted by updated_at descending.
+    pub fn list_gateway_chat_sessions(
+        &self,
+        platform: &str,
+    ) -> Result<Vec<(String, Uuid)>> {
+        let mut statement = self.connection.prepare(
+            "SELECT chat_key, session_id, updated_at FROM gateway_chat_sessions WHERE platform = ?1 ORDER BY updated_at DESC",
+        )?;
+
+        let rows = statement.query_map(params![platform], |row| {
+            let chat_key = row.get::<_, String>(0)?;
+            let session_id_str = row.get::<_, String>(1)?;
+            Ok((chat_key, session_id_str))
+        })?;
+
+        let mut sessions: Vec<(String, Uuid)> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for row in rows {
+            let (chat_key, session_id_str) = row?;
+            if seen.contains(&chat_key) {
+                continue;
+            }
+            seen.insert(chat_key.clone());
+            let session_id = Uuid::parse_str(&session_id_str)
+                .context("invalid session_id in gateway_chat_sessions")?;
+            sessions.push((chat_key, session_id));
+        }
+
+        Ok(sessions)
     }
 
     pub fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
