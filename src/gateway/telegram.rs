@@ -6,7 +6,8 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use tokio::sync::mpsc::unbounded_channel;
-use tokio::time::{Duration, Instant, sleep};
+use std::time::Instant;
+use tokio::time::{Duration, sleep};
 use uuid::Uuid;
 
 use crate::{
@@ -24,7 +25,7 @@ use crate::{
 
 use super::channel::Channel;
 use super::commands::{
-    CommandInvocation, GATEWAY_COMMANDS, gateway_help_text, parse_command,
+    CommandInvocation, GATEWAY_COMMANDS, format_status_summary, gateway_help_text, parse_command,
 };
 use super::shared::compose_system_prompt;
 
@@ -56,6 +57,8 @@ pub struct TelegramChannel {
     pub bot: TelegramBot,
     pub offset: i64,
     pub request_seq: u64,
+    /// Gateway start time for uptime calculation.
+    pub start_time: Instant,
     /// Interactive model selection state per chat_id.
     /// When a user is in this state, their next message is handled as selection input,
     /// not sent to the agent.
@@ -89,6 +92,7 @@ impl TelegramChannel {
             bot: TelegramBot::new(bot_token),
             offset: 0,
             request_seq: 0,
+            start_time: Instant::now(),
             model_selection_states: HashMap::new(),
         }
     }
@@ -595,6 +599,11 @@ impl TelegramChannel {
                     .await?;
                 Ok(true)
             }
+            "status" => {
+                self.handle_status_command(source_message, conversation, active_model)
+                    .await?;
+                Ok(true)
+            }
             _ => {
                 self.send_reply_chunks(
                     source_message,
@@ -996,6 +1005,59 @@ impl TelegramChannel {
                 .await?;
         }
         Ok(())
+    }
+
+    /// Handle /status command - show session statistics.
+    async fn handle_status_command(
+        &self,
+        source_message: &TelegramMessage,
+        conversation: &Conversation,
+        active_model: &ActiveModel,
+    ) -> Result<()> {
+        // Count messages by role
+        let user_message_count = conversation
+            .messages
+            .iter()
+            .filter(|m| m.role == MessageRole::User)
+            .count();
+        let assistant_message_count = conversation
+            .messages
+            .iter()
+            .filter(|m| m.role == MessageRole::Assistant)
+            .count();
+
+        // Get tool call count from database
+        let tool_call_count = self
+            .store
+            .count_tool_events(conversation.session_id)
+            .unwrap_or(0);
+
+        // Get token stats from database
+        let token_stats = self
+            .store
+            .get_session_token_stats(conversation.session_id)
+            .unwrap_or(crate::storage::SessionTokenStats {
+                input_tokens: 0,
+                output_tokens: 0,
+            });
+
+        let text = format_status_summary(
+            &conversation.session_id.to_string(),
+            &conversation.title,
+            conversation.messages.len(),
+            user_message_count,
+            assistant_message_count,
+            tool_call_count,
+            &active_model.provider_id,
+            &active_model.model_id,
+            active_model.context_window,
+            token_stats.input_tokens,
+            token_stats.output_tokens,
+            self.start_time,
+            None, // Average response time - could be tracked if needed
+        );
+
+        self.send_reply_chunks(source_message, &text).await
     }
 }
 

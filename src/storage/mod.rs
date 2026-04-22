@@ -54,6 +54,13 @@ pub struct WorkspaceSessionCount {
     pub session_count: i64,
 }
 
+/// Token statistics for a session.
+#[derive(Debug, Clone)]
+pub struct SessionTokenStats {
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+}
+
 impl SessionStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
@@ -618,6 +625,41 @@ impl SessionStore {
             .optional()?;
 
         Ok(output)
+    }
+
+    /// Count total tool events (tool calls) for a session.
+    pub fn count_tool_events(&self, session_id: Uuid) -> Result<usize> {
+        let mut statement = self.connection.prepare(
+            "SELECT COUNT(*) FROM tool_events WHERE session_id = ?1",
+        )?;
+
+        let count: i64 = statement.query_row(params![session_id.to_string()], |row| {
+            row.get(0)
+        })?;
+
+        Ok(count as usize)
+    }
+
+    /// Get token statistics for a session.
+    pub fn get_session_token_stats(&self, session_id: Uuid) -> Result<SessionTokenStats> {
+        let mut statement = self.connection.prepare(
+            r#"
+            SELECT
+                COALESCE(SUM(input_tokens), 0) as input_tokens,
+                COALESCE(SUM(output_tokens), 0) as output_tokens
+            FROM messages
+            WHERE session_id = ?1
+            "#,
+        )?;
+
+        let stats = statement.query_row(params![session_id.to_string()], |row| {
+            Ok(SessionTokenStats {
+                input_tokens: row.get::<_, i64>(0)? as u32,
+                output_tokens: row.get::<_, i64>(1)? as u32,
+            })
+        })?;
+
+        Ok(stats)
     }
 
     pub fn update_message_snapshot(

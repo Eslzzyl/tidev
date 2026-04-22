@@ -37,6 +37,10 @@ pub const GATEWAY_COMMANDS: &[CommandSpec] = &[
         name: "model",
         description: "Switch provider or model",
     },
+    CommandSpec {
+        name: "status",
+        description: "Show session statistics",
+    },
 ];
 
 /// Parse a slash command from message content.
@@ -80,8 +84,103 @@ pub fn gateway_help_text() -> String {
         "/new - start a fresh session",
         "/session - show current session status",
         "/model - switch provider or model",
+        "/status - show session statistics",
     ]
     .join("\n")
+}
+
+/// Format status information for display.
+/// Parameters:
+/// - session_id: The current session ID
+/// - title: Session title
+/// - message_count: Total number of messages
+/// - user_message_count: Number of user messages
+/// - assistant_message_count: Number of assistant messages
+/// - tool_call_count: Number of tool calls made
+/// - provider_id: LLM provider ID
+/// - model_id: Model ID
+/// - context_window: Model's context window size (in tokens)
+/// - input_tokens: Total input tokens used
+/// - output_tokens: Total output tokens used
+/// - start_time: Gateway start time (Instant)
+/// - avg_response_time_ms: Average response time in milliseconds
+pub fn format_status_summary(
+    session_id: &str,
+    title: &str,
+    message_count: usize,
+    user_message_count: usize,
+    assistant_message_count: usize,
+    tool_call_count: usize,
+    provider_id: &str,
+    model_id: &str,
+    context_window: usize,
+    input_tokens: u32,
+    output_tokens: u32,
+    start_time: std::time::Instant,
+    avg_response_time_ms: Option<u64>,
+) -> String {
+    let total_tokens = input_tokens + output_tokens;
+    let context_usage_pct = if context_window > 0 {
+        (total_tokens as f64 / context_window as f64 * 100.0).min(100.0)
+    } else {
+        0.0
+    };
+
+    let uptime = start_time.elapsed();
+    let uptime_str = format_uptime(uptime);
+
+    let response_time_str = avg_response_time_ms
+        .map(|ms| format!("{} ms", ms))
+        .unwrap_or_else(|| "N/A".to_string());
+
+    format!(
+        "📊 Session Status\n\
+        ────────────────\n\
+        Session: {}\n\
+        Title: {}\n\
+        ────────────────\n\
+        Messages: {} (user: {}, assistant: {})\n\
+        Tool calls: {}\n\
+        ────────────────\n\
+        Model: {}/{}\n\
+        Context: {}/{} ({:.1}%)\n\
+        Tokens: in={}, out={}, total={}\n\
+        ────────────────\n\
+        Avg response: {}\n\
+        Gateway uptime: {}",
+        session_id,
+        title,
+        message_count,
+        user_message_count,
+        assistant_message_count,
+        tool_call_count,
+        provider_id,
+        model_id,
+        total_tokens,
+        context_window,
+        context_usage_pct,
+        input_tokens,
+        output_tokens,
+        total_tokens,
+        response_time_str,
+        uptime_str
+    )
+}
+
+/// Format duration into human-readable uptime string.
+fn format_uptime(duration: std::time::Duration) -> String {
+    let total_secs = duration.as_secs();
+    let hours = total_secs / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+
+    if hours > 0 {
+        format!("{}h {}m {}s", hours, minutes, seconds)
+    } else if minutes > 0 {
+        format!("{}m {}s", minutes, seconds)
+    } else {
+        format!("{}s", seconds)
+    }
 }
 
 #[cfg(test)]

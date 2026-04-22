@@ -6,7 +6,8 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use tokio::time::{Duration, Instant, sleep};
+use std::time::Instant;
+use tokio::time::{Duration, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 use uuid::Uuid;
 
@@ -19,7 +20,7 @@ use crate::{
 };
 
 use super::channel::Channel;
-use super::commands::{CommandInvocation, gateway_help_text, parse_command};
+use super::commands::{CommandInvocation, format_status_summary, gateway_help_text, parse_command};
 use super::qq_client::QQClient;
 use super::shared;
 
@@ -67,6 +68,8 @@ pub struct QQChannel {
     pub client: QQClient,
     pub session_id: Option<String>,
     pub last_seq: Option<u32>,
+    /// Gateway start time for uptime calculation.
+    pub start_time: Instant,
     /// Interactive model selection state per channel_id.
     /// When a user is in this state, their next message is handled as selection input,
     /// not sent to the agent.
@@ -100,6 +103,7 @@ impl QQChannel {
             client: QQClient::new(app_id, app_secret, sandbox),
             session_id: None,
             last_seq: None,
+            start_time: Instant::now(),
             model_selection_states: HashMap::new(),
         }
     }
@@ -569,6 +573,11 @@ impl QQChannel {
                     .await?;
                 Ok(true)
             }
+            "status" => {
+                self.handle_status_command(channel_id, msg_id, conversation, active_model)
+                    .await?;
+                Ok(true)
+            }
             _ => {
                 self.client
                     .send_message(
@@ -849,6 +858,60 @@ impl QQChannel {
             &conversation.title,
         )?;
         Ok(conversation)
+    }
+
+    /// Handle /status command - show session statistics.
+    async fn handle_status_command(
+        &self,
+        channel_id: &str,
+        msg_id: &str,
+        conversation: &Conversation,
+        active_model: &ActiveModel,
+    ) -> Result<()> {
+        // Count messages by role
+        let user_message_count = conversation
+            .messages
+            .iter()
+            .filter(|m| m.role == MessageRole::User)
+            .count();
+        let assistant_message_count = conversation
+            .messages
+            .iter()
+            .filter(|m| m.role == MessageRole::Assistant)
+            .count();
+
+        // Get tool call count from database
+        let tool_call_count = self
+            .store
+            .count_tool_events(conversation.session_id)
+            .unwrap_or(0);
+
+        // Get token stats from database
+        let token_stats = self
+            .store
+            .get_session_token_stats(conversation.session_id)
+            .unwrap_or(crate::storage::SessionTokenStats {
+                input_tokens: 0,
+                output_tokens: 0,
+            });
+
+        let text = format_status_summary(
+            &conversation.session_id.to_string(),
+            &conversation.title,
+            conversation.messages.len(),
+            user_message_count,
+            assistant_message_count,
+            tool_call_count,
+            &active_model.provider_id,
+            &active_model.model_id,
+            active_model.context_window,
+            token_stats.input_tokens,
+            token_stats.output_tokens,
+            self.start_time,
+            None, // Average response time - could be tracked if needed
+        );
+
+        self.client.send_message(channel_id, &text, Some(msg_id)).await
     }
 }
 
