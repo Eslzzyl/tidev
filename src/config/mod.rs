@@ -83,6 +83,12 @@ pub struct GatewayConfig {
     pub telegram: TelegramGatewayConfig,
     #[serde(default)]
     pub qq: QQGatewayConfig,
+    /// Default provider for gateway mode (falls back to global default if empty).
+    #[serde(default)]
+    pub default_provider: String,
+    /// Default model for gateway mode (falls back to global default if empty).
+    #[serde(default)]
+    pub default_model: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -436,7 +442,17 @@ poll_timeout_secs = 30
 
     /// Resolve active model for gateway mode with its own system prompt.
     pub fn resolve_active_model_for_gateway(&self, auth: &AuthStore) -> Result<ActiveModel> {
-        let mut model = self.resolve_active_model(auth)?;
+        let provider_id = if !self.gateway.default_provider.is_empty() {
+            &self.gateway.default_provider
+        } else {
+            &self.default_provider
+        };
+        let model_id = if !self.gateway.default_model.is_empty() {
+            &self.gateway.default_model
+        } else {
+            &self.default_model
+        };
+        let mut model = self.resolve_model_by_ids(auth, provider_id, model_id)?;
         model.system_prompt = gateway_system_prompt();
         Ok(model)
     }
