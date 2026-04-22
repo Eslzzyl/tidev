@@ -70,6 +70,8 @@ pub struct QQChannel {
     pub client: QQClient,
     pub session_id: Option<String>,
     pub last_seq: Option<u32>,
+    /// Message sequence number for Markdown messages.
+    pub msg_seq: u32,
     /// Gateway start time for uptime calculation.
     pub start_time: Instant,
     /// Cancellation flags per channel_id for /stop command.
@@ -108,10 +110,24 @@ impl QQChannel {
             client: QQClient::new(app_id, app_secret, sandbox),
             session_id: None,
             last_seq: None,
+            msg_seq: 0,
             start_time: Instant::now(),
             cancellation_flags: HashMap::new(),
             model_selection_states: HashMap::new(),
         }
+    }
+
+    /// Send a text message with Markdown format.
+    async fn send_markdown(
+        &mut self,
+        channel_id: &str,
+        content: &str,
+        msg_id: Option<&str>,
+    ) -> Result<()> {
+        self.msg_seq += 1;
+        self.client
+            .send_message_markdown(channel_id, content, msg_id, self.msg_seq)
+            .await
     }
 
     async fn run_loop(&mut self) -> Result<()> {
@@ -307,8 +323,7 @@ impl QQChannel {
             let error_message = Message::new(MessageRole::Error, error_text.clone());
             self.store
                 .append_message(conversation.session_id, &error_message)?;
-            self.client
-                .send_message(&channel_id, &error_text, Some(&msg_id))
+            self.send_markdown(&channel_id, &error_text, Some(&msg_id))
                 .await?;
         }
 
@@ -397,8 +412,7 @@ impl QQChannel {
                 crate::log_info!("Task cancelled by user: channel_id={}", channel_id);
 
                 // Send cancellation confirmation
-                self.client
-                    .send_message(channel_id, "🛑 Task stopped.", Some(msg_id))
+                self.send_markdown(channel_id, "🛑 Task stopped.", Some(msg_id))
                     .await?;
                 return Ok(());
             }
@@ -410,8 +424,9 @@ impl QQChannel {
             if turn.tool_calls.is_empty() {
                 let final_text = turn.content.trim();
                 if !final_text.is_empty() {
+                    self.msg_seq += 1;
                     self.client
-                        .send_message(channel_id, final_text, Some(msg_id))
+                        .send_message_markdown(channel_id, final_text, Some(msg_id), self.msg_seq)
                         .await?;
                 }
 
@@ -558,8 +573,7 @@ impl QQChannel {
         match command.name.as_str() {
             "new" => {
                 *conversation = self.rotate_chat_session(chat_key, active_model)?;
-                self.client
-                    .send_message(channel_id, "Started a fresh session.", Some(msg_id))
+                self.send_markdown(channel_id, "Started a fresh session.", Some(msg_id))
                     .await?;
                 Ok(true)
             }
@@ -585,8 +599,7 @@ impl QQChannel {
                 Ok(true)
             }
             "help" => {
-                self.client
-                    .send_message(channel_id, &gateway_help_text(), Some(msg_id))
+                self.send_markdown(channel_id, &gateway_help_text(), Some(msg_id))
                     .await?;
                 Ok(true)
             }
@@ -600,17 +613,16 @@ impl QQChannel {
                 Ok(true)
             }
             _ => {
-                self.client
-                    .send_message(
-                        channel_id,
-                        &format!(
-                            "Unknown command: {}\n\n{}",
-                            command.name,
-                            gateway_help_text()
-                        ),
-                        Some(msg_id),
-                    )
-                    .await?;
+                self.send_markdown(
+                    channel_id,
+                    &format!(
+                        "Unknown command: {}\n\n{}",
+                        command.name,
+                        gateway_help_text()
+                    ),
+                    Some(msg_id),
+                )
+                .await?;
                 Ok(true)
             }
         }
@@ -618,7 +630,7 @@ impl QQChannel {
 
     #[allow(clippy::too_many_arguments)]
     async fn handle_session_command(
-        &self,
+        &mut self,
         channel_id: &str,
         msg_id: &str,
         _chat_key: &str,
@@ -632,13 +644,11 @@ impl QQChannel {
         match args.first().map(|s| s.as_str()) {
             None | Some("") => {
                 let text = format_session_summary(conversation, active_model);
-                self.client
-                    .send_message(channel_id, &text, Some(msg_id))
+                self.send_markdown(channel_id, &text, Some(msg_id))
                     .await?;
             }
             _ => {
-                self.client
-                    .send_message(channel_id, &gateway_help_text(), Some(msg_id))
+                self.send_markdown(channel_id, &gateway_help_text(), Some(msg_id))
                     .await?;
             }
         }
@@ -652,8 +662,7 @@ impl QQChannel {
         let providers = self.get_available_providers();
 
         if providers.is_empty() {
-            self.client
-                .send_message(channel_id, "No available providers found. Please check your configuration.", Some(msg_id))
+            self.send_markdown(channel_id, "No available providers found. Please check your configuration.", Some(msg_id))
                 .await?;
             return Ok(());
         }
@@ -665,7 +674,7 @@ impl QQChannel {
         }
         text.push_str("\n(Enter any other number to cancel)");
 
-        self.client.send_message(channel_id, &text, Some(msg_id)).await?;
+        self.send_markdown(channel_id, &text, Some(msg_id)).await?;
 
         // Set state to waiting for provider selection
         self.model_selection_states
@@ -685,21 +694,19 @@ impl QQChannel {
         // Check if it's a command - cancel selection if so
         if content.starts_with('/') {
             self.model_selection_states.remove(channel_id);
-            self.client
-                .send_message(channel_id, "Selection cancelled. Send /model to try again.", Some(msg_id))
+            self.send_markdown(channel_id, "Selection cancelled. Send /model to try again.", Some(msg_id))
                 .await?;
             return Ok(());
         }
 
-        match state {
+            match state {
             ModelSelectionState::WaitingForProvider => {
                 // Parse provider selection
                 let selection: usize = match content.parse() {
                     Ok(n) => n,
                     Err(_) => {
                         self.model_selection_states.remove(channel_id);
-                        self.client
-                            .send_message(channel_id, "Invalid selection. Selection cancelled. Send /model to try again.", Some(msg_id))
+                        self.send_markdown(channel_id, "Invalid selection. Selection cancelled. Send /model to try again.", Some(msg_id))
                             .await?;
                         return Ok(());
                     }
@@ -720,8 +727,7 @@ impl QQChannel {
                 let models = self.get_models_for_provider(provider_id);
                 if models.is_empty() {
                     self.model_selection_states.remove(channel_id);
-                    self.client
-                        .send_message(channel_id, "No models available for this provider. Selection cancelled.", Some(msg_id))
+                    self.send_markdown(channel_id, "No models available for this provider. Selection cancelled.", Some(msg_id))
                         .await?;
                     return Ok(());
                 }
@@ -736,8 +742,7 @@ impl QQChannel {
                 }
                 text.push_str("\n(Enter any other number to cancel)");
 
-                self.client.send_message(channel_id, &text, Some(msg_id)).await?;
-
+      self.send_markdown(channel_id, &text, Some(msg_id)).await?;
                 // Set state to waiting for model selection
                 self.model_selection_states.insert(
                     channel_id.to_string(),
@@ -751,19 +756,16 @@ impl QQChannel {
                 let selection: usize = match content.parse() {
                     Ok(n) => n,
                     Err(_) => {
-                        self.model_selection_states.remove(channel_id);
-                        self.client
-                            .send_message(channel_id, "Invalid selection. Selection cancelled. Send /model to try again.", Some(msg_id))
-                            .await?;
-                        return Ok(());
-                    }
-                };
+   self.model_selection_states.remove(channel_id);
+                    self.send_markdown(channel_id, "Selection cancelled. Send /model to try again.", Some(msg_id))
+                        .await?;
+                    return Ok(());
+                }                };
 
-                let models = self.get_models_for_provider(provider_id);
+                   let models = self.get_models_for_provider(provider_id);
                 if selection < 1 || selection > models.len() {
                     self.model_selection_states.remove(channel_id);
-                    self.client
-                        .send_message(channel_id, "Selection cancelled. Send /model to try again.", Some(msg_id))
+                    self.send_markdown(channel_id, "Invalid selection. Selection cancelled. Send /model to try again.", Some(msg_id))
                         .await?;
                     return Ok(());
                 }
@@ -787,7 +789,7 @@ impl QQChannel {
                     "Model switched to {}/{}\n\nSend /model to change again.",
                     provider_id, model_id
                 );
-                self.client.send_message(channel_id, &success_text, Some(msg_id)).await?;
+                self.send_markdown(channel_id, &success_text, Some(msg_id)).await?;
             }
         }
 
@@ -883,7 +885,7 @@ impl QQChannel {
 
     /// Handle /status command - show session statistics.
     async fn handle_status_command(
-        &self,
+        &mut self,
         channel_id: &str,
         msg_id: &str,
         conversation: &Conversation,
@@ -932,7 +934,7 @@ impl QQChannel {
             None, // Average response time - could be tracked if needed
         );
 
-        self.client.send_message(channel_id, &text, Some(msg_id)).await
+         self.send_markdown(channel_id, &text, Some(msg_id)).await
     }
 
     /// Handle /stop command - set cancellation flag for current task.
@@ -948,11 +950,9 @@ impl QQChannel {
             .entry(channel_id.to_string())
             .or_insert_with(|| Arc::new(AtomicBool::new(false)));
 
-        // Check if there's already a task running
-        if flag.load(Ordering::SeqCst) {
+          if flag.load(Ordering::SeqCst) {
             // Already stopping
-            self.client
-                .send_message(channel_id, "Already stopping...", Some(msg_id))
+            self.send_markdown(channel_id, "Already stopping...", Some(msg_id))
                 .await?;
         } else {
             // Set the cancellation flag
