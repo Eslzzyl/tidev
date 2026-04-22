@@ -861,7 +861,7 @@ impl App {
         }
 
         // 自动补全弹窗的 Tab 处理优先于模式切换
-        if self.snippet_state.visible {
+        if self.snippet_state.visible && !self.snippet_state.snippets.is_empty() {
             match key.code {
                 KeyCode::Esc => {
                     self.snippet_state.clear();
@@ -883,7 +883,7 @@ impl App {
             }
         }
 
-        if self.at_mention.visible {
+        if self.at_mention.visible && !self.at_mention.suggestions.is_empty() {
             match key.code {
                 KeyCode::Esc => {
                     self.at_mention.clear();

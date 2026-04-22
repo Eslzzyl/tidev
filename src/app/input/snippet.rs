@@ -132,9 +132,9 @@ impl SnippetState {
             return;
         }
 
-        self.visible = true;
         self.query = query.to_string();
         self.search_snippets();
+        self.visible = !self.snippets.is_empty();
     }
 
     fn current_word(input: &str, cursor: usize) -> String {

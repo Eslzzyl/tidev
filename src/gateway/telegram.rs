@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -27,6 +28,7 @@ use crate::{
 };
 
 use super::channel::Channel;
+use super::channel::SendMessage;
 use super::commands::{
     CommandInvocation, GATEWAY_COMMANDS, format_status_summary, gateway_help_text, parse_command,
 };
@@ -36,6 +38,20 @@ pub const GATEWAY_PLATFORM_TELEGRAM: &str = "telegram";
 const TELEGRAM_MAX_MESSAGE_LENGTH: usize = 4096;
 const TELEGRAM_DRAFT_EDIT_INTERVAL_MS: u64 = 1200;
 const MAX_TOOL_ROUNDS: usize = 8;
+
+/// Parse recipient string into (chat_id, thread_id).
+fn parse_telegram_recipient(recipient: &str) -> Result<(i64, Option<i64>)> {
+    let parts: Vec<&str> = recipient.split(':').collect();
+    let chat_id: i64 = parts[0]
+        .parse()
+        .context("invalid chat_id in recipient")?;
+    let thread_id = if parts.len() > 1 {
+        Some(parts[1].parse().context("invalid thread_id in recipient")?)
+    } else {
+        None
+    };
+    Ok((chat_id, thread_id))
+}
 
 /// Interactive model selection state for a chat.
 #[derive(Debug, Clone)]
@@ -273,24 +289,44 @@ impl TelegramChannel {
             conversation.session_id
         );
 
-        let draft = self
-            .bot
-            .send_message(
-                source_message.chat.id,
-                source_message.message_thread_id,
-                "Thinking...",
-                Some(source_message.message_id),
-            )
-            .await?;
-        let draft_message_id = draft.message_id;
-        crate::log_debug!("Sent draft message: msg_id={}", draft_message_id);
+        // Build recipient string: chat_id:thread_id (if thread exists)
+        let recipient = if let Some(thread_id) = source_message.message_thread_id {
+            format!("{}:{}", source_message.chat.id, thread_id)
+        } else {
+            source_message.chat.id.to_string()
+        };
+
+        // Send initial draft message
+        let draft_message_id = match self
+            .send_draft(&SendMessage::new("Thinking...", &recipient))
+            .await?
+        {
+            Some(id) => {
+                crate::log_debug!("Sent draft message: msg_id={}", id);
+                id
+            }
+            None => {
+                // Fallback: channel doesn't support drafts, use old behavior
+                let draft = self
+                    .bot
+                    .send_message(
+                        source_message.chat.id,
+                        source_message.message_thread_id,
+                        "Thinking...",
+                        Some(source_message.message_id),
+                    )
+                    .await?;
+                draft.message_id.to_string()
+            }
+        };
 
         if let Err(error) = self
             .run_agent_with_tools_inner(
                 source_message,
                 conversation,
                 active_model,
-                draft_message_id,
+                &recipient,
+                &draft_message_id,
             )
             .await
         {
@@ -299,10 +335,12 @@ impl TelegramChannel {
                 "Agent failed: chat_id={}, error={error}",
                 source_message.chat.id
             );
-            let _ = self
-                .bot
-                .edit_message_text(source_message.chat.id, draft_message_id, &error_text)
-                .await;
+            // Try to update the draft with error message, fallback to sending new message
+            if self.update_draft(&recipient, &draft_message_id, &error_text).await.is_err() {
+                let _ = self
+                    .send_reply_chunks(source_message, &error_text)
+                    .await;
+            }
             return Err(error);
         }
 
@@ -314,8 +352,11 @@ impl TelegramChannel {
         source_message: &TelegramMessage,
         conversation: &mut Conversation,
         active_model: &ActiveModel,
-        draft_message_id: i64,
+        recipient: &str,
+        draft_message_id: &str,
     ) -> Result<()> {
+        let mut has_tool_calls = false;
+
         for round in 1..=MAX_TOOL_ROUNDS {
             // Check for cancellation at the start of each round
             if self.check_cancellation(source_message.chat.id) {
@@ -357,14 +398,38 @@ impl TelegramChannel {
                 self.store
                     .append_message(conversation.session_id, &assistant_message)?;
 
-                self.finalize_draft_response(source_message, draft_message_id, &final_text)
-                    .await?;
+                // If we had tool calls, send final response as a new message
+                // instead of editing the draft (so it appears at the end)
+                if has_tool_calls {
+                    // Delete the draft message first
+                    let _ = self.cancel_draft(recipient, draft_message_id).await;
+                    // Send final response as new message
+                    self.send_reply_chunks(source_message, &final_text)
+                        .await?;
+                } else {
+                    // No tool calls - use finalize_draft to update the initial message
+                    if self.finalize_draft(recipient, draft_message_id, &final_text).await.is_err() {
+                        // Fallback: send as new message
+                        self.send_reply_chunks(source_message, &final_text)
+                            .await?;
+                    }
+                }
                 return Ok(());
             }
 
-            let status = format!("Running {} tool call(s)...", turn.tool_calls.len());
-            self.try_edit_draft_text(source_message.chat.id, draft_message_id, &status)
-                .await;
+            // Mark that we've had tool calls
+            has_tool_calls = true;
+
+            // Show tool call progress - use update_draft_progress
+            let status = format!("🔧 Running {} tool call(s)...", turn.tool_calls.len());
+            if self
+                .update_draft_progress(recipient, draft_message_id, &status)
+                .await
+                .is_err()
+            {
+                // Fallback: send as new message
+                self.send_reply_chunks(source_message, &status).await?;
+            }
 
             self.execute_tool_calls(source_message, conversation, turn.tool_calls)
                 .await?;
@@ -380,7 +445,7 @@ impl TelegramChannel {
         source_message: &TelegramMessage,
         conversation: &mut Conversation,
         active_model: &ActiveModel,
-        draft_message_id: i64,
+        draft_message_id: &str,
     ) -> Result<AssistantTurn> {
         self.tools.set_active_model(active_model.clone());
 
@@ -425,6 +490,13 @@ impl TelegramChannel {
         let mut last_edit = Instant::now() - Duration::from_millis(TELEGRAM_DRAFT_EDIT_INTERVAL_MS);
         let mut final_turn: Option<AssistantTurn> = None;
 
+        // Build recipient for draft updates
+        let recipient = if let Some(thread_id) = source_message.message_thread_id {
+            format!("{}:{}", source_message.chat.id, thread_id)
+        } else {
+            source_message.chat.id.to_string()
+        };
+
         while let Some(event) = rx.recv().await {
             match event {
                 BackendEvent::Delta {
@@ -437,12 +509,8 @@ impl TelegramChannel {
                     if last_edit.elapsed() >= Duration::from_millis(TELEGRAM_DRAFT_EDIT_INTERVAL_MS)
                     {
                         let preview = preview_for_streaming(&streamed_content);
-                        self.try_edit_draft_text(
-                            source_message.chat.id,
-                            draft_message_id,
-                            &preview,
-                        )
-                        .await;
+                        // Try to update draft, ignore errors
+                        let _ = self.update_draft(&recipient, draft_message_id, &preview).await;
                         last_edit = Instant::now();
                     }
                 }
@@ -555,52 +623,6 @@ impl TelegramChannel {
         }
 
         Ok(())
-    }
-
-    async fn finalize_draft_response(
-        &self,
-        source_message: &TelegramMessage,
-        draft_message_id: i64,
-        text: &str,
-    ) -> Result<()> {
-        let chunks = split_message_for_telegram(text);
-        let Some(first_chunk) = chunks.first() else {
-            return Ok(());
-        };
-
-        self.bot
-            .edit_message_text_html(source_message.chat.id, draft_message_id, first_chunk)
-            .await?;
-        crate::log_debug!(
-            "Sent final response: chat_id={}, msg_id={}",
-            source_message.chat.id,
-            draft_message_id
-        );
-
-        for chunk in chunks.iter().skip(1) {
-            self.bot
-                .send_message_html(
-                    source_message.chat.id,
-                    source_message.message_thread_id,
-                    chunk,
-                    None,
-                )
-                .await?;
-        }
-
-        crate::log_info!("Reply sent: chunks={}", chunks.len());
-
-        Ok(())
-    }
-
-    async fn try_edit_draft_text(&self, chat_id: i64, message_id: i64, text: &str) {
-        if let Err(error) = self
-            .bot
-            .edit_message_text_html(chat_id, message_id, text)
-            .await
-        {
-            crate::log_warn!("Edit message failed: msg_id={}, error={error}", message_id);
-        }
     }
 
     async fn handle_command(
@@ -1528,55 +1550,6 @@ impl TelegramBot {
         payload.into_result("sendMessage")
     }
 
-    async fn edit_message_text(&self, chat_id: i64, message_id: i64, text: &str) -> Result<()> {
-        let body = EditMessageTextRequest {
-            chat_id,
-            message_id,
-            text,
-            parse_mode: None,
-        };
-
-        let response = self
-            .http
-            .post(self.api_url("editMessageText"))
-            .json(&body)
-            .send()
-            .await
-            .context("failed to call Telegram editMessageText")?;
-
-        let payload: TelegramApiResponse<serde_json::Value> = response
-            .json()
-            .await
-            .context("failed to parse Telegram editMessageText response")?;
-
-        if payload.ok {
-            return Ok(());
-        }
-
-        if payload
-            .description
-            .as_deref()
-            .is_some_and(|description| description.contains("message is not modified"))
-        {
-            return Ok(());
-        }
-
-        match payload.error_code {
-            Some(code) => bail!(
-                "telegram editMessageText failed ({code}): {}",
-                payload
-                    .description
-                    .unwrap_or_else(|| "unknown telegram api error".to_string())
-            ),
-            None => bail!(
-                "telegram editMessageText failed: {}",
-                payload
-                    .description
-                    .unwrap_or_else(|| "unknown telegram api error".to_string())
-            ),
-        }
-    }
-
     /// Edit message text with HTML parse mode for Markdown rendering.
     async fn edit_message_text_html(
         &self,
@@ -1631,6 +1604,47 @@ impl TelegramBot {
                     .unwrap_or_else(|| "unknown telegram api error".to_string())
             ),
         }
+    }
+
+    /// Delete a message.
+    async fn delete_message(&self, chat_id: i64, message_id: i64) -> Result<()> {
+        let body = serde_json::json!({
+            "chat_id": chat_id,
+            "message_id": message_id,
+        });
+
+        let response = self
+            .http
+            .post(self.api_url("deleteMessage"))
+            .json(&body)
+            .send()
+            .await
+            .context("failed to call Telegram deleteMessage")?;
+
+        let payload: TelegramApiResponse<serde_json::Value> = response
+            .json()
+            .await
+            .context("failed to parse Telegram deleteMessage response")?;
+
+        if payload.ok {
+            return Ok(());
+        }
+
+        // Ignore "message to delete not found" errors
+        if payload
+            .description
+            .as_deref()
+            .is_some_and(|desc| desc.contains("message to delete not found"))
+        {
+            return Ok(());
+        }
+
+        bail!(
+            "telegram deleteMessage failed: {}",
+            payload
+                .description
+                .unwrap_or_else(|| "unknown telegram api error".to_string())
+        )
     }
 
     pub async fn set_my_commands(&self, commands: Vec<(String, String)>) -> Result<()> {
@@ -1810,6 +1824,7 @@ enum ReactionType {
     Emoji { emoji: String },
 }
 
+#[async_trait]
 impl Channel for TelegramChannel {
     fn name(&self) -> &'static str {
         GATEWAY_PLATFORM_TELEGRAM
@@ -1870,6 +1885,71 @@ impl Channel for TelegramChannel {
         }
 
         Ok(count)
+    }
+
+    // ── Draft API ─────────────────────────────────────────────────────
+
+    fn supports_draft_updates(&self) -> bool {
+        true
+    }
+
+    async fn send_draft(&mut self, message: &SendMessage) -> Result<Option<String>> {
+        let (chat_id, thread_id) = parse_telegram_recipient(&message.recipient)?;
+        let sent = self
+            .bot
+            .send_message_html(chat_id, thread_id, &message.content, None)
+            .await?;
+        Ok(Some(sent.message_id.to_string()))
+    }
+
+    async fn update_draft(&mut self, recipient: &str, message_id: &str, text: &str) -> Result<()> {
+        let (chat_id, _) = parse_telegram_recipient(recipient)?;
+        let msg_id: i64 = message_id.parse().context("invalid message_id")?;
+        self.bot
+            .edit_message_text_html(chat_id, msg_id, text)
+            .await?;
+        Ok(())
+    }
+
+    async fn update_draft_progress(
+        &mut self,
+        recipient: &str,
+        message_id: &str,
+        text: &str,
+    ) -> Result<()> {
+        // Same as update_draft for Telegram - both use editMessageText
+        self.update_draft(recipient, message_id, text).await
+    }
+
+    async fn finalize_draft(&mut self, recipient: &str, message_id: &str, text: &str) -> Result<()> {
+        let (chat_id, thread_id) = parse_telegram_recipient(recipient)?;
+        let msg_id: i64 = message_id.parse().context("invalid message_id")?;
+
+        let chunks = split_message_for_telegram(text);
+        let Some(first_chunk) = chunks.first() else {
+            return Ok(());
+        };
+
+        // Edit the first chunk into the draft message
+        self.bot
+            .edit_message_text_html(chat_id, msg_id, first_chunk)
+            .await?;
+
+        // Send remaining chunks as new messages
+        for chunk in chunks.iter().skip(1) {
+            self.bot
+                .send_message_html(chat_id, thread_id, chunk, None)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn cancel_draft(&mut self, recipient: &str, message_id: &str) -> Result<()> {
+        let (chat_id, _) = parse_telegram_recipient(recipient)?;
+        let msg_id: i64 = message_id.parse().context("invalid message_id")?;
+        self.bot.delete_message(chat_id, msg_id).await?;
+        Ok(())
     }
 }
 

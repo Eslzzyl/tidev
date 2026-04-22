@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, anyhow, bail};
+use async_trait::async_trait;
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -986,6 +987,7 @@ impl QQChannel {
     }
 }
 
+#[async_trait]
 impl Channel for QQChannel {
     fn name(&self) -> &'static str {
         GATEWAY_PLATFORM_QQ
