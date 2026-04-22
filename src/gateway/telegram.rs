@@ -820,7 +820,7 @@ impl TelegramChannel {
                     GATEWAY_PLATFORM_TELEGRAM,
                     &chat_key,
                     provider_id,
-                    &_model_id,
+                    _model_id,
                 )?;
 
                 // Clear state
@@ -844,11 +844,10 @@ impl TelegramChannel {
 
         // Check user-configured providers
         for (id, config) in &self.config.providers {
-            if let Some(auth) = self.auth.providers.get(id) {
-                if auth.api_key.as_ref().is_some_and(|k| !k.trim().is_empty()) {
+            if let Some(auth) = self.auth.providers.get(id)
+                && auth.api_key.as_ref().is_some_and(|k| !k.trim().is_empty()) {
                     providers.push((id.clone(), config.display_name.clone()));
                 }
-            }
         }
 
         // Check bundled providers
@@ -857,11 +856,10 @@ impl TelegramChannel {
             if self.config.providers.contains_key(id) {
                 continue;
             }
-            if let Some(auth) = self.auth.providers.get(id) {
-                if auth.api_key.as_ref().is_some_and(|k| !k.trim().is_empty()) {
+            if let Some(auth) = self.auth.providers.get(id)
+                && auth.api_key.as_ref().is_some_and(|k| !k.trim().is_empty()) {
                     providers.push((id.clone(), config.display_name.clone()));
                 }
-            }
         }
 
         providers
@@ -879,13 +877,12 @@ impl TelegramChannel {
         }
 
         // Check bundled providers if not found
-        if models.is_empty() {
-            if let Some(config) = self.config.bundled_providers.get(provider_id) {
+        if models.is_empty()
+            && let Some(config) = self.config.bundled_providers.get(provider_id) {
                 for (id, model_config) in &config.models {
                     models.push((id.clone(), model_config.display_name.clone()));
                 }
             }
-        }
 
         models
     }
@@ -1116,13 +1113,12 @@ impl TelegramChannel {
 
     /// Check and clear cancellation flag, return true if cancelled.
     fn check_cancellation(&self, chat_id: i64) -> bool {
-        if let Some(flag) = self.cancellation_flags.get(&chat_id) {
-            if flag.load(Ordering::SeqCst) {
+        if let Some(flag) = self.cancellation_flags.get(&chat_id)
+            && flag.load(Ordering::SeqCst) {
                 // Clear the flag
                 flag.store(false, Ordering::SeqCst);
                 return true;
             }
-        }
         false
     }
 }
@@ -1819,8 +1815,8 @@ impl Channel for TelegramChannel {
                 let messages = store.load_messages(session_id)?;
 
                 // Check for orphaned user turn (crash mid-query)
-                if let Some(last) = messages.last() {
-                    if last.role == MessageRole::User {
+                if let Some(last) = messages.last()
+                    && last.role == MessageRole::User {
                         // Close orphan with marker to prevent LLM from continuing the old request
                         let marker = Message::new(
                             MessageRole::Assistant,
@@ -1829,7 +1825,6 @@ impl Channel for TelegramChannel {
                         store.append_message(session_id, &marker)?;
                         orphans_closed += 1;
                     }
-                }
 
                 count += 1;
                 crate::log_info!(

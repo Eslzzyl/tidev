@@ -82,13 +82,11 @@ fn parse_error_body(status: reqwest::StatusCode, body: &str) -> String {
                 .map(|s| s.to_string());
 
             // If detail/cause is itself a JSON string, try to parse it
-            if let Some(d) = detail.as_ref() {
-                if let Ok(inner_val) = serde_json::from_str::<serde_json::Value>(d) {
-                    if let Some(inner_detail) = inner_val.get("detail").and_then(|m| m.as_str()) {
+            if let Some(d) = detail.as_ref()
+                && let Ok(inner_val) = serde_json::from_str::<serde_json::Value>(d)
+                    && let Some(inner_detail) = inner_val.get("detail").and_then(|m| m.as_str()) {
                         detail = Some(inner_detail.to_string());
                     }
-                }
-            }
 
             let mut result = format!("HTTP {} {}", status.as_u16(), msg);
             if let Some(d) = detail {
@@ -99,7 +97,7 @@ fn parse_error_body(status: reqwest::StatusCode, body: &str) -> String {
     }
 
     // Fallback if not JSON or unexpected structure
-    if body.len() > 0 && body.len() < 200 {
+    if !body.is_empty() && body.len() < 200 {
         format!(
             "HTTP {} {}: {}",
             status.as_u16(),
