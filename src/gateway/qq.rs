@@ -2,7 +2,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -24,6 +24,15 @@ use super::qq_client::QQClient;
 use super::shared;
 
 pub const GATEWAY_PLATFORM_QQ: &str = "qq";
+
+/// Interactive model selection state for a channel.
+#[derive(Debug, Clone)]
+enum ModelSelectionState {
+    /// Waiting for user to select a provider (1, 2, 3, ...)
+    WaitingForProvider,
+    /// Waiting for user to select a model (1, 2, 3, ...) for the given provider.
+    WaitingForModel { provider_id: String },
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct WsPayload {
@@ -58,6 +67,10 @@ pub struct QQChannel {
     pub client: QQClient,
     pub session_id: Option<String>,
     pub last_seq: Option<u32>,
+    /// Interactive model selection state per channel_id.
+    /// When a user is in this state, their next message is handled as selection input,
+    /// not sent to the agent.
+    model_selection_states: HashMap<String, ModelSelectionState>,
 }
 
 impl QQChannel {
@@ -87,6 +100,7 @@ impl QQChannel {
             client: QQClient::new(app_id, app_secret, sandbox),
             session_id: None,
             last_seq: None,
+            model_selection_states: HashMap::new(),
         }
     }
 
@@ -226,6 +240,15 @@ impl QQChannel {
         };
 
         crate::log_info!("QQ Message from {}: {}", author_id, clean_content);
+
+        // Check if user is in interactive model selection state.
+        // If so, handle selection input instead of normal message processing.
+        if let Some(state) = self.model_selection_states.get(&channel_id).cloned() {
+            crate::log_info!("Handling model selection input: channel_id={}", channel_id);
+            return self
+                .handle_model_selection(&channel_id, &msg_id, &state, clean_content)
+                .await;
+        }
 
         // Check if this is a slash command
         if let Some(command) = parse_command(clean_content) {
@@ -536,6 +559,10 @@ impl QQChannel {
                 }
                 Ok(true)
             }
+            "model" => {
+                self.handle_model_command(channel_id, msg_id).await?;
+                Ok(true)
+            }
             "help" => {
                 self.client
                     .send_message(channel_id, &gateway_help_text(), Some(msg_id))
@@ -587,6 +614,206 @@ impl QQChannel {
         }
 
         Ok(updated_model)
+    }
+
+    /// Handle /model command - start interactive provider/model selection.
+    async fn handle_model_command(&mut self, channel_id: &str, msg_id: &str) -> Result<()> {
+        // Get available providers (user config + bundled, only those with valid auth)
+        let providers = self.get_available_providers();
+
+        if providers.is_empty() {
+            self.client
+                .send_message(channel_id, "No available providers found. Please check your configuration.", Some(msg_id))
+                .await?;
+            return Ok(());
+        }
+
+        // Format provider list
+        let mut text = String::from("Select a provider (enter number):\n\n");
+        for (i, provider) in providers.iter().enumerate() {
+            text.push_str(&format!("{}. {}\n", i + 1, provider.1));
+        }
+        text.push_str("\n(Enter any other number to cancel)");
+
+        self.client.send_message(channel_id, &text, Some(msg_id)).await?;
+
+        // Set state to waiting for provider selection
+        self.model_selection_states
+            .insert(channel_id.to_string(), ModelSelectionState::WaitingForProvider);
+
+        Ok(())
+    }
+
+    /// Handle interactive model selection input.
+    async fn handle_model_selection(
+        &mut self,
+        channel_id: &str,
+        msg_id: &str,
+        state: &ModelSelectionState,
+        content: &str,
+    ) -> Result<()> {
+        // Check if it's a command - cancel selection if so
+        if content.starts_with('/') {
+            self.model_selection_states.remove(channel_id);
+            self.client
+                .send_message(channel_id, "Selection cancelled. Send /model to try again.", Some(msg_id))
+                .await?;
+            return Ok(());
+        }
+
+        match state {
+            ModelSelectionState::WaitingForProvider => {
+                // Parse provider selection
+                let selection: usize = match content.parse() {
+                    Ok(n) => n,
+                    Err(_) => {
+                        self.model_selection_states.remove(channel_id);
+                        self.client
+                            .send_message(channel_id, "Invalid selection. Selection cancelled. Send /model to try again.", Some(msg_id))
+                            .await?;
+                        return Ok(());
+                    }
+                };
+
+                let providers = self.get_available_providers();
+                if selection < 1 || selection > providers.len() {
+                    self.model_selection_states.remove(channel_id);
+                    self.client
+                        .send_message(channel_id, "Selection cancelled. Send /model to try again.", Some(msg_id))
+                        .await?;
+                    return Ok(());
+                }
+
+                let (provider_id, _provider_name) = &providers[selection - 1];
+
+                // Get models for selected provider
+                let models = self.get_models_for_provider(provider_id);
+                if models.is_empty() {
+                    self.model_selection_states.remove(channel_id);
+                    self.client
+                        .send_message(channel_id, "No models available for this provider. Selection cancelled.", Some(msg_id))
+                        .await?;
+                    return Ok(());
+                }
+
+                // Format model list
+                let mut text = format!(
+                    "Select a model for {} (enter number):\n\n",
+                    provider_id
+                );
+                for (i, model) in models.iter().enumerate() {
+                    text.push_str(&format!("{}. {}\n", i + 1, model.1));
+                }
+                text.push_str("\n(Enter any other number to cancel)");
+
+                self.client.send_message(channel_id, &text, Some(msg_id)).await?;
+
+                // Set state to waiting for model selection
+                self.model_selection_states.insert(
+                    channel_id.to_string(),
+                    ModelSelectionState::WaitingForModel {
+                        provider_id: provider_id.clone(),
+                    },
+                );
+            }
+            ModelSelectionState::WaitingForModel { provider_id } => {
+                // Parse model selection
+                let selection: usize = match content.parse() {
+                    Ok(n) => n,
+                    Err(_) => {
+                        self.model_selection_states.remove(channel_id);
+                        self.client
+                            .send_message(channel_id, "Invalid selection. Selection cancelled. Send /model to try again.", Some(msg_id))
+                            .await?;
+                        return Ok(());
+                    }
+                };
+
+                let models = self.get_models_for_provider(provider_id);
+                if selection < 1 || selection > models.len() {
+                    self.model_selection_states.remove(channel_id);
+                    self.client
+                        .send_message(channel_id, "Selection cancelled. Send /model to try again.", Some(msg_id))
+                        .await?;
+                    return Ok(());
+                }
+
+                let (model_id, _model_name) = &models[selection - 1];
+
+                // Save the model selection
+                let chat_key = format!("qq:{}", channel_id);
+                self.store.set_gateway_chat_model(
+                    GATEWAY_PLATFORM_QQ,
+                    &chat_key,
+                    provider_id,
+                    model_id,
+                )?;
+
+                // Clear state
+                self.model_selection_states.remove(channel_id);
+
+                // Send success message
+                let success_text = format!(
+                    "Model switched to {}/{}\n\nSend /model to change again.",
+                    provider_id, model_id
+                );
+                self.client.send_message(channel_id, &success_text, Some(msg_id)).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get available providers (user config + bundled) that have valid auth.
+    fn get_available_providers(&self) -> Vec<(String, String)> {
+        let mut providers = Vec::new();
+
+        // Check user-configured providers
+        for (id, config) in &self.config.providers {
+            if let Some(auth) = self.auth.providers.get(id) {
+                if auth.api_key.as_ref().is_some_and(|k| !k.trim().is_empty()) {
+                    providers.push((id.clone(), config.display_name.clone()));
+                }
+            }
+        }
+
+        // Check bundled providers
+        for (id, config) in &self.config.bundled_providers {
+            // Skip if already added from user config
+            if self.config.providers.contains_key(id) {
+                continue;
+            }
+            if let Some(auth) = self.auth.providers.get(id) {
+                if auth.api_key.as_ref().is_some_and(|k| !k.trim().is_empty()) {
+                    providers.push((id.clone(), config.display_name.clone()));
+                }
+            }
+        }
+
+        providers
+    }
+
+    /// Get models for a specific provider.
+    fn get_models_for_provider(&self, provider_id: &str) -> Vec<(String, String)> {
+        let mut models = Vec::new();
+
+        // Check user-configured providers first
+        if let Some(config) = self.config.providers.get(provider_id) {
+            for (id, model_config) in &config.models {
+                models.push((id.clone(), model_config.display_name.clone()));
+            }
+        }
+
+        // Check bundled providers if not found
+        if models.is_empty() {
+            if let Some(config) = self.config.bundled_providers.get(provider_id) {
+                for (id, model_config) in &config.models {
+                    models.push((id.clone(), model_config.display_name.clone()));
+                }
+            }
+        }
+
+        models
     }
 
     fn rotate_chat_session(
