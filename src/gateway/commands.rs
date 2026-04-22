@@ -22,10 +22,6 @@ pub struct CommandSpec {
 /// All gateway shared slash commands.
 pub const GATEWAY_COMMANDS: &[CommandSpec] = &[
     CommandSpec {
-        name: "start",
-        description: "Show help",
-    },
-    CommandSpec {
         name: "help",
         description: "Show help",
     },
@@ -36,10 +32,6 @@ pub const GATEWAY_COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "session",
         description: "Manage current session",
-    },
-    CommandSpec {
-        name: "model",
-        description: "Manage model settings",
     },
 ];
 
@@ -83,24 +75,6 @@ pub fn gateway_help_text() -> String {
         "Gateway command help",
         "/new - start a fresh session",
         "/session - show current session status",
-        "/session new - start a fresh session",
-        "/session reset-model - clear model override for this chat",
-        "/model - show current model",
-        "/model list - list available models",
-        "/model <provider:model> - switch model for this chat",
-        "/model reset - reset to default model",
-    ]
-    .join("\n")
-}
-
-/// Session subcommand help text.
-pub fn session_help_text() -> String {
-    [
-        "Session command help",
-        "/session",
-        "/session current",
-        "/session new",
-        "/session reset-model",
     ]
     .join("\n")
 }

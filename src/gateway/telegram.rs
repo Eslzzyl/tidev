@@ -24,7 +24,7 @@ use crate::{
 
 use super::channel::Channel;
 use super::commands::{
-    CommandInvocation, GATEWAY_COMMANDS, gateway_help_text, parse_command, session_help_text,
+    CommandInvocation, GATEWAY_COMMANDS, gateway_help_text, parse_command,
 };
 use super::shared::compose_system_prompt;
 
@@ -32,7 +32,6 @@ pub const GATEWAY_PLATFORM_TELEGRAM: &str = "telegram";
 const TELEGRAM_MAX_MESSAGE_LENGTH: usize = 4096;
 const TELEGRAM_DRAFT_EDIT_INTERVAL_MS: u64 = 1200;
 const MAX_TOOL_ROUNDS: usize = 8;
-const MAX_MODEL_LIST_LINES: usize = 48;
 
 /// Telegram gateway channel implementation.
 pub struct TelegramChannel {
@@ -564,12 +563,7 @@ impl TelegramChannel {
                 }
                 Ok(true)
             }
-            "model" => {
-                self.handle_model_command(source_message, chat_key, active_model, command.args)
-                    .await?;
-                Ok(true)
-            }
-            "help" | "start" => {
+            "help" => {
                 self.send_reply_chunks(source_message, &gateway_help_text())
                     .await?;
                 Ok(true)
@@ -592,128 +586,26 @@ impl TelegramChannel {
     async fn handle_session_command(
         &self,
         source_message: &TelegramMessage,
-        chat_key: &str,
+        _chat_key: &str,
         conversation: &Conversation,
         active_model: &ActiveModel,
         args: Vec<String>,
         new_active_model: Option<ActiveModel>,
     ) -> Result<Option<ActiveModel>> {
-        let mut updated_model = new_active_model;
+        let updated_model = new_active_model;
 
         match args.first().map(|s| s.as_str()) {
-            None | Some("") | Some("current") => {
+            None | Some("") => {
                 let text = format_session_summary(conversation, active_model);
                 self.send_reply_chunks(source_message, &text).await?;
             }
-            Some("new") => {
-                let new_conversation = self.rotate_chat_session(chat_key, active_model)?;
-                let text = format!(
-                    "Session rotated. New session_id: {}",
-                    new_conversation.session_id
-                );
-                self.send_reply_chunks(source_message, &text).await?;
-            }
-            Some("reset-model") => {
-                self.store
-                    .clear_gateway_chat_model(GATEWAY_PLATFORM_TELEGRAM, chat_key)?;
-                let default_model = self.config.resolve_active_model(&self.auth)?;
-                updated_model = Some(default_model);
-                let text = format!(
-                    "Model override cleared, now using default: {}/{}",
-                    active_model.provider_id, active_model.model_id
-                );
-                self.send_reply_chunks(source_message, &text).await?;
-            }
             _ => {
-                let text = format!(
-                    "Unknown /session subcommand: {}\n\n{}",
-                    args.first().unwrap(),
-                    session_help_text()
-                );
-                self.send_reply_chunks(source_message, &text).await?;
+                self.send_reply_chunks(source_message, &gateway_help_text())
+                    .await?;
             }
         }
 
         Ok(updated_model)
-    }
-
-    async fn handle_model_command(
-        &self,
-        source_message: &TelegramMessage,
-        chat_key: &str,
-        active_model: &mut ActiveModel,
-        args: Vec<String>,
-    ) -> Result<()> {
-        match args.first().map(|s| s.as_str()) {
-            None | Some("") | Some("current") => {
-                let text = format!(
-                    "Current model: {}/{}\n\n{}",
-                    active_model.provider_id,
-                    active_model.model_id,
-                    self.format_model_list()
-                );
-                self.send_reply_chunks(source_message, &text).await?;
-            }
-            Some("list") => {
-                self.send_reply_chunks(source_message, &self.format_model_list())
-                    .await?;
-            }
-            Some("reset") => {
-                self.store
-                    .clear_gateway_chat_model(GATEWAY_PLATFORM_TELEGRAM, chat_key)?;
-                let default_model = self.config.resolve_active_model(&self.auth)?;
-                *active_model = default_model;
-                let text = format!(
-                    "Reset to default model: {}/{}",
-                    active_model.provider_id, active_model.model_id
-                );
-                self.send_reply_chunks(source_message, &text).await?;
-            }
-            Some(selector) => {
-                let selected = self
-                    .config
-                    .resolve_model(&self.auth, Some(selector))
-                    .with_context(|| format!("invalid model selector '{selector}'"))?;
-
-                self.store.set_gateway_chat_model(
-                    GATEWAY_PLATFORM_TELEGRAM,
-                    chat_key,
-                    &selected.provider_id,
-                    &selected.model_id,
-                )?;
-
-                *active_model = selected;
-                let text = format!(
-                    "Switched model for this chat to {}/{}",
-                    active_model.provider_id, active_model.model_id
-                );
-                self.send_reply_chunks(source_message, &text).await?;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn format_model_list(&self) -> String {
-        let models = self.config.available_models();
-        let total = models.len();
-        let mut lines = Vec::new();
-
-        for model in models.iter().take(MAX_MODEL_LIST_LINES) {
-            lines.push(format!("- {}/{}", model.provider_id, model.model_id));
-        }
-
-        if total > MAX_MODEL_LIST_LINES {
-            lines.push(format!(
-                "... and {} more model(s)",
-                total - MAX_MODEL_LIST_LINES
-            ));
-        }
-
-        format!(
-            "Available models ({total}):\n{}\n\nUse: /model <provider:model>",
-            lines.join("\n")
-        )
     }
 
     fn load_or_create_chat_conversation(
