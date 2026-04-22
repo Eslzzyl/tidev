@@ -128,9 +128,6 @@ impl Composer {
                     self.preferred_column = None;
                     self.selection_anchor = None;
                 }
-                'p' if allow_history_navigation => {
-                    self.select_previous_history();
-                }
                 'n' if allow_history_navigation => {
                     self.select_next_history();
                 }
@@ -512,29 +509,6 @@ impl Composer {
         self.preferred_column = None;
         self.visual_line_hint = None;
         self.selection_anchor = None; // Clear selection on cursor movement
-    }
-
-    fn select_previous_history(&mut self) {
-        if self.history.is_empty() {
-            return;
-        }
-
-        if self.history_cursor.is_none() {
-            self.draft = self.text.clone();
-            self.history_cursor = Some(self.history.len().saturating_sub(1));
-        } else if let Some(index) = self.history_cursor
-            && index > 0
-        {
-            self.history_cursor = Some(index - 1);
-        }
-
-        if let Some(index) = self.history_cursor {
-            self.text = self.history[index].clone();
-            self.cursor = self.text.len();
-        }
-
-        self.preferred_column = None;
-        self.visual_line_hint = None;
     }
 
     fn select_next_history(&mut self) {

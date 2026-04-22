@@ -813,6 +813,12 @@ impl App {
             return Ok(());
         }
 
+        // Ctrl+P: 打开模型选择面板（无论当前是否有面板）
+        if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.open_model_panel(String::new());
+            return Ok(());
+        }
+
         if matches!(key.code, KeyCode::Char('v'))
             && (key.modifiers.contains(KeyModifiers::CONTROL)
                 || key.modifiers.contains(KeyModifiers::SUPER))
