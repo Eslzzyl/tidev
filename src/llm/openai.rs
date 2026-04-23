@@ -502,7 +502,13 @@ impl ChatMessagePayload {
         Self {
             role: "assistant".to_string(),
             content: if content.is_empty() {
-                None
+                if tool_calls.is_some() {
+                    // When tool_calls exist but content is empty, set a placeholder
+                    // to satisfy API requirements that require either content or tool_calls.
+                    Some(serde_json::Value::String("".to_string()))
+                } else {
+                    None
+                }
             } else {
                 Some(serde_json::Value::String(content))
             },
