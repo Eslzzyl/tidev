@@ -140,8 +140,11 @@ impl ActiveModel {
             ApiType::Anthropic => {
                 format!("{}/v1/messages", self.base_url.trim_end_matches('/'))
             }
-            ApiType::OpenAi => {
+            ApiType::OpenAiChatCompletions => {
                 format!("{}/chat/completions", self.base_url.trim_end_matches('/'))
+            }
+            ApiType::OpenAiResponses => {
+                format!("{}/v1/responses", self.base_url.trim_end_matches('/'))
             }
         }
     }

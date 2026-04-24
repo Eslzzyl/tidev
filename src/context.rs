@@ -489,7 +489,7 @@ mod tests {
             provider_id: "provider".to_string(),
             provider_display_name: "Provider".to_string(),
             base_url: "https://example.com".to_string(),
-            api_type: ApiType::OpenAi,
+            api_type: ApiType::OpenAiChatCompletions,
             model_id: "model".to_string(),
             request_model_id: "model".to_string(),
             display_name: "Model".to_string(),

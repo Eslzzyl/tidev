@@ -201,16 +201,16 @@ mod tests {
 
     #[test]
     fn parses_command_with_args() {
-        let cmd = parse_command("/model deepseek:deepseek-chat").expect("command");
+        let cmd = parse_command("/model deepseek:deepseek-v4-flash").expect("command");
         assert_eq!(cmd.name, "model");
-        assert_eq!(cmd.args, vec!["deepseek:deepseek-chat"]);
+        assert_eq!(cmd.args, vec!["deepseek:deepseek-v4-flash"]);
     }
 
     #[test]
     fn parses_command_with_bot_mention() {
-        let cmd = parse_command("/model@my_bot deepseek:deepseek-chat").expect("command");
+        let cmd = parse_command("/model@my_bot deepseek:deepseek-v4-flash").expect("command");
         assert_eq!(cmd.name, "model");
-        assert_eq!(cmd.args, vec!["deepseek:deepseek-chat"]);
+        assert_eq!(cmd.args, vec!["deepseek:deepseek-v4-flash"]);
     }
 
     #[test]

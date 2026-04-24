@@ -775,7 +775,7 @@ mod tests {
         // Use bundled providers to avoid "unknown provider" error
         config.providers = config.bundled_providers.clone();
         config.default_provider = "deepseek".to_string();
-        config.default_model = "deepseek-chat".to_string();
+        config.default_model = "deepseek-v4-flash".to_string();
 
         let tui_model = config.resolve_active_model(&auth).unwrap();
         let gateway_model = config.resolve_active_model_for_gateway(&auth).unwrap();

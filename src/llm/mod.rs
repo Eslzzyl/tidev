@@ -2,6 +2,7 @@ mod anthropic;
 mod attachments;
 mod error;
 mod openai;
+mod responses;
 mod think_parser;
 
 use anyhow::{Context, Result};
@@ -127,8 +128,11 @@ impl LlmClient {
                 ApiType::Anthropic => {
                     anthropic::complete_anthropic(&self.http, model.clone(), messages.clone()).await
                 }
-                ApiType::OpenAi => {
+                ApiType::OpenAiChatCompletions => {
                     openai::complete_openai(&self.http, model.clone(), messages.clone()).await
+                }
+                ApiType::OpenAiResponses => {
+                    responses::complete_responses(&self.http, model.clone(), messages.clone()).await
                 }
             };
 
@@ -176,8 +180,14 @@ impl LlmClient {
                 )
                 .await
             }
-            ApiType::OpenAi => {
+            ApiType::OpenAiChatCompletions => {
                 openai::stream_openai(
+                    &self.http, session_id, request_id, model, messages, tools, tx,
+                )
+                .await
+            }
+            ApiType::OpenAiResponses => {
+                responses::stream_responses(
                     &self.http, session_id, request_id, model, messages, tools, tx,
                 )
                 .await

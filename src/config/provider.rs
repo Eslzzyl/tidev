@@ -11,22 +11,25 @@ pub enum ProviderSource {
 #[serde(rename_all = "snake_case")]
 pub enum ApiType {
     #[default]
-    OpenAi,
+    OpenAiChatCompletions,
     Anthropic,
+    OpenAiResponses,
 }
 
 impl ApiType {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::OpenAi => "openai",
+            Self::OpenAiChatCompletions => "openai_chat_completions",
             Self::Anthropic => "anthropic",
+            Self::OpenAiResponses => "openai_responses",
         }
     }
 
     pub fn parse(s: &str) -> Self {
         match s {
             "anthropic" => Self::Anthropic,
-            _ => Self::OpenAi,
+            "openai_responses" => Self::OpenAiResponses,
+            _ => Self::OpenAiChatCompletions,
         }
     }
 }
