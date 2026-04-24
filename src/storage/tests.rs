@@ -18,16 +18,16 @@ fn session_display_names_round_trip() {
                 Path::new("/tmp/workspace"),
                 "deepseek",
                 "DeepSeek",
-                "deepseek-chat",
-                "DeepSeek Chat",
+                "deepseek-v4-flash",
+                "DeepSeek-V4-Flash",
                 "Untitled session",
             )
             .expect("session should be created");
 
         assert_eq!(record.provider_id, "deepseek");
         assert_eq!(record.provider_display_name, "DeepSeek");
-        assert_eq!(record.model_id, "deepseek-chat");
-        assert_eq!(record.model_display_name, "DeepSeek Chat");
+        assert_eq!(record.model_id, "deepseek-v4-flash");
+        assert_eq!(record.model_display_name, "DeepSeek-V4-Flash");
         assert_eq!(record.workspace_root, "/tmp/workspace");
         assert_eq!(record.context_summary, None);
         assert_eq!(record.context_retained_from, 0);
@@ -421,8 +421,8 @@ fn revert_marker_round_trips() {
                 Path::new("/workspace"),
                 "deepseek",
                 "DeepSeek",
-                "deepseek-chat",
-                "DeepSeek Chat",
+                "deepseek-v4-flash",
+                "DeepSeek-V4-Flash",
                 "Untitled session",
             )
             .expect("session should be created");
@@ -564,14 +564,14 @@ fn gateway_chat_model_mapping_round_trip() {
         );
 
         store
-            .set_gateway_chat_model("telegram", chat_key, "deepseek", "deepseek-chat")
+            .set_gateway_chat_model("telegram", chat_key, "deepseek", "deepseek-v4-flash")
             .expect("model mapping should update");
 
         assert_eq!(
             store
                 .load_gateway_chat_model("telegram", chat_key)
                 .expect("updated model mapping should load"),
-            Some(("deepseek".to_string(), "deepseek-chat".to_string()))
+            Some(("deepseek".to_string(), "deepseek-v4-flash".to_string()))
         );
 
         store
