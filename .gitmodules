@@ -16,3 +16,6 @@
 	path = rtk
 	url = https://github.com/rtk-ai/rtk.git
 	shallow = true
+[submodule "async-openai"]
+	path = async-openai
+	url = https://github.com/64bit/async-openai.git
