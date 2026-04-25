@@ -383,6 +383,7 @@ fn build_openai_request(
                 request_messages.push(ChatMessagePayload::assistant(
                     message_text_with_file_references(message),
                     tool_calls,
+                    Some(message.reasoning.clone()),
                 ))
             }
             MessageRole::Tool => request_messages.push(ChatMessagePayload::tool(
@@ -471,6 +472,8 @@ struct ChatMessagePayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     content: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     tool_calls: Option<Vec<ChatToolCallPayload>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_call_id: Option<String>,
@@ -483,6 +486,7 @@ impl ChatMessagePayload {
         Self {
             role: "system".to_string(),
             content: Some(serde_json::Value::String(content)),
+            reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
             name: None,
@@ -494,13 +498,14 @@ impl ChatMessagePayload {
         Ok(Self {
             role: "user".to_string(),
             content: Some(content),
+            reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
             name: None,
         })
     }
 
-    fn assistant(content: String, tool_calls: Option<Vec<ChatToolCallPayload>>) -> Self {
+    fn assistant(content: String, tool_calls: Option<Vec<ChatToolCallPayload>>, reasoning_content: Option<String>) -> Self {
         Self {
             role: "assistant".to_string(),
             content: if content.is_empty() {
@@ -514,6 +519,7 @@ impl ChatMessagePayload {
             } else {
                 Some(serde_json::Value::String(content))
             },
+            reasoning_content,
             tool_calls,
             tool_call_id: None,
             name: None,
@@ -524,6 +530,7 @@ impl ChatMessagePayload {
         Self {
             role: "tool".to_string(),
             content: Some(serde_json::Value::String(content)),
+            reasoning_content: None,
             tool_calls: None,
             tool_call_id,
             name,

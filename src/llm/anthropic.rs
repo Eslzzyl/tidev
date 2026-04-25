@@ -381,6 +381,11 @@ fn build_anthropic_request(
                             .unwrap_or(serde_json::Value::Object(Default::default())),
                     });
                 }
+                if !message.reasoning.is_empty() {
+                    content.push(AnthropicContentBlock::Thinking {
+                        thinking: message.reasoning.clone(),
+                    });
+                }
                 anthropic_messages.push(AnthropicMessage {
                     role: "assistant".to_string(),
                     content,
@@ -455,6 +460,9 @@ struct AnthropicMessage {
 enum AnthropicContentBlock {
     Text {
         text: String,
+    },
+    Thinking {
+        thinking: String,
     },
     Image {
         source: AnthropicImageSource,
