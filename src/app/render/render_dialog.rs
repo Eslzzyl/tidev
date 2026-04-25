@@ -1064,9 +1064,9 @@ impl App {
         let help_text = if panel.operation_mode
             == crate::app::session_panel::OperationMode::MultiSelect
         {
-            "Enter/D: switch/delete · Space: select · Ctrl+A: exit multi-select · Tab: switch view · C: cleanup"
+            "Enter/D: switch/delete · Space: select · Ctrl+A: exit multi-select · Tab: switch view · C: cleanup · E: export"
         } else {
-            "Enter: switch · D: delete · C: cleanup · Ctrl+A: multi-select · Tab: switch view · W: all sessions"
+            "Enter: switch · D: delete · C: cleanup · Ctrl+A: multi-select · Tab: switch view · W: all sessions · E: export"
         };
 
         frame.render_widget(
@@ -1730,6 +1730,60 @@ impl App {
 
                 frame.render_widget(
                     Paragraph::new("Enter: confirm · Esc: cancel")
+                        .alignment(Alignment::Center)
+                        .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
+                    sections[2],
+                );
+            }
+            SessionPanelDialog::ExportConfirm {
+                session_ids,
+                session_titles,
+            } => {
+                let overlay = centered_rect(60, 20, area);
+                frame.render_widget(Clear, overlay);
+
+                let block = Block::default()
+                    .style(Style::default().bg(palette.panel))
+                    .title(" Confirm Export ")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(palette.border_active()));
+                frame.render_widget(block, overlay);
+
+                let inner = overlay.inner(Margin {
+                    horizontal: 1,
+                    vertical: 1,
+                });
+                self.register_selection_region(inner);
+                let sections = Layout::vertical([
+                    Constraint::Length(3),
+                    Constraint::Min(1),
+                    Constraint::Length(3),
+                ])
+                .split(inner);
+
+                frame.render_widget(
+                    Paragraph::new(format!("Export {} session(s) to JSONL?", session_ids.len()))
+                        .alignment(Alignment::Center)
+                        .style(Style::default().bg(palette.panel).fg(palette.text)),
+                    sections[0],
+                );
+
+                let mut content = String::new();
+                for title in session_titles.iter().take(5) {
+                    content.push_str(&format!("  • {}\n", title));
+                }
+                if session_titles.len() > 5 {
+                    content.push_str(&format!("  ... and {} more\n", session_titles.len() - 5));
+                }
+
+                frame.render_widget(
+                    Paragraph::new(content)
+                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                    sections[1],
+                );
+
+                frame.render_widget(
+                    Paragraph::new("Enter: export · Esc: cancel")
                         .alignment(Alignment::Center)
                         .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
                     sections[2],

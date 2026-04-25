@@ -57,6 +57,10 @@ pub enum SessionPanelDialog {
         selected_duration: Option<ChronoDuration>,
         cleanup_workspace: bool,
     },
+    ExportConfirm {
+        session_ids: Vec<Uuid>,
+        session_titles: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -248,7 +252,8 @@ impl App {
                 self.confirm_delete_session()
             }
             (SessionPanelDialog::DeleteConfirm { .. }, KeyCode::Esc)
-            | (SessionPanelDialog::Cleanup { .. }, KeyCode::Esc) => {
+            | (SessionPanelDialog::Cleanup { .. }, KeyCode::Esc)
+            | (SessionPanelDialog::ExportConfirm { .. }, KeyCode::Esc) => {
                 self.close_session_panel_dialog()
             }
             (SessionPanelDialog::Cleanup { .. }, KeyCode::Enter) => self.confirm_cleanup_sessions(),
@@ -267,6 +272,7 @@ impl App {
             (SessionPanelDialog::Cleanup { .. }, KeyCode::Char('5')) => {
                 self.select_cleanup_workspace()
             }
+            (SessionPanelDialog::ExportConfirm { .. }, KeyCode::Enter) => self.confirm_export_session(),
             _ => Ok(()),
         }
     }
@@ -337,6 +343,10 @@ impl App {
                 return Ok(());
             }
             KeyCode::Char('w') | KeyCode::Char('W') => self.switch_to_all_sessions_view()?,
+            KeyCode::Char('e') | KeyCode::Char('E') => {
+                self.open_export_dialog()?;
+                return Ok(());
+            }
             _ => {
                 let previous_query = self.composer.text().to_string();
                 let _ = self.composer.handle_key_with_history(key, false);
@@ -512,6 +522,46 @@ impl App {
         }
 
         self.close_session_panel();
+        self.open_session_panel(String::new())?;
+        Ok(())
+    }
+
+    pub(crate) fn open_export_dialog(&mut self) -> Result<()> {
+        if let Some(panel) = &mut self.session_panel {
+            let query = self.composer.text().to_string();
+            let session_ids = panel.get_selected_session_ids(&query);
+            let session_titles = panel.get_selected_session_titles(&query);
+
+            if !session_ids.is_empty() {
+                panel.dialog = SessionPanelDialog::ExportConfirm {
+                    session_ids,
+                    session_titles,
+                };
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn confirm_export_session(&mut self) -> Result<()> {
+        if let Some(panel) = self.session_panel.take()
+            && let SessionPanelDialog::ExportConfirm { session_ids, .. } = panel.dialog
+        {
+            let export_dir = self.paths.data_dir.join("export");
+
+            crate::log_info!("Export dir: {}", export_dir.display());
+
+            for session_id in &session_ids {
+                match self.store.export_session_to_jsonl(*session_id, &export_dir) {
+                    Ok(path) => crate::log_info!("Exported: {}", path.display()),
+                    Err(e) => crate::log_error!("Export failed: {}", e),
+                }
+            }
+
+            let count = session_ids.len();
+            self.last_notice = Some(format!("Exported {} session(s) to {}", count, export_dir.display()));
+        }
+
+        self.close_session_panel_dialog()?;
         self.open_session_panel(String::new())?;
         Ok(())
     }

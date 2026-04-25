@@ -1413,6 +1413,35 @@ impl SessionStore {
         )?;
         Ok(())
     }
+
+    /// Export session messages to JSONL format.
+    /// Each line is a JSON object representing one message.
+    /// Returns the path to the exported file.
+    pub fn export_session_to_jsonl(&self, session_id: Uuid, export_dir: &Path) -> Result<PathBuf> {
+        // Create export directory if it doesn't exist
+        fs::create_dir_all(export_dir).context("failed to create export directory")?;
+
+        let file_path = export_dir.join(format!("{session_id}.jsonl"));
+
+        let messages = self.load_messages(session_id)?;
+
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&file_path)
+            .context("failed to open export file")?;
+
+        let mut writer = std::io::BufWriter::new(file);
+
+        for message in messages {
+            let json_line = serde_json::to_string(&message)?;
+            use std::io::Write;
+            writeln!(writer, "{}", json_line).context("failed to write JSON line")?;
+        }
+
+        Ok(file_path)
+    }
 }
 
 /// Record of a file read by the model
