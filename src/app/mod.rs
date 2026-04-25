@@ -184,6 +184,8 @@ pub fn run() -> Result<()> {
 }
 
 impl App {
+    /// Build prompt attachments for @ references with truncation like opencode.
+    /// Uses build_at_reference_attachment for @ references to apply read tool truncation.
     fn build_prompt_attachments(&self, prompt: &str) -> Result<Vec<MessageAttachment>> {
         let mut attachments = Vec::new();
         let mut seen_paths = std::collections::BTreeSet::new();
@@ -193,17 +195,82 @@ impl App {
                 continue;
             }
 
-            let absolute = self.resolve_workspace_path(&path);
-            match self.build_attachment_for_path(&path, &absolute)? {
+            // Use build_at_reference_attachment for @ references with truncation
+            match self.build_at_reference_attachment(&path)? {
                 Some(attachment) => attachments.push(attachment),
                 None => continue,
             }
         }
 
+        // Add draft attachments (pasted files) without truncation
         attachments.extend(self.draft_attachments.iter().cloned());
         Ok(attachments)
     }
 
+    /// Build attachment for @ reference with truncation like opencode's read tool.
+    fn build_at_reference_attachment(
+        &self,
+        path: &str,
+    ) -> Result<Option<MessageAttachment>> {
+        use crate::tooling::builtin::file::read_file_for_at_reference;
+
+        let absolute = self.resolve_workspace_path(path);
+        let metadata = match std::fs::metadata(&absolute) {
+            Ok(metadata) => metadata,
+            Err(_error) => return Ok(None),
+        };
+
+        if metadata.is_dir() {
+            let tree = build_directory_tree(&absolute, 2, 80)?;
+            return Ok(Some(MessageAttachment::DirectoryReference {
+                path: path.trim_end_matches(['/', '\\']).to_string(),
+                tree: Arc::new(tree),
+            }));
+        }
+
+        if let Some(mime) = image_mime_from_path(&absolute) {
+            let bytes = std::fs::read(&absolute)?;
+            let filename = absolute
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or(path)
+                .to_string();
+            let data_url = format!("data:{mime};base64,{}", BASE64_STANDARD.encode(bytes));
+            return Ok(Some(MessageAttachment::Image {
+                filename,
+                mime: mime.to_string(),
+                data_url,
+            }));
+        }
+
+        // For text files, read with truncation like opencode's read tool
+        match read_file_for_at_reference(&self.workspace_root, path) {
+            Ok((tool_output, truncated)) => {
+                // Also read full content for display purposes
+                let content = std::fs::read_to_string(&absolute)
+                    .unwrap_or_else(|_| String::new());
+                Ok(Some(MessageAttachment::FileReference {
+                    path: path.to_string(),
+                    content: Arc::new(content),
+                    tool_output: Some(Arc::new(tool_output)),
+                    truncated,
+                }))
+            }
+            Err(_error) => {
+                // Fall back to full content if read fails
+                let content = std::fs::read_to_string(&absolute)
+                    .unwrap_or_else(|_| String::new());
+                Ok(Some(MessageAttachment::FileReference {
+                    path: path.to_string(),
+                    content: Arc::new(content),
+                    tool_output: None,
+                    truncated: false,
+                }))
+            }
+        }
+    }
+
+    #[allow(dead_code)]
     fn build_attachment_for_path(
         &self,
         path: &str,
@@ -245,27 +312,39 @@ impl App {
         Ok(Some(MessageAttachment::FileReference {
             path: path.to_string(),
             content: Arc::new(content),
+            tool_output: None,
+            truncated: false,
         }))
     }
 
+     /// Parse @ references using fancy-regex like opencode.
+    /// Regex: `(?<![\w\`])@(\.?[^\s\`.,]*(?:\.[^\s\`.,]+)*)`
+    /// Uses look-behind to ensure @ is not preceded by word characters or backticks.
     fn inline_file_references(&self, prompt: &str) -> Vec<String> {
+        use fancy_regex::Regex;
+        // Look-behind: (?<![\w`]) ensures @ is not preceded by word chars or backticks
+        let re = Regex::new(r"(?<![\w`])@(\.?[^\s`.,]*(?:\.[^\s`.,]+)*)").unwrap();
         let mut paths = Vec::new();
         let mut seen = std::collections::BTreeSet::new();
 
-        for token in prompt.split_whitespace() {
-            let Some(path) = token.strip_prefix('@') else {
-                continue;
-            };
-            let path = path.trim_matches(|ch: char| {
-                matches!(ch, ',' | '.' | ';' | ':' | ')' | ']' | '"' | '\'')
-            });
-            if path.is_empty() {
-                continue;
+        let mut start = 0;
+        while let Some(caps) = re.captures(&prompt[start..]).unwrap() {
+            if let Some(path_match) = caps.get(1) {
+                let path = path_match.as_str();
+                if path.is_empty() {
+                    break;
+                }
+                if !seen.insert(path.to_string()) {
+                    // Move to next position
+                    start += path_match.start() + 1;
+                    continue;
+                }
+                paths.push(path.to_string());
+                // Move past this match
+                start += path_match.start() + 1;
+            } else {
+                break;
             }
-            if !seen.insert(path.to_string()) {
-                continue;
-            }
-            paths.push(path.to_string());
         }
 
         paths

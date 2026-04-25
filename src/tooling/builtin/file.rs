@@ -1082,3 +1082,120 @@ fn multi_occurrence_replacer(content: &str, find: &str) -> Vec<String> {
     }
     results
 }
+
+/// Read file content for @ reference (like opencode's behavior).
+/// Applies truncation strategy: 2000 lines / 50KB max.
+/// Returns the tool output format similar to read tool results.
+pub fn read_file_for_at_reference(
+    workspace_root: &Path,
+    relative_path: &str,
+) -> Result<(String, bool)> {
+    let path = resolve_workspace_path(workspace_root, Path::new(relative_path))?;
+
+    if !path.exists() {
+        bail!("File not found: {}", path.display());
+    }
+
+    if path.is_dir() {
+        let output = list_dir(workspace_root, relative_path)?;
+        return Ok((output, false));
+    }
+
+    // Treat as potential image
+    let mime = mime_guess::from_path(&path).first_or_octet_stream();
+    let mime_str = mime.to_string();
+
+    if mime_str.starts_with("image/") {
+        let content =
+            fs::read(&path).with_context(|| format!("failed to read image {}", path.display()))?;
+        let _data_url = format!(
+            "data:{};base64,{}",
+            mime_str,
+            BASE64_STANDARD.encode(content)
+        );
+        let output = format!("Image read successfully.\n\n[Binary content: {}]", mime_str);
+        return Ok((output, false));
+    }
+
+    // Detect if binary but not an image
+    if is_binary_file(&path)? {
+        bail!("Cannot read binary file: {}", path.display());
+    }
+
+    // Treat as text file with truncation
+    let file =
+        fs::File::open(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let mut reader = std::io::BufReader::new(file);
+
+    const DEFAULT_READ_LIMIT: i64 = 2000;
+    const MAX_BYTES: usize = 50 * 1024;
+
+    let offset = 1i64;
+    let limit = DEFAULT_READ_LIMIT;
+
+    let mut lines = Vec::new();
+    let mut total_lines = 0;
+    let mut bytes = 0;
+    let mut cut = false;
+    let mut more = false;
+    let mut raw_line = String::new();
+
+    while reader.read_line(&mut raw_line)? > 0 {
+        total_lines += 1;
+        if total_lines < offset as usize {
+            raw_line.clear();
+            continue;
+        }
+
+        if lines.len() >= limit as usize {
+            more = true;
+            raw_line.clear();
+            continue;
+        }
+
+        let trimmed = raw_line.trim_end_matches(&['\r', '\n'][..]);
+        let text = truncate_line_to_limit(trimmed);
+        let size = text.len() + if lines.is_empty() { 0 } else { 1 };
+        if bytes + size > MAX_BYTES {
+            cut = true;
+            more = true;
+            break;
+        }
+
+        bytes += size;
+        lines.push(text);
+        raw_line.clear();
+    }
+
+    let start = offset as usize;
+    let last = start + lines.len().saturating_sub(1);
+    let next_offset = start as i64 + lines.len() as i64;
+    let mut content_str = lines
+        .into_iter()
+        .enumerate()
+        .map(|(i, line)| format!("{}: {}", start + i, line))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if cut {
+        content_str.push_str(&format!(
+            "\n\n(Output capped at 50 KB. Showing lines {}-{}. Use offset={} to continue.)",
+            start, last, next_offset
+        ));
+    } else if more {
+        content_str.push_str(&format!(
+            "\n\n(Showing lines {}-{} of {}. Use offset={} to continue.)",
+            start, last, total_lines, next_offset
+        ));
+    } else {
+        content_str.push_str(&format!("\n\n(End of file - total {} lines)", total_lines));
+    }
+
+    let output = format!(
+        "<path>{}</path>\n<type>file</type>\n<content>\n{}\n</content>",
+        display_workspace_relative(workspace_root, &path),
+        content_str
+    );
+
+    Ok((output, cut || more))
+}

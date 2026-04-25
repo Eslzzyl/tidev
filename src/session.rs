@@ -7,9 +7,15 @@ use std::sync::Arc;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MessageAttachment {
+    /// File reference with optional truncated tool output (for @ references)
     FileReference {
         path: String,
+        /// Original full content (for display purposes)
         content: Arc<String>,
+        /// Tool output format with truncation applied (like read tool results)
+        tool_output: Option<Arc<String>>,
+        /// Whether the content was truncated
+        truncated: bool,
     },
     DirectoryReference {
         path: String,
@@ -29,12 +35,13 @@ impl MessageAttachment {
 
     pub fn summary(&self) -> String {
         match self {
-            Self::FileReference { path, content } => {
+            Self::FileReference { path, content, truncated, .. } => {
                 let preview = content.lines().take(6).collect::<Vec<_>>().join(" ");
+                let truncated_hint = if *truncated { " (truncated)" } else { "" };
                 if preview.trim().is_empty() {
-                    format!("[file:{}]", path)
+                    format!("[file:{}{}]", path, truncated_hint)
                 } else {
-                    format!("[file:{}] {}", path, truncate_preview(&preview, 120))
+                    format!("[file:{}{}] {}", path, truncated_hint, truncate_preview(&preview, 120))
                 }
             }
             Self::DirectoryReference { path, tree } => {
@@ -49,12 +56,33 @@ impl MessageAttachment {
         }
     }
 
+    /// Returns the prompt text in tool call result format (like opencode).
+    /// For FileReference with tool_output, returns read tool result format.
+    /// For FileReference without tool_output, returns original format.
     pub fn prompt_text(&self) -> Option<String> {
         match self {
-            Self::FileReference { path, content } => Some(format!(
-                "\n\nReferenced file: {}\n```text\n{}\n```",
-                path, content
-            )),
+            Self::FileReference { path, content, tool_output, truncated } => {
+                // If we have tool output (from @ reference), return in tool result format
+                if let Some(output) = tool_output {
+                    let truncated_hint = if *truncated {
+                        "\n\n(The tool call succeeded but the output was truncated.)"
+                    } else {
+                        ""
+                    };
+                    return Some(format!(
+                        "\n\n{tool_name} Tool: read\n{args}\n\nOutput:\n{output}{truncated_hint}",
+                        tool_name = "read",
+                        args = format!(r#"{{"path":"{}"}}"#, path),
+                        output = output.as_ref(),
+                        truncated_hint = truncated_hint
+                    ));
+                }
+                // Fall back to original format
+                Some(format!(
+                    "\n\nReferenced file: {}\n```text\n{}\n```",
+                    path, content
+                ))
+            }
             Self::DirectoryReference { path, tree } => Some(format!(
                 "\n\nReferenced directory: {}\n```text\n{}\n```",
                 path, tree
