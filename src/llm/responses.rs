@@ -85,13 +85,14 @@ pub(super) async fn stream_responses(
         response.status()
     );
 
-    let mut stream = response.bytes_stream();
+  let mut stream = response.bytes_stream();
     let mut buffer = String::new();
     let mut assistant_text = String::new();
     let mut reasoning_text = String::new();
     let mut finish_reason: Option<String> = None;
     let mut tool_calls: BTreeMap<String, ToolCallBuilder> = BTreeMap::new();
     let mut first_delta_time: Option<std::time::Instant> = None;
+    let mut current_event_type: Option<String> = None;
 
     use futures_util::StreamExt;
 
@@ -107,12 +108,17 @@ pub(super) async fn stream_responses(
                 continue;
             }
 
-            // Parse SSE event format: "event: TYPE\ndata: {...}\n\n"
-            let event_type = line.strip_prefix("event:").map(|s| s.trim().to_string());
+            // SSE event type line: "event: TYPE"
+            if let Some(event) = line.strip_prefix("event:") {
+                current_event_type = Some(event.trim().to_string());
+                continue;
+            }
 
-            let payload = line.strip_prefix("data:").map(|s| s.trim().to_string());
+            // SSE data line: "data: {...}"
+            if let Some(payload) = line.strip_prefix("data:") {
+                let payload = payload.trim().to_string();
+                let event_type = current_event_type.take();
 
-            if let (Some(_event), Some(payload)) = (event_type, payload) {
                 if payload == "[DONE]" {
                     let turn = finalize_turn(
                         &assistant_text,
@@ -128,97 +134,264 @@ pub(super) async fn stream_responses(
                     return Ok(());
                 }
 
-                let event: ResponsesStreamEvent =
+                // Debug logging
+                log_debug!(
+                    "responses stream event: type={:?} data={}",
+                    event_type,
+                    &payload[..payload.len().min(500)]
+                );
+
+                let event: ResponseStreamEvent =
                     serde_json::from_str(&payload).context("failed to parse responses event")?;
 
-                // Handle usage stats
-                if let Some(usage) = event.data.usage {
-                    let duration_ms =
-                        first_delta_time.map(|start| start.elapsed().as_millis() as u64);
-                    let _ = tx.send(BackendEvent::UsageStats {
-                        session_id,
-                        request_id,
-                        input_tokens: usage.input_tokens,
-                        output_tokens: usage.output_tokens,
-                        total_tokens: usage.total_tokens,
-                        cache_read_tokens: 0,
-                        cache_write_tokens: 0,
-                        model_id: model.model_id.clone(),
-                        duration_ms,
-                    });
-                }
-
-                // Process content deltas
-                for content in event.data.content {
-                    match content.kind.as_str() {
-                        "output_text" => {
-                            if let Some(text) = content.text {
-                                if first_delta_time.is_none() {
-                                    first_delta_time = Some(std::time::Instant::now());
-                                }
-                                assistant_text.push_str(&text);
-                                let _ = tx.send(BackendEvent::Delta {
-                                    session_id,
-                                    request_id,
-                                    content: text,
-                                });
-                            }
+                match event {
+                    ResponseStreamEvent::OutputTextDelta { delta, sequence_number: _, output_index: _, content_index: _ } => {
+                        if first_delta_time.is_none() {
+                            first_delta_time = Some(std::time::Instant::now());
                         }
-                        "reasoning" => {
-                            if let Some(text) = content.text {
-                                if first_delta_time.is_none() {
-                                    first_delta_time = Some(std::time::Instant::now());
-                                }
-                                reasoning_text.push_str(&text);
-                                let _ = tx.send(BackendEvent::ReasoningDelta {
-                                    session_id,
-                                    request_id,
-                                    content: text,
-                                });
-                            }
-                        }
-                        "tool_use" => {
-                            if let Some(name) = content.name {
-                                let call_id = content
-                                    .id
-                                    .unwrap_or_else(|| format!("call_{}", uuid::Uuid::new_v4()));
-
-                                let builder = tool_calls
-                                    .entry(call_id.clone())
-                                    .or_insert_with(|| ToolCallBuilder::new(call_id.clone(), name));
-
-                                if let Some(arguments) = content.arguments {
-                                    builder.append_arguments(&arguments);
-                                }
-
-                                if let Some(arguments) = builder.arguments() {
-                                    let call = ToolCall {
-                                        id: call_id.clone(),
-                                        name: builder.name().to_string(),
-                                        arguments: arguments.to_string(),
-                                    };
-                                    let _ = tx.send(BackendEvent::ToolCallUpdated {
-                                        session_id,
-                                        request_id,
-                                        tool_call: call,
-                                    });
-                                }
-                            }
-                        }
-                        _ => {}
+                        assistant_text.push_str(&delta);
+                        let _ = tx.send(BackendEvent::Delta {
+                            session_id,
+                            request_id,
+                            content: delta,
+                        });
                     }
-                }
+                    ResponseStreamEvent::RefusalDelta { delta, sequence_number: _, output_index: _, content_index: _ } => {
+                        // Handle refusal text (model declined to respond)
+                        if first_delta_time.is_none() {
+                            first_delta_time = Some(std::time::Instant::now());
+                        }
+                        assistant_text.push_str(&delta);
+                        let _ = tx.send(BackendEvent::Delta {
+                            session_id,
+                            request_id,
+                            content: delta,
+                        });
+                    }
+                    ResponseStreamEvent::ReasoningDelta { delta, sequence_number: _, output_index: _, content_index: _ } => {
+                        if first_delta_time.is_none() {
+                            first_delta_time = Some(std::time::Instant::now());
+                        }
+                        reasoning_text.push_str(&delta);
+                        let _ = tx.send(BackendEvent::ReasoningDelta {
+                            session_id,
+                            request_id,
+                            content: delta,
+                        });
+                    }
+                    ResponseStreamEvent::ReasoningTextDelta { delta, sequence_number: _, item_id: _, output_index: _, content_index: _ } => {
+                        if first_delta_time.is_none() {
+                            first_delta_time = Some(std::time::Instant::now());
+                        }
+                        reasoning_text.push_str(&delta);
+                        let _ = tx.send(BackendEvent::ReasoningDelta {
+                            session_id,
+                            request_id,
+                            content: delta,
+                        });
+                    }
+                    ResponseStreamEvent::ReasoningSummaryTextDelta {
+                        summary_delta,
+                        sequence_number: _,
+                        item_id: _,
+                        output_index: _,
+                        summary_index: _,
+                    } => {
+                        reasoning_text.push_str(&summary_delta);
+                        let _ = tx.send(BackendEvent::ReasoningDelta {
+                            session_id,
+                            request_id,
+                            content: summary_delta,
+                        });
+                    }
+                    ResponseStreamEvent::ReasoningSummaryTextDone {
+                        text,
+                        sequence_number: _,
+                        item_id: _,
+                        output_index: _,
+                        summary_index: _,
+                    } => {
+                        reasoning_text.push_str(&text);
+                        let _ = tx.send(BackendEvent::ReasoningDelta {
+                            session_id,
+                            request_id,
+                            content: text,
+                        });
+                    }
+                    ResponseStreamEvent::OutputItemAdded { item, sequence_number: _, output_index: _ } => {
+                        // New output item added (message or function call)
+                        if let Some(content_parts) = &item.content {
+                            for part in content_parts {
+                                match part.part_type.as_str() {
+                                    "text" | "output_text" => {
+                                        if let Some(text) = &part.text {
+                                            if first_delta_time.is_none() {
+                                                first_delta_time = Some(std::time::Instant::now());
+                                            }
+                                            assistant_text.push_str(text);
+                                            let _ = tx.send(BackendEvent::Delta {
+                                                session_id,
+                                                request_id,
+                                                content: text.clone(),
+                                            });
+                                        }
+                                    }
+                                    "tool_use" => {
+                                        if let Some(name) = &part.name {
+                                            let call_id = part
+                                                .id
+                                                .clone()
+                                                .unwrap_or_else(|| format!("call_{}", Uuid::new_v4()));
+                                            tool_calls.insert(
+                                                call_id.clone(),
+                                                ToolCallBuilder::new(call_id.clone(), name.clone()),
+                                            );
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                    ResponseStreamEvent::OutputItemDone { item, sequence_number: _, output_index: _ } => {
+                        // Extract finish reason from message items
+                        if let Some(reason) = &item.finish_reason {
+                            finish_reason = Some(reason.clone());
+                        }
+                    }
+                    ResponseStreamEvent::ContentPartAdded { content_part, sequence_number: _, output_index: _, content_index: _ } => {
+                        match content_part.part_type.as_str() {
+                            "tool_use" => {
+                                if let Some(name) = &content_part.name {
+                                    let call_id = content_part
+                                        .id
+                                        .clone()
+                                        .unwrap_or_else(|| format!("call_{}", Uuid::new_v4()));
+                                    tool_calls.insert(
+                                        call_id.clone(),
+                                        ToolCallBuilder::new(call_id.clone(), name.clone()),
+                                    );
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    ResponseStreamEvent::ReasoningPartAdded {
+                        part: _,
+                        sequence_number: _,
+                        item_id: _,
+                        output_index: _,
+                        content_index: _,
+                    } => {
+                        // Reasoning part added, handled by ReasoningTextDelta
+                    }
+                    ResponseStreamEvent::ReasoningPartDone {
+                        sequence_number: _,
+                        item_id: _,
+                        output_index: _,
+                        content_index: _,
+                    } => {
+                        // Reasoning part done
+                    }
+                    ResponseStreamEvent::ReasoningSummaryPartAdded {
+                        part: _,
+                        sequence_number: _,
+                        item_id: _,
+                        output_index: _,
+                        summary_index: _,
+                    } => {
+                        // Reasoning summary part added
+                    }
+                    ResponseStreamEvent::FunctionCallArgumentsDelta {
+                        call_id,
+                        call_name,
+                        arguments,
+                        sequence_number: _,
+                        output_index: _,
+                        item_id: _,
+                    } => {
+                        let builder = tool_calls.entry(call_id.clone()).or_insert_with(|| {
+                            ToolCallBuilder::new(
+                                call_id.clone(),
+                                call_name.unwrap_or_else(|| "unknown".to_string()),
+                            )
+                        });
+                        builder.append_arguments(&arguments);
 
-                // Handle finish reason
-                if let Some(reason) = event.data.finish_reason {
-                    finish_reason = Some(reason);
+                        if let Some(args) = builder.arguments() {
+                            let call = ToolCall {
+                                id: call_id.clone(),
+                                name: builder.name().to_string(),
+                                arguments: args.to_string(),
+                            };
+                            let _ = tx.send(BackendEvent::ToolCallUpdated {
+                                session_id,
+                                request_id,
+                                tool_call: call,
+                            });
+                        }
+                    }
+                    ResponseStreamEvent::FunctionCallArgumentsDone {
+                        call_id,
+                        call_name: _,
+                        sequence_number: _,
+                        output_index: _,
+                        item_id: _,
+                    } => {
+                        if let Some(builder) = tool_calls.get(&call_id) {
+                            if let Some(arguments) = builder.arguments() {
+                                let call = ToolCall {
+                                    id: call_id.clone(),
+                                    name: builder.name().to_string(),
+                                    arguments: arguments.to_string(),
+                                };
+                                let _ = tx.send(BackendEvent::ToolCallUpdated {
+                                    session_id,
+                                    request_id,
+                                    tool_call: call,
+                                });
+                            }
+                        }
+                    }
+                    ResponseStreamEvent::ResponseCreated { response: _, sequence_number: _ }
+                    | ResponseStreamEvent::ResponseInProgress { response: _, sequence_number: _ }
+                    | ResponseStreamEvent::ResponseCompleted { response: _, sequence_number: _ }
+                    | ResponseStreamEvent::ResponseQueued { response: _, sequence_number: _ }
+                    | ResponseStreamEvent::OutputTextDone { sequence_number: _, output_index: _, content_index: _ }
+                    | ResponseStreamEvent::RefusalDone { sequence_number: _, output_index: _, content_index: _ }
+                    | ResponseStreamEvent::ReasoningDone { sequence_number: _, output_index: _, content_index: _ }
+                    | ResponseStreamEvent::ReasoningTextDone { text: _, sequence_number: _, item_id: _, output_index: _, content_index: _ }
+                    | ResponseStreamEvent::ReasoningSummaryPartDone { sequence_number: _, item_id: _, output_index: _, summary_index: _ }
+                    | ResponseStreamEvent::ContentPartDone { content_part: _, sequence_number: _, output_index: _, content_index: _ }
+                    | ResponseStreamEvent::FileSearchCallInProgress { sequence_number: _, output_index: _, item_id: _ }
+                    | ResponseStreamEvent::FileSearchCallSearching { sequence_number: _, output_index: _, item_id: _ }
+                    | ResponseStreamEvent::FileSearchCallCompleted { sequence_number: _, output_index: _, item_id: _ }
+                    | ResponseStreamEvent::WebSearchCallInProgress { sequence_number: _, output_index: _, item_id: _ }
+                    | ResponseStreamEvent::WebSearchCallSearching { sequence_number: _, output_index: _, item_id: _ }
+                    | ResponseStreamEvent::WebSearchCallCompleted { sequence_number: _, output_index: _, item_id: _ }
+                    | ResponseStreamEvent::ResponseIncomplete { response: _, sequence_number: _ } => {
+                        // These events don't need special handling
+                    }
+                    ResponseStreamEvent::ResponseFailed { response: _, sequence_number: _ } => {
+                        log_error!(
+                            "openai responses stream failed"
+                        );
+                        return Err(anyhow::anyhow!("Response stream failed").into());
+                    }
+                    ResponseStreamEvent::Error { message, code } => {
+                        log_error!(
+                            "openai responses stream error: code={:?} message={}",
+                            code,
+                            message
+                        );
+                        return Err(anyhow::anyhow!("Response stream error: {}", message).into());
+                    }
                 }
             }
         }
     }
 
-    Ok(())
-}
+    Ok(())}
 
 pub(super) async fn complete_responses(
     http: &Client,
@@ -285,12 +458,31 @@ pub(super) async fn complete_responses(
 
     let response: ResponsesCompleteResponse = response.json().await?;
 
+    // Check for error in response
+    if let Some(error) = response.error {
+        return Err(anyhow::anyhow!("API error: {} - {}", error.code, error.message));
+    }
+
+    // Check for result error
+    if let Some(result) = response.result
+        && result.result_type == "error" {
+            return Err(anyhow::anyhow!("API result error"));
+        }
+
+    // Extract text content from message output items
     let content = response
         .output
         .into_iter()
         .find_map(|output| {
             if output.kind == "message" {
-                Some(output.content)
+                
+                output.content.into_iter().find_map(|part| {
+                    if part.kind == "output_text" || part.kind == "text" {
+                        Some(part.text.unwrap_or_default())
+                    } else {
+                        None
+                    }
+                })
             } else {
                 None
             }
@@ -644,20 +836,694 @@ impl From<&ToolDefinition> for ResponseTool {
 // Response parsing structures
 // ============================================================================
 
+/// SSE event types for Responses API streaming
 #[derive(Clone, Debug, Deserialize)]
-struct ResponsesStreamEvent {
+#[serde(from = "ResponseStreamEventRaw")]
+enum ResponseStreamEvent {
+    ResponseCreated {
+        #[serde(default)]
+        response: ResponseStreamResponse,
+        #[serde(default)]
+        sequence_number: u64,
+    },
+    ResponseInProgress {
+        #[serde(default)]
+        response: ResponseStreamResponse,
+        #[serde(default)]
+        sequence_number: u64,
+    },
+    ResponseCompleted {
+        #[serde(default)]
+        response: ResponseStreamResponse,
+        #[serde(default)]
+        sequence_number: u64,
+    },
+    ResponseFailed {
+        #[serde(default)]
+        response: ResponseStreamResponse,
+        #[serde(default)]
+        sequence_number: u64,
+    },
+    ResponseIncomplete {
+        #[serde(default)]
+        response: ResponseStreamResponse,
+        #[serde(default)]
+        sequence_number: u64,
+    },
+    ResponseQueued {
+        #[serde(default)]
+        response: ResponseStreamResponse,
+        #[serde(default)]
+        sequence_number: u64,
+    },
+    OutputItemAdded {
+        item: ResponseStreamItem,
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        output_index: u32,
+    },
+    OutputItemDone {
+        #[serde(default)]
+        item: ResponseStreamItem,
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        output_index: u32,
+    },
+    ContentPartAdded {
+        #[serde(default)]
+        content_part: ResponseStreamContentPart,
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        content_index: u32,
+    },
+    ContentPartDone {
+        #[serde(default)]
+        content_part: ResponseStreamContentPart,
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        content_index: u32,
+    },
+    OutputTextDelta {
+        delta: String,
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        content_index: u32,
+    },
+    OutputTextDone {
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        content_index: u32,
+    },
+    RefusalDelta {
+        delta: String,
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        content_index: u32,
+    },
+    RefusalDone {
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        content_index: u32,
+    },
+    ReasoningDelta {
+        delta: String,
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        content_index: u32,
+    },
+    ReasoningDone {
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        content_index: u32,
+    },
+    ReasoningTextDelta {
+        delta: String,
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        item_id: String,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        content_index: u32,
+    },
+    ReasoningTextDone {
+        #[serde(default)]
+        text: String,
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        item_id: String,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        content_index: u32,
+    },
+    ReasoningPartAdded {
+        #[serde(default)]
+        part: ResponseStreamReasoningPart,
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        item_id: String,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        content_index: u32,
+    },
+    ReasoningPartDone {
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        item_id: String,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        content_index: u32,
+    },
+    ReasoningSummaryTextDelta {
+        #[serde(rename = "summary")]
+        summary_delta: String,
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        item_id: String,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        summary_index: u32,
+    },
+    ReasoningSummaryTextDone {
+        #[serde(default)]
+        text: String,
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        item_id: String,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        summary_index: u32,
+    },
+    ReasoningSummaryPartAdded {
+        #[serde(default)]
+        part: ResponseStreamReasoningPart,
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        item_id: String,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        summary_index: u32,
+    },
+    ReasoningSummaryPartDone {
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        item_id: String,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        summary_index: u32,
+    },
+    FunctionCallArgumentsDelta {
+        #[serde(rename = "id")]
+        call_id: String,
+        #[serde(rename = "name")]
+        call_name: Option<String>,
+        arguments: String,
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        item_id: String,
+    },
+    FunctionCallArgumentsDone {
+        #[serde(rename = "id")]
+        call_id: String,
+        #[serde(rename = "name")]
+        call_name: Option<String>,
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        item_id: String,
+    },
+    FileSearchCallInProgress {
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        item_id: String,
+    },
+    FileSearchCallSearching {
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        item_id: String,
+    },
+    FileSearchCallCompleted {
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        item_id: String,
+    },
+    WebSearchCallInProgress {
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        item_id: String,
+    },
+    WebSearchCallSearching {
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        item_id: String,
+    },
+    WebSearchCallCompleted {
+        #[serde(default)]
+        sequence_number: u64,
+        #[serde(default)]
+        output_index: u32,
+        #[serde(default)]
+        item_id: String,
+    },
+    Error {
+        message: String,
+        #[serde(default)]
+        code: Option<String>,
+    },
+}
+
+/// Raw JSON structure for parsing SSE events
+#[derive(Clone, Debug, Deserialize)]
+struct ResponseStreamEventRaw {
+    #[serde(rename = "type")]
+    event_type: String,
     #[serde(default)]
-    data: ResponseEventData,
+    response: ResponseStreamResponse,
+    #[serde(default)]
+    item: ResponseStreamItem,
+    #[serde(default)]
+    content_part: ResponseStreamContentPart,
+    #[serde(default)]
+    part: ResponseStreamReasoningPart,
+    #[serde(default)]
+    delta: String,
+    #[serde(default)]
+    text: String,
+    #[serde(default)]
+    index: u32,
+    #[serde(default)]
+    content_index: u32,
+    #[serde(default)]
+    summary_index: u32,
+    #[serde(default)]
+    summary: String,
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    arguments: String,
+    #[serde(default)]
+    item_id: String,
+    #[serde(default)]
+    output_index: u32,
+    #[serde(default)]
+    sequence_number: u64,
+    #[serde(default)]
+    output: Vec<ResponseStreamItem>,
+    #[serde(default)]
+    error: ResponseStreamError,
+    #[serde(default)]
+    incomplete_details: ResponseStreamIncompleteDetails,
+    #[serde(default)]
+    message: String,
+    #[serde(default)]
+    code: Option<String>,
+}
+
+impl From<ResponseStreamEventRaw> for ResponseStreamEvent {
+    fn from(raw: ResponseStreamEventRaw) -> Self {
+        match raw.event_type.as_str() {
+            "response.created" => ResponseStreamEvent::ResponseCreated {
+                response: raw.response,
+                sequence_number: raw.sequence_number,
+            },
+            "response.in_progress" => ResponseStreamEvent::ResponseInProgress {
+                response: raw.response,
+                sequence_number: raw.sequence_number,
+            },
+            "response.completed" => ResponseStreamEvent::ResponseCompleted {
+                response: raw.response,
+                sequence_number: raw.sequence_number,
+            },
+            "response.failed" => ResponseStreamEvent::ResponseFailed {
+                response: raw.response,
+                sequence_number: raw.sequence_number,
+            },
+            "response.incomplete" => ResponseStreamEvent::ResponseIncomplete {
+                response: raw.response,
+                sequence_number: raw.sequence_number,
+            },
+            "response.queued" => ResponseStreamEvent::ResponseQueued {
+                response: raw.response,
+                sequence_number: raw.sequence_number,
+            },
+            "response.output_item.added" => ResponseStreamEvent::OutputItemAdded {
+                item: raw.item,
+                sequence_number: raw.sequence_number,
+                output_index: raw.output_index,
+            },
+            "response.output_item.done" => ResponseStreamEvent::OutputItemDone {
+                item: raw.item,
+                sequence_number: raw.sequence_number,
+                output_index: raw.output_index,
+            },
+            "response.content_part.added" => ResponseStreamEvent::ContentPartAdded {
+                content_part: raw.content_part,
+                sequence_number: raw.sequence_number,
+                output_index: raw.output_index,
+                content_index: raw.content_index,
+            },
+            "response.content_part.done" => ResponseStreamEvent::ContentPartDone {
+                content_part: raw.content_part,
+                sequence_number: raw.sequence_number,
+                output_index: raw.output_index,
+                content_index: raw.content_index,
+            },
+            "response.output_text.delta" => ResponseStreamEvent::OutputTextDelta {
+                delta: raw.delta,
+                sequence_number: raw.sequence_number,
+                output_index: raw.output_index,
+                content_index: raw.content_index,
+            },
+            "response.output_text.done" => ResponseStreamEvent::OutputTextDone {
+                sequence_number: raw.sequence_number,
+                output_index: raw.output_index,
+                content_index: raw.content_index,
+            },
+            "response.refusal.delta" => ResponseStreamEvent::RefusalDelta {
+                delta: raw.delta,
+                sequence_number: raw.sequence_number,
+                output_index: raw.output_index,
+                content_index: raw.content_index,
+            },
+            "response.refusal.done" => ResponseStreamEvent::RefusalDone {
+                sequence_number: raw.sequence_number,
+                output_index: raw.output_index,
+                content_index: raw.content_index,
+            },
+            "response.reasoning.delta" => ResponseStreamEvent::ReasoningDelta {
+                delta: raw.delta,
+                sequence_number: raw.sequence_number,
+                output_index: raw.output_index,
+                content_index: raw.content_index,
+            },
+            "response.reasoning.done" => ResponseStreamEvent::ReasoningDone {
+                sequence_number: raw.sequence_number,
+                output_index: raw.output_index,
+                content_index: raw.content_index,
+            },
+            "response.reasoning_text.delta" => ResponseStreamEvent::ReasoningTextDelta {
+                delta: raw.delta,
+                sequence_number: raw.sequence_number,
+                item_id: raw.item_id,
+                output_index: raw.output_index,
+                content_index: raw.content_index,
+            },
+            "response.reasoning_text.done" => ResponseStreamEvent::ReasoningTextDone {
+                text: raw.text,
+                sequence_number: raw.sequence_number,
+                item_id: raw.item_id,
+                output_index: raw.output_index,
+                content_index: raw.content_index,
+            },
+            "response.reasoning_part.added" => ResponseStreamEvent::ReasoningPartAdded {
+                part: raw.part,
+                sequence_number: raw.sequence_number,
+                item_id: raw.item_id,
+                output_index: raw.output_index,
+                content_index: raw.content_index,
+            },
+            "response.reasoning_part.done" => ResponseStreamEvent::ReasoningPartDone {
+                sequence_number: raw.sequence_number,
+                item_id: raw.item_id,
+                output_index: raw.output_index,
+                content_index: raw.content_index,
+            },
+            "response.reasoning_summary_text.delta" => ResponseStreamEvent::ReasoningSummaryTextDelta {
+                summary_delta: raw.summary,
+                sequence_number: raw.sequence_number,
+                item_id: raw.item_id,
+                output_index: raw.output_index,
+                summary_index: raw.summary_index,
+            },
+            "response.reasoning_summary_text.done" => ResponseStreamEvent::ReasoningSummaryTextDone {
+                text: raw.text,
+                sequence_number: raw.sequence_number,
+                item_id: raw.item_id,
+                output_index: raw.output_index,
+                summary_index: raw.summary_index,
+            },
+            "response.reasoning_summary_part.added" => ResponseStreamEvent::ReasoningSummaryPartAdded {
+                part: raw.part,
+                sequence_number: raw.sequence_number,
+                item_id: raw.item_id,
+                output_index: raw.output_index,
+                summary_index: raw.summary_index,
+            },
+            "response.reasoning_summary_part.done" => ResponseStreamEvent::ReasoningSummaryPartDone {
+                sequence_number: raw.sequence_number,
+                item_id: raw.item_id,
+                output_index: raw.output_index,
+                summary_index: raw.summary_index,
+            },
+            "response.function_call_arguments.delta" => ResponseStreamEvent::FunctionCallArgumentsDelta {
+                call_id: raw.id,
+                call_name: if raw.name.is_empty() { None } else { Some(raw.name) },
+                arguments: raw.arguments,
+                sequence_number: raw.sequence_number,
+                output_index: raw.output_index,
+                item_id: raw.item_id,
+            },
+            "response.function_call_arguments.done" => ResponseStreamEvent::FunctionCallArgumentsDone {
+                call_id: raw.id,
+                call_name: if raw.name.is_empty() { None } else { Some(raw.name) },
+                sequence_number: raw.sequence_number,
+                output_index: raw.output_index,
+                item_id: raw.item_id,
+            },
+            "response.file_search_call.in_progress" => ResponseStreamEvent::FileSearchCallInProgress {
+                sequence_number: raw.sequence_number,
+                output_index: raw.output_index,
+                item_id: raw.item_id,
+            },
+            "response.file_search_call.searching" => ResponseStreamEvent::FileSearchCallSearching {
+                sequence_number: raw.sequence_number,
+                output_index: raw.output_index,
+                item_id: raw.item_id,
+            },
+            "response.file_search_call.completed" => ResponseStreamEvent::FileSearchCallCompleted {
+                sequence_number: raw.sequence_number,
+                output_index: raw.output_index,
+                item_id: raw.item_id,
+            },
+            "response.web_search_call.in_progress" => ResponseStreamEvent::WebSearchCallInProgress {
+                sequence_number: raw.sequence_number,
+                output_index: raw.output_index,
+                item_id: raw.item_id,
+            },
+            "response.web_search_call.searching" => ResponseStreamEvent::WebSearchCallSearching {
+                sequence_number: raw.sequence_number,
+                output_index: raw.output_index,
+                item_id: raw.item_id,
+            },
+            "response.web_search_call.completed" => ResponseStreamEvent::WebSearchCallCompleted {
+                sequence_number: raw.sequence_number,
+                output_index: raw.output_index,
+                item_id: raw.item_id,
+            },
+            "error" => ResponseStreamEvent::Error {
+                message: raw.message,
+                code: raw.code,
+            },
+            _ => ResponseStreamEvent::Error {
+                message: format!("Unknown event type: {}", raw.event_type),
+                code: None,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
-struct ResponseEventData {
+struct ResponseStreamResponse {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    model: String,
+    #[serde(default)]
+    created_at: u64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ResponseStreamItem {
+    #[serde(rename = "type")]
+    #[serde(default)]
+    item_type: String,
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    role: String,
+    #[serde(default)]
+    content: Option<Vec<ResponseStreamContentPart>>,
+    #[serde(default)]
+    finish_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ResponseStreamContentPart {
+    #[serde(rename = "type")]
+    #[serde(default)]
+    part_type: String,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    index: Option<u32>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ResponseStreamReasoningPart {
+    #[serde(rename = "type")]
+    #[serde(default)]
+    part_type: String,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    summary: Option<Vec<ResponseStreamReasoningStep>>,
+    #[serde(default)]
+    last_summary: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ResponseStreamReasoningStep {
+    #[serde(default)]
+    end: Option<String>,
+    #[serde(default)]
+    text: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ResponseStreamError {
+    #[serde(default)]
+    code: String,
+    #[serde(default)]
+    message: String,
+    #[serde(default)]
+    param: Option<String>,
+    #[serde(default)]
+    error: ResponseStreamErrorDetail,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ResponseStreamErrorDetail {
+    #[serde(rename = "type", default)]
+    r#type: String,
+    #[serde(default)]
+    code: String,
+    #[serde(default)]
+    message: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ResponseStreamIncompleteDetails {
+    #[serde(rename = "type")]
+    #[serde(default)]
+    incomplete_type: String,
+    #[serde(default)]
+    reason: String,
+}
+
+/// Usage stats from streaming response
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ResponseStreamUsage {
+    #[serde(rename = "input_tokens")]
+    input_tokens: u32,
+    #[serde(rename = "completion_tokens")]
+    output_tokens: u32,
+    #[serde(rename = "total_tokens")]
+    total_tokens: u32,
+    #[serde(rename = "response_tokens")]
+    response_tokens: Option<u32>,
+    #[serde(rename = "thinking_tokens")]
+    thinking_tokens: Option<u32>,
+}
+
+/// Non-streaming response structures
+#[derive(Clone, Debug, Deserialize)]
+struct ResponsesCompleteResponse {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    model: String,
+    #[serde(default)]
+    created_at: u64,
+    #[serde(default)]
+    error: Option<ResponseStreamError>,
+    #[serde(default)]
+    result: Option<ResponseResult>,
+    #[serde(default)]
+    output: Vec<ResponseOutputItem>,
+    #[serde(default)]
+    usage: ResponseStreamUsage,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ResponseResult {
+    #[serde(rename = "type")]
+    #[serde(default)]
+    result_type: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ResponseOutputItem {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    role: String,
     #[serde(default)]
     content: Vec<ResponseOutputContent>,
     #[serde(default)]
     finish_reason: Option<String>,
-    #[serde(default)]
-    usage: Option<ResponseUsage>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -671,31 +1537,11 @@ struct ResponseOutputContent {
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
+    call_id: Option<String>,
+    #[serde(default)]
     arguments: Option<String>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
-struct ResponseUsage {
-    #[serde(rename = "input_tokens")]
-    input_tokens: u32,
-    #[serde(rename = "completion_tokens")]
-    output_tokens: u32,
-    #[serde(rename = "total_tokens")]
-    total_tokens: u32,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct ResponsesCompleteResponse {
     #[serde(default)]
-    output: Vec<ResponseOutput>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct ResponseOutput {
-    #[serde(rename = "type")]
-    kind: String,
-    #[serde(default)]
-    content: String,
+    index: Option<u32>,
 }
 
 // ============================================================================
