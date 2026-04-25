@@ -134,13 +134,6 @@ pub(super) async fn stream_responses(
                     return Ok(());
                 }
 
-                // Debug logging
-                log_debug!(
-                    "responses stream event: type={:?} data={}",
-                    event_type,
-                    &payload[..payload.len().min(500)]
-                );
-
                 let event: ResponseStreamEvent =
                     serde_json::from_str(&payload).context("failed to parse responses event")?;
 
@@ -219,10 +212,6 @@ pub(super) async fn stream_responses(
                         });
                     }
                    ResponseStreamEvent::OutputItemAdded { item, sequence_number: _, output_index: _ } => {
-                        log_debug!(
-                            "OutputItemAdded: item_type={:?} id={:?} call_id={:?} name={:?}",
-                            item.item_type, item.id, item.call_id, item.name
-                        );
                         // Handle function_call items (Responses API style)
                         if item.item_type == "function_call" {
                             // Use item.id as the key (consistent with item_id in delta events)
@@ -231,16 +220,13 @@ pub(super) async fn stream_responses(
                             } else if !item.call_id.is_empty() {
                                 item.call_id.clone()
                             } else {
-                                log_debug!("OutputItemAdded: no id available");
                                 continue;
                             };
                             let name = if !item.name.is_empty() {
                                 item.name.clone()
                             } else {
-                                log_debug!("OutputItemAdded: no name available");
                                 continue;
                             };
-                            log_debug!("OutputItemAdded: inserting builder key_id={} name={}", key_id, name);
                             let mut builder = ToolCallBuilder::new(key_id.clone(), name.clone());
                             // Add initial arguments if present
                             if !item.arguments.is_empty() {
@@ -250,10 +236,6 @@ pub(super) async fn stream_responses(
                         }
                     }
                     ResponseStreamEvent::OutputItemDone { item, sequence_number: _, output_index: _ } => {
-                        log_debug!(
-                            "OutputItemDone: item_type={:?} id={:?} call_id={:?} name={:?}",
-                            item.item_type, item.id, item.call_id, item.name
-                        );
                         // Handle function_call items - send final ToolCallUpdated
                         if item.item_type == "function_call" {
                             let key_id = if !item.id.is_empty() {
@@ -261,34 +243,21 @@ pub(super) async fn stream_responses(
                             } else if !item.call_id.is_empty() {
                                 item.call_id.clone()
                             } else {
-                                log_debug!("OutputItemDone: no id available");
                                 continue;
                             };
-                            log_debug!("OutputItemDone: looking up builder key_id={}", key_id);
                             if let Some(builder) = tool_calls.get(&key_id) {
-                                log_debug!(
-                                    "OutputItemDone: found builder name={} arguments={:?}",
-                                    builder.name(),
-                                    builder.arguments()
-                                );
                                 if let Some(arguments) = builder.arguments() {
                                     let call = crate::session::ToolCall {
                                         id: key_id.clone(),
                                         name: builder.name().to_string(),
                                         arguments: arguments.to_string(),
                                     };
-                                    log_debug!(
-                                        "OutputItemDone: sending ToolCallUpdated id={} name={} args={}",
-                                        call.id, call.name, arguments
-                                    );
                                     let _ = tx.send(BackendEvent::ToolCallUpdated {
                                         session_id,
                                         request_id,
                                         tool_call: call,
                                     });
                                 }
-                            } else {
-                                log_debug!("OutputItemDone: no builder found for key_id={}", key_id);
                             }
                         }
                         // Extract finish reason from message items
@@ -353,19 +322,9 @@ pub(super) async fn stream_responses(
                         } else {
                             call_id.clone()
                         };
-                        log_debug!(
-                            "FunctionCallArgumentsDelta: key_id={} arguments={:?}",
-                            key_id, arguments
-                        );
                         // Only accumulate arguments, don't send ToolCallUpdated here
                         if let Some(builder) = tool_calls.get_mut(&key_id) {
                             builder.append_arguments(&arguments);
-                            log_debug!(
-                                "FunctionCallArgumentsDelta: accumulated arguments={:?}",
-                                builder.arguments()
-                            );
-                        } else {
-                            log_debug!("FunctionCallArgumentsDelta: no builder found for key_id={}", key_id);
                         }
                     }
                     ResponseStreamEvent::FunctionCallArgumentsDone {
