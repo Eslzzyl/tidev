@@ -38,7 +38,7 @@ fn session_display_names_round_trip() {
             .expect("session should exist");
 
         assert_eq!(loaded.provider_display_name, "DeepSeek");
-        assert_eq!(loaded.model_display_name, "DeepSeek Chat");
+        assert_eq!(loaded.model_display_name, "DeepSeek-V4-Flash");
         assert_eq!(loaded.workspace_root, "/tmp/workspace");
         assert_eq!(loaded.context_summary, None);
         assert_eq!(loaded.context_retained_from, 0);
@@ -49,7 +49,7 @@ fn session_display_names_round_trip() {
             .expect("conversation should exist");
 
         assert_eq!(conversation.provider_display_name, "DeepSeek");
-        assert_eq!(conversation.model_display_name, "DeepSeek Chat");
+        assert_eq!(conversation.model_display_name, "DeepSeek-V4-Flash");
         assert_eq!(conversation.workspace_root, "/tmp/workspace");
         assert_eq!(conversation.context_summary, None);
         assert_eq!(conversation.context_retained_from, 0);
