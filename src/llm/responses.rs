@@ -117,7 +117,7 @@ pub(super) async fn stream_responses(
             // SSE data line: "data: {...}"
             if let Some(payload) = line.strip_prefix("data:") {
                 let payload = payload.trim().to_string();
-                let event_type = current_event_type.take();
+                let _event_type = current_event_type.take();
 
                 if payload == "[DONE]" {
                     let turn = finalize_turn(
@@ -245,8 +245,8 @@ pub(super) async fn stream_responses(
                             } else {
                                 continue;
                             };
-                            if let Some(builder) = tool_calls.get(&key_id) {
-                                if let Some(arguments) = builder.arguments() {
+                            if let Some(builder) = tool_calls.get(&key_id)
+                                && let Some(arguments) = builder.arguments() {
                                     let call = crate::session::ToolCall {
                                         id: key_id.clone(),
                                         name: builder.name().to_string(),
@@ -258,7 +258,6 @@ pub(super) async fn stream_responses(
                                         tool_call: call,
                                     });
                                 }
-                            }
                         }
                         // Extract finish reason from message items
                         if let Some(reason) = &item.finish_reason {
@@ -266,20 +265,17 @@ pub(super) async fn stream_responses(
                         }
                     }
                     ResponseStreamEvent::ContentPartAdded { content_part, sequence_number: _, output_index: _, content_index: _ } => {
-                        match content_part.part_type.as_str() {
-                            "tool_use" => {
-                                if let Some(name) = &content_part.name {
-                                    let call_id = content_part
-                                        .id
-                                        .clone()
-                                        .unwrap_or_else(|| format!("call_{}", Uuid::new_v4()));
-                                    tool_calls.insert(
-                                        call_id.clone(),
-                                        ToolCallBuilder::new(call_id.clone(), name.clone()),
-                                    );
-                                }
+                        if content_part.part_type.as_str() == "tool_use" {
+                            if let Some(name) = &content_part.name {
+                                let call_id = content_part
+                                    .id
+                                    .clone()
+                                    .unwrap_or_else(|| format!("call_{}", Uuid::new_v4()));
+                                tool_calls.insert(
+                                    call_id.clone(),
+                                    ToolCallBuilder::new(call_id.clone(), name.clone()),
+                                );
                             }
-                            _ => {}
                         }
                     }
                     ResponseStreamEvent::ReasoningPartAdded {
@@ -328,11 +324,11 @@ pub(super) async fn stream_responses(
                         }
                     }
                     ResponseStreamEvent::FunctionCallArgumentsDone {
-                        call_id,
+                        call_id: _,
                         call_name: _,
                         sequence_number: _,
                         output_index: _,
-                        item_id,
+                        item_id: _,
                     } => {
                         // Only accumulate arguments, final ToolCallUpdated is sent in OutputItemDone
                     }
@@ -359,7 +355,7 @@ pub(super) async fn stream_responses(
                         log_error!(
                             "openai responses stream failed"
                         );
-                        return Err(anyhow::anyhow!("Response stream failed").into());
+                        return Err(anyhow::anyhow!("Response stream failed"));
                     }
                     ResponseStreamEvent::Error { message, code } => {
                         log_error!(
@@ -367,7 +363,7 @@ pub(super) async fn stream_responses(
                             code,
                             message
                         );
-                        return Err(anyhow::anyhow!("Response stream error: {}", message).into());
+                        return Err(anyhow::anyhow!("Response stream error: {}", message));
                     }
                 }
             }
