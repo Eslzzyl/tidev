@@ -16,7 +16,7 @@ use super::attachments::{image_attachments, message_text_with_file_references};
 use super::error::classify_response_status;
 
 /// Responses API endpoint
-const RESPONSES_ENDPOINT: &str = "/v1/responses";
+const RESPONSES_ENDPOINT: &str = "/responses";
 
 pub(super) async fn stream_responses(
     http: &Client,
