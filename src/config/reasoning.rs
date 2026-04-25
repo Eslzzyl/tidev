@@ -220,7 +220,9 @@ impl ThinkingLevelType {
         let parts: Vec<&str> = s.splitn(2, ':').collect();
         match parts.as_slice() {
             ["none"] => Self::None,
-            ["deepseek", level] => Self::DeepSeek(DeepSeekV4ThinkingLevel::from_display_name(level)),
+            ["deepseek", level] => {
+                Self::DeepSeek(DeepSeekV4ThinkingLevel::from_display_name(level))
+            }
             ["qwen", level] => Self::Qwen(Qwen35ThinkingLevel::from_display_name(level)),
             _ => Self::None,
         }

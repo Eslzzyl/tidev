@@ -16,7 +16,8 @@ impl<T> TelegramApiResponse<T> {
     /// Extract result or generate error from failed response.
     pub fn into_result(self, operation: &str) -> Result<T, anyhow::Error> {
         if self.ok {
-            self.result.context("missing result field in Telegram API response")
+            self.result
+                .context("missing result field in Telegram API response")
         } else {
             let msg = self
                 .description

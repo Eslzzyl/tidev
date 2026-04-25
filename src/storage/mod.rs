@@ -633,13 +633,11 @@ impl SessionStore {
 
     /// Count total tool events (tool calls) for a session.
     pub fn count_tool_events(&self, session_id: Uuid) -> Result<usize> {
-        let mut statement = self.connection.prepare(
-            "SELECT COUNT(*) FROM tool_events WHERE session_id = ?1",
-        )?;
+        let mut statement = self
+            .connection
+            .prepare("SELECT COUNT(*) FROM tool_events WHERE session_id = ?1")?;
 
-        let count: i64 = statement.query_row(params![session_id.to_string()], |row| {
-            row.get(0)
-        })?;
+        let count: i64 = statement.query_row(params![session_id.to_string()], |row| row.get(0))?;
 
         Ok(count as usize)
     }
@@ -803,10 +801,7 @@ impl SessionStore {
 
     /// List all gateway chat sessions for a given platform.
     /// Returns a list of (chat_key, session_id) tuples sorted by updated_at descending.
-    pub fn list_gateway_chat_sessions(
-        &self,
-        platform: &str,
-    ) -> Result<Vec<(String, Uuid)>> {
+    pub fn list_gateway_chat_sessions(&self, platform: &str) -> Result<Vec<(String, Uuid)>> {
         let mut statement = self.connection.prepare(
             "SELECT chat_key, session_id, updated_at FROM gateway_chat_sessions WHERE platform = ?1 ORDER BY updated_at DESC",
         )?;
@@ -871,8 +866,7 @@ impl SessionStore {
                 serde_json::from_str(&metadata).unwrap_or_default();
             let mode: Option<crate::prompts::SessionMode> =
                 mode.and_then(|m| serde_json::from_str(&m).ok());
-            let completed_at = completed_at
-                .and_then(|s| parse_datetime(&s).ok());
+            let completed_at = completed_at.and_then(|s| parse_datetime(&s).ok());
             let thinking_level = thinking_level
                 .filter(|s| !s.is_empty())
                 .map(|s| crate::config::reasoning::ThinkingLevelType::from_string(&s));

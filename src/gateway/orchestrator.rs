@@ -16,7 +16,9 @@ pub struct ChannelOrchestrator {
 impl ChannelOrchestrator {
     /// Create a new empty orchestrator.
     pub fn new() -> Self {
-        Self { channels: Vec::new() }
+        Self {
+            channels: Vec::new(),
+        }
     }
 
     /// Add a channel to the orchestrator.

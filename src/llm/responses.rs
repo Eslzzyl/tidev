@@ -450,7 +450,9 @@ fn finalize_turn(
     finish_reason: &Option<String>,
     tool_calls: &BTreeMap<String, ToolCallBuilder>,
 ) -> crate::session::AssistantTurn {
-    let tool_calls = tool_calls.values().map(|builder| ToolCall {
+    let tool_calls = tool_calls
+        .values()
+        .map(|builder| ToolCall {
             id: builder.id().to_string(),
             name: builder.name().to_string(),
             arguments: builder.arguments().unwrap_or_default().to_string(),

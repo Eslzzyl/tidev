@@ -281,7 +281,15 @@ impl ContextManager {
             tokio::spawn(async move {
                 let thinking_level = model_clone.thinking_level.clone();
                 llm_clone
-                    .stream_chat(session_id, request_id, model_clone, msgs, vec![], tx, thinking_level)
+                    .stream_chat(
+                        session_id,
+                        request_id,
+                        model_clone,
+                        msgs,
+                        vec![],
+                        tx,
+                        thinking_level,
+                    )
                     .await;
             });
 
@@ -529,10 +537,7 @@ mod tests {
             Message::new(MessageRole::Assistant, "follow up"),
         ];
 
-        let total_tokens: usize = messages
-            .iter()
-            .map(ContextManager::message_tokens)
-            .sum();
+        let total_tokens: usize = messages.iter().map(ContextManager::message_tokens).sum();
         let first_msg_tokens = ContextManager::message_tokens(&messages[0]);
         let retain_recent_tokens = total_tokens - first_msg_tokens;
 

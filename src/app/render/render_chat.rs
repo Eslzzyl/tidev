@@ -82,7 +82,8 @@ fn render_tool_call_with_result(
     let mut lines = Vec::new();
     lines.push(Line::from(""));
 
-    let call_lines = render_tool_call_lines(tool_call, body_width, palette, exit_code, rtk_rewritten);
+    let call_lines =
+        render_tool_call_lines(tool_call, body_width, palette, exit_code, rtk_rewritten);
     lines.extend(call_lines);
 
     if is_pending {
@@ -1261,7 +1262,6 @@ impl App {
         )
     }
 
-
     fn cached_render_tool_call_with_result(
         &self,
         message: &Message,
@@ -1274,7 +1274,7 @@ impl App {
         if body_width == 0 {
             return (Vec::new(), Vec::new());
         }
-        
+
         let tick = self.next_message_render_cache_tick();
         let key = MessageRenderCacheKey {
             session_id: self.conversation.session_id,
@@ -1299,7 +1299,8 @@ impl App {
         }
 
         self.record_message_render_cache_miss();
-        let result = render_tool_call_with_result(tool_call, tool_result, body_width, is_streaming, ctx);
+        let result =
+            render_tool_call_with_result(tool_call, tool_result, body_width, is_streaming, ctx);
 
         {
             let mut cache = self.message_render_cache.borrow_mut();
@@ -1311,7 +1312,7 @@ impl App {
                 },
             );
         }
-        
+
         result
     }
 
@@ -2228,14 +2229,15 @@ impl App {
                 if !message.tool_calls.is_empty() {
                     for tool_call in &message.tool_calls {
                         let tool_result = tool_results_by_id.get(&tool_call.id).copied();
-                        let (tool_card_lines, mut regions) = self.cached_render_tool_call_with_result(
-                            message,
-                            tool_call,
-                            tool_result,
-                            body_width,
-                            message.streaming,
-                            ctx,
-                        );
+                        let (tool_card_lines, mut regions) = self
+                            .cached_render_tool_call_with_result(
+                                message,
+                                tool_call,
+                                tool_result,
+                                body_width,
+                                message.streaming,
+                                ctx,
+                            );
                         if !tool_card_lines.is_empty() {
                             let start_line = current_line_offset + lines.len();
 

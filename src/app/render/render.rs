@@ -178,11 +178,7 @@ impl App {
 
         let model_label = self.active_model.label();
         let model_display = if self.thinking_level.is_supported() {
-            format!(
-                "{} [{}]",
-                model_label,
-                self.thinking_level.display_name()
-            )
+            format!("{} [{}]", model_label, self.thinking_level.display_name())
         } else {
             model_label
         };
@@ -435,11 +431,7 @@ impl App {
 
         let model_label = self.active_model.label();
         let model_display = if self.thinking_level.is_supported() {
-            format!(
-                "{} [{}]",
-                model_label,
-                self.thinking_level.display_name()
-            )
+            format!("{} [{}]", model_label, self.thinking_level.display_name())
         } else {
             model_label
         };

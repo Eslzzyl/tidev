@@ -316,7 +316,9 @@ impl App {
         let session_id = self.conversation.session_id;
 
         // 获取 thinking level：从最后一条用户消息获取，如果没有则 fallback 到模型默认
-        let thinking_level = self.conversation.messages
+        let thinking_level = self
+            .conversation
+            .messages
             .iter()
             .rev()
             .find(|m| m.role == MessageRole::User)
@@ -324,8 +326,16 @@ impl App {
             .unwrap_or_else(|| self.thinking_level.clone());
 
         runtime.spawn(async move {
-            llm.stream_chat(session_id, request_id, model, messages, tools, tx, thinking_level)
-                .await;
+            llm.stream_chat(
+                session_id,
+                request_id,
+                model,
+                messages,
+                tools,
+                tx,
+                thinking_level,
+            )
+            .await;
         });
 
         Ok(())

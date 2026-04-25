@@ -606,7 +606,9 @@ mod tests {
             Message::new(MessageRole::Assistant, "Hi there"),
         ];
 
-        let request = build_openai_request(&model, messages, false, &[], model.thinking_level.clone()).expect("build request");
+        let request =
+            build_openai_request(&model, messages, false, &[], model.thinking_level.clone())
+                .expect("build request");
         let roles: Vec<_> = request
             .messages
             .iter()
@@ -650,7 +652,9 @@ mod tests {
             Message::new(MessageRole::Assistant, "Hi there"),
         ];
 
-         let request = build_openai_request(&model, messages, false, &[], model.thinking_level.clone()).expect("build request");
+        let request =
+            build_openai_request(&model, messages, false, &[], model.thinking_level.clone())
+                .expect("build request");
         let roles: Vec<_> = request
             .messages
             .iter()

@@ -158,7 +158,10 @@ impl ActiveModel {
     }
 
     /// 获取完整的 extra_body（使用指定的 thinking level）
-    pub fn merged_extra_body_with_thinking(&self, thinking_level: ThinkingLevelType) -> Option<serde_json::Value> {
+    pub fn merged_extra_body_with_thinking(
+        &self,
+        thinking_level: ThinkingLevelType,
+    ) -> Option<serde_json::Value> {
         let thinking_extra = thinking_level.extra_body();
 
         match (&self.extra_body, thinking_extra) {

@@ -105,7 +105,12 @@ pub trait Channel {
     }
 
     /// Update a previously sent draft message with new accumulated content.
-    async fn update_draft(&mut self, _recipient: &str, _message_id: &str, _text: &str) -> Result<()> {
+    async fn update_draft(
+        &mut self,
+        _recipient: &str,
+        _message_id: &str,
+        _text: &str,
+    ) -> Result<()> {
         Ok(())
     }
 
@@ -126,7 +131,12 @@ pub trait Channel {
     ///
     /// This is called when the agent has completed its response. Channels can
     /// use this to apply final formatting or handle multi-chunk messages.
-    async fn finalize_draft(&mut self, _recipient: &str, _message_id: &str, _text: &str) -> Result<()> {
+    async fn finalize_draft(
+        &mut self,
+        _recipient: &str,
+        _message_id: &str,
+        _text: &str,
+    ) -> Result<()> {
         Ok(())
     }
 

@@ -5,9 +5,7 @@ use std::fmt::Write;
 use anyhow::{Context, Result};
 use reqwest::Client;
 
-use super::types::{
-    SendMessageRequest, TelegramApiResponse, TelegramSentMessage, TelegramUpdate,
-};
+use super::types::{SendMessageRequest, TelegramApiResponse, TelegramSentMessage, TelegramUpdate};
 
 /// Telegram bot API client.
 pub struct TelegramBot {
@@ -167,11 +165,7 @@ impl TelegramBot {
     }
 
     /// Fetch updates from Telegram.
-    pub async fn get_updates(
-        &self,
-        offset: i64,
-        timeout_secs: u64,
-    ) -> Result<Vec<TelegramUpdate>> {
+    pub async fn get_updates(&self, offset: i64, timeout_secs: u64) -> Result<Vec<TelegramUpdate>> {
         let body = serde_json::json!({
             "offset": offset,
             "timeout": timeout_secs,
@@ -314,10 +308,7 @@ impl TelegramBot {
     }
 
     /// Set bot command menu.
-    pub async fn set_my_commands(
-        &self,
-        commands: Vec<(String, String)>,
-    ) -> Result<()> {
+    pub async fn set_my_commands(&self, commands: Vec<(String, String)>) -> Result<()> {
         let body = serde_json::json!({
             "commands": commands
         });

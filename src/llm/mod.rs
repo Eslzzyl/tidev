@@ -44,7 +44,15 @@ impl LlmClient {
         thinking_level: crate::config::reasoning::ThinkingLevelType,
     ) {
         let result = self
-            .stream_chat_with_retry(session_id, request_id, model, messages, tools, tx.clone(), thinking_level)
+            .stream_chat_with_retry(
+                session_id,
+                request_id,
+                model,
+                messages,
+                tools,
+                tx.clone(),
+                thinking_level,
+            )
             .await;
 
         if let Err(error) = result {
@@ -186,7 +194,14 @@ impl LlmClient {
             }
             ApiType::OpenAiChatCompletions => {
                 openai::stream_openai(
-                    &self.http, session_id, request_id, model, messages, tools, tx, thinking_level,
+                    &self.http,
+                    session_id,
+                    request_id,
+                    model,
+                    messages,
+                    tools,
+                    tx,
+                    thinking_level,
                 )
                 .await
             }

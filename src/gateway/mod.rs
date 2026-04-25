@@ -71,7 +71,10 @@ async fn run_async() -> Result<()> {
             .context("missing Telegram bot token in auth.json for channel 'telegram'")?
             .to_string();
 
-        crate::log_info!("Telegram channel enabled, allowlist: {} entries", allowlist.len());
+        crate::log_info!(
+            "Telegram channel enabled, allowlist: {} entries",
+            allowlist.len()
+        );
 
         // Each channel gets its own resources
         let store = SessionStore::open(db_path)?;

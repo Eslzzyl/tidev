@@ -7,8 +7,8 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use tokio::time::{Duration, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
@@ -336,7 +336,9 @@ impl QQChannel {
         chat_key: &str,
         active_model: &crate::config::ActiveModel,
     ) -> Result<Conversation> {
-        if let Some(session_id) = self.store.load_gateway_chat_session(GATEWAY_PLATFORM_QQ, chat_key)?
+        if let Some(session_id) = self
+            .store
+            .load_gateway_chat_session(GATEWAY_PLATFORM_QQ, chat_key)?
             && let Some(record) = self.store.load_session_record(session_id)?
         {
             let messages = self.store.load_messages(session_id)?;
@@ -441,7 +443,8 @@ impl QQChannel {
                 return Ok(());
             }
 
-            self.execute_tool_calls(channel_id, msg_id, &runtime, conversation, turn.tool_calls).await?;
+            self.execute_tool_calls(channel_id, msg_id, &runtime, conversation, turn.tool_calls)
+                .await?;
         }
 
         bail!("assistant exceeded maximum tool rounds; aborting to prevent loop")
@@ -498,7 +501,15 @@ impl QQChannel {
         tokio::spawn(async move {
             let thinking_level = model.thinking_level.clone();
             client
-                .stream_chat(session_id, request_id, model, messages, tools, tx, thinking_level)
+                .stream_chat(
+                    session_id,
+                    request_id,
+                    model,
+                    messages,
+                    tools,
+                    tx,
+                    thinking_level,
+                )
                 .await;
         });
 
@@ -572,7 +583,8 @@ impl QQChannel {
                 tool_call.name,
                 truncate_for_markdown(&output_for_tool_event)
             );
-            self.send_markdown(channel_id, &tool_result_text, Some(msg_id)).await?;
+            self.send_markdown(channel_id, &tool_result_text, Some(msg_id))
+                .await?;
         }
         Ok(())
     }
@@ -625,7 +637,8 @@ impl QQChannel {
                 Ok(true)
             }
             "stop" => {
-                self.handle_stop_command(channel_id, msg_id, channel_id).await?;
+                self.handle_stop_command(channel_id, msg_id, channel_id)
+                    .await?;
                 Ok(true)
             }
             _ => {
@@ -660,8 +673,7 @@ impl QQChannel {
         match args.first().map(|s| s.as_str()) {
             None | Some("") => {
                 let text = format_session_summary(conversation, active_model);
-                self.send_markdown(channel_id, &text, Some(msg_id))
-                    .await?;
+                self.send_markdown(channel_id, &text, Some(msg_id)).await?;
             }
             _ => {
                 self.send_markdown(channel_id, &gateway_help_text(), Some(msg_id))
@@ -678,8 +690,12 @@ impl QQChannel {
         let providers = self.get_available_providers();
 
         if providers.is_empty() {
-            self.send_markdown(channel_id, "No available providers found. Please check your configuration.", Some(msg_id))
-                .await?;
+            self.send_markdown(
+                channel_id,
+                "No available providers found. Please check your configuration.",
+                Some(msg_id),
+            )
+            .await?;
             return Ok(());
         }
 
@@ -693,8 +709,10 @@ impl QQChannel {
         self.send_markdown(channel_id, &text, Some(msg_id)).await?;
 
         // Set state to waiting for provider selection
-        self.model_selection_states
-            .insert(channel_id.to_string(), ModelSelectionState::WaitingForProvider);
+        self.model_selection_states.insert(
+            channel_id.to_string(),
+            ModelSelectionState::WaitingForProvider,
+        );
 
         Ok(())
     }
@@ -710,20 +728,28 @@ impl QQChannel {
         // Check if it's a command - cancel selection if so
         if content.starts_with('/') {
             self.model_selection_states.remove(channel_id);
-            self.send_markdown(channel_id, "Selection cancelled. Send /model to try again.", Some(msg_id))
-                .await?;
+            self.send_markdown(
+                channel_id,
+                "Selection cancelled. Send /model to try again.",
+                Some(msg_id),
+            )
+            .await?;
             return Ok(());
         }
 
-            match state {
+        match state {
             ModelSelectionState::WaitingForProvider => {
                 // Parse provider selection
                 let selection: usize = match content.parse() {
                     Ok(n) => n,
                     Err(_) => {
                         self.model_selection_states.remove(channel_id);
-                        self.send_markdown(channel_id, "Invalid selection. Selection cancelled. Send /model to try again.", Some(msg_id))
-                            .await?;
+                        self.send_markdown(
+                            channel_id,
+                            "Invalid selection. Selection cancelled. Send /model to try again.",
+                            Some(msg_id),
+                        )
+                        .await?;
                         return Ok(());
                     }
                 };
@@ -732,7 +758,11 @@ impl QQChannel {
                 if selection < 1 || selection > providers.len() {
                     self.model_selection_states.remove(channel_id);
                     self.client
-                        .send_message(channel_id, "Selection cancelled. Send /model to try again.", Some(msg_id))
+                        .send_message(
+                            channel_id,
+                            "Selection cancelled. Send /model to try again.",
+                            Some(msg_id),
+                        )
                         .await?;
                     return Ok(());
                 }
@@ -743,22 +773,23 @@ impl QQChannel {
                 let models = self.get_models_for_provider(provider_id);
                 if models.is_empty() {
                     self.model_selection_states.remove(channel_id);
-                    self.send_markdown(channel_id, "No models available for this provider. Selection cancelled.", Some(msg_id))
-                        .await?;
+                    self.send_markdown(
+                        channel_id,
+                        "No models available for this provider. Selection cancelled.",
+                        Some(msg_id),
+                    )
+                    .await?;
                     return Ok(());
                 }
 
                 // Format model list
-                let mut text = format!(
-                    "Select a model for {} (enter number):\n\n",
-                    provider_id
-                );
+                let mut text = format!("Select a model for {} (enter number):\n\n", provider_id);
                 for (i, model) in models.iter().enumerate() {
                     text.push_str(&format!("{}. {}\n", i + 1, model.1));
                 }
                 text.push_str("\n(Enter any other number to cancel)");
 
-      self.send_markdown(channel_id, &text, Some(msg_id)).await?;
+                self.send_markdown(channel_id, &text, Some(msg_id)).await?;
                 // Set state to waiting for model selection
                 self.model_selection_states.insert(
                     channel_id.to_string(),
@@ -772,17 +803,26 @@ impl QQChannel {
                 let selection: usize = match content.parse() {
                     Ok(n) => n,
                     Err(_) => {
-   self.model_selection_states.remove(channel_id);
-                    self.send_markdown(channel_id, "Selection cancelled. Send /model to try again.", Some(msg_id))
+                        self.model_selection_states.remove(channel_id);
+                        self.send_markdown(
+                            channel_id,
+                            "Selection cancelled. Send /model to try again.",
+                            Some(msg_id),
+                        )
                         .await?;
-                    return Ok(());
-                }                };
+                        return Ok(());
+                    }
+                };
 
-                   let models = self.get_models_for_provider(provider_id);
+                let models = self.get_models_for_provider(provider_id);
                 if selection < 1 || selection > models.len() {
                     self.model_selection_states.remove(channel_id);
-                    self.send_markdown(channel_id, "Invalid selection. Selection cancelled. Send /model to try again.", Some(msg_id))
-                        .await?;
+                    self.send_markdown(
+                        channel_id,
+                        "Invalid selection. Selection cancelled. Send /model to try again.",
+                        Some(msg_id),
+                    )
+                    .await?;
                     return Ok(());
                 }
 
@@ -805,7 +845,8 @@ impl QQChannel {
                     "Model switched to {}/{}\n\nSend /model to change again.",
                     provider_id, model_id
                 );
-                self.send_markdown(channel_id, &success_text, Some(msg_id)).await?;
+                self.send_markdown(channel_id, &success_text, Some(msg_id))
+                    .await?;
             }
         }
 
@@ -819,9 +860,10 @@ impl QQChannel {
         // Check user-configured providers
         for (id, config) in &self.config.providers {
             if let Some(auth) = self.auth.providers.get(id)
-                && auth.api_key.as_ref().is_some_and(|k| !k.trim().is_empty()) {
-                    providers.push((id.clone(), config.display_name.clone()));
-                }
+                && auth.api_key.as_ref().is_some_and(|k| !k.trim().is_empty())
+            {
+                providers.push((id.clone(), config.display_name.clone()));
+            }
         }
 
         // Check bundled providers
@@ -831,9 +873,10 @@ impl QQChannel {
                 continue;
             }
             if let Some(auth) = self.auth.providers.get(id)
-                && auth.api_key.as_ref().is_some_and(|k| !k.trim().is_empty()) {
-                    providers.push((id.clone(), config.display_name.clone()));
-                }
+                && auth.api_key.as_ref().is_some_and(|k| !k.trim().is_empty())
+            {
+                providers.push((id.clone(), config.display_name.clone()));
+            }
         }
 
         providers
@@ -852,11 +895,12 @@ impl QQChannel {
 
         // Check bundled providers if not found
         if models.is_empty()
-            && let Some(config) = self.config.bundled_providers.get(provider_id) {
-                for (id, model_config) in &config.models {
-                    models.push((id.clone(), model_config.display_name.clone()));
-                }
+            && let Some(config) = self.config.bundled_providers.get(provider_id)
+        {
+            for (id, model_config) in &config.models {
+                models.push((id.clone(), model_config.display_name.clone()));
             }
+        }
 
         models
     }
@@ -867,8 +911,11 @@ impl QQChannel {
         active_model: &ActiveModel,
     ) -> Result<Conversation> {
         let conversation = self.create_gateway_session(active_model)?;
-        self.store
-            .set_gateway_chat_session(GATEWAY_PLATFORM_QQ, chat_key, conversation.session_id)?;
+        self.store.set_gateway_chat_session(
+            GATEWAY_PLATFORM_QQ,
+            chat_key,
+            conversation.session_id,
+        )?;
         Ok(conversation)
     }
 
@@ -947,7 +994,7 @@ impl QQChannel {
             None, // Average response time - could be tracked if needed
         );
 
-         self.send_markdown(channel_id, &text, Some(msg_id)).await
+        self.send_markdown(channel_id, &text, Some(msg_id)).await
     }
 
     /// Handle /stop command - set cancellation flag for current task.
@@ -963,7 +1010,7 @@ impl QQChannel {
             .entry(channel_id.to_string())
             .or_insert_with(|| Arc::new(AtomicBool::new(false)));
 
-          if flag.load(Ordering::SeqCst) {
+        if flag.load(Ordering::SeqCst) {
             // Already stopping
             self.send_markdown(channel_id, "Already stopping...", Some(msg_id))
                 .await?;
@@ -979,11 +1026,12 @@ impl QQChannel {
     /// Check and clear cancellation flag, return true if cancelled.
     fn check_cancellation(&self, channel_id: &str) -> bool {
         if let Some(flag) = self.cancellation_flags.get(channel_id)
-            && flag.load(Ordering::SeqCst) {
-                // Clear the flag
-                flag.store(false, Ordering::SeqCst);
-                return true;
-            }
+            && flag.load(Ordering::SeqCst)
+        {
+            // Clear the flag
+            flag.store(false, Ordering::SeqCst);
+            return true;
+        }
         false
     }
 }
@@ -1016,15 +1064,16 @@ impl Channel for QQChannel {
 
                 // Check for orphaned user turn (crash mid-query)
                 if let Some(last) = messages.last()
-                    && last.role == MessageRole::User {
-                        // Close orphan with marker to prevent LLM from continuing the old request
-                        let marker = Message::new(
-                            MessageRole::Assistant,
-                            "[Session interrupted — not continuing this request]".to_string(),
-                        );
-                        store.append_message(session_id, &marker)?;
-                        orphans_closed += 1;
-                    }
+                    && last.role == MessageRole::User
+                {
+                    // Close orphan with marker to prevent LLM from continuing the old request
+                    let marker = Message::new(
+                        MessageRole::Assistant,
+                        "[Session interrupted — not continuing this request]".to_string(),
+                    );
+                    store.append_message(session_id, &marker)?;
+                    orphans_closed += 1;
+                }
 
                 count += 1;
                 crate::log_info!(
