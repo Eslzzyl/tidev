@@ -218,42 +218,79 @@ pub(super) async fn stream_responses(
                             content: text,
                         });
                     }
-                    ResponseStreamEvent::OutputItemAdded { item, sequence_number: _, output_index: _ } => {
-                        // New output item added (message or function call)
-                        if let Some(content_parts) = &item.content {
-                            for part in content_parts {
-                                match part.part_type.as_str() {
-                                    "text" | "output_text" => {
-                                        if let Some(text) = &part.text {
-                                            if first_delta_time.is_none() {
-                                                first_delta_time = Some(std::time::Instant::now());
-                                            }
-                                            assistant_text.push_str(text);
-                                            let _ = tx.send(BackendEvent::Delta {
-                                                session_id,
-                                                request_id,
-                                                content: text.clone(),
-                                            });
-                                        }
-                                    }
-                                    "tool_use" => {
-                                        if let Some(name) = &part.name {
-                                            let call_id = part
-                                                .id
-                                                .clone()
-                                                .unwrap_or_else(|| format!("call_{}", Uuid::new_v4()));
-                                            tool_calls.insert(
-                                                call_id.clone(),
-                                                ToolCallBuilder::new(call_id.clone(), name.clone()),
-                                            );
-                                        }
-                                    }
-                                    _ => {}
-                                }
+                   ResponseStreamEvent::OutputItemAdded { item, sequence_number: _, output_index: _ } => {
+                        log_debug!(
+                            "OutputItemAdded: item_type={:?} id={:?} call_id={:?} name={:?}",
+                            item.item_type, item.id, item.call_id, item.name
+                        );
+                        // Handle function_call items (Responses API style)
+                        if item.item_type == "function_call" {
+                            // Use item.id as the key (consistent with item_id in delta events)
+                            let key_id = if !item.id.is_empty() {
+                                item.id.clone()
+                            } else if !item.call_id.is_empty() {
+                                item.call_id.clone()
+                            } else {
+                                log_debug!("OutputItemAdded: no id available");
+                                continue;
+                            };
+                            let name = if !item.name.is_empty() {
+                                item.name.clone()
+                            } else {
+                                log_debug!("OutputItemAdded: no name available");
+                                continue;
+                            };
+                            log_debug!("OutputItemAdded: inserting builder key_id={} name={}", key_id, name);
+                            let mut builder = ToolCallBuilder::new(key_id.clone(), name.clone());
+                            // Add initial arguments if present
+                            if !item.arguments.is_empty() {
+                                builder.append_arguments(&item.arguments);
                             }
+                            tool_calls.insert(key_id.clone(), builder);
                         }
                     }
                     ResponseStreamEvent::OutputItemDone { item, sequence_number: _, output_index: _ } => {
+                        log_debug!(
+                            "OutputItemDone: item_type={:?} id={:?} call_id={:?} name={:?}",
+                            item.item_type, item.id, item.call_id, item.name
+                        );
+                        // Handle function_call items - send final ToolCallUpdated
+                        if item.item_type == "function_call" {
+                            let key_id = if !item.id.is_empty() {
+                                item.id.clone()
+                            } else if !item.call_id.is_empty() {
+                                item.call_id.clone()
+                            } else {
+                                log_debug!("OutputItemDone: no id available");
+                                continue;
+                            };
+                            log_debug!("OutputItemDone: looking up builder key_id={}", key_id);
+                            if let Some(builder) = tool_calls.get(&key_id) {
+                                log_debug!(
+                                    "OutputItemDone: found builder name={} arguments={:?}",
+                                    builder.name(),
+                                    builder.arguments()
+                                );
+                                if let Some(arguments) = builder.arguments() {
+                                    let call = crate::session::ToolCall {
+                                        id: key_id.clone(),
+                                        name: builder.name().to_string(),
+                                        arguments: arguments.to_string(),
+                                    };
+                                    log_debug!(
+                                        "OutputItemDone: sending ToolCallUpdated id={} name={} args={}",
+                                        call.id, call.name, arguments
+                                    );
+                                    let _ = tx.send(BackendEvent::ToolCallUpdated {
+                                        session_id,
+                                        request_id,
+                                        tool_call: call,
+                                    });
+                                }
+                            } else {
+                                log_debug!("OutputItemDone: no builder found for key_id={}", key_id);
+                            }
+                        }
                         // Extract finish reason from message items
                         if let Some(reason) = &item.finish_reason {
                             finish_reason = Some(reason.clone());
@@ -304,31 +341,31 @@ pub(super) async fn stream_responses(
                     }
                     ResponseStreamEvent::FunctionCallArgumentsDelta {
                         call_id,
-                        call_name,
+                        call_name: _,
                         arguments,
                         sequence_number: _,
                         output_index: _,
-                        item_id: _,
+                        item_id,
                     } => {
-                        let builder = tool_calls.entry(call_id.clone()).or_insert_with(|| {
-                            ToolCallBuilder::new(
-                                call_id.clone(),
-                                call_name.unwrap_or_else(|| "unknown".to_string()),
-                            )
-                        });
-                        builder.append_arguments(&arguments);
-
-                        if let Some(args) = builder.arguments() {
-                            let call = ToolCall {
-                                id: call_id.clone(),
-                                name: builder.name().to_string(),
-                                arguments: args.to_string(),
-                            };
-                            let _ = tx.send(BackendEvent::ToolCallUpdated {
-                                session_id,
-                                request_id,
-                                tool_call: call,
-                            });
+                        // Use item_id as the key when call_id is empty
+                        let key_id = if call_id.is_empty() {
+                            item_id.clone()
+                        } else {
+                            call_id.clone()
+                        };
+                        log_debug!(
+                            "FunctionCallArgumentsDelta: key_id={} arguments={:?}",
+                            key_id, arguments
+                        );
+                        // Only accumulate arguments, don't send ToolCallUpdated here
+                        if let Some(builder) = tool_calls.get_mut(&key_id) {
+                            builder.append_arguments(&arguments);
+                            log_debug!(
+                                "FunctionCallArgumentsDelta: accumulated arguments={:?}",
+                                builder.arguments()
+                            );
+                        } else {
+                            log_debug!("FunctionCallArgumentsDelta: no builder found for key_id={}", key_id);
                         }
                     }
                     ResponseStreamEvent::FunctionCallArgumentsDone {
@@ -336,22 +373,9 @@ pub(super) async fn stream_responses(
                         call_name: _,
                         sequence_number: _,
                         output_index: _,
-                        item_id: _,
+                        item_id,
                     } => {
-                        if let Some(builder) = tool_calls.get(&call_id) {
-                            if let Some(arguments) = builder.arguments() {
-                                let call = ToolCall {
-                                    id: call_id.clone(),
-                                    name: builder.name().to_string(),
-                                    arguments: arguments.to_string(),
-                                };
-                                let _ = tx.send(BackendEvent::ToolCallUpdated {
-                                    session_id,
-                                    request_id,
-                                    tool_call: call,
-                                });
-                            }
-                        }
+                        // Only accumulate arguments, final ToolCallUpdated is sent in OutputItemDone
                     }
                     ResponseStreamEvent::ResponseCreated { response: _, sequence_number: _ }
                     | ResponseStreamEvent::ResponseInProgress { response: _, sequence_number: _ }
@@ -391,7 +415,19 @@ pub(super) async fn stream_responses(
         }
     }
 
-    Ok(())}
+    let turn = finalize_turn(
+        &assistant_text,
+        &reasoning_text,
+        &finish_reason,
+        &tool_calls,
+    );
+    let _ = tx.send(BackendEvent::Finished {
+        session_id,
+        request_id,
+        turn,
+    });
+    Ok(())
+}
 
 pub(super) async fn complete_responses(
     http: &Client,
@@ -498,8 +534,6 @@ fn build_responses_request(
     stream: bool,
     tools: &[ToolDefinition],
 ) -> Result<ResponsesRequest> {
-    let mut request_messages = Vec::new();
-
     // Extract context summary from System messages (from context compaction)
     let context_summary: Option<String> = messages
         .iter()
@@ -526,7 +560,8 @@ fn build_responses_request(
     // Instructions come from system prompt
     let instructions = combined_system_prompt.filter(|s| !s.trim().is_empty());
 
-    // Process only User/Assistant/Tool messages (System messages already handled above)
+    // Build conversation history as a string (this backend only supports string input)
+    let mut conversation_parts: Vec<String> = Vec::new();
     for message in &messages {
         if message.streaming {
             continue;
@@ -535,59 +570,42 @@ fn build_responses_request(
         match message.role {
             MessageRole::System => {}
             MessageRole::User => {
-                let content = user_message_content(message)?;
-                request_messages.push(ResponseMessage {
-                    role: "user".to_string(),
-                    content,
-                });
+                let text = message_text_with_file_references(message);
+                if !text.is_empty() {
+                    conversation_parts.push(format!("User: {}", text));
+                }
             }
             MessageRole::Assistant => {
                 let text = message_text_with_file_references(message);
                 let has_tool_calls = !message.tool_calls.is_empty();
 
-                let content = if has_tool_calls {
-                    let mut content_parts = Vec::new();
-                    if !text.is_empty() {
-                        content_parts.push(ResponseContentPart::text(text));
-                    }
+                if has_tool_calls {
+                    let mut combined = text;
                     for tool_call in &message.tool_calls {
-                        content_parts.push(ResponseContentPart::tool_use(
-                            tool_call.id.clone(),
-                            tool_call.name.clone(),
-                            tool_call.arguments.clone(),
+                        combined.push_str(&format!(
+                            "\n[Tool: {}]\nArguments: {}",
+                            tool_call.name,
+                            tool_call.arguments
                         ));
                     }
-                    ResponseContent::Array(content_parts)
+                    if !combined.is_empty() {
+                        conversation_parts.push(format!("Assistant: {}", combined));
+                    }
                 } else if !text.is_empty() {
-                    ResponseContent::Text(text)
-                } else {
-                    continue;
-                };
-
-                request_messages.push(ResponseMessage {
-                    role: "assistant".to_string(),
-                    content,
-                });
+                    conversation_parts.push(format!("Assistant: {}", text));
+                }
             }
             MessageRole::Tool => {
                 let text = message_text_with_file_references(message);
-                let mut content_parts = Vec::new();
-                content_parts.push(ResponseContentPart::text(text));
-                if let (Some(name), Some(id)) = (&message.tool_name, &message.tool_call_id) {
-                    content_parts.push(ResponseContentPart::tool_use(
-                        id.clone(),
-                        name.clone(),
-                        String::new(),
-                    ));
+                if !text.is_empty() {
+                    conversation_parts.push(format!("Tool: {}", text));
                 }
-                request_messages.push(ResponseMessage {
-                    role: "tool".to_string(),
-                    content: ResponseContent::Array(content_parts),
-                });
             }
             MessageRole::Error => {}
         }
     }
+
+    let input = conversation_parts.join("\n\n");
 
     let chat_tools = if tools.is_empty() {
         None
@@ -598,7 +616,7 @@ fn build_responses_request(
     Ok(ResponsesRequest {
         model: model.request_model_id.clone(),
         instructions,
-        input: request_messages,
+        input,
         tools: chat_tools,
         temperature: Some(model.temperature),
         max_output_tokens: Some(model.max_output_tokens),
@@ -630,7 +648,7 @@ fn user_message_content(message: &Message) -> Result<ResponseContent> {
     }
 
     if parts.len() == 1 && !parts[0].has_image() {
-        Ok(ResponseContent::Text(parts.pop().unwrap().unwrap_text()))
+        Ok(ResponseContent::Text(parts))
     } else {
         Ok(ResponseContent::Array(parts))
     }
@@ -708,7 +726,18 @@ impl ToolCallBuilder {
 impl ResponseContentPart {
     fn text(content: String) -> Self {
         Self {
-            kind: "text".to_string(),
+            kind: "input_text".to_string(),
+            text: Some(content),
+            image: None,
+            id: None,
+            name: None,
+            arguments: None,
+        }
+    }
+
+    fn output_text(content: String) -> Self {
+        Self {
+            kind: "output_text".to_string(),
             text: Some(content),
             image: None,
             id: None,
@@ -757,8 +786,7 @@ struct ResponsesRequest {
     model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     instructions: Option<String>,
-    #[serde(rename = "input")]
-    input: Vec<ResponseMessage>,
+    input: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<ResponseTool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -780,6 +808,9 @@ struct StreamOptions {
 
 #[derive(Clone, Debug, Serialize)]
 struct ResponseMessage {
+    #[serde(rename = "type")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<String>,
     role: String,
     content: ResponseContent,
 }
@@ -787,7 +818,8 @@ struct ResponseMessage {
 #[derive(Clone, Debug, Serialize)]
 #[serde(untagged)]
 enum ResponseContent {
-    Text(String),
+    Text(Vec<ResponseContentPart>),
+    OutputText(Vec<ResponseContentPart>),
     Array(Vec<ResponseContentPart>),
 }
 
@@ -1321,7 +1353,7 @@ impl From<ResponseStreamEventRaw> for ResponseStreamEvent {
             "response.function_call_arguments.delta" => ResponseStreamEvent::FunctionCallArgumentsDelta {
                 call_id: raw.id,
                 call_name: if raw.name.is_empty() { None } else { Some(raw.name) },
-                arguments: raw.arguments,
+                arguments: raw.delta,
                 sequence_number: raw.sequence_number,
                 output_index: raw.output_index,
                 item_id: raw.item_id,
@@ -1393,9 +1425,15 @@ struct ResponseStreamItem {
     #[serde(default)]
     id: String,
     #[serde(default)]
+    call_id: String,
+    #[serde(default)]
     status: String,
     #[serde(default)]
     role: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    arguments: String,
     #[serde(default)]
     content: Option<Vec<ResponseStreamContentPart>>,
     #[serde(default)]
@@ -1580,8 +1618,7 @@ mod tests {
         assert_eq!(request.model, "gpt-4.5");
         assert_eq!(request.instructions, Some("You are helpful.".to_string()));
         assert!(request.stream);
-        assert_eq!(request.input.len(), 1);
-        assert_eq!(request.input[0].role, "user");
+        assert_eq!(request.input, "User: Hello");
     }
 
     #[test]
@@ -1618,7 +1655,7 @@ mod tests {
     }
 
     #[test]
-    fn test_responses_request_tool_calls() {
+    fn test_responses_request_assistant_and_tool_messages() {
         let model = ActiveModel {
             provider_id: "test".to_string(),
             provider_display_name: "Test".to_string(),
@@ -1637,16 +1674,18 @@ mod tests {
             thinking_level: crate::config::reasoning::ThinkingLevelType::None,
         };
 
-        let mut message = Message::new(MessageRole::User, "Run command");
-        message.tool_calls.push(ToolCall {
-            id: "call_123".to_string(),
-            name: "bash".to_string(),
-            arguments: "{\"command\":\"ls\"}".to_string(),
-        });
+        let messages = vec![
+            Message::new(MessageRole::User, "Run command"),
+            Message::new(MessageRole::Assistant, "I'll help you run a command."),
+            Message::new(MessageRole::Tool, "Tool result: success"),
+        ];
 
-        let request = build_responses_request(&model, vec![message], false, &[]).unwrap();
+        let request = build_responses_request(&model, messages, false, &[]).unwrap();
 
-        assert!(request.tools.is_none()); // No tools provided to the request
+        // Input should be a string with conversation history
+        assert!(request.input.contains("User: Run command"));
+        assert!(request.input.contains("Assistant: I'll help you run a command."));
+        assert!(request.input.contains("Tool: Tool result: success"));
     }
 
     #[test]
