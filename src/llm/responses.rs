@@ -37,7 +37,11 @@ pub(super) async fn stream_responses(
         .map(|s| s.len())
         .unwrap_or(0);
 
-    let endpoint = format!("{}{}", model.base_url.trim_end_matches('/'), RESPONSES_ENDPOINT);
+    let endpoint = format!(
+        "{}{}",
+        model.base_url.trim_end_matches('/'),
+        RESPONSES_ENDPOINT
+    );
 
     let send_result = http
         .post(&endpoint)
@@ -104,13 +108,9 @@ pub(super) async fn stream_responses(
             }
 
             // Parse SSE event format: "event: TYPE\ndata: {...}\n\n"
-            let event_type = line
-                .strip_prefix("event:")
-                .map(|s| s.trim().to_string());
+            let event_type = line.strip_prefix("event:").map(|s| s.trim().to_string());
 
-            let payload = line
-                .strip_prefix("data:")
-                .map(|s| s.trim().to_string());
+            let payload = line.strip_prefix("data:").map(|s| s.trim().to_string());
 
             if let (Some(_event), Some(payload)) = (event_type, payload) {
                 if payload == "[DONE]" {
@@ -179,10 +179,9 @@ pub(super) async fn stream_responses(
                         }
                         "tool_use" => {
                             if let Some(name) = content.name {
-                                let call_id = content.id.unwrap_or_else(|| format!(
-                                    "call_{}",
-                                    uuid::Uuid::new_v4()
-                                ));
+                                let call_id = content
+                                    .id
+                                    .unwrap_or_else(|| format!("call_{}", uuid::Uuid::new_v4()));
 
                                 let builder = tool_calls
                                     .entry(call_id.clone())
@@ -236,7 +235,11 @@ pub(super) async fn complete_responses(
         .map(|s| s.len())
         .unwrap_or(0);
 
-    let endpoint = format!("{}{}", model.base_url.trim_end_matches('/'), RESPONSES_ENDPOINT);
+    let endpoint = format!(
+        "{}{}",
+        model.base_url.trim_end_matches('/'),
+        RESPONSES_ENDPOINT
+    );
 
     let send_result = http
         .post(&endpoint)
@@ -318,13 +321,11 @@ fn build_responses_request(
         model.system_prompt.trim().is_empty(),
         context_summary.as_ref().map(|s| s.trim().is_empty()),
     ) {
-        (false, Some(false)) => {
-            Some(format!(
-                "{}\n\n{}",
-                model.system_prompt.trim(),
-                context_summary.as_ref().unwrap().trim()
-            ))
-        }
+        (false, Some(false)) => Some(format!(
+            "{}\n\n{}",
+            model.system_prompt.trim(),
+            context_summary.as_ref().unwrap().trim()
+        )),
         (false, _) => Some(model.system_prompt.clone()),
         (true, Some(false)) => context_summary,
         (true, _) => None,
@@ -417,6 +418,7 @@ fn build_responses_request(
         } else {
             None
         },
+        thinking: model.thinking_config(),
     })
 }
 
@@ -450,12 +452,10 @@ fn finalize_turn(
 ) -> crate::session::AssistantTurn {
     let tool_calls = tool_calls
         .iter()
-        .map(|(_, builder)| {
-            ToolCall {
-                id: builder.id().to_string(),
-                name: builder.name().to_string(),
-                arguments: builder.arguments().unwrap_or_default().to_string(),
-            }
+        .map(|(_, builder)| ToolCall {
+            id: builder.id().to_string(),
+            name: builder.name().to_string(),
+            arguments: builder.arguments().unwrap_or_default().to_string(),
         })
         .collect::<Vec<_>>();
 
@@ -576,6 +576,8 @@ struct ResponsesRequest {
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     stream_options: Option<StreamOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -722,6 +724,7 @@ mod tests {
             system_prompt: "You are helpful.".to_string(),
             api_key: None,
             extra_body: None,
+            thinking_level: crate::config::reasoning::ThinkingLevelType::None,
         };
 
         let messages = vec![Message::new(MessageRole::User, "Hello")];
@@ -752,6 +755,7 @@ mod tests {
             system_prompt: "Base system prompt".to_string(),
             api_key: None,
             extra_body: None,
+            thinking_level: crate::config::reasoning::ThinkingLevelType::None,
         };
 
         let messages = vec![
@@ -784,6 +788,7 @@ mod tests {
             system_prompt: "You are helpful.".to_string(),
             api_key: None,
             extra_body: None,
+            thinking_level: crate::config::reasoning::ThinkingLevelType::None,
         };
 
         let mut message = Message::new(MessageRole::User, "Run command");

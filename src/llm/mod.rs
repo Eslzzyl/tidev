@@ -41,9 +41,10 @@ impl LlmClient {
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
         tx: UnboundedSender<BackendEvent>,
+        thinking_level: crate::config::reasoning::ThinkingLevelType,
     ) {
         let result = self
-            .stream_chat_with_retry(session_id, request_id, model, messages, tools, tx.clone())
+            .stream_chat_with_retry(session_id, request_id, model, messages, tools, tx.clone(), thinking_level)
             .await;
 
         if let Err(error) = result {
@@ -74,6 +75,7 @@ impl LlmClient {
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
         tx: UnboundedSender<BackendEvent>,
+        thinking_level: crate::config::reasoning::ThinkingLevelType,
     ) -> Result<()> {
         for attempt in 1..=MAX_RETRIES {
             let result = self
@@ -84,6 +86,7 @@ impl LlmClient {
                     messages.clone(),
                     tools.clone(),
                     tx.clone(),
+                    thinking_level.clone(),
                 )
                 .await;
 
@@ -172,6 +175,7 @@ impl LlmClient {
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
         tx: UnboundedSender<BackendEvent>,
+        thinking_level: crate::config::reasoning::ThinkingLevelType,
     ) -> Result<()> {
         match model.api_type {
             ApiType::Anthropic => {
@@ -182,7 +186,7 @@ impl LlmClient {
             }
             ApiType::OpenAiChatCompletions => {
                 openai::stream_openai(
-                    &self.http, session_id, request_id, model, messages, tools, tx,
+                    &self.http, session_id, request_id, model, messages, tools, tx, thinking_level,
                 )
                 .await
             }

@@ -407,10 +407,11 @@ impl TelegramChannel {
         let request_id = self.request_seq;
         let session_id = conversation.session_id;
 
-        let (tx, mut rx) = unbounded_channel();
+         let (tx, mut rx) = unbounded_channel();
         let llm = self.llm.clone();
 
         tokio::spawn(async move {
+            let thinking_level = request_model.thinking_level.clone();
             llm.stream_chat(
                 session_id,
                 request_id,
@@ -418,6 +419,7 @@ impl TelegramChannel {
                 request_messages,
                 tool_definitions,
                 tx,
+                thinking_level,
             )
             .await;
         });

@@ -130,6 +130,7 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
         let model = context.model.clone();
         let stream_request_id = request_sequence;
         let stream_session_id = context.child_session_id;
+        let thinking_level = model.thinking_level.clone();
         let stream_handle = tokio::spawn(async move {
             llm.stream_chat(
                 stream_session_id,
@@ -138,6 +139,7 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
                 messages,
                 tools,
                 stream_tx,
+                thinking_level,
             )
             .await;
         });

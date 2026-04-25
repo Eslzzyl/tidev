@@ -176,8 +176,18 @@ impl App {
             false,
         );
 
+        let model_label = self.active_model.label();
+        let model_display = if self.thinking_level.is_supported() {
+            format!(
+                "{} [{}]",
+                model_label,
+                self.thinking_level.display_name()
+            )
+        } else {
+            model_label
+        };
         let model_line = Line::from(vec![Span::styled(
-            self.active_model.label(),
+            model_display,
             Style::default().fg(palette.accent),
         )]);
         frame.render_widget(
@@ -423,8 +433,18 @@ impl App {
         let chunks =
             Layout::horizontal([Constraint::Min(1), Constraint::Length(status_width)]).split(area);
 
+        let model_label = self.active_model.label();
+        let model_display = if self.thinking_level.is_supported() {
+            format!(
+                "{} [{}]",
+                model_label,
+                self.thinking_level.display_name()
+            )
+        } else {
+            model_label
+        };
         let model_line = Line::from(vec![Span::styled(
-            self.active_model.label(),
+            model_display,
             Style::default().fg(palette.accent),
         )]);
 

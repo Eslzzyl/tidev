@@ -6,7 +6,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 use crate::{
-    config::ActiveModel,
+    config::{ActiveModel, reasoning::ThinkingLevelType},
     log_debug, log_error,
     session::{BackendEvent, Message, MessageAttachment, MessageRole, ToolCall},
     tooling::ToolDefinition,
@@ -24,12 +24,13 @@ pub(super) async fn stream_openai(
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
     tx: UnboundedSender<BackendEvent>,
+    thinking_level: ThinkingLevelType,
 ) -> Result<()> {
     let api_key = model
         .api_key
         .clone()
         .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
-    let request = build_openai_request(&model, messages, true, &tools)?;
+    let request = build_openai_request(&model, messages, true, &tools, thinking_level)?;
     let request_body_size = serde_json::to_string(&request)
         .map(|s| s.len())
         .unwrap_or(0);
@@ -244,7 +245,7 @@ pub(super) async fn complete_openai(
         .api_key
         .clone()
         .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
-    let request = build_openai_request(&model, messages, false, &[])?;
+    let request = build_openai_request(&model, messages, false, &[], model.thinking_level.clone())?;
     let request_body_size = serde_json::to_string(&request)
         .map(|s| s.len())
         .unwrap_or(0);
@@ -306,6 +307,7 @@ fn build_openai_request(
     messages: Vec<Message>,
     stream: bool,
     tools: &[ToolDefinition],
+    thinking_level: ThinkingLevelType,
 ) -> Result<ChatCompletionRequest> {
     let mut request_messages = Vec::new();
 
@@ -436,7 +438,7 @@ fn build_openai_request(
         } else {
             None
         },
-        extra_body: model.extra_body.clone(),
+        extra_body: model.merged_extra_body_with_thinking(thinking_level),
     })
 }
 
@@ -594,6 +596,7 @@ mod tests {
             system_prompt: "base system prompt".to_string(),
             api_key: None,
             extra_body: None,
+            thinking_level: crate::config::reasoning::ThinkingLevelType::None,
         };
 
         // System message in messages represents context compaction summary
@@ -603,7 +606,7 @@ mod tests {
             Message::new(MessageRole::Assistant, "Hi there"),
         ];
 
-        let request = build_openai_request(&model, messages, false, &[]).expect("build request");
+        let request = build_openai_request(&model, messages, false, &[], model.thinking_level.clone()).expect("build request");
         let roles: Vec<_> = request
             .messages
             .iter()
@@ -638,6 +641,7 @@ mod tests {
             system_prompt: "base system prompt".to_string(),
             api_key: None,
             extra_body: None,
+            thinking_level: crate::config::reasoning::ThinkingLevelType::None,
         };
 
         // No System message in messages, only model.system_prompt
@@ -646,7 +650,7 @@ mod tests {
             Message::new(MessageRole::Assistant, "Hi there"),
         ];
 
-        let request = build_openai_request(&model, messages, false, &[]).expect("build request");
+         let request = build_openai_request(&model, messages, false, &[], model.thinking_level.clone()).expect("build request");
         let roles: Vec<_> = request
             .messages
             .iter()

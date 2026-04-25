@@ -279,8 +279,9 @@ impl ContextManager {
             let session_id = conversation.session_id;
 
             tokio::spawn(async move {
+                let thinking_level = model_clone.thinking_level.clone();
                 llm_clone
-                    .stream_chat(session_id, request_id, model_clone, msgs, vec![], tx)
+                    .stream_chat(session_id, request_id, model_clone, msgs, vec![], tx, thinking_level)
                     .await;
             });
 
@@ -500,6 +501,7 @@ mod tests {
             system_prompt: String::new(),
             api_key: None,
             extra_body: None,
+            thinking_level: crate::config::reasoning::ThinkingLevelType::None,
         }
     }
 

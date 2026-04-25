@@ -496,8 +496,9 @@ impl QQChannel {
         let model = model.clone();
 
         tokio::spawn(async move {
+            let thinking_level = model.thinking_level.clone();
             client
-                .stream_chat(session_id, request_id, model, messages, tools, tx)
+                .stream_chat(session_id, request_id, model, messages, tools, tx, thinking_level)
                 .await;
         });
 

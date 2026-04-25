@@ -173,6 +173,8 @@ struct App {
     todos: Vec<TodoItem>,
     stats_panel: Option<ui::stats_panel::StatsPanelState>,
     notifications: notifications::NotificationManager,
+    /// DeepSeek thinking level for the current model
+    thinking_level: crate::config::reasoning::ThinkingLevelType,
 }
 
 pub fn run() -> Result<()> {
@@ -313,8 +315,16 @@ impl App {
         let tx = self.backend_tx.clone();
         let session_id = self.conversation.session_id;
 
+        // 获取 thinking level：从最后一条用户消息获取，如果没有则 fallback 到模型默认
+        let thinking_level = self.conversation.messages
+            .iter()
+            .filter(|m| m.role == MessageRole::User)
+            .last()
+            .and_then(|m| m.thinking_level.clone())
+            .unwrap_or_else(|| self.thinking_level.clone());
+
         runtime.spawn(async move {
-            llm.stream_chat(session_id, request_id, model, messages, tools, tx)
+            llm.stream_chat(session_id, request_id, model, messages, tools, tx, thinking_level)
                 .await;
         });
 
@@ -1106,6 +1116,7 @@ impl App {
         let mut user_message = Message::new(MessageRole::User, prompt.clone());
         user_message.attachments = attachments;
         user_message.mode = Some(self.mode);
+        user_message.thinking_level = Some(self.thinking_level.clone());
         self.conversation.push(user_message.clone());
         self.store
             .append_message(self.conversation.session_id, &user_message)?;

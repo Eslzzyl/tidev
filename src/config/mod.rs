@@ -3,6 +3,7 @@ pub mod logging;
 pub mod mcp;
 mod paths;
 mod provider;
+pub mod reasoning;
 mod ui;
 
 use anyhow::{Context, Result, bail};
@@ -12,6 +13,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::prompts::{SessionMode, default_system_prompt, gateway_system_prompt};
 use crate::theme::ThemeName;
 use crate::tooling::ToolPermission;
+
+use self::reasoning::ThinkingMatcher;
 
 pub use auth::{ActiveModel, AuthStore, ModelSummary, ProviderAuth};
 pub use logging::LogConfig;
@@ -513,16 +516,20 @@ poll_timeout_secs = 30
             .map(ApiType::parse)
             .unwrap_or_default();
 
+        // Determine thinking level based on model name
+        let request_model_id = model
+            .request_model_id
+            .clone()
+            .unwrap_or_else(|| model_id.to_string());
+        let thinking_level = ThinkingMatcher::match_for_model(&request_model_id);
+
         Ok(ActiveModel {
             provider_id: provider_id.to_string(),
             provider_display_name: provider.display_name.clone(),
             base_url: provider.base_url.clone(),
             api_type,
             model_id: model_id.to_string(),
-            request_model_id: model
-                .request_model_id
-                .clone()
-                .unwrap_or_else(|| model_id.to_string()),
+            request_model_id,
             display_name: model.display_name.clone(),
             context_window: model.context_window,
             max_output_tokens: model.max_output_tokens,
@@ -535,6 +542,7 @@ poll_timeout_secs = 30
                 .unwrap_or_else(default_system_prompt),
             api_key,
             extra_body: model.extra_body.clone(),
+            thinking_level,
         })
     }
 

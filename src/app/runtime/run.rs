@@ -135,6 +135,7 @@ impl App {
             todos: Vec::new(),
             stats_panel: None,
             notifications,
+            thinking_level: active_model.thinking_level.clone(),
         };
 
         app.at_mention

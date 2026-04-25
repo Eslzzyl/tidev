@@ -274,6 +274,8 @@ pub struct Message {
     pub mode: Option<crate::prompts::SessionMode>,
     #[serde(default)]
     pub rtk_rewritten: bool,
+    #[serde(default)]
+    pub thinking_level: Option<crate::config::reasoning::ThinkingLevelType>,
 }
 
 impl Message {
@@ -302,6 +304,7 @@ impl Message {
             patch_files: None,
             mode: None,
             rtk_rewritten: false,
+            thinking_level: None,
         }
     }
 
@@ -337,6 +340,7 @@ impl Message {
             patch_files: None,
             mode: None,
             rtk_rewritten: false,
+            thinking_level: None,
         }
     }
 
@@ -371,6 +375,7 @@ impl Message {
             patch_files: None,
             mode: None,
             rtk_rewritten: false,
+            thinking_level: None,
         }
     }
 
@@ -403,6 +408,7 @@ impl Message {
             patch_files: None,
             mode: None,
             rtk_rewritten: result.rtk_rewritten,
+            thinking_level: None,
         }
     }
 

@@ -1,4 +1,4 @@
-pub const SCHEMA_VERSION: i64 = 19;
+pub const SCHEMA_VERSION: i64 = 20;
 
 pub const SESSION_SELECT_COLUMNS: &str = "s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, s.context_summary, s.context_retained_from, COALESCE(sw.workspace_root, '')";
 
@@ -67,7 +67,8 @@ CREATE TABLE IF NOT EXISTS messages (
     snapshot_hash TEXT,
     patch_files TEXT,
     mode TEXT,
-    rtk_rewritten INTEGER NOT NULL DEFAULT 0
+    rtk_rewritten INTEGER NOT NULL DEFAULT 0,
+    thinking_level TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_session_created_at

@@ -912,6 +912,21 @@ impl App {
             return Ok(());
         }
 
+        if !self.command_palette.visible
+            && key.code == KeyCode::Tab
+            && key.modifiers.contains(KeyModifiers::SHIFT)
+        {
+            self.thinking_level = self.thinking_level.next();
+            self.last_notice = Some(format!("Thinking: {}", self.thinking_level.display_name()));
+            return Ok(());
+        }
+
+        if matches!(key.code, KeyCode::Char('t')) && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.thinking_level = self.thinking_level.next();
+            self.last_notice = Some(format!("Thinking: {}", self.thinking_level.display_name()));
+            return Ok(());
+        }
+
         if self.command_palette.visible {
             match key.code {
                 KeyCode::Esc => {
@@ -1641,6 +1656,7 @@ impl App {
     pub(crate) fn switch_model(&mut self, selector: Option<&str>) -> Result<()> {
         let model = self.config.resolve_model(&self.auth, selector)?;
         self.active_model = model.clone();
+        self.thinking_level = model.thinking_level.clone();
         self.tools.set_active_model(model.clone());
         self.conversation.set_model(
             model.provider_id.clone(),
