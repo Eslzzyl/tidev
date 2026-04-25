@@ -170,7 +170,7 @@ pub(crate) fn canonical_tool_name(tool_name: &str) -> Option<&'static str> {
         "skill" => Some("skill"),
         "websearch" => Some("websearch"),
         "webfetch" => Some("webfetch"),
-        "patch" => Some("apply_patch"),
+        "apply_patch" => Some("apply_patch"),
         _ => None,
     }
 }
