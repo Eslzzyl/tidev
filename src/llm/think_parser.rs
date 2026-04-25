@@ -104,33 +104,33 @@ fn think_tag_suffix_len(text: &str) -> usize {
 }
 
 pub(super) fn finalize_turn(
-    assistant_text: &mut String,
-    reasoning_text: &mut String,
-    finish_reason: &mut Option<String>,
-    tool_calls: &mut BTreeMap<usize, ToolCallBuilder>,
+    assistant_text: String,
+    reasoning_text: String,
+    finish_reason: Option<String>,
+    tool_calls: &BTreeMap<usize, ToolCallBuilder>,
     think_parser: &mut ThinkParser,
 ) -> AssistantTurn {
     let (visible, reasoning) = think_parser.finish();
-    assistant_text.push_str(&visible);
-    reasoning_text.push_str(&reasoning);
+    let assistant_text = assistant_text + &visible;
+    let reasoning_text = reasoning_text + &reasoning;
 
     let tool_calls = tool_calls
         .iter()
         .map(|(index, builder)| builder.clone().into_tool_call(*index))
         .collect::<Vec<_>>();
 
-    if finish_reason.is_none() {
-        *finish_reason = Some(if tool_calls.is_empty() {
+    let final_finish_reason = finish_reason.unwrap_or_else(|| {
+        if tool_calls.is_empty() {
             "stop".to_string()
         } else {
             "tool_calls".to_string()
-        });
-    }
+        }
+    });
 
     AssistantTurn {
-        content: assistant_text.clone(),
-        reasoning: reasoning_text.clone(),
+        content: assistant_text,
+        reasoning: reasoning_text,
         tool_calls,
-        finish_reason: finish_reason.clone(),
+        finish_reason: Some(final_finish_reason),
     }
 }

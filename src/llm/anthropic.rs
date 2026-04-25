@@ -179,10 +179,10 @@ pub(super) async fn stream_anthropic(
                     },
                     AnthropicStreamEvent::MessageStop => {
                         let turn = finalize_turn(
-                            &mut assistant_text,
-                            &mut reasoning_text,
-                            &mut finish_reason,
-                            &mut tool_calls,
+                            assistant_text.clone(),
+                            reasoning_text.clone(),
+                            finish_reason.clone(),
+                            &tool_calls,
                             &mut think_parser,
                         );
                         let _ = tx.send(BackendEvent::Finished {
@@ -220,10 +220,10 @@ pub(super) async fn stream_anthropic(
     }
 
     let turn = finalize_turn(
-        &mut assistant_text,
-        &mut reasoning_text,
-        &mut finish_reason,
-        &mut tool_calls,
+        assistant_text.clone(),
+        reasoning_text.clone(),
+        finish_reason.clone(),
+        &tool_calls,
         &mut think_parser,
     );
     let _ = tx.send(BackendEvent::Finished {

@@ -875,7 +875,7 @@ impl SessionStore {
                 .and_then(|s| parse_datetime(&s).ok());
             let thinking_level = thinking_level
                 .filter(|s| !s.is_empty())
-                .map(|s| crate::config::reasoning::ThinkingLevelType::from_str(&s));
+                .map(|s| crate::config::reasoning::ThinkingLevelType::from_string(&s));
 
             let mut message = Message::persisted(
                 Uuid::parse_str(&id).map_err(|error| {

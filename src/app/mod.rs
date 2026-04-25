@@ -318,8 +318,8 @@ impl App {
         // 获取 thinking level：从最后一条用户消息获取，如果没有则 fallback 到模型默认
         let thinking_level = self.conversation.messages
             .iter()
-            .filter(|m| m.role == MessageRole::User)
-            .last()
+            .rev()
+            .find(|m| m.role == MessageRole::User)
             .and_then(|m| m.thinking_level.clone())
             .unwrap_or_else(|| self.thinking_level.clone());
 

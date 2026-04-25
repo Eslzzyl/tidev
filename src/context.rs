@@ -531,7 +531,7 @@ mod tests {
 
         let total_tokens: usize = messages
             .iter()
-            .map(|m| ContextManager::message_tokens(m))
+            .map(ContextManager::message_tokens)
             .sum();
         let first_msg_tokens = ContextManager::message_tokens(&messages[0]);
         let retain_recent_tokens = total_tokens - first_msg_tokens;

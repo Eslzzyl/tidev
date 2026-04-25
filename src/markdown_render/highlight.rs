@@ -333,7 +333,7 @@ mod tests {
     fn large_code_bypasses_highlighting() {
         let large_code = "x".repeat(MAX_HIGHLIGHT_BYTES + 1);
         let lines = highlight_code_to_lines(&large_code, "rust");
-        assert!(lines.len() > 0);
+        assert!(!lines.is_empty());
     }
 
     #[test]

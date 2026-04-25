@@ -299,7 +299,6 @@ impl TelegramChannel {
 
         let mut tool_rounds = 0;
         let mut has_tool_calls = false;
-        let mut final_text = String::new();
 
         loop {
             if self.check_cancellation(source_message.chat.id) {
@@ -318,7 +317,7 @@ impl TelegramChannel {
                 .await?;
 
             if turn.tool_calls.is_empty() {
-                final_text = normalize_assistant_output(&turn.content);
+                let final_text = normalize_assistant_output(&turn.content);
                 crate::log_info!(
                     "Agent completed: session={}, content_len={}",
                     conversation.session_id,
@@ -461,7 +460,7 @@ impl TelegramChannel {
                         || turn.content.len() >= TELEGRAM_MAX_MESSAGE_LENGTH
                     {
                         if self
-                            .update_draft(&recipient, &draft_message_id, &preview)
+                            .update_draft(&recipient, draft_message_id, &preview)
                             .await
                             .is_err()
                         {
@@ -1133,7 +1132,7 @@ impl TelegramChannel {
     }
 
     /// Finalize draft message with final content.
-    async fn finalize_draft(&self, recipient: &str, message_id: &str, text: &str) -> Result<()> {
+    async fn finalize_draft(&mut self, _recipient: &str, message_id: &str, text: &str) -> Result<()> {
         let msg_id: i64 = message_id.parse().context("invalid message_id")?;
         self.bot
             .edit_message_text_html(0, msg_id, text)
@@ -1142,7 +1141,7 @@ impl TelegramChannel {
     }
 
     /// Cancel draft by deleting the message.
-    async fn cancel_draft(&self, recipient: &str, message_id: &str) -> Result<()> {
+    async fn cancel_draft(&mut self, _recipient: &str, message_id: &str) -> Result<()> {
         let msg_id: i64 = message_id.parse().context("invalid message_id")?;
         self.bot.delete_message(0, msg_id).await?;
         Ok(())
@@ -1323,7 +1322,7 @@ impl Channel for TelegramChannel {
 
     async fn send_draft(&mut self, message: &SendMessage) -> Result<Option<String>> {
         let chat_id = message.recipient.parse::<i64>().context("invalid chat_id")?;
-        let thread_id = message.thread_ts.as_ref().map(|s| s.parse::<i64>().ok()).flatten();
+        let thread_id = message.thread_ts.as_ref().and_then(|s| s.parse::<i64>().ok());
         let sent = self
             .bot
             .send_message(

@@ -3015,7 +3015,7 @@ fn pretty_tool_arguments(arguments: &str) -> String {
 }
 
 fn display_tool_name(tool_name: &str) -> String {
-    canonical_tool_name(tool_name)
+    crate::tooling::canonical_tool_name(tool_name)
         .unwrap_or(tool_name)
         .to_string()
 }

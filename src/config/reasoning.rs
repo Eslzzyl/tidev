@@ -216,7 +216,7 @@ impl fmt::Display for ThinkingLevelType {
 
 impl ThinkingLevelType {
     /// 从字符串解析（用于数据库加载）
-    pub fn from_str(s: &str) -> Self {
+    pub fn from_string(s: &str) -> Self {
         let parts: Vec<&str> = s.splitn(2, ':').collect();
         match parts.as_slice() {
             ["none"] => Self::None,

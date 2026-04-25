@@ -487,17 +487,6 @@ fn find_fuzzy_suggestions(workspace_root: &Path, relative_path: &Path) -> Result
         .collect())
 }
 
-#[cfg(test)]
-pub(super) fn read_file_with_options(
-    _workspace_root: &Path,
-    _config_dir: &Path,
-    _relative_path: impl AsRef<Path>,
-    _offset: Option<i64>,
-    _limit: Option<i64>,
-) -> Result<String> {
-    bail!("deprecated: use read_path instead")
-}
-
 pub(super) fn write_file(
     workspace_root: &Path,
     relative_path: impl AsRef<Path>,

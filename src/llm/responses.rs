@@ -115,10 +115,10 @@ pub(super) async fn stream_responses(
             if let (Some(_event), Some(payload)) = (event_type, payload) {
                 if payload == "[DONE]" {
                     let turn = finalize_turn(
-                        &mut assistant_text,
-                        &mut reasoning_text,
-                        &mut finish_reason,
-                        &mut tool_calls,
+                        &assistant_text,
+                        &reasoning_text,
+                        &finish_reason,
+                        &tool_calls,
                     );
                     let _ = tx.send(BackendEvent::Finished {
                         session_id,
@@ -445,33 +445,31 @@ fn user_message_content(message: &Message) -> Result<ResponseContent> {
 }
 
 fn finalize_turn(
-    assistant_text: &mut String,
-    reasoning_text: &mut String,
-    finish_reason: &mut Option<String>,
-    tool_calls: &mut BTreeMap<String, ToolCallBuilder>,
+    assistant_text: &str,
+    reasoning_text: &str,
+    finish_reason: &Option<String>,
+    tool_calls: &BTreeMap<String, ToolCallBuilder>,
 ) -> crate::session::AssistantTurn {
-    let tool_calls = tool_calls
-        .iter()
-        .map(|(_, builder)| ToolCall {
+    let tool_calls = tool_calls.values().map(|builder| ToolCall {
             id: builder.id().to_string(),
             name: builder.name().to_string(),
             arguments: builder.arguments().unwrap_or_default().to_string(),
         })
         .collect::<Vec<_>>();
 
-    if finish_reason.is_none() {
-        *finish_reason = Some(if tool_calls.is_empty() {
+    let final_finish_reason = finish_reason.clone().unwrap_or_else(|| {
+        if tool_calls.is_empty() {
             "stop".to_string()
         } else {
             "tool_calls".to_string()
-        });
-    }
+        }
+    });
 
     crate::session::AssistantTurn {
-        content: assistant_text.clone(),
-        reasoning: reasoning_text.clone(),
+        content: assistant_text.to_string(),
+        reasoning: reasoning_text.to_string(),
         tool_calls,
-        finish_reason: finish_reason.clone(),
+        finish_reason: Some(final_finish_reason),
     }
 }
 
