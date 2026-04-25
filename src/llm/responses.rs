@@ -8,11 +8,11 @@ use uuid::Uuid;
 use crate::{
     config::ActiveModel,
     log_debug, log_error,
-    session::{BackendEvent, Message, MessageAttachment, MessageRole, ToolCall},
+    session::{BackendEvent, Message, MessageRole, ToolCall},
     tooling::ToolDefinition,
 };
 
-use super::attachments::{image_attachments, message_text_with_file_references};
+use super::attachments::message_text_with_file_references;
 use super::error::classify_response_status;
 
 /// Responses API endpoint
@@ -587,28 +587,6 @@ fn build_responses_request(
     })
 }
 
-fn user_message_content(message: &Message) -> Result<ResponseContent> {
-    let mut parts = Vec::new();
-    let text = message_text_with_file_references(message);
-
-    if !text.is_empty() {
-        parts.push(ResponseContentPart::text(text));
-    }
-
-    // Handle image attachments
-    for attachment in image_attachments(message) {
-        if let MessageAttachment::Image { data_url, .. } = attachment {
-            parts.push(ResponseContentPart::image(data_url.clone()));
-        }
-    }
-
-    if parts.len() == 1 && !parts[0].has_image() {
-        Ok(ResponseContent::Text(parts))
-    } else {
-        Ok(ResponseContent::Array(parts))
-    }
-}
-
 fn finalize_turn(
     assistant_text: &str,
     reasoning_text: &str,
@@ -677,61 +655,6 @@ impl ToolCallBuilder {
     }
 }
 
-// Response Content Part helpers
-impl ResponseContentPart {
-    fn text(content: String) -> Self {
-        Self {
-            kind: "input_text".to_string(),
-            text: Some(content),
-            image: None,
-            id: None,
-            name: None,
-            arguments: None,
-        }
-    }
-
-    fn output_text(content: String) -> Self {
-        Self {
-            kind: "output_text".to_string(),
-            text: Some(content),
-            image: None,
-            id: None,
-            name: None,
-            arguments: None,
-        }
-    }
-
-    fn image(url: String) -> Self {
-        Self {
-            kind: "image".to_string(),
-            text: None,
-            image: Some(ResponseImage { url }),
-            id: None,
-            name: None,
-            arguments: None,
-        }
-    }
-
-    fn tool_use(id: String, name: String, arguments: String) -> Self {
-        Self {
-            kind: "tool_use".to_string(),
-            text: None,
-            image: None,
-            id: Some(id),
-            name: Some(name),
-            arguments: Some(arguments),
-        }
-    }
-
-    fn has_image(&self) -> bool {
-        self.image.is_some()
-    }
-
-    fn unwrap_text(self) -> String {
-        self.text.unwrap_or_default()
-    }
-}
-
 // ============================================================================
 // Response data structures
 // ============================================================================
@@ -761,44 +684,7 @@ struct StreamOptions {
     include_usage: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
-struct ResponseMessage {
-    #[serde(rename = "type")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    kind: Option<String>,
-    role: String,
-    content: ResponseContent,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(untagged)]
-enum ResponseContent {
-    Text(Vec<ResponseContentPart>),
-    OutputText(Vec<ResponseContentPart>),
-    Array(Vec<ResponseContentPart>),
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct ResponseContentPart {
-    #[serde(rename = "type")]
-    kind: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    text: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    image: Option<ResponseImage>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    arguments: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct ResponseImage {
-    url: String,
-}
-
+// ============================================================================
 #[derive(Clone, Debug, Serialize)]
 struct ResponseTool {
     #[serde(rename = "type")]
@@ -826,6 +712,7 @@ impl From<&ToolDefinition> for ResponseTool {
 /// SSE event types for Responses API streaming
 #[derive(Clone, Debug, Deserialize)]
 #[serde(from = "ResponseStreamEventRaw")]
+#[allow(dead_code)]
 enum ResponseStreamEvent {
     ResponseCreated {
         #[serde(default)]
@@ -1122,6 +1009,7 @@ enum ResponseStreamEvent {
 
 /// Raw JSON structure for parsing SSE events
 #[derive(Clone, Debug, Deserialize)]
+#[allow(dead_code)]
 struct ResponseStreamEventRaw {
     #[serde(rename = "type")]
     event_type: String,
@@ -1363,6 +1251,7 @@ impl From<ResponseStreamEventRaw> for ResponseStreamEvent {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
+#[allow(dead_code)]
 struct ResponseStreamResponse {
     #[serde(default)]
     id: String,
@@ -1373,6 +1262,7 @@ struct ResponseStreamResponse {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
+#[allow(dead_code)]
 struct ResponseStreamItem {
     #[serde(rename = "type")]
     #[serde(default)]
@@ -1396,6 +1286,7 @@ struct ResponseStreamItem {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
+#[allow(dead_code)]
 struct ResponseStreamContentPart {
     #[serde(rename = "type")]
     #[serde(default)]
@@ -1411,6 +1302,7 @@ struct ResponseStreamContentPart {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
+#[allow(dead_code)]
 struct ResponseStreamReasoningPart {
     #[serde(rename = "type")]
     #[serde(default)]
@@ -1424,6 +1316,7 @@ struct ResponseStreamReasoningPart {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
+#[allow(dead_code)]
 struct ResponseStreamReasoningStep {
     #[serde(default)]
     end: Option<String>,
@@ -1432,6 +1325,7 @@ struct ResponseStreamReasoningStep {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
+#[allow(dead_code)]
 struct ResponseStreamError {
     #[serde(default)]
     code: String,
@@ -1444,6 +1338,7 @@ struct ResponseStreamError {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
+#[allow(dead_code)]
 struct ResponseStreamErrorDetail {
     #[serde(rename = "type", default)]
     r#type: String,
@@ -1454,6 +1349,7 @@ struct ResponseStreamErrorDetail {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
+#[allow(dead_code)]
 struct ResponseStreamIncompleteDetails {
     #[serde(rename = "type")]
     #[serde(default)]
@@ -1464,6 +1360,7 @@ struct ResponseStreamIncompleteDetails {
 
 /// Usage stats from streaming response
 #[derive(Clone, Debug, Default, Deserialize)]
+#[allow(dead_code)]
 struct ResponseStreamUsage {
     #[serde(rename = "input_tokens")]
     input_tokens: u32,
@@ -1479,6 +1376,7 @@ struct ResponseStreamUsage {
 
 /// Non-streaming response structures
 #[derive(Clone, Debug, Deserialize)]
+#[allow(dead_code)]
 struct ResponsesCompleteResponse {
     #[serde(default)]
     id: String,
@@ -1497,6 +1395,7 @@ struct ResponsesCompleteResponse {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
+#[allow(dead_code)]
 struct ResponseResult {
     #[serde(rename = "type")]
     #[serde(default)]
@@ -1504,6 +1403,7 @@ struct ResponseResult {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[allow(dead_code)]
 struct ResponseOutputItem {
     #[serde(rename = "type")]
     kind: String,
@@ -1520,6 +1420,7 @@ struct ResponseOutputItem {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
+#[allow(dead_code)]
 struct ResponseOutputContent {
     #[serde(rename = "type")]
     kind: String,
