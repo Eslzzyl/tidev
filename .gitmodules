@@ -12,8 +12,5 @@
 [submodule "nanobot"]
 	path = nanobot
 	url = https://github.com/HKUDS/nanobot.git
-[submodule "rtk"]
-	path = rtk
-	url = https://github.com/rtk-ai/rtk.git
-	shallow = true
+
 
