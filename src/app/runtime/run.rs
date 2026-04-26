@@ -134,6 +134,7 @@ impl App {
             message_scroll_target: None,
             todos: Vec::new(),
             stats_panel: None,
+            balance_panel: Arc::new(Mutex::new(None)),
             notifications,
             thinking_level: active_model.thinking_level.clone(),
         };

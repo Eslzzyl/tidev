@@ -1,5 +1,6 @@
 use super::*;
 
+pub mod balance_panel;
 pub mod connect;
 pub mod mcp_panel;
 pub mod message_panel;

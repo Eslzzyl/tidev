@@ -1,5 +1,6 @@
 use super::*;
 use crate::session::MessageRole;
+use reqwest::Client;
 
 impl App {
     pub(crate) fn handle_event(&mut self, event: Event, runtime: &Runtime) -> Result<()> {
@@ -840,6 +841,15 @@ impl App {
             return self.handle_stats_panel_key(key);
         }
 
+        if self
+            .balance_panel
+            .lock()
+            .map(|guard| guard.as_ref().is_some_and(|p| p.active))
+            .unwrap_or(false)
+        {
+            return self.handle_balance_panel_key(key, runtime);
+        }
+
         if self.handle_request_abort_key(key, runtime)? {
             return Ok(());
         }
@@ -1323,6 +1333,12 @@ impl App {
         }
 
         match action {
+            CommandAction::Balance => {
+                if !args.is_empty() {
+                    self.last_notice = Some("Ignoring arguments to /balance".to_string());
+                }
+                self.open_balance_panel(runtime)?;
+            }
             CommandAction::Connect => {
                 if !args.is_empty() {
                     self.last_notice = Some("Ignoring arguments to /connect".to_string());
@@ -1805,6 +1821,27 @@ impl App {
         Ok(())
     }
 
+    pub(crate) fn handle_balance_panel_key(
+        &mut self,
+        key: KeyEvent,
+        runtime: &Runtime,
+    ) -> Result<()> {
+        match key.code {
+            KeyCode::Esc => {
+                if let Ok(mut guard) = self.balance_panel.lock()
+                    && let Some(panel) = &mut *guard
+                {
+                    panel.close();
+                }
+            }
+            KeyCode::Char('r') => {
+                self.refresh_balance_panel(runtime);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     pub(crate) fn toggle_stats_panel(&mut self) {
         if let Some(panel) = &mut self.stats_panel {
             panel.toggle();
@@ -1836,6 +1873,109 @@ impl App {
                     crate::log_error!("Failed to refresh stats: {}", e);
                 }
             }
+        }
+    }
+
+    pub(crate) fn open_balance_panel(&mut self, runtime: &Runtime) -> Result<()> {
+        self.command_palette.clear();
+        self.connect_dialog = None;
+        self.theme_panel = None;
+        self.mcp_panel = None;
+        self.model_panel = None;
+        self.session_panel = None;
+        self.settings_panel = None;
+
+        let mut panel = crate::app::ui::balance_panel::BalancePanelState::new();
+        panel.open();
+        *self.balance_panel.lock().unwrap() = Some(panel);
+
+        // Check if DeepSeek provider has API key configured
+        if let Some(api_key) = self.auth.api_key("deepseek").map(|s| s.to_string()) {
+            // Set loading state
+            if let Ok(mut guard) = self.balance_panel.lock() {
+                if let Some(panel) = &mut *guard {
+                    panel.set_loading(true);
+                }
+            }
+
+            let http = Client::new();
+            let panel_ptr = self.balance_panel.clone();
+            let panel_ptr_clone = panel_ptr.clone();
+            let api_key_clone = api_key.clone();
+
+            runtime.spawn(async move {
+                match crate::balance::query_deepseek_balance(&http, &api_key_clone).await {
+                    Ok(balance) => {
+                        if let Ok(mut guard) = panel_ptr_clone.lock() {
+                            if let Some(panel) = &mut *guard {
+                                panel.set_balance(balance);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        if let Ok(mut guard) = panel_ptr_clone.lock() {
+                            if let Some(panel) = &mut *guard {
+                                panel.set_error(e.to_string());
+                            }
+                        }
+                    }
+                }
+            });
+        } else {
+            // Set error state
+            if let Ok(mut guard) = self.balance_panel.lock() {
+                if let Some(panel) = &mut *guard {
+                    panel.set_error("DeepSeek API key not configured".to_string());
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+      fn refresh_balance_panel(&mut self, runtime: &Runtime) {
+        let mut guard = match self.balance_panel.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+        let panel = match &mut *guard {
+            Some(panel) => panel,
+            None => return,
+        };
+
+        if !panel.active || panel.loading {
+            return;
+        }
+
+        // Check if DeepSeek provider has API key configured
+        if let Some(api_key) = self.auth.api_key("deepseek").map(|s| s.to_string()) {
+            panel.set_loading(true);
+
+            let http = Client::new();
+            let panel_ptr = self.balance_panel.clone();
+            let panel_ptr_clone = panel_ptr.clone();
+            let api_key_clone = api_key.clone();
+
+            runtime.spawn(async move {
+                match crate::balance::query_deepseek_balance(&http, &api_key_clone).await {
+                    Ok(balance) => {
+                        if let Ok(mut guard) = panel_ptr_clone.lock() {
+                            if let Some(panel) = &mut *guard {
+                                panel.set_balance(balance);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        if let Ok(mut guard) = panel_ptr_clone.lock() {
+                            if let Some(panel) = &mut *guard {
+                                panel.set_error(e.to_string());
+                            }
+                        }
+                    }
+                }
+            });
+        } else {
+            panel.set_error("DeepSeek API key not configured".to_string());
         }
     }
 }

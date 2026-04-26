@@ -15,7 +15,7 @@ use std::{
     cell::{Cell, RefCell},
     env, io,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
     sync::atomic::Ordering,
     time::{Duration, Instant},
 };
@@ -43,6 +43,7 @@ pub use runtime::run;
 pub use runtime::state;
 pub use runtime::subagent;
 pub use runtime::undo;
+pub use ui::balance_panel;
 pub use ui::connect;
 pub use ui::mcp_panel;
 pub use ui::message_panel;
@@ -172,6 +173,7 @@ struct App {
     message_scroll_target: Option<Uuid>,
     todos: Vec<TodoItem>,
     stats_panel: Option<ui::stats_panel::StatsPanelState>,
+    balance_panel: Arc<Mutex<Option<ui::balance_panel::BalancePanelState>>>,
     notifications: notifications::NotificationManager,
     /// DeepSeek thinking level for the current model
     thinking_level: crate::config::reasoning::ThinkingLevelType,

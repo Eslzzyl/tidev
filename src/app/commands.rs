@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CommandAction {
+    Balance,
     Connect,
     Mcp,
     Model,
@@ -232,6 +233,13 @@ fn command_fragment(input: &str) -> Option<&str> {
 }
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec {
+        name: "balance",
+        aliases: &["bal", "quota"],
+        description: "Open balance panel to view provider quotas",
+        usage: "/balance",
+        action: CommandAction::Balance,
+    },
     CommandSpec {
         name: "connect",
         aliases: &["login"],
