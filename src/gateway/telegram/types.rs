@@ -29,7 +29,6 @@ impl<T> TelegramApiResponse<T> {
 
 /// Incoming update from Telegram getUpdates.
 #[derive(Debug, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
 pub struct TelegramUpdate {
     pub update_id: i64,
     pub message: Option<TelegramMessage>,
@@ -37,10 +36,9 @@ pub struct TelegramUpdate {
 
 /// Incoming message from Telegram.
 #[derive(Debug, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
 pub struct TelegramMessage {
-    pub message_id: u64,
-    pub date: u64,
+    pub message_id: i64,
+    pub date: i64,
     pub text: Option<String>,
     pub caption: Option<String>,
     pub chat: TelegramChat,
@@ -68,10 +66,9 @@ pub struct TelegramChat {
 
 /// Sent message from Telegram sendMessage.
 #[derive(Debug, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
 pub struct TelegramSentMessage {
-    pub message_id: u64,
-    pub date: u64,
+    pub message_id: i64,
+    pub date: i64,
     pub chat: TelegramChat,
 }
 

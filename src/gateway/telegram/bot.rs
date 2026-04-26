@@ -310,7 +310,12 @@ impl TelegramBot {
     /// Set bot command menu.
     pub async fn set_my_commands(&self, commands: Vec<(String, String)>) -> Result<()> {
         let body = serde_json::json!({
-            "commands": commands
+            "commands": commands.into_iter().map(|(cmd, desc)| {
+                serde_json::json!({
+                    "command": cmd,
+                    "description": desc
+                })
+            }).collect::<Vec<_>>()
         });
 
         let response = self
@@ -333,7 +338,7 @@ impl TelegramBot {
     pub async fn set_message_reaction(
         &self,
         chat_id: i64,
-        message_id: u64,
+        message_id: i64,
         reaction: &str,
     ) -> Result<()> {
         let body = serde_json::json!({
