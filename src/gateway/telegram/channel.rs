@@ -81,6 +81,8 @@ pub struct TelegramChannel {
     /// When a user is in this state, their next message is handled as selection input,
     /// not sent to the agent.
     balance_selection_states: HashMap<i64, BalanceSelectionState>,
+    /// Sessions that are currently compacting.
+    compacting_sessions: HashSet<Uuid>,
 }
 
 impl TelegramChannel {
@@ -114,6 +116,7 @@ impl TelegramChannel {
             cancellation_flags: HashMap::new(),
             model_selection_states: HashMap::new(),
             balance_selection_states: HashMap::new(),
+            compacting_sessions: HashSet::new(),
         }
     }
 
@@ -633,6 +636,15 @@ impl TelegramChannel {
             }
             "stop" => {
                 self.handle_stop_command(source_message, chat_key).await?;
+                Ok(true)
+            }
+            "compact" => {
+                self.handle_compact_command(source_message, chat_key, conversation, active_model)
+                    .await?;
+                Ok(true)
+            }
+            "init" => {
+                self.handle_init_command(source_message).await?;
                 Ok(true)
             }
             _ => {
@@ -1535,6 +1547,119 @@ impl Channel for TelegramChannel {
     async fn cancel_draft(&mut self, _recipient: &str, message_id: &str) -> Result<()> {
         let msg_id: i64 = message_id.parse().context("invalid message_id")?;
         self.bot.delete_message(0, msg_id).await?;
+        Ok(())
+    }
+}
+
+impl TelegramChannel {
+    /// Handle /compact command - compact session context.
+    async fn handle_compact_command(
+        &mut self,
+        source_message: &TelegramMessage,
+        _chat_key: &str,
+        conversation: &Conversation,
+        active_model: &ActiveModel,
+    ) -> Result<()> {
+        use crate::context::ContextManager;
+
+        let session_id = conversation.session_id;
+
+        // Check if already compacting
+        if self.compacting_sessions.contains(&session_id) {
+            self.send_reply_chunks(
+                source_message,
+                "Already compacting session. Please wait...",
+            )
+            .await?;
+            return Ok(());
+        }
+
+        self.compacting_sessions.insert(session_id);
+
+        self.send_reply_chunks(
+            source_message,
+            "Compacting session context... This may take a moment.",
+        )
+        .await?;
+
+        // Clone required data for async operation
+        let llm = self.llm.clone();
+        let store = self.store.clone();
+        let session_id_for_compact = session_id;
+        let active_model_for_compact = active_model.clone();
+        let conversation_for_compact = conversation.clone();
+
+        // Spawn compaction task
+        tokio::spawn(async move {
+            let mut context_manager = ContextManager::new();
+
+            let result = context_manager
+                .compact(
+                    &llm,
+                    &active_model_for_compact,
+                    &conversation_for_compact,
+                    true,
+                    None,
+                )
+                .await;
+
+            match result {
+                Ok(true) => {
+                    let summary = context_manager.summary.clone();
+                    let retained_from = context_manager.retained_from;
+
+                    // Save compacted context state
+                    if let Some(summary) = &summary {
+                        let _ = store.update_session_context_state(
+                            session_id_for_compact,
+                            Some(summary),
+                            retained_from,
+                        );
+                    }
+
+                    // Send success message
+                    let text = format!(
+                        "✅ Session context compacted.\n\
+                         Messages retained: {}\n\
+                         Summary: {}",
+                        retained_from,
+                        summary.as_deref().unwrap_or("(none)")
+                    );
+                    let _ = store.append_message(
+                        session_id_for_compact,
+                        &crate::session::Message::new(crate::session::MessageRole::System, text),
+                    );
+                }
+                Ok(false) => {
+                    let text = "ℹ️ No compaction needed (context already compact)".to_string();
+                    let _ = store.append_message(
+                        session_id_for_compact,
+                        &crate::session::Message::new(crate::session::MessageRole::System, text),
+                    );
+                }
+                Err(e) => {
+                    let text = format!("❌ Compaction failed: {}", e);
+                    let _ = store.append_message(
+                        session_id_for_compact,
+                        &crate::session::Message::new(crate::session::MessageRole::System, text),
+                    );
+                }
+            }
+        });
+
+        Ok(())
+    }
+
+    /// Handle /init command - load init prompt for project analysis.
+    async fn handle_init_command(&self, source_message: &TelegramMessage) -> Result<()> {
+        let init_prompt = crate::prompts::init_command();
+        let text = format!(
+            "📁 Project Analysis Prompt\n\n\
+             Copy and send this prompt to analyze your project:\n\n\
+             ```\n{}\n```",
+            init_prompt
+        );
+        self.send_reply_chunks(source_message, &text).await?;
         Ok(())
     }
 }

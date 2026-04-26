@@ -49,6 +49,14 @@ pub const GATEWAY_COMMANDS: &[CommandSpec] = &[
         name: "balance",
         description: "Query provider balance",
     },
+    CommandSpec {
+        name: "compact",
+        description: "Compact session context to save tokens",
+    },
+    CommandSpec {
+        name: "init",
+        description: "Analyze project and create AGENTS.md",
+    },
 ];
 
 /// Parse a slash command from message content.
@@ -95,6 +103,8 @@ pub fn gateway_help_text() -> String {
         "/balance - query provider balance",
         "/status - show session statistics",
         "/stop - stop current task",
+        "/compact - compact session context to save tokens",
+        "/init - analyze project and create AGENTS.md",
     ]
     .join("\n")
 }
