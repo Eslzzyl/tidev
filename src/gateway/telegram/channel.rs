@@ -37,7 +37,6 @@ use crate::gateway::shared::compose_system_prompt;
 pub const GATEWAY_PLATFORM_TELEGRAM: &str = "telegram";
 pub const TELEGRAM_MAX_MESSAGE_LENGTH: usize = 4096;
 const TELEGRAM_DRAFT_EDIT_INTERVAL_MS: u64 = 1200;
-const MAX_TOOL_ROUNDS: usize = 8;
 
 /// Interactive model selection state for a chat.
 #[derive(Debug, Clone)]
@@ -317,7 +316,6 @@ impl TelegramChannel {
             }
         };
 
-        let mut tool_rounds = 0;
         let mut has_tool_calls = false;
 
         loop {
@@ -386,13 +384,6 @@ impl TelegramChannel {
 
             self.execute_tool_calls(source_message, conversation, turn.tool_calls)
                 .await?;
-
-            tool_rounds += 1;
-            if tool_rounds >= MAX_TOOL_ROUNDS {
-                bail!(
-                    "assistant exceeded maximum tool rounds ({MAX_TOOL_ROUNDS}); aborting to prevent loop"
-                )
-            }
         }
     }
 
