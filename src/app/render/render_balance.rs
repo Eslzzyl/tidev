@@ -110,6 +110,9 @@ impl App {
             Some(ProviderTab::DeepSeek) => {
                 self.render_deepseek_balance(frame, area, palette, panel);
             }
+            Some(ProviderTab::SiliconFlow) => {
+                self.render_siliconflow_balance(frame, area, palette, panel);
+            }
             None => {
                 let spans = vec![Span::styled(
                     "No balance data",
@@ -170,6 +173,47 @@ impl App {
                         Style::default().bg(palette.panel).fg(palette.muted),
                     )]));
                 }
+            }
+        }
+
+        let paragraph = Paragraph::new(lines).style(Style::default().bg(palette.panel));
+        frame.render_widget(paragraph, area);
+    }
+
+    fn render_siliconflow_balance(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        palette: ThemePalette,
+        panel: Option<&BalancePanelState>,
+    ) {
+        let mut lines = Vec::new();
+
+        if let Some(panel) = panel {
+            if panel.loading {
+                lines.push(Line::from(vec![Span::styled(
+                    "Loading...",
+                    Style::default().bg(palette.panel).fg(palette.muted),
+                )]));
+            } else if let Some(error) = &panel.error {
+                lines.push(Line::from(vec![Span::styled(
+                    format!("Error: {}", error),
+                    Style::default().bg(palette.panel).fg(palette.error),
+                )]));
+            } else if let Some(balance) = &panel.siliconflow_balance {
+                // Header
+                lines.push(Line::from(vec![Span::styled(
+                    "SiliconFlow Account",
+                    Style::default().bg(palette.panel).fg(palette.text),
+                )]));
+                lines.push(Line::from(vec![Span::styled(
+                    "─────────────────────────────────",
+                    Style::default().bg(palette.panel).fg(palette.border),
+                )]));
+                lines.push(Line::from(vec![Span::styled(
+                    format!("Total Balance: {}", balance.data.total_balance),
+                    Style::default().bg(palette.panel).fg(palette.text),
+                )]));
             }
         }
 

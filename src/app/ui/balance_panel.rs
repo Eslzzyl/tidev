@@ -1,10 +1,11 @@
-use crate::balance::DeepSeekBalanceResponse;
+use crate::balance::{DeepSeekBalanceResponse, SiliconFlowBalanceResponse};
 
 #[derive(Clone, Debug)]
 pub struct BalancePanelState {
     pub active: bool,
     pub selected_provider: ProviderTab,
     pub deepseek_balance: Option<DeepSeekBalanceResponse>,
+    pub siliconflow_balance: Option<SiliconFlowBalanceResponse>,
     pub loading: bool,
     pub error: Option<String>,
 }
@@ -21,6 +22,7 @@ impl BalancePanelState {
             active: false,
             selected_provider: ProviderTab::DeepSeek,
             deepseek_balance: None,
+            siliconflow_balance: None,
             loading: false,
             error: None,
         }
@@ -46,12 +48,16 @@ impl BalancePanelState {
 
     pub fn next_provider(&mut self) {
         self.selected_provider = match self.selected_provider {
-            ProviderTab::DeepSeek => ProviderTab::DeepSeek,
+            ProviderTab::DeepSeek => ProviderTab::SiliconFlow,
+            ProviderTab::SiliconFlow => ProviderTab::DeepSeek,
         };
     }
 
     pub fn prev_provider(&mut self) {
-        self.selected_provider = ProviderTab::DeepSeek;
+        self.selected_provider = match self.selected_provider {
+            ProviderTab::DeepSeek => ProviderTab::SiliconFlow,
+            ProviderTab::SiliconFlow => ProviderTab::DeepSeek,
+        };
     }
 
     pub fn set_loading(&mut self, loading: bool) {
@@ -67,6 +73,12 @@ impl BalancePanelState {
         self.error = None;
     }
 
+    pub fn set_siliconflow_balance(&mut self, balance: SiliconFlowBalanceResponse) {
+        self.siliconflow_balance = Some(balance);
+        self.loading = false;
+        self.error = None;
+    }
+
     pub fn set_error(&mut self, error: String) {
         self.error = Some(error);
         self.loading = false;
@@ -76,16 +88,18 @@ impl BalancePanelState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderTab {
     DeepSeek,
+    SiliconFlow,
 }
 
 impl ProviderTab {
     pub fn label(&self) -> &'static str {
         match self {
             Self::DeepSeek => "DeepSeek",
+            Self::SiliconFlow => "SiliconFlow",
         }
     }
 
-    pub fn all() -> [Self; 1] {
-        [Self::DeepSeek]
+    pub fn all() -> [Self; 2] {
+        [Self::DeepSeek, Self::SiliconFlow]
     }
 }
