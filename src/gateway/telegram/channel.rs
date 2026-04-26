@@ -48,6 +48,13 @@ enum ModelSelectionState {
     WaitingForModel { provider_id: String },
 }
 
+/// Interactive balance selection state for a chat.
+#[derive(Debug, Clone)]
+enum BalanceSelectionState {
+    /// Waiting for user to select a provider (1, 2, 3, ...)
+    WaitingForProvider,
+}
+
 /// Telegram gateway channel implementation.
 pub struct TelegramChannel {
     pub workspace_root: PathBuf,
@@ -71,6 +78,10 @@ pub struct TelegramChannel {
     /// When a user is in this state, their next message is handled as selection input,
     /// not sent to the agent.
     model_selection_states: HashMap<i64, ModelSelectionState>,
+    /// Interactive balance selection state per chat_id.
+    /// When a user is in this state, their next message is handled as selection input,
+    /// not sent to the agent.
+    balance_selection_states: HashMap<i64, BalanceSelectionState>,
 }
 
 impl TelegramChannel {
@@ -103,6 +114,7 @@ impl TelegramChannel {
             start_time: Instant::now(),
             cancellation_flags: HashMap::new(),
             model_selection_states: HashMap::new(),
+            balance_selection_states: HashMap::new(),
         }
     }
 
@@ -208,6 +220,16 @@ impl TelegramChannel {
                 message.chat.id
             );
             return self.handle_model_selection(&message, &state).await;
+        }
+
+        // Check if user is in interactive balance selection state.
+        // If so, handle selection input instead of normal message processing.
+        if let Some(state) = self.balance_selection_states.get(&message.chat.id).cloned() {
+            crate::log_info!(
+                "Handling balance selection input: chat_id={}",
+                message.chat.id
+            );
+            return self.handle_balance_selection(&message, &state).await;
         }
 
         let chat_key = self.chat_key(&message);
@@ -614,6 +636,10 @@ impl TelegramChannel {
                     .await?;
                 Ok(true)
             }
+            "balance" => {
+                self.handle_balance_command(source_message).await?;
+                Ok(true)
+            }
             "stop" => {
                 self.handle_stop_command(source_message, chat_key).await?;
                 Ok(true)
@@ -663,7 +689,6 @@ impl TelegramChannel {
                 Ok(updated_model)
             }
             Some("clear") => {
-                // Clear session conversation
                 let new_conversation = self.rotate_chat_session("session:clear", active_model)?;
                 self.send_reply_chunks(
                     source_message,
@@ -702,8 +727,162 @@ impl TelegramChannel {
         }
     }
 
-    async fn handle_model_command(&mut self, message: &TelegramMessage) -> Result<()> {
-        let providers = self.get_available_providers();
+    /// Get providers that support balance queries and have API keys configured.
+    fn get_balance_providers(&self) -> Vec<(&str, &str)> {
+        let mut providers = Vec::new();
+
+        // DeepSeek
+        if self.auth.api_key("deepseek").is_some() {
+            providers.push(("deepseek", "DeepSeek"));
+        }
+
+        // SiliconFlow
+        if self.auth.api_key("siliconflow-cn").is_some() {
+            providers.push(("siliconflow-cn", "SiliconFlow"));
+        }
+
+        providers
+    }
+
+    /// Format DeepSeek balance for display.
+    fn format_deepseek_balance(&self, balance: &crate::balance::DeepSeekBalanceResponse) -> String {
+        let mut text = String::from("💰 DeepSeek Balance\n\n");
+
+        if !balance.is_available {
+            text.push_str("Account is not available.\n");
+            return text;
+        }
+
+        for info in &balance.balance_infos {
+            text.push_str(&format!(
+                "Currency: {}\n",
+                info.currency
+            ));
+            text.push_str(&format!(
+                "Total: {} {}\n",
+                info.total_balance, info.currency
+            ));
+            text.push_str(&format!(
+                "Granted: {} {}\n",
+                info.granted_balance, info.currency
+            ));
+            text.push_str(&format!(
+                "Topped Up: {} {}\n",
+                info.topped_up_balance, info.currency
+            ));
+        }
+
+        text
+    }
+
+    /// Format SiliconFlow balance for display.
+    fn format_siliconflow_balance(&self, balance: &crate::balance::SiliconFlowBalanceResponse) -> String {
+        format!(
+            "💰 SiliconFlow Balance\n\nTotal: {} CNY",
+            balance.data.total_balance
+        )
+    }
+
+    async fn handle_balance_command(&mut self, message: &TelegramMessage) -> Result<()> {
+        let providers = self.get_balance_providers();
+
+        if providers.is_empty() {
+            self.send_reply_chunks(
+                message,
+                "No providers available for balance queries.\nConfigure API keys for DeepSeek or SiliconFlow.",
+            )
+            .await?;
+            return Ok(());
+        }
+
+        // Format provider list
+        let mut text = String::from("Select a provider to query balance (enter number):\n\n");
+        for (i, (_, name)) in providers.iter().enumerate() {
+            text.push_str(&format!("{}. {}\n", i + 1, name));
+        }
+        text.push_str("\n(Enter any other number to cancel)");
+
+        self.send_reply_chunks(message, &text).await?;
+
+        // Set state to waiting for provider selection
+        self.balance_selection_states
+            .insert(message.chat.id, BalanceSelectionState::WaitingForProvider);
+
+        Ok(())
+    }
+
+    async fn handle_balance_selection(
+        &mut self,
+        message: &TelegramMessage,
+        state: &BalanceSelectionState,
+    ) -> Result<()> {
+        let content = message.text.as_deref().unwrap_or_default().trim();
+
+        match state {
+            BalanceSelectionState::WaitingForProvider => {
+                let providers = self.get_balance_providers();
+                let selection: usize = match content.parse() {
+                    Ok(n) => n,
+                    Err(_) => {
+                        self.balance_selection_states.remove(&message.chat.id);
+                        self.send_reply_chunks(
+                            message,
+                            "Invalid selection. Selection cancelled. Send /balance to try again.",
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+                };
+
+                if selection < 1 || selection > providers.len() {
+                    self.balance_selection_states.remove(&message.chat.id);
+                    self.send_reply_chunks(
+                        message,
+                        "Selection cancelled. Send /balance to try again.",
+                    )
+                    .await?;
+                    return Ok(());
+                }
+
+                let (provider_id, _provider_name) = providers[selection - 1];
+
+                // Query balance
+                let result = self.query_balance_for_provider(provider_id).await;
+
+                self.balance_selection_states.remove(&message.chat.id);
+
+                let text = match result {
+                    Ok(info) => info,
+                    Err(e) => format!("Failed to query balance: {}", e),
+                };
+
+                self.send_reply_chunks(message, &text).await?;
+                Ok(())
+            }
+        }
+    }
+
+    async fn query_balance_for_provider(&self, provider_id: &str) -> Result<String> {
+        let http = reqwest::Client::new();
+        let api_key = self
+            .auth
+            .api_key(provider_id)
+            .context("API key not found")?;
+
+        match provider_id {
+            "deepseek" => {
+                let balance = crate::balance::query_deepseek_balance(&http, api_key).await?;
+                Ok(self.format_deepseek_balance(&balance))
+            }
+            "siliconflow-cn" => {
+                let balance = crate::balance::query_siliconflow_balance(&http, api_key).await?;
+                Ok(self.format_siliconflow_balance(&balance))
+            }
+            _ => anyhow::bail!("Unsupported provider: {}", provider_id),
+        }
+    }
+
+    async fn handle_model_command(&mut self, message: &TelegramMessage) -> Result<()> {        let providers = self.get_available_providers();
 
         if providers.is_empty() {
             self.send_reply_chunks(

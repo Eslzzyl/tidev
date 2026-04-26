@@ -45,6 +45,10 @@ pub const GATEWAY_COMMANDS: &[CommandSpec] = &[
         name: "stop",
         description: "Stop current task",
     },
+    CommandSpec {
+        name: "balance",
+        description: "Query provider balance",
+    },
 ];
 
 /// Parse a slash command from message content.
@@ -88,6 +92,7 @@ pub fn gateway_help_text() -> String {
         "/new - start a fresh session",
         "/session - show current session status",
         "/model - switch provider or model",
+        "/balance - query provider balance",
         "/status - show session statistics",
         "/stop - stop current task",
     ]
