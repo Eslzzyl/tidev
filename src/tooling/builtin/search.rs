@@ -5,10 +5,12 @@ use grep::{
     searcher::{SearcherBuilder, sinks},
 };
 use ignore::WalkBuilder;
+use rayon::prelude::*;
 use serde_json::Value;
 use std::time::UNIX_EPOCH;
 use std::{
     path::{Path, PathBuf},
+    sync::atomic::{AtomicUsize, Ordering},
     time::SystemTime,
 };
 
@@ -74,7 +76,7 @@ fn glob_paths(
         .compile_matcher();
 
     let mut matches = Vec::new();
-    let mut skipped = 0usize;
+    let skipped = AtomicUsize::new(0);
 
     if search_root.is_file() {
         let candidate = search_root.as_path();
@@ -82,37 +84,39 @@ fn glob_paths(
             matches.push(SearchHit::from_path(&search_root)?);
         }
     } else {
-        for result in WalkBuilder::new(&search_root)
+        // Collect paths into a Vec for parallel iteration
+        let paths: Vec<PathBuf> = WalkBuilder::new(&search_root)
             .hidden(false)
             .git_ignore(true)
             .git_global(true)
             .git_exclude(true)
             .follow_links(false)
             .build()
-        {
-            let entry = match result {
-                Ok(entry) => entry,
+            .filter_map(|result| match result {
+                Ok(entry) => Some(entry.into_path()),
                 Err(_) => {
-                    skipped += 1;
-                    continue;
+                    skipped.fetch_add(1, Ordering::Relaxed);
+                    None
                 }
-            };
+            })
+            .filter(|path| path.is_file())
+            .collect();
 
-            if !entry
-                .file_type()
-                .map(|file_type| file_type.is_file())
-                .unwrap_or(false)
-            {
-                continue;
-            }
+        // Parallel glob matching
+        let search_root_owned = search_root.clone();
+        let pattern_owned = pattern.to_owned();
+        let matched_paths: Vec<SearchHit> = paths
+            .par_iter()
+            .filter_map(|path| {
+                if glob_matches_path(path, &search_root_owned, &matcher, &pattern_owned) {
+                    SearchHit::from_path(path).ok()
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-            let path = entry.into_path();
-            if !glob_matches_path(&path, &search_root, &matcher, pattern) {
-                continue;
-            }
-
-            matches.push(SearchHit::from_path(&path)?);
-        }
+        matches = matched_paths;
     }
 
     matches.sort_by(|left, right| {
@@ -124,7 +128,7 @@ fn glob_paths(
 
     if matches.is_empty() {
         let mut output = String::from("No files found");
-        if skipped > 0 {
+        if skipped.load(Ordering::Relaxed) > 0 {
             output.push_str("\n\n(Some paths were inaccessible and skipped)");
         }
         return Ok(output);
@@ -159,7 +163,7 @@ fn glob_paths(
             matches.len()
         ));
     }
-    if skipped > 0 {
+    if skipped.load(Ordering::Relaxed) > 0 {
         output.push(String::new());
         output.push("(Some paths were inaccessible and skipped)".to_string());
     }
@@ -199,71 +203,77 @@ fn grep_paths(
         .map(|value| value.contains('/') || value.contains('\\'))
         .unwrap_or(false);
 
-    let mut searcher = SearcherBuilder::new().line_number(true).build();
-    let mut matches = Vec::new();
-    let mut skipped = 0usize;
+    let skipped = AtomicUsize::new(0);
 
-    let files: Box<dyn Iterator<Item = PathBuf>> = if search_root.is_file() {
-        Box::new(std::iter::once(search_root.clone()))
+    let files: Vec<PathBuf> = if search_root.is_file() {
+        vec![search_root.clone()]
     } else {
-        Box::new(
-            WalkBuilder::new(&search_root)
-                .hidden(false)
-                .git_ignore(true)
-                .git_global(true)
-                .git_exclude(true)
-                .follow_links(false)
-                .build()
-                .filter_map(|result| match result {
-                    Ok(entry) => entry
-                        .file_type()
-                        .map(|file_type| (entry, file_type.is_file())),
-                    Err(_) => None,
-                })
-                .filter_map(|(entry, is_file)| is_file.then(|| entry.into_path())),
-        )
+        WalkBuilder::new(&search_root)
+            .hidden(false)
+            .git_ignore(true)
+            .git_global(true)
+            .git_exclude(true)
+            .follow_links(false)
+            .build()
+            .filter_map(|result| match result {
+                Ok(entry) => entry
+                    .file_type()
+                    .map(|file_type| (entry, file_type.is_file())),
+                Err(_) => None,
+            })
+            .filter_map(|(entry, is_file)| is_file.then(|| entry.into_path()))
+            .collect()
     };
 
-    for path in files {
-        if let Some(include_matcher) = &include_matcher {
-            let relative_candidate = path.strip_prefix(&search_root).unwrap_or(path.as_path());
-            if !include_matcher.is_match(relative_candidate)
-                && (!include_has_separator
-                    && !path
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .map(|name| include_matcher.is_match(name))
-                        .unwrap_or(false))
-            {
-                continue;
+    // Parallel file search
+    let search_root_owned = search_root.clone();
+    let matches: Vec<SearchHit> = files
+        .par_iter()
+        .filter_map(|path| {
+            if let Some(ref inc_matcher) = include_matcher {
+                let relative_candidate = path.strip_prefix(&search_root_owned).unwrap_or(path.as_path());
+                if !inc_matcher.is_match(relative_candidate)
+                    && (!include_has_separator
+                        && !path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .map(|name| inc_matcher.is_match(name))
+                            .unwrap_or(false))
+                {
+                    return None;
+                }
             }
-        }
 
-        let modified_at = path
-            .metadata()
-            .and_then(|metadata| metadata.modified())
-            .unwrap_or(UNIX_EPOCH);
-        let path_for_sink = path.clone();
-        let mut file_hits = Vec::new();
-        let sink = sinks::Lossy(|line_number, line| {
-            file_hits.push(SearchHit {
-                path: path_for_sink.clone(),
-                line_number,
-                line_text: line.to_string(),
-                modified_at,
+            let modified_at = path
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .unwrap_or(UNIX_EPOCH);
+            let path_owned = path.clone();
+            let mut file_hits = Vec::new();
+            let sink = sinks::Lossy(|line_number, line| {
+                file_hits.push(SearchHit {
+                    path: path_owned.clone(),
+                    line_number,
+                    line_text: line.to_string(),
+                    modified_at,
+                });
+                Ok(true)
             });
-            Ok(true)
-        });
 
-        if searcher.search_path(matcher.clone(), &path, sink).is_err() {
-            skipped += 1;
-            continue;
-        }
+            // Create a new Searcher for each thread (not thread-safe)
+            let mut searcher = SearcherBuilder::new().line_number(true).build();
+            if searcher.search_path(matcher.clone(), path, sink).is_err() {
+                skipped.fetch_add(1, Ordering::Relaxed);
+                return None;
+            }
 
-        matches.extend(file_hits);
-    }
+            Some(file_hits)
+        })
+        .flatten()
+        .collect();
 
-    matches.sort_by(|left, right| {
+    let mut sorted_matches = matches;
+    sorted_matches.sort_by(|left, right| {
         right
             .modified_at
             .cmp(&left.modified_at)
@@ -271,25 +281,25 @@ fn grep_paths(
             .then_with(|| left.line_number.cmp(&right.line_number))
     });
 
-    if matches.is_empty() {
+    if sorted_matches.is_empty() {
         let mut output = String::from("No files found");
-        if skipped > 0 {
+        if skipped.load(Ordering::Relaxed) > 0 {
             output.push_str("\n\n(Some paths were inaccessible and skipped)");
         }
         return Ok(output);
     }
 
     let limit = 100usize;
-    let truncated = matches.len() > limit;
+    let truncated = sorted_matches.len() > limit;
     let display_matches = if truncated {
-        &matches[..limit]
+        &sorted_matches[..limit]
     } else {
-        &matches
+        &sorted_matches
     };
 
     let mut output = vec![format!(
         "Found {} matches{}",
-        matches.len(),
+        sorted_matches.len(),
         if truncated {
             format!(" (showing first {limit})")
         } else {
@@ -319,10 +329,10 @@ fn grep_paths(
         output.push(String::new());
         output.push(format!(
             "(Results truncated: showing {limit} of {} matches.)",
-            matches.len()
+            sorted_matches.len()
         ));
     }
-    if skipped > 0 {
+    if skipped.load(Ordering::Relaxed) > 0 {
         output.push(String::new());
         output.push("(Some paths were inaccessible and skipped)".to_string());
     }

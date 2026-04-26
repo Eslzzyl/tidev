@@ -63,47 +63,41 @@ let mut ranked: Vec<_> = indexed_entries
 
 ---
 
-#### 2. Grep Tool Parallel File Search
+#### 2. Grep Tool Parallel File Search ✅ Done
 
 **File:** `src/tooling/builtin/search.rs:224-261`
 
-**Current Implementation:**
-```rust
-for path in files {
-    // Filter by include pattern
-    // Search file content
-    // Collect matches
-    if searcher.search_path(matcher.clone(), &path, sink).is_err() {
-        skipped += 1;
-        continue;
-    }
-    matches.extend(file_hits);
-}
-```
-
-**Proposed Change:**
+**Implementation (Done):**
 ```rust
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 let skipped = AtomicUsize::new(0);
 let matches: Vec<SearchHit> = files
-    .into_par_iter()
+    .par_iter()
     .filter_map(|path| {
         // Filter by include pattern
-        if let Some(include_matcher) = &include_matcher {
-            // ... filter logic
+        if let Some(inc_matcher) = &include_matcher {
+            let relative_candidate = path.strip_prefix(&search_root_owned).unwrap_or(path.as_path());
+            if !inc_matcher.is_match(relative_candidate)
+                && (!include_has_separator
+                    && !path.file_name().and_then(|name| name.to_str())
+                        .map(|name| inc_matcher.is_match(name))
+                        .unwrap_or(false))
+            {
+                return None;
+            }
         }
 
         let mut file_hits = Vec::new();
         // Note: Searcher is not thread-safe, need to create per-thread
-        let searcher = SearcherBuilder::new().line_number(true).build();
+        let mut searcher = SearcherBuilder::new().line_number(true).build();
         let sink = sinks::Lossy(|line_number, line| {
             file_hits.push(SearchHit { ... });
             Ok(true)
         });
 
-        if searcher.search_path(matcher.clone(), &path, sink).is_err() {
+        if searcher.search_path(matcher.clone(), path, sink).is_err() {
             skipped.fetch_add(1, Ordering::Relaxed);
             return None;
         }
@@ -124,39 +118,47 @@ let matches: Vec<SearchHit> = files
 
 ---
 
-#### 3. Glob Tool Parallel File Matching
+#### 3. Glob Tool Parallel File Matching ✅ Done
 
 **File:** `src/tooling/builtin/search.rs:82-112`
 
-**Current Implementation:**
-```rust
-for result in WalkBuilder::new(&search_root).build() {
-    // Process each entry sequentially
-    if glob_matches_path(&path, &search_root, &matcher, pattern) {
-        matches.push(SearchHit::from_path(&path)?);
-    }
-}
-```
-
-**Proposed Change:**
+**Implementation (Done):**
 ```rust
 use rayon::prelude::*;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-let files: Vec<_> = WalkBuilder::new(&search_root)
+let skipped = AtomicUsize::new(0);
+let paths: Vec<PathBuf> = WalkBuilder::new(&search_root)
     .build()
-    .par_bridge()
-    .filter_map(|result| {
-        let entry = result.ok()?;
-        if !entry.file_type()?.is_file() {
-            return None;
+    .filter_map(|result| match result {
+        Ok(entry) => Some(entry.into_path()),
+        Err(_) => {
+            skipped.fetch_add(1, Ordering::Relaxed);
+            None
         }
-        let path = entry.into_path();
-        if glob_matches_path(&path, &search_root, &matcher, pattern) {
-            SearchHit::from_path(&path).ok()
+    })
+    .filter(|path| path.is_file())
+    .collect();
+
+let search_root_owned = search_root.clone();
+let matched_paths: Vec<SearchHit> = paths
+    .par_iter()
+    .filter_map(|path| {
+        if glob_matches_path(path, &search_root_owned, &matcher, &pattern_owned) {
+            SearchHit::from_path(path).ok()
         } else {
             None
         }
     })
+    .collect();
+```
+
+**Impact:**
+- Parallel glob matching for large directories
+- Benefits especially when many files match the pattern
+
+**Complexity:** Low
+**Risk:** Low
     .collect();
 ```
 
@@ -372,10 +374,10 @@ mod benches {
 
 ## Summary
 
-The most impactful rayon optimizations for TiDev are:
+All priority rayon optimizations have been implemented:
 
-1. **@-mention scoring** - Easy win, high impact for large workspaces
-2. **Grep tool** - Medium complexity, high impact for code search
-3. **Glob tool** - Low complexity, medium impact
+1. **@-mention scoring** ✅ Done - `src/app/input/at_mention.rs:765`
+2. **Grep tool** ✅ Done - `src/tooling/builtin/search.rs:230-275`
+3. **Glob tool** ✅ Done - `src/tooling/builtin/search.rs:85-101`
 
 The existing tool call rendering parallelization in `render_chat.rs` is a good pattern to follow for additional optimizations.
