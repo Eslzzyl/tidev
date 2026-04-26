@@ -863,7 +863,7 @@ impl TelegramChannel {
     }
 
     async fn query_balance_for_provider(&self, provider_id: &str) -> Result<String> {
-        let http = reqwest::Client::new();
+        let http = self.llm.http();
         let api_key = self
             .auth
             .api_key(provider_id)

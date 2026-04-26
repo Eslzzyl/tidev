@@ -17,6 +17,7 @@ impl App {
         let auth = AuthStore::load_or_create(&paths)?;
         let store = SessionStore::open(paths.default_database_path())?;
         let llm = LlmClient::new()?;
+        let http_client = Arc::new(reqwest::Client::new());
         let theme = ThemeManager::new(&config.theme);
         let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
         let file_read_tracker = Arc::new(FileReadTracker::new());
@@ -64,6 +65,7 @@ impl App {
             auth,
             store,
             llm,
+            http_client,
             theme,
             mode,
             active_model: active_model.clone(),

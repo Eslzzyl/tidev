@@ -97,6 +97,7 @@ struct App {
     auth: AuthStore,
     store: SessionStore,
     llm: LlmClient,
+    http_client: Arc<reqwest::Client>,
     theme: ThemeManager,
     mode: SessionMode,
     active_model: ActiveModel,

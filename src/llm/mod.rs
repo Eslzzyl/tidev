@@ -33,6 +33,11 @@ impl LlmClient {
         Ok(Self { http })
     }
 
+    /// Get a reference to the HTTP client for reuse.
+    pub fn http(&self) -> &Client {
+        &self.http
+    }
+
     pub async fn stream_chat(
         &self,
         session_id: Uuid,

@@ -1,6 +1,5 @@
 use super::*;
 use crate::session::MessageRole;
-use reqwest::Client;
 
 impl App {
     pub(crate) fn handle_event(&mut self, event: Event, runtime: &Runtime) -> Result<()> {
@@ -1849,7 +1848,7 @@ impl App {
                     };
                     if let Some(api_key) = self.auth.api_key(provider_id).map(|s| s.to_string()) {
                         panel.set_loading(true);
-                        let http = reqwest::Client::new();
+                        let http = self.http_client.clone();
                         let panel_ptr = self.balance_panel.clone();
                         let panel_ptr_clone = panel_ptr.clone();
                         let api_key_clone = api_key.clone();
@@ -1916,7 +1915,7 @@ impl App {
                     };
                     if let Some(api_key) = self.auth.api_key(provider_id).map(|s| s.to_string()) {
                         panel.set_loading(true);
-                        let http = reqwest::Client::new();
+                        let http = self.http_client.clone();
                         let panel_ptr = self.balance_panel.clone();
                         let panel_ptr_clone = panel_ptr.clone();
                         let api_key_clone = api_key.clone();
@@ -2038,7 +2037,7 @@ impl App {
                 }
             }
 
-            let http = Client::new();
+            let http = self.http_client.clone();
             let panel_ptr = self.balance_panel.clone();
             let panel_ptr_clone = panel_ptr.clone();
             let api_key_clone = api_key.clone();
@@ -2122,7 +2121,7 @@ impl App {
         if let Some(api_key) = self.auth.api_key(provider_id).map(|s| s.to_string()) {
             panel.set_loading(true);
 
-            let http = Client::new();
+            let http = self.http_client.clone();
             let panel_ptr = self.balance_panel.clone();
             let panel_ptr_clone = panel_ptr.clone();
             let api_key_clone = api_key.clone();
