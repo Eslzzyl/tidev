@@ -516,12 +516,25 @@ poll_timeout_secs = 30
             .map(ApiType::parse)
             .unwrap_or_default();
 
-        // Determine thinking level based on model name
         let request_model_id = model
             .request_model_id
             .clone()
             .unwrap_or_else(|| model_id.to_string());
-        let thinking_level = ThinkingMatcher::match_for_model(&request_model_id);
+
+        // Determine thinking level with cascade fallback:
+        // 1. Try request_model_id first (if present)
+        // 2. Then try display_name (if request_model_id is None)
+        // 3. Finally try model_id (if both above are None)
+        let thinking_level = if let Some(ref rid) = model.request_model_id {
+            ThinkingMatcher::match_for_model(rid)
+        } else {
+            let display_name = model.display_name.clone();
+            if display_name.is_empty() {
+                ThinkingMatcher::match_for_model(&model_id)
+            } else {
+                ThinkingMatcher::match_for_model(&display_name)
+            }
+        };
 
         Ok(ActiveModel {
             provider_id: provider_id.to_string(),
