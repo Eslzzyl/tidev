@@ -15,8 +15,8 @@ use std::{
     cell::{Cell, RefCell},
     env, io,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
     sync::atomic::Ordering,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use tokio::{
@@ -212,10 +212,7 @@ impl App {
     }
 
     /// Build attachment for @ reference with truncation like opencode's read tool.
-    fn build_at_reference_attachment(
-        &self,
-        path: &str,
-    ) -> Result<Option<MessageAttachment>> {
+    fn build_at_reference_attachment(&self, path: &str) -> Result<Option<MessageAttachment>> {
         use crate::tooling::builtin::file::read_file_for_at_reference;
 
         let absolute = self.resolve_workspace_path(path);
@@ -251,8 +248,7 @@ impl App {
         match read_file_for_at_reference(&self.workspace_root, path) {
             Ok((tool_output, truncated)) => {
                 // Also read full content for display purposes
-                let content = std::fs::read_to_string(&absolute)
-                    .unwrap_or_else(|_| String::new());
+                let content = std::fs::read_to_string(&absolute).unwrap_or_else(|_| String::new());
                 Ok(Some(MessageAttachment::FileReference {
                     path: path.to_string(),
                     content: Arc::new(content),
@@ -262,8 +258,7 @@ impl App {
             }
             Err(_error) => {
                 // Fall back to full content if read fails
-                let content = std::fs::read_to_string(&absolute)
-                    .unwrap_or_else(|_| String::new());
+                let content = std::fs::read_to_string(&absolute).unwrap_or_else(|_| String::new());
                 Ok(Some(MessageAttachment::FileReference {
                     path: path.to_string(),
                     content: Arc::new(content),
@@ -321,7 +316,7 @@ impl App {
         }))
     }
 
-     /// Parse @ references using fancy-regex like opencode.
+    /// Parse @ references using fancy-regex like opencode.
     /// Regex: `(?<![\w\`])@(\.?[^\s\`.,]*(?:\.[^\s\`.,]+)*)`
     /// Uses look-behind to ensure @ is not preceded by word characters or backticks.
     fn inline_file_references(&self, prompt: &str) -> Vec<String> {

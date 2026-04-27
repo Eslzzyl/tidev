@@ -744,6 +744,7 @@ impl App {
     }
 
     pub(crate) fn handle_key_event(&mut self, key: KeyEvent, runtime: &Runtime) -> Result<()> {
+        crate::log_debug!("KeyEvent: code={:?}, modifiers={:?}", key.code, key.modifiers);
         if self.leader_key_pending {
             self.leader_key_pending = false;
             let _ = self.handle_leader_key(key, runtime)?;
@@ -860,10 +861,10 @@ impl App {
         }
 
         if matches!(key.code, KeyCode::Char('v'))
-            && (key.modifiers.contains(KeyModifiers::CONTROL)
-                || key.modifiers.contains(KeyModifiers::SUPER))
+            && key.modifiers.contains(KeyModifiers::CONTROL)
             && !key.modifiers.contains(KeyModifiers::ALT)
             && !key.modifiers.contains(KeyModifiers::SHIFT)
+            && !key.modifiers.contains(KeyModifiers::SUPER)
         {
             self.handle_clipboard_paste()?;
             return Ok(());
@@ -1182,6 +1183,7 @@ impl App {
             mime: "image/png".to_string(),
             data_url,
         });
+        self.composer.insert_str("[Image]");
         self.last_notice = Some("Image pasted into draft".to_string());
         Ok(())
     }
