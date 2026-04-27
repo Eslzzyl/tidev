@@ -18,6 +18,7 @@ pub mod storage;
 pub mod system_info;
 pub mod theme;
 pub mod tooling;
+pub mod utils;
 
 use clap::Parser;
 

@@ -3,6 +3,7 @@ use crate::{
     session::{COMPACTION_MESSAGE_LABEL, Message, MessageRole, ToolCall},
     theme::ThemePalette,
     tooling::{TodoItem, canonical_tool_name},
+    utils::format_token_count,
 };
 use chrono::Local;
 use ratatui::{
@@ -991,6 +992,49 @@ impl App {
                 )]));
             }
         }
+
+        // Token statistics (session cumulative)
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![Span::styled(
+            "Tokens",
+            Style::default()
+                .fg(palette.accent)
+                .add_modifier(Modifier::BOLD),
+        )]));
+
+        let (total_in, total_out, total_cache_read, total_cache_write) = self
+            .conversation
+            .messages
+            .iter()
+            .filter(|m| matches!(m.role, MessageRole::Assistant))
+            .fold((0u64, 0u64, 0u64, 0u64), |acc, m| {
+                (
+                    acc.0 + m.input_tokens.unwrap_or(0) as u64,
+                    acc.1 + m.output_tokens.unwrap_or(0) as u64,
+                    acc.2 + m.cache_read_tokens.unwrap_or(0) as u64,
+                    acc.3 + m.cache_write_tokens.unwrap_or(0) as u64,
+                )
+            });
+
+        let total = total_in + total_out;
+        let total_cache = total_cache_read + total_cache_write;
+
+        lines.push(Line::from(vec![Span::styled(
+            format!("Total: {}", format_token_count(total)),
+            Style::default().fg(palette.text),
+        )]));
+        lines.push(Line::from(vec![Span::styled(
+            format!("In: {}", format_token_count(total_in)),
+            Style::default().fg(palette.muted),
+        )]));
+        lines.push(Line::from(vec![Span::styled(
+            format!("Cache: {}", format_token_count(total_cache)),
+            Style::default().fg(palette.muted),
+        )]));
+        lines.push(Line::from(vec![Span::styled(
+            format!("Out: {}", format_token_count(total_out)),
+            Style::default().fg(palette.muted),
+        )]));
 
         lines.push(Line::from(""));
 
