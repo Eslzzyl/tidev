@@ -1861,36 +1861,32 @@ impl App {
                                 crate::app::ui::balance_panel::ProviderTab::DeepSeek => {
                                     match crate::balance::query_deepseek_balance(&http, &api_key_clone).await {
                                         Ok(balance) => {
-                                            if let Ok(mut guard) = panel_ptr_clone.lock() {
-                                                if let Some(panel) = &mut *guard {
+                                            if let Ok(mut guard) = panel_ptr_clone.lock()
+                                                && let Some(panel) = &mut *guard {
                                                     panel.set_balance(balance);
                                                 }
-                                            }
                                         }
                                         Err(e) => {
-                                            if let Ok(mut guard) = panel_ptr_clone.lock() {
-                                                if let Some(panel) = &mut *guard {
+                                            if let Ok(mut guard) = panel_ptr_clone.lock()
+                                                && let Some(panel) = &mut *guard {
                                                     panel.set_error(e.to_string());
                                                 }
-                                            }
                                         }
                                     }
                                 }
                                 crate::app::ui::balance_panel::ProviderTab::SiliconFlow => {
                                     match crate::balance::query_siliconflow_balance(&http, &api_key_clone).await {
                                         Ok(balance) => {
-                                            if let Ok(mut guard) = panel_ptr_clone.lock() {
-                                                if let Some(panel) = &mut *guard {
+                                            if let Ok(mut guard) = panel_ptr_clone.lock()
+                                                && let Some(panel) = &mut *guard {
                                                     panel.set_siliconflow_balance(balance);
                                                 }
-                                            }
                                         }
                                         Err(e) => {
-                                            if let Ok(mut guard) = panel_ptr_clone.lock() {
-                                                if let Some(panel) = &mut *guard {
+                                            if let Ok(mut guard) = panel_ptr_clone.lock()
+                                                && let Some(panel) = &mut *guard {
                                                     panel.set_error(e.to_string());
                                                 }
-                                            }
                                         }
                                     }
                                 }
@@ -1928,36 +1924,32 @@ impl App {
                                 crate::app::ui::balance_panel::ProviderTab::DeepSeek => {
                                     match crate::balance::query_deepseek_balance(&http, &api_key_clone).await {
                                         Ok(balance) => {
-                                            if let Ok(mut guard) = panel_ptr_clone.lock() {
-                                                if let Some(panel) = &mut *guard {
+                                            if let Ok(mut guard) = panel_ptr_clone.lock()
+                                                && let Some(panel) = &mut *guard {
                                                     panel.set_balance(balance);
                                                 }
-                                            }
                                         }
                                         Err(e) => {
-                                            if let Ok(mut guard) = panel_ptr_clone.lock() {
-                                                if let Some(panel) = &mut *guard {
+                                            if let Ok(mut guard) = panel_ptr_clone.lock()
+                                                && let Some(panel) = &mut *guard {
                                                     panel.set_error(e.to_string());
                                                 }
-                                            }
                                         }
                                     }
                                 }
                                 crate::app::ui::balance_panel::ProviderTab::SiliconFlow => {
                                     match crate::balance::query_siliconflow_balance(&http, &api_key_clone).await {
                                         Ok(balance) => {
-                                            if let Ok(mut guard) = panel_ptr_clone.lock() {
-                                                if let Some(panel) = &mut *guard {
+                                            if let Ok(mut guard) = panel_ptr_clone.lock()
+                                                && let Some(panel) = &mut *guard {
                                                     panel.set_siliconflow_balance(balance);
                                                 }
-                                            }
                                         }
                                         Err(e) => {
-                                            if let Ok(mut guard) = panel_ptr_clone.lock() {
-                                                if let Some(panel) = &mut *guard {
+                                            if let Ok(mut guard) = panel_ptr_clone.lock()
+                                                && let Some(panel) = &mut *guard {
                                                     panel.set_error(e.to_string());
                                                 }
-                                            }
                                         }
                                     }
                                 }
@@ -2033,11 +2025,10 @@ impl App {
 
         if let Some(api_key) = self.auth.api_key(provider_id).map(|s| s.to_string()) {
             // Set loading state
-            if let Ok(mut guard) = self.balance_panel.lock() {
-                if let Some(panel) = &mut *guard {
+            if let Ok(mut guard) = self.balance_panel.lock()
+                && let Some(panel) = &mut *guard {
                     panel.set_loading(true);
                 }
-            }
 
             let http = self.http_client.clone();
             let panel_ptr = self.balance_panel.clone();
@@ -2049,36 +2040,32 @@ impl App {
                     crate::app::ui::balance_panel::ProviderTab::DeepSeek => {
                         match crate::balance::query_deepseek_balance(&http, &api_key_clone).await {
                             Ok(balance) => {
-                                if let Ok(mut guard) = panel_ptr_clone.lock() {
-                                    if let Some(panel) = &mut *guard {
+                                if let Ok(mut guard) = panel_ptr_clone.lock()
+                                    && let Some(panel) = &mut *guard {
                                         panel.set_balance(balance);
                                     }
-                                }
                             }
                             Err(e) => {
-                                if let Ok(mut guard) = panel_ptr_clone.lock() {
-                                    if let Some(panel) = &mut *guard {
+                                if let Ok(mut guard) = panel_ptr_clone.lock()
+                                    && let Some(panel) = &mut *guard {
                                         panel.set_error(e.to_string());
                                     }
-                                }
                             }
                         }
                     }
                     crate::app::ui::balance_panel::ProviderTab::SiliconFlow => {
                         match crate::balance::query_siliconflow_balance(&http, &api_key_clone).await {
                             Ok(balance) => {
-                                if let Ok(mut guard) = panel_ptr_clone.lock() {
-                                    if let Some(panel) = &mut *guard {
+                                if let Ok(mut guard) = panel_ptr_clone.lock()
+                                    && let Some(panel) = &mut *guard {
                                         panel.set_siliconflow_balance(balance);
                                     }
-                                }
                             }
                             Err(e) => {
-                                if let Ok(mut guard) = panel_ptr_clone.lock() {
-                                    if let Some(panel) = &mut *guard {
+                                if let Ok(mut guard) = panel_ptr_clone.lock()
+                                    && let Some(panel) = &mut *guard {
                                         panel.set_error(e.to_string());
                                     }
-                                }
                             }
                         }
                     }
@@ -2090,11 +2077,10 @@ impl App {
                 crate::app::ui::balance_panel::ProviderTab::DeepSeek => "DeepSeek API key not configured",
                 crate::app::ui::balance_panel::ProviderTab::SiliconFlow => "SiliconFlow API key not configured",
             };
-            if let Ok(mut guard) = self.balance_panel.lock() {
-                if let Some(panel) = &mut *guard {
+            if let Ok(mut guard) = self.balance_panel.lock()
+                && let Some(panel) = &mut *guard {
                     panel.set_error(error_msg.to_string());
                 }
-            }
         }
 
         Ok(())
@@ -2134,36 +2120,32 @@ impl App {
                     crate::app::ui::balance_panel::ProviderTab::DeepSeek => {
                         match crate::balance::query_deepseek_balance(&http, &api_key_clone).await {
                             Ok(balance) => {
-                                if let Ok(mut guard) = panel_ptr_clone.lock() {
-                                    if let Some(panel) = &mut *guard {
+                                if let Ok(mut guard) = panel_ptr_clone.lock()
+                                    && let Some(panel) = &mut *guard {
                                         panel.set_balance(balance);
                                     }
-                                }
                             }
                             Err(e) => {
-                                if let Ok(mut guard) = panel_ptr_clone.lock() {
-                                    if let Some(panel) = &mut *guard {
+                                if let Ok(mut guard) = panel_ptr_clone.lock()
+                                    && let Some(panel) = &mut *guard {
                                         panel.set_error(e.to_string());
                                     }
-                                }
                             }
                         }
                     }
                     crate::app::ui::balance_panel::ProviderTab::SiliconFlow => {
                         match crate::balance::query_siliconflow_balance(&http, &api_key_clone).await {
                             Ok(balance) => {
-                                if let Ok(mut guard) = panel_ptr_clone.lock() {
-                                    if let Some(panel) = &mut *guard {
+                                if let Ok(mut guard) = panel_ptr_clone.lock()
+                                    && let Some(panel) = &mut *guard {
                                         panel.set_siliconflow_balance(balance);
                                     }
-                                }
                             }
                             Err(e) => {
-                                if let Ok(mut guard) = panel_ptr_clone.lock() {
-                                    if let Some(panel) = &mut *guard {
+                                if let Ok(mut guard) = panel_ptr_clone.lock()
+                                    && let Some(panel) = &mut *guard {
                                         panel.set_error(e.to_string());
                                     }
-                                }
                             }
                         }
                     }

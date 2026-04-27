@@ -874,11 +874,11 @@ impl TelegramChannel {
 
         match provider_id {
             "deepseek" => {
-                let balance = crate::balance::query_deepseek_balance(&http, api_key).await?;
+                let balance = crate::balance::query_deepseek_balance(http, api_key).await?;
                 Ok(self.format_deepseek_balance(&balance))
             }
             "siliconflow-cn" => {
-                let balance = crate::balance::query_siliconflow_balance(&http, api_key).await?;
+                let balance = crate::balance::query_siliconflow_balance(http, api_key).await?;
                 Ok(self.format_siliconflow_balance(&balance))
             }
             _ => anyhow::bail!("Unsupported provider: {}", provider_id),
@@ -1204,7 +1204,7 @@ impl TelegramChannel {
                     message.message_thread_id,
                     chunk,
                     if index == 0 {
-                        Some(message.message_id as i64)
+                        Some(message.message_id)
                     } else {
                         None
                     },

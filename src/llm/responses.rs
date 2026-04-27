@@ -265,8 +265,8 @@ pub(super) async fn stream_responses(
                         }
                     }
                     ResponseStreamEvent::ContentPartAdded { content_part, sequence_number: _, output_index: _, content_index: _ } => {
-                        if content_part.part_type.as_str() == "tool_use" {
-                            if let Some(name) = &content_part.name {
+                        if content_part.part_type.as_str() == "tool_use"
+                            && let Some(name) = &content_part.name {
                                 let call_id = content_part
                                     .id
                                     .clone()
@@ -276,7 +276,6 @@ pub(super) async fn stream_responses(
                                     ToolCallBuilder::new(call_id.clone(), name.clone()),
                                 );
                             }
-                        }
                     }
                     ResponseStreamEvent::ReasoningPartAdded {
                         part: _,
