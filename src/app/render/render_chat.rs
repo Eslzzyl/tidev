@@ -1040,6 +1040,20 @@ impl App {
 
         lines.push(Line::from(""));
 
+        // Request count
+        let request_count = self
+            .conversation
+            .messages
+            .iter()
+            .filter(|m| matches!(m.role, MessageRole::Assistant))
+            .count();
+        lines.push(Line::from(vec![Span::styled(
+            format!("Requests: {request_count}"),
+            Style::default().fg(palette.text),
+        )]));
+
+        lines.push(Line::from(""));
+
         // Working directory
         lines.push(Line::from(shorten(
             &self.workspace_root.display().to_string(),
