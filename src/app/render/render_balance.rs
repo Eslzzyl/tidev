@@ -5,9 +5,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
-use crate::{
-    theme::ThemePalette,
-};
+use crate::theme::ThemePalette;
 
 use super::App;
 use crate::app::ui::balance_panel::{BalancePanelState, ProviderTab};
@@ -79,17 +77,14 @@ impl App {
             };
 
             let label = tab.label();
-            
+
             if i > 0 {
                 spans.push(Span::styled("  ", Style::default().bg(palette.panel)));
             }
             spans.push(Span::styled(format!("[{}]", label), style));
         }
 
-        spans.push(Span::styled(
-            "     ",
-            Style::default().bg(palette.panel),
-        ));
+        spans.push(Span::styled("     ", Style::default().bg(palette.panel)));
 
         let paragraph = Paragraph::new(Line::from(spans)).style(Style::default().bg(palette.panel));
         frame.render_widget(paragraph, area);
@@ -169,7 +164,10 @@ impl App {
                         Style::default().bg(palette.panel).fg(palette.muted),
                     )]));
                     lines.push(Line::from(vec![Span::styled(
-                        format!("  Topped Up:    {} {}", info.topped_up_balance, info.currency),
+                        format!(
+                            "  Topped Up:    {} {}",
+                            info.topped_up_balance, info.currency
+                        ),
                         Style::default().bg(palette.panel).fg(palette.muted),
                     )]));
                 }
@@ -235,7 +233,10 @@ impl App {
         };
 
         let spans = vec![
-            Span::styled(refresh_hint, Style::default().bg(palette.panel).fg(palette.muted)),
+            Span::styled(
+                refresh_hint,
+                Style::default().bg(palette.panel).fg(palette.muted),
+            ),
             Span::styled(
                 "                    [Esc] Close",
                 Style::default().bg(palette.panel).fg(palette.muted),

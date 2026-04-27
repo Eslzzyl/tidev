@@ -139,12 +139,7 @@ pub fn format_status_summary(
     start_time: std::time::Instant,
     avg_response_time_ms: Option<u64>,
 ) -> String {
-    let token_usage = crate::utils::TokenUsage::new(
-        input_tokens,
-        output_tokens,
-        0,
-        0,
-    );
+    let token_usage = crate::utils::TokenUsage::new(input_tokens, output_tokens, 0, 0);
     let total_tokens = token_usage.total();
     let context_usage_pct = token_usage.context_usage_pct(context_window);
 

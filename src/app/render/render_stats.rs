@@ -158,7 +158,11 @@ impl App {
                     .style(Color::Blue),
             );
             // Cache Read (shows label with formatted token count)
-            let cache_label = format!("{}\n{}", label, format_token_count(entry.cache_read_tokens as u64));
+            let cache_label = format!(
+                "{}\n{}",
+                label,
+                format_token_count(entry.cache_read_tokens as u64)
+            );
             bars.push(
                 Bar::with_label(cache_label, entry.cache_read_tokens as u64).style(Color::Cyan),
             );

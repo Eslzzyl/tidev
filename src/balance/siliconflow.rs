@@ -16,7 +16,7 @@ pub struct SiliconFlowBalanceData {
 }
 
 /// Query SiliconFlow account balance.
-/// 
+///
 /// # Arguments
 /// * `http` - reqwest HTTP client
 /// * `api_key` - SiliconFlow API key
@@ -25,7 +25,7 @@ pub async fn query_siliconflow_balance(
     api_key: &str,
 ) -> Result<SiliconFlowBalanceResponse> {
     let url = "https://api.siliconflow.cn/v1/user/info";
-    
+
     let response = http
         .get(url)
         .header("Authorization", format!("Bearer {api_key}"))
@@ -64,7 +64,7 @@ mod tests {
         }"#;
 
         let response: SiliconFlowBalanceResponse = serde_json::from_str(json).unwrap();
-        
+
         assert_eq!(response.data.total_balance, "100.00");
     }
 }

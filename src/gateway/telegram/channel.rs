@@ -757,10 +757,7 @@ impl TelegramChannel {
         }
 
         for info in &balance.balance_infos {
-            text.push_str(&format!(
-                "Currency: {}\n",
-                info.currency
-            ));
+            text.push_str(&format!("Currency: {}\n", info.currency));
             text.push_str(&format!(
                 "Total: {} {}\n",
                 info.total_balance, info.currency
@@ -779,7 +776,10 @@ impl TelegramChannel {
     }
 
     /// Format SiliconFlow balance for display.
-    fn format_siliconflow_balance(&self, balance: &crate::balance::SiliconFlowBalanceResponse) -> String {
+    fn format_siliconflow_balance(
+        &self,
+        balance: &crate::balance::SiliconFlowBalanceResponse,
+    ) -> String {
         format!(
             "💰 SiliconFlow Balance\n\nTotal: {} CNY",
             balance.data.total_balance
@@ -885,7 +885,8 @@ impl TelegramChannel {
         }
     }
 
-    async fn handle_model_command(&mut self, message: &TelegramMessage) -> Result<()> {        let providers = self.get_available_providers();
+    async fn handle_model_command(&mut self, message: &TelegramMessage) -> Result<()> {
+        let providers = self.get_available_providers();
 
         if providers.is_empty() {
             self.send_reply_chunks(
@@ -1566,11 +1567,8 @@ impl TelegramChannel {
 
         // Check if already compacting
         if self.compacting_sessions.contains(&session_id) {
-            self.send_reply_chunks(
-                source_message,
-                "Already compacting session. Please wait...",
-            )
-            .await?;
+            self.send_reply_chunks(source_message, "Already compacting session. Please wait...")
+                .await?;
             return Ok(());
         }
 

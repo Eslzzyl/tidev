@@ -505,7 +505,11 @@ impl ChatMessagePayload {
         })
     }
 
-    fn assistant(content: String, tool_calls: Option<Vec<ChatToolCallPayload>>, reasoning_content: Option<String>) -> Self {
+    fn assistant(
+        content: String,
+        tool_calls: Option<Vec<ChatToolCallPayload>>,
+        reasoning_content: Option<String>,
+    ) -> Self {
         Self {
             role: "assistant".to_string(),
             content: if content.is_empty() {

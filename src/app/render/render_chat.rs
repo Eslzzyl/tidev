@@ -3,7 +3,7 @@ use crate::{
     session::{COMPACTION_MESSAGE_LABEL, Message, MessageRole, ToolCall},
     theme::ThemePalette,
     tooling::{TodoItem, canonical_tool_name},
-    utils::{format_token_count, TokenUsage},
+    utils::{TokenUsage, format_token_count},
 };
 use chrono::Local;
 use ratatui::{
@@ -1003,7 +1003,12 @@ impl App {
         )]));
 
         let mut token_usage = TokenUsage::default();
-        for m in self.conversation.messages.iter().filter(|m| matches!(m.role, MessageRole::Assistant)) {
+        for m in self
+            .conversation
+            .messages
+            .iter()
+            .filter(|m| matches!(m.role, MessageRole::Assistant))
+        {
             token_usage.add(m.token_usage());
         }
 
@@ -1015,7 +1020,10 @@ impl App {
             Style::default().fg(palette.text),
         )]));
         lines.push(Line::from(vec![Span::styled(
-            format!("In: {}", format_token_count(token_usage.input_tokens as u64)),
+            format!(
+                "In: {}",
+                format_token_count(token_usage.input_tokens as u64)
+            ),
             Style::default().fg(palette.muted),
         )]));
         lines.push(Line::from(vec![Span::styled(
@@ -1023,7 +1031,10 @@ impl App {
             Style::default().fg(palette.muted),
         )]));
         lines.push(Line::from(vec![Span::styled(
-            format!("Out: {}", format_token_count(token_usage.output_tokens as u64)),
+            format!(
+                "Out: {}",
+                format_token_count(token_usage.output_tokens as u64)
+            ),
             Style::default().fg(palette.muted),
         )]));
 

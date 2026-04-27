@@ -19,7 +19,7 @@ pub struct DeepSeekBalanceInfo {
 }
 
 /// Query DeepSeek account balance.
-/// 
+///
 /// # Arguments
 /// * `http` - reqwest HTTP client
 /// * `api_key` - DeepSeek API key
@@ -28,7 +28,7 @@ pub async fn query_deepseek_balance(
     api_key: &str,
 ) -> Result<DeepSeekBalanceResponse> {
     let url = "https://api.deepseek.com/user/balance";
-    
+
     let response = http
         .get(url)
         .header("Authorization", format!("Bearer {api_key}"))
@@ -73,10 +73,10 @@ mod tests {
         }"#;
 
         let response: DeepSeekBalanceResponse = serde_json::from_str(json).unwrap();
-        
+
         assert!(response.is_available);
         assert_eq!(response.balance_infos.len(), 1);
-        
+
         let info = &response.balance_infos[0];
         assert_eq!(info.currency, "CNY");
         assert_eq!(info.total_balance, "110.00");

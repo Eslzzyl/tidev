@@ -231,7 +231,9 @@ fn grep_paths(
         .par_iter()
         .filter_map(|path| {
             if let Some(ref inc_matcher) = include_matcher {
-                let relative_candidate = path.strip_prefix(&search_root_owned).unwrap_or(path.as_path());
+                let relative_candidate = path
+                    .strip_prefix(&search_root_owned)
+                    .unwrap_or(path.as_path());
                 if !inc_matcher.is_match(relative_candidate)
                     && (!include_has_separator
                         && !path

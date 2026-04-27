@@ -85,7 +85,7 @@ pub(super) async fn stream_responses(
         response.status()
     );
 
-  let mut stream = response.bytes_stream();
+    let mut stream = response.bytes_stream();
     let mut buffer = String::new();
     let mut assistant_text = String::new();
     let mut reasoning_text = String::new();
@@ -138,7 +138,12 @@ pub(super) async fn stream_responses(
                     serde_json::from_str(&payload).context("failed to parse responses event")?;
 
                 match event {
-                    ResponseStreamEvent::OutputTextDelta { delta, sequence_number: _, output_index: _, content_index: _ } => {
+                    ResponseStreamEvent::OutputTextDelta {
+                        delta,
+                        sequence_number: _,
+                        output_index: _,
+                        content_index: _,
+                    } => {
                         if first_delta_time.is_none() {
                             first_delta_time = Some(std::time::Instant::now());
                         }
@@ -149,7 +154,12 @@ pub(super) async fn stream_responses(
                             content: delta,
                         });
                     }
-                    ResponseStreamEvent::RefusalDelta { delta, sequence_number: _, output_index: _, content_index: _ } => {
+                    ResponseStreamEvent::RefusalDelta {
+                        delta,
+                        sequence_number: _,
+                        output_index: _,
+                        content_index: _,
+                    } => {
                         // Handle refusal text (model declined to respond)
                         if first_delta_time.is_none() {
                             first_delta_time = Some(std::time::Instant::now());
@@ -161,7 +171,12 @@ pub(super) async fn stream_responses(
                             content: delta,
                         });
                     }
-                    ResponseStreamEvent::ReasoningDelta { delta, sequence_number: _, output_index: _, content_index: _ } => {
+                    ResponseStreamEvent::ReasoningDelta {
+                        delta,
+                        sequence_number: _,
+                        output_index: _,
+                        content_index: _,
+                    } => {
                         if first_delta_time.is_none() {
                             first_delta_time = Some(std::time::Instant::now());
                         }
@@ -172,7 +187,13 @@ pub(super) async fn stream_responses(
                             content: delta,
                         });
                     }
-                    ResponseStreamEvent::ReasoningTextDelta { delta, sequence_number: _, item_id: _, output_index: _, content_index: _ } => {
+                    ResponseStreamEvent::ReasoningTextDelta {
+                        delta,
+                        sequence_number: _,
+                        item_id: _,
+                        output_index: _,
+                        content_index: _,
+                    } => {
                         if first_delta_time.is_none() {
                             first_delta_time = Some(std::time::Instant::now());
                         }
@@ -211,7 +232,11 @@ pub(super) async fn stream_responses(
                             content: text,
                         });
                     }
-                   ResponseStreamEvent::OutputItemAdded { item, sequence_number: _, output_index: _ } => {
+                    ResponseStreamEvent::OutputItemAdded {
+                        item,
+                        sequence_number: _,
+                        output_index: _,
+                    } => {
                         // Handle function_call items (Responses API style)
                         if item.item_type == "function_call" {
                             // Use item.id as the key (consistent with item_id in delta events)
@@ -235,7 +260,11 @@ pub(super) async fn stream_responses(
                             tool_calls.insert(key_id.clone(), builder);
                         }
                     }
-                    ResponseStreamEvent::OutputItemDone { item, sequence_number: _, output_index: _ } => {
+                    ResponseStreamEvent::OutputItemDone {
+                        item,
+                        sequence_number: _,
+                        output_index: _,
+                    } => {
                         // Handle function_call items - send final ToolCallUpdated
                         if item.item_type == "function_call" {
                             let key_id = if !item.id.is_empty() {
@@ -246,36 +275,43 @@ pub(super) async fn stream_responses(
                                 continue;
                             };
                             if let Some(builder) = tool_calls.get(&key_id)
-                                && let Some(arguments) = builder.arguments() {
-                                    let call = crate::session::ToolCall {
-                                        id: key_id.clone(),
-                                        name: builder.name().to_string(),
-                                        arguments: arguments.to_string(),
-                                    };
-                                    let _ = tx.send(BackendEvent::ToolCallUpdated {
-                                        session_id,
-                                        request_id,
-                                        tool_call: call,
-                                    });
-                                }
+                                && let Some(arguments) = builder.arguments()
+                            {
+                                let call = crate::session::ToolCall {
+                                    id: key_id.clone(),
+                                    name: builder.name().to_string(),
+                                    arguments: arguments.to_string(),
+                                };
+                                let _ = tx.send(BackendEvent::ToolCallUpdated {
+                                    session_id,
+                                    request_id,
+                                    tool_call: call,
+                                });
+                            }
                         }
                         // Extract finish reason from message items
                         if let Some(reason) = &item.finish_reason {
                             finish_reason = Some(reason.clone());
                         }
                     }
-                    ResponseStreamEvent::ContentPartAdded { content_part, sequence_number: _, output_index: _, content_index: _ } => {
+                    ResponseStreamEvent::ContentPartAdded {
+                        content_part,
+                        sequence_number: _,
+                        output_index: _,
+                        content_index: _,
+                    } => {
                         if content_part.part_type.as_str() == "tool_use"
-                            && let Some(name) = &content_part.name {
-                                let call_id = content_part
-                                    .id
-                                    .clone()
-                                    .unwrap_or_else(|| format!("call_{}", Uuid::new_v4()));
-                                tool_calls.insert(
-                                    call_id.clone(),
-                                    ToolCallBuilder::new(call_id.clone(), name.clone()),
-                                );
-                            }
+                            && let Some(name) = &content_part.name
+                        {
+                            let call_id = content_part
+                                .id
+                                .clone()
+                                .unwrap_or_else(|| format!("call_{}", Uuid::new_v4()));
+                            tool_calls.insert(
+                                call_id.clone(),
+                                ToolCallBuilder::new(call_id.clone(), name.clone()),
+                            );
+                        }
                     }
                     ResponseStreamEvent::ReasoningPartAdded {
                         part: _,
@@ -331,29 +367,97 @@ pub(super) async fn stream_responses(
                     } => {
                         // Only accumulate arguments, final ToolCallUpdated is sent in OutputItemDone
                     }
-                    ResponseStreamEvent::ResponseCreated { response: _, sequence_number: _ }
-                    | ResponseStreamEvent::ResponseInProgress { response: _, sequence_number: _ }
-                    | ResponseStreamEvent::ResponseCompleted { response: _, sequence_number: _ }
-                    | ResponseStreamEvent::ResponseQueued { response: _, sequence_number: _ }
-                    | ResponseStreamEvent::OutputTextDone { sequence_number: _, output_index: _, content_index: _ }
-                    | ResponseStreamEvent::RefusalDone { sequence_number: _, output_index: _, content_index: _ }
-                    | ResponseStreamEvent::ReasoningDone { sequence_number: _, output_index: _, content_index: _ }
-                    | ResponseStreamEvent::ReasoningTextDone { text: _, sequence_number: _, item_id: _, output_index: _, content_index: _ }
-                    | ResponseStreamEvent::ReasoningSummaryPartDone { sequence_number: _, item_id: _, output_index: _, summary_index: _ }
-                    | ResponseStreamEvent::ContentPartDone { content_part: _, sequence_number: _, output_index: _, content_index: _ }
-                    | ResponseStreamEvent::FileSearchCallInProgress { sequence_number: _, output_index: _, item_id: _ }
-                    | ResponseStreamEvent::FileSearchCallSearching { sequence_number: _, output_index: _, item_id: _ }
-                    | ResponseStreamEvent::FileSearchCallCompleted { sequence_number: _, output_index: _, item_id: _ }
-                    | ResponseStreamEvent::WebSearchCallInProgress { sequence_number: _, output_index: _, item_id: _ }
-                    | ResponseStreamEvent::WebSearchCallSearching { sequence_number: _, output_index: _, item_id: _ }
-                    | ResponseStreamEvent::WebSearchCallCompleted { sequence_number: _, output_index: _, item_id: _ }
-                    | ResponseStreamEvent::ResponseIncomplete { response: _, sequence_number: _ } => {
+                    ResponseStreamEvent::ResponseCreated {
+                        response: _,
+                        sequence_number: _,
+                    }
+                    | ResponseStreamEvent::ResponseInProgress {
+                        response: _,
+                        sequence_number: _,
+                    }
+                    | ResponseStreamEvent::ResponseCompleted {
+                        response: _,
+                        sequence_number: _,
+                    }
+                    | ResponseStreamEvent::ResponseQueued {
+                        response: _,
+                        sequence_number: _,
+                    }
+                    | ResponseStreamEvent::OutputTextDone {
+                        sequence_number: _,
+                        output_index: _,
+                        content_index: _,
+                    }
+                    | ResponseStreamEvent::RefusalDone {
+                        sequence_number: _,
+                        output_index: _,
+                        content_index: _,
+                    }
+                    | ResponseStreamEvent::ReasoningDone {
+                        sequence_number: _,
+                        output_index: _,
+                        content_index: _,
+                    }
+                    | ResponseStreamEvent::ReasoningTextDone {
+                        text: _,
+                        sequence_number: _,
+                        item_id: _,
+                        output_index: _,
+                        content_index: _,
+                    }
+                    | ResponseStreamEvent::ReasoningSummaryPartDone {
+                        sequence_number: _,
+                        item_id: _,
+                        output_index: _,
+                        summary_index: _,
+                    }
+                    | ResponseStreamEvent::ContentPartDone {
+                        content_part: _,
+                        sequence_number: _,
+                        output_index: _,
+                        content_index: _,
+                    }
+                    | ResponseStreamEvent::FileSearchCallInProgress {
+                        sequence_number: _,
+                        output_index: _,
+                        item_id: _,
+                    }
+                    | ResponseStreamEvent::FileSearchCallSearching {
+                        sequence_number: _,
+                        output_index: _,
+                        item_id: _,
+                    }
+                    | ResponseStreamEvent::FileSearchCallCompleted {
+                        sequence_number: _,
+                        output_index: _,
+                        item_id: _,
+                    }
+                    | ResponseStreamEvent::WebSearchCallInProgress {
+                        sequence_number: _,
+                        output_index: _,
+                        item_id: _,
+                    }
+                    | ResponseStreamEvent::WebSearchCallSearching {
+                        sequence_number: _,
+                        output_index: _,
+                        item_id: _,
+                    }
+                    | ResponseStreamEvent::WebSearchCallCompleted {
+                        sequence_number: _,
+                        output_index: _,
+                        item_id: _,
+                    }
+                    | ResponseStreamEvent::ResponseIncomplete {
+                        response: _,
+                        sequence_number: _,
+                    } => {
                         // These events don't need special handling
                     }
-                    ResponseStreamEvent::ResponseFailed { response: _, sequence_number: _ } => {
-                        log_error!(
-                            "openai responses stream failed"
-                        );
+                    ResponseStreamEvent::ResponseFailed {
+                        response: _,
+                        sequence_number: _,
+                    } => {
+                        log_error!("openai responses stream failed");
                         return Err(anyhow::anyhow!("Response stream failed"));
                     }
                     ResponseStreamEvent::Error { message, code } => {
@@ -450,14 +554,19 @@ pub(super) async fn complete_responses(
 
     // Check for error in response
     if let Some(error) = response.error {
-        return Err(anyhow::anyhow!("API error: {} - {}", error.code, error.message));
+        return Err(anyhow::anyhow!(
+            "API error: {} - {}",
+            error.code,
+            error.message
+        ));
     }
 
     // Check for result error
     if let Some(result) = response.result
-        && result.result_type == "error" {
-            return Err(anyhow::anyhow!("API result error"));
-        }
+        && result.result_type == "error"
+    {
+        return Err(anyhow::anyhow!("API result error"));
+    }
 
     // Extract text content from message output items
     let content = response
@@ -465,7 +574,6 @@ pub(super) async fn complete_responses(
         .into_iter()
         .find_map(|output| {
             if output.kind == "message" {
-                
                 output.content.into_iter().find_map(|part| {
                     if part.kind == "output_text" || part.kind == "text" {
                         Some(part.text.unwrap_or_default())
@@ -538,8 +646,7 @@ fn build_responses_request(
                     for tool_call in &message.tool_calls {
                         combined.push_str(&format!(
                             "\n[Tool: {}]\nArguments: {}",
-                            tool_call.name,
-                            tool_call.arguments
+                            tool_call.name, tool_call.arguments
                         ));
                     }
                     if !combined.is_empty() {
@@ -1165,53 +1272,75 @@ impl From<ResponseStreamEventRaw> for ResponseStreamEvent {
                 output_index: raw.output_index,
                 content_index: raw.content_index,
             },
-            "response.reasoning_summary_text.delta" => ResponseStreamEvent::ReasoningSummaryTextDelta {
-                summary_delta: raw.summary,
-                sequence_number: raw.sequence_number,
-                item_id: raw.item_id,
-                output_index: raw.output_index,
-                summary_index: raw.summary_index,
-            },
-            "response.reasoning_summary_text.done" => ResponseStreamEvent::ReasoningSummaryTextDone {
-                text: raw.text,
-                sequence_number: raw.sequence_number,
-                item_id: raw.item_id,
-                output_index: raw.output_index,
-                summary_index: raw.summary_index,
-            },
-            "response.reasoning_summary_part.added" => ResponseStreamEvent::ReasoningSummaryPartAdded {
-                part: raw.part,
-                sequence_number: raw.sequence_number,
-                item_id: raw.item_id,
-                output_index: raw.output_index,
-                summary_index: raw.summary_index,
-            },
-            "response.reasoning_summary_part.done" => ResponseStreamEvent::ReasoningSummaryPartDone {
-                sequence_number: raw.sequence_number,
-                item_id: raw.item_id,
-                output_index: raw.output_index,
-                summary_index: raw.summary_index,
-            },
-            "response.function_call_arguments.delta" => ResponseStreamEvent::FunctionCallArgumentsDelta {
-                call_id: raw.id,
-                call_name: if raw.name.is_empty() { None } else { Some(raw.name) },
-                arguments: raw.delta,
-                sequence_number: raw.sequence_number,
-                output_index: raw.output_index,
-                item_id: raw.item_id,
-            },
-            "response.function_call_arguments.done" => ResponseStreamEvent::FunctionCallArgumentsDone {
-                call_id: raw.id,
-                call_name: if raw.name.is_empty() { None } else { Some(raw.name) },
-                sequence_number: raw.sequence_number,
-                output_index: raw.output_index,
-                item_id: raw.item_id,
-            },
-            "response.file_search_call.in_progress" => ResponseStreamEvent::FileSearchCallInProgress {
-                sequence_number: raw.sequence_number,
-                output_index: raw.output_index,
-                item_id: raw.item_id,
-            },
+            "response.reasoning_summary_text.delta" => {
+                ResponseStreamEvent::ReasoningSummaryTextDelta {
+                    summary_delta: raw.summary,
+                    sequence_number: raw.sequence_number,
+                    item_id: raw.item_id,
+                    output_index: raw.output_index,
+                    summary_index: raw.summary_index,
+                }
+            }
+            "response.reasoning_summary_text.done" => {
+                ResponseStreamEvent::ReasoningSummaryTextDone {
+                    text: raw.text,
+                    sequence_number: raw.sequence_number,
+                    item_id: raw.item_id,
+                    output_index: raw.output_index,
+                    summary_index: raw.summary_index,
+                }
+            }
+            "response.reasoning_summary_part.added" => {
+                ResponseStreamEvent::ReasoningSummaryPartAdded {
+                    part: raw.part,
+                    sequence_number: raw.sequence_number,
+                    item_id: raw.item_id,
+                    output_index: raw.output_index,
+                    summary_index: raw.summary_index,
+                }
+            }
+            "response.reasoning_summary_part.done" => {
+                ResponseStreamEvent::ReasoningSummaryPartDone {
+                    sequence_number: raw.sequence_number,
+                    item_id: raw.item_id,
+                    output_index: raw.output_index,
+                    summary_index: raw.summary_index,
+                }
+            }
+            "response.function_call_arguments.delta" => {
+                ResponseStreamEvent::FunctionCallArgumentsDelta {
+                    call_id: raw.id,
+                    call_name: if raw.name.is_empty() {
+                        None
+                    } else {
+                        Some(raw.name)
+                    },
+                    arguments: raw.delta,
+                    sequence_number: raw.sequence_number,
+                    output_index: raw.output_index,
+                    item_id: raw.item_id,
+                }
+            }
+            "response.function_call_arguments.done" => {
+                ResponseStreamEvent::FunctionCallArgumentsDone {
+                    call_id: raw.id,
+                    call_name: if raw.name.is_empty() {
+                        None
+                    } else {
+                        Some(raw.name)
+                    },
+                    sequence_number: raw.sequence_number,
+                    output_index: raw.output_index,
+                    item_id: raw.item_id,
+                }
+            }
+            "response.file_search_call.in_progress" => {
+                ResponseStreamEvent::FileSearchCallInProgress {
+                    sequence_number: raw.sequence_number,
+                    output_index: raw.output_index,
+                    item_id: raw.item_id,
+                }
+            }
             "response.file_search_call.searching" => ResponseStreamEvent::FileSearchCallSearching {
                 sequence_number: raw.sequence_number,
                 output_index: raw.output_index,
@@ -1222,11 +1351,13 @@ impl From<ResponseStreamEventRaw> for ResponseStreamEvent {
                 output_index: raw.output_index,
                 item_id: raw.item_id,
             },
-            "response.web_search_call.in_progress" => ResponseStreamEvent::WebSearchCallInProgress {
-                sequence_number: raw.sequence_number,
-                output_index: raw.output_index,
-                item_id: raw.item_id,
-            },
+            "response.web_search_call.in_progress" => {
+                ResponseStreamEvent::WebSearchCallInProgress {
+                    sequence_number: raw.sequence_number,
+                    output_index: raw.output_index,
+                    item_id: raw.item_id,
+                }
+            }
             "response.web_search_call.searching" => ResponseStreamEvent::WebSearchCallSearching {
                 sequence_number: raw.sequence_number,
                 output_index: raw.output_index,
@@ -1539,7 +1670,11 @@ mod tests {
 
         // Input should be a string with conversation history
         assert!(request.input.contains("User: Run command"));
-        assert!(request.input.contains("Assistant: I'll help you run a command."));
+        assert!(
+            request
+                .input
+                .contains("Assistant: I'll help you run a command.")
+        );
         assert!(request.input.contains("Tool: Tool result: success"));
     }
 

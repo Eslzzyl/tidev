@@ -645,8 +645,14 @@ impl QQChannel {
                 Ok(true)
             }
             "compact" => {
-                self.handle_compact_command(channel_id, msg_id, chat_key, conversation, active_model)
-                    .await?;
+                self.handle_compact_command(
+                    channel_id,
+                    msg_id,
+                    chat_key,
+                    conversation,
+                    active_model,
+                )
+                .await?;
                 Ok(true)
             }
             "init" => {
@@ -1062,15 +1068,23 @@ impl QQChannel {
 
         // Check if already compacting
         if self.compacting_sessions.contains(&session_id) {
-            self.send_markdown(channel_id, "Already compacting session. Please wait...", Some(msg_id))
-                .await?;
+            self.send_markdown(
+                channel_id,
+                "Already compacting session. Please wait...",
+                Some(msg_id),
+            )
+            .await?;
             return Ok(());
         }
 
         self.compacting_sessions.insert(session_id);
 
-        self.send_markdown(channel_id, "Compacting session context... This may take a moment.", Some(msg_id))
-            .await?;
+        self.send_markdown(
+            channel_id,
+            "Compacting session context... This may take a moment.",
+            Some(msg_id),
+        )
+        .await?;
 
         // Clone required data for async operation
         let llm = self.llm.clone();

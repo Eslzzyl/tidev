@@ -272,7 +272,9 @@ impl App {
             (SessionPanelDialog::Cleanup { .. }, KeyCode::Char('5')) => {
                 self.select_cleanup_workspace()
             }
-            (SessionPanelDialog::ExportConfirm { .. }, KeyCode::Enter) => self.confirm_export_session(),
+            (SessionPanelDialog::ExportConfirm { .. }, KeyCode::Enter) => {
+                self.confirm_export_session()
+            }
             _ => Ok(()),
         }
     }
@@ -558,7 +560,11 @@ impl App {
             }
 
             let count = session_ids.len();
-            self.last_notice = Some(format!("Exported {} session(s) to {}", count, export_dir.display()));
+            self.last_notice = Some(format!(
+                "Exported {} session(s) to {}",
+                count,
+                export_dir.display()
+            ));
         }
 
         self.close_session_panel_dialog()?;

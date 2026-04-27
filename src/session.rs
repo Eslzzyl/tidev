@@ -35,13 +35,23 @@ impl MessageAttachment {
 
     pub fn summary(&self) -> String {
         match self {
-            Self::FileReference { path, content, truncated, .. } => {
+            Self::FileReference {
+                path,
+                content,
+                truncated,
+                ..
+            } => {
                 let preview = content.lines().take(6).collect::<Vec<_>>().join(" ");
                 let truncated_hint = if *truncated { " (truncated)" } else { "" };
                 if preview.trim().is_empty() {
                     format!("[file:{}{}]", path, truncated_hint)
                 } else {
-                    format!("[file:{}{}] {}", path, truncated_hint, truncate_preview(&preview, 120))
+                    format!(
+                        "[file:{}{}] {}",
+                        path,
+                        truncated_hint,
+                        truncate_preview(&preview, 120)
+                    )
                 }
             }
             Self::DirectoryReference { path, tree } => {
@@ -61,7 +71,12 @@ impl MessageAttachment {
     /// For FileReference without tool_output, returns original format.
     pub fn prompt_text(&self) -> Option<String> {
         match self {
-            Self::FileReference { path, content, tool_output, truncated } => {
+            Self::FileReference {
+                path,
+                content,
+                tool_output,
+                truncated,
+            } => {
                 // If we have tool output (from @ reference), return in tool result format
                 if let Some(output) = tool_output {
                     let truncated_hint = if *truncated {

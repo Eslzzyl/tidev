@@ -1,7 +1,4 @@
-use crate::{
-    theme::ThemePalette,
-    utils::TokenUsage,
-};
+use crate::{theme::ThemePalette, utils::TokenUsage};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Position, Rect},
     prelude::{Frame, Modifier, Style, Text},
