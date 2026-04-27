@@ -1,4 +1,7 @@
-use crate::theme::ThemePalette;
+use crate::{
+    theme::ThemePalette,
+    utils::TokenUsage,
+};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Position, Rect},
     prelude::{Frame, Modifier, Style, Text},
@@ -501,10 +504,16 @@ impl App {
         }
 
         let token_status = self.context_usage.as_ref().map(|usage| {
-            let max_context = self.active_model.context_window as u32;
-            let percent = usage.input_tokens as f64 / max_context as f64 * 100.0;
+            let token_usage = TokenUsage::new(
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.cache_read_tokens,
+                usage.cache_write_tokens,
+            );
+            let max_context = self.active_model.context_window;
+            let percent = token_usage.context_usage_pct(max_context);
             let used_k = usage.input_tokens / 1000;
-            let max_k = max_context / 1000;
+            let max_k = max_context as u32 / 1000;
             format!("{:.1}% ({}K/{}K)", percent, used_k, max_k)
         });
 

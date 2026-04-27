@@ -9,6 +9,7 @@ use ratatui::{
 use crate::{
     stats::{Granularity, TimeRangeStats},
     theme::ThemePalette,
+    utils::format_token_count,
 };
 
 use super::App;
@@ -157,7 +158,7 @@ impl App {
                     .style(Color::Blue),
             );
             // Cache Read (shows label with formatted token count)
-            let cache_label = format!("{}\n{}", label, format_number(entry.cache_read_tokens));
+            let cache_label = format!("{}\n{}", label, format_token_count(entry.cache_read_tokens as u64));
             bars.push(
                 Bar::with_label(cache_label, entry.cache_read_tokens as u64).style(Color::Cyan),
             );
@@ -192,7 +193,7 @@ impl App {
                 Style::default().bg(palette.panel).fg(palette.muted),
             ),
             Span::styled(
-                format_number(stats.summary.total_tokens),
+                format_token_count(stats.summary.total_tokens as u64),
                 Style::default()
                     .bg(palette.panel)
                     .fg(palette.accent)
@@ -207,7 +208,7 @@ impl App {
                 Style::default().bg(palette.panel).fg(palette.muted),
             ),
             Span::styled(
-                format_number(stats.summary.total_input_tokens),
+                format_token_count(stats.summary.total_input_tokens as u64),
                 Style::default()
                     .bg(palette.panel)
                     .fg(Color::Blue)
@@ -222,7 +223,7 @@ impl App {
                 Style::default().bg(palette.panel).fg(palette.muted),
             ),
             Span::styled(
-                format_number(stats.summary.total_cache_read_tokens),
+                format_token_count(stats.summary.total_cache_read_tokens as u64),
                 Style::default()
                     .bg(palette.panel)
                     .fg(Color::Cyan)
@@ -241,7 +242,7 @@ impl App {
                 Style::default().bg(palette.panel).fg(palette.muted),
             ),
             Span::styled(
-                format_number(stats.summary.total_output_tokens),
+                format_token_count(stats.summary.total_output_tokens as u64),
                 Style::default()
                     .bg(palette.panel)
                     .fg(Color::Green)
@@ -274,7 +275,7 @@ impl App {
                 Style::default().bg(palette.panel).fg(palette.muted),
             ),
             Span::styled(
-                format_number(stats.summary.total_requests),
+                format_token_count(stats.summary.total_requests as u64),
                 Style::default()
                     .bg(palette.panel)
                     .fg(palette.text)
@@ -348,7 +349,7 @@ impl App {
                     Style::default().bg(palette.panel).fg(palette.text),
                 ),
                 Span::styled(
-                    format_number(entry.total_tokens),
+                    format_token_count(entry.total_tokens as u64),
                     Style::default().bg(palette.panel).fg(palette.accent_soft),
                 ),
                 Span::styled(
@@ -403,16 +404,6 @@ impl App {
 
         let paragraph = Paragraph::new(Line::from(spans)).style(Style::default().bg(palette.panel));
         frame.render_widget(paragraph, area);
-    }
-}
-
-fn format_number(n: i64) -> String {
-    if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    } else if n >= 1_000 {
-        format!("{:.1}K", n as f64 / 1_000.0)
-    } else {
-        n.to_string()
     }
 }
 

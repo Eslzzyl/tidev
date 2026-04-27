@@ -86,6 +86,7 @@ use crate::{
     storage::SessionStore,
     theme::{ThemeManager, ThemeName},
     tooling::{FileReadTracker, TodoItem, ToolRegistry},
+    utils::TokenUsage,
 };
 
 struct App {
@@ -968,13 +969,13 @@ impl App {
                     return Ok(());
                 }
 
-                let tokens_per_second = if let Some(ms) = duration_ms
-                    && ms > 0
-                {
-                    Some((output_tokens as f32) / (ms as f32 / 1000.0))
-                } else {
-                    None
-                };
+                let token_usage = TokenUsage::new(
+                    input_tokens,
+                    output_tokens,
+                    cache_read_tokens,
+                    cache_write_tokens,
+                );
+                let tokens_per_second = token_usage.tokens_per_second(duration_ms);
 
                 self.context_usage = Some(state::ContextUsage {
                     input_tokens,

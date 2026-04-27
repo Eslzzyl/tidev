@@ -1,6 +1,97 @@
 /// Utility functions for formatting and common operations.
 
 /// Token count units: K (thousand), M (million), B (billion), T (trillion).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TokenUsage {
+    /// Input tokens (prompt tokens)
+    pub input_tokens: u32,
+    /// Output tokens (completion tokens)
+    pub output_tokens: u32,
+    /// Cache read tokens (cached prompt tokens)
+    pub cache_read_tokens: u32,
+    /// Cache write tokens (cache creation tokens)
+    pub cache_write_tokens: u32,
+}
+
+impl TokenUsage {
+    /// Total tokens (input + output)
+    pub fn total(&self) -> u64 {
+        self.input_tokens as u64 + self.output_tokens as u64
+    }
+
+    /// Total cache tokens (read + write)
+    pub fn total_cache(&self) -> u64 {
+        self.cache_read_tokens as u64 + self.cache_write_tokens as u64
+    }
+
+    /// Context usage percentage given a context window size
+    pub fn context_usage_pct(&self, context_window: usize) -> f64 {
+        if context_window == 0 {
+            return 0.0;
+        }
+        let total = self.total() as f64;
+        (total / context_window as f64 * 100.0).min(100.0)
+    }
+
+    /// Calculate tokens per second given duration in milliseconds
+    pub fn tokens_per_second(&self, duration_ms: Option<u64>) -> Option<f32> {
+        let ms = duration_ms?;
+        if ms > 0 {
+            Some(self.output_tokens as f32 / (ms as f32 / 1000.0))
+        } else {
+            None
+        }
+    }
+
+    /// Create from individual values
+    pub fn new(
+        input_tokens: u32,
+        output_tokens: u32,
+        cache_read_tokens: u32,
+        cache_write_tokens: u32,
+    ) -> Self {
+        Self {
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+        }
+    }
+
+    /// Add two token usages together.
+    pub fn add(&mut self, other: Self) {
+        self.input_tokens += other.input_tokens;
+        self.output_tokens += other.output_tokens;
+        self.cache_read_tokens += other.cache_read_tokens;
+        self.cache_write_tokens += other.cache_write_tokens;
+    }
+}
+
+/// Sum token usage from a slice of TokenUsage.
+///
+/// # Examples
+///
+/// ```
+/// use tidev::utils::{sum_token_usage, TokenUsage};
+///
+/// let items = [
+///     TokenUsage::new(100, 50, 0, 0),
+///     TokenUsage::new(200, 100, 0, 0),
+/// ];
+///
+/// let total = sum_token_usage(&items);
+/// assert_eq!(total.input_tokens, 300);
+/// assert_eq!(total.output_tokens, 150);
+/// ```
+pub fn sum_token_usage(items: &[TokenUsage]) -> TokenUsage {
+    let mut total = TokenUsage::default();
+    for item in items {
+        total.add(*item);
+    }
+    total
+}
+
+/// Token count units: K (thousand), M (million), B (billion), T (trillion).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenUnit {
     /// Thousand (10^3)

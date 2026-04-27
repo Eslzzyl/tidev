@@ -3,7 +3,7 @@ use crate::{
     session::{COMPACTION_MESSAGE_LABEL, Message, MessageRole, ToolCall},
     theme::ThemePalette,
     tooling::{TodoItem, canonical_tool_name},
-    utils::format_token_count,
+    utils::{format_token_count, TokenUsage},
 };
 use chrono::Local;
 use ratatui::{
@@ -1002,29 +1002,20 @@ impl App {
                 .add_modifier(Modifier::BOLD),
         )]));
 
-        let (total_in, total_out, total_cache_read, total_cache_write) = self
-            .conversation
-            .messages
-            .iter()
-            .filter(|m| matches!(m.role, MessageRole::Assistant))
-            .fold((0u64, 0u64, 0u64, 0u64), |acc, m| {
-                (
-                    acc.0 + m.input_tokens.unwrap_or(0) as u64,
-                    acc.1 + m.output_tokens.unwrap_or(0) as u64,
-                    acc.2 + m.cache_read_tokens.unwrap_or(0) as u64,
-                    acc.3 + m.cache_write_tokens.unwrap_or(0) as u64,
-                )
-            });
+        let mut token_usage = TokenUsage::default();
+        for m in self.conversation.messages.iter().filter(|m| matches!(m.role, MessageRole::Assistant)) {
+            token_usage.add(m.token_usage());
+        }
 
-        let total = total_in + total_out;
-        let total_cache = total_cache_read + total_cache_write;
+        let total = token_usage.total();
+        let total_cache = token_usage.total_cache();
 
         lines.push(Line::from(vec![Span::styled(
             format!("Total: {}", format_token_count(total)),
             Style::default().fg(palette.text),
         )]));
         lines.push(Line::from(vec![Span::styled(
-            format!("In: {}", format_token_count(total_in)),
+            format!("In: {}", format_token_count(token_usage.input_tokens as u64)),
             Style::default().fg(palette.muted),
         )]));
         lines.push(Line::from(vec![Span::styled(
@@ -1032,7 +1023,7 @@ impl App {
             Style::default().fg(palette.muted),
         )]));
         lines.push(Line::from(vec![Span::styled(
-            format!("Out: {}", format_token_count(total_out)),
+            format!("Out: {}", format_token_count(token_usage.output_tokens as u64)),
             Style::default().fg(palette.muted),
         )]));
 

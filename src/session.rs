@@ -451,6 +451,16 @@ impl Message {
             self.tool_calls.push(tool_call);
         }
     }
+
+    /// Get token usage from this message's token fields.
+    pub fn token_usage(&self) -> crate::utils::TokenUsage {
+        crate::utils::TokenUsage::new(
+            self.input_tokens.unwrap_or(0),
+            self.output_tokens.unwrap_or(0),
+            self.cache_read_tokens.unwrap_or(0),
+            self.cache_write_tokens.unwrap_or(0),
+        )
+    }
 }
 
 #[derive(Clone, Debug)]
