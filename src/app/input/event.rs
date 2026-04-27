@@ -1293,13 +1293,13 @@ impl App {
 
     pub(crate) fn execute_command_line(&mut self, line: &str, runtime: &Runtime) -> Result<()> {
         let Some((name, args)) = self.commands.parse_invocation(line) else {
-            self.last_notice = Some("Invalid command".to_string());
-            return Ok(());
+            // Not a valid command format, treat as regular message
+            return self.submit_prompt(line.to_string(), runtime);
         };
 
         let Some(spec) = self.commands.command(&name).cloned() else {
-            self.last_notice = Some(format!("Unknown command '/{name}'"));
-            return Ok(());
+            // Unknown command, treat as regular message
+            return self.submit_prompt(line.to_string(), runtime);
         };
 
         self.run_command(spec.name, spec.action, &args, runtime)?;
