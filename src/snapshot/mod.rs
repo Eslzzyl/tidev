@@ -73,11 +73,11 @@ impl SnapshotService {
         }
 
         let all_files = git::find_changed_files(&self.gitdir, &self.worktree)?;
-        if all_files.is_empty() {
-            return Ok(None);
-        }
-
-        let ignored = git::check_ignored(&self.gitdir, &self.worktree, &all_files)?;
+        let ignored = if all_files.is_empty() {
+            HashSet::new()
+        } else {
+            git::check_ignored(&self.gitdir, &self.worktree, &all_files)?
+        };
 
         if !ignored.is_empty() {
             let ignored_files: Vec<_> = ignored.iter().cloned().collect();
@@ -89,10 +89,6 @@ impl SnapshotService {
             .filter(|f| !ignored.contains(*f))
             .cloned()
             .collect();
-
-        if allowed.is_empty() {
-            return Ok(None);
-        }
 
         let large_files = git::filter_large_files(&self.worktree, &allowed, 2 * 1024 * 1024)?;
         let blocked: HashSet<_> = large_files.iter().cloned().collect();
@@ -109,7 +105,9 @@ impl SnapshotService {
             git::sync_exclude(&self.gitdir, &self.worktree, &[])?;
         }
 
-        git::stage_files(&self.gitdir, &self.worktree, &to_stage)?;
+        if !to_stage.is_empty() {
+            git::stage_files(&self.gitdir, &self.worktree, &to_stage)?;
+        }
 
         let hash = git::write_tree(&self.gitdir)?;
 
@@ -378,6 +376,140 @@ impl SnapshotService {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ConfigPaths, SnapshotService};
+    use std::{fs, path::PathBuf};
+
+    fn unique_temp_dir(prefix: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("{}-{}", prefix, uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).expect("temp dir should be created");
+        dir
+    }
+
+    #[tokio::test]
+    async fn track_returns_snapshot_even_when_worktree_is_clean() {
+        let workspace_root = unique_temp_dir("tidev-snapshot-worktree");
+        let data_dir = unique_temp_dir("tidev-snapshot-data");
+        let file_path = workspace_root.join("note.txt");
+
+        fs::write(&file_path, "hello\n").expect("file should be written");
+
+        let paths = ConfigPaths {
+            config_dir: data_dir.join("config"),
+            data_dir: data_dir.clone(),
+            config_file: data_dir.join("config/config.toml"),
+            auth_file: data_dir.join("auth.json"),
+            database_file: data_dir.join("sessions.sqlite3"),
+        };
+
+        let snapshot = SnapshotService::new(&workspace_root, &paths).expect("snapshot should init");
+
+        let first = snapshot
+            .track()
+            .await
+            .expect("initial track should succeed");
+        assert!(first.is_some(), "initial track should capture a snapshot");
+
+        let second = snapshot.track().await.expect("clean track should succeed");
+        assert!(
+            second.is_some(),
+            "clean track should still capture a snapshot for redo"
+        );
+        assert_eq!(
+            first, second,
+            "clean worktree should produce the same tree hash"
+        );
+
+        let _ = fs::remove_dir_all(&workspace_root);
+        let _ = fs::remove_dir_all(&data_dir);
+    }
+
+    #[tokio::test]
+    async fn restore_round_trips_without_git_repo() {
+        let workspace_root = unique_temp_dir("tidev-restore-worktree");
+        let data_dir = unique_temp_dir("tidev-restore-data");
+        let file_path = workspace_root.join("note.txt");
+
+        fs::write(&file_path, "before\n").expect("file should be written");
+
+        let paths = ConfigPaths {
+            config_dir: data_dir.join("config"),
+            data_dir: data_dir.clone(),
+            config_file: data_dir.join("config/config.toml"),
+            auth_file: data_dir.join("auth.json"),
+            database_file: data_dir.join("sessions.sqlite3"),
+        };
+
+        let snapshot = SnapshotService::new(&workspace_root, &paths).expect("snapshot should init");
+        let hash = snapshot
+            .track()
+            .await
+            .expect("track should succeed")
+            .expect("hash should exist");
+
+        fs::write(&file_path, "after\n").expect("file should be modified");
+
+        snapshot
+            .restore(&hash)
+            .await
+            .expect("restore should succeed");
+
+        assert_eq!(
+            fs::read_to_string(&file_path).expect("file should be readable"),
+            "before\n"
+        );
+
+        let _ = fs::remove_dir_all(&workspace_root);
+        let _ = fs::remove_dir_all(&data_dir);
+    }
+
+    #[tokio::test]
+    async fn revert_round_trips_without_git_repo() {
+        let workspace_root = unique_temp_dir("tidev-revert-worktree");
+        let data_dir = unique_temp_dir("tidev-revert-data");
+        let file_path = workspace_root.join("note.txt");
+
+        fs::write(&file_path, "before\n").expect("file should be written");
+
+        let paths = ConfigPaths {
+            config_dir: data_dir.join("config"),
+            data_dir: data_dir.clone(),
+            config_file: data_dir.join("config/config.toml"),
+            auth_file: data_dir.join("auth.json"),
+            database_file: data_dir.join("sessions.sqlite3"),
+        };
+
+        let snapshot = SnapshotService::new(&workspace_root, &paths).expect("snapshot should init");
+        let hash = snapshot
+            .track()
+            .await
+            .expect("track should succeed")
+            .expect("hash should exist");
+
+        fs::write(&file_path, "after\n").expect("file should be modified");
+
+        let patch = snapshot.patch(&hash).await.expect("patch should succeed");
+        assert!(
+            !patch.files.is_empty(),
+            "patch should include the modified file"
+        );
+
+        snapshot
+            .revert(&[patch])
+            .await
+            .expect("revert should succeed");
+
+        assert_eq!(
+            fs::read_to_string(&file_path).expect("file should be readable"),
+            "before\n"
+        );
+
+        let _ = fs::remove_dir_all(&workspace_root);
+        let _ = fs::remove_dir_all(&data_dir);
     }
 }
 

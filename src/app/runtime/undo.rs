@@ -412,3 +412,135 @@ impl App {
         self.set_revert_message_id(None, None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        config::ConfigPaths,
+        session::{Message, MessageRole},
+    };
+    use std::{fs, path::PathBuf, process::Command};
+
+    struct CwdGuard(PathBuf);
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.0);
+        }
+    }
+
+    fn temp_workspace(prefix: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("{}-{}", prefix, Uuid::new_v4()));
+        fs::create_dir_all(&dir).expect("workspace should be created");
+        dir
+    }
+
+    fn build_app(
+        workspace_root: &PathBuf,
+        config_root: &PathBuf,
+        data_root: &PathBuf,
+        init_git: bool,
+    ) -> (App, Runtime, CwdGuard) {
+        let original_cwd = std::env::current_dir().expect("cwd should be readable");
+        std::env::set_current_dir(workspace_root).expect("cwd should switch to workspace");
+
+        if init_git {
+            let status = Command::new("git")
+                .current_dir(workspace_root)
+                .args(["init"])
+                .status()
+                .expect("git init should run");
+            assert!(status.success(), "git init should succeed");
+        }
+
+        let paths = ConfigPaths {
+            config_dir: config_root.clone(),
+            data_dir: data_root.clone(),
+            config_file: config_root.join("config.toml"),
+            auth_file: data_root.join("auth.json"),
+            database_file: data_root.join("sessions.sqlite3"),
+        };
+
+        let app = App::new_with_paths(paths).expect("app should initialize");
+        let runtime = Runtime::new().expect("runtime should initialize");
+
+        (app, runtime, CwdGuard(original_cwd))
+    }
+
+    fn create_session(app: &mut App) {
+        app.store
+            .create_session(
+                app.conversation.session_id,
+                app.workspace_root.as_path(),
+                &app.active_model.provider_id,
+                &app.active_model.provider_display_name,
+                &app.active_model.model_id,
+                &app.active_model.display_name,
+                "Untitled session",
+            )
+            .expect("session should be created");
+    }
+
+    fn add_user_message(app: &mut App, content: &str) -> Message {
+        let message = Message::new(MessageRole::User, content);
+        app.conversation.push(message.clone());
+        app.store
+            .append_message(app.conversation.session_id, &message)
+            .expect("message should be stored");
+        message
+    }
+
+    fn run_scenario(init_git: bool, prefix: &str) {
+        let workspace_root = temp_workspace(prefix);
+        let config_root = temp_workspace(&format!("{}-config", prefix));
+        let data_root = temp_workspace(&format!("{}-data", prefix));
+        let file_path = workspace_root.join("note.txt");
+        fs::write(&file_path, "before\n").expect("file should be written");
+
+        let (mut app, runtime, _cwd_guard) =
+            build_app(&workspace_root, &config_root, &data_root, init_git);
+        create_session(&mut app);
+
+        let message = add_user_message(&mut app, "prompt");
+        app.capture_prompt_snapshot(message.id, &runtime)
+            .expect("prompt snapshot should capture");
+
+        fs::write(&file_path, "after\n").expect("file should be modified");
+        app.finalize_snapshot_for_last_user_message_sync(&runtime)
+            .expect("finalize snapshot should succeed");
+
+        app.undo_last_user_message(&runtime)
+            .expect("undo should succeed");
+        assert_eq!(
+            fs::read_to_string(&file_path).expect("file should be readable"),
+            "before\n"
+        );
+
+        let saved_redo_snapshot = app
+            .store
+            .load_redo_snapshot(app.conversation.session_id)
+            .expect("redo snapshot should load");
+        assert!(
+            saved_redo_snapshot.is_some(),
+            "redo snapshot should be stored"
+        );
+
+        app.redo_last_user_message(&runtime)
+            .expect("redo should succeed");
+        assert_eq!(
+            fs::read_to_string(&file_path).expect("file should be readable"),
+            "after\n"
+        );
+
+        let _ = fs::remove_dir_all(&workspace_root);
+        let _ = fs::remove_dir_all(&config_root);
+        let _ = fs::remove_dir_all(&data_root);
+    }
+
+    #[test]
+    fn undo_and_redo_restore_files_in_both_workspace_types() {
+        run_scenario(false, "tidev-undo-non-git");
+        run_scenario(true, "tidev-undo-git");
+    }
+}

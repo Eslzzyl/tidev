@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use std::{collections::HashSet, ffi::OsString, fs, path::Path, process::Command};
 
 const DEFAULT_IGNORED_DIRS: &[&str] = &[
+    ".git",
     "node_modules",
     ".venv",
     "venv",
@@ -160,6 +161,20 @@ fn should_ignore_path(path: &str) -> bool {
         }
         false
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_ignore_path;
+
+    #[test]
+    fn ignores_git_metadata_paths() {
+        assert!(should_ignore_path(".git"));
+        assert!(should_ignore_path(".git/config"));
+        assert!(should_ignore_path("repo/.git/info/exclude"));
+        assert!(!should_ignore_path(".gitignore"));
+        assert!(!should_ignore_path("src/git.rs"));
+    }
 }
 
 pub fn check_ignored(gitdir: &Path, worktree: &Path, files: &[String]) -> Result<HashSet<String>> {
