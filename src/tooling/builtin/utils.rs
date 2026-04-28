@@ -27,7 +27,10 @@ pub fn resolve_workspace_path(workspace_root: &Path, candidate: &Path) -> Result
     Ok(resolved)
 }
 
-pub(super) fn display_workspace_relative(workspace_root: &Path, path: &Path) -> String {
+/// Display a path relative to the workspace root.
+/// If the path is outside the workspace, returns the full path.
+/// If the path equals the workspace root, returns ".".
+pub fn display_workspace_relative(workspace_root: &Path, path: &Path) -> String {
     let relative = path.strip_prefix(workspace_root).unwrap_or(path);
     if relative.as_os_str().is_empty() {
         ".".to_string()

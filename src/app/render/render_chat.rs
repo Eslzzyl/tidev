@@ -3,6 +3,7 @@ use crate::{
     session::{COMPACTION_MESSAGE_LABEL, Message, MessageRole, ToolCall},
     theme::ThemePalette,
     tooling::{TodoItem, canonical_tool_name},
+    tooling::builtin::utils::display_workspace_relative,
     utils::{TokenUsage, format_token_count},
 };
 use chrono::Local;
@@ -84,7 +85,7 @@ fn render_tool_call_with_result(
     lines.push(Line::from(""));
 
     let call_lines =
-        render_tool_call_lines(tool_call, body_width, palette, exit_code, rtk_rewritten);
+        render_tool_call_lines(tool_call, body_width, palette, exit_code, rtk_rewritten, ctx.workspace_root);
     lines.extend(call_lines);
 
     if is_pending {
@@ -168,27 +169,29 @@ fn render_tool_call_summary_line(
             .map(|(_, v)| v.as_str())
     };
 
+    let rel_path = |p: &str| display_workspace_relative(ctx.workspace_root, Path::new(p));
+
     let (action_label, target) = match canonical_name {
         "list" => {
             let path = get_field("path").unwrap_or(".");
-            ("List", path.to_string())
+            ("List", rel_path(path).to_string())
         }
         "grep" => {
             let pattern = get_field("pattern").unwrap_or("");
             let path = get_field("path").unwrap_or(".");
-            ("Search", format!("\"{}\" in {}", pattern, path))
+            ("Search", format!("\"{}\" in {}", pattern, rel_path(path)))
         }
         "glob" => {
             let pattern = get_field("pattern").unwrap_or("*");
             let path = get_field("path").unwrap_or(".");
-            ("Find", format!("{} in {}", pattern, path))
+            ("Find", format!("{} in {}", pattern, rel_path(path)))
         }
         "read" => {
             let path = get_field("path").unwrap_or("file");
-            ("Read", path.to_string())
+            ("Read", rel_path(path).to_string())
         }
         _ => {
-            let summary = summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width);
+            let summary = summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width, ctx.workspace_root);
             return vec![Line::from(vec![Span::styled(
                 summary,
                 Style::default()
@@ -423,6 +426,7 @@ fn render_tool_call_lines(
     palette: ThemePalette,
     exit_code: Option<i32>,
     rtk_rewritten: bool,
+    workspace_root: &Path,
 ) -> Vec<Line<'static>> {
     let fields = summarize_tool_arguments(&tool_call.name, &tool_call.arguments);
 
@@ -521,13 +525,14 @@ fn render_tool_call_lines(
         }
         "write" => {
             let path = get_field("path").unwrap_or("file");
+            let rel_path = display_workspace_relative(workspace_root, Path::new(path));
             lines.push(Line::from(vec![
                 Span::styled("  Path: ", Style::default().fg(palette.muted)),
-                Span::styled(path.to_string(), Style::default().fg(palette.text)),
+                Span::styled(rel_path, Style::default().fg(palette.text)),
             ]));
         }
         _ => {
-            let summary = summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width);
+            let summary = summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width, workspace_root);
             for line in summary.lines() {
                 lines.push(Line::from(vec![
                     Span::styled("  ", Style::default()),
@@ -1840,6 +1845,7 @@ impl App {
                             &tool_call.name,
                             &tool_call.arguments,
                             body_width.saturating_sub(10),
+                            self.workspace_root.as_path(),
                         )
                     } else {
                         let canonical_display = canonical_tool_name(&tool_call.name)
@@ -2790,7 +2796,7 @@ mod tests {
         let text = text_lines_to_string(&lines);
 
         assert!(
-            text.contains("Read /tmp/example.txt"),
+            text.contains("Read example.txt"),
             "should show parsed summary: {}",
             text
         );
@@ -2904,7 +2910,7 @@ fn tool_output_is_error(output: &str) -> bool {
         || (first_line.starts_with("[exit ") && !first_line.starts_with("[exit 0]"))
 }
 
-fn summarize_tool_call(tool_name: &str, arguments: &str, body_width: usize) -> String {
+fn summarize_tool_call(tool_name: &str, arguments: &str, body_width: usize, workspace_root: &Path) -> String {
     let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
     let fields = summarize_tool_arguments(tool_name, arguments);
     let parsed = serde_json::from_str::<serde_json::Value>(arguments).ok();
@@ -2916,31 +2922,35 @@ fn summarize_tool_call(tool_name: &str, arguments: &str, body_width: usize) -> S
             .map(|(_, value)| value.as_str())
     };
 
+    let path_to_relative = |path: &str| {
+        display_workspace_relative(workspace_root, Path::new(path))
+    };
+
     let summary = match canonical_name {
         "read" => field("path")
-            .map(|path| format!("Read {path}"))
+            .map(|path| format!("Read {}", path_to_relative(path)))
             .unwrap_or_else(|| "Read file".to_string()),
         "write" => field("path")
-            .map(|path| format!("Write {path}"))
+            .map(|path| format!("Write {}", path_to_relative(path)))
             .unwrap_or_else(|| "Write file".to_string()),
         "edit" => field("path")
-            .map(|path| format!("Edit {path}"))
+            .map(|path| format!("Edit {}", path_to_relative(path)))
             .unwrap_or_else(|| "Edit file".to_string()),
         "list" => field("path")
-            .map(|path| format!("List {path}"))
+            .map(|path| format!("List {}", path_to_relative(path)))
             .unwrap_or_else(|| "List items".to_string()),
         "glob" => {
             let pattern = field("pattern").unwrap_or("*");
             let path = field("path").unwrap_or(".");
-            format!("Find {pattern} in {path}")
+            format!("Find {} in {}", pattern, path_to_relative(path))
         }
         "grep" => {
             let pattern = field("pattern").unwrap_or("");
             let path = field("path").unwrap_or(".");
             if pattern.is_empty() {
-                format!("Search in {path}")
+                format!("Search in {}", path_to_relative(path))
             } else {
-                format!("Search \"{pattern}\" in {path}")
+                format!("Search \"{pattern}\" in {}", path_to_relative(path))
             }
         }
         "bash" => field("command")
