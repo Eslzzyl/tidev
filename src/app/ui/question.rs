@@ -500,7 +500,15 @@ impl App {
         }
 
         if matches!(key.code, KeyCode::Esc) {
-            self.question_dialog = None;
+            // Record a tool result for the dismissed question before aborting,
+            // so the assistant message's tool_calls remain balanced with a tool response.
+            if let Some(dialog) = self.question_dialog.take() {
+                self.record_tool_result(
+                    dialog.tool_call,
+                    ToolExecutionResult::new("Tool 'question' was dismissed by user"),
+                )?;
+                self.advance_pending_tool_execution();
+            }
             self.composer.clear();
             self.composer
                 .set_placeholder("Ask TiDev about your code, task, or question...");

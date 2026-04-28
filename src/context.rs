@@ -158,6 +158,11 @@ impl ContextManager {
                     }
                 }
                 MessageRole::Assistant => {
+                    // Skip assistant messages that have neither content nor tool_calls,
+                    // as providers reject messages with both fields missing.
+                    if message.content.is_empty() && message.tool_calls.is_empty() {
+                        continue;
+                    }
                     if let Some(mode) = message.mode {
                         was_plan_mode = mode == SessionMode::Plan;
                     } else if message.content.contains("PLAN MODE")
