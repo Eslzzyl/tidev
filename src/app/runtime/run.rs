@@ -363,7 +363,9 @@ impl App {
     pub(crate) fn restore_cached_session_runtime(&mut self, cached: CachedSessionRuntime) {
         let _session_id = cached.conversation.session_id;
         self.conversation = cached.conversation;
+        let thinking_level = cached.active_model.thinking_level.clone();
         self.active_model = cached.active_model;
+        self.thinking_level = thinking_level;
         self.context_manager = cached.context_manager;
         self.pending_tool_execution = cached.pending_tool_execution;
         self.permission_dialog = cached.permission_dialog;
