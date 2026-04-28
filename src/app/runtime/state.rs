@@ -183,6 +183,7 @@ pub(crate) struct CachedSessionRuntime {
     pub(crate) file_reads: Option<HashMap<PathBuf, FileReadStamp>>,
     pub(crate) loaded_instruction_sources: Vec<String>,
     /// Cached instruction file contents to avoid redundant I/O
+    #[allow(dead_code)]
     pub(crate) instruction_content_cache: HashMap<String, String>,
 }
 

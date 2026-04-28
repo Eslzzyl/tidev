@@ -383,7 +383,25 @@ impl App {
         self.message_total_lines = cached.message_total_lines;
         self.context_usage = cached.context_usage;
         self.todos = cached.todos.clone();
-        self.loaded_instruction_sources = cached.loaded_instruction_sources;
+        self.loaded_instruction_sources = cached.loaded_instruction_sources.clone();
+
+        // Restore instruction content cache from loaded sources.
+        // This prevents instruction files from being reloaded on the next user message,
+        // avoiding duplicate "Loaded instructions from ..." messages.
+        self.instruction_content_cache.clear();
+        for source in &cached.loaded_instruction_sources {
+            if source.starts_with("http://") || source.starts_with("https://") {
+                // Skip URLs - they are fetched each time
+                continue;
+            }
+
+            let path = self.workspace_root.join(source);
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                // Use relative path as cache key to match what
+                // system_prompt_and_sources_with_cache uses for lookups
+                self.instruction_content_cache.insert(source.clone(), content);
+            }
+        }
 
         // Restore cached file read records
         if let Some(reads) = cached.file_reads {
