@@ -101,6 +101,8 @@ struct App {
     http_client: Arc<reqwest::Client>,
     theme: ThemeManager,
     mode: SessionMode,
+    /// Pending mode switch that will take effect on the next user message.
+    pending_mode: Option<SessionMode>,
     active_model: ActiveModel,
     conversation: Conversation,
     context_manager: ContextManager,
@@ -365,13 +367,22 @@ impl App {
             self.conversation.session_id,
             self.conversation.messages.len()
         );
-        self.refresh_tools();
+
+        // Apply pending mode switch if any
+        let effective_mode = if let Some(new_mode) = self.pending_mode.take() {
+            self.mode = new_mode;
+            self.refresh_tools();
+            new_mode
+        } else {
+            self.mode
+        };
+
         self.pending_request = true;
         self.abort_confirmation_deadline = None;
         self.active_request_id = self.active_request_id.wrapping_add(1);
         let request_id = self.active_request_id;
         crate::log_info!("start_assistant_turn: new request_id={}", request_id);
-        self.last_notice = Some(match self.mode {
+        self.last_notice = Some(match effective_mode {
             SessionMode::Plan => "Planning...".to_string(),
             SessionMode::Build => "Thinking...".to_string(),
         });
@@ -385,12 +396,12 @@ impl App {
         self.update_loaded_instruction_sources(&instruction_sources)?;
 
         let mut assistant_message = Message::streaming(MessageRole::Assistant, "");
-        assistant_message.mode = Some(self.mode);
+        assistant_message.mode = Some(effective_mode);
         self.conversation.push(assistant_message);
 
         let messages = self
             .context_manager
-            .build_request_messages(&self.conversation, self.mode);
+            .build_request_messages(&self.conversation, effective_mode);
         let tools = self.tools.all_definitions();
         let tx = self.backend_tx.clone();
         let session_id = self.conversation.session_id;

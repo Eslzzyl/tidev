@@ -920,9 +920,21 @@ impl App {
         }
 
         if !self.command_palette.visible && key.code == KeyCode::Tab {
-            self.mode = self.mode.toggle();
-            self.refresh_tools();
-            self.last_notice = Some(format!("Mode switched to {}", self.mode.as_str()));
+            if self.pending_mode.is_some() {
+                // Cancel pending mode switch if user toggles again
+                self.pending_mode = None;
+                self.last_notice = Some("Mode switch cancelled".to_string());
+            } else if self.pending_request {
+                // Request in progress: defer mode switch to next message
+                let new_mode = self.mode.toggle();
+                self.pending_mode = Some(new_mode);
+                self.last_notice = Some(format!("Mode will switch to {} on next message", new_mode.as_str()));
+            } else {
+                // No request: switch mode immediately
+                self.mode = self.mode.toggle();
+                self.refresh_tools();
+                self.last_notice = Some(format!("Mode switched to {}", self.mode.as_str()));
+            }
             return Ok(());
         }
 

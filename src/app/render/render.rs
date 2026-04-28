@@ -174,7 +174,13 @@ impl App {
             .style(Style::default().fg(palette.muted));
         frame.render_widget(subtitle, sections[1]);
 
-        let prompt_title = self.mode.title().to_string();
+        let prompt_title = if self.pending_request && self.pending_mode.is_some() {
+            let current = self.mode.title();
+            let next = self.pending_mode.as_ref().unwrap().title();
+            format!("{} (current), {} (next message)", current, next)
+        } else {
+            self.mode.title().to_string()
+        };
         let prompt_placeholder = self.composer.placeholder().to_string();
         self.render_input_block(
             frame,

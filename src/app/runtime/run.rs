@@ -68,6 +68,7 @@ impl App {
             http_client,
             theme,
             mode,
+            pending_mode: None,
             active_model: active_model.clone(),
             conversation,
             context_manager: ContextManager::new(),
