@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use globset::GlobBuilder;
 use ignore::WalkBuilder;
 use reqwest::blocking::Client;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -153,6 +154,73 @@ pub fn system_prompt_and_sources(
     }
 
     Ok((sections.join("\n\n"), sources))
+}
+
+/// Build system prompt with content caching to avoid redundant file I/O.
+/// Only reads files that are not already in the cache.
+/// Returns (prompt, sources, updated_cache)
+pub fn system_prompt_and_sources_with_cache(
+    workspace_root: &Path,
+    config_dir: &Path,
+    instructions: &[String],
+    cache: &HashMap<String, String>,
+) -> Result<(String, Vec<String>, HashMap<String, String>)> {
+    let mut sections = Vec::new();
+    let mut sources = Vec::new();
+    let mut new_cache = cache.clone();
+    let paths = system_paths(workspace_root, config_dir, instructions)?;
+
+    for path in paths {
+        let path_str = path.display().to_string();
+        if let Some(cached_content) = cache.get(&path_str) {
+            // Use cached content
+            if !cached_content.trim().is_empty() {
+                sections.push(format!(
+                    "Instructions from: {}\n{}",
+                    path.display(),
+                    cached_content
+                ));
+                sources.push(path_str);
+            }
+        } else {
+            // Read and cache new content
+            if let Ok(content) = fs::read_to_string(&path)
+                && !content.trim().is_empty()
+            {
+                new_cache.insert(path_str.clone(), content.clone());
+                sections.push(format!(
+                    "Instructions from: {}\n{}",
+                    path.display(),
+                    content
+                ));
+                sources.push(path_str);
+            }
+        }
+    }
+
+    for url in instructions
+        .iter()
+        .filter(|item| item.starts_with("http://") || item.starts_with("https://"))
+    {
+        if let Some(cached_content) = cache.get(url) {
+            // Use cached content
+            if !cached_content.trim().is_empty() {
+                sections.push(format!("Instructions from: {}\n{}", url, cached_content));
+                sources.push(url.clone());
+            }
+        } else {
+            // Fetch and cache new content
+            if let Ok(content) = fetch_remote(url)
+                && !content.trim().is_empty()
+            {
+                new_cache.insert(url.clone(), content.clone());
+                sections.push(format!("Instructions from: {}\n{}", url, content));
+                sources.push(url.clone());
+            }
+        }
+    }
+
+    Ok((sections.join("\n\n"), sources, new_cache))
 }
 
 pub fn system_prompt(

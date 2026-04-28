@@ -769,7 +769,7 @@ impl App {
         )?;
 
         if !result.instruction_sources.is_empty() {
-            self.update_loaded_instruction_sources(&result.instruction_sources);
+            self.update_loaded_instruction_sources(&result.instruction_sources).ok();
         }
 
         self.conversation.push(message.clone());

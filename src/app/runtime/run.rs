@@ -130,6 +130,7 @@ impl App {
             snapshot,
             cleanup_cancel,
             loaded_instruction_sources: Vec::new(),
+            instruction_content_cache: std::collections::HashMap::new(),
             expanded_tool_results: std::collections::HashSet::new(),
             tool_result_card_bounds: Vec::new(),
             selectable_regions: Vec::new(),
@@ -264,6 +265,7 @@ impl App {
             todos: self.todos.clone(),
             file_reads: self.file_read_tracker.extract_session_reads(session_id),
             loaded_instruction_sources: self.loaded_instruction_sources.clone(),
+            instruction_content_cache: self.instruction_content_cache.clone(),
         };
 
         self.cached_sessions.insert(session_id, cached);
@@ -527,6 +529,7 @@ impl App {
             todos: self.store.load_todos(session_id)?,
             file_reads: None,
             loaded_instruction_sources: self.store.load_instruction_sources(session_id)?,
+            instruction_content_cache: std::collections::HashMap::new(),
         };
 
         // Load file reads from database into the tracker

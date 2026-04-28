@@ -169,6 +169,8 @@ struct App {
     snapshot: SnapshotService,
     cleanup_cancel: Arc<std::sync::atomic::AtomicBool>,
     loaded_instruction_sources: Vec<String>,
+    /// Cached instruction file contents to avoid redundant I/O
+    instruction_content_cache: std::collections::HashMap<String, String>,
     expanded_tool_results: std::collections::HashSet<Uuid>,
     tool_result_card_bounds: Vec<(Uuid, Rect)>,
     pub(crate) selectable_regions: Vec<Rect>,
@@ -380,7 +382,7 @@ impl App {
         let mut model = self.active_model.clone();
         model.system_prompt = system_prompt;
 
-        self.update_loaded_instruction_sources(&instruction_sources);
+        self.update_loaded_instruction_sources(&instruction_sources)?;
 
         let mut assistant_message = Message::streaming(MessageRole::Assistant, "");
         assistant_message.mode = Some(self.mode);
@@ -433,15 +435,19 @@ impl App {
         );
     }
 
-    fn compose_system_prompt(&self) -> (String, Vec<String>) {
+    fn compose_system_prompt(&mut self) -> (String, Vec<String>) {
         let base_prompt = self.active_model.system_prompt.trim();
         let mode_reminder = self.mode.reminder();
-        let (instruction_prompt, sources) = instructions::system_prompt_and_sources(
+        let (instruction_prompt, sources, new_cache) = instructions::system_prompt_and_sources_with_cache(
             &self.workspace_root,
             &self.paths.config_dir,
             &self.config.instructions,
+            &self.instruction_content_cache,
         )
         .unwrap_or_default();
+
+        // Update the cache with newly loaded contents
+        self.instruction_content_cache = new_cache;
 
         let mut prompt = String::new();
         if !base_prompt.is_empty() {
@@ -480,7 +486,7 @@ impl App {
         (prompt, sources)
     }
 
-    fn update_loaded_instruction_sources(&mut self, sources: &[String]) {
+    fn update_loaded_instruction_sources(&mut self, sources: &[String]) -> Result<()> {
         let display_sources: Vec<String> = sources
             .iter()
             .map(|source| self.display_instruction_source(source))
@@ -505,8 +511,7 @@ impl App {
                 )
             };
 
-            self.conversation
-                .push(Message::new(MessageRole::System, content));
+            self.push_message(MessageRole::System, content)?;
 
             // Merge newly loaded sources instead of overwriting the entire list.
             // This prevents previously loaded sources (like root AGENTS.md) from being
@@ -523,6 +528,7 @@ impl App {
                 }
             }
         }
+        Ok(())
     }
 
     fn display_instruction_source(&self, source: &str) -> String {
@@ -1006,7 +1012,7 @@ impl App {
                 session_id: _,
                 sources,
             } => {
-                self.update_loaded_instruction_sources(&sources);
+                self.update_loaded_instruction_sources(&sources)?;
             }
             BackendEvent::ContextCompacted {
                 session_id,

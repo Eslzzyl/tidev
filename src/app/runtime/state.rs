@@ -182,6 +182,8 @@ pub(crate) struct CachedSessionRuntime {
     /// Cached file read records for this session.
     pub(crate) file_reads: Option<HashMap<PathBuf, FileReadStamp>>,
     pub(crate) loaded_instruction_sources: Vec<String>,
+    /// Cached instruction file contents to avoid redundant I/O
+    pub(crate) instruction_content_cache: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
