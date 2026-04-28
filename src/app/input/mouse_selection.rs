@@ -4,6 +4,7 @@ use ratatui::{
     prelude::Frame,
     style::Style,
 };
+use std::io::Write;
 use std::time::{Duration, Instant};
 use unicode_width::UnicodeWidthStr;
 
@@ -235,14 +236,102 @@ impl App {
     }
 }
 
+/// Detect if we're running under WSL (Windows Subsystem for Linux).
+#[cfg(target_os = "linux")]
+fn is_probably_wsl() -> bool {
+    // Primary: Check /proc/version for "microsoft" or "WSL" (most reliable for standard WSL).
+    if let Ok(version) = std::fs::read_to_string("/proc/version") {
+        let version_lower = version.to_lowercase();
+        if version_lower.contains("microsoft") || version_lower.contains("wsl") {
+            return true;
+        }
+    }
+
+    // Fallback: Check WSL environment variables. This handles edge cases like
+    // custom Linux kernels installed in WSL where /proc/version may not contain
+    // "microsoft" or "WSL".
+    std::env::var_os("WSL_DISTRO_NAME").is_some() || std::env::var_os("WSL_INTEROP").is_some()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn is_probably_wsl() -> bool {
+    false
+}
+
+/// Copy text into the Windows clipboard from a WSL process via PowerShell.
+#[cfg(target_os = "linux")]
+fn wsl_clipboard_copy(text: &str) -> Result<(), String> {
+    let mut child = std::process::Command::new("powershell.exe")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .args([
+            "-NoProfile",
+            "-Command",
+            "[Console]::InputEncoding = [System.Text.Encoding]::UTF8; $ErrorActionPreference = 'Stop'; $text = [Console]::In.ReadToEnd(); Set-Clipboard -Value $text",
+        ])
+        .spawn()
+        .map_err(|e| format!("failed to spawn powershell.exe: {e}"))?;
+
+    let Some(mut stdin) = child.stdin.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err("failed to open powershell.exe stdin".to_string());
+    };
+
+    if let Err(err) = stdin.write_all(text.as_bytes()) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!("failed to write to powershell.exe: {err}"));
+    }
+
+    drop(stdin);
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("failed to wait for powershell.exe: {e}"))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if stderr.is_empty() {
+            let status = output.status;
+            Err(format!("powershell.exe exited with status {status}"))
+        } else {
+            Err(format!("powershell.exe failed: {stderr}"))
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn wsl_clipboard_copy(_text: &str) -> Result<(), String> {
+    Err("WSL clipboard is only available on Linux".to_string())
+}
+
 pub(crate) fn copy_to_clipboard(text: &str) -> Result<Option<ClipboardLease>, String> {
     #[cfg(target_os = "linux")]
     {
-        let mut clipboard =
-            arboard::Clipboard::new().map_err(|error| format!("clipboard unavailable: {error}"))?;
-        clipboard
-            .set_text(text)
-            .map_err(|error| format!("failed to set clipboard text: {error}"))?;
+        // Try native Linux clipboard first.
+        let mut clipboard = match arboard::Clipboard::new() {
+            Ok(cb) => cb,
+            Err(native_err) => {
+                if is_probably_wsl() {
+                    // Native clipboard unavailable, fall back to WSL PowerShell.
+                    return wsl_clipboard_copy(text).map(|()| None);
+                }
+                return Err(format!("clipboard unavailable: {native_err}"));
+            }
+        };
+
+        if let Err(set_err) = clipboard.set_text(text) {
+            if is_probably_wsl() {
+                // Failed to set text, fall back to WSL PowerShell.
+                return wsl_clipboard_copy(text).map(|()| None);
+            }
+            return Err(format!("failed to set clipboard text: {set_err}"));
+        }
+
         Ok(Some(ClipboardLease::native_linux(clipboard)))
     }
 
