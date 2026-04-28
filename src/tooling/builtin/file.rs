@@ -335,6 +335,7 @@ pub(super) fn read_path(
         fs::File::open(&path).with_context(|| format!("failed to read {}", path.display()))?;
     let mut reader = std::io::BufReader::new(file);
 
+    let has_requested_range = offset.is_some() || limit.is_some();
     let offset = offset.unwrap_or(1);
     let limit = limit.unwrap_or(2000);
     if offset < 1 {
@@ -410,11 +411,33 @@ pub(super) fn read_path(
         content_str.push_str(&format!("\n\n(End of file - total {} lines)", total_lines));
     }
 
-    // Build XML-style output
+    // Build XML-style output with metadata
+    let truncated_by = if cut {
+        Some("size")
+    } else if more && !has_requested_range {
+        Some("lines")
+    } else {
+        None
+    };
+    let mut metadata = format!("<line_range>{}-{}</line_range>\n", start, last);
+    if has_requested_range {
+        let requested_end = offset + limit - 1;
+        metadata.push_str(&format!(
+            "<requested_range>{}-{}</requested_range>\n",
+            offset, requested_end
+        ));
+    }
+    if let Some(reason) = truncated_by {
+        metadata.push_str(&format!("<truncated_by>{}</truncated_by>\n", reason));
+    }
+    metadata.push_str(&format!(
+        "<file_total>{}</file_total>\n<content>\n{}\n</content>",
+        total_lines, content_str
+    ));
     let output = format!(
-        "<path>{}</path>\n<type>file</type>\n<content>\n{}\n</content>",
+        "<path>{}</path>\n<type>file</type>\n{}",
         display_workspace_relative(workspace_root, &path),
-        content_str
+        metadata
     );
 
     // Load nearby instruction files

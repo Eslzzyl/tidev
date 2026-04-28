@@ -290,24 +290,98 @@ fn compute_tool_result_suffix(canonical_name: &str, output: &str) -> String {
                     .saturating_sub(2); // Approximate, list_dir output is different now
                 format!(" → directory ({} entries)", count)
             } else {
-                let line_range = parse_line_range_from_read_output(output);
-                let truncated = tool_output_is_truncated(output);
-                match line_range {
-                    Some((start, end)) => {
-                        if truncated {
-                            format!(" → Line {}-{} (truncated)", start, end)
+                let metadata = parse_read_content_metadata(output);
+                let is_size_truncated = output.contains("Output capped at 50 KB");
+
+                match metadata {
+                    Some(((start, end), requested_range, total, truncated_by)) => {
+                        // Check if this is a full file read (start==1 && end==total)
+                        let is_full_file = start == 1 && end == total;
+                        let has_requested_range = requested_range.is_some();
+
+                        if is_size_truncated {
+                            // 50KB truncation
+                            if has_requested_range {
+                                let (req_start, req_end) = requested_range.unwrap();
+                                if is_full_file {
+                                    format!(
+                                        " → All {} lines (requested {}-{}, truncated due to 50KB cap)",
+                                        total, req_start, req_end
+                                    )
+                                } else {
+                                    format!(
+                                        " → Line {}-{} of {} (requested {}-{}, truncated due to 50KB cap)",
+                                        start, end, total, req_start, req_end
+                                    )
+                                }
+                            } else if is_full_file {
+                                format!(
+                                    " → All {} lines (requested all lines, truncated due to 50KB cap)",
+                                    total
+                                )
+                            } else {
+                                format!(
+                                    " → Line {}-{} of {} (requested all lines, truncated due to 50KB cap)",
+                                    start, end, total
+                                )
+                            }
+                        } else if truncated_by.as_deref() == Some("lines") {
+                            // 2000-line cap (more flag, but no 50KB cutoff)
+                            if has_requested_range {
+                                let (req_start, req_end) = requested_range.unwrap();
+                                if is_full_file {
+                                    format!(
+                                        " → All {} lines (requested {}-{}, truncated due to 2000 lines cap)",
+                                        total, req_start, req_end
+                                    )
+                                } else {
+                                    format!(
+                                        " → Line {}-{} of {} (requested {}-{}, truncated due to 2000 lines cap)",
+                                        start, end, total, req_start, req_end
+                                    )
+                                }
+                            } else if is_full_file {
+                                format!(
+                                    " → All {} lines (requested all lines, truncated due to 2000 lines cap)",
+                                    total
+                                )
+                            } else {
+                                format!(
+                                    " → Line {}-{} of {} (requested all lines, truncated due to 2000 lines cap)",
+                                    start, end, total
+                                )
+                            }
+                        } else if is_full_file {
+                            // Complete file read without truncation
+                            format!(" → All {} lines", total)
                         } else {
-                            format!(" → Line {}-{}", start, end)
+                            // Partial read without truncation
+                            format!(" → Line {}-{} of {}", start, end, total)
                         }
                     }
                     None => {
-                        let total_lines = output.lines().count();
-                        if total_lines == 0 {
-                            " → empty".to_string()
-                        } else if truncated {
-                            format!(" → First {} lines (truncated)", total_lines)
-                        } else {
-                            format!(" → All {} lines", total_lines)
+                        // Fallback: try old format parsing
+                        let line_range = parse_line_range_from_read_output(output);
+                        let truncated = tool_output_is_truncated(output);
+
+                        match line_range {
+                            Some((start, end)) => {
+                                if truncated && output.contains("Output capped at 50 KB") {
+                                    format!(" → Line {}-{} (truncated)", start, end)
+                                } else {
+                                    format!(" → Line {}-{}", start, end)
+                                }
+                            }
+                            None => {
+                                let total_lines = output.lines().count();
+                                if total_lines == 0 {
+                                    " → empty".to_string()
+                                } else if truncated {
+                                    format!(" → First {} lines (truncated)", total_lines)
+                                } else {
+                                    format!(" → All {} lines", total_lines)
+                                }
+                            }
                         }
                     }
                 }
@@ -3067,6 +3141,60 @@ fn parse_line_range_from_read_output(output: &str) -> Option<(i64, i64)> {
         }
     }
     None
+}
+
+/// Parse range string "start-end" into (start, end).
+fn parse_range(s: &str) -> Option<(i64, i64)> {
+    let parts: Vec<_> = s.split('-').collect();
+    if parts.len() == 2 {
+        let start = parts[0].trim().parse().ok()?;
+        let end = parts[1].trim().parse().ok()?;
+        Some((start, end))
+    } else {
+        None
+    }
+}
+
+/// Parsed metadata from a read tool output's XML-style metadata block.
+/// Returns (line_range, optional_requested_range, file_total, optional_truncation_reason).
+type ReadContentMetadata = Option<(
+    (i64, i64),              // line_range (start, end)
+    Option<(i64, i64)>,      // requested_range (None if model didn't specify)
+    i64,                     // file_total
+    Option<String>,          // truncated_by (None | "size" | "lines")
+)>;
+
+fn parse_read_content_metadata(content: &str) -> ReadContentMetadata {
+    let mut line_range = None;
+    let mut requested_range = None;
+    let mut file_total = None;
+    let mut truncated_by = None;
+
+    for line in content.lines() {
+        if let Some(val) = line.strip_prefix("<line_range>") {
+            if let Some(end) = val.strip_suffix("</line_range>") {
+                line_range = parse_range(end);
+            }
+        } else if let Some(val) = line.strip_prefix("<requested_range>") {
+            if let Some(end) = val.strip_suffix("</requested_range>") {
+                requested_range = parse_range(end);
+            }
+        } else if let Some(val) = line.strip_prefix("<file_total>") {
+            if let Some(end) = val.strip_suffix("</file_total>") {
+                file_total = end.trim().parse().ok();
+            }
+        } else if let Some(val) = line.strip_prefix("<truncated_by>")
+            && let Some(end) = val.strip_suffix("</truncated_by>")
+            && matches!(end.trim(), "size" | "lines")
+        {
+            truncated_by = Some(end.trim().to_string());
+        }
+    }
+
+    match (line_range, file_total) {
+        (Some(lr), Some(ft)) => Some((lr, requested_range, ft, truncated_by)),
+        _ => None,
+    }
 }
 
 fn pretty_tool_arguments(arguments: &str) -> String {
