@@ -840,13 +840,16 @@ impl App {
         if self.conversation.parent_session_id.is_some() {
             self.render_subsession_navigation(frame, layout[1]);
         } else {
-            let prompt_title = if self.pending_request && self.pending_mode.is_some() {
-            let current = self.mode.title();
-            let next = self.pending_mode.as_ref().unwrap().title();
-            format!("{} (current), {} (next message)", current, next)
-        } else {
-            self.mode.title().to_string()
-        };
+            let prompt_title = match self.pending_mode.as_ref() {
+                Some(pending) if self.pending_request => {
+                    format!(
+                        "{} (current), {} (on completion)",
+                        self.mode.title(),
+                        pending.title()
+                    )
+                }
+                _ => self.mode.title().to_string(),
+            };
             self.render_input_block(
                 frame,
                 layout[1],

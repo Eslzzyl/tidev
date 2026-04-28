@@ -368,21 +368,12 @@ impl App {
             self.conversation.messages.len()
         );
 
-        // Apply pending mode switch if any
-        let effective_mode = if let Some(new_mode) = self.pending_mode.take() {
-            self.mode = new_mode;
-            self.refresh_tools();
-            new_mode
-        } else {
-            self.mode
-        };
-
         self.pending_request = true;
         self.abort_confirmation_deadline = None;
         self.active_request_id = self.active_request_id.wrapping_add(1);
         let request_id = self.active_request_id;
         crate::log_info!("start_assistant_turn: new request_id={}", request_id);
-        self.last_notice = Some(match effective_mode {
+        self.last_notice = Some(match self.mode {
             SessionMode::Plan => "Planning...".to_string(),
             SessionMode::Build => "Thinking...".to_string(),
         });
@@ -396,12 +387,12 @@ impl App {
         self.update_loaded_instruction_sources(&instruction_sources)?;
 
         let mut assistant_message = Message::streaming(MessageRole::Assistant, "");
-        assistant_message.mode = Some(effective_mode);
+        assistant_message.mode = Some(self.mode);
         self.conversation.push(assistant_message);
 
         let messages = self
             .context_manager
-            .build_request_messages(&self.conversation, effective_mode);
+            .build_request_messages(&self.conversation, self.mode);
         let tools = self.tools.all_definitions();
         let tx = self.backend_tx.clone();
         let session_id = self.conversation.session_id;
@@ -1116,6 +1107,13 @@ impl App {
 
             self.begin_tool_execution(turn.tool_calls, turn_mode, runtime)?;
             return Ok(());
+        }
+
+        // End of round: apply pending mode switch if any
+        if let Some(new_mode) = self.pending_mode.take() {
+            self.mode = new_mode;
+            self.refresh_tools();
+            self.last_notice = Some(format!("Mode switched to {}", new_mode.as_str()));
         }
 
         self.pending_request = false;
