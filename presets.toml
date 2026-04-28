@@ -191,7 +191,7 @@ supports_images = false
 display_name = "Xiaomi MiMo Token Plan (CN)"
 base_url = "https://token-plan-cn.xiaomimimo.com/v1"
 
-[providers.mimo-token-plan-cn.models.mimo-v2.5-pro]
+[providers.mimo-token-plan-cn.models.mimo-v2-5-pro]
 request_model_id = "mimo-v2.5-pro"
 display_name = "MiMo-V2.5-Pro"
 context_window = 1048576
@@ -200,7 +200,7 @@ temperature = 1.0
 supports_streaming = true
 supports_images = false
 
-[providers.mimo-token-plan-cn.models.mimo-v2.5]
+[providers.mimo-token-plan-cn.models.mimo-v2-5]
 request_model_id = "mimo-v2.5"
 display_name = "MiMo-V2.5"
 context_window = 1048576
