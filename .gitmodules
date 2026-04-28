@@ -14,3 +14,6 @@
 	url = https://github.com/HKUDS/nanobot.git
 
 
+[submodule "oh-my-opencode-slim"]
+	path = oh-my-opencode-slim
+	url = https://github.com/alvinunreal/oh-my-opencode-slim.git
