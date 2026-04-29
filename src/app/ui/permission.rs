@@ -523,6 +523,14 @@ impl App {
         let agent_type_name = agent_type.display_name().to_string();
         let agent_definition = AgentDefinition::new(agent_type);
 
+        // Resolve model override for this agent type from config
+        let model = self
+            .config
+            .resolve_agent_active_model(&self.auth, &agent_type_name)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| self.active_model.clone());
+
         let request_id = self.active_request_id;
         let parent_session_id = self.conversation.session_id;
         let child_session_id = uuid::Uuid::new_v4();
@@ -555,7 +563,6 @@ impl App {
         let tx = self.backend_tx.clone();
         let llm = self.llm.clone();
         let tools = self.tools.clone();
-        let model = self.active_model.clone();
         let workspace_root = self.workspace_root.clone();
         let task_call = tool_call.clone();
 

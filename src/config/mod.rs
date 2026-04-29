@@ -137,6 +137,11 @@ impl Default for RtkConfig {
 /// default_subagent_model = "gpt-4o-mini"
 /// max_depth = 3
 /// max_sessions_per_agent = 2
+///
+/// [agent.models]
+/// explorer = "gpt-4o-mini"
+/// oracle = "gpt-4o"
+/// fixer = "claude-3-5-sonnet"
 /// ```
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AgentConfig {
@@ -156,6 +161,11 @@ pub struct AgentConfig {
     /// Maximum concurrent sub-agent tasks per parent session.
     #[serde(default = "default_max_sessions_per_agent")]
     pub max_sessions_per_agent: usize,
+    /// Per-agent model overrides, keyed by agent type name.
+    /// E.g. `explorer = "gpt-4o-mini"` or `explorer = "openai/gpt-4o-mini"`.
+    /// Format: `"model_id"` or `"provider/model_id"`.
+    #[serde(default)]
+    pub models: BTreeMap<String, String>,
 }
 
 fn default_agent_enabled() -> bool {
@@ -170,6 +180,22 @@ fn default_max_sessions_per_agent() -> usize {
     5
 }
 
+impl AgentConfig {
+    /// Given an agent type name (e.g. "explorer"), return the configured model override
+    /// from `[agent.models]`, if any.
+    ///
+    /// Format can be `"model_id"` or `"provider/model_id"`.
+    pub fn model_for(&self, agent_type: &str) -> Option<&str> {
+        self.models.get(agent_type).map(|s| s.as_str())
+    }
+
+    /// Return the default sub-agent model string, if configured.
+    pub fn default_model(&self) -> Option<&str> {
+        let m = self.default_subagent_model.trim();
+        if m.is_empty() { None } else { Some(m) }
+    }
+}
+
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
@@ -178,6 +204,7 @@ impl Default for AgentConfig {
             default_subagent_provider: String::new(),
             max_depth: 3,
             max_sessions_per_agent: 5,
+            models: BTreeMap::new(),
         }
     }
 }
@@ -552,6 +579,44 @@ poll_timeout_secs = 30
         };
 
         self.resolve_model_by_ids(auth, &provider_id, &model_id)
+    }
+
+    /// Resolve an ActiveModel for a sub-agent type, checking the `[agent.models]` config.
+    ///
+    /// If the agent type has a configured model string, it is resolved.
+    /// If the model string is in `"provider/model_id"` format, the provider prefix is used;
+    /// otherwise, the default provider is assumed.
+    ///
+    /// Returns `None` when no override is configured (caller should fall back to parent model).
+    pub fn resolve_agent_active_model(
+        &self,
+        auth: &AuthStore,
+        agent_type: &str,
+    ) -> Result<Option<ActiveModel>> {
+        let Some(model_str) = self.agent.model_for(agent_type).or_else(|| self.agent.default_model()) else {
+            return Ok(None);
+        };
+
+        let (provider_id, model_id) = if let Some(slash_pos) = model_str.find('/') {
+            let provider = &model_str[..slash_pos];
+            let model = &model_str[slash_pos + 1..];
+            (provider.to_string(), model.to_string())
+        } else {
+            // Use the default provider
+            (self.default_provider.clone(), model_str.to_string())
+        };
+
+        self.resolve_model_by_ids(auth, &provider_id, &model_id)
+            .map(Some)
+            .or_else(|e| {
+                crate::log_warn!(
+                    "failed to resolve agent model '{}' for '{}': {}",
+                    model_str,
+                    agent_type,
+                    e
+                );
+                Ok(None)
+            })
     }
 
     pub fn resolve_model_by_ids(
