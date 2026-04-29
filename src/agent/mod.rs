@@ -191,10 +191,7 @@ impl AgentDefinition {
 
     /// Build the bootstrap message content for a sub-agent session.
     pub fn bootstrap_content(&self) -> String {
-        format!(
-            "{}",
-            self.system_prompt,
-        )
+        self.system_prompt.clone()
     }
 }
 

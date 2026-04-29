@@ -679,7 +679,7 @@ poll_timeout_secs = 30
         } else {
             let display_name = model.display_name.clone();
             if display_name.is_empty() {
-                ThinkingMatcher::match_for_model(&model_id)
+                ThinkingMatcher::match_for_model(model_id)
             } else {
                 ThinkingMatcher::match_for_model(&display_name)
             }

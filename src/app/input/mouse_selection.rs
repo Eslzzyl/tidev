@@ -4,6 +4,7 @@ use ratatui::{
     prelude::Frame,
     style::Style,
 };
+#[cfg(target_os = "linux")]
 use std::io::Write;
 use std::time::{Duration, Instant};
 use unicode_width::UnicodeWidthStr;
@@ -254,6 +255,7 @@ fn is_probably_wsl() -> bool {
 }
 
 #[cfg(not(target_os = "linux"))]
+#[allow(dead_code)]
 fn is_probably_wsl() -> bool {
     false
 }
@@ -305,6 +307,7 @@ fn wsl_clipboard_copy(text: &str) -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "linux"))]
+#[allow(dead_code)]
 fn wsl_clipboard_copy(_text: &str) -> Result<(), String> {
     Err("WSL clipboard is only available on Linux".to_string())
 }

@@ -85,9 +85,9 @@ impl MessageAttachment {
                         ""
                     };
                     return Some(format!(
-                        "\n\n{tool_name} Tool: read\n{args}\n\nOutput:\n{output}{truncated_hint}",
+                        "\n\n{tool_name} Tool: read\n{{\"path\":\"{args}\"}}\n\nOutput:\n{output}{truncated_hint}",
                         tool_name = "read",
-                        args = format!(r#"{{"path":"{}"}}"#, path),
+                        args = path,
                         output = output.as_ref(),
                         truncated_hint = truncated_hint
                     ));

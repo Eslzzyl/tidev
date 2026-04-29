@@ -1,4 +1,4 @@
-/// Utility functions for formatting and common operations.
+//! Utility functions for formatting and common operations.
 
 /// Token count units: K (thousand), M (million), B (billion), T (trillion).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
