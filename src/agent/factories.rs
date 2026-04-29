@@ -58,7 +58,7 @@ pub fn create_all_agents() -> Vec<AgentDefinition> {
         .collect()
 }
 
-/// Create definitions for all sub-agent types (everything except General and Orchestrator).
+/// Create definitions for all sub-agent types (everything except General).
 pub fn create_sub_agents() -> Vec<AgentDefinition> {
     [
         AgentType::Explorer,

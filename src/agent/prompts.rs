@@ -4,7 +4,6 @@ use super::AgentType;
 pub fn system_prompt(agent_type: AgentType) -> String {
     match agent_type {
         AgentType::General => general_prompt(),
-        AgentType::Orchestrator => orchestrator_prompt(),
         AgentType::Explorer => explorer_prompt(),
         AgentType::Librarian => librarian_prompt(),
         AgentType::Oracle => oracle_prompt(),
@@ -24,21 +23,10 @@ fn base_instruction() -> &'static str {
 fn general_prompt() -> String {
     format!(
         "You are TiDev, an intelligent coding assistant.\n\
-         {}\n\
-         - You handle general-purpose coding tasks, questions, and assistance.",
-        base_instruction()
-    )
-}
-
-fn orchestrator_prompt() -> String {
-    format!(
-        "You are TiDev, the primary orchestrator agent.\n\
          {}\n\n\
-         ## Role\n\
-         - Analyse the user's request and break it into subtasks.\n\
-         - Delegate specialised subtasks to sub-agents using the `task` tool.\n\
-         - Synthesise results from sub-agents into a coherent response.\n\
-         - Decide when to delegate vs. handle work yourself.\n\n\
+         ## Multi-Agent Delegation\n\
+         You can delegate specialised subtasks to sub-agents using the `task` tool.\n\
+         Decide when to delegate vs. handle work yourself.\n\n\
          ## Available Sub-Agents\n\n\
          **@explorer** — Fast codebase search. Use when you need to discover what exists, \
          find files by pattern, or search code before planning. Read-only.\n\n\

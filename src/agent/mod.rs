@@ -8,14 +8,13 @@ use crate::config::ActiveModel;
 /// The built-in agent types supported by TiDev.
 ///
 /// Each agent type has a specialized system prompt, default tool permissions,
-/// and optional model overrides.
+/// and optional model overrides. The General agent serves as the default and
+/// includes multi-agent delegation capabilities.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentType {
-    /// Default / fallback agent (same as current behavior).
+    /// Default agent — handles general tasks and delegates to sub-agents.
     General,
-    /// Main coordinator that delegates to sub-agents and synthesises results.
-    Orchestrator,
     /// Codebase exploration specialist — fast grep/glob/read, read-only.
     Explorer,
     /// Documentation and library research specialist.
@@ -33,7 +32,6 @@ impl AgentType {
     pub fn all() -> &'static [Self] {
         &[
             Self::General,
-            Self::Orchestrator,
             Self::Explorer,
             Self::Librarian,
             Self::Oracle,
@@ -46,7 +44,6 @@ impl AgentType {
     pub fn display_name(self) -> &'static str {
         match self {
             Self::General => "general",
-            Self::Orchestrator => "orchestrator",
             Self::Explorer => "explorer",
             Self::Librarian => "librarian",
             Self::Oracle => "oracle",
@@ -58,10 +55,7 @@ impl AgentType {
     /// Short description shown to the LLM and in UI panels.
     pub fn description(self) -> &'static str {
         match self {
-            Self::General => "General-purpose assistant",
-            Self::Orchestrator => {
-                "Main coordinator: analyses tasks, delegates to specialists, synthesises results"
-            }
+            Self::General => "General-purpose assistant with multi-agent delegation",
             Self::Explorer => {
                 "Fast codebase search specialist: grep, glob, and read to discover code patterns"
             }
@@ -87,8 +81,8 @@ impl AgentType {
     /// `None` means all tools are allowed (subject to session mode permissions).
     pub fn default_tool_restrictions(self) -> Option<&'static [&'static str]> {
         match self {
-            // General and Orchestrator can use everything.
-            Self::General | Self::Orchestrator => None,
+            // General can use everything.
+            Self::General => None,
             // Explorer: read-only search tools.
             Self::Explorer => Some(&["read", "list", "glob", "grep", "websearch", "webfetch"]),
             // Librarian: research tools (no code modification).
@@ -136,7 +130,7 @@ impl AgentType {
             Self::Explorer | Self::Librarian | Self::Oracle => 0.1,
             Self::Fixer => 0.2,
             Self::Designer => 0.7,
-            Self::General | Self::Orchestrator => 0.3,
+            Self::General => 0.3,
         }
     }
 
@@ -146,7 +140,6 @@ impl AgentType {
         let s = s.strip_prefix('@').unwrap_or(&s);
         match s {
             "general" => Some(Self::General),
-            "orchestrator" => Some(Self::Orchestrator),
             "explorer" => Some(Self::Explorer),
             "librarian" => Some(Self::Librarian),
             "oracle" => Some(Self::Oracle),
@@ -224,7 +217,6 @@ mod tests {
         assert!(AgentType::Oracle.is_read_only());
         assert!(!AgentType::Fixer.is_read_only());
         assert!(!AgentType::General.is_read_only());
-        assert!(!AgentType::Orchestrator.is_read_only());
         assert!(!AgentType::Designer.is_read_only());
     }
 
