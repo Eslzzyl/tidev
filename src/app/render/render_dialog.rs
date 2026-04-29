@@ -1299,25 +1299,63 @@ impl App {
         self.register_selection_region(inner);
 
         let sections = Layout::vertical([
-            Constraint::Length(2),
-            Constraint::Length(3),
-            Constraint::Min(8),
-            Constraint::Length(1),
+            Constraint::Length(1),   // tab bar
+            Constraint::Length(2),   // instruction
+            Constraint::Length(3),   // search box
+            Constraint::Min(8),      // model list
+            Constraint::Length(1),   // footer help
         ])
         .split(inner);
 
+        // --- Tab bar ---
+        let tab_spans: Vec<Span> = panel
+            .tabs
+            .iter()
+            .enumerate()
+            .flat_map(|(idx, tab)| {
+                let is_active = idx == panel.selected_tab_index;
+                let tab_style = if is_active {
+                    Style::default()
+                        .fg(palette.accent)
+                        .bg(palette.selection_bg)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(palette.muted)
+                };
+                let label = format!(" {} ", tab.display_name);
+                let mut spans = vec![Span::styled(label, tab_style)];
+                // Separator between tabs
+                if idx + 1 < panel.tabs.len() {
+                    spans.push(Span::styled(" │ ", Style::default().fg(palette.border)));
+                }
+                spans
+            })
+            .collect();
+
         frame.render_widget(
-            Paragraph::new(
-                "Type to filter by provider or model. Enter switches to the highlighted model.",
-            )
-            .alignment(Alignment::Center)
-            .style(Style::default().bg(palette.panel).fg(palette.muted)),
+            Paragraph::new(Line::from(tab_spans))
+                .style(Style::default().bg(palette.panel))
+                .alignment(Alignment::Left),
             sections[0],
         );
 
+        // --- Instruction ---
+        let instruction = if panel.is_general_tab() {
+            "Select a model for the main session. Enter switches to the selected model."
+        } else {
+            "Select a model for this agent. Enter saves to config.toml."
+        };
+        frame.render_widget(
+            Paragraph::new(instruction)
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(palette.panel).fg(palette.muted)),
+            sections[1],
+        );
+
+        // --- Search box ---
         self.render_input_block_with_composer(
             frame,
-            sections[1],
+            sections[2],
             "Search models",
             &panel.query,
             panel.query.placeholder(),
@@ -1325,6 +1363,7 @@ impl App {
             false,
         );
 
+        // --- Model list ---
         let items = self.model_panel_items(panel);
         let mut rows = Vec::new();
         for item in &items {
@@ -1378,13 +1417,16 @@ impl App {
                 Paragraph::new("No connected models match this search.")
                     .alignment(Alignment::Center)
                     .style(Style::default().bg(palette.panel).fg(palette.muted)),
-                sections[2],
+                sections[3],
             );
         } else {
+            let sel = panel
+                .current_tab()
+                .map(|t| t.selected_index)
+                .unwrap_or(0)
+                .min(items.len().saturating_sub(1));
             let mut state = ListState::default();
-            state.select(Some(
-                panel.selected_index.min(items.len().saturating_sub(1)),
-            ));
+            state.select(Some(sel));
 
             let list = List::new(rows)
                 .style(Style::default().bg(palette.panel).fg(palette.text))
@@ -1395,14 +1437,20 @@ impl App {
                         .add_modifier(Modifier::BOLD),
                 );
 
-            frame.render_stateful_widget(list, sections[2], &mut state);
+            frame.render_stateful_widget(list, sections[3], &mut state);
         }
 
+        // --- Footer ---
+        let footer = if panel.is_general_tab() {
+            "Enter switch · Ctrl+E edit provider · Tab switch tab · Esc close"
+        } else {
+            "Enter save · Ctrl+E edit provider · Tab switch tab · Esc close"
+        };
         frame.render_widget(
-            Paragraph::new("Enter switch · Ctrl+E edit selected provider · Esc close")
+            Paragraph::new(footer)
                 .alignment(Alignment::Center)
                 .style(Style::default().bg(palette.panel).fg(palette.muted)),
-            sections[3],
+            sections[4],
         );
     }
 

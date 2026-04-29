@@ -619,6 +619,31 @@ poll_timeout_secs = 30
             })
     }
 
+    /// Set the model override for a specific agent type and persist to config.
+    /// `model_str` should be in `"provider/model_id"` format.
+    pub fn set_agent_model(&mut self, paths: &ConfigPaths, agent_type: &str, model_str: &str) -> Result<()> {
+        if model_str.is_empty() {
+            self.agent.models.remove(agent_type);
+        } else {
+            self.agent.models.insert(agent_type.to_string(), model_str.to_string());
+        }
+        self.save(paths)
+    }
+
+    /// Return the configured model label for an agent type, if any.
+    /// Format: `"provider/model_id"` or `None` (inherit).
+    pub fn agent_model_label(&self, agent_type: &str) -> Option<&str> {
+        self.agent.models.get(agent_type).map(|s| s.as_str())
+    }
+
+    /// Return a human-readable label for an agent type's current model,
+    /// or the string "<inherit>" if none is configured.
+    pub fn agent_model_display(&self, agent_type: &str) -> String {
+        self.agent_model_label(agent_type)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "<inherit>".to_string())
+    }
+
     pub fn resolve_model_by_ids(
         &self,
         auth: &AuthStore,

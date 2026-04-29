@@ -1,4 +1,5 @@
 use super::*;
+use crate::agent::AgentType;
 use crate::session::MessageRole;
 
 impl App {
@@ -700,9 +701,36 @@ impl App {
             KeyCode::Enter => {
                 let items = self.model_panel_items(&panel);
                 if let Some(summary) = panel.selected_model(&items).cloned() {
-                    self.switch_model(Some(&summary.label()))?;
-                    self.close_model_panel();
+                    if panel.is_general_tab() {
+                        // General tab: switch main session model (existing behavior)
+                        self.switch_model(Some(&summary.label()))?;
+                        self.close_model_panel();
+                    } else {
+                        // Agent tab: save to agent.models
+                        let agent_type_str = panel.current_tab()
+                            .map(|t| t.agent_type_str.clone())
+                            .unwrap_or_default();
+                        let model_str = summary.label(); // "provider/model_id"
+                        // Update config and persist
+                        self.config.set_agent_model(
+                            &self.paths,
+                            &agent_type_str,
+                            &model_str,
+                        )?;
+                        // Update the tab's current_label
+                        let mut next_panel = panel;
+                        if let Some(t) = next_panel.current_tab_mut() {
+                            t.current_label = model_str.clone();
+                        }
+                        self.model_panel = Some(next_panel);
+                        self.last_notice = Some(format!(
+                            "Agent '{}' model set to {}",
+                            agent_type_str, model_str
+                        ));
+                    }
                 }
+                // For agent tabs, stay open so the user can continue configuring
+                // or close with Esc.
             }
             KeyCode::Esc => {
                 self.close_model_panel();
@@ -714,17 +742,44 @@ impl App {
                     self.begin_provider_edit_for_model(summary.provider_id, summary.model_id)?;
                 }
             }
-            KeyCode::Tab => {}
+            KeyCode::Tab if key.modifiers.is_empty() => {
+                let mut next_panel = panel;
+                next_panel.next_tab();
+                // Reset selection to the new tab's saved position
+                let items = self.model_panel_items(&next_panel);
+                let active = agent_tab_active_model(&next_panel, &self.active_model);
+                if let Some((p, m)) = active {
+                    next_panel.reset_selection(&items, Some((&p, &m)));
+                } else {
+                    next_panel.reset_selection(&items, None);
+                }
+                self.model_panel = Some(next_panel);
+            }
+            KeyCode::BackTab | KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                let mut next_panel = panel;
+                next_panel.prev_tab();
+                let items = self.model_panel_items(&next_panel);
+                let active = agent_tab_active_model(&next_panel, &self.active_model);
+                if let Some((p, m)) = active {
+                    next_panel.reset_selection(&items, Some((&p, &m)));
+                } else {
+                    next_panel.reset_selection(&items, None);
+                }
+                self.model_panel = Some(next_panel);
+            }
             _ => {
                 let previous_query = panel.query.text().to_string();
                 let _ = panel.query.handle_key_with_history(key, false);
                 if panel.query.text() != previous_query {
                     let items = self.model_panel_items(&panel);
                     let mut next_panel = panel;
-                    next_panel.reset_selection(
-                        &items,
-                        Some((&self.active_model.provider_id, &self.active_model.model_id)),
-                    );
+                    // On query change, reset the current tab's selection to its configured model
+                    let active = agent_tab_active_model(&next_panel, &self.active_model);
+                    if let Some((p, m)) = active {
+                        next_panel.reset_selection(&items, Some((&p, &m)));
+                    } else {
+                        next_panel.reset_selection(&items, None);
+                    }
                     self.model_panel = Some(next_panel);
                 } else {
                     self.model_panel = Some(panel);
@@ -746,10 +801,12 @@ impl App {
 
         if panel.query.text() != previous_query {
             let items = self.model_panel_items(&panel);
-            panel.reset_selection(
-                &items,
-                Some((&self.active_model.provider_id, &self.active_model.model_id)),
-            );
+            let active = agent_tab_active_model(&panel, &self.active_model);
+            if let Some((p, m)) = active {
+                panel.reset_selection(&items, Some((&p, &m)));
+            } else {
+                panel.reset_selection(&items, None);
+            }
         }
 
         self.model_panel = Some(panel);
@@ -1504,6 +1561,28 @@ impl App {
 
         let mut panel = ModelPanelState::new();
         panel.query.set_text(initial_query);
+
+        // Build tabs: General first, then each agent type
+        let mut tabs = Vec::new();
+        // General tab — main session model
+        tabs.push(crate::app::model_panel::ModelPanelTab::new(
+            "general",
+            "General",
+            &self.active_model.label(),
+        ));
+        // Agent tabs
+        for agent_type in AgentType::all() {
+            if *agent_type == AgentType::General {
+                continue;
+            }
+            let ty = agent_type.display_name();
+            let label = self.config.agent_model_display(ty);
+            tabs.push(crate::app::model_panel::ModelPanelTab::new(ty, agent_type.display_name(), &label));
+        }
+        panel.tabs = tabs;
+        panel.selected_tab_index = 0;
+
+        // Initialize selection for the general tab
         let items = self.model_panel_items(&panel);
         panel.reset_selection(
             &items,
@@ -2259,5 +2338,25 @@ impl App {
             };
             panel.set_error(error_msg.to_string());
         }
+    }
+}
+
+/// Helper: given a model panel, parse the current tab's `current_label` into
+/// `(provider_id, model_id)` for use with `reset_selection`.
+/// Returns owned strings to avoid borrow conflicts with the panel.
+fn agent_tab_active_model(
+    panel: &crate::app::model_panel::ModelPanelState,
+    default: &crate::config::ActiveModel,
+) -> Option<(String, String)> {
+    let tab = panel.current_tab()?;
+    let label = &tab.current_label;
+    if label == "<inherit>" || label.is_empty() {
+        Some((default.provider_id.clone(), default.model_id.clone()))
+    } else if let Some(slash_pos) = label.find('/') {
+        let p = &label[..slash_pos];
+        let m = &label[slash_pos + 1..];
+        Some((p.to_string(), m.to_string()))
+    } else {
+        None
     }
 }

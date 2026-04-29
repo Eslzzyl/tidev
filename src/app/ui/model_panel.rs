@@ -1,9 +1,36 @@
 use crate::{app::Composer, config::ModelSummary};
 
 #[derive(Clone, Debug)]
-pub struct ModelPanelState {
+pub struct ModelPanelTab {
+    /// Agent type identifier, e.g. "general", "explorer", "librarian", etc.
+    pub agent_type_str: String,
+    /// Human-readable display name for the tab header.
+    pub display_name: String,
+    /// Currently selected item index within the filtered model list.
     pub selected_index: usize,
+    /// Current model label shown on the tab, e.g. "openai/gpt-4o" or "<inherit>".
+    pub current_label: String,
+}
+
+impl ModelPanelTab {
+    pub fn new(agent_type_str: &str, display_name: &str, current_label: &str) -> Self {
+        Self {
+            agent_type_str: agent_type_str.to_string(),
+            display_name: display_name.to_string(),
+            selected_index: 0,
+            current_label: current_label.to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ModelPanelState {
+    /// Shared search query across all tabs.
     pub(crate) query: Composer,
+    /// Ordered list of tabs (General first, then Explorer, Librarian, etc.).
+    pub tabs: Vec<ModelPanelTab>,
+    /// Index into tabs for the currently active tab.
+    pub selected_tab_index: usize,
 }
 
 impl Default for ModelPanelState {
@@ -15,9 +42,20 @@ impl Default for ModelPanelState {
 impl ModelPanelState {
     pub fn new() -> Self {
         Self {
-            selected_index: 0,
             query: Composer::new("Search connected models by provider or model name"),
+            tabs: Vec::new(),
+            selected_tab_index: 0,
         }
+    }
+
+    /// Resolve the active tab's selected_index given a filtered item list.
+    pub(crate) fn current_tab_mut(&mut self) -> Option<&mut ModelPanelTab> {
+        self.tabs.get_mut(self.selected_tab_index)
+    }
+
+    /// Resolve the active tab.
+    pub(crate) fn current_tab(&self) -> Option<&ModelPanelTab> {
+        self.tabs.get(self.selected_tab_index)
     }
 
     pub fn reset_selection(
@@ -25,39 +63,76 @@ impl ModelPanelState {
         items: &[ModelPanelItem],
         active_model: Option<(&str, &str)>,
     ) {
+        let Some(tab) = self.current_tab_mut() else {
+            return;
+        };
         if let Some((provider_id, model_id)) = active_model
             && let Some(index) = items.iter().position(|item| {
                 matches!(item, ModelPanelItem::Model { summary }
                     if summary.provider_id == provider_id && summary.model_id == model_id)
             })
         {
-            self.selected_index = index;
+            tab.selected_index = index;
             return;
         }
 
-        self.selected_index = first_selectable_index(items).unwrap_or(0);
+        tab.selected_index = first_selectable_index(items).unwrap_or(0);
     }
 
     pub fn move_selection(&mut self, items: &[ModelPanelItem], delta: isize) {
+        let Some(tab) = self.current_tab_mut() else {
+            return;
+        };
         let selectable = selectable_indices(items);
         if selectable.is_empty() {
-            self.selected_index = 0;
+            tab.selected_index = 0;
             return;
         }
 
         let current_position = selectable
             .iter()
-            .position(|index| *index == self.selected_index)
+            .position(|index| *index == tab.selected_index)
             .unwrap_or(0) as isize;
         let len = selectable.len() as isize;
         let next_position = (current_position + delta).rem_euclid(len) as usize;
-        self.selected_index = selectable[next_position];
+        tab.selected_index = selectable[next_position];
     }
 
     pub fn selected_model<'a>(&self, items: &'a [ModelPanelItem]) -> Option<&'a ModelSummary> {
+        let tab = self.current_tab()?;
         items
-            .get(self.selected_index)
+            .get(tab.selected_index)
             .and_then(ModelPanelItem::as_model)
+    }
+
+    pub fn select_tab(&mut self, index: usize) {
+        if index < self.tabs.len() {
+            self.selected_tab_index = index;
+        }
+    }
+
+    /// Move to the next tab, wrapping around.
+    pub fn next_tab(&mut self) {
+        if !self.tabs.is_empty() {
+            self.selected_tab_index = (self.selected_tab_index + 1) % self.tabs.len();
+        }
+    }
+
+    /// Move to the previous tab, wrapping around.
+    pub fn prev_tab(&mut self) {
+        if !self.tabs.is_empty() {
+            self.selected_tab_index = if self.selected_tab_index == 0 {
+                self.tabs.len() - 1
+            } else {
+                self.selected_tab_index - 1
+            };
+        }
+    }
+
+    /// Is the active tab the "general" (main session) tab?
+    pub fn is_general_tab(&self) -> bool {
+        self.current_tab()
+            .is_some_and(|t| t.agent_type_str == "general")
     }
 }
 
