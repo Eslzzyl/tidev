@@ -1134,7 +1134,7 @@ impl App {
     }
 
     /// Ensure the cursor in the input area is visible by adjusting scroll offset.
-    fn ensure_input_cursor_visible(&mut self) {
+    pub(crate) fn ensure_input_cursor_visible(&mut self) {
         let Some(input_area) = self.input_area.get() else {
             return;
         };

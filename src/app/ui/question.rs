@@ -493,6 +493,7 @@ impl App {
             }
 
             let _ = self.composer.handle_key_with_history(key, false);
+            self.ensure_input_cursor_visible();
             if let Some(dialog) = self.question_dialog.as_mut() {
                 dialog.sync_current_custom_input(self.composer.text());
             }

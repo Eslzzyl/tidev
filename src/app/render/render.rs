@@ -373,9 +373,7 @@ impl App {
             .style(Style::default().fg(palette.text))
             .scroll((scroll, 0));
 
-        if composer.is_empty() || mask_input {
-            paragraph = paragraph.wrap(Wrap { trim: false });
-        }
+        paragraph = paragraph.wrap(Wrap { trim: false });
 
         frame.render_widget(paragraph, area);
 
