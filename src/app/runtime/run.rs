@@ -135,6 +135,8 @@ impl App {
             instruction_content_cache: std::collections::HashMap::new(),
             expanded_tool_results: std::collections::HashSet::new(),
             tool_result_card_bounds: Vec::new(),
+            subagent_task_map: std::collections::HashMap::new(),
+            running_subagent_card_bounds: Vec::new(),
             selectable_regions: Vec::new(),
             message_scroll_target: None,
             todos: Vec::new(),

@@ -553,6 +553,8 @@ impl App {
                 agent_type_name,
                 cancel_requested.clone(),
             ));
+        self.subagent_task_map
+            .insert(tool_call.id.clone(), child_session_id);
         self.last_notice = Some(format!(
             "Running {} subagent(s)...",
             self.running_subagent_executions.len()

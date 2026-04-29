@@ -16,7 +16,7 @@ impl App {
                 }
             }
             Event::Mouse(mouse) => {
-                self.handle_mouse_event(mouse);
+                self.handle_mouse_event(mouse, runtime);
             }
             Event::Resize(_, _) => {
                 self.clear_mouse_selection();
@@ -38,7 +38,7 @@ impl App {
         Ok(())
     }
 
-    pub(crate) fn handle_mouse_event(&mut self, mouse: MouseEvent) {
+    pub(crate) fn handle_mouse_event(&mut self, mouse: MouseEvent, runtime: &Runtime) {
         if self.model_panel.is_some() {
             return;
         }
@@ -86,11 +86,52 @@ impl App {
                 }
 
                 if !self.mouse_selection.is_dragging() {
-                    for (message_id, rect) in &self.tool_result_card_bounds {
-                        if rect.contains(position) {
-                            self.toggle_tool_result_expanded(*message_id);
+                    let is_ctrl = mouse.modifiers.contains(KeyModifiers::CONTROL);
+
+                    // Ctrl+Click on a completed task card → enter subsession
+                    if is_ctrl {
+                        let hit_message_id = self
+                            .tool_result_card_bounds
+                            .iter()
+                            .find(|(_, rect)| rect.contains(position))
+                            .map(|(id, _)| *id);
+
+                        if let Some(message_id) = hit_message_id {
+                            if !self.try_navigate_to_subagent_subsession(message_id, runtime) {
+                                self.toggle_tool_result_expanded(message_id);
+                            }
                             return;
                         }
+                    }
+
+                    // Click on running subagent card → enter subsession
+                    let hit_running = self
+                        .running_subagent_card_bounds
+                        .iter()
+                        .find(|(_, rect)| rect.contains(position))
+                        .map(|(idx, _)| *idx);
+
+                    if let Some(execution_index) = hit_running {
+                        if let Some(execution) = self
+                            .running_subagent_executions
+                            .get(execution_index)
+                        {
+                            let child_id = execution.child_session_id;
+                            self.switch_session(child_id, runtime).ok();
+                            return;
+                        }
+                    }
+
+                    // Plain click on tool result card → toggle expand
+                    let hit_message_id = self
+                        .tool_result_card_bounds
+                        .iter()
+                        .find(|(_, rect)| rect.contains(position))
+                        .map(|(id, _)| *id);
+
+                    if let Some(message_id) = hit_message_id {
+                        self.toggle_tool_result_expanded(message_id);
+                        return;
                     }
                 }
 
@@ -343,6 +384,35 @@ impl App {
             self.expanded_tool_results.insert(message_id);
         }
         self.clear_message_render_cache();
+    }
+
+    /// Attempts to navigate to a subagent's child session from a tool result message.
+    /// Returns true if navigation was performed.
+    fn try_navigate_to_subagent_subsession(
+        &mut self,
+        message_id: Uuid,
+        runtime: &Runtime,
+    ) -> bool {
+        // Find the message and its tool_call_id
+        let tool_call_id = self
+            .conversation
+            .messages
+            .iter()
+            .find(|m| m.id == message_id)
+            .and_then(|m| m.tool_call_id.as_deref())
+            .map(|id| id.to_string());
+
+        let Some(tool_call_id) = tool_call_id else {
+            return false;
+        };
+
+        // Look up the child session from the subagent_task_map
+        if let Some(&child_session_id) = self.subagent_task_map.get(&tool_call_id) {
+            self.switch_session(child_session_id, runtime).ok();
+            true
+        } else {
+            false
+        }
     }
 
     pub(crate) fn update_mouse_selection_auto_scroll(&mut self) {

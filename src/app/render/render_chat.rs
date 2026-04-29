@@ -39,6 +39,13 @@ struct ToolResultCardRange {
     end_line: usize,
 }
 
+#[derive(Clone, Debug)]
+struct RunningCardRange {
+    execution_index: usize,
+    start_line: usize,
+    end_line: usize,
+}
+
 struct RenderContext<'a> {
     palette: ThemePalette,
     spinner: &'a str,
@@ -617,6 +624,19 @@ fn render_tool_result_detail_lines(
         }
     }
 
+    // Subagent task results: render markdown preview (collapsed) or full raw (expanded)
+    if canonical_name == "task" {
+        let is_expanded = ctx.expanded_tool_results.contains(&message.id);
+        if !is_expanded {
+            return (
+                render_subagent_task_preview(effective_output, body_width, palette),
+                None,
+                vec![],
+            );
+        }
+        // Expanded: fall through to full raw output below
+    }
+
     (
         render_output_preview_lines(
             effective_output,
@@ -629,6 +649,56 @@ fn render_tool_result_detail_lines(
         exit_code,
         vec![],
     )
+}
+
+/// Renders a compact markdown preview of a subagent task result.
+fn render_subagent_task_preview(
+    output: &str,
+    body_width: usize,
+    palette: ThemePalette,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+
+    if output.trim().is_empty() {
+        lines.push(line_with_style("(empty result)", palette.muted));
+        return lines;
+    }
+
+    // Title header
+    lines.push(Line::from(vec![
+        Span::styled("Task ", Style::default().fg(palette.accent_soft)),
+        Span::styled("· subagent result", Style::default().fg(palette.muted)),
+    ]));
+    lines.push(Line::from(""));
+
+    // Render the output as markdown, then take the first few lines
+    let rendered =
+        render_markdown_text_with_width_and_cwd(output, Some(body_width.saturating_sub(2)), None);
+    let md_lines: Vec<Line<'static>> = rendered.lines;
+
+    let max_preview = TOOL_OUTPUT_PREVIEW_LINES;
+    let line_count = md_lines.len();
+
+    if line_count <= max_preview {
+        lines.extend(md_lines);
+    } else {
+        lines.extend(md_lines.into_iter().take(max_preview));
+        lines.push(Line::from(vec![Span::styled(
+            format!(
+                "  ▼ {} more line(s) — Click to expand",
+                line_count - max_preview
+            ),
+            Style::default().fg(palette.muted),
+        )]));
+    }
+
+    // Always add Ctrl+Click hint
+    lines.push(Line::from(vec![Span::styled(
+        "  Ctrl+Click to enter subsession",
+        Style::default().fg(palette.muted),
+    )]));
+
+    lines
 }
 
 fn render_todos_checkbox_list(
@@ -942,6 +1012,7 @@ impl App {
             selectable_regions_ranges,
             rendered_virtualized,
             virtualized_render_scroll,
+            running_card_ranges,
         ) = self.messages_text(Some(content_width));
 
         self.message_total_lines = total_lines;
@@ -1012,6 +1083,40 @@ impl App {
                 };
                 self.tool_result_card_bounds
                     .push((card_range.message_id, card_rect));
+            }
+        }
+
+        // Calculate screen positions for running subagent cards
+        // running_card_ranges contain positions within the running_lines block,
+        // which starts at (header_line_count + total_message_lines) in the full text.
+        let header_line_count = if self.conversation.parent_session_id.is_some() { 3 } else { 0 };
+        let total_msg_lines = self.message_layout_index.borrow().total_lines;
+        let running_block_start = header_line_count + total_msg_lines;
+
+        self.running_subagent_card_bounds.clear();
+        for card_range in &running_card_ranges {
+            let abs_start = running_block_start + card_range.start_line;
+            let abs_end = running_block_start + card_range.end_line;
+
+            let screen_start = abs_start.saturating_sub(render_scroll);
+            let screen_end = abs_end.saturating_sub(render_scroll);
+
+            if screen_end == 0 || screen_start >= self.message_viewport_lines {
+                continue;
+            }
+
+            let visible_start = screen_start as u16;
+            let visible_end = (screen_end.min(self.message_viewport_lines)) as u16;
+
+            if visible_start < visible_end {
+                let card_rect = Rect {
+                    x: content_area.x,
+                    y: content_area.y.saturating_add(visible_start),
+                    width: content_area.width,
+                    height: visible_end.saturating_sub(visible_start),
+                };
+                self.running_subagent_card_bounds
+                    .push((card_range.execution_index, card_rect));
             }
         }
 
@@ -1214,6 +1319,7 @@ impl App {
         Vec<SelectableRegionRange>,
         bool,
         usize,
+        Vec<RunningCardRange>,
     ) {
         let started_at = Instant::now();
         let palette = self.palette();
@@ -1224,6 +1330,7 @@ impl App {
         let mut lines = Vec::new();
         let mut card_ranges = Vec::new();
         let mut selectable_regions_ranges = Vec::new();
+        let mut running_card_ranges = Vec::new();
 
         // Header for subsessions (always visible at top)
         let header_lines = if self.conversation.parent_session_id.is_some() {
@@ -1261,6 +1368,7 @@ impl App {
                 selectable_regions_ranges,
                 false,
                 0,
+                running_card_ranges,
             );
         }
 
@@ -1275,15 +1383,23 @@ impl App {
 
         let mut running_lines = Vec::new();
         if self.conversation.parent_session_id.is_none() {
-            for running_subagent in &self.running_subagent_executions {
+            for (index, running_subagent) in self.running_subagent_executions.iter().enumerate() {
                 let card_lines = self.render_running_subagent_lines(running_subagent, width);
                 if card_lines.is_empty() {
                     continue;
                 }
 
+                let card_start = running_lines.len();
                 let decorated_lines =
                     super::render::decorate_card_lines(card_lines, width, palette.panel);
                 running_lines.extend(decorated_lines);
+                let card_end = running_lines.len();
+
+                running_card_ranges.push(RunningCardRange {
+                    execution_index: index,
+                    start_line: card_start,
+                    end_line: card_end,
+                });
             }
         }
         let total_running_lines = running_lines.len();
@@ -1407,6 +1523,7 @@ impl App {
             selectable_regions_ranges,
             true,
             render_scroll,
+            running_card_ranges,
         )
     }
 
@@ -2411,8 +2528,15 @@ impl App {
                                 });
                             }
 
+                            let card_bg = if canonical_tool_name(&tool_call.name)
+                                == Some("task")
+                            {
+                                palette.panel
+                            } else {
+                                palette.panel_light
+                            };
                             let decorated =
-                                decorate_card_lines(tool_card_lines, width, palette.panel_light);
+                                decorate_card_lines(tool_card_lines, width, card_bg);
                             if let Some(result_msg) = tool_result {
                                 lines.extend(decorated);
                                 let end_line = current_line_offset + lines.len();
@@ -2862,7 +2986,7 @@ mod tests {
         app.conversation
             .push(Message::new(MessageRole::Assistant, "old cached content"));
 
-        let (before, _, _, _, _, _) = app.messages_text(Some(80));
+        let (before, _, _, _, _, _, _) = app.messages_text(Some(80));
         let before_text = text_lines_to_string(&before.lines);
         assert!(before_text.contains("old cached content"));
 
@@ -2870,7 +2994,7 @@ mod tests {
         app.conversation.messages[0].content = "new refreshed content".to_string();
         app.invalidate_active_message_render_cache_for(message_id);
 
-        let (after, _, _, _, _, _) = app.messages_text(Some(80));
+        let (after, _, _, _, _, _, _) = app.messages_text(Some(80));
         let after_text = text_lines_to_string(&after.lines);
         assert!(after_text.contains("new refreshed content"));
     }
@@ -2891,7 +3015,7 @@ mod tests {
             ));
         }
 
-        let (text, total_lines, _, _, _, _) = app.messages_text(Some(80));
+        let (text, total_lines, _, _, _, _, _) = app.messages_text(Some(80));
 
         assert!(total_lines > 0);
         assert!(!text.lines.is_empty());
