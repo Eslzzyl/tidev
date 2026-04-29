@@ -3,6 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use std::sync::{Arc, atomic::AtomicBool};
 use tokio::runtime::Runtime;
 
+use crate::agent::{AgentDefinition, AgentType};
 use crate::prompts::SessionMode;
 use crate::session::{ToolCall, ToolExecutionResult};
 use crate::tooling::{QuestionArgs, TaskArgs, execute_shell_tool_call};
@@ -503,13 +504,12 @@ impl App {
         let args = serde_json::from_str::<TaskArgs>(&tool_call.arguments)?;
         let description = args.description.trim().to_string();
         let prompt = args.prompt.trim().to_string();
-        let subagent_type = args
+        let subagent_type_str = args
             .subagent_type
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .unwrap_or("general")
-            .to_string();
+            .unwrap_or("general");
 
         if description.is_empty() {
             anyhow::bail!("task description cannot be empty");
@@ -518,15 +518,21 @@ impl App {
             anyhow::bail!("task prompt cannot be empty");
         }
 
+        // Resolve agent type and create the agent definition
+        let agent_type = AgentType::parse(subagent_type_str).unwrap_or(AgentType::General);
+        let agent_type_name = agent_type.display_name().to_string();
+        let agent_definition = AgentDefinition::new(agent_type);
+
         let request_id = self.active_request_id;
         let parent_session_id = self.conversation.session_id;
         let child_session_id = uuid::Uuid::new_v4();
         crate::log_info!(
-            "start_subagent_task_execution: request_id={}, parent_session_id={}, child_session_id={}, tool_call_id={}",
+            "start_subagent_task_execution: request_id={}, parent_session_id={}, child_session_id={}, tool_call_id={}, agent_type={}",
             request_id,
             parent_session_id,
             child_session_id,
-            tool_call.id
+            tool_call.id,
+            agent_type.display_name()
         );
         let cancel_requested = Arc::new(AtomicBool::new(false));
         self.running_subagent_executions
@@ -536,7 +542,7 @@ impl App {
                 tool_call.clone(),
                 child_session_id,
                 description.clone(),
-                subagent_type.clone(),
+                agent_type_name,
                 cancel_requested.clone(),
             ));
         self.last_notice = Some(format!(
@@ -555,9 +561,10 @@ impl App {
 
         runtime.spawn(async move {
             crate::log_info!(
-                "subagent task spawned: request_id={}, child_session_id={}",
+                "subagent task spawned: request_id={}, child_session_id={}, agent_type={}",
                 request_id,
-                child_session_id
+                child_session_id,
+                agent_definition.agent_type.display_name()
             );
             let context = crate::app::subagent::SubagentTaskContext {
                 parent_request_id: request_id,
@@ -565,7 +572,7 @@ impl App {
                 child_session_id,
                 description,
                 prompt,
-                subagent_type,
+                agent_definition,
                 llm,
                 tools,
                 model,

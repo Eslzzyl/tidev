@@ -1,9 +1,9 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use serde_json::Value;
 use std::path::Path;
 use uuid::Uuid;
 
-use crate::session::{Message, MessageRole};
+use crate::agent::AgentType;
 use crate::storage::SessionStore;
 use crate::tooling::tools::TaskArgs;
 use crate::tooling::{ToolDefinition, ToolPermission};
@@ -11,32 +11,31 @@ use crate::tooling::{ToolDefinition, ToolPermission};
 pub fn definitions() -> Vec<ToolDefinition> {
     vec![ToolDefinition::new::<TaskArgs>(
         "task",
-        "Run a subagent task",
+        "Run a subagent task. Use `subagent_type` to delegate to a specialist: \
+         explorer (code search), librarian (docs), oracle (strategy), \
+         designer (UI/UX), fixer (implementation). Default: general.",
         ToolPermission::Session,
     )]
 }
 
 pub fn execute_tool_call(
-    workspace_root: &Path,
-    store: &SessionStore,
-    session_id: Uuid,
+    _workspace_root: &Path,
+    _store: &SessionStore,
+    _session_id: Uuid,
     call: &crate::session::ToolCall,
 ) -> Result<String> {
     let arguments: Value = serde_json::from_str(&call.arguments)
-        .with_context(|| format!("failed to parse arguments for tool '{}", call.name))?;
+        .map_err(|e| anyhow::anyhow!("failed to parse arguments for tool '{}': {}", call.name, e))?;
     let args = serde_json::from_value::<TaskArgs>(arguments)
-        .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
+        .map_err(|e| anyhow::anyhow!("failed to decode arguments for tool '{}': {}", call.name, e))?;
 
-    let parent_session = store
-        .load_session_record(session_id)?
-        .context("parent session not found")?;
     let description = args.description.trim();
     let prompt = args.prompt.trim();
-    let subagent_type = args
+    let subagent_type_str = args
         .subagent_type
         .as_deref()
         .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|v| !v.is_empty())
         .unwrap_or("general");
 
     if description.is_empty() {
@@ -46,33 +45,10 @@ pub fn execute_tool_call(
         bail!("task prompt cannot be empty");
     }
 
-    let child_session_id = Uuid::new_v4();
-    let child_title = format!("Task: {description}");
-    store.create_session_with_parent(
-        child_session_id,
-        parent_session.session_id,
-        workspace_root,
-        &parent_session.provider_id,
-        &parent_session.provider_display_name,
-        &parent_session.model_id,
-        &parent_session.model_display_name,
-        &child_title,
-    )?;
-
-    store.copy_tool_permissions(parent_session.session_id, child_session_id)?;
-
-    let bootstrap_message = Message::new(
-        MessageRole::System,
-        format!(
-            "You are a {subagent_type} assistant. Work on the task and keep the response concise."
-        ),
-    );
-    store.append_message(child_session_id, &bootstrap_message)?;
-
-    let user_message = Message::new(MessageRole::User, prompt.to_string());
-    store.append_message(child_session_id, &user_message)?;
+    let agent_type = AgentType::parse(subagent_type_str).unwrap_or(AgentType::General);
 
     Ok(format!(
-        "Started {subagent_type} subagent task '{description}'"
+        "Started {agent_type} subagent task '{description}'",
+        agent_type = agent_type.display_name()
     ))
 }

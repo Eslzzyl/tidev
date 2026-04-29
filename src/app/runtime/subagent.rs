@@ -13,6 +13,7 @@ use tokio::{
 use uuid::Uuid;
 
 use crate::{
+    agent::AgentDefinition,
     config::ActiveModel,
     llm::LlmClient,
     session::{AssistantTurn, BackendEvent, Message, MessageRole, ToolCall, ToolExecutionResult},
@@ -27,7 +28,7 @@ pub(crate) struct SubagentTaskContext {
     pub child_session_id: Uuid,
     pub description: String,
     pub prompt: String,
-    pub subagent_type: String,
+    pub agent_definition: AgentDefinition,
     pub llm: LlmClient,
     pub tools: ToolRegistry,
     pub model: ActiveModel,
@@ -56,7 +57,17 @@ fn prepare_child_session(context: &SubagentTaskContext) -> Result<()> {
     let parent_record = store
         .load_session_record(context.parent_session_id)?
         .context("parent session not found")?;
-    let child_title = format!("Task: {}", context.description);
+
+    // Use agent type in title for better session identification
+    let agent_label = context.agent_definition.agent_type.display_name();
+    let child_title = format!("Task ({agent_label}): {}", context.description);
+
+    // Determine model — use the agent's model override if set
+    let model = context
+        .agent_definition
+        .model_override
+        .as_ref()
+        .unwrap_or(&context.model);
 
     store.create_session_with_parent(
         context.child_session_id,
@@ -64,8 +75,8 @@ fn prepare_child_session(context: &SubagentTaskContext) -> Result<()> {
         &context.workspace_root,
         &parent_record.provider_id,
         &parent_record.provider_display_name,
-        &parent_record.model_id,
-        &parent_record.model_display_name,
+        &model.model_id,
+        &model.display_name,
         &child_title,
     )?;
 
@@ -73,10 +84,7 @@ fn prepare_child_session(context: &SubagentTaskContext) -> Result<()> {
 
     let bootstrap_message = Message::new(
         MessageRole::System,
-        format!(
-            "You are a {} assistant. Work on the task and keep the response concise.",
-            context.subagent_type
-        ),
+        context.agent_definition.bootstrap_content(),
     );
     store.append_message(context.child_session_id, &bootstrap_message)?;
 
@@ -108,23 +116,25 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
             let store = SessionStore::open(&context.store_path)?;
             store.load_messages(context.child_session_id)?
         };
-        let tools = context
-            .tools
-            .definitions()
-            .iter()
-            .filter(|definition| {
-                matches!(
-                    canonical_tool_name(&definition.name),
-                    Some("read")
-                        | Some("list")
-                        | Some("glob")
-                        | Some("grep")
-                        | Some("websearch")
-                        | Some("webfetch")
-                )
-            })
-            .cloned()
-            .collect::<Vec<_>>();
+        let tools = if let Some(allowed_tools) = &context.agent_definition.allowed_tools {
+            // Filter tools based on agent definition
+            context
+                .tools
+                .definitions()
+                .iter()
+                .filter(|definition| {
+                    allowed_tools.contains(&definition.name)
+                        || matches!(
+                            canonical_tool_name(&definition.name),
+                            Some("question")
+                        )
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            // No restrictions: use all available tools
+            context.tools.definitions().to_vec()
+        };
         let (stream_tx, mut stream_rx) = unbounded_channel();
         let llm = context.llm.clone();
         let model = context.model.clone();

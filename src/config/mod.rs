@@ -51,6 +51,8 @@ pub struct AppConfig {
     pub gateway: GatewayConfig,
     #[serde(default)]
     pub rtk: RtkConfig,
+    #[serde(default)]
+    pub agent: AgentConfig,
     #[serde(skip)]
     pub bundled_providers: BTreeMap<String, ProviderConfig>,
 }
@@ -75,6 +77,7 @@ impl Default for AppConfig {
             notifications: NotificationConfig::default(),
             gateway: GatewayConfig::default(),
             rtk: RtkConfig::default(),
+            agent: AgentConfig::default(),
             bundled_providers: bundled_provider_catalog().unwrap_or_default(),
         }
     }
@@ -119,6 +122,62 @@ impl Default for RtkConfig {
         Self {
             enabled: default_rtk_enabled(),
             installed: false,
+        }
+    }
+}
+
+/// Configuration for the multi-agent subsystem.
+///
+/// Controls delegation depth, per-agent session limits, and default sub-agent model.
+/// Example `config.toml` entry:
+///
+/// ```toml
+/// [agent]
+/// enabled = true
+/// default_subagent_model = "gpt-4o-mini"
+/// max_depth = 3
+/// max_sessions_per_agent = 2
+/// ```
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AgentConfig {
+    /// Enable the multi-agent delegation system.
+    #[serde(default = "default_agent_enabled")]
+    pub enabled: bool,
+    /// Default model ID for sub-agents when no per-agent override is set.
+    /// If empty, sub-agents inherit the parent session's model.
+    #[serde(default)]
+    pub default_subagent_model: String,
+    /// Default provider for sub-agents.
+    #[serde(default)]
+    pub default_subagent_provider: String,
+    /// Maximum delegation chain depth (3 = orchestrator -> sub -> sub).
+    #[serde(default = "default_max_depth")]
+    pub max_depth: usize,
+    /// Maximum concurrent sub-agent tasks per parent session.
+    #[serde(default = "default_max_sessions_per_agent")]
+    pub max_sessions_per_agent: usize,
+}
+
+fn default_agent_enabled() -> bool {
+    true
+}
+
+fn default_max_depth() -> usize {
+    3
+}
+
+fn default_max_sessions_per_agent() -> usize {
+    5
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            default_subagent_model: String::new(),
+            default_subagent_provider: String::new(),
+            max_depth: 3,
+            max_sessions_per_agent: 5,
         }
     }
 }

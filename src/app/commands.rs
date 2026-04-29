@@ -18,6 +18,7 @@ pub enum CommandAction {
     Settings,
     Quit,
     Init,
+    Agents,
 }
 
 #[derive(Clone, Debug)]
@@ -344,5 +345,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         description: "Analyze project and create AGENTS.md",
         usage: "/init",
         action: CommandAction::Init,
+    },
+    CommandSpec {
+        name: "agents",
+        aliases: &[],
+        description: "List all available sub-agent types",
+        usage: "/agents",
+        action: CommandAction::Agents,
     },
 ];

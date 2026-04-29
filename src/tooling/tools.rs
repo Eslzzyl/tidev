@@ -227,7 +227,8 @@ tool_args! {
     pub struct TaskArgs {
         description: string("Short title for the task"),
         prompt: string("Task prompt to give the subagent"),
-        subagent_type: optional_string("Optional subagent type, such as general or review"),
+        subagent_type: optional_string("Subagent type: general, explorer, librarian, oracle, designer, fixer"),
+        task_id: optional_string("Resume a previous task by session ID (UUID)"),
     }
 }
 

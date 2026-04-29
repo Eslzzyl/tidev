@@ -1441,6 +1441,16 @@ impl App {
                 self.composer.set_text(init_command().to_string());
                 self.last_notice = Some("Init prompt loaded".to_string());
             }
+            CommandAction::Agents => {
+                let lines: Vec<String> = crate::agent::AgentType::all()
+                    .iter()
+                    .map(|agent_type| {
+                        let read_only = if agent_type.is_read_only() { " [read-only]" } else { "" };
+                        format!("  @{:<12} {}{}", agent_type.display_name(), agent_type.description(), read_only)
+                    })
+                    .collect();
+                self.last_notice = Some(format!("Available agents:\n{}", lines.join("\n")));
+            }
         }
 
         Ok(())
