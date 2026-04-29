@@ -18,6 +18,7 @@ use super::permission::{
 use super::question::QuestionDialogState;
 use super::session_panel::SessionPanelState;
 use super::theme_panel::ThemePanelState;
+use crate::app::ui::agents_panel::AgentsPanelState;
 use crate::app::ui::rename::RenameSessionDialogState;
 use crate::{
     app::commands::CommandPaletteState,
@@ -197,6 +198,7 @@ pub(crate) struct UiStateSnapshot {
     pub(crate) session_panel: Option<SessionPanelState>,
     pub(crate) rename_dialog: Option<RenameSessionDialogState>,
     pub(crate) mcp_panel: Option<McpPanelState>,
+    pub(crate) agents_panel: Option<AgentsPanelState>,
     pub(crate) at_mention: AtMentionState,
     pub(crate) snippet_state: SnippetState,
     pub(crate) command_palette: CommandPaletteState,

@@ -8,6 +8,7 @@ use crate::{
     app::session_panel::{SessionPanelDialog, SessionPanelState, SessionViewMode},
     app::settings_panel::SettingsPanelState,
     app::theme_panel::ThemePanelState,
+    app::ui::agents_panel::AgentsPanelState,
     app::ui::rename::RenameSessionDialogState,
     config::ProviderSource,
     provider_setup::{ConnectDialog, EditProviderStep, NewProviderStep},
@@ -813,6 +814,94 @@ impl App {
         });
         self.register_selection_region(inner);
         frame.render_stateful_widget(list, inner, &mut state);
+    }
+
+    pub(super) fn render_agents_panel(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        panel: &AgentsPanelState,
+    ) {
+        let palette = self.palette();
+        let overlay = centered_rect(70, 24, area);
+
+        frame.render_widget(Clear, overlay);
+
+        let panel_block = Block::default()
+            .style(Style::default().bg(palette.panel))
+            .title(" Agents ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.border_active()));
+        frame.render_widget(panel_block, overlay);
+
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+        self.register_selection_region(inner);
+
+        // Header line
+        let header = Line::from(vec![
+            Span::styled(
+                "  Agent",
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("    "),
+            Span::styled(
+                "Description",
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]);
+        frame.render_widget(Paragraph::new(header).style(Style::default().bg(palette.panel)), inner);
+
+        let divider = Line::from(Span::styled(
+            "─".repeat(inner.width as usize),
+            Style::default().fg(palette.muted),
+        ));
+        let sections = Layout::vertical([
+            Constraint::Length(1), // header
+            Constraint::Length(1), // divider
+            Constraint::Min(0),   // content
+        ])
+        .split(inner);
+        frame.render_widget(
+            Paragraph::new(divider).style(Style::default().bg(palette.panel)),
+            sections[1],
+        );
+
+        // Agent rows
+        let mut lines: Vec<Line<'_>> = Vec::new();
+        for agent in &panel.agents {
+            let tag = if agent.read_only { " [read-only]" } else { "" };
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  @{}", agent.display_name),
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("  {}{}", agent.description, tag),
+                    Style::default().fg(palette.muted),
+                ),
+            ]));
+        }
+
+        // Footer hint
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            "  Press Esc or q to close",
+            Style::default().fg(palette.muted),
+        )));
+
+        frame.render_widget(
+            Paragraph::new(lines).style(Style::default().bg(palette.panel)),
+            sections[2],
+        );
     }
 
     pub(super) fn render_settings_panel(

@@ -474,6 +474,7 @@ impl App {
             && self.theme_panel.is_none()
             && self.model_panel.is_none()
             && self.mcp_panel.is_none()
+            && self.agents_panel.is_none()
             && !self.command_palette.visible
     }
 
@@ -632,6 +633,18 @@ impl App {
                 }
                 KeyCode::Esc => {
                     let _ = self.close_theme_panel(false);
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn handle_agents_panel_key(&mut self, key: KeyEvent) -> Result<()> {
+        if self.agents_panel.is_some() {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.agents_panel = None;
                 }
                 _ => {}
             }
@@ -819,6 +832,10 @@ impl App {
 
         if self.theme_panel.is_some() {
             return self.handle_theme_panel_key(key);
+        }
+
+        if self.agents_panel.is_some() {
+            return self.handle_agents_panel_key(key);
         }
 
         if self.mcp_panel.is_some() {
@@ -1212,6 +1229,7 @@ impl App {
             || self.message_panel.is_some()
             || self.session_panel.is_some()
             || self.mcp_panel.is_some()
+            || self.agents_panel.is_some()
             || self.question_dialog.is_some()
         {
             self.at_mention.clear();
@@ -1270,6 +1288,7 @@ impl App {
             || self.message_panel.is_some()
             || self.session_panel.is_some()
             || self.mcp_panel.is_some()
+            || self.agents_panel.is_some()
             || self.question_dialog.is_some()
             || self.at_mention.visible
         {
@@ -1442,14 +1461,7 @@ impl App {
                 self.last_notice = Some("Init prompt loaded".to_string());
             }
             CommandAction::Agents => {
-                let lines: Vec<String> = crate::agent::AgentType::all()
-                    .iter()
-                    .map(|agent_type| {
-                        let read_only = if agent_type.is_read_only() { " [read-only]" } else { "" };
-                        format!("  @{:<12} {}{}", agent_type.display_name(), agent_type.description(), read_only)
-                    })
-                    .collect();
-                self.last_notice = Some(format!("Available agents:\n{}", lines.join("\n")));
+                self.agents_panel = Some(ui::agents_panel::AgentsPanelState::new());
             }
         }
 
@@ -1470,11 +1482,13 @@ impl App {
 
     pub(crate) fn open_theme_panel(&mut self) {
         self.mcp_panel = None;
+        self.agents_panel = None;
         self.theme_panel = Some(ThemePanelState::new(self.theme.palette().name));
     }
 
     pub(crate) fn open_settings_panel(&mut self) {
         self.mcp_panel = None;
+        self.agents_panel = None;
         self.theme_panel = None;
         self.model_panel = None;
         self.session_panel = None;
@@ -1486,6 +1500,7 @@ impl App {
         self.connect_dialog = None;
         self.theme_panel = None;
         self.mcp_panel = None;
+        self.agents_panel = None;
 
         let mut panel = ModelPanelState::new();
         panel.query.set_text(initial_query);
@@ -1510,6 +1525,7 @@ impl App {
         self.model_panel = None;
         self.session_panel = None;
         self.mcp_panel = None;
+        self.agents_panel = None;
         self.composer.clear();
         self.composer
             .set_placeholder("Search user messages in the current session");
@@ -1639,6 +1655,7 @@ impl App {
         self.model_panel = None;
         self.session_panel = None;
         self.mcp_panel = None;
+        self.agents_panel = None;
         self.at_mention.clear();
         self.draft_attachments.clear();
 
@@ -1754,6 +1771,7 @@ impl App {
         self.model_panel = None;
         self.session_panel = None;
         self.mcp_panel = None;
+        self.agents_panel = None;
         self.command_palette.clear();
         self.at_mention.clear();
         self.draft_attachments.clear();
@@ -2073,6 +2091,7 @@ impl App {
         self.model_panel = None;
         self.session_panel = None;
         self.settings_panel = None;
+        self.agents_panel = None;
 
         let mut panel = crate::app::ui::balance_panel::BalancePanelState::new();
         let selected_provider = panel.selected_provider;

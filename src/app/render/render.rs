@@ -36,6 +36,9 @@ impl App {
         if let Some(panel) = &self.theme_panel {
             self.render_theme_panel(frame, area, panel);
         }
+        if let Some(panel) = &self.agents_panel {
+            self.render_agents_panel(frame, area, panel);
+        }
         if let Some(panel) = &self.settings_panel {
             self.render_settings_panel(frame, area, panel);
         }
