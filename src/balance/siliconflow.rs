@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 /// SiliconFlow balance response structure.
-/// API: GET https://api.siliconflow.cn/v1/user/info
+/// API: GET <https://api.siliconflow.cn/v1/user/info>
 /// Auth: Authorization: Bearer <api_key>
 #[derive(Clone, Debug, Deserialize)]
 pub struct SiliconFlowBalanceResponse {

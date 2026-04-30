@@ -8,7 +8,7 @@ pub struct ModelPanelTab {
     pub display_name: String,
     /// Currently selected item index within the filtered model list.
     pub selected_index: usize,
-    /// Current model label shown on the tab, e.g. "openai/gpt-4o" or "<inherit>".
+    /// Current model label shown on the tab, e.g. "openai/gpt-4o" or `"<inherit>"`.
     pub current_label: String,
 }
 

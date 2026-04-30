@@ -637,7 +637,7 @@ poll_timeout_secs = 30
     }
 
     /// Return a human-readable label for an agent type's current model,
-    /// or the string "<inherit>" if none is configured.
+    /// or the string `"<inherit>"` if none is configured.
     pub fn agent_model_display(&self, agent_type: &str) -> String {
         self.agent_model_label(agent_type)
             .map(|s| s.to_string())

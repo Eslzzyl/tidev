@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 /// DeepSeek balance response structure.
-/// API: GET https://api.deepseek.com/user/balance
+/// API: GET <https://api.deepseek.com/user/balance>
 /// Auth: Authorization: Bearer <api_key>
 #[derive(Clone, Debug, Deserialize)]
 pub struct DeepSeekBalanceResponse {
