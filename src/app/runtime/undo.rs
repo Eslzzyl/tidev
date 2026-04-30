@@ -2,9 +2,10 @@ use anyhow::Result;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
+use crate::snapshot::FileDiff;
 use crate::{context::ContextManager, snapshot::Patch};
 
-use super::{App, Screen};
+use super::{App, BackendEvent, Screen};
 
 /// A single step-level patch stored within a round.
 /// Multiple step patches are serialized as a JSON array in `patch_files`.
@@ -16,8 +17,8 @@ struct StepPatch {
 }
 
 impl App {
-    /// Finalize snapshot for the last user message by computing per-step patches
-    /// and file diffs for sidebar display.
+    /// Finalize snapshot for the last user message by using cached per-step patches
+    /// and dispatching async diff_full for sidebar display.
     pub(crate) fn finalize_snapshot_for_last_user_message_sync(
         &mut self,
         runtime: &Runtime,
@@ -62,38 +63,55 @@ impl App {
             }
         };
 
-        // Collect all snapshot hashes: initial + step snapshots
+        // Collect all snapshot hashes and cached file lists
         let step_hashes: Vec<String> = self.step_snapshot_hashes.drain(..).collect();
-        let mut all_hashes = vec![initial_hash.clone()];
-        all_hashes.extend(step_hashes);
+        let cached_file_lists: Vec<Vec<String>> = self.step_cached_file_lists.drain(..).collect();
 
         crate::log_info!(
-            "finalize_snapshot: computing patches for {} snapshots (initial + {} steps)",
-            all_hashes.len(),
-            all_hashes.len().saturating_sub(1)
+            "finalize_snapshot: {} cached step patches, {} step hashes",
+            cached_file_lists.len(),
+            step_hashes.len()
         );
 
-        // Compute cumulative patch for each snapshot
+        // Build step patches from cached data — avoids re-running expensive patch() calls
         let mut step_patches: Vec<StepPatch> = Vec::new();
-        for (i, hash) in all_hashes.iter().enumerate() {
-            match runtime.block_on(self.snapshot.patch(hash)) {
+        if !cached_file_lists.is_empty() {
+            for (i, files) in cached_file_lists.iter().enumerate() {
+                if !files.is_empty() {
+                    let hash = step_hashes.get(i).cloned().unwrap_or_default();
+                    crate::log_info!(
+                        "finalize_snapshot: cached step {} hash={} files={}",
+                        i + 1,
+                        hash,
+                        files.len()
+                    );
+                    step_patches.push(StepPatch {
+                        hash,
+                        files: files.clone(),
+                        step: i + 1,
+                    });
+                }
+            }
+        } else {
+            // Fallback: no cached patches. Compute patch for the initial hash
+            // to capture changes made since the initial snapshot (e.g., direct file edits).
+            crate::log_info!("finalize_snapshot: no cached patches, computing from snapshot");
+            match runtime.block_on(self.snapshot.patch(&initial_hash)) {
                 Ok(patch) => {
                     if !patch.files.is_empty() {
                         crate::log_info!(
-                            "finalize_snapshot: step {} hash={} files={}",
-                            i,
-                            hash,
+                            "finalize_snapshot: fallback patch: {} files",
                             patch.files.len()
                         );
                         step_patches.push(StepPatch {
-                            hash: hash.clone(),
+                            hash: initial_hash.clone(),
                             files: patch.files,
-                            step: i,
+                            step: 0,
                         });
                     }
                 }
                 Err(e) => {
-                    crate::log_warn!("finalize_snapshot: patch for step {} failed: {}", i, e);
+                    crate::log_warn!("finalize_snapshot: fallback patch failed: {}", e);
                 }
             }
         }
@@ -119,32 +137,65 @@ impl App {
                 msg.patch_files = Some(patch_files_json);
             }
 
-            // Compute full file diffs for sidebar display
-            match runtime.block_on(self.snapshot.diff_full(&initial_hash, &all_hashes.last().cloned().unwrap_or(initial_hash.clone()))) {
+            // Dispatch async diff_full for accurate sidebar display with full patches
+            let final_hash = step_hashes.last().cloned().unwrap_or(initial_hash.clone());
+            self.dispatch_async_diff_full(
+                runtime,
+                initial_hash.clone(),
+                final_hash,
+                last_user_message_id,
+            );
+        }
+
+        // Clear per-step tracking state
+        self.step_cached_file_diffs = None;
+        self.step_prev_hash = None;
+
+        crate::log_info!("finalize_snapshot: completed (async diff_full dispatched)");
+        Ok(())
+    }
+
+    /// Dispatch diff_full computation to a background async task.
+    /// Result is delivered via BackendEvent::SidebarSnapshotReady.
+    fn dispatch_async_diff_full(
+        &self,
+        runtime: &Runtime,
+        from: String,
+        to: String,
+        message_id: Uuid,
+    ) {
+        let snapshot = self.snapshot.clone();
+        let tx = self.backend_tx.clone();
+        let session_id = self.conversation.session_id;
+        let request_id = self.active_request_id;
+
+        runtime.spawn(async move {
+            crate::log_info!("async diff_full: starting from={} to={}", from, to);
+            match snapshot.diff_full(&from, &to).await {
                 Ok(file_diffs) => {
-                    let diffs_json = serde_json::to_string(&file_diffs)?;
-                    self.store.update_message_file_diffs(
-                        self.conversation.session_id,
-                        last_user_message_id,
-                        &diffs_json,
-                    )?;
-                    if let Some(msg) = self
-                        .conversation
-                        .messages
-                        .iter_mut()
-                        .find(|m| m.id == last_user_message_id)
-                    {
-                        msg.file_diffs = Some(diffs_json);
+                    match serde_json::to_string(&file_diffs) {
+                        Ok(diffs_json) => {
+                            crate::log_info!(
+                                "async diff_full: completed, {} files",
+                                file_diffs.len()
+                            );
+                            let _ = tx.send(BackendEvent::SidebarSnapshotReady {
+                                session_id,
+                                request_id,
+                                message_id,
+                                file_diffs_json: diffs_json,
+                            });
+                        }
+                        Err(e) => {
+                            crate::log_warn!("async diff_full: serialization failed: {}", e);
+                        }
                     }
                 }
                 Err(e) => {
-                    crate::log_warn!("finalize_snapshot: diff_full failed: {}", e);
+                    crate::log_warn!("async diff_full: failed: {}", e);
                 }
             }
-        }
-
-        crate::log_info!("finalize_snapshot: completed");
-        Ok(())
+        });
     }
 
     pub(crate) fn undo_last_user_message(&mut self, runtime: &Runtime) -> Result<()> {
@@ -338,8 +389,11 @@ impl App {
     ) -> Result<()> {
         crate::log_info!("capture_prompt_snapshot: message_id={}", message_id);
 
-        // Clear any intermediate step snapshots from previous rounds
+        // Clear intermediate step tracking from any previous rounds
         self.step_snapshot_hashes.clear();
+        self.step_cached_file_lists.clear();
+        self.step_cached_file_diffs = None;
+        self.step_prev_hash = None;
 
         match runtime.block_on(self.snapshot.track()) {
             Ok(Some(hash)) => {
@@ -356,8 +410,11 @@ impl App {
                     .iter_mut()
                     .find(|m| m.id == message_id)
                 {
-                    msg.snapshot_hash = Some(hash);
+                    msg.snapshot_hash = Some(hash.clone());
                 }
+
+                // Save as previous hash for per-step diff computation
+                self.step_prev_hash = Some(hash);
             }
             Ok(None) => {
                 crate::log_info!(
@@ -379,13 +436,132 @@ impl App {
         match runtime.block_on(self.snapshot.track()) {
             Ok(Some(hash)) => {
                 crate::log_info!("capture_step_snapshot: captured hash={}", hash);
-                self.step_snapshot_hashes.push(hash);
+                self.step_snapshot_hashes.push(hash.clone());
+
+                // Compute lightweight diff between the previous state and this step,
+                // then cache file lists and update sidebar diffs.
+                let prev_hash = self.step_prev_hash.clone().or_else(|| {
+                    self.conversation
+                        .last_visible_user_message()
+                        .and_then(|m| m.snapshot_hash.clone())
+                });
+
+                if let Some(prev) = prev_hash {
+                    match runtime.block_on(self.snapshot.diff_lightweight(&prev, &hash)) {
+                        Ok(diffs) => {
+                            // Cache absolute file paths for undo/redo step patches
+                            let files: Vec<String> = diffs
+                                .iter()
+                                .map(|d| {
+                                    self.workspace_root
+                                        .join(&d.file)
+                                        .to_string_lossy()
+                                        .replace('\\', "/")
+                                })
+                                .collect();
+                            self.step_cached_file_lists.push(files);
+
+                            // Merge into cumulative sidebar diffs and update message
+                            self.merge_step_diffs(diffs);
+                        }
+                        Err(e) => {
+                            crate::log_warn!(
+                                "capture_step_snapshot: diff_lightweight failed: {}",
+                                e
+                            );
+                            // Still push an empty list to maintain parallel structure
+                            self.step_cached_file_lists.push(Vec::new());
+                        }
+                    }
+                } else {
+                    crate::log_info!("capture_step_snapshot: no previous hash available");
+                    self.step_cached_file_lists.push(Vec::new());
+                }
+
+                self.step_prev_hash = Some(hash);
             }
             Ok(None) => {
                 crate::log_info!("capture_step_snapshot: track() returned None (no changes)");
             }
             Err(error) => {
                 crate::log_warn!("capture_step_snapshot: track() failed: {}", error);
+            }
+        }
+    }
+
+    /// Merge lightweight per-step diffs into the running cumulative sidebar data.
+    /// Updates step_cached_file_diffs and writes to the current user message's file_diffs.
+    fn merge_step_diffs(&mut self, step_diffs: Vec<FileDiff>) {
+        use std::collections::HashMap;
+
+        // Build a map from file path to FileDiff for existing cumulative data
+        let mut cumulative: HashMap<String, FileDiff> = HashMap::new();
+        if let Some(existing) = self.step_cached_file_diffs.take() {
+            for d in existing {
+                cumulative.insert(d.file.clone(), d);
+            }
+        }
+
+        // Merge new diffs into cumulative map
+        for d in step_diffs {
+            match cumulative.get_mut(&d.file) {
+                Some(existing) => {
+                    // Update additions/deletions (cumulative from initial state)
+                    existing.additions = d.additions;
+                    existing.deletions = d.deletions;
+                    // Preserve "added" status if file was added in an earlier step
+                    if existing.status.as_deref() != Some("added") {
+                        existing.status = d.status;
+                    }
+                }
+                None => {
+                    cumulative.insert(d.file.clone(), d);
+                }
+            }
+        }
+
+        let merged: Vec<FileDiff> = cumulative.into_values().collect();
+        self.step_cached_file_diffs = Some(merged.clone());
+
+        // Write to the last visible user message's file_diffs so sidebar picks it up
+        // Find by scanning messages in reverse for the last user message (matching visible_messages logic)
+        let last_user_id = self
+            .conversation
+            .messages
+            .iter()
+            .rev()
+            .find(|m| matches!(m.role, crate::session::MessageRole::User))
+            .map(|m| m.id);
+
+        if let Some(msg_id) = last_user_id {
+            // Only update if the message is visible (not in a revert branch)
+            let is_visible = self
+                .conversation
+                .message_index(msg_id)
+                .map(|idx| {
+                    self.conversation
+                        .revert_message_id
+                        .map_or(true, |revert_id| {
+                            self.conversation.message_index(revert_id).map_or(true, |revert_idx| idx < revert_idx)
+                        })
+                })
+                .unwrap_or(false);
+
+            if is_visible {
+                if let Some(msg) = self
+                    .conversation
+                    .messages
+                    .iter_mut()
+                    .find(|m| m.id == msg_id)
+                {
+                    if let Ok(json) = serde_json::to_string(&merged) {
+                        crate::log_info!(
+                            "merge_step_diffs: updating msg.file_diffs with {} files",
+                            merged.len()
+                        );
+                        msg.file_diffs = Some(json);
+                    }
+                }
             }
         }
     }

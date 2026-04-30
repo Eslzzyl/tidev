@@ -279,6 +279,7 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
                 BackendEvent::SubagentToolResult { .. } => {}
                 BackendEvent::SubagentCompleted { .. } => {}
                 BackendEvent::ContextCompacted { .. } => {}
+                BackendEvent::SidebarSnapshotReady { .. } => {}
             }
         }
 

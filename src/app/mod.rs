@@ -85,7 +85,7 @@ use crate::{
     prompts::{SessionMode, init_command},
     provider_setup::ConnectDialog,
     session::{AssistantTurn, BackendEvent, Conversation, Message, MessageAttachment, MessageRole},
-    snapshot::SnapshotService,
+    snapshot::{FileDiff, SnapshotService},
     storage::SessionStore,
     theme::{ThemeManager, ThemeName},
     tooling::{FileReadTracker, TodoItem, ToolRegistry},
@@ -190,6 +190,14 @@ struct App {
     /// Intermediate snapshot hashes captured after each tool execution step within a round.
     /// Used at round end to compute per-step patches.
     step_snapshot_hashes: Vec<String>,
+    /// Per-step file lists cached during capture_step_snapshot to avoid
+    /// re-computing expensive patch() calls during finalization.
+    step_cached_file_lists: Vec<Vec<String>>,
+    /// Cumulative lightweight FileDiff entries accumulated across steps in the current round.
+    /// Updated per-step for sidebar display; replaced by full diff at round end.
+    step_cached_file_diffs: Option<Vec<FileDiff>>,
+    /// The previous snapshot hash, used for computing per-step lightweight diffs.
+    step_prev_hash: Option<String>,
     stats_panel: Option<ui::stats_panel::StatsPanelState>,
     balance_panel: Arc<Mutex<Option<ui::balance_panel::BalancePanelState>>>,
     notifications: notifications::NotificationManager,
@@ -653,6 +661,7 @@ impl App {
             BackendEvent::UsageStats { .. } => "UsageStats",
             BackendEvent::InstructionsLoaded { .. } => "InstructionsLoaded",
             BackendEvent::ContextCompacted { .. } => "ContextCompacted",
+            BackendEvent::SidebarSnapshotReady { .. } => "SidebarSnapshotReady",
         };
         if event_type != "Delta"
             && event_type != "ReasoningDelta"
@@ -1062,6 +1071,39 @@ impl App {
                     retained_from,
                     error,
                 );
+            }
+            BackendEvent::SidebarSnapshotReady {
+                session_id: _,
+                request_id: _,
+                message_id,
+                file_diffs_json,
+            } => {
+                crate::log_info!(
+                    "handle_backend_event: SidebarSnapshotReady message_id={}",
+                    message_id
+                );
+                // Update the message with full file diffs (including patches)
+                if let Some(msg) = self
+                    .conversation
+                    .messages
+                    .iter_mut()
+                    .find(|m| m.id == message_id)
+                {
+                    msg.file_diffs = Some(file_diffs_json.clone());
+                    // Also persist to database
+                    if let Err(e) = self.store.update_message_file_diffs(
+                        self.conversation.session_id,
+                        message_id,
+                        &file_diffs_json,
+                    ) {
+                        crate::log_warn!(
+                            "SidebarSnapshotReady: failed to persist file_diffs: {}",
+                            e
+                        );
+                    }
+                    // Invalidate render cache so sidebar re-renders
+                    self.invalidate_active_message_render_cache_for(message_id);
+                }
             }
         }
 

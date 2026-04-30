@@ -733,6 +733,14 @@ pub enum BackendEvent {
         retained_from: usize,
         error: Option<String>,
     },
+    /// Async sidebar snapshot computation completed.
+    /// Contains full FileDiff data (with patches) computed off the main thread.
+    SidebarSnapshotReady {
+        session_id: Uuid,
+        request_id: u64,
+        message_id: Uuid,
+        file_diffs_json: String,
+    },
 }
 
 impl BackendEvent {
@@ -750,7 +758,8 @@ impl BackendEvent {
             | Self::SubagentCompleted { session_id, .. }
             | Self::UsageStats { session_id, .. }
             | Self::InstructionsLoaded { session_id, .. }
-            | Self::ContextCompacted { session_id, .. } => *session_id,
+            | Self::ContextCompacted { session_id, .. }
+            | Self::SidebarSnapshotReady { session_id, .. } => *session_id,
         }
     }
 
@@ -766,7 +775,8 @@ impl BackendEvent {
             | Self::SubagentStatus { request_id, .. }
             | Self::SubagentToolResult { request_id, .. }
             | Self::SubagentCompleted { request_id, .. }
-            | Self::UsageStats { request_id, .. } => Some(*request_id),
+            | Self::UsageStats { request_id, .. }
+            | Self::SidebarSnapshotReady { request_id, .. } => Some(*request_id),
             Self::InstructionsLoaded { .. } | Self::ContextCompacted { .. } => None,
         }
     }

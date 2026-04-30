@@ -282,6 +282,44 @@ impl SnapshotService {
         git::diff_cached(&self.gitdir, &self.worktree, hash)
     }
 
+    /// Lightweight diff between two snapshot tree hashes.
+    /// Returns FileDiff entries with file, additions, deletions, and status
+    /// but WITHOUT full patch content. Used for per-step sidebar updates.
+    /// Does NOT call update_index() since it compares two committed trees.
+    /// Much cheaper than diff_full() — only 2 git subprocess calls total.
+    pub async fn diff_lightweight(&self, from: &str, to: &str) -> Result<Vec<FileDiff>> {
+        let _guard = self.lock.lock().await;
+
+        let statuses = git::diff_name_status(&self.gitdir, &self.worktree, from, to)?;
+        let numstat = git::diff_numstat(&self.gitdir, &self.worktree, from, to)?;
+
+        let mut status_map: HashMap<String, String> = HashMap::new();
+        for (status, file) in &statuses {
+            let s = if status.starts_with('A') {
+                "added"
+            } else if status.starts_with('D') {
+                "deleted"
+            } else {
+                "modified"
+            };
+            status_map.insert(file.clone(), s.to_string());
+        }
+
+        let mut result: Vec<FileDiff> = Vec::new();
+        for (adds, dels, file) in &numstat {
+            let binary = adds == "-" && dels == "-";
+            result.push(FileDiff {
+                file: file.clone(),
+                patch: String::new(), // lightweight — no patch content
+                additions: if binary { 0 } else { adds.parse().unwrap_or(0) },
+                deletions: if binary { 0 } else { dels.parse().unwrap_or(0) },
+                status: status_map.get(file).cloned(),
+            });
+        }
+
+        Ok(result)
+    }
+
     pub async fn diff_full(&self, from: &str, to: &str) -> Result<Vec<FileDiff>> {
         let _guard = self.lock.lock().await;
 
