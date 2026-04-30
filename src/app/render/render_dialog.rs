@@ -1342,9 +1342,9 @@ impl App {
 
         // --- Instruction ---
         let instruction = if panel.is_general_tab() {
-            "Select a model for the main session. Enter switches to the selected model."
+            "Select a model for the main session. Enter to switch, Esc to close."
         } else {
-            "Select a model for this agent. Enter saves to config.toml."
+            "Select a model for this agent. Enter to save, Esc to close."
         };
         frame.render_widget(
             Paragraph::new(instruction)
@@ -1366,8 +1366,31 @@ impl App {
 
         // --- Model list ---
         let items = self.model_panel_items(panel);
+
+        // Determine the "active" model index (the model currently in use / saved)
+        let active_index = panel.current_tab().and_then(|tab| {
+            let label = &tab.current_label;
+            if label == "<inherit>" || label.is_empty() {
+                // For inherit, use the main session's active model
+                items.iter().position(|item| {
+                    matches!(item, ModelPanelItem::Model { summary }
+                        if summary.provider_id == self.active_model.provider_id
+                        && summary.model_id == self.active_model.model_id)
+                })
+            } else if let Some(slash_pos) = label.find('/') {
+                let p = &label[..slash_pos];
+                let m = &label[slash_pos + 1..];
+                items.iter().position(|item| {
+                    matches!(item, ModelPanelItem::Model { summary }
+                        if summary.provider_id == p && summary.model_id == m)
+                })
+            } else {
+                None
+            }
+        });
+
         let mut rows = Vec::new();
-        for item in &items {
+        for (index, item) in items.iter().enumerate() {
             match item {
                 ModelPanelItem::ProviderHeader {
                     provider_id,
@@ -1388,9 +1411,16 @@ impl App {
                     ])));
                 }
                 ModelPanelItem::Model { summary } => {
+                    // Show checkmark for active model, space otherwise
+                    let active_marker = if active_index == Some(index) {
+                        Span::styled("✓ ", Style::default().fg(palette.accent))
+                    } else {
+                        Span::raw("  ")
+                    };
                     rows.push(ListItem::new(Line::from(vec![
+                        active_marker,
                         Span::styled(
-                            format!("  {}", summary.model_display_name),
+                            summary.model_display_name.clone(),
                             Style::default()
                                 .fg(palette.text)
                                 .add_modifier(Modifier::BOLD),
@@ -1442,11 +1472,7 @@ impl App {
         }
 
         // --- Footer ---
-        let footer = if panel.is_general_tab() {
-            "Enter switch · Ctrl+E edit provider · Tab switch tab · Esc close"
-        } else {
-            "Enter save · Ctrl+E edit provider · Tab switch tab · Esc close"
-        };
+        let footer = "Enter apply · Ctrl+E edit provider · Tab switch tab · Esc close";
         frame.render_widget(
             Paragraph::new(footer)
                 .alignment(Alignment::Center)

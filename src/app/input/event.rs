@@ -822,9 +822,14 @@ impl App {
                 let items = self.model_panel_items(&panel);
                 if let Some(summary) = panel.selected_model(&items).cloned() {
                     if panel.is_general_tab() {
-                        // General tab: switch main session model (existing behavior)
+                        // General tab: switch main session model
                         self.switch_model(Some(&summary.label()))?;
-                        self.close_model_panel();
+                        // Update the tab's current_label to reflect the active model
+                        let mut next_panel = panel;
+                        if let Some(t) = next_panel.current_tab_mut() {
+                            t.current_label = summary.label();
+                        }
+                        self.model_panel = Some(next_panel);
                     } else {
                         // Agent tab: save to agent.models
                         let agent_type_str = panel.current_tab()
@@ -849,8 +854,7 @@ impl App {
                         ));
                     }
                 }
-                // For agent tabs, stay open so the user can continue configuring
-                // or close with Esc.
+                // Stay open so the user can continue configuring; close with Esc.
             }
             KeyCode::Esc => {
                 self.close_model_panel();
