@@ -12,7 +12,7 @@ use ratatui::{
     prelude::{Frame, Modifier, Style, Text},
     style::Color,
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, Wrap},
 };
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -1140,7 +1140,7 @@ impl App {
         }
     }
 
-    fn render_sidebar(&self, frame: &mut Frame<'_>, area: Rect) {
+    fn render_sidebar(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let palette = self.palette();
         let mut lines = Vec::new();
 
@@ -1171,10 +1171,7 @@ impl App {
                 .add_modifier(Modifier::BOLD),
         )]));
         lines.push(Line::from(vec![Span::styled(
-            format!(
-                "{} / {}",
-                self.active_model.provider_id, self.active_model.model_id
-            ),
+            self.active_model.label(),
             Style::default().fg(palette.text),
         )]));
 
@@ -1269,9 +1266,6 @@ impl App {
                 .add_modifier(Modifier::BOLD),
         )]));
 
-        let sidebar_width = self.config.ui.sidebar_width as usize;
-        let max_content_len = sidebar_width.saturating_sub(4);
-
         {
             let mut all_diffs = Vec::new();
             let mut seen_files = std::collections::HashSet::new();
@@ -1291,7 +1285,7 @@ impl App {
 
             if all_diffs.is_empty() {
                 lines.push(Line::from(vec![Span::styled(
-                    shorten("(no changes yet)", max_content_len),
+                    "(no changes yet)",
                     Style::default().fg(palette.muted),
                 )]));
             } else {
@@ -1319,7 +1313,7 @@ impl App {
                     let summary = format!(
                         "{}{} (+{}/-{})",
                         status_icon,
-                        shorten(&filename, max_content_len.saturating_sub(12)),
+                        filename,
                         d.additions,
                         d.deletions
                     );
@@ -1359,10 +1353,10 @@ impl App {
 
             let priority_marker = if todo.priority == "high" { "⚠ " } else { "" };
 
-            let content = shorten(&todo.content, max_content_len);
+            let content = &todo.content;
             lines.push(Line::from(vec![
                 Span::styled(format!("{priority_marker}{checkbox}"), style),
-                Span::styled(content, style),
+                Span::styled(content.as_str(), style),
             ]));
         }
 
@@ -1375,6 +1369,28 @@ impl App {
             )]));
         }
 
+        // Estimate total lines for scroll max (accounts for word wrapping)
+        let sidebar_content_width = (area.width.saturating_sub(2)) as usize;
+        self.sidebar_total_lines = lines
+            .iter()
+            .map(|line| {
+                let w: usize = line
+                    .spans
+                    .iter()
+                    .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+                    .sum();
+                if w == 0 {
+                    1
+                } else {
+                    (w + sidebar_content_width - 1) / sidebar_content_width.max(1)
+                }
+            })
+            .sum();
+
+        let sidebar_viewport_lines = area.height.saturating_sub(2) as usize;
+        let max_scroll = self.sidebar_total_lines.saturating_sub(sidebar_viewport_lines);
+        self.sidebar_scroll_offset = self.sidebar_scroll_offset.min(max_scroll);
+
         let paragraph = Paragraph::new(Text::from(lines))
             .block(
                 Block::default()
@@ -1382,7 +1398,9 @@ impl App {
                     .border_style(Style::default().fg(palette.border_idle()))
                     .title("Sidebar"),
             )
-            .style(Style::default().fg(palette.text));
+            .style(Style::default().fg(palette.text))
+            .wrap(Wrap { trim: false })
+            .scroll((self.sidebar_scroll_offset as u16, 0));
 
         frame.render_widget(paragraph, area);
     }

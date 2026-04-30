@@ -143,6 +143,9 @@ impl App {
                 if self.handle_input_area_scroll_up(position) {
                     return;
                 }
+                if self.handle_sidebar_scroll_up(position) {
+                    return;
+                }
                 if self.can_scroll_conversation() {
                     self.clear_mouse_selection();
                     self.scroll_messages_up(self.config.ui.scroll_speed as usize);
@@ -151,6 +154,9 @@ impl App {
             MouseEventKind::ScrollDown => {
                 let position = Position::new(mouse.column, mouse.row);
                 if self.handle_input_area_scroll_down(position) {
+                    return;
+                }
+                if self.handle_sidebar_scroll_down(position) {
                     return;
                 }
                 if self.can_scroll_conversation() {
@@ -596,6 +602,50 @@ impl App {
 
         self.message_scroll_offset = current.saturating_add(lines).min(max_scroll);
         self.message_follow_tail = self.message_scroll_offset >= max_scroll;
+    }
+
+    fn sidebar_scroll_max(&self) -> usize {
+        if let Some(area) = self.sidebar_area {
+            let viewport = area.height.saturating_sub(2) as usize;
+            self.sidebar_total_lines.saturating_sub(viewport)
+        } else {
+            0
+        }
+    }
+
+    fn scroll_sidebar_up(&mut self, lines: usize) {
+        self.sidebar_scroll_offset = self.sidebar_scroll_offset.saturating_sub(lines);
+    }
+
+    fn scroll_sidebar_down(&mut self, lines: usize) {
+        let max_scroll = self.sidebar_scroll_max();
+        self.sidebar_scroll_offset = self
+            .sidebar_scroll_offset
+            .saturating_add(lines)
+            .min(max_scroll);
+    }
+
+    fn handle_sidebar_scroll_up(&mut self, position: Position) -> bool {
+        if let Some(area) = self.sidebar_area
+            && area.contains(position)
+            && self.sidebar_scroll_offset > 0
+        {
+            self.scroll_sidebar_up(self.config.ui.scroll_speed as usize);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn handle_sidebar_scroll_down(&mut self, position: Position) -> bool {
+        if let Some(area) = self.sidebar_area
+            && area.contains(position)
+        {
+            self.scroll_sidebar_down(self.config.ui.scroll_speed as usize);
+            true
+        } else {
+            false
+        }
     }
 
     pub(crate) fn handle_message_scroll_key(&mut self, key: KeyEvent) -> bool {

@@ -160,6 +160,8 @@ struct App {
     message_scrollbar_area: Option<Rect>,
     scrollbar_drag_state: Option<state::ScrollbarDragState>,
     sidebar_area: Option<Rect>,
+    sidebar_scroll_offset: usize,
+    sidebar_total_lines: usize,
     input_area: Cell<Option<Rect>>,
     /// Scroll offset for the input box when content exceeds visible area.
     input_scroll_offset: usize,

@@ -123,6 +123,8 @@ impl App {
             message_scrollbar_area: None,
             scrollbar_drag_state: None,
             sidebar_area: None,
+            sidebar_scroll_offset: 0,
+            sidebar_total_lines: 0,
             input_area: Cell::new(None),
             input_scroll_offset: 0,
             input_dragging: false,
