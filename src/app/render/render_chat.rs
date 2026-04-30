@@ -1144,6 +1144,25 @@ impl App {
         let palette = self.palette();
         let mut lines = Vec::new();
 
+        // Workspace directory (top)
+        let workspace_path = self.workspace_root.display().to_string();
+        let display_path = workspace_path.replace(
+            &dirs::home_dir().unwrap_or_default().display().to_string(),
+            "~",
+        );
+        lines.push(Line::from(vec![Span::styled(
+            "Workspace",
+            Style::default()
+                .fg(palette.accent)
+                .add_modifier(Modifier::BOLD),
+        )]));
+        lines.push(Line::from(vec![Span::styled(
+            display_path,
+            Style::default().fg(palette.muted),
+        )]));
+
+        lines.push(Line::from(""));
+
         // Model info
         lines.push(Line::from(vec![Span::styled(
             "Model",
@@ -1157,18 +1176,6 @@ impl App {
                 self.active_model.provider_id, self.active_model.model_id
             ),
             Style::default().fg(palette.text),
-        )]));
-        lines.push(Line::from(vec![Span::styled(
-            if self.active_model.api_key_present() {
-                "✓ API key present"
-            } else {
-                "✗ API key missing"
-            },
-            if self.active_model.api_key_present() {
-                Style::default().fg(palette.success)
-            } else {
-                Style::default().fg(palette.error)
-            },
         )]));
 
         if let Some(usage) = &self.context_usage {
@@ -1252,14 +1259,6 @@ impl App {
             format!("Requests: {request_count}"),
             Style::default().fg(palette.text),
         )]));
-
-        lines.push(Line::from(""));
-
-        // Working directory
-        lines.push(Line::from(shorten(
-            &self.workspace_root.display().to_string(),
-            32,
-        )));
 
         // Todos section
         lines.push(Line::from(""));
