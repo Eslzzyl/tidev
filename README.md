@@ -82,7 +82,12 @@ I'd like to pronounce it as "tide-v", but "ti-dev" should also be fine.
 
 ---
 
-## Run from Source
+## Install from crates.io
+
+1. `cargo install tidev`
+1. Run `tidev` in your working directory.
+
+## Install from Source
 
 1. Ensure the latest Rust stable toolchain is installed. https://rust-lang.org/
 2. Clone the repository and `cd tidev`.
