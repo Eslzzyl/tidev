@@ -628,10 +628,11 @@ impl App {
     fn handle_sidebar_scroll_up(&mut self, position: Position) -> bool {
         if let Some(area) = self.sidebar_area
             && area.contains(position)
-            && self.sidebar_scroll_offset > 0
         {
-            self.scroll_sidebar_up(self.config.ui.scroll_speed as usize);
-            true
+            if self.sidebar_scroll_offset > 0 {
+                self.scroll_sidebar_up(self.config.ui.scroll_speed as usize);
+            }
+            true // Always consume scroll event when in sidebar area
         } else {
             false
         }
@@ -641,8 +642,11 @@ impl App {
         if let Some(area) = self.sidebar_area
             && area.contains(position)
         {
-            self.scroll_sidebar_down(self.config.ui.scroll_speed as usize);
-            true
+            let max_scroll = self.sidebar_scroll_max();
+            if self.sidebar_scroll_offset < max_scroll {
+                self.scroll_sidebar_down(self.config.ui.scroll_speed as usize);
+            }
+            true // Always consume scroll event when in sidebar area
         } else {
             false
         }
