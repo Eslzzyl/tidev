@@ -268,7 +268,8 @@ impl App {
     ) {
         let palette = self.palette();
         let border_style = if self.pending_request && self.pending_mode.is_none() {
-            Style::default().fg(palette.warning)
+            // Use accent color for active/pending state - it's more theme-coherent than warning
+            Style::default().fg(palette.accent)
         } else if let Some(pending) = self.pending_mode {
             Style::default().fg(palette.border_mode_color(pending))
         } else {
