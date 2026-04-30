@@ -128,6 +128,15 @@ pub struct ActiveModel {
 }
 
 impl ActiveModel {
+    /// Whether this model should use `apply_patch` instead of `edit`/`write`.
+    ///
+    /// Matches opencode's logic: GPT models (claude/deepseek/etc. excluded) get
+    /// `apply_patch` as their primary edit tool; all other models get `edit`/`write`.
+    pub fn use_apply_patch(&self) -> bool {
+        let id = self.model_id.to_ascii_lowercase();
+        id.contains("gpt-") && !id.contains("oss") && !id.contains("gpt-4")
+    }
+
     pub fn label(&self) -> String {
         format!("{}/{}", self.provider_display_name, self.display_name)
     }

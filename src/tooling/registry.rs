@@ -158,10 +158,23 @@ impl ToolRegistry {
         definitions
     }
 
-    /// Returns all tool definitions (unfiltered), used for LLM requests.
-    /// In plan mode, the LLM can see all tools, but execution will be blocked.
+    /// Returns all tool definitions filtered by the active model.
+    ///
+    /// GPT models (`gpt-4o`, `gpt-4o-mini`, etc.) get `apply_patch` but not
+    /// `edit`/`write`. All other models (Claude, DeepSeek, etc.) get `edit`/`write`
+    /// but not `apply_patch`.  This matches opencode's tool-per-model logic.
+    /// If no model has been set yet, all tools are returned unchanged.
     pub fn all_definitions(&self) -> Vec<ToolDefinition> {
         let mut definitions = self.definitions.clone();
+
+        if let Some(ref model) = self.active_model {
+            if model.use_apply_patch() {
+                definitions.retain(|d| d.name != "edit" && d.name != "write");
+            } else {
+                definitions.retain(|d| d.name != "apply_patch");
+            }
+        }
+
         definitions.extend(self.mcp.all_definitions());
         definitions
     }

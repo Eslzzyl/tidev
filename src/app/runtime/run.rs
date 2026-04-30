@@ -21,7 +21,7 @@ impl App {
         let theme = ThemeManager::new(&config.theme);
         let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
         let file_read_tracker = Arc::new(FileReadTracker::new());
-        let tools = ToolRegistry::new(
+        let mut tools = ToolRegistry::new(
             workspace_root.clone(),
             paths.config_dir.clone(),
             config.skills.clone(),
@@ -30,6 +30,7 @@ impl App {
             file_read_tracker.clone(),
             config.rtk.enabled,
         );
+        #[allow(unused_variables)]
         let commands = CommandRegistry::new();
         let command_palette = CommandPaletteState::default();
         let composer = Composer::new("Ask TiDev about your code, task, or question...");
@@ -49,6 +50,7 @@ impl App {
         );
 
         let active_model = fallback_model.clone();
+        tools.set_active_model(active_model.clone());
         let last_notice = None;
         let retrying_hint = None;
 
@@ -404,7 +406,8 @@ impl App {
             if let Ok(content) = std::fs::read_to_string(&path) {
                 // Use relative path as cache key to match what
                 // system_prompt_and_sources_with_cache uses for lookups
-                self.instruction_content_cache.insert(source.clone(), content);
+                self.instruction_content_cache
+                    .insert(source.clone(), content);
             }
         }
 
