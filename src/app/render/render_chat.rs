@@ -993,7 +993,15 @@ impl App {
             return;
         }
 
-        let scrollbar_area = if inner.width > 1 {
+        let scrollbar_area = if inner.width > 2 {
+            let chunks = Layout::horizontal([
+                Constraint::Min(1),
+                Constraint::Length(1), // gap between content and scrollbar
+                Constraint::Length(1),
+            ])
+            .split(inner);
+            (chunks[0], Some(chunks[2]))
+        } else if inner.width > 1 {
             let chunks =
                 Layout::horizontal([Constraint::Min(1), Constraint::Length(1)]).split(inner);
             (chunks[0], Some(chunks[1]))
