@@ -364,6 +364,9 @@ impl App {
             );
             self.pending_tool_execution = None;
             if self.running_subagent_executions.is_empty() {
+                // Capture an intermediate snapshot after tool execution and before the
+                // next LLM step, enabling per-step patch computation at round end.
+                self.capture_step_snapshot(runtime);
                 crate::log_info!("process_pending_tool_execution: calling start_assistant_turn");
                 self.start_assistant_turn(runtime)?;
             } else {
@@ -751,6 +754,8 @@ impl App {
         {
             self.pending_tool_execution = None;
             if self.running_subagent_executions.is_empty() {
+                // Capture step snapshot before next LLM step (start_parallel_execution path)
+                self.capture_step_snapshot(runtime);
                 self.start_assistant_turn(runtime)?;
             } else {
                 self.last_notice = Some(format!(
@@ -829,6 +834,8 @@ impl App {
         {
             self.pending_tool_execution = None;
             if self.running_subagent_executions.is_empty() {
+                // Capture step snapshot before next LLM step (try_start_parallel_execution path)
+                self.capture_step_snapshot(runtime);
                 self.start_assistant_turn(runtime)?;
             } else {
                 self.last_notice = Some(format!(

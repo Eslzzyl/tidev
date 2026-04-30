@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS messages (
     tokens_per_second REAL,
     snapshot_hash TEXT,
     patch_files TEXT,
+    file_diffs TEXT,
     mode TEXT,
     rtk_rewritten INTEGER NOT NULL DEFAULT 0,
     thinking_level TEXT

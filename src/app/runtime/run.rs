@@ -142,6 +142,7 @@ impl App {
             selectable_regions: Vec::new(),
             message_scroll_target: None,
             todos: Vec::new(),
+            step_snapshot_hashes: Vec::new(),
             stats_panel: None,
             balance_panel: Arc::new(Mutex::new(None)),
             notifications,

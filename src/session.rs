@@ -314,6 +314,8 @@ pub struct Message {
     #[serde(default)]
     pub patch_files: Option<String>,
     #[serde(default)]
+    pub file_diffs: Option<String>,
+    #[serde(default)]
     pub mode: Option<crate::prompts::SessionMode>,
     #[serde(default)]
     pub rtk_rewritten: bool,
@@ -345,6 +347,7 @@ impl Message {
             tokens_per_second: None,
             snapshot_hash: None,
             patch_files: None,
+            file_diffs: None,
             mode: None,
             rtk_rewritten: false,
             thinking_level: None,
@@ -381,6 +384,7 @@ impl Message {
             tokens_per_second: None,
             snapshot_hash: None,
             patch_files: None,
+            file_diffs: None,
             mode: None,
             rtk_rewritten: false,
             thinking_level: None,
@@ -416,6 +420,7 @@ impl Message {
             tokens_per_second: None,
             snapshot_hash: None,
             patch_files: None,
+            file_diffs: None,
             mode: None,
             rtk_rewritten: false,
             thinking_level: None,
@@ -449,6 +454,7 @@ impl Message {
             tokens_per_second: None,
             snapshot_hash: None,
             patch_files: None,
+            file_diffs: None,
             mode: None,
             rtk_rewritten: result.rtk_rewritten,
             thinking_level: None,

@@ -1260,6 +1260,80 @@ impl App {
             Style::default().fg(palette.text),
         )]));
 
+        // Changed Files section
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![Span::styled(
+            "Changed Files",
+            Style::default()
+                .fg(palette.accent)
+                .add_modifier(Modifier::BOLD),
+        )]));
+
+        let sidebar_width = self.config.ui.sidebar_width as usize;
+        let max_content_len = sidebar_width.saturating_sub(4);
+
+        {
+            let mut all_diffs = Vec::new();
+            let mut seen_files = std::collections::HashSet::new();
+            for msg in self.conversation.visible_messages() {
+                if let Some(diffs_json) = &msg.file_diffs {
+                    if let Ok(diffs) =
+                        serde_json::from_str::<Vec<crate::snapshot::FileDiff>>(diffs_json)
+                    {
+                        for d in &diffs {
+                            if seen_files.insert(d.file.clone()) {
+                                all_diffs.push(d.clone());
+                            }
+                        }
+                    }
+                }
+            }
+
+            if all_diffs.is_empty() {
+                lines.push(Line::from(vec![Span::styled(
+                    shorten("(no changes yet)", max_content_len),
+                    Style::default().fg(palette.muted),
+                )]));
+            } else {
+                // Sort: modified first, then added, then deleted
+                all_diffs.sort_by_key(|d| match d.status.as_deref() {
+                    Some("modified") => 0,
+                    Some("added") => 1,
+                    Some("deleted") => 2,
+                    _ => 3,
+                });
+
+                let count = all_diffs.len().min(10); // limit display to 10 files
+                for d in &all_diffs[..count] {
+                    let (status_icon, style) = match d.status.as_deref() {
+                        Some("added") => ("+ ", Style::default().fg(palette.success)),
+                        Some("deleted") => ("- ", Style::default().fg(palette.error)),
+                        _ => ("~ ", Style::default().fg(palette.warning)),
+                    };
+
+                    let filename = Path::new(&d.file)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| d.file.clone());
+
+                    let summary = format!(
+                        "{}{} (+{}/-{})",
+                        status_icon,
+                        shorten(&filename, max_content_len.saturating_sub(12)),
+                        d.additions,
+                        d.deletions
+                    );
+                    lines.push(Line::from(vec![Span::styled(summary, style)]));
+                }
+                if all_diffs.len() > 10 {
+                    lines.push(Line::from(vec![Span::styled(
+                        format!("  ... {} more", all_diffs.len() - 10),
+                        Style::default().fg(palette.muted),
+                    )]));
+                }
+            }
+        }
+
         // Todos section
         lines.push(Line::from(""));
         lines.push(Line::from(vec![Span::styled(
@@ -1268,9 +1342,6 @@ impl App {
                 .fg(palette.accent)
                 .add_modifier(Modifier::BOLD),
         )]));
-
-        let sidebar_width = self.config.ui.sidebar_width as usize;
-        let max_content_len = sidebar_width.saturating_sub(4);
 
         for todo in &self.todos {
             let (checkbox, style) = match todo.status.as_str() {

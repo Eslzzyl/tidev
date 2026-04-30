@@ -6,7 +6,18 @@ use crate::{context::ContextManager, snapshot::Patch};
 
 use super::{App, Screen};
 
+/// A single step-level patch stored within a round.
+/// Multiple step patches are serialized as a JSON array in `patch_files`.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct StepPatch {
+    hash: String,
+    files: Vec<String>,
+    step: usize,
+}
+
 impl App {
+    /// Finalize snapshot for the last user message by computing per-step patches
+    /// and file diffs for sidebar display.
     pub(crate) fn finalize_snapshot_for_last_user_message_sync(
         &mut self,
         runtime: &Runtime,
@@ -32,7 +43,7 @@ impl App {
             last_user_message.id
         };
 
-        let snapshot_hash = {
+        let initial_hash = {
             let Some(msg) = self
                 .conversation
                 .messages
@@ -42,27 +53,61 @@ impl App {
                 crate::log_warn!("finalize_snapshot: message not found in messages list");
                 return Ok(());
             };
-            msg.snapshot_hash.clone()
+            match msg.snapshot_hash.clone() {
+                Some(h) => h,
+                None => {
+                    crate::log_info!("finalize_snapshot: snapshot_hash is None");
+                    return Ok(());
+                }
+            }
         };
 
-        let Some(snapshot_hash) = snapshot_hash else {
-            crate::log_info!("finalize_snapshot: snapshot_hash is None");
-            return Ok(());
-        };
+        // Collect all snapshot hashes: initial + step snapshots
+        let step_hashes: Vec<String> = self.step_snapshot_hashes.drain(..).collect();
+        let mut all_hashes = vec![initial_hash.clone()];
+        all_hashes.extend(step_hashes);
 
-        let patch = runtime.block_on(self.snapshot.patch(&snapshot_hash))?;
-        crate::log_info!("finalize_snapshot: patch.files.len()={}", patch.files.len());
+        crate::log_info!(
+            "finalize_snapshot: computing patches for {} snapshots (initial + {} steps)",
+            all_hashes.len(),
+            all_hashes.len().saturating_sub(1)
+        );
 
-        if !patch.files.is_empty() {
-            let patch_files = serde_json::to_string(&patch.files)?;
+        // Compute cumulative patch for each snapshot
+        let mut step_patches: Vec<StepPatch> = Vec::new();
+        for (i, hash) in all_hashes.iter().enumerate() {
+            match runtime.block_on(self.snapshot.patch(hash)) {
+                Ok(patch) => {
+                    if !patch.files.is_empty() {
+                        crate::log_info!(
+                            "finalize_snapshot: step {} hash={} files={}",
+                            i,
+                            hash,
+                            patch.files.len()
+                        );
+                        step_patches.push(StepPatch {
+                            hash: hash.clone(),
+                            files: patch.files,
+                            step: i,
+                        });
+                    }
+                }
+                Err(e) => {
+                    crate::log_warn!("finalize_snapshot: patch for step {} failed: {}", i, e);
+                }
+            }
+        }
+
+        if !step_patches.is_empty() {
+            let patch_files_json = serde_json::to_string(&step_patches)?;
             crate::log_info!(
-                "finalize_snapshot: saving patch_files, len={}",
-                patch_files.len()
+                "finalize_snapshot: saving patch_files, steps={}",
+                step_patches.len()
             );
             self.store.update_message_patch(
                 self.conversation.session_id,
                 last_user_message_id,
-                &patch_files,
+                &patch_files_json,
             )?;
 
             if let Some(msg) = self
@@ -71,7 +116,30 @@ impl App {
                 .iter_mut()
                 .find(|m| m.id == last_user_message_id)
             {
-                msg.patch_files = Some(patch_files);
+                msg.patch_files = Some(patch_files_json);
+            }
+
+            // Compute full file diffs for sidebar display
+            match runtime.block_on(self.snapshot.diff_full(&initial_hash, &all_hashes.last().cloned().unwrap_or(initial_hash.clone()))) {
+                Ok(file_diffs) => {
+                    let diffs_json = serde_json::to_string(&file_diffs)?;
+                    self.store.update_message_file_diffs(
+                        self.conversation.session_id,
+                        last_user_message_id,
+                        &diffs_json,
+                    )?;
+                    if let Some(msg) = self
+                        .conversation
+                        .messages
+                        .iter_mut()
+                        .find(|m| m.id == last_user_message_id)
+                    {
+                        msg.file_diffs = Some(diffs_json);
+                    }
+                }
+                Err(e) => {
+                    crate::log_warn!("finalize_snapshot: diff_full failed: {}", e);
+                }
             }
         }
 
@@ -270,6 +338,9 @@ impl App {
     ) -> Result<()> {
         crate::log_info!("capture_prompt_snapshot: message_id={}", message_id);
 
+        // Clear any intermediate step snapshots from previous rounds
+        self.step_snapshot_hashes.clear();
+
         match runtime.block_on(self.snapshot.track()) {
             Ok(Some(hash)) => {
                 crate::log_info!("capture_prompt_snapshot: captured hash={}", hash);
@@ -299,6 +370,24 @@ impl App {
         }
 
         Ok(())
+    }
+
+    /// Capture an intermediate snapshot between tool execution steps within a round.
+    /// These are used at round end to compute per-step patches.
+    pub(crate) fn capture_step_snapshot(&mut self, runtime: &Runtime) {
+        crate::log_info!("capture_step_snapshot: starting");
+        match runtime.block_on(self.snapshot.track()) {
+            Ok(Some(hash)) => {
+                crate::log_info!("capture_step_snapshot: captured hash={}", hash);
+                self.step_snapshot_hashes.push(hash);
+            }
+            Ok(None) => {
+                crate::log_info!("capture_step_snapshot: track() returned None (no changes)");
+            }
+            Err(error) => {
+                crate::log_warn!("capture_step_snapshot: track() failed: {}", error);
+            }
+        }
     }
 
     pub(crate) fn discard_reverted_branch(&mut self) -> Result<()> {
@@ -331,29 +420,14 @@ impl App {
         let mut found = false;
 
         // We iterate through the messages in forward order to find the target.
-        // But for REVERTING, we should build the list such that we process them
-        // in reverse order (newest to oldest), which revert() handles by
-        // the order in the input slice.
+        // For REVERTING, we collect patches in order such that the OLDEST
+        // snapshot hash for each file takes priority (to restore pre-round state).
+        // The patches are inserted at position 0, so they end up in reverse order
+        // (newest message first). Within each message, step patches are also reversed
+        // so the initial snapshot hash takes priority.
         for message in &self.conversation.messages {
             if found {
-                if let Some(patch_files_str) = &message.patch_files
-                    && let Some(snapshot_hash) = &message.snapshot_hash
-                {
-                    let files: Vec<String> = serde_json::from_str(patch_files_str)?;
-                    crate::log_info!(
-                        "collect_patches: found patch in subsequent message, hash={}, files={}",
-                        snapshot_hash,
-                        files.len()
-                    );
-                    // Add to the front so we revert the NEWEST changes first
-                    patches.insert(
-                        0,
-                        Patch {
-                            hash: snapshot_hash.clone(),
-                            files,
-                        },
-                    );
-                }
+                patches = self.collect_patches_from_message(patches, message);
                 continue;
             }
 
@@ -364,29 +438,73 @@ impl App {
                     message.snapshot_hash,
                     message.patch_files.as_ref().map(|s| s.len())
                 );
-                if let Some(patch_files_str) = &message.patch_files
-                    && let Some(snapshot_hash) = &message.snapshot_hash
-                {
-                    let files: Vec<String> = serde_json::from_str(patch_files_str)?;
-                    crate::log_info!(
-                        "collect_patches: target message has patch, hash={}, files={}",
-                        snapshot_hash,
-                        files.len()
-                    );
-                    // Add to the front
-                    patches.insert(
-                        0,
-                        Patch {
-                            hash: snapshot_hash.clone(),
-                            files,
-                        },
-                    );
+                // Also include the target message's own patches
+                patches = self.collect_patches_from_message(patches, message);
+            }
+        }
+
+        // Reverse so the OLDEST patches (closest to target message) are processed first.
+        // This ensures the initial snapshot hash takes priority in revert dedup.
+        patches.reverse();
+
+        crate::log_info!("collect_patches: returning {} patches", patches.len());
+        Ok(patches)
+    }
+
+    /// Extract patches from a single message's patch_files.
+    /// Handles both new nested format `[{"hash":"...","files":[...],"step":N}]`
+    /// and old flat format `["file1","file2"]`.
+    fn extract_patches_from_message(message: &crate::session::Message) -> Vec<Patch> {
+        let Some(patch_files_str) = &message.patch_files else {
+            return Vec::new();
+        };
+
+        // Try nested format first
+        if let Ok(step_patches) = serde_json::from_str::<Vec<StepPatch>>(patch_files_str) {
+            return step_patches
+                .into_iter()
+                .map(|sp| Patch {
+                    hash: sp.hash,
+                    files: sp.files,
+                })
+                .collect();
+        }
+
+        // Fallback: old flat format `["file1","file2"]` — use message's snapshot_hash
+        if let Ok(files) = serde_json::from_str::<Vec<String>>(patch_files_str) {
+            if !files.is_empty() {
+                if let Some(hash) = &message.snapshot_hash {
+                    return vec![Patch {
+                        hash: hash.clone(),
+                        files,
+                    }];
                 }
             }
         }
 
-        crate::log_info!("collect_patches: returning {} patches", patches.len());
-        Ok(patches)
+        Vec::new()
+    }
+
+    /// Collect patches from a message, inserting them at the beginning of the list
+    /// so that newer messages appear first (will be reversed later for correct ordering).
+    fn collect_patches_from_message(
+        &self,
+        mut patches: Vec<Patch>,
+        message: &crate::session::Message,
+    ) -> Vec<Patch> {
+        let msg_patches = Self::extract_patches_from_message(message);
+        if msg_patches.is_empty() {
+            return patches;
+        }
+        crate::log_info!(
+            "collect_patches: message {} has {} step patches",
+            message.id,
+            msg_patches.len()
+        );
+        for msg_patch in msg_patches.into_iter().rev() {
+            patches.insert(0, msg_patch);
+        }
+        patches
     }
 
     fn set_revert_message_id(

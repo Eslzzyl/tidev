@@ -279,7 +279,7 @@ impl SessionStore {
             .map(|m| serde_json::to_string(&m).unwrap_or_default());
         let thinking_level = message.thinking_level.as_ref().map(|t| t.to_string());
         self.connection.execute(
-            "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, mode, rtk_rewritten, thinking_level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+            "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
             params![
                 message.id.to_string(),
                 session_id.to_string(),
@@ -303,6 +303,7 @@ impl SessionStore {
                 message.tokens_per_second,
                 message.snapshot_hash,
                 message.patch_files,
+                message.file_diffs,
                 mode,
                 if message.rtk_rewritten { 1_i64 } else { 0_i64 },
                 thinking_level,
@@ -326,7 +327,7 @@ impl SessionStore {
         let thinking_level = message.thinking_level.as_ref().map(|t| t.to_string());
 
         self.connection.execute(
-            "UPDATE messages SET role = ?3, content = ?4, attachments = ?5, reasoning = ?6, tool_calls = ?7, tool_call_id = ?8, tool_name = ?9, metadata = ?10, created_at = ?11, completed_at = ?12, streaming = ?13, input_tokens = ?14, output_tokens = ?15, total_tokens = ?16, cache_read_tokens = ?17, cache_write_tokens = ?18, model_id = ?19, tokens_per_second = ?20, snapshot_hash = ?21, patch_files = ?22, mode = ?23, rtk_rewritten = ?24, thinking_level = ?25 WHERE session_id = ?1 AND id = ?2",
+            "UPDATE messages SET role = ?3, content = ?4, attachments = ?5, reasoning = ?6, tool_calls = ?7, tool_call_id = ?8, tool_name = ?9, metadata = ?10, created_at = ?11, completed_at = ?12, streaming = ?13, input_tokens = ?14, output_tokens = ?15, total_tokens = ?16, cache_read_tokens = ?17, cache_write_tokens = ?18, model_id = ?19, tokens_per_second = ?20, snapshot_hash = ?21, patch_files = ?22, file_diffs = ?23, mode = ?24, rtk_rewritten = ?25, thinking_level = ?26 WHERE session_id = ?1 AND id = ?2",
             params![
                 session_id.to_string(),
                 message.id.to_string(),
@@ -350,6 +351,7 @@ impl SessionStore {
                 message.tokens_per_second,
                 message.snapshot_hash,
                 message.patch_files,
+                message.file_diffs,
                 mode,
                 if message.rtk_rewritten { 1_i64 } else { 0_i64 },
                 thinking_level,
@@ -694,6 +696,19 @@ impl SessionStore {
         Ok(())
     }
 
+    pub fn update_message_file_diffs(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        file_diffs: &str,
+    ) -> Result<()> {
+        self.connection.execute(
+            "UPDATE messages SET file_diffs = ?1 WHERE session_id = ?2 AND id = ?3",
+            params![file_diffs, session_id.to_string(), message_id.to_string()],
+        )?;
+        Ok(())
+    }
+
     pub fn load_session_record(&self, session_id: Uuid) -> Result<Option<SessionRecord>> {
         let sql = format!(
             "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.id = ?1 LIMIT 1"
@@ -831,7 +846,7 @@ impl SessionStore {
 
     pub fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, mode, rtk_rewritten, thinking_level FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
+            "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
         )?;
 
         let rows = statement.query_map(params![session_id.to_string()], |row| {
@@ -856,9 +871,10 @@ impl SessionStore {
             let tokens_per_second = row.get::<_, Option<f32>>(18)?;
             let snapshot_hash = row.get::<_, Option<String>>(19)?;
             let patch_files = row.get::<_, Option<String>>(20)?;
-            let mode = row.get::<_, Option<String>>(21)?;
-            let rtk_rewritten = row.get::<_, i64>(22)? != 0;
-            let thinking_level = row.get::<_, Option<String>>(23)?;
+            let file_diffs = row.get::<_, Option<String>>(21)?;
+            let mode = row.get::<_, Option<String>>(22)?;
+            let rtk_rewritten = row.get::<_, i64>(23)? != 0;
+            let thinking_level = row.get::<_, Option<String>>(24)?;
 
             let attachments = serde_json::from_str(&attachments).unwrap_or_default();
             let tool_calls: Vec<ToolCall> = serde_json::from_str(&tool_calls).unwrap_or_default();
@@ -898,6 +914,7 @@ impl SessionStore {
             message.tokens_per_second = tokens_per_second;
             message.snapshot_hash = snapshot_hash;
             message.patch_files = patch_files;
+            message.file_diffs = file_diffs;
             message.mode = mode;
             message.rtk_rewritten = rtk_rewritten;
             message.thinking_level = thinking_level;

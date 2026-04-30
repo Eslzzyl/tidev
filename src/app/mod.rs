@@ -184,6 +184,9 @@ struct App {
     pub(crate) selectable_regions: Vec<Rect>,
     message_scroll_target: Option<Uuid>,
     todos: Vec<TodoItem>,
+    /// Intermediate snapshot hashes captured after each tool execution step within a round.
+    /// Used at round end to compute per-step patches.
+    step_snapshot_hashes: Vec<String>,
     stats_panel: Option<ui::stats_panel::StatsPanelState>,
     balance_panel: Arc<Mutex<Option<ui::balance_panel::BalancePanelState>>>,
     notifications: notifications::NotificationManager,
