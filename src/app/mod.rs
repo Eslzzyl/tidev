@@ -960,7 +960,11 @@ impl App {
                     crate::log_info!(
                         "SubagentCompleted: user switched away from parent session, writing to database directly"
                     );
-                    let display_result = result.preview_for_storage(Some(tool_call.name.as_str()));
+                    let display_result = if tool_call.name == "task" {
+                        result.clone()
+                    } else {
+                        result.preview_for_storage(Some(tool_call.name.as_str()))
+                    };
                     let message = Message::tool_result(
                         tool_call.id.clone(),
                         tool_call.name.clone(),

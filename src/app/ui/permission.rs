@@ -773,7 +773,13 @@ impl App {
         tool_call: ToolCall,
         result: ToolExecutionResult,
     ) -> Result<()> {
-        let display_result = result.preview_for_storage(Some(tool_call.name.as_str()));
+        let display_result = if tool_call.name == "task" {
+            // Subagent (task) results should not be preview-truncated;
+            // the caller expects the complete output for correct decision-making.
+            result.clone()
+        } else {
+            result.preview_for_storage(Some(tool_call.name.as_str()))
+        };
         let output_for_tool_event = display_result.output.clone();
         let message = crate::session::Message::tool_result(
             tool_call.id,
