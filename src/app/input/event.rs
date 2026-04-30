@@ -981,6 +981,10 @@ impl App {
             return self.handle_message_panel_key(key);
         }
 
+        if self.memory_panel.is_some() {
+            return self.handle_memory_panel_key(key, runtime);
+        }
+
         if self.session_panel.is_some() {
             return self.handle_session_panel_key(key, runtime);
         }
@@ -1587,6 +1591,9 @@ impl App {
                 self.composer.set_text(init_command().to_string());
                 self.last_notice = Some("Init prompt loaded".to_string());
             }
+            CommandAction::Memory => {
+                self.open_memory_panel()?;
+            }
             CommandAction::Agents => {
                 self.agents_panel = Some(ui::agents_panel::AgentsPanelState::new());
             }
@@ -1611,6 +1618,23 @@ impl App {
         self.mcp_panel = None;
         self.agents_panel = None;
         self.theme_panel = Some(ThemePanelState::new(self.theme.palette().name));
+    }
+
+    pub(crate) fn open_memory_panel(&mut self) -> Result<()> {
+        self.command_palette.clear();
+        self.mcp_panel = None;
+        self.agents_panel = None;
+        self.theme_panel = None;
+        self.model_panel = None;
+        self.session_panel = None;
+        self.settings_panel = None;
+        let mut panel = MemoryPanelState::new();
+        panel.load(
+            &self.memory_store,
+            &self.workspace_root.display().to_string(),
+        )?;
+        self.memory_panel = Some(panel);
+        Ok(())
     }
 
     pub(crate) fn open_settings_panel(&mut self) {

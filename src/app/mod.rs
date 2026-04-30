@@ -46,6 +46,7 @@ pub use runtime::undo;
 pub use ui::balance_panel;
 pub use ui::connect;
 pub use ui::mcp_panel;
+pub use ui::memory_panel;
 pub use ui::message_panel;
 pub use ui::model_panel;
 pub use ui::permission;
@@ -62,6 +63,7 @@ use crate::{
     app::at_mention::{AtMentionKind, AtMentionState, current_at_fragment},
     app::input::SnippetState,
     app::mcp_panel::McpPanelState,
+    app::memory_panel::MemoryPanelState,
     app::message_panel::MessagePanelState,
     app::model_panel::ModelPanelState,
     app::mouse_selection::{ClipboardLease, MouseSelectionState},
@@ -78,6 +80,7 @@ use crate::{
     instructions,
     llm::LlmClient,
     mcp::McpManager,
+    memory::types::MemoryStore,
     notifications,
     prompts::{SessionMode, init_command},
     provider_setup::ConnectDialog,
@@ -192,6 +195,10 @@ struct App {
     notifications: notifications::NotificationManager,
     /// DeepSeek thinking level for the current model
     thinking_level: crate::config::reasoning::ThinkingLevelType,
+    /// Cross-session memory store
+    memory_store: Arc<MemoryStore>,
+    /// Memory management panel
+    memory_panel: Option<MemoryPanelState>,
 }
 
 pub fn run() -> Result<()> {
@@ -442,6 +449,7 @@ impl App {
             mcp,
             self.config.permissions.clone(),
             file_read_tracker,
+            self.memory_store.clone(),
             self.config.rtk.enabled,
         );
     }
@@ -493,6 +501,15 @@ impl App {
         ));
         prompt.push_str(&system_info.format_env());
         prompt.push_str("\n</env>");
+
+        // Add workspace memories
+        let ws = self.workspace_root.display().to_string();
+        if let Ok(memories) = self.memory_store.select_hot(&ws, 5, 800) {
+            let memory_prompt = MemoryStore::format_for_prompt(&memories);
+            if !memory_prompt.is_empty() {
+                prompt.push_str(&memory_prompt);
+            }
+        }
 
         (prompt, sources)
     }

@@ -1,4 +1,4 @@
-mod schema;
+pub mod schema;
 #[cfg(test)]
 mod tests;
 

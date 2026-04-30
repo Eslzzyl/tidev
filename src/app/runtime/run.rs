@@ -16,6 +16,7 @@ impl App {
         crate::log_info!("App initializing, workspace={}", workspace_root.display());
         let auth = AuthStore::load_or_create(&paths)?;
         let store = SessionStore::open(paths.default_database_path())?;
+        let memory_store = Arc::new(MemoryStore::open(paths.default_database_path())?);
         let llm = LlmClient::new()?;
         let http_client = Arc::new(reqwest::Client::new());
         let theme = ThemeManager::new(&config.theme);
@@ -28,6 +29,7 @@ impl App {
             mcp,
             config.permissions.clone(),
             file_read_tracker.clone(),
+            memory_store.clone(),
             config.rtk.enabled,
         );
         #[allow(unused_variables)]
@@ -147,6 +149,8 @@ impl App {
             balance_panel: Arc::new(Mutex::new(None)),
             notifications,
             thinking_level: active_model.thinking_level.clone(),
+            memory_store,
+            memory_panel: None,
         };
 
         app.at_mention
@@ -288,6 +292,7 @@ impl App {
             rename_dialog: self.rename_dialog.clone(),
             mcp_panel: self.mcp_panel.clone(),
             agents_panel: self.agents_panel.clone(),
+            memory_panel: self.memory_panel.clone(),
             message_panel: self.message_panel.clone(),
             at_mention: self.at_mention.clone(),
             snippet_state: self.snippet_state.clone(),
@@ -308,6 +313,7 @@ impl App {
         self.model_panel = snapshot.model_panel;
         self.message_panel = snapshot.message_panel;
         self.session_panel = snapshot.session_panel;
+        self.memory_panel = snapshot.memory_panel;
         self.rename_dialog = snapshot.rename_dialog;
         self.mcp_panel = snapshot.mcp_panel;
         self.agents_panel = snapshot.agents_panel;

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::mcp::McpManager;
+use crate::memory::types::MemoryStore;
 use crate::tooling::SkillCatalog;
 use crate::{
     config::PermissionConfig, prompts::SessionMode, session::ToolCall, storage::SessionStore,
@@ -21,6 +22,7 @@ pub struct ToolRegistry {
     mcp: McpManager,
     permission_config: PermissionConfig,
     file_read_tracker: Arc<FileReadTracker>,
+    memory_store: Arc<MemoryStore>,
     active_model: Option<crate::config::ActiveModel>,
     rtk_enabled: bool,
 }
@@ -33,6 +35,7 @@ impl ToolRegistry {
         mcp: McpManager,
         permission_config: PermissionConfig,
         file_read_tracker: Arc<FileReadTracker>,
+        memory_store: Arc<MemoryStore>,
         rtk_enabled: bool,
     ) -> Self {
         let skills = SkillCatalog::discover(&workspace_root, &config_dir, &skill_sources);
@@ -47,6 +50,7 @@ impl ToolRegistry {
             mcp,
             permission_config,
             file_read_tracker,
+            memory_store,
             active_model: None,
             rtk_enabled,
         }
@@ -235,6 +239,7 @@ impl ToolRegistry {
             call,
             self.max_output_bytes,
             self.rtk_enabled,
+            &self.memory_store,
         )?;
 
         // Image capability check: If the result contains images but the model doesn't support them,

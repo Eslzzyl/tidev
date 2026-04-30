@@ -1,6 +1,7 @@
 use crate::{
     app::mcp_panel::McpPanelState,
     app::mcp_panel::McpServerEditorState,
+    app::memory_panel::{MemoryPanelMode, MemoryPanelState},
     app::message_panel::MessagePanelState,
     app::model_panel::{ModelPanelItem, ModelPanelState},
     app::permission::PermissionDialogState,
@@ -2071,6 +2072,200 @@ impl App {
                 .wrap(Wrap { trim: false }),
             sections[3],
         );
+    }
+
+    pub(super) fn render_memory_panel(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        panel: &MemoryPanelState,
+    ) {
+        let palette = self.palette();
+        let filtered = panel.filtered_indices();
+
+        let overlay = centered_rect(
+            area.width.min(96),
+            area.height.min(36),
+            area,
+        );
+        frame.render_widget(Clear, overlay);
+
+        let title_block = Block::default()
+            .style(Style::default().bg(palette.panel))
+            .title(" Memories ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.border_active()));
+        frame.render_widget(title_block, overlay);
+
+        let inner = overlay.inner(Margin { horizontal: 1, vertical: 1 });
+
+        match panel.mode {
+            MemoryPanelMode::Browse => {
+                let sections = Layout::vertical([
+                    Constraint::Length(1),    // filter indicator
+                    Constraint::Min(6),       // list
+                    Constraint::Length(1),    // count
+                    Constraint::Length(1),    // help
+                ])
+                .split(inner);
+
+                // Filter indicator
+                let filter_text = match panel.filter_type {
+                    None => "All types".to_string(),
+                    Some(t) => format!("Type: {}", t.as_str()),
+                };
+                frame.render_widget(
+                    Paragraph::new(filter_text)
+                        .alignment(Alignment::Center)
+                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                    sections[0],
+                );
+
+                // Memory list
+                if filtered.is_empty() {
+                    frame.render_widget(
+                        Paragraph::new("No memories yet. Press 'a' to add one.")
+                            .alignment(Alignment::Center)
+                            .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                        sections[1],
+                    );
+                } else {
+                    let items: Vec<ListItem> = filtered
+                        .iter()
+                        .enumerate()
+                        .map(|(list_idx, &mem_idx)| {
+                            let entry = &panel.memories[mem_idx];
+                            let is_selected = list_idx == panel.selected_index;
+                            let prefix = if is_selected { "▸ " } else { "  " };
+                            let type_label = entry.memory_type.short_label();
+                            let preview: String = entry.content.chars().take(80).collect();
+                            let suffix = if entry.content.len() > 80 { "…" } else { "" };
+                            let text = format!("{}[{}] {} – {}{}", prefix, type_label, entry.title, preview, suffix);
+                            let style = if is_selected {
+                                Style::default()
+                                    .fg(palette.accent)
+                                    .bg(palette.selection_bg)
+                                    .add_modifier(Modifier::BOLD)
+                            } else {
+                                Style::default().bg(palette.panel).fg(palette.text)
+                            };
+                            ListItem::new(text).style(style)
+                        })
+                        .collect();
+
+                    let list = List::new(items);
+                    frame.render_widget(list, sections[1]);
+                }
+
+                // Count
+                frame.render_widget(
+                    Paragraph::new(format!("{} / {} memories", filtered.len(), panel.memories.len()))
+                        .alignment(Alignment::Right)
+                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                    sections[2],
+                );
+
+                // Help
+                frame.render_widget(
+                    Paragraph::new("↑↓ navigate · a add · e edit · d delete · r filter type · Esc close")
+                        .alignment(Alignment::Center)
+                        .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
+                    sections[3],
+                );
+            }
+
+            MemoryPanelMode::Add | MemoryPanelMode::Edit => {
+                let label = match panel.mode {
+                    MemoryPanelMode::Add => "Add Memory",
+                    MemoryPanelMode::Edit => "Edit Memory",
+                    _ => unreachable!(),
+                };
+
+                let sections = Layout::vertical([
+                    Constraint::Length(1),    // label
+                    Constraint::Length(1),    // type
+                    Constraint::Length(3),    // title
+                    Constraint::Min(8),       // content
+                    Constraint::Length(1),    // tags
+                    Constraint::Length(1),    // hints
+                ])
+                .split(inner);
+
+                frame.render_widget(
+                    Paragraph::new(label)
+                        .alignment(Alignment::Center)
+                        .style(Style::default().bg(palette.panel).fg(palette.accent)),
+                    sections[0],
+                );
+
+                // Type
+                frame.render_widget(
+                    Paragraph::new(format!("Type: {}", panel.edit_type.as_str()))
+                        .style(Style::default().bg(palette.panel).fg(palette.text)),
+                    sections[1],
+                );
+
+                // Title edit area
+                frame.render_widget(
+                    Paragraph::new(format!("Title: {}", panel.edit_title))
+                        .style(Style::default().bg(palette.panel).fg(palette.text))
+                        .wrap(Wrap { trim: false }),
+                    sections[2],
+                );
+
+                // Content edit area
+                frame.render_widget(
+                    Paragraph::new(if panel.edit_content.is_empty() {
+                        "Content: (type in input box below)"
+                    } else {
+                        &panel.edit_content
+                    })
+                    .style(Style::default().bg(palette.panel).fg(palette.text))
+                    .wrap(Wrap { trim: false }),
+                    sections[3],
+                );
+
+                // Tags
+                frame.render_widget(
+                    Paragraph::new(format!("Tags: {}", panel.edit_tags))
+                        .style(Style::default().bg(palette.panel).fg(palette.text)),
+                    sections[4],
+                );
+
+                // Hints
+                frame.render_widget(
+                    Paragraph::new("Tab: cycle type · Enter: save · Esc: cancel")
+                        .alignment(Alignment::Center)
+                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                    sections[5],
+                );
+            }
+
+            MemoryPanelMode::DeleteConfirm => {
+                let sections = Layout::vertical([
+                    Constraint::Length(2),
+                    Constraint::Length(2),
+                    Constraint::Length(1),
+                ])
+                .split(inner);
+
+                if let Some(entry) = panel.selected_entry() {
+                    frame.render_widget(
+                        Paragraph::new(format!("Delete memory: {}?", entry.title))
+                            .alignment(Alignment::Center)
+                            .style(Style::default().bg(palette.panel).fg(palette.warning)),
+                        sections[0],
+                    );
+                }
+
+                frame.render_widget(
+                    Paragraph::new("Press Y to confirm, N or Esc to cancel")
+                        .alignment(Alignment::Center)
+                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                    sections[1],
+                );
+            }
+        }
     }
 }
 

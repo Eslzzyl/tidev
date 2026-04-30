@@ -5,6 +5,7 @@ pub enum CommandAction {
     Balance,
     Connect,
     Mcp,
+    Memory,
     Model,
     Session,
     Compact,
@@ -254,6 +255,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         description: "Open the MCP panel",
         usage: "/mcp",
         action: CommandAction::Mcp,
+    },
+    CommandSpec {
+        name: "memory",
+        aliases: &["mem"],
+        description: "Open the memory panel to manage cross-session memories",
+        usage: "/memory",
+        action: CommandAction::Memory,
     },
     CommandSpec {
         name: "model",

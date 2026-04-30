@@ -4,6 +4,7 @@ pub mod agents_panel;
 pub mod balance_panel;
 pub mod connect;
 pub mod mcp_panel;
+pub mod memory_panel;
 pub mod message_panel;
 pub mod model_panel;
 pub mod permission;

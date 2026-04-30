@@ -10,6 +10,7 @@ pub mod llm;
 pub mod logging;
 pub mod markdown_render;
 pub mod mcp;
+pub mod memory;
 pub mod notifications;
 pub mod prompts;
 pub mod provider_setup;

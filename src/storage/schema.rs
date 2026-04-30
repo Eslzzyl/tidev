@@ -1,4 +1,30 @@
-pub const SCHEMA_VERSION: i64 = 20;
+pub const SCHEMA_VERSION: i64 = 21;
+
+/// The memories table SQL, exported so MemoryStore can create it independently.
+pub const MEMORIES_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS memories (
+    id TEXT PRIMARY KEY,
+    workspace_root TEXT NOT NULL,
+    memory_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    tags TEXT NOT NULL DEFAULT '[]',
+    source_session_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    usage_count INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_memories_workspace_active
+    ON memories(workspace_root, active);
+
+CREATE INDEX IF NOT EXISTS idx_memories_type
+    ON memories(workspace_root, memory_type, active);
+
+CREATE INDEX IF NOT EXISTS idx_memories_usage
+    ON memories(workspace_root, usage_count DESC);
+"#;
 
 pub const SESSION_SELECT_COLUMNS: &str = "s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, s.context_summary, s.context_retained_from, COALESCE(sw.workspace_root, '')";
 
@@ -168,4 +194,27 @@ CREATE TABLE IF NOT EXISTS file_reads (
 
 CREATE INDEX IF NOT EXISTS idx_file_reads_session
     ON file_reads(session_id);
+
+CREATE TABLE IF NOT EXISTS memories (
+    id TEXT PRIMARY KEY,
+    workspace_root TEXT NOT NULL,
+    memory_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    tags TEXT NOT NULL DEFAULT '[]',
+    source_session_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    usage_count INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_memories_workspace_active
+    ON memories(workspace_root, active);
+
+CREATE INDEX IF NOT EXISTS idx_memories_type
+    ON memories(workspace_root, memory_type, active);
+
+CREATE INDEX IF NOT EXISTS idx_memories_usage
+    ON memories(workspace_root, usage_count DESC);
 "#;

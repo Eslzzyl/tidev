@@ -1,13 +1,14 @@
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::path::Path;
+use std::sync::Arc;
 
-use super::tools::{QuestionArgs, SkillArgs};
-use super::{SkillCatalog, ToolDefinition, ToolPermission, canonical_tool_name};
+use super::tools::{MemoryArgs, QuestionArgs, SkillArgs};use super::{SkillCatalog, ToolDefinition, ToolPermission, canonical_tool_name};
 use crate::{session::ToolCall, storage::SessionStore};
 
 pub mod exec;
 pub mod file;
+pub mod memory;
 pub mod search;
 pub mod task;
 pub mod todo;
@@ -32,6 +33,11 @@ pub fn definitions(skill_description: String) -> Vec<ToolDefinition> {
         skill_description,
         ToolPermission::Session,
     ));
+    definitions.push(ToolDefinition::new::<MemoryArgs>(
+        "memory",
+        "Store or retrieve workspace memories that persist across sessions. Use to remember user preferences, project decisions, architecture decisions, and other important context. Operations: store (save a new memory), search (find by keyword), list (all active), read (full content by ID), delete (remove by ID).",
+        ToolPermission::Session,
+    ));
     definitions
 }
 
@@ -44,6 +50,7 @@ pub fn execute_tool_call(
     call: &ToolCall,
     max_output_bytes: usize,
     rtk_enabled: bool,
+    memory_store: &Arc<crate::memory::types::MemoryStore>,
 ) -> Result<crate::session::ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
@@ -74,6 +81,15 @@ pub fn execute_tool_call(
             let args = super::tools::parse_arguments::<SkillArgs>(&call.name, arguments)?;
             let output = skills.render_skill(&args.name)?;
             crate::session::ToolExecutionResult::new(output)
+        }
+        Some("memory") => {
+            let result = crate::tooling::builtin::memory::execute_tool_call(
+                workspace_root,
+                memory_store,
+                call,
+                arguments,
+            )?;
+            crate::session::ToolExecutionResult::new(result)
         }
         Some("websearch") | Some("webfetch") => {
             let output = web::execute_tool_call(workspace_root, call, max_output_bytes)?;

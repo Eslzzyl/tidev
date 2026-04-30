@@ -253,6 +253,18 @@ tool_args! {
 }
 
 tool_args! {
+    pub struct MemoryArgs {
+        operation: string("Operation: store, search, list, read, or delete"),
+        memory_type: optional_string("Memory type: user, project, feedback, reference (required for store)"),
+        title: optional_string("Memory title (required for store)"),
+        content: optional_string("Memory content in markdown (required for store)"),
+        tags: optional_string("Comma-separated tags for search (optional)"),
+        query: optional_string("Search query (required for search)"),
+        memory_id: optional_string("Memory UUID (required for read, delete)"),
+    }
+}
+
+tool_args! {
     pub struct QuestionOption {
         label: string("Display text for the option"),
         description: optional_string("Optional explanation of the option"),
@@ -354,6 +366,7 @@ pub(super) fn execute_tool_call(
     call: &ToolCall,
     max_output_bytes: usize,
     rtk_enabled: bool,
+    memory_store: &Arc<crate::memory::types::MemoryStore>,
 ) -> Result<ToolExecutionResult> {
     // Pre-execution checks for file read tracking
     let tool_name = crate::tooling::canonical_tool_name(&call.name);
@@ -387,6 +400,7 @@ pub(super) fn execute_tool_call(
         call,
         max_output_bytes,
         rtk_enabled,
+        memory_store,
     )?;
 
     // Post-execution: record file reads
