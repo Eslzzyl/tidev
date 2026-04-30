@@ -1,109 +1,100 @@
 # tidev
 
-基本上是一个基于 Rust 的 [OpenCode](https://github.com/anomalyco/opencode) 复刻版本。在保持大部分交互逻辑与 OpenCode 一致的前提下尝试优化性能和内存占用。
+A terminal-based AI coding assistant built in Rust. Tidev reimplements the interaction model of [OpenCode](https://github.com/anomalyco/opencode) with a focus on performance and memory efficiency.
 
-Basically a Rust-based fork of [OpenCode](https://github.com/anomalyco/opencode). Try to optimize performance and memory usage while keeping most of the interaction logic consistent with OpenCode.
+> Disclaimer: This project is early in development. The database structure and UI may iterate quickly and produce incompatible changes. Run at your own risk.
 
-项目处于开发早期，数据库结构和 UI 可能会快速迭代并产生不兼容的更改。
+---
 
-The project is early in development and the database structure and UI may iterate quickly and produce incompatible changes.
+## Features
 
-一个粗略的统计：
+- **Multi-Provider LLM Support** -- Anthropic (Claude), OpenAI Chat Completions, and OpenAI Responses. Configurable presets with fallback providers and models.
 
-A rough statistic:
+- **Specialized Sub-Agents** -- Six agent roles for delegating tasks: General (default), Explorer (code search), Librarian (documentation), Oracle (architecture review), Designer (UI/UX), and Fixer (fast implementation). Each agent has a tailored system prompt and tool set.
 
-|页面/Page|OpenCode 内存/Memory|tidev 内存/Memory|
-|---|---|---|
-|启动页/Welcome page|~470MB|~16MB|
-|一个简单的 session 的对话/Chat page of a simple session|~580MB|~30MB|
+- **Built-in Tool Set**
+  - File operations: `read`, `write`, `edit`, `apply_patch`
+  - Code search: `list`, `glob`, `grep`
+  - Shell command execution with permission control
+  - Session management: task delegation, todo tracking, question prompts
+  - Web integration: search (Exa) and page fetching
 
-|OpenCode 体积/File size|tidev 体积/File size|
-|---|---|
-|121MB|14MB|
+- **Model Context Protocol (MCP) Support** -- Connect to MCP servers via child process or streamable HTTP. MCP tools are automatically discovered and available with namespaced permissions (`mcp:<server>:<tool>`).
+
+- **Git Snapshot & Revert** -- Automatically track file changes in the workspace using git. View diff statistics and revert changes when needed.
+
+- **Permission System** -- Granular tool permissions per session mode (Read, Search, Write, Edit, Execute, Session).
+
+- **Usage Statistics** -- SQLite-based tracking of token consumption (input, output, cache) and request counts with time-bucket aggregation (hour, day, week, month).
+
+- **API Balance Checking** -- Query account balances for DeepSeek and SiliconFlow providers directly from the UI.
+
+- **Session Persistence** -- All conversations are stored in SQLite. Sessions, workspaces, messages, tool events, and reverts survive restarts.
+
+---
+
+## Performance
+
+Significantly lower memory usage and binary size compared to OpenCode:
+
+| Page | OpenCode Memory | tidev Memory |
+|------|----------------|--------------|
+| Welcome page | ~470 MB | ~16 MB |
+| Chat page (simple session) | ~580 MB | ~30 MB |
+
+| Metric | OpenCode | tidev |
+|--------|----------|-------|
+| Binary size | 121 MB | 14 MB |
+
+---
+
+## Screenshots
 
 ![welcome](https://github-imagebed.eslzzyl.eu.org/tidev/welcome.webp)
 ![chat](https://github-imagebed.eslzzyl.eu.org/tidev/chat.webp)
 ![stat](https://github-imagebed.eslzzyl.eu.org/tidev/stat.webp)
 ![models](https://github-imagebed.eslzzyl.eu.org/tidev/models.webp)
 
-怎么读？
+---
 
-> 我愿意将其读成 "tide-v"，但读成"ti-dev"应该也可以。
+## Experimental: Gateway Mode
 
-How to pronounce it?
+A gateway mode is under active development that runs tidev as a persistent server with bot integrations (like OpenClaw):
 
-> I'd like to pronounce it as "tide-v", but "ti-dev" should also be fine.
+- **Telegram** -- Polling-based bot with file attachment support and user allowlist.
+- **QQ** -- Bot integration using the QQ channel API with sandbox mode.
 
-运行：
-1. 确保安装了最新的 Rust stable 工具链
-1. 克隆仓库并 `cd tidev`
-1. `cargo install --path .`
-1. 在你的工作目录下执行 `tidev`
+Both platforms can run simultaneously via a shared channel orchestrator. Gateway mode uses a dedicated system prompt and manages separate chat-to-session mappings.
 
-How to Run:
-1. Ensure the latest Rust stable toolchain is installed.
-1. Clone the repository and `cd tidev`.
-1. `cargo install --path .`
-1. Execute `tidev` in your working directory.
+Run with:
 
-Telegram Gateway（Phase 1）
-1. 在 `~/.config/tidev/config.toml` 添加或确认：
-	 ```toml
-	 [gateway.telegram]
-	 enabled = true
-	 allowlist = ["<telegram_user_or_chat_id>"]
-	 poll_timeout_secs = 30
-	 ```
-2. 在 `~/.local/share/tidev/auth.json` 为 `telegram` provider 设置 bot token：
-	 ```json
-	 {
-		 "providers": {
-			 "telegram": {
-				 "api_key": "<telegram_bot_token>"
-			 }
-		 }
-	 }
-	 ```
-3. 在工作目录启动：`tidev gateway`
-4. 在 Telegram 中发送 `/new` 会开始一个新的 session，两个 `/new` 之间的消息会进入同一个 session。
-5. 常用命令：
-	- `/session` 查看当前会话状态
-	- `/session new` 新建会话
-	- `/model list` 查看可用模型
-	- `/model <provider:model>` 为当前 chat 切换模型（会持久化）
-	- `/model reset` 清除当前 chat 的模型覆盖，恢复默认模型
+```
+tidev gateway
+```
 
-Telegram Gateway (Phase 1)
-1. Add or verify this block in `~/.config/tidev/config.toml`:
-	 ```toml
-	 [gateway.telegram]
-	 enabled = true
-	 allowlist = ["<telegram_user_or_chat_id>"]
-	 poll_timeout_secs = 30
-	 ```
-2. Put the bot token in `~/.local/share/tidev/auth.json` under provider `telegram`:
-	 ```json
-	 {
-		 "providers": {
-			 "telegram": {
-				 "api_key": "<telegram_bot_token>"
-			 }
-		 }
-	 }
-	 ```
-3. Start from your workspace with `tidev gateway`.
-4. Sending `/new` in Telegram starts a fresh session; messages between two `/new` commands stay in the same session.
-5. Useful commands:
-	- `/session` shows current session status
-	- `/session new` starts a fresh session
-	- `/model list` lists available models
-	- `/model <provider:model>` switches model for the current chat (persisted)
-	- `/model reset` clears chat-level model override and uses default model
+> Note: Gateway mode is experimental. Configuration, reliability, and feature coverage are still evolving.
 
-由于在开发早期，我暂时不发布 Release。
+---
 
-Since it's in the early stages of development, I'm not releasing a release yet.
+## How to Pronounce It?
 
-> 声明：此项目的所有代码均由大语言模型生成
+I'd like to pronounce it as "tide-v", but "ti-dev" should also be fine.
 
-> Disclaimer: All code in this project was generated by LLMs.
+---
+
+## Run from Source
+
+1. Ensure the latest Rust stable toolchain is installed. https://rust-lang.org/
+2. Clone the repository and `cd tidev`.
+3. `cargo install --path .`
+4. Run `tidev` in your working directory.
+
+---
+
+## Configuration
+
+- Config file: `~/.config/tidev/config.toml`
+- Auth file: `~/.local/share/tidev/auth.json`
+- Session database: `~/.local/share/tidev/sessions.sqlite3`
+
+Provider presets in the repository root (`presets.toml`) are merged with user configuration at runtime.
