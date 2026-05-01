@@ -132,6 +132,9 @@ struct App {
     /// In-memory workspace boundary permissions (path -> allowed).
     /// Cleared when tidev exits or session switches.
     workspace_boundary_permissions: std::collections::HashMap<String, bool>,
+    /// Per-batch: tool calls approved for outside-workspace access (tool_call.id -> allow_outside).
+    /// Populated during permission checking, consumed during parallel execution dispatch.
+    workspace_boundary_approved: std::collections::HashMap<String, bool>,
     question_dialog: Option<QuestionDialogState>,
     running_tool_executions: Vec<RunningToolExecution>,
     running_subagent_executions: Vec<RunningSubagentExecution>,
@@ -790,6 +793,7 @@ impl App {
                 self.permission_dialog = None;
                 self.question_dialog = None;
                 self.running_tool_executions.clear();
+                self.workspace_boundary_approved.clear();
                 self.cancel_running_subagents();
                 self.abort_confirmation_deadline = None;
                 self.retrying_hint = None;
@@ -1295,6 +1299,7 @@ impl App {
             self.permission_dialog = None;
             self.question_dialog = None;
             self.running_tool_executions.clear();
+            self.workspace_boundary_approved.clear();
             self.abort_confirmation_deadline = None;
             self.active_request_id = self.active_request_id.wrapping_add(1);
         }

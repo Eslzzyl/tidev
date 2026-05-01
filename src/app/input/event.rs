@@ -760,8 +760,34 @@ impl App {
 
         self.cancel_running_subagents();
 
-        for running in self.running_tool_executions.drain(..) {
-            running.cancel_requested.store(true, Ordering::SeqCst);
+        // Clean up per-batch boundary approvals
+        self.workspace_boundary_approved.clear();
+
+        // Handle running tool execution cancellations: same orphan prevention
+        if !self.running_tool_executions.is_empty() {
+            let session_id = self.conversation.session_id;
+            let cancel_output = "User cancelled the request".to_string();
+
+            for running in self.running_tool_executions.drain(..) {
+                running.cancel_requested.store(true, Ordering::SeqCst);
+
+                let result = ToolExecutionResult::new(cancel_output.clone());
+                let msg = Message::tool_result(
+                    running.tool_call.id.clone(),
+                    running.tool_call.name.clone(),
+                    result,
+                );
+
+                let _ = self.store.append_tool_event(
+                    session_id,
+                    msg.id,
+                    &running.tool_call.name,
+                    &running.tool_call.arguments,
+                    &cancel_output,
+                );
+                let _ = self.store.append_message(session_id, &msg);
+                self.conversation.messages.push(msg);
+            }
         }
 
         if let Some(message) = self.conversation.messages.last_mut()

@@ -110,6 +110,7 @@ impl App {
             permission_dialog: None,
             workspace_boundary_dialog: None,
             workspace_boundary_permissions: std::collections::HashMap::new(),
+            workspace_boundary_approved: std::collections::HashMap::new(),
             question_dialog: None,
             running_tool_executions: Vec::new(),
             running_subagent_executions: Vec::new(),

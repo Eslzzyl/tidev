@@ -232,6 +232,20 @@ impl App {
         }
 
         if allowed {
+            // Check if the tool is read-only; dispatch async instead of inline execute
+            if Self::is_readonly_tool(&dialog.pending.tool_call.name) {
+                // If it's also a "question" tool, handle via dialog (fall through below)
+                if dialog.pending.tool_call.name != "question" {
+                    self.workspace_boundary_approved
+                        .insert(dialog.pending.tool_call.id.clone(), true);
+                    self.pending_tool_execution
+                        .as_mut()
+                        .unwrap()
+                        .add_ready(dialog.pending.tool_call);
+                    self.advance_pending_tool_execution();
+                    return self.process_pending_tool_execution(runtime);
+                }
+            }
             // Execute the tool immediately with allow_outside=true
             self.execute_boundary_allowed_tool(dialog.pending.tool_call, runtime)?;
             return Ok(());

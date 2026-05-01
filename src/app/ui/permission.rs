@@ -6,7 +6,7 @@ use tokio::runtime::Runtime;
 use crate::agent::{AgentDefinition, AgentType};
 use crate::prompts::SessionMode;
 use crate::session::{ToolCall, ToolExecutionResult};
-use crate::tooling::{QuestionArgs, TaskArgs, execute_shell_tool_call};
+use crate::tooling::{QuestionArgs, TaskArgs, canonical_tool_name, execute_shell_tool_call};
 
 use super::App;
 
@@ -305,6 +305,17 @@ impl App {
                         continue;
                     }
                     // Previously allowed — execute with allow_outside=true
+                    if Self::is_readonly_tool(&tool_call.name) {
+                        // Record boundary approval for async dispatch
+                        self.workspace_boundary_approved
+                            .insert(tool_call.id.clone(), true);
+                        self.pending_tool_execution
+                            .as_mut()
+                            .unwrap()
+                            .add_ready(tool_call);
+                        self.advance_pending_tool_execution();
+                        continue;
+                    }
                     let mut result = self
                         .tools
                         .execute_call(
@@ -691,6 +702,27 @@ impl App {
         Ok(())
     }
 
+    pub(crate) fn is_readonly_tool(name: &str) -> bool {
+        matches!(
+            canonical_tool_name(name),
+            Some("read" | "list" | "glob" | "grep" | "websearch" | "webfetch")
+        )
+    }
+
+    fn should_run_tool_async(&self, tool_call: &ToolCall) -> bool {
+        self.tools
+            .definition_for(&tool_call.name)
+            .is_some_and(|def| {
+                def.name == "bash"
+                    || Self::is_readonly_tool(&def.name)
+                    || matches!(
+                        def.permission,
+                        crate::tooling::ToolPermission::Read
+                            | crate::tooling::ToolPermission::Search
+                    )
+            })
+    }
+
     fn should_run_shell_async(&self, tool_call: &ToolCall) -> bool {
         self.tools
             .definition_for(&tool_call.name)
@@ -734,6 +766,56 @@ impl App {
         Ok(())
     }
 
+    fn start_readonly_tool_execution(
+        &mut self,
+        tool_call: ToolCall,
+        runtime: &Runtime,
+    ) -> Result<()> {
+        let session_id = self.conversation.session_id;
+        let request_id = self.active_request_id;
+        let allow_outside = self
+            .workspace_boundary_approved
+            .remove(&tool_call.id)
+            .unwrap_or(false);
+        let cancel_requested = Arc::new(AtomicBool::new(false));
+        self.running_tool_executions.push(RunningToolExecution::new(
+            request_id,
+            tool_call.clone(),
+            cancel_requested.clone(),
+        ));
+        self.last_notice = Some(format!("Running {}...", tool_call.name));
+
+        let tx = self.backend_tx.clone();
+        let tools = self.tools.clone();
+        let store = self.store.clone();
+        let runtime_handle = runtime.handle().clone();
+        let mode = self.mode;
+
+        runtime.spawn_blocking(move || {
+            let result = tools
+                .execute_call(
+                    &runtime_handle,
+                    &store,
+                    session_id,
+                    &tool_call,
+                    mode,
+                    allow_outside,
+                )
+                .unwrap_or_else(|error| {
+                    ToolExecutionResult::new(format!("Tool failed: {error}"))
+                });
+
+            let _ = tx.send(crate::session::BackendEvent::ToolCompleted {
+                session_id,
+                request_id,
+                tool_call,
+                result,
+            });
+        });
+
+        Ok(())
+    }
+
     pub(crate) fn start_parallel_execution(
         &mut self,
         tool_calls: Vec<ToolCall>,
@@ -753,7 +835,9 @@ impl App {
             ));
         }
 
-        for tool_call in tool_calls {
+        // Phase 1: Dispatch async tools (bash, read-only, subagent) concurrently
+        // These start immediately via spawn_blocking and report completion via events.
+        for tool_call in &tool_calls {
             match tool_call.name.as_str() {
                 "task" => {
                     if let Err(error) =
@@ -761,7 +845,7 @@ impl App {
                     {
                         crate::log_error!("start_subagent_task_execution failed: {}", error);
                         self.record_tool_result(
-                            tool_call,
+                            tool_call.clone(),
                             ToolExecutionResult::new(format!("Tool failed: {error}")),
                         )?;
                     }
@@ -771,11 +855,11 @@ impl App {
                         serde_json::from_str(&tool_call.arguments);
                     match parsed {
                         Ok(args) if !args.questions.is_empty() => {
-                            self.begin_question_dialog(tool_call, args)?;
+                            self.begin_question_dialog(tool_call.clone(), args)?;
                         }
                         _ => {
                             self.record_tool_result(
-                                tool_call,
+                                tool_call.clone(),
                                 ToolExecutionResult::new(
                                     "Tool failed: failed to decode question arguments or empty questions",
                                 ),
@@ -784,9 +868,27 @@ impl App {
                     };
                 }
                 _ => {
-                    if self.should_run_shell_async(&tool_call) {
-                        self.start_shell_tool_execution(tool_call, runtime)?;
-                    } else {
+                    if self.should_run_tool_async(tool_call) {
+                        if tool_call.name == "bash" {
+                            self.start_shell_tool_execution(tool_call.clone(), runtime)?;
+                        } else {
+                            self.start_readonly_tool_execution(tool_call.clone(), runtime)?;
+                        }
+                    }
+                    // Sync tools handled in Phase 2 below
+                }
+            }
+        }
+
+        // Phase 2: Execute may-write tools synchronously, in order.
+        // These complete inline before the next turn starts.
+        for tool_call in tool_calls {
+            match tool_call.name.as_str() {
+                "task" | "question" => {
+                    // Already handled in Phase 1
+                }
+                _ => {
+                    if !self.should_run_tool_async(&tool_call) {
                         let result = self
                             .tools
                             .execute_call(
@@ -823,6 +925,11 @@ impl App {
                     self.running_subagent_executions.len()
                 ));
             }
+        }
+
+        // Clean up any stale workspace_boundary_approved entries (should already be consumed)
+        if !self.workspace_boundary_approved.is_empty() {
+            self.workspace_boundary_approved.clear();
         }
 
         Ok(())
