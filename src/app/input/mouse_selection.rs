@@ -88,8 +88,14 @@ impl MouseSelectionState {
         self.focus = Some(clamp_to_bounds(position, self.bounds));
 
         if self.has_selection(current_scroll) {
-            self.pending_copy = true;
+            // Only auto-copy if the user actually dragged to a different position
+            // (anchor != focus). A click-without-drag or drag-back-to-start should not copy.
+            let effective_selection = self.anchor != self.focus;
+            self.pending_copy = effective_selection;
             self.dragging = false;
+            if !self.pending_copy {
+                self.clear();
+            }
             return;
         }
 
@@ -159,10 +165,9 @@ impl MouseSelectionState {
         let dy = current_scroll as i32 - self.anchor_scroll_offset as i32;
         anchor.y = (anchor.y as i32 - dy).clamp(0, u16::MAX as i32) as u16;
 
-        // Allow single character selection if we just clicked without moving,
-        // so long as it passes the later is_empty checks inside applicable regions.
         if !self.moved && anchor == focus {
-            return Some(SelectionRange::new(anchor, focus));
+            // Pure click without any drag → no selection
+            return None;
         }
 
         if self.moved || anchor != focus {
@@ -377,7 +382,7 @@ fn apply_selection_style(
     let end_x = range.end.x.min(area_right.saturating_sub(1));
     let end_y = range.end.y.min(area_bottom.saturating_sub(1));
 
-    if start_x > end_x || start_y > end_y {
+    if start_y > end_y {
         return;
     }
 
@@ -465,7 +470,7 @@ fn extract_selected_text(
     let end_x = range.end.x.min(area_right.saturating_sub(1));
     let end_y = range.end.y.min(area_bottom.saturating_sub(1));
 
-    if start_x > end_x || start_y > end_y {
+    if start_y > end_y {
         return String::new();
     }
 
@@ -646,6 +651,38 @@ mod tests {
         );
 
         assert_eq!(text, "hi");
+    }
+
+    #[test]
+    fn multi_line_selection_backwards_x_does_not_disappear() {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 2));
+        buffer.set_string(0, 0, "Hello World This is", Style::default());
+        buffer.set_string(0, 1, "a test line here", Style::default());
+
+        // Select from column 12 on line 0 to column 6 on line 1.
+        // This is a typical "drag to the left across lines" scenario.
+        apply_selection_style(
+            &mut buffer,
+            super::SelectionRange::new(Position::new(12, 0), Position::new(6, 1)),
+            None,
+            &[],
+            Style::default().bg(Color::Blue),
+        );
+
+        // First line: cells from column 12 to end of text should be highlighted
+        assert_eq!(buffer.cell((12, 0)).unwrap().bg, Color::Blue);
+        assert_eq!(buffer.cell((16, 0)).unwrap().bg, Color::Blue);
+        assert_eq!(buffer.cell((18, 0)).unwrap().bg, Color::Blue);
+        // Cell before start_x on first line should NOT be highlighted
+        assert_eq!(buffer.cell((11, 0)).unwrap().bg, Color::Reset);
+
+        // Second line: cells up to column 5 should be highlighted
+        assert_eq!(buffer.cell((0, 1)).unwrap().bg, Color::Blue);
+        assert_eq!(buffer.cell((5, 1)).unwrap().bg, Color::Blue);
+        // Space at column 6 is trailing (trimmed), so it should NOT be highlighted
+        assert_eq!(buffer.cell((6, 1)).unwrap().bg, Color::Reset);
+        // Cell after end_x on second line should NOT be highlighted
+        assert_eq!(buffer.cell((7, 1)).unwrap().bg, Color::Reset);
     }
 
     #[test]
