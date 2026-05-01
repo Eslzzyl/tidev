@@ -379,6 +379,14 @@ pub(super) fn read_path(
         raw_line.clear();
     }
 
+    // After the loop: if cut was triggered, finish counting lines to get accurate file total
+    if cut {
+        while reader.read_line(&mut raw_line)? > 0 {
+            total_lines += 1;
+            raw_line.clear();
+        }
+    }
+
     if total_lines < offset as usize && !(total_lines == 0 && offset == 1) {
         bail!(
             "Offset {} is out of range for this file ({} lines)",
@@ -1188,6 +1196,14 @@ pub fn read_file_for_at_reference(
         bytes += size;
         lines.push(text);
         raw_line.clear();
+    }
+
+    // After the loop: if cut was triggered, finish counting lines to get accurate file total
+    if cut {
+        while reader.read_line(&mut raw_line)? > 0 {
+            total_lines += 1;
+            raw_line.clear();
+        }
     }
 
     let start = offset as usize;
