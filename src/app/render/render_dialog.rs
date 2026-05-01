@@ -1317,7 +1317,7 @@ impl App {
                 let is_active = idx == panel.selected_tab_index;
                 let tab_style = if is_active {
                     Style::default()
-                        .fg(palette.accent)
+                        .fg(palette.selection_fg)
                         .bg(palette.selection_bg)
                         .add_modifier(Modifier::BOLD)
                 } else {
