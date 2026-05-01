@@ -39,6 +39,9 @@ impl App {
         if let Some(panel) = &self.agents_panel {
             self.render_agents_panel(frame, area, panel);
         }
+        if let Some(panel) = &self.skills_panel {
+            self.render_skills_panel(frame, area, panel);
+        }
         if let Some(panel) = &self.settings_panel {
             self.render_settings_panel(frame, area, panel);
         }

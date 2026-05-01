@@ -12,5 +12,6 @@ pub mod question;
 pub mod rename;
 pub mod session_panel;
 pub mod settings_panel;
+pub mod skills_panel;
 pub mod stats_panel;
 pub mod theme_panel;

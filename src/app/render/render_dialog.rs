@@ -11,6 +11,7 @@ use crate::{
     app::theme_panel::ThemePanelState,
     app::ui::agents_panel::AgentsPanelState,
     app::ui::rename::RenameSessionDialogState,
+    app::ui::skills_panel::SkillsPanelState,
     config::ProviderSource,
     provider_setup::{ConnectDialog, EditProviderStep, NewProviderStep},
 };
@@ -2299,5 +2300,226 @@ fn pretty_tool_arguments(arguments: &str) -> String {
     match serde_json::from_str::<serde_json::Value>(arguments) {
         Ok(value) => serde_json::to_string_pretty(&value).unwrap_or_else(|_| arguments.to_string()),
         Err(_) => arguments.to_string(),
+    }
+}
+
+impl App {
+    /// Render the skills panel with a two-pane layout:
+    /// - Left: searchable list of skills
+    /// - Right: markdown preview of selected skill
+    pub(super) fn render_skills_panel(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        panel: &SkillsPanelState,
+    ) {
+        use crate::markdown_render::render_markdown_text_with_width_and_cwd;
+
+        let palette = self.palette();
+
+        // Main overlay - 85% width, 80% height
+        let overlay = centered_rect(85, 80, area);
+        frame.render_widget(Clear, overlay);
+
+        // Main block with title
+        let title = if panel.is_empty() {
+            " Skills ".to_string()
+        } else {
+            format!(" Skills · {}/{} ", panel.selected_index + 1, panel.filtered_count())
+        };
+
+        let panel_block = Block::default()
+            .style(Style::default().bg(palette.panel))
+            .title(title)
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.border_active()));
+        frame.render_widget(panel_block, overlay);
+
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+        self.register_selection_region(inner);
+
+        // Check if empty
+        if panel.is_empty() {
+            let empty_text = vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  No skills discovered",
+                    Style::default().fg(palette.muted),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Create .opencode/skills/SKILL.md to add skills",
+                    Style::default().fg(palette.muted),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Press Esc or q to close",
+                    Style::default().fg(palette.muted),
+                )),
+            ];
+            frame.render_widget(
+                Paragraph::new(empty_text).style(Style::default().bg(palette.panel)),
+                inner,
+            );
+            return;
+        }
+
+        // Split into left (list) and right (preview) panes
+        // Left: 35%, Right: 65%
+        let panes = Layout::horizontal([
+            Constraint::Percentage(35),
+            Constraint::Percentage(65),
+        ])
+        .split(inner);
+
+        let list_area = panes[0];
+        let preview_area = panes[1];
+
+        // --- Left Pane: Skill List ---
+        // Header with search status
+        let search_status = if panel.query_active {
+            format!("Search: {}_", panel.query)
+        } else if !panel.query.is_empty() {
+            format!("Filter: {} (press / to edit)", panel.query)
+        } else {
+            "Press / to search".to_string()
+        };
+
+        let header_lines = vec![
+            Line::from(vec![
+                Span::styled("  Name", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(Span::styled(
+                format!("  {}", search_status),
+                Style::default().fg(palette.muted),
+            )),
+        ];
+
+        let header_height = header_lines.len() as u16;
+        frame.render_widget(
+            Paragraph::new(header_lines).style(Style::default().bg(palette.panel)),
+            Rect::new(list_area.x, list_area.y, list_area.width, header_height),
+        );
+
+        // Divider
+        let divider_y = list_area.y + header_height;
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "─".repeat(list_area.width as usize),
+                Style::default().fg(palette.muted),
+            )))
+            .style(Style::default().bg(palette.panel)),
+            Rect::new(list_area.x, divider_y, list_area.width, 1),
+        );
+
+        // Skill list
+        let list_start_y = divider_y + 1;
+        let list_content_height = list_area.height.saturating_sub(header_height + 1);
+        let list_content_area = Rect::new(list_area.x, list_start_y, list_area.width, list_content_height);
+
+        let mut list_lines: Vec<Line<'_>> = Vec::new();
+        let visible_start = panel.list_scroll;
+        let visible_end = (panel.list_scroll + list_content_height as usize)
+            .min(panel.filtered_indices.len());
+
+        for (i, skill_idx) in panel.filtered_indices.iter().enumerate().skip(visible_start).take(visible_end - visible_start) {
+            let skill = &panel.all_skills[*skill_idx];
+            let is_selected = i == panel.selected_index;
+
+            let icon = "📁 ";
+            let name_style = if is_selected {
+                Style::default()
+                    .bg(palette.selection_bg)
+                    .fg(palette.selection_fg)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(palette.text)
+            };
+
+            let line = Line::from(vec![
+                Span::styled(icon, name_style),
+                Span::styled(&skill.name, name_style),
+            ]);
+            list_lines.push(line);
+        }
+
+        // Fill remaining space with background
+        while list_lines.len() < list_content_height as usize {
+            list_lines.push(Line::from(""));
+        }
+
+        frame.render_widget(
+            Paragraph::new(list_lines).style(Style::default().bg(palette.panel)),
+            list_content_area,
+        );
+
+        // --- Right Pane: Preview ---
+        // Header
+        let preview_header = vec![
+            Line::from(vec![
+                Span::styled("  Preview", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
+            ]),
+        ];
+        frame.render_widget(
+            Paragraph::new(preview_header).style(Style::default().bg(palette.panel)),
+            Rect::new(preview_area.x, preview_area.y, preview_area.width, 1),
+        );
+
+        // Divider
+        let preview_divider_y = preview_area.y + 1;
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "─".repeat(preview_area.width as usize),
+                Style::default().fg(palette.muted),
+            )))
+            .style(Style::default().bg(palette.panel)),
+            Rect::new(preview_area.x, preview_divider_y, preview_area.width, 1),
+        );
+
+        // Preview content
+        let preview_content_y = preview_divider_y + 1;
+        let preview_content_height = preview_area.height.saturating_sub(2);
+        let preview_content_area = Rect::new(preview_area.x, preview_content_y, preview_area.width, preview_content_height);
+
+        if let Some(skill) = panel.selected_skill() {
+            // Get rendered skill content from catalog
+            let content = self.tools.skills().render_skill(&skill.name).unwrap_or_default();
+
+            // Render markdown with syntax highlighting
+            let content_width = preview_content_area.width.saturating_sub(2) as usize;
+            let rendered = render_markdown_text_with_width_and_cwd(&content, Some(content_width), None);
+
+            // Apply scroll offset
+            let scroll = panel.preview_scroll;
+            let visible_lines: Vec<Line<'_>> = rendered
+                .into_iter()
+                .skip(scroll)
+                .take(preview_content_height as usize)
+                .collect();
+
+            frame.render_widget(
+                Paragraph::new(visible_lines).style(Style::default().bg(palette.panel)),
+                preview_content_area,
+            );
+        }
+
+        // --- Footer hints ---
+        let footer_y = inner.y + inner.height - 1;
+        let hints = if panel.query_active {
+            "Enter: confirm search  •  Esc: cancel"
+        } else {
+            "↑/↓: navigate  •  ←/→: scroll preview  •  /: search  •  c: copy  •  Esc: close"
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                format!("  {}", hints),
+                Style::default().fg(palette.muted),
+            )))
+            .style(Style::default().bg(palette.panel)),
+            Rect::new(inner.x, footer_y, inner.width, 1),
+        );
     }
 }

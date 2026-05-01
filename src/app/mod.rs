@@ -122,6 +122,7 @@ struct App {
     rename_dialog: Option<RenameSessionDialogState>,
     mcp_panel: Option<McpPanelState>,
     agents_panel: Option<ui::agents_panel::AgentsPanelState>,
+    skills_panel: Option<ui::skills_panel::SkillsPanelState>,
     at_mention: AtMentionState,
     snippet_state: SnippetState,
     pending_tool_execution: Option<PendingToolExecution>,

@@ -777,6 +777,82 @@ impl App {
         Ok(())
     }
 
+    pub(crate) fn handle_skills_panel_key(&mut self, key: KeyEvent) -> Result<()> {
+        // Handle close actions first to avoid borrowing issues
+        let should_close = matches!(key.code, KeyCode::Esc | KeyCode::Char('q'));
+        if should_close {
+            self.skills_panel = None;
+            return Ok(());
+        }
+
+        if let Some(panel) = &mut self.skills_panel {
+            // When query is active, handle text input first
+            if panel.query_active {
+                match key.code {
+                    KeyCode::Esc => {
+                        panel.query_active = false;
+                    }
+                    KeyCode::Enter => {
+                        panel.query_active = false;
+                    }
+                    KeyCode::Backspace => {
+                        panel.backspace_query();
+                    }
+                    KeyCode::Char(c) => {
+                        panel.append_to_query(c);
+                    }
+                    _ => {}
+                }
+                return Ok(());
+            }
+
+            // Normal navigation mode
+            match key.code {
+                KeyCode::Char('/') | KeyCode::Char('s') => {
+                    panel.query_active = true;
+                }
+                KeyCode::Char('c') => {
+                    // Copy selected skill name to composer and close
+                    if let Some(name) = panel.selected_skill_name() {
+                        let name = name.to_string();
+                        self.composer.set_text(format!("/skill {}", name));
+                        self.skills_panel = None;
+                        self.last_notice = Some(format!("Skill '{}' selected", name));
+                    }
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    panel.move_up(10);
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    panel.move_down(10);
+                }
+                KeyCode::PageUp => {
+                    panel.page_up(10);
+                }
+                KeyCode::PageDown => {
+                    panel.page_down(10);
+                }
+                KeyCode::Home => {
+                    panel.selected_index = 0;
+                    panel.list_scroll = 0;
+                }
+                KeyCode::End => {
+                    if !panel.filtered_indices.is_empty() {
+                        panel.selected_index = panel.filtered_indices.len() - 1;
+                    }
+                }
+                KeyCode::Left => {
+                    panel.scroll_preview_up(5);
+                }
+                KeyCode::Right => {
+                    panel.scroll_preview_down(5);
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn handle_settings_panel_key(&mut self, key: KeyEvent) -> Result<()> {
         if let Some(panel) = &mut self.settings_panel {
             match key.code {
@@ -1021,6 +1097,10 @@ impl App {
 
         if self.agents_panel.is_some() {
             return self.handle_agents_panel_key(key);
+        }
+
+        if self.skills_panel.is_some() {
+            return self.handle_skills_panel_key(key);
         }
 
         if self.mcp_panel.is_some() {
@@ -1655,6 +1735,9 @@ impl App {
             CommandAction::Agents => {
                 self.agents_panel = Some(ui::agents_panel::AgentsPanelState::new());
             }
+            CommandAction::Skills => {
+                self.open_skills_panel();
+            }
         }
 
         Ok(())
@@ -1745,6 +1828,32 @@ impl App {
 
     pub(crate) fn close_model_panel(&mut self) {
         self.model_panel = None;
+    }
+
+    pub(crate) fn open_skills_panel(&mut self) {
+        // Close other panels
+        self.mcp_panel = None;
+        self.agents_panel = None;
+        self.theme_panel = None;
+        self.model_panel = None;
+        self.session_panel = None;
+        self.settings_panel = None;
+        self.memory_panel = None;
+
+        // Build skill items from the catalog
+        let skill_items: Vec<ui::skills_panel::SkillItem> = self
+            .tools
+            .skills()
+            .all()
+            .iter()
+            .map(|skill| ui::skills_panel::SkillItem {
+                name: skill.name.clone(),
+                description: skill.description.clone(),
+                location: skill.location.clone(),
+            })
+            .collect();
+
+        self.skills_panel = Some(ui::skills_panel::SkillsPanelState::new(skill_items));
     }
 
     pub(crate) fn open_message_panel(&mut self, initial_query: String) -> Result<()> {

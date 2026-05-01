@@ -20,6 +20,7 @@ use super::session_panel::SessionPanelState;
 use super::theme_panel::ThemePanelState;
 use crate::app::ui::agents_panel::AgentsPanelState;
 use crate::app::ui::rename::RenameSessionDialogState;
+use crate::app::ui::skills_panel::SkillsPanelState;
 use crate::{
     app::commands::CommandPaletteState,
     app::input::Composer,
@@ -200,6 +201,7 @@ pub(crate) struct UiStateSnapshot {
     pub(crate) rename_dialog: Option<RenameSessionDialogState>,
     pub(crate) mcp_panel: Option<McpPanelState>,
     pub(crate) agents_panel: Option<AgentsPanelState>,
+    pub(crate) skills_panel: Option<SkillsPanelState>,
     pub(crate) at_mention: AtMentionState,
     pub(crate) snippet_state: SnippetState,
     pub(crate) command_palette: CommandPaletteState,

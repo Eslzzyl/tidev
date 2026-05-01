@@ -80,6 +80,10 @@ impl ToolRegistry {
         &self.definitions
     }
 
+    pub fn skills(&self) -> &SkillCatalog {
+        &self.skills
+    }
+
     pub fn mcp_summaries(&self) -> Vec<crate::mcp::McpServerSummary> {
         self.mcp.summaries()
     }

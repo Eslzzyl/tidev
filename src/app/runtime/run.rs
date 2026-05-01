@@ -103,6 +103,7 @@ impl App {
             rename_dialog: None,
             mcp_panel: None,
             agents_panel: None,
+            skills_panel: None,
             at_mention: AtMentionState::default(),
             snippet_state: SnippetState::default(),
             pending_tool_execution: None,
@@ -311,6 +312,7 @@ impl App {
             rename_dialog: self.rename_dialog.clone(),
             mcp_panel: self.mcp_panel.clone(),
             agents_panel: self.agents_panel.clone(),
+            skills_panel: self.skills_panel.clone(),
             memory_panel: self.memory_panel.clone(),
             message_panel: self.message_panel.clone(),
             at_mention: self.at_mention.clone(),
@@ -336,6 +338,7 @@ impl App {
         self.rename_dialog = snapshot.rename_dialog;
         self.mcp_panel = snapshot.mcp_panel;
         self.agents_panel = snapshot.agents_panel;
+        self.skills_panel = snapshot.skills_panel;
         self.at_mention = snapshot.at_mention;
         self.snippet_state = snapshot.snippet_state;
         self.command_palette = snapshot.command_palette;
