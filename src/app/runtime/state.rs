@@ -17,8 +17,8 @@ use super::permission::{
 };
 use super::question::QuestionDialogState;
 use super::session_panel::SessionPanelState;
-use super::ui::workspace_boundary::WorkspaceBoundaryDialogState;
 use super::theme_panel::ThemePanelState;
+use super::ui::workspace_boundary::WorkspaceBoundaryDialogState;
 use crate::app::ui::agents_panel::AgentsPanelState;
 use crate::app::ui::rename::RenameSessionDialogState;
 use crate::app::ui::skills_panel::SkillsPanelState;

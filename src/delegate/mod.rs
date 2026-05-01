@@ -60,7 +60,11 @@ impl DelegateManager {
     /// Returns `Ok(depth)` where `depth` is the current depth of the parent session
     /// (0-indexed, so depth 0 means the parent is the root orchestrator).
     pub fn check_depth(&mut self, parent_session_id: Uuid) -> anyhow::Result<usize> {
-        let current_depth = self.depth_cache.get(&parent_session_id).copied().unwrap_or(0);
+        let current_depth = self
+            .depth_cache
+            .get(&parent_session_id)
+            .copied()
+            .unwrap_or(0);
         if current_depth >= self.max_depth {
             anyhow::bail!(
                 "Max delegation depth ({}) reached for session {}",
@@ -89,7 +93,11 @@ impl DelegateManager {
             );
         }
 
-        let parent_depth = self.depth_cache.get(&info.parent_session_id).copied().unwrap_or(0);
+        let parent_depth = self
+            .depth_cache
+            .get(&info.parent_session_id)
+            .copied()
+            .unwrap_or(0);
         let child_depth = parent_depth + 1;
 
         if child_depth > self.max_depth {
@@ -134,8 +142,10 @@ impl DelegateManager {
 
     /// Clean up stale entries (e.g., completed/cancelled sessions).
     pub fn cleanup(&mut self, active_session_ids: &[Uuid]) {
-        self.active_tasks.retain(|id, _| active_session_ids.contains(id));
-        self.depth_cache.retain(|id, _| active_session_ids.contains(id));
+        self.active_tasks
+            .retain(|id, _| active_session_ids.contains(id));
+        self.depth_cache
+            .retain(|id, _| active_session_ids.contains(id));
     }
 }
 
@@ -197,7 +207,12 @@ mod tests {
         };
         let result = manager.track_task(info);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Max delegation depth"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Max delegation depth")
+        );
     }
 
     #[test]

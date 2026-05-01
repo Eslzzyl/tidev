@@ -3,7 +3,7 @@ use chrono::Utc;
 use crossterm::event::{KeyCode, KeyEvent};
 use uuid::Uuid;
 
-use crate::memory::types::{MemoryEntry, MemoryType, MemoryStore};
+use crate::memory::types::{MemoryEntry, MemoryStore, MemoryType};
 
 use super::App;
 
@@ -56,7 +56,9 @@ impl MemoryPanelState {
 
     pub fn load(&mut self, store: &MemoryStore, workspace_root: &str) -> Result<()> {
         self.memories = store.get_or_load(workspace_root)?;
-        self.selected_index = self.selected_index.min(self.memories.len().saturating_sub(1));
+        self.selected_index = self
+            .selected_index
+            .min(self.memories.len().saturating_sub(1));
         Ok(())
     }
 
@@ -64,9 +66,7 @@ impl MemoryPanelState {
         self.memories
             .iter()
             .enumerate()
-            .filter(|(_, m)| {
-                self.filter_type.is_none_or(|t| m.memory_type == t)
-            })
+            .filter(|(_, m)| self.filter_type.is_none_or(|t| m.memory_type == t))
             .map(|(i, _)| i)
             .collect()
     }
@@ -98,7 +98,9 @@ impl MemoryPanelState {
     }
 
     pub fn start_edit(&mut self) {
-        let Some(entry) = self.selected_entry().cloned() else { return; };
+        let Some(entry) = self.selected_entry().cloned() else {
+            return;
+        };
         self.mode = MemoryPanelMode::Edit;
         self.edit_title = entry.title;
         self.edit_content = entry.content;
@@ -109,7 +111,9 @@ impl MemoryPanelState {
 
     pub fn confirm_save(&mut self, store: &MemoryStore, workspace_root: &str) -> Result<()> {
         let now = Utc::now();
-        let tags: Vec<String> = self.edit_tags.split(',')
+        let tags: Vec<String> = self
+            .edit_tags
+            .split(',')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
@@ -232,12 +236,11 @@ impl App {
                 next.start_edit();
                 self.memory_panel = Some(next);
             }
-            KeyCode::Char('d') | KeyCode::Char('D')
-                if panel.selected_entry().is_some() => {
-                    let mut next = panel;
-                    next.mode = MemoryPanelMode::DeleteConfirm;
-                    self.memory_panel = Some(next);
-                }
+            KeyCode::Char('d') | KeyCode::Char('D') if panel.selected_entry().is_some() => {
+                let mut next = panel;
+                next.mode = MemoryPanelMode::DeleteConfirm;
+                self.memory_panel = Some(next);
+            }
             KeyCode::Char('r') | KeyCode::Char('R') => {
                 let mut next = panel;
                 next.cycle_filter_type();

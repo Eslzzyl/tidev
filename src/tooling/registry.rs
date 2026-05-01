@@ -39,7 +39,12 @@ impl ToolRegistry {
         rtk_enabled: bool,
         worktree: Option<PathBuf>,
     ) -> Self {
-        let skills = SkillCatalog::discover(&workspace_root, &config_dir, &skill_sources, worktree.as_deref());
+        let skills = SkillCatalog::discover(
+            &workspace_root,
+            &config_dir,
+            &skill_sources,
+            worktree.as_deref(),
+        );
         let definitions = tool_definitions(skills.tool_description());
 
         Self {

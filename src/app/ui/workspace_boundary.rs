@@ -27,10 +27,7 @@ pub(crate) struct WorkspaceBoundaryDialogState {
 
 impl WorkspaceBoundaryDialogState {
     pub(crate) fn title(&self) -> String {
-        format!(
-            "Security Warning {} of {}",
-            self.current_index, self.total
-        )
+        format!("Security Warning {} of {}", self.current_index, self.total)
     }
 
     pub(crate) fn path_display(&self) -> String {
@@ -76,7 +73,10 @@ pub(crate) fn extract_boundary_violation_path(
         "read" | "write" | "edit" | "list" | "glob" => {
             if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
                 let path_buf = std::path::Path::new(path);
-                if crate::tooling::builtin::utils::is_path_outside_workspace(workspace_root, path_buf) {
+                if crate::tooling::builtin::utils::is_path_outside_workspace(
+                    workspace_root,
+                    path_buf,
+                ) {
                     return Some(path_buf.to_path_buf());
                 }
             }
@@ -84,17 +84,24 @@ pub(crate) fn extract_boundary_violation_path(
         "apply_patch" => {
             // For apply_patch, we need to extract the file path from the patch
             if let Some(patch) = args.get("patch").and_then(|v| v.as_str())
-                && let Some(file_path) = crate::tooling::extract_file_path_from_patch(patch) {
-                    let path_buf = std::path::Path::new(&file_path);
-                    if crate::tooling::builtin::utils::is_path_outside_workspace(workspace_root, path_buf) {
-                        return Some(path_buf.to_path_buf());
-                    }
+                && let Some(file_path) = crate::tooling::extract_file_path_from_patch(patch)
+            {
+                let path_buf = std::path::Path::new(&file_path);
+                if crate::tooling::builtin::utils::is_path_outside_workspace(
+                    workspace_root,
+                    path_buf,
+                ) {
+                    return Some(path_buf.to_path_buf());
                 }
+            }
         }
         "grep" => {
             if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
                 let path_buf = std::path::Path::new(path);
-                if crate::tooling::builtin::utils::is_path_outside_workspace(workspace_root, path_buf) {
+                if crate::tooling::builtin::utils::is_path_outside_workspace(
+                    workspace_root,
+                    path_buf,
+                ) {
                     return Some(path_buf.to_path_buf());
                 }
             }
@@ -131,19 +138,20 @@ impl App {
     ) -> Result<()> {
         // Handle special cases like question tool
         if tool_call.name == "question" {
-            let args = match serde_json::from_str::<crate::tooling::QuestionArgs>(&tool_call.arguments) {
-                Ok(args) => args,
-                Err(error) => {
-                    self.record_tool_result(
-                        tool_call,
-                        ToolExecutionResult::new(format!(
-                            "Tool failed: failed to decode question arguments: {error}"
-                        )),
-                    )?;
-                    self.advance_pending_tool_execution();
-                    return self.process_pending_tool_execution(runtime);
-                }
-            };
+            let args =
+                match serde_json::from_str::<crate::tooling::QuestionArgs>(&tool_call.arguments) {
+                    Ok(args) => args,
+                    Err(error) => {
+                        self.record_tool_result(
+                            tool_call,
+                            ToolExecutionResult::new(format!(
+                                "Tool failed: failed to decode question arguments: {error}"
+                            )),
+                        )?;
+                        self.advance_pending_tool_execution();
+                        return self.process_pending_tool_execution(runtime);
+                    }
+                };
 
             if args.questions.is_empty() {
                 self.record_tool_result(
@@ -221,8 +229,14 @@ impl App {
             return Ok(());
         };
 
-        let allowed = matches!(decision, BoundaryDecision::AllowOnce | BoundaryDecision::AllowUntilExit);
-        let remember = matches!(decision, BoundaryDecision::AllowUntilExit | BoundaryDecision::DenyUntilExit);
+        let allowed = matches!(
+            decision,
+            BoundaryDecision::AllowOnce | BoundaryDecision::AllowUntilExit
+        );
+        let remember = matches!(
+            decision,
+            BoundaryDecision::AllowUntilExit | BoundaryDecision::DenyUntilExit
+        );
 
         // If remembering, store the permission in memory
         if remember {

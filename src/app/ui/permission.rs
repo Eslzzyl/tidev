@@ -286,10 +286,12 @@ impl App {
             };
 
             // Check for workspace boundary violations before proceeding
-            if let Some(violation_path) = crate::app::ui::workspace_boundary::extract_boundary_violation_path(
-                &self.workspace_root,
-                &tool_call,
-            ) {
+            if let Some(violation_path) =
+                crate::app::ui::workspace_boundary::extract_boundary_violation_path(
+                    &self.workspace_root,
+                    &tool_call,
+                )
+            {
                 let path_str = violation_path.display().to_string();
 
                 // Check stored permissions in memory
@@ -339,15 +341,18 @@ impl App {
                     continue;
                 } else {
                     // No stored permission - show dialog
-                    self.workspace_boundary_dialog = Some(crate::app::ui::workspace_boundary::WorkspaceBoundaryDialogState {
-                        pending: crate::app::ui::workspace_boundary::PendingWorkspaceBoundaryCheck {
-                            tool_call: tool_call.clone(),
-                            requested_path: violation_path,
-                            workspace_root: self.workspace_root.clone(),
+                    self.workspace_boundary_dialog = Some(
+                        crate::app::ui::workspace_boundary::WorkspaceBoundaryDialogState {
+                            pending:
+                                crate::app::ui::workspace_boundary::PendingWorkspaceBoundaryCheck {
+                                    tool_call: tool_call.clone(),
+                                    requested_path: violation_path,
+                                    workspace_root: self.workspace_root.clone(),
+                                },
+                            current_index,
+                            total,
                         },
-                        current_index,
-                        total,
-                    });
+                    );
                     return Ok(());
                 }
             }
@@ -801,9 +806,7 @@ impl App {
                     mode,
                     allow_outside,
                 )
-                .unwrap_or_else(|error| {
-                    ToolExecutionResult::new(format!("Tool failed: {error}"))
-                });
+                .unwrap_or_else(|error| ToolExecutionResult::new(format!("Tool failed: {error}")));
 
             let _ = tx.send(crate::session::BackendEvent::ToolCompleted {
                 session_id,
@@ -963,7 +966,8 @@ impl App {
         )?;
 
         if !result.instruction_sources.is_empty() {
-            self.update_loaded_instruction_sources(&result.instruction_sources).ok();
+            self.update_loaded_instruction_sources(&result.instruction_sources)
+                .ok();
         }
 
         self.conversation.push(message.clone());

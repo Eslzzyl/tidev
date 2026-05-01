@@ -26,10 +26,12 @@ pub fn execute_tool_call(
     call: &crate::session::ToolCall,
     mode: SessionMode,
 ) -> Result<String> {
-    let arguments: Value = serde_json::from_str(&call.arguments)
-        .map_err(|e| anyhow::anyhow!("failed to parse arguments for tool '{}': {}", call.name, e))?;
-    let args = serde_json::from_value::<TaskArgs>(arguments)
-        .map_err(|e| anyhow::anyhow!("failed to decode arguments for tool '{}': {}", call.name, e))?;
+    let arguments: Value = serde_json::from_str(&call.arguments).map_err(|e| {
+        anyhow::anyhow!("failed to parse arguments for tool '{}': {}", call.name, e)
+    })?;
+    let args = serde_json::from_value::<TaskArgs>(arguments).map_err(|e| {
+        anyhow::anyhow!("failed to decode arguments for tool '{}': {}", call.name, e)
+    })?;
 
     let description = args.description.trim();
     let prompt = args.prompt.trim();

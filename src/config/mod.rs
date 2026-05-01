@@ -593,7 +593,11 @@ poll_timeout_secs = 30
         auth: &AuthStore,
         agent_type: &str,
     ) -> Result<Option<ActiveModel>> {
-        let Some(model_str) = self.agent.model_for(agent_type).or_else(|| self.agent.default_model()) else {
+        let Some(model_str) = self
+            .agent
+            .model_for(agent_type)
+            .or_else(|| self.agent.default_model())
+        else {
             return Ok(None);
         };
 
@@ -621,11 +625,18 @@ poll_timeout_secs = 30
 
     /// Set the model override for a specific agent type and persist to config.
     /// `model_str` should be in `"provider/model_id"` format.
-    pub fn set_agent_model(&mut self, paths: &ConfigPaths, agent_type: &str, model_str: &str) -> Result<()> {
+    pub fn set_agent_model(
+        &mut self,
+        paths: &ConfigPaths,
+        agent_type: &str,
+        model_str: &str,
+    ) -> Result<()> {
         if model_str.is_empty() {
             self.agent.models.remove(agent_type);
         } else {
-            self.agent.models.insert(agent_type.to_string(), model_str.to_string());
+            self.agent
+                .models
+                .insert(agent_type.to_string(), model_str.to_string());
         }
         self.save(paths)
     }

@@ -112,14 +112,13 @@ impl App {
                         .map(|(idx, _)| *idx);
 
                     if let Some(execution_index) = hit_running
-                        && let Some(execution) = self
-                            .running_subagent_executions
-                            .get(execution_index)
-                        {
-                            let child_id = execution.child_session_id;
-                            self.switch_session(child_id, runtime).ok();
-                            return;
-                        }
+                        && let Some(execution) =
+                            self.running_subagent_executions.get(execution_index)
+                    {
+                        let child_id = execution.child_session_id;
+                        self.switch_session(child_id, runtime).ok();
+                        return;
+                    }
 
                     // Plain click on tool result card → toggle expand
                     let hit_message_id = self
@@ -393,11 +392,7 @@ impl App {
 
     /// Attempts to navigate to a subagent's child session from a tool result message.
     /// Returns true if navigation was performed.
-    fn try_navigate_to_subagent_subsession(
-        &mut self,
-        message_id: Uuid,
-        runtime: &Runtime,
-    ) -> bool {
+    fn try_navigate_to_subagent_subsession(&mut self, message_id: Uuid, runtime: &Runtime) -> bool {
         // Find the message and its tool_call_id
         let tool_call_id = self
             .conversation
@@ -912,10 +907,9 @@ impl App {
                     panel.selected_index = 0;
                     panel.list_scroll = 0;
                 }
-                KeyCode::End
-                    if !panel.filtered_indices.is_empty() => {
-                        panel.selected_index = panel.filtered_indices.len() - 1;
-                    }
+                KeyCode::End if !panel.filtered_indices.is_empty() => {
+                    panel.selected_index = panel.filtered_indices.len() - 1;
+                }
                 KeyCode::Left => {
                     panel.scroll_preview_up(5);
                 }
@@ -987,16 +981,14 @@ impl App {
                         self.model_panel = Some(next_panel);
                     } else {
                         // Agent tab: save to agent.models
-                        let agent_type_str = panel.current_tab()
+                        let agent_type_str = panel
+                            .current_tab()
                             .map(|t| t.agent_type_str.clone())
                             .unwrap_or_default();
                         let model_str = summary.label(); // "provider/model_id"
                         // Update config and persist
-                        self.config.set_agent_model(
-                            &self.paths,
-                            &agent_type_str,
-                            &model_str,
-                        )?;
+                        self.config
+                            .set_agent_model(&self.paths, &agent_type_str, &model_str)?;
                         // Update the tab's current_label
                         let mut next_panel = panel;
                         if let Some(t) = next_panel.current_tab_mut() {
@@ -1297,7 +1289,10 @@ impl App {
                 // Request in progress: defer mode switch to next message
                 let new_mode = self.mode.toggle();
                 self.pending_mode = Some(new_mode);
-                self.last_notice = Some(format!("Mode will switch to {} on next message", new_mode.as_str()));
+                self.last_notice = Some(format!(
+                    "Mode will switch to {} on next message",
+                    new_mode.as_str()
+                ));
             } else {
                 // No request: switch mode immediately
                 self.mode = self.mode.toggle();
@@ -1895,7 +1890,11 @@ impl App {
             }
             let ty = agent_type.display_name();
             let label = self.config.agent_model_display(ty);
-            tabs.push(crate::app::model_panel::ModelPanelTab::new(ty, agent_type.display_name(), &label));
+            tabs.push(crate::app::model_panel::ModelPanelTab::new(
+                ty,
+                agent_type.display_name(),
+                &label,
+            ));
         }
         panel.tabs = tabs;
         panel.selected_tab_index = 0;
@@ -2022,12 +2021,11 @@ impl App {
                         .map(|idx| idx + 1)
                         .unwrap_or(1);
 
-                    self.fork_confirm_dialog = Some(
-                        crate::app::ui::fork_confirm::ForkConfirmDialogState::new(
+                    self.fork_confirm_dialog =
+                        Some(crate::app::ui::fork_confirm::ForkConfirmDialogState::new(
                             message.message_id,
                             message_count,
-                        ),
-                    );
+                        ));
                 }
             }
             KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -2112,7 +2110,8 @@ impl App {
         // 复制消息（从开头到选中的消息），为每条消息生成新的 ID
         let original_messages: Vec<_> = self.conversation.messages[..=message_index].to_vec();
 
-        let mut id_mapping: std::collections::HashMap<Uuid, Uuid> = std::collections::HashMap::new();
+        let mut id_mapping: std::collections::HashMap<Uuid, Uuid> =
+            std::collections::HashMap::new();
 
         for original in &original_messages {
             let mut new_message = original.clone();
@@ -2122,9 +2121,11 @@ impl App {
 
             // 更新 tool_call_id 引用（如果有）
             if let Some(ref tool_call_id) = new_message.tool_call_id
-                && let Some(&new_tool_call_id) = id_mapping.get(&Uuid::parse_str(tool_call_id).unwrap_or_else(|_| Uuid::nil())) {
-                    new_message.tool_call_id = Some(new_tool_call_id.to_string());
-                }
+                && let Some(&new_tool_call_id) =
+                    id_mapping.get(&Uuid::parse_str(tool_call_id).unwrap_or_else(|_| Uuid::nil()))
+            {
+                new_message.tool_call_id = Some(new_tool_call_id.to_string());
+            }
 
             self.store.append_message(new_session_id, &new_message)?;
         }

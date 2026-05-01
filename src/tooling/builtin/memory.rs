@@ -46,8 +46,7 @@ fn execute_store(
         .get("memory_type")
         .and_then(|v| v.as_str())
         .context("memory_type is required for store operation")?;
-    let memory_type =
-        MemoryType::from_str(memory_type_str).context("invalid memory_type")?;
+    let memory_type = MemoryType::from_str(memory_type_str).context("invalid memory_type")?;
     let title = arguments
         .get("title")
         .and_then(|v| v.as_str())
@@ -82,7 +81,11 @@ fn execute_store(
 
     memory_store.add(&entry)?;
 
-    Ok(format!("Memory saved: [{}] {}", memory_type.as_str(), title))
+    Ok(format!(
+        "Memory saved: [{}] {}",
+        memory_type.as_str(),
+        title
+    ))
 }
 
 fn execute_search(
@@ -116,10 +119,7 @@ fn execute_search(
     Ok(out)
 }
 
-fn execute_list(
-    memory_store: &Arc<MemoryStore>,
-    workspace_root: &str,
-) -> Result<String> {
+fn execute_list(memory_store: &Arc<MemoryStore>, workspace_root: &str) -> Result<String> {
     let entries = memory_store.get_or_load(workspace_root)?;
 
     if entries.is_empty() {

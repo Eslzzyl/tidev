@@ -490,13 +490,14 @@ impl App {
     fn compose_system_prompt(&mut self) -> (String, Vec<String>) {
         let base_prompt = self.active_model.system_prompt.trim();
         let mode_reminder = self.mode.reminder();
-        let (instruction_prompt, sources, new_cache) = instructions::system_prompt_and_sources_with_cache(
-            &self.workspace_root,
-            &self.paths.config_dir,
-            &self.config.instructions,
-            &self.instruction_content_cache,
-        )
-        .unwrap_or_default();
+        let (instruction_prompt, sources, new_cache) =
+            instructions::system_prompt_and_sources_with_cache(
+                &self.workspace_root,
+                &self.paths.config_dir,
+                &self.config.instructions,
+                &self.instruction_content_cache,
+            )
+            .unwrap_or_default();
 
         // Update the cache with newly loaded contents
         self.instruction_content_cache = new_cache;

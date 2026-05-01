@@ -53,7 +53,13 @@ pub fn execute_tool_call(
             let args = serde_json::from_value::<GrepArgs>(arguments)
                 .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
             let path = args.path.unwrap_or_else(|| ".".to_string());
-            grep_paths(workspace_root, path, &args.pattern, args.include.as_deref(), allow_outside)
+            grep_paths(
+                workspace_root,
+                path,
+                &args.pattern,
+                args.include.as_deref(),
+                allow_outside,
+            )
         }
         Some(other) => bail!("unsupported search tool '{}'", other),
         None => bail!("unknown tool '{}'", call.name),
@@ -66,7 +72,8 @@ fn glob_paths(
     pattern: &str,
     allow_outside: bool,
 ) -> Result<String> {
-    let search_root = resolve_workspace_path(workspace_root, relative_path.as_ref(), allow_outside)?;
+    let search_root =
+        resolve_workspace_path(workspace_root, relative_path.as_ref(), allow_outside)?;
     if !search_root.exists() {
         bail!("{} does not exist", search_root.display());
     }
@@ -184,7 +191,8 @@ fn grep_paths(
         bail!("pattern cannot be empty");
     }
 
-    let search_root = resolve_workspace_path(workspace_root, relative_path.as_ref(), allow_outside)?;
+    let search_root =
+        resolve_workspace_path(workspace_root, relative_path.as_ref(), allow_outside)?;
     if !search_root.exists() {
         bail!("{} does not exist", search_root.display());
     }

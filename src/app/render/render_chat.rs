@@ -2,8 +2,8 @@ use crate::{
     markdown_render::{WrapOptions, render_markdown_text_with_width_and_cwd, word_wrap_line},
     session::{COMPACTION_MESSAGE_LABEL, Message, MessageRole, ToolCall},
     theme::ThemePalette,
-    tooling::{TodoItem, canonical_tool_name},
     tooling::builtin::utils::display_workspace_relative,
+    tooling::{TodoItem, canonical_tool_name},
     utils::{TokenUsage, format_token_count},
 };
 use chrono::Local;
@@ -92,8 +92,14 @@ fn render_tool_call_with_result(
     let mut lines = Vec::new();
     lines.push(Line::from(""));
 
-    let call_lines =
-        render_tool_call_lines(tool_call, body_width, palette, exit_code, rtk_rewritten, ctx.workspace_root);
+    let call_lines = render_tool_call_lines(
+        tool_call,
+        body_width,
+        palette,
+        exit_code,
+        rtk_rewritten,
+        ctx.workspace_root,
+    );
     lines.extend(call_lines);
 
     if is_pending {
@@ -203,7 +209,12 @@ fn render_tool_call_summary_line(
             ("Loaded skill", name.to_string())
         }
         _ => {
-            let summary = summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width, ctx.workspace_root);
+            let summary = summarize_tool_call(
+                &tool_call.name,
+                &tool_call.arguments,
+                body_width,
+                ctx.workspace_root,
+            );
             return vec![Line::from(vec![Span::styled(
                 summary,
                 Style::default()
@@ -544,7 +555,12 @@ fn render_tool_call_lines(
             ]));
         }
         _ => {
-            let summary = summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width, workspace_root);
+            let summary = summarize_tool_call(
+                &tool_call.name,
+                &tool_call.arguments,
+                body_width,
+                workspace_root,
+            );
             for line in summary.lines() {
                 lines.push(Line::from(vec![
                     Span::styled("  ", Style::default()),
@@ -929,8 +945,12 @@ impl App {
             0
         };
 
-        let composer_height = composer_height_raw
-            .min(main_area.height.saturating_sub((queued_height as u16) + 3).max(3));
+        let composer_height = composer_height_raw.min(
+            main_area
+                .height
+                .saturating_sub((queued_height as u16) + 3)
+                .max(3),
+        );
 
         // Handle workspace boundary dialog (similar to question dialog)
         if let Some(dialog) = self.workspace_boundary_dialog.clone() {
@@ -1035,10 +1055,7 @@ impl App {
                     .fg(palette.selection_fg)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                format!(" {} ", count),
-                Style::default().fg(palette.muted),
-            ),
+            Span::styled(format!(" {} ", count), Style::default().fg(palette.muted)),
         ]);
 
         let block = Block::default()
@@ -1268,7 +1285,11 @@ impl App {
         // Calculate screen positions for running subagent cards
         // running_card_ranges contain positions within the running_lines block,
         // which starts at (header_line_count + total_message_lines) in the full text.
-        let header_line_count = if self.conversation.parent_session_id.is_some() { 3 } else { 0 };
+        let header_line_count = if self.conversation.parent_session_id.is_some() {
+            3
+        } else {
+            0
+        };
         let total_msg_lines = self.message_layout_index.borrow().total_lines;
         let running_block_start = header_line_count + total_msg_lines;
 
@@ -1444,13 +1465,13 @@ impl App {
                 if let Some(diffs_json) = &msg.file_diffs
                     && let Ok(diffs) =
                         serde_json::from_str::<Vec<crate::snapshot::FileDiff>>(diffs_json)
-                    {
-                        for d in &diffs {
-                            if seen_files.insert(d.file.clone()) {
-                                all_diffs.push(d.clone());
-                            }
+                {
+                    for d in &diffs {
+                        if seen_files.insert(d.file.clone()) {
+                            all_diffs.push(d.clone());
                         }
                     }
+                }
             }
 
             if all_diffs.is_empty() {
@@ -1481,10 +1502,7 @@ impl App {
 
                     let summary = format!(
                         "{}{} (+{}/-{})",
-                        status_icon,
-                        filename,
-                        d.additions,
-                        d.deletions
+                        status_icon, filename, d.additions, d.deletions
                     );
                     lines.push(Line::from(vec![Span::styled(summary, style)]));
                 }
@@ -1551,7 +1569,9 @@ impl App {
             .sum();
 
         let sidebar_viewport_lines = area.height.saturating_sub(2) as usize;
-        let max_scroll = self.sidebar_total_lines.saturating_sub(sidebar_viewport_lines);
+        let max_scroll = self
+            .sidebar_total_lines
+            .saturating_sub(sidebar_viewport_lines);
         self.sidebar_scroll_offset = self.sidebar_scroll_offset.min(max_scroll);
 
         let paragraph = Paragraph::new(Text::from(lines))
@@ -2788,15 +2808,12 @@ impl App {
                                 });
                             }
 
-                            let card_bg = if canonical_tool_name(&tool_call.name)
-                                == Some("task")
-                            {
+                            let card_bg = if canonical_tool_name(&tool_call.name) == Some("task") {
                                 palette.panel
                             } else {
                                 palette.panel_light
                             };
-                            let decorated =
-                                decorate_card_lines(tool_card_lines, width, card_bg);
+                            let decorated = decorate_card_lines(tool_card_lines, width, card_bg);
                             if let Some(result_msg) = tool_result {
                                 lines.extend(decorated);
                                 let end_line = current_line_offset + lines.len();
@@ -3297,7 +3314,12 @@ fn tool_output_is_error(output: &str) -> bool {
         || (first_line.starts_with("[exit ") && !first_line.starts_with("[exit 0]"))
 }
 
-fn summarize_tool_call(tool_name: &str, arguments: &str, body_width: usize, workspace_root: &Path) -> String {
+fn summarize_tool_call(
+    tool_name: &str,
+    arguments: &str,
+    body_width: usize,
+    workspace_root: &Path,
+) -> String {
     let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
     let fields = summarize_tool_arguments(tool_name, arguments);
     let parsed = serde_json::from_str::<serde_json::Value>(arguments).ok();
@@ -3309,9 +3331,7 @@ fn summarize_tool_call(tool_name: &str, arguments: &str, body_width: usize, work
             .map(|(_, value)| value.as_str())
     };
 
-    let path_to_relative = |path: &str| {
-        display_workspace_relative(workspace_root, Path::new(path))
-    };
+    let path_to_relative = |path: &str| display_workspace_relative(workspace_root, Path::new(path));
 
     let summary = match canonical_name {
         "read" => field("path")
@@ -3569,10 +3589,10 @@ fn parse_range(s: &str) -> Option<(i64, i64)> {
 /// Parsed metadata from a read tool output's XML-style metadata block.
 /// Returns (line_range, optional_requested_range, file_total, optional_truncation_reason).
 type ReadContentMetadata = Option<(
-    (i64, i64),              // line_range (start, end)
-    Option<(i64, i64)>,      // requested_range (None if model didn't specify)
-    i64,                     // file_total
-    Option<String>,          // truncated_by (None | "size" | "lines")
+    (i64, i64),         // line_range (start, end)
+    Option<(i64, i64)>, // requested_range (None if model didn't specify)
+    i64,                // file_total
+    Option<String>,     // truncated_by (None | "size" | "lines")
 )>;
 
 fn parse_read_content_metadata(content: &str) -> ReadContentMetadata {

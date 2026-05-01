@@ -91,7 +91,10 @@ impl MemoryStore {
     /// Load all active memories for a workspace into cache.
     pub fn load_for_workspace(&self, workspace_root: &str) -> anyhow::Result<Vec<MemoryEntry>> {
         let entries = self.query_active(workspace_root)?;
-        self.cache.write().unwrap().insert(workspace_root.to_string(), entries.clone());
+        self.cache
+            .write()
+            .unwrap()
+            .insert(workspace_root.to_string(), entries.clone());
         Ok(entries)
     }
 
@@ -184,7 +187,11 @@ impl MemoryStore {
                AND (title LIKE ?2 OR content LIKE ?2 OR tags LIKE ?2)
              ORDER BY usage_count DESC, updated_at DESC"
         )?;
-        let entries = stmt.query_map(rusqlite::params![workspace_root, pattern], Self::row_to_entry)?
+        let entries = stmt
+            .query_map(
+                rusqlite::params![workspace_root, pattern],
+                Self::row_to_entry,
+            )?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(entries)
     }
@@ -196,20 +203,35 @@ impl MemoryStore {
             "SELECT id, workspace_root, memory_type, title, content, tags, source_session_id, created_at, updated_at, usage_count, active
              FROM memories WHERE id = ?1 AND workspace_root = ?2 AND active = 1"
         )?;
-        let mut rows = stmt.query_map(rusqlite::params![id.to_string(), workspace_root], Self::row_to_entry)?;
+        let mut rows = stmt.query_map(
+            rusqlite::params![id.to_string(), workspace_root],
+            Self::row_to_entry,
+        )?;
         Ok(rows.next().transpose()?)
     }
 
     /// Select hot memories for system prompt injection.
     /// Returns up to `max_count` entries, prioritized by usage_count and recency,
     /// fitting within `budget_chars` total.
-    pub fn select_hot(&self, workspace_root: &str, max_count: usize, budget_chars: usize) -> anyhow::Result<Vec<MemoryEntry>> {
+    pub fn select_hot(
+        &self,
+        workspace_root: &str,
+        max_count: usize,
+        budget_chars: usize,
+    ) -> anyhow::Result<Vec<MemoryEntry>> {
         let all = self.get_or_load(workspace_root)?;
-        let mut scored: Vec<(i64, &MemoryEntry)> = all.iter()
+        let mut scored: Vec<(i64, &MemoryEntry)> = all
+            .iter()
             .filter(|e| e.active)
             .map(|e| {
                 let hours = (chrono::Utc::now() - e.updated_at).num_hours();
-                let recency_bonus = if hours < 24 { 5 } else if hours < 168 { 2 } else { 0 };
+                let recency_bonus = if hours < 24 {
+                    5
+                } else if hours < 168 {
+                    2
+                } else {
+                    0
+                };
                 (e.usage_count * 10 + recency_bonus, e)
             })
             .collect();
@@ -271,7 +293,8 @@ impl MemoryStore {
              WHERE workspace_root = ?1 AND active = 1
              ORDER BY usage_count DESC, updated_at DESC"
         )?;
-        let entries = stmt.query_map(rusqlite::params![workspace_root], Self::row_to_entry)?
+        let entries = stmt
+            .query_map(rusqlite::params![workspace_root], Self::row_to_entry)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(entries)
     }
@@ -284,13 +307,20 @@ impl MemoryStore {
         Ok(MemoryEntry {
             id: row.get::<_, String>(0)?.parse().unwrap_or_default(),
             workspace_root: row.get(1)?,
-            memory_type: MemoryType::from_str(&row.get::<_, String>(2)?).unwrap_or(MemoryType::Reference),
+            memory_type: MemoryType::from_str(&row.get::<_, String>(2)?)
+                .unwrap_or(MemoryType::Reference),
             title: row.get(3)?,
             content: row.get(4)?,
             tags,
             source_session_id: session_id_str.and_then(|s| s.parse().ok()),
-            created_at: row.get::<_, String>(7)?.parse().unwrap_or_else(|_| chrono::Utc::now()),
-            updated_at: row.get::<_, String>(8)?.parse().unwrap_or_else(|_| chrono::Utc::now()),
+            created_at: row
+                .get::<_, String>(7)?
+                .parse()
+                .unwrap_or_else(|_| chrono::Utc::now()),
+            updated_at: row
+                .get::<_, String>(8)?
+                .parse()
+                .unwrap_or_else(|_| chrono::Utc::now()),
             usage_count: row.get(9)?,
             active: row.get::<_, i64>(10)? != 0,
         })
@@ -389,21 +419,19 @@ mod tests {
     #[test]
     fn test_format_for_prompt() {
         let ws = "/test";
-        let entries = vec![
-            MemoryEntry {
-                id: Uuid::new_v4(),
-                workspace_root: ws.to_string(),
-                memory_type: MemoryType::Project,
-                title: "Architecture".to_string(),
-                content: "Using plugin-based design".to_string(),
-                tags: vec![],
-                source_session_id: None,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-                usage_count: 5,
-                active: true,
-            }
-        ];
+        let entries = vec![MemoryEntry {
+            id: Uuid::new_v4(),
+            workspace_root: ws.to_string(),
+            memory_type: MemoryType::Project,
+            title: "Architecture".to_string(),
+            content: "Using plugin-based design".to_string(),
+            tags: vec![],
+            source_session_id: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            usage_count: 5,
+            active: true,
+        }];
 
         let formatted = MemoryStore::format_for_prompt(&entries);
         assert!(formatted.contains("Architecture"));

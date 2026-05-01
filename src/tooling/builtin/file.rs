@@ -69,7 +69,8 @@ pub fn execute_tool_call(
         Some("write") => {
             let args = serde_json::from_value::<WriteArgs>(arguments)
                 .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
-            let absolute_path = resolve_workspace_path(workspace_root, Path::new(&args.path), allow_outside)?;
+            let absolute_path =
+                resolve_workspace_path(workspace_root, Path::new(&args.path), allow_outside)?;
             let original_exists = absolute_path.exists();
             let old_content = if original_exists {
                 read_existing_text(&absolute_path).unwrap_or_default()
@@ -106,7 +107,8 @@ pub fn execute_tool_call(
                 .with_context(|| format!("failed to parse patch for tool '{}'", call.name))?;
             let file_path = extract_patch_file_path(&patch)
                 .with_context(|| "failed to determine file path from patch".to_string())?;
-            let absolute_path = resolve_workspace_path(workspace_root, Path::new(&file_path), allow_outside)?;
+            let absolute_path =
+                resolve_workspace_path(workspace_root, Path::new(&file_path), allow_outside)?;
             let original_exists = absolute_path.exists();
             let old_content = read_existing_text(&absolute_path)?;
             let updated = apply_patch_contents(&old_content, &patch)?;

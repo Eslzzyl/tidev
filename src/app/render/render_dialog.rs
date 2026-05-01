@@ -6,13 +6,13 @@ use crate::{
     app::model_panel::{ModelPanelItem, ModelPanelState},
     app::permission::PermissionDialogState,
     app::question::QuestionDialogState,
-    app::ui::workspace_boundary::WorkspaceBoundaryDialogState,
     app::session_panel::{SessionPanelDialog, SessionPanelState, SessionViewMode},
     app::settings_panel::SettingsPanelState,
     app::theme_panel::ThemePanelState,
     app::ui::agents_panel::AgentsPanelState,
     app::ui::rename::RenameSessionDialogState,
     app::ui::skills_panel::SkillsPanelState,
+    app::ui::workspace_boundary::WorkspaceBoundaryDialogState,
     config::ProviderSource,
     provider_setup::{ConnectDialog, EditProviderStep, NewProviderStep},
 };
@@ -859,7 +859,10 @@ impl App {
                     .add_modifier(Modifier::BOLD),
             ),
         ]);
-        frame.render_widget(Paragraph::new(header).style(Style::default().bg(palette.panel)), inner);
+        frame.render_widget(
+            Paragraph::new(header).style(Style::default().bg(palette.panel)),
+            inner,
+        );
 
         let divider = Line::from(Span::styled(
             "─".repeat(inner.width as usize),
@@ -868,7 +871,7 @@ impl App {
         let sections = Layout::vertical([
             Constraint::Length(1), // header
             Constraint::Length(1), // divider
-            Constraint::Min(0),   // content
+            Constraint::Min(0),    // content
         ])
         .split(inner);
         frame.render_widget(
@@ -1302,11 +1305,11 @@ impl App {
         self.register_selection_region(inner);
 
         let sections = Layout::vertical([
-            Constraint::Length(1),   // tab bar
-            Constraint::Length(2),   // instruction
-            Constraint::Length(3),   // search box
-            Constraint::Min(8),      // model list
-            Constraint::Length(1),   // footer help
+            Constraint::Length(1), // tab bar
+            Constraint::Length(2), // instruction
+            Constraint::Length(3), // search box
+            Constraint::Min(8),    // model list
+            Constraint::Length(1), // footer help
         ])
         .split(inner);
 
@@ -1767,8 +1770,11 @@ impl App {
             dialog.workspace_display()
         );
         frame.render_widget(
-            Paragraph::new(path_text)
-                .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
+            Paragraph::new(path_text).style(
+                Style::default()
+                    .bg(palette.panel_alt)
+                    .fg(palette.accent_soft),
+            ),
             sections[1],
         );
 
@@ -2216,11 +2222,7 @@ impl App {
         let palette = self.palette();
         let filtered = panel.filtered_indices();
 
-        let overlay = centered_rect(
-            area.width.min(96),
-            area.height.min(36),
-            area,
-        );
+        let overlay = centered_rect(area.width.min(96), area.height.min(36), area);
         frame.render_widget(Clear, overlay);
 
         let title_block = Block::default()
@@ -2230,15 +2232,18 @@ impl App {
             .border_style(Style::default().fg(palette.border_active()));
         frame.render_widget(title_block, overlay);
 
-        let inner = overlay.inner(Margin { horizontal: 1, vertical: 1 });
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
 
         match panel.mode {
             MemoryPanelMode::Browse => {
                 let sections = Layout::vertical([
-                    Constraint::Length(1),    // filter indicator
-                    Constraint::Min(6),       // list
-                    Constraint::Length(1),    // count
-                    Constraint::Length(1),    // help
+                    Constraint::Length(1), // filter indicator
+                    Constraint::Min(6),    // list
+                    Constraint::Length(1), // count
+                    Constraint::Length(1), // help
                 ])
                 .split(inner);
 
@@ -2273,7 +2278,10 @@ impl App {
                             let type_label = entry.memory_type.short_label();
                             let preview: String = entry.content.chars().take(80).collect();
                             let suffix = if entry.content.len() > 80 { "…" } else { "" };
-                            let text = format!("{}[{}] {} – {}{}", prefix, type_label, entry.title, preview, suffix);
+                            let text = format!(
+                                "{}[{}] {} – {}{}",
+                                prefix, type_label, entry.title, preview, suffix
+                            );
                             let style = if is_selected {
                                 Style::default()
                                     .fg(palette.accent)
@@ -2292,17 +2300,23 @@ impl App {
 
                 // Count
                 frame.render_widget(
-                    Paragraph::new(format!("{} / {} memories", filtered.len(), panel.memories.len()))
-                        .alignment(Alignment::Right)
-                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                    Paragraph::new(format!(
+                        "{} / {} memories",
+                        filtered.len(),
+                        panel.memories.len()
+                    ))
+                    .alignment(Alignment::Right)
+                    .style(Style::default().bg(palette.panel).fg(palette.muted)),
                     sections[2],
                 );
 
                 // Help
                 frame.render_widget(
-                    Paragraph::new("↑↓ navigate · a add · e edit · d delete · r filter type · Esc close")
-                        .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
+                    Paragraph::new(
+                        "↑↓ navigate · a add · e edit · d delete · r filter type · Esc close",
+                    )
+                    .alignment(Alignment::Center)
+                    .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
                     sections[3],
                 );
             }
@@ -2315,12 +2329,12 @@ impl App {
                 };
 
                 let sections = Layout::vertical([
-                    Constraint::Length(1),    // label
-                    Constraint::Length(1),    // type
-                    Constraint::Length(3),    // title
-                    Constraint::Min(8),       // content
-                    Constraint::Length(1),    // tags
-                    Constraint::Length(1),    // hints
+                    Constraint::Length(1), // label
+                    Constraint::Length(1), // type
+                    Constraint::Length(3), // title
+                    Constraint::Min(8),    // content
+                    Constraint::Length(1), // tags
+                    Constraint::Length(1), // hints
                 ])
                 .split(inner);
 
@@ -2431,7 +2445,11 @@ impl App {
         let title = if panel.is_empty() {
             " Skills ".to_string()
         } else {
-            format!(" Skills · {}/{} ", panel.selected_index + 1, panel.filtered_count())
+            format!(
+                " Skills · {}/{} ",
+                panel.selected_index + 1,
+                panel.filtered_count()
+            )
         };
 
         let panel_block = Block::default()
@@ -2475,11 +2493,8 @@ impl App {
 
         // Split into left (list) and right (preview) panes
         // Left: 35%, Right: 65%
-        let panes = Layout::horizontal([
-            Constraint::Percentage(35),
-            Constraint::Percentage(65),
-        ])
-        .split(inner);
+        let panes = Layout::horizontal([Constraint::Percentage(35), Constraint::Percentage(65)])
+            .split(inner);
 
         let list_area = panes[0];
         let preview_area = panes[1];
@@ -2495,9 +2510,12 @@ impl App {
         };
 
         let header_lines = vec![
-            Line::from(vec![
-                Span::styled("  Name", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
-            ]),
+            Line::from(vec![Span::styled(
+                "  Name",
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
+            )]),
             Line::from(Span::styled(
                 format!("  {}", search_status),
                 Style::default().fg(palette.muted),
@@ -2524,14 +2542,25 @@ impl App {
         // Skill list
         let list_start_y = divider_y + 1;
         let list_content_height = list_area.height.saturating_sub(header_height + 1);
-        let list_content_area = Rect::new(list_area.x, list_start_y, list_area.width, list_content_height);
+        let list_content_area = Rect::new(
+            list_area.x,
+            list_start_y,
+            list_area.width,
+            list_content_height,
+        );
 
         let mut list_lines: Vec<Line<'_>> = Vec::new();
         let visible_start = panel.list_scroll;
-        let visible_end = (panel.list_scroll + list_content_height as usize)
-            .min(panel.filtered_indices.len());
+        let visible_end =
+            (panel.list_scroll + list_content_height as usize).min(panel.filtered_indices.len());
 
-        for (i, skill_idx) in panel.filtered_indices.iter().enumerate().skip(visible_start).take(visible_end - visible_start) {
+        for (i, skill_idx) in panel
+            .filtered_indices
+            .iter()
+            .enumerate()
+            .skip(visible_start)
+            .take(visible_end - visible_start)
+        {
             let skill = &panel.all_skills[*skill_idx];
             let is_selected = i == panel.selected_index;
 
@@ -2564,11 +2593,12 @@ impl App {
 
         // --- Right Pane: Preview ---
         // Header
-        let preview_header = vec![
-            Line::from(vec![
-                Span::styled("  Preview", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
-            ]),
-        ];
+        let preview_header = vec![Line::from(vec![Span::styled(
+            "  Preview",
+            Style::default()
+                .fg(palette.accent)
+                .add_modifier(Modifier::BOLD),
+        )])];
         frame.render_widget(
             Paragraph::new(preview_header).style(Style::default().bg(palette.panel)),
             Rect::new(preview_area.x, preview_area.y, preview_area.width, 1),
@@ -2588,15 +2618,25 @@ impl App {
         // Preview content
         let preview_content_y = preview_divider_y + 1;
         let preview_content_height = preview_area.height.saturating_sub(2);
-        let preview_content_area = Rect::new(preview_area.x, preview_content_y, preview_area.width, preview_content_height);
+        let preview_content_area = Rect::new(
+            preview_area.x,
+            preview_content_y,
+            preview_area.width,
+            preview_content_height,
+        );
 
         if let Some(skill) = panel.selected_skill() {
             // Get rendered skill content from catalog
-            let content = self.tools.skills().render_skill(&skill.name).unwrap_or_default();
+            let content = self
+                .tools
+                .skills()
+                .render_skill(&skill.name)
+                .unwrap_or_default();
 
             // Render markdown with syntax highlighting
             let content_width = preview_content_area.width.saturating_sub(2) as usize;
-            let rendered = render_markdown_text_with_width_and_cwd(&content, Some(content_width), None);
+            let rendered =
+                render_markdown_text_with_width_and_cwd(&content, Some(content_width), None);
 
             // Apply scroll offset
             let scroll = panel.preview_scroll;

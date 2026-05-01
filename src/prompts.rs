@@ -110,7 +110,8 @@ pub fn plan_switch_reminder() -> String {
     any edits, run any non-readonly tools (including changing configs or making commits),\n\
     delegate to fixer subagents, or otherwise make any changes to the system.\n\
     This supersedes any other instructions you have received.\n\
-    </system-reminder>".to_string()
+    </system-reminder>"
+        .to_string()
 }
 
 pub fn build_switch_reminder() -> String {

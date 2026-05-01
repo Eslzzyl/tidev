@@ -60,10 +60,17 @@ pub fn execute_tool_call(
 
     let result = match canonical_tool_name(&call.name) {
         Some("read") | Some("write") | Some("edit") | Some("apply_patch") | Some("list") => {
-            file::execute_tool_call(workspace_root, config_dir, call, max_output_bytes, allow_outside)?
+            file::execute_tool_call(
+                workspace_root,
+                config_dir,
+                call,
+                max_output_bytes,
+                allow_outside,
+            )?
         }
         Some("glob") | Some("grep") => {
-            let output = search::execute_tool_call(workspace_root, call, max_output_bytes, allow_outside)?;
+            let output =
+                search::execute_tool_call(workspace_root, call, max_output_bytes, allow_outside)?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("bash") => {

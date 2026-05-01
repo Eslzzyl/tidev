@@ -186,7 +186,11 @@ mod tests {
     fn test_all_agents_have_prompts() {
         for agent_type in AgentType::all() {
             let prompt = system_prompt(*agent_type);
-            assert!(!prompt.is_empty(), "Agent {:?} has empty prompt", agent_type);
+            assert!(
+                !prompt.is_empty(),
+                "Agent {:?} has empty prompt",
+                agent_type
+            );
             assert!(
                 prompt.contains("Be direct and specific"),
                 "Agent {:?} prompt missing base instruction",

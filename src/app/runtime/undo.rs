@@ -172,25 +172,20 @@ impl App {
         runtime.spawn(async move {
             crate::log_info!("async diff_full: starting from={} to={}", from, to);
             match snapshot.diff_full(&from, &to).await {
-                Ok(file_diffs) => {
-                    match serde_json::to_string(&file_diffs) {
-                        Ok(diffs_json) => {
-                            crate::log_info!(
-                                "async diff_full: completed, {} files",
-                                file_diffs.len()
-                            );
-                            let _ = tx.send(BackendEvent::SidebarSnapshotReady {
-                                session_id,
-                                request_id,
-                                message_id,
-                                file_diffs_json: diffs_json,
-                            });
-                        }
-                        Err(e) => {
-                            crate::log_warn!("async diff_full: serialization failed: {}", e);
-                        }
+                Ok(file_diffs) => match serde_json::to_string(&file_diffs) {
+                    Ok(diffs_json) => {
+                        crate::log_info!("async diff_full: completed, {} files", file_diffs.len());
+                        let _ = tx.send(BackendEvent::SidebarSnapshotReady {
+                            session_id,
+                            request_id,
+                            message_id,
+                            file_diffs_json: diffs_json,
+                        });
                     }
-                }
+                    Err(e) => {
+                        crate::log_warn!("async diff_full: serialization failed: {}", e);
+                    }
+                },
                 Err(e) => {
                     crate::log_warn!("async diff_full: failed: {}", e);
                 }
@@ -539,11 +534,11 @@ impl App {
                 .conversation
                 .message_index(msg_id)
                 .map(|idx| {
-                    self.conversation
-                        .revert_message_id
-                        .is_none_or(|revert_id| {
-                            self.conversation.message_index(revert_id).is_none_or(|revert_idx| idx < revert_idx)
-                        })
+                    self.conversation.revert_message_id.is_none_or(|revert_id| {
+                        self.conversation
+                            .message_index(revert_id)
+                            .is_none_or(|revert_idx| idx < revert_idx)
+                    })
                 })
                 .unwrap_or(false);
 
@@ -553,13 +548,14 @@ impl App {
                     .messages
                     .iter_mut()
                     .find(|m| m.id == msg_id)
-                    && let Ok(json) = serde_json::to_string(&merged) {
-                        crate::log_info!(
-                            "merge_step_diffs: updating msg.file_diffs with {} files",
-                            merged.len()
-                        );
-                        msg.file_diffs = Some(json);
-                    }
+                && let Ok(json) = serde_json::to_string(&merged)
+            {
+                crate::log_info!(
+                    "merge_step_diffs: updating msg.file_diffs with {} files",
+                    merged.len()
+                );
+                msg.file_diffs = Some(json);
+            }
         }
     }
 
@@ -646,12 +642,13 @@ impl App {
         // Fallback: old flat format `["file1","file2"]` — use message's snapshot_hash
         if let Ok(files) = serde_json::from_str::<Vec<String>>(patch_files_str)
             && !files.is_empty()
-                && let Some(hash) = &message.snapshot_hash {
-                    return vec![Patch {
-                        hash: hash.clone(),
-                        files,
-                    }];
-                }
+            && let Some(hash) = &message.snapshot_hash
+        {
+            return vec![Patch {
+                hash: hash.clone(),
+                files,
+            }];
+        }
 
         Vec::new()
     }

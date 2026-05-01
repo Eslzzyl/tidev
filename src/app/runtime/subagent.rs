@@ -125,10 +125,7 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
                 .iter()
                 .filter(|definition| {
                     allowed_tools.contains(&definition.name)
-                        || matches!(
-                            canonical_tool_name(&definition.name),
-                            Some("question")
-                        )
+                        || matches!(canonical_tool_name(&definition.name), Some("question"))
                 })
                 .cloned()
                 .collect::<Vec<_>>()
