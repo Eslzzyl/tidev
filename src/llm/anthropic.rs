@@ -403,6 +403,7 @@ fn build_anthropic_request(
                 });
             }
             MessageRole::Error => {}
+            MessageRole::Shell => {}
         }
     }
 

@@ -273,7 +273,9 @@ impl App {
         register_input_area: bool,
     ) {
         let palette = self.palette();
-        let border_style = if self.pending_request && self.pending_mode.is_none() {
+        let border_style = if self.shell_mode {
+            Style::default().fg(palette.success)
+        } else if self.pending_request && self.pending_mode.is_none() {
             // Use accent color for active/pending state - it's more theme-coherent than warning
             Style::default().fg(palette.accent)
         } else if let Some(pending) = self.pending_mode {

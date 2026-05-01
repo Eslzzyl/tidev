@@ -392,6 +392,7 @@ fn build_openai_request(
                 message.tool_name.clone(),
             )),
             MessageRole::Error => {}
+            MessageRole::Shell => {}
         }
     }
 

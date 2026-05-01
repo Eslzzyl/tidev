@@ -172,6 +172,7 @@ impl App {
             stats_panel: None,
             balance_panel: Arc::new(Mutex::new(None)),
             notifications,
+            shell_mode: false,
             thinking_level: active_model.thinking_level.clone(),
             memory_store,
             memory_panel: None,

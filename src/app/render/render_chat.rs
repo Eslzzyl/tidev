@@ -1012,15 +1012,19 @@ impl App {
         if self.conversation.parent_session_id.is_some() {
             self.render_subsession_navigation(frame, layout[2]);
         } else {
-            let prompt_title = match self.pending_mode.as_ref() {
-                Some(pending) if self.pending_request => {
-                    format!(
-                        "{} (current), {} (on completion)",
-                        self.mode.title(),
-                        pending.title()
-                    )
+            let prompt_title = if self.shell_mode {
+                "Shell".to_string()
+            } else {
+                match self.pending_mode.as_ref() {
+                    Some(pending) if self.pending_request => {
+                        format!(
+                            "{} (current), {} (on completion)",
+                            self.mode.title(),
+                            pending.title()
+                        )
+                    }
+                    _ => self.mode.title().to_string(),
                 }
-                _ => self.mode.title().to_string(),
             };
             self.render_input_block(
                 frame,
@@ -1933,7 +1937,7 @@ impl App {
         let palette = self.palette();
 
         match message.role {
-            MessageRole::User => vec![(palette.panel_alt, {
+            MessageRole::User | MessageRole::Shell => vec![(palette.panel_alt, {
                 let mut content_lines = self.render_text_body_lines(
                     &message.content,
                     body_width.saturating_sub(2),
@@ -2637,6 +2641,16 @@ impl App {
                 }
                 (1, lines)
             }
+            MessageRole::Shell => {
+                let cards = self.cached_render_message_cards(message, body_width, is_round_end);
+                let mut lines = 0;
+                for (_, card_lines) in &cards {
+                    lines +=
+                        decorate_card_lines(card_lines.clone(), width, palette.panel_alt).len();
+                }
+                lines += 1; // Empty line after shell message
+                (1, lines)
+            }
             MessageRole::Tool => {
                 // Tool messages are included in Assistant blocks, skip
                 (1, 0)
@@ -2830,7 +2844,7 @@ impl App {
                     lines.push(Line::from(""));
                 }
             }
-            MessageRole::User | MessageRole::System | MessageRole::Error => {
+            MessageRole::User | MessageRole::System | MessageRole::Error | MessageRole::Shell => {
                 let cards = self.cached_render_message_cards(message, body_width, is_round_end);
                 let bg = match message.role {
                     MessageRole::User => palette.panel_alt,
@@ -2873,7 +2887,7 @@ impl App {
                         lines.extend(decorate_card_lines(card_lines, width, bg));
                     }
                 }
-                if matches!(message.role, MessageRole::User) {
+                if matches!(message.role, MessageRole::User | MessageRole::Shell) {
                     lines.push(Line::from(""));
                 }
             }

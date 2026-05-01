@@ -187,6 +187,7 @@ impl ContextManager {
                     }
                 }
                 MessageRole::Error => {}
+                MessageRole::Shell => {}
             }
         }
 

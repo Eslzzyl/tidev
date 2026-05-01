@@ -1280,6 +1280,11 @@ impl App {
             }
         }
 
+        // In shell mode, Tab does nothing (no mode toggle, no thinking level change)
+        if self.shell_mode && key.code == KeyCode::Tab {
+            return Ok(());
+        }
+
         if !self.command_palette.visible && key.code == KeyCode::Tab {
             if self.pending_mode.is_some() {
                 // Cancel pending mode switch if user toggles again
@@ -1398,6 +1403,32 @@ impl App {
             return Ok(());
         }
 
+        // Check for shell mode activation: '!' at the beginning of empty input
+        if !self.shell_mode
+            && key.code == KeyCode::Char('!')
+            && key.modifiers.is_empty()
+            && self.composer.is_empty()
+        {
+            self.shell_mode = true;
+            self.last_notice = Some("Shell mode (enter a shell command)".to_string());
+            return Ok(());
+        }
+
+        // Handle shell mode Esc before composer processing
+        if self.shell_mode {
+            match key.code {
+                KeyCode::Esc => {
+                    self.shell_mode = false;
+                    self.composer.clear();
+                    self.last_notice = Some("Exited shell mode".to_string());
+                    self.command_palette
+                        .sync(self.composer.text(), &self.commands);
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+
         if let Some(submission) = self.composer.handle_key_with_history(key, true) {
             self.handle_submission(submission, runtime)?;
             self.at_mention.clear();
@@ -1413,6 +1444,11 @@ impl App {
             }
             self.refresh_at_mention_state();
             self.refresh_snippet_state();
+        }
+
+        // Exit shell mode if the composer becomes empty (e.g., user cleared it)
+        if self.shell_mode && self.composer.is_empty() {
+            self.shell_mode = false;
         }
 
         // Ensure cursor is visible after any key handling
@@ -1498,6 +1534,11 @@ impl App {
         submission: String,
         runtime: &Runtime,
     ) -> Result<()> {
+        if self.shell_mode {
+            self.shell_mode = false;
+            return self.execute_shell_command(submission.trim());
+        }
+
         let trimmed = submission.trim();
         if trimmed.starts_with('/') {
             self.execute_command_line(trimmed, runtime)?;
@@ -1506,6 +1547,82 @@ impl App {
         } else {
             self.submit_prompt(submission, runtime)?;
         }
+
+        Ok(())
+    }
+
+    pub(crate) fn execute_shell_command(&mut self, command: &str) -> Result<()> {
+        let command = command.trim();
+        if command.is_empty() {
+            self.last_notice = Some("No command entered".to_string());
+            return Ok(());
+        }
+
+        // Add user message showing the shell command
+        let user_message = Message::new(MessageRole::Shell, format!("$ {command}"));
+        self.conversation.push(user_message.clone());
+        self.store
+            .append_message(self.conversation.session_id, &user_message)?;
+
+        // Execute the command
+        let output = match std::process::Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .output()
+        {
+            Ok(output) => output,
+            Err(error) => {
+                let error_msg =
+                    Message::new(MessageRole::Shell, format!("Failed to execute command: {error}"));
+                self.conversation.push(error_msg.clone());
+                self.store
+                    .append_message(self.conversation.session_id, &error_msg)?;
+                self.last_notice = Some("Shell command failed to start".to_string());
+                self.scroll_messages_to_bottom();
+                return Ok(());
+            }
+        };
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let exit_code = output.status.code();
+
+        // Format the output as a code block
+        let result = if !stdout.is_empty() || !stderr.is_empty() {
+            let mut content = String::new();
+            if !stdout.is_empty() {
+                content.push_str(stdout.trim_end());
+            }
+            if !stderr.is_empty() {
+                if !content.is_empty() {
+                    content.push('\n');
+                }
+                content.push_str(stderr.trim_end());
+            }
+            match exit_code {
+                Some(0) => format!("```\n{content}\n```"),
+                Some(code) => format!("```\n{content}\n```\n\nExit code: {code}"),
+                None => format!("```\n{content}\n```"),
+            }
+        } else {
+            match exit_code {
+                Some(0) => "Command completed successfully (no output)".to_string(),
+                Some(code) => format!("Exit code: {code}"),
+                None => "Command completed (no output)".to_string(),
+            }
+        };
+
+        let assistant_message = Message::new(MessageRole::Shell, result);
+        self.conversation.push(assistant_message.clone());
+        self.store
+            .append_message(self.conversation.session_id, &assistant_message)?;
+
+        self.last_notice = match exit_code {
+            Some(0) => Some("Shell command completed successfully".to_string()),
+            Some(code) => Some(format!("Shell command completed with exit code {code}")),
+            None => Some("Shell command completed (exit code unknown)".to_string()),
+        };
+        self.scroll_messages_to_bottom();
 
         Ok(())
     }

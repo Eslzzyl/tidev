@@ -211,6 +211,7 @@ pub enum MessageRole {
     Assistant,
     Tool,
     Error,
+    Shell,
 }
 
 impl MessageRole {
@@ -221,6 +222,7 @@ impl MessageRole {
             Self::Assistant => "assistant",
             Self::Tool => "tool",
             Self::Error => "error",
+            Self::Shell => "shell",
         }
     }
 
@@ -235,6 +237,7 @@ impl MessageRole {
             "assistant" => Self::Assistant,
             "tool" => Self::Tool,
             "error" => Self::Error,
+            "shell" => Self::Shell,
             _ => Self::System,
         }
     }

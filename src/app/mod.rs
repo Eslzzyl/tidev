@@ -213,6 +213,8 @@ struct App {
     stats_panel: Option<ui::stats_panel::StatsPanelState>,
     balance_panel: Arc<Mutex<Option<ui::balance_panel::BalancePanelState>>>,
     notifications: notifications::NotificationManager,
+    /// Whether the input is in shell command mode (triggered by `!` prefix).
+    shell_mode: bool,
     /// DeepSeek thinking level for the current model
     thinking_level: crate::config::reasoning::ThinkingLevelType,
     /// Cross-session memory store
