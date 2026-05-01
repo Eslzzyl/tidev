@@ -1346,8 +1346,7 @@ impl App {
                     _ => 3,
                 });
 
-                let count = all_diffs.len().min(10); // limit display to 10 files
-                for d in &all_diffs[..count] {
+                for d in &all_diffs {
                     let (status_icon, style) = match d.status.as_deref() {
                         Some("added") => ("+ ", Style::default().fg(palette.success)),
                         Some("deleted") => ("- ", Style::default().fg(palette.error)),
@@ -1367,12 +1366,6 @@ impl App {
                         d.deletions
                     );
                     lines.push(Line::from(vec![Span::styled(summary, style)]));
-                }
-                if all_diffs.len() > 10 {
-                    lines.push(Line::from(vec![Span::styled(
-                        format!("  ... {} more", all_diffs.len() - 10),
-                        Style::default().fg(palette.muted),
-                    )]));
                 }
             }
         }
