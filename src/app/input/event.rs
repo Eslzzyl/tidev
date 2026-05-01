@@ -1,6 +1,6 @@
 use super::*;
 use crate::agent::AgentType;
-use crate::session::MessageRole;
+use crate::session::{Message, MessageRole, ToolExecutionResult};
 
 impl App {
     pub(crate) fn handle_event(&mut self, event: Event, runtime: &Runtime) -> Result<()> {
@@ -712,6 +712,52 @@ impl App {
         self.pending_tool_execution = None;
         self.permission_dialog = None;
         self.question_dialog = None;
+
+        // Handle subagent cancellations: record "User cancelled" tool results
+        // so the parent agent's tool call has a matching tool message.
+        // This prevents orphaned tool calls that some providers (e.g. OpenAI) reject.
+        if !self.running_subagent_executions.is_empty() {
+            let parent_session_id = self.running_subagent_executions[0].parent_session_id;
+            let current_session_id = self.conversation.session_id;
+            let is_in_subsession = current_session_id != parent_session_id;
+            let cancel_output = "User cancelled the request".to_string();
+
+            for execution in self.running_subagent_executions.drain(..) {
+                execution.cancel_requested.store(true, Ordering::SeqCst);
+
+                let result = ToolExecutionResult::new(cancel_output.clone());
+                let msg = Message::tool_result(
+                    execution.tool_call.id.clone(),
+                    execution.tool_call.name.clone(),
+                    result,
+                );
+
+                // Store in DB for parent session
+                let _ = self.store.append_tool_event(
+                    parent_session_id,
+                    msg.id,
+                    &execution.tool_call.name,
+                    &execution.tool_call.arguments,
+                    &cancel_output,
+                );
+                let _ = self.store.append_message(parent_session_id, &msg);
+
+                if is_in_subsession {
+                    // Also push to cached parent conversation so it's in-memory when restored
+                    if let Some(cached) = self.cached_sessions.get_mut(&parent_session_id) {
+                        cached.conversation.messages.push(msg.clone());
+                    }
+                } else {
+                    // We're on the parent session: push to in-memory conversation
+                    self.conversation.messages.push(msg.clone());
+                }
+            }
+
+            if is_in_subsession {
+                self.pending_assistant_turns.insert(parent_session_id);
+            }
+        }
+
         self.cancel_running_subagents();
 
         for running in self.running_tool_executions.drain(..) {

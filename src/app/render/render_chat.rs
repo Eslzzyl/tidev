@@ -628,17 +628,14 @@ fn render_tool_result_detail_lines(
         }
     }
 
-    // Subagent task results: render markdown preview (collapsed) or full raw (expanded)
+    // Subagent task results: render markdown preview (collapsed) or full (expanded)
     if canonical_name == "task" {
         let is_expanded = ctx.expanded_tool_results.contains(&message.id);
-        if !is_expanded {
-            return (
-                render_subagent_task_preview(effective_output, body_width, palette),
-                None,
-                vec![],
-            );
-        }
-        // Expanded: fall through to full raw output below
+        return (
+            render_subagent_task_preview(effective_output, body_width, palette, is_expanded),
+            None,
+            vec![],
+        );
     }
 
     (
@@ -655,11 +652,12 @@ fn render_tool_result_detail_lines(
     )
 }
 
-/// Renders a compact markdown preview of a subagent task result.
+/// Renders a compact or full markdown preview of a subagent task result.
 fn render_subagent_task_preview(
     output: &str,
     body_width: usize,
     palette: ThemePalette,
+    is_expanded: bool,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
@@ -675,32 +673,59 @@ fn render_subagent_task_preview(
     ]));
     lines.push(Line::from(""));
 
-    // Render the output as markdown, then take the first few lines
+    // Render the output as markdown
     let rendered =
         render_markdown_text_with_width_and_cwd(output, Some(body_width.saturating_sub(2)), None);
     let md_lines: Vec<Line<'static>> = rendered.lines;
 
-    let max_preview = TOOL_OUTPUT_PREVIEW_LINES;
-    let line_count = md_lines.len();
-
-    if line_count <= max_preview {
-        lines.extend(md_lines);
-    } else {
-        lines.extend(md_lines.into_iter().take(max_preview));
+    if is_expanded {
+        // Show all lines when expanded
+        let max_lines = TOOL_OUTPUT_EXPANDED_MAX_LINES;
+        let line_count = md_lines.len();
+        if line_count <= max_lines {
+            lines.extend(md_lines);
+        } else {
+            lines.extend(md_lines.into_iter().take(max_lines));
+            lines.push(Line::from(vec![Span::styled(
+                format!(
+                    "  ▼ {} more line(s) — Click to expand",
+                    line_count - max_lines
+                ),
+                Style::default().fg(palette.muted),
+            )]));
+        }
         lines.push(Line::from(vec![Span::styled(
-            format!(
-                "  ▼ {} more line(s) — Click to expand",
-                line_count - max_preview
-            ),
+            if line_count > max_lines {
+                "▲ Click to collapse"
+            } else {
+                "▲  Click to collapse"
+            },
+            Style::default().fg(palette.muted),
+        )]));
+    } else {
+        // Preview mode: show first few lines
+        let max_preview = TOOL_OUTPUT_PREVIEW_LINES;
+        let line_count = md_lines.len();
+
+        if line_count <= max_preview {
+            lines.extend(md_lines);
+        } else {
+            lines.extend(md_lines.into_iter().take(max_preview));
+            lines.push(Line::from(vec![Span::styled(
+                format!(
+                    "  ▼ {} more line(s) — Click to expand",
+                    line_count - max_preview
+                ),
+                Style::default().fg(palette.muted),
+            )]));
+        }
+
+        // Always add Ctrl+Click hint
+        lines.push(Line::from(vec![Span::styled(
+            "  Ctrl+Click to enter subsession",
             Style::default().fg(palette.muted),
         )]));
     }
-
-    // Always add Ctrl+Click hint
-    lines.push(Line::from(vec![Span::styled(
-        "  Ctrl+Click to enter subsession",
-        Style::default().fg(palette.muted),
-    )]));
 
     lines
 }
