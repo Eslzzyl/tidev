@@ -452,6 +452,7 @@ impl App {
     fn refresh_tools(&mut self) {
         let mcp = self.tools.mcp_manager();
         let file_read_tracker = self.tools.file_read_tracker();
+        let worktree = Self::find_git_worktree(&self.workspace_root);
         self.tools = ToolRegistry::new(
             self.workspace_root.clone(),
             self.paths.config_dir.clone(),
@@ -461,7 +462,19 @@ impl App {
             file_read_tracker,
             self.memory_store.clone(),
             self.config.rtk.enabled,
+            worktree,
         );
+    }
+
+    /// Find the git worktree root by looking for a .git directory,
+    /// starting from the given path and walking up to the ancestors.
+    fn find_git_worktree(start: &Path) -> Option<PathBuf> {
+        for ancestor in start.ancestors() {
+            if ancestor.join(".git").is_dir() {
+                return Some(ancestor.to_path_buf());
+            }
+        }
+        None
     }
 
     fn compose_system_prompt(&mut self) -> (String, Vec<String>) {

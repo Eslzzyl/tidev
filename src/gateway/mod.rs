@@ -7,6 +7,7 @@ mod shared;
 pub mod telegram;
 
 use std::env;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 
@@ -22,6 +23,17 @@ use crate::{
 
 use orchestrator::ChannelOrchestrator;
 use shared::compose_instruction_prompt;
+
+/// Find the git worktree root by looking for a .git directory,
+/// starting from the given path and walking up to the ancestors.
+fn find_git_worktree(start: &Path) -> Option<std::path::PathBuf> {
+    for ancestor in start.ancestors() {
+        if ancestor.join(".git").is_dir() {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    None
+}
 
 pub fn run() -> Result<()> {
     let runtime = Runtime::new().context("failed to create runtime")?;
@@ -82,6 +94,7 @@ async fn run_async() -> Result<()> {
         let llm = LlmClient::new()?;
         let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
         let file_read_tracker = Arc::new(FileReadTracker::new());
+        let worktree = find_git_worktree(&workspace_root);
         let mut tools = ToolRegistry::new(
             workspace_root.clone(),
             paths.config_dir.clone(),
@@ -91,6 +104,7 @@ async fn run_async() -> Result<()> {
             file_read_tracker,
             memory_store,
             config.rtk.enabled,
+            worktree,
         );
         tools.set_active_model(default_model.clone());
 
@@ -141,6 +155,7 @@ async fn run_async() -> Result<()> {
         let llm = LlmClient::new()?;
         let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
         let file_read_tracker = Arc::new(FileReadTracker::new());
+        let worktree2 = find_git_worktree(&workspace_root);
         let mut tools = ToolRegistry::new(
             workspace_root.clone(),
             paths.config_dir.clone(),
@@ -150,6 +165,7 @@ async fn run_async() -> Result<()> {
             file_read_tracker,
             memory_store2,
             config.rtk.enabled,
+            worktree2,
         );
         tools.set_active_model(default_model.clone());
 

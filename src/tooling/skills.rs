@@ -47,13 +47,14 @@ fn discover_inner(
     workspace_root: &Path,
     config_dir: &Path,
     extra_sources: &[String],
+    worktree: Option<&Path>,
 ) -> SkillCatalogInner {
-    crate::log_debug!("discover_inner: start");
+    crate::log_debug!("discover_inner: start, worktree={:?}", worktree.map(|p| p.display().to_string()));
     let mut skills = Vec::new();
     let mut seen_names = HashSet::new();
     let mut seen_locations = HashSet::new();
 
-    let roots = candidate_roots(workspace_root, config_dir);
+    let roots = candidate_roots(workspace_root, config_dir, worktree);
     crate::log_debug!("discover_inner: candidate_roots returned {} roots", roots.len());
     for (i, root) in roots.iter().enumerate() {
         crate::log_debug!("discover_inner: root[{}] = {}", i, root.display());
@@ -112,16 +113,21 @@ fn discover_inner(
 }
 
 impl SkillCatalog {
-    pub fn discover(workspace_root: &Path, config_dir: &Path, skill_sources: &[String]) -> Self {
+    pub fn discover(
+        workspace_root: &Path,
+        config_dir: &Path,
+        skill_sources: &[String],
+        worktree: Option<&Path>,
+    ) -> Self {
         crate::log_debug!(
-            "SkillCatalog::discover: workspace_root={}, config_dir={}, skill_sources={:?}, SKILL_ROOTS={:?}",
-            workspace_root.display(), config_dir.display(), skill_sources, SKILL_ROOTS
+            "SkillCatalog::discover: workspace_root={}, config_dir={}, skill_sources={:?}, SKILL_ROOTS={:?}, worktree={:?}",
+            workspace_root.display(), config_dir.display(), skill_sources, SKILL_ROOTS, worktree.map(|p| p.display().to_string())
         );
         let inner = CATALOG
             .get_or_init(|| {
                 let start = std::time::Instant::now();
                 crate::log_info!("SkillCatalog::discover: initializing catalog (first call)");
-                let inner = discover_inner(workspace_root, config_dir, skill_sources);
+                let inner = discover_inner(workspace_root, config_dir, skill_sources, worktree);
                 crate::log_info!(
                     "SkillCatalog::discover: catalog initialized with {} skills in {:?}",
                     inner.skills.len(), start.elapsed()
@@ -188,12 +194,23 @@ impl SkillCatalog {
     }
 }
 
-fn candidate_roots(workspace_root: &Path, config_dir: &Path) -> Vec<PathBuf> {
-    crate::log_debug!("candidate_roots: workspace_root={}, config_dir={}", workspace_root.display(), config_dir.display());
+fn candidate_roots(workspace_root: &Path, config_dir: &Path, worktree: Option<&Path>) -> Vec<PathBuf> {
+    crate::log_debug!("candidate_roots: workspace_root={}, config_dir={}, worktree={:?}", workspace_root.display(), config_dir.display(), worktree.map(|p| p.display().to_string()));
     let mut roots = Vec::new();
     let mut seen = HashSet::new();
 
     for ancestor in workspace_root.ancestors() {
+        // Stop if we've reached the worktree boundary (if specified)
+        if let Some(wt) = worktree {
+            if ancestor == wt {
+                crate::log_debug!("candidate_roots: reached worktree boundary at {}", ancestor.display());
+                // Still check this directory (the worktree root itself)
+            } else if !ancestor.starts_with(wt) {
+                crate::log_debug!("candidate_roots: passed worktree boundary, stopping traversal");
+                break;
+            }
+        }
+
         for root in SKILL_ROOTS {
             let candidate = ancestor.join(root);
             crate::log_debug!("candidate_roots: checking candidate={}", candidate.display());
@@ -210,6 +227,14 @@ fn candidate_roots(workspace_root: &Path, config_dir: &Path) -> Vec<PathBuf> {
                 roots.push(canonical);
             } else {
                 crate::log_debug!("candidate_roots: already seen, skip");
+            }
+        }
+
+        // Stop after processing the worktree root
+        if let Some(wt) = worktree {
+            if ancestor == wt {
+                crate::log_debug!("candidate_roots: stopping at worktree root");
+                break;
             }
         }
     }

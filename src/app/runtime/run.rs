@@ -1,7 +1,18 @@
 use super::*;
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::{io, time::Duration};
+use std::{io, path::Path, time::Duration};
 use tokio::runtime::Runtime;
+
+/// Find the git worktree root by looking for a .git directory,
+/// starting from the given path and walking up to the ancestors.
+fn find_git_worktree(start: &Path) -> Option<std::path::PathBuf> {
+    for ancestor in start.ancestors() {
+        if ancestor.join(".git").is_dir() {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    None
+}
 
 impl App {
     pub(crate) fn new() -> Result<Self> {
@@ -22,6 +33,8 @@ impl App {
         let theme = ThemeManager::new(&config.theme);
         let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
         let file_read_tracker = Arc::new(FileReadTracker::new());
+        // Find git worktree root to limit skill discovery scope
+        let worktree = find_git_worktree(&workspace_root);
         let mut tools = ToolRegistry::new(
             workspace_root.clone(),
             paths.config_dir.clone(),
@@ -31,6 +44,7 @@ impl App {
             file_read_tracker.clone(),
             memory_store.clone(),
             config.rtk.enabled,
+            worktree,
         );
         #[allow(unused_variables)]
         let commands = CommandRegistry::new();

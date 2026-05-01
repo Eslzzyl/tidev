@@ -37,8 +37,9 @@ impl ToolRegistry {
         file_read_tracker: Arc<FileReadTracker>,
         memory_store: Arc<MemoryStore>,
         rtk_enabled: bool,
+        worktree: Option<PathBuf>,
     ) -> Self {
-        let skills = SkillCatalog::discover(&workspace_root, &config_dir, &skill_sources);
+        let skills = SkillCatalog::discover(&workspace_root, &config_dir, &skill_sources, worktree.as_deref());
         let definitions = tool_definitions(skills.tool_description());
 
         Self {
