@@ -1159,6 +1159,7 @@ impl App {
             })
             .unwrap_or(self.mode);
         let mut persisted_message = None;
+        let mut finished_message_id = None;
 
         if let Some(message) = self.conversation.messages.last_mut()
             && message.streaming
@@ -1168,6 +1169,7 @@ impl App {
             message.reasoning = turn.reasoning.clone();
             message.tool_calls = turn.tool_calls.clone();
             message.streaming = false;
+            finished_message_id = Some(message.id);
             if message.mode.is_none() {
                 message.mode = Some(turn_mode);
             }
@@ -1183,6 +1185,10 @@ impl App {
             }
 
             persisted_message = Some(message.clone());
+        }
+
+        if let Some(message_id) = finished_message_id {
+            self.invalidate_active_message_render_cache_for(message_id);
         }
 
         if let Some(message) = persisted_message {
