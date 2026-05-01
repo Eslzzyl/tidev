@@ -71,7 +71,7 @@ fn render_tool_call_with_result(
         && !matches!(canonical_name, "read" | "list" | "glob" | "grep")
         && !tool_call_arguments_are_complete(&tool_call.arguments);
 
-    if matches!(canonical_name, "list" | "grep" | "glob" | "read") {
+    if matches!(canonical_name, "list" | "grep" | "glob" | "read" | "skill") {
         return (
             render_tool_call_summary_line(tool_call, tool_result, body_width, palette, ctx),
             vec![],
@@ -196,6 +196,10 @@ fn render_tool_call_summary_line(
         "read" => {
             let path = get_field("path").unwrap_or("file");
             ("Read", rel_path(path).to_string())
+        }
+        "skill" => {
+            let name = get_field("name").unwrap_or("");
+            ("Loaded skill", name.to_string())
         }
         _ => {
             let summary = summarize_tool_call(&tool_call.name, &tool_call.arguments, body_width, ctx.workspace_root);
@@ -3201,6 +3205,9 @@ fn summarize_tool_call(tool_name: &str, arguments: &str, body_width: usize, work
             }
         }
         "todowrite" => "Update todo list".to_string(),
+        "skill" => field("name")
+            .map(|name| format!("Loaded skill {name}"))
+            .unwrap_or_else(|| "Load skill".to_string()),
         _ => {
             let mut summary = display_tool_name(tool_name);
             summary = summary[0..1].to_uppercase() + &summary[1..];
@@ -3332,6 +3339,11 @@ fn summarize_tool_arguments(tool_name: &str, arguments: &str) -> Vec<(String, St
 
             if let Some(todo_count) = todo_count {
                 fields.push(("todos".to_string(), todo_count));
+            }
+        }
+        "skill" => {
+            if let Some(name) = string_field("name") {
+                fields.push(("name".to_string(), name));
             }
         }
         _ => {}
