@@ -111,8 +111,8 @@ impl App {
                         .find(|(_, rect)| rect.contains(position))
                         .map(|(idx, _)| *idx);
 
-                    if let Some(execution_index) = hit_running {
-                        if let Some(execution) = self
+                    if let Some(execution_index) = hit_running
+                        && let Some(execution) = self
                             .running_subagent_executions
                             .get(execution_index)
                         {
@@ -120,7 +120,6 @@ impl App {
                             self.switch_session(child_id, runtime).ok();
                             return;
                         }
-                    }
 
                     // Plain click on tool result card → toggle expand
                     let hit_message_id = self
@@ -838,11 +837,10 @@ impl App {
                     panel.selected_index = 0;
                     panel.list_scroll = 0;
                 }
-                KeyCode::End => {
-                    if !panel.filtered_indices.is_empty() {
+                KeyCode::End
+                    if !panel.filtered_indices.is_empty() => {
                         panel.selected_index = panel.filtered_indices.len() - 1;
                     }
-                }
                 KeyCode::Left => {
                     panel.scroll_preview_up(5);
                 }

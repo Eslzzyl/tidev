@@ -33,6 +33,12 @@ pub struct MemoryPanelState {
     pub edit_id: Option<Uuid>,
 }
 
+impl Default for MemoryPanelState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MemoryPanelState {
     pub fn new() -> Self {
         Self {
@@ -59,7 +65,7 @@ impl MemoryPanelState {
             .iter()
             .enumerate()
             .filter(|(_, m)| {
-                self.filter_type.map_or(true, |t| m.memory_type == t)
+                self.filter_type.is_none_or(|t| m.memory_type == t)
             })
             .map(|(i, _)| i)
             .collect()
@@ -226,13 +232,12 @@ impl App {
                 next.start_edit();
                 self.memory_panel = Some(next);
             }
-            KeyCode::Char('d') | KeyCode::Char('D') => {
-                if panel.selected_entry().is_some() {
+            KeyCode::Char('d') | KeyCode::Char('D')
+                if panel.selected_entry().is_some() => {
                     let mut next = panel;
                     next.mode = MemoryPanelMode::DeleteConfirm;
                     self.memory_panel = Some(next);
                 }
-            }
             KeyCode::Char('r') | KeyCode::Char('R') => {
                 let mut next = panel;
                 next.cycle_filter_type();

@@ -231,12 +231,11 @@ fn candidate_roots(workspace_root: &Path, config_dir: &Path, worktree: Option<&P
         }
 
         // Stop after processing the worktree root
-        if let Some(wt) = worktree {
-            if ancestor == wt {
+        if let Some(wt) = worktree
+            && ancestor == wt {
                 crate::log_debug!("candidate_roots: stopping at worktree root");
                 break;
             }
-        }
     }
 
     let global_root = config_dir.join("skills");

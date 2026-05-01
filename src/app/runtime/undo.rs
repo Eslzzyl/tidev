@@ -541,28 +541,25 @@ impl App {
                 .map(|idx| {
                     self.conversation
                         .revert_message_id
-                        .map_or(true, |revert_id| {
-                            self.conversation.message_index(revert_id).map_or(true, |revert_idx| idx < revert_idx)
+                        .is_none_or(|revert_id| {
+                            self.conversation.message_index(revert_id).is_none_or(|revert_idx| idx < revert_idx)
                         })
                 })
                 .unwrap_or(false);
 
-            if is_visible {
-                if let Some(msg) = self
+            if is_visible
+                && let Some(msg) = self
                     .conversation
                     .messages
                     .iter_mut()
                     .find(|m| m.id == msg_id)
-                {
-                    if let Ok(json) = serde_json::to_string(&merged) {
+                    && let Ok(json) = serde_json::to_string(&merged) {
                         crate::log_info!(
                             "merge_step_diffs: updating msg.file_diffs with {} files",
                             merged.len()
                         );
                         msg.file_diffs = Some(json);
                     }
-                }
-            }
         }
     }
 
@@ -647,16 +644,14 @@ impl App {
         }
 
         // Fallback: old flat format `["file1","file2"]` — use message's snapshot_hash
-        if let Ok(files) = serde_json::from_str::<Vec<String>>(patch_files_str) {
-            if !files.is_empty() {
-                if let Some(hash) = &message.snapshot_hash {
+        if let Ok(files) = serde_json::from_str::<Vec<String>>(patch_files_str)
+            && !files.is_empty()
+                && let Some(hash) = &message.snapshot_hash {
                     return vec![Patch {
                         hash: hash.clone(),
                         files,
                     }];
                 }
-            }
-        }
 
         Vec::new()
     }

@@ -1274,8 +1274,8 @@ impl App {
             let mut all_diffs = Vec::new();
             let mut seen_files = std::collections::HashSet::new();
             for msg in self.conversation.visible_messages() {
-                if let Some(diffs_json) = &msg.file_diffs {
-                    if let Ok(diffs) =
+                if let Some(diffs_json) = &msg.file_diffs
+                    && let Ok(diffs) =
                         serde_json::from_str::<Vec<crate::snapshot::FileDiff>>(diffs_json)
                     {
                         for d in &diffs {
@@ -1284,7 +1284,6 @@ impl App {
                             }
                         }
                     }
-                }
             }
 
             if all_diffs.is_empty() {
