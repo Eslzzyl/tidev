@@ -2065,7 +2065,8 @@ impl App {
         }
 
         // Add model name, duration, end time, and mode at the end (only for round end)
-        if is_round_end && !message.streaming {
+        // Don't show stats if message has tool_calls — more messages (Tool + next Assistant) will follow
+        if is_round_end && !message.streaming && message.tool_calls.is_empty() {
             let model_display_name = message
                 .model_id
                 .as_ref()
