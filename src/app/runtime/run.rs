@@ -112,6 +112,7 @@ impl App {
             workspace_boundary_permissions: std::collections::HashMap::new(),
             workspace_boundary_approved: std::collections::HashMap::new(),
             question_dialog: None,
+            fork_confirm_dialog: None,
             running_tool_executions: Vec::new(),
             running_subagent_executions: Vec::new(),
             pending_assistant_turns: std::collections::HashSet::new(),
@@ -525,6 +526,7 @@ impl App {
         self.pending_tool_execution = None;
         self.permission_dialog = None;
         self.question_dialog = None;
+        self.fork_confirm_dialog = None;
         self.running_tool_executions.clear();
         self.running_subagent_executions.clear();
         self.pending_request = false;

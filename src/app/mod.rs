@@ -136,6 +136,7 @@ struct App {
     /// Populated during permission checking, consumed during parallel execution dispatch.
     workspace_boundary_approved: std::collections::HashMap<String, bool>,
     question_dialog: Option<QuestionDialogState>,
+    fork_confirm_dialog: Option<ui::fork_confirm::ForkConfirmDialogState>,
     running_tool_executions: Vec<RunningToolExecution>,
     running_subagent_executions: Vec<RunningSubagentExecution>,
     pending_assistant_turns: std::collections::HashSet<Uuid>,
@@ -792,6 +793,7 @@ impl App {
                 self.pending_tool_execution = None;
                 self.permission_dialog = None;
                 self.question_dialog = None;
+                self.fork_confirm_dialog = None;
                 self.running_tool_executions.clear();
                 self.workspace_boundary_approved.clear();
                 self.cancel_running_subagents();
@@ -1298,6 +1300,7 @@ impl App {
             self.pending_tool_execution = None;
             self.permission_dialog = None;
             self.question_dialog = None;
+            self.fork_confirm_dialog = None;
             self.running_tool_executions.clear();
             self.workspace_boundary_approved.clear();
             self.abort_confirmation_deadline = None;

@@ -80,6 +80,9 @@ impl App {
         if let Some(dialog) = &self.permission_dialog {
             self.render_permission_dialog(frame, area, dialog);
         }
+        if self.fork_confirm_dialog.is_some() {
+            self.render_fork_confirm_dialog(frame, area);
+        }
         self.finish_mouse_selection(frame);
         self.render_toast(frame);
     }

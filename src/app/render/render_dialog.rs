@@ -1784,6 +1784,53 @@ impl App {
         );
     }
 
+    pub(super) fn render_fork_confirm_dialog(&self, frame: &mut Frame<'_>, area: Rect) {
+        let Some(dialog) = &self.fork_confirm_dialog else {
+            return;
+        };
+
+        let palette = self.palette();
+        // 使用居中矩形，在屏幕中间显示
+        let overlay = centered_rect(60, 10, area);
+        frame.render_widget(Clear, overlay);
+
+        let block = Block::default()
+            .style(Style::default().bg(palette.panel))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.border_active()))
+            .title(format!(" {} ", dialog.title()));
+        frame.render_widget(block, overlay);
+
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+
+        let sections = Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Min(3),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+        // 描述文本
+        frame.render_widget(
+            Paragraph::new(dialog.description())
+                .alignment(Alignment::Center)
+                .wrap(Wrap { trim: true })
+                .style(Style::default().bg(palette.panel).fg(palette.text)),
+            sections[1],
+        );
+
+        // 底部提示
+        frame.render_widget(
+            Paragraph::new("Enter to confirm · Esc or N to cancel")
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(palette.panel).fg(palette.muted)),
+            sections[2],
+        );
+    }
+
     pub(super) fn render_question_dialog(
         &self,
         frame: &mut Frame<'_>,

@@ -547,6 +547,7 @@ impl App {
         self.screen == Screen::Chat
             && self.permission_dialog.is_none()
             && self.workspace_boundary_dialog.is_none()
+            && self.fork_confirm_dialog.is_none()
             && self.connect_dialog.is_none()
             && self.theme_panel.is_none()
             && self.model_panel.is_none()
@@ -712,6 +713,7 @@ impl App {
         self.pending_tool_execution = None;
         self.permission_dialog = None;
         self.question_dialog = None;
+        self.fork_confirm_dialog = None;
 
         // Handle subagent cancellations: record "User cancelled" tool results
         // so the parent agent's tool call has a matching tool message.
@@ -1157,6 +1159,10 @@ impl App {
 
         if self.question_dialog.is_some() {
             return self.handle_question_dialog_key(key, runtime);
+        }
+
+        if self.fork_confirm_dialog.is_some() {
+            return self.handle_fork_confirm_dialog_key(key, runtime);
         }
 
         if let Some(dialog) = self.connect_dialog.clone() {
@@ -2007,6 +2013,23 @@ impl App {
             KeyCode::Esc => {
                 self.close_message_panel();
             }
+            KeyCode::Char('f') => {
+                let query = self.composer.text().to_string();
+                if let Some(message) = panel.selected_message(&query) {
+                    // 计算要复制的消息数量
+                    let message_count = self
+                        .get_message_index(message.message_id)
+                        .map(|idx| idx + 1)
+                        .unwrap_or(1);
+
+                    self.fork_confirm_dialog = Some(
+                        crate::app::ui::fork_confirm::ForkConfirmDialogState::new(
+                            message.message_id,
+                            message_count,
+                        ),
+                    );
+                }
+            }
             KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let query = self.composer.text().to_string();
                 let mut next_panel = panel;
@@ -2027,6 +2050,111 @@ impl App {
                 }
             }
         }
+
+        Ok(())
+    }
+
+    /// 获取消息在 conversation.messages 中的索引
+    fn get_message_index(&self, message_id: Uuid) -> Option<usize> {
+        self.conversation
+            .messages
+            .iter()
+            .position(|m| m.id == message_id)
+    }
+
+    pub(crate) fn handle_fork_confirm_dialog_key(
+        &mut self,
+        key: KeyEvent,
+        runtime: &Runtime,
+    ) -> Result<()> {
+        match key.code {
+            KeyCode::Enter => {
+                self.confirm_fork_session(runtime)?;
+            }
+            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                self.fork_confirm_dialog = None;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub(crate) fn confirm_fork_session(&mut self, _runtime: &Runtime) -> Result<()> {
+        let Some(dialog) = self.fork_confirm_dialog.take() else {
+            return Ok(());
+        };
+
+        // 获取要复制的消息索引
+        let message_index = match self.get_message_index(dialog.selected_message_id) {
+            Some(idx) => idx,
+            None => {
+                self.last_notice = Some("Selected message not found".to_string());
+                return Ok(());
+            }
+        };
+
+        // 保存当前 session 状态
+        self.cache_active_session_runtime();
+
+        // 创建新 session（独立的，没有 parent）
+        let new_session_id = Uuid::new_v4();
+
+        let _record = self.store.create_session(
+            new_session_id,
+            self.workspace_root.as_path(),
+            &self.active_model.provider_id,
+            &self.active_model.provider_display_name,
+            &self.active_model.model_id,
+            &self.active_model.display_name,
+            &format!("Fork of {}", self.conversation.title),
+        )?;
+
+        // 复制消息（从开头到选中的消息），为每条消息生成新的 ID
+        let original_messages: Vec<_> = self.conversation.messages[..=message_index]
+            .iter()
+            .cloned()
+            .collect();
+
+        let mut id_mapping: std::collections::HashMap<Uuid, Uuid> = std::collections::HashMap::new();
+
+        for original in &original_messages {
+            let mut new_message = original.clone();
+            let new_id = Uuid::new_v4();
+            id_mapping.insert(original.id, new_id);
+            new_message.id = new_id;
+
+            // 更新 tool_call_id 引用（如果有）
+            if let Some(ref tool_call_id) = new_message.tool_call_id {
+                if let Some(&new_tool_call_id) = id_mapping.get(&Uuid::parse_str(tool_call_id).unwrap_or_else(|_| Uuid::nil())) {
+                    new_message.tool_call_id = Some(new_tool_call_id.to_string());
+                }
+            }
+
+            self.store.append_message(new_session_id, &new_message)?;
+        }
+
+        // 加载新 session
+        let conversation = self
+            .store
+            .load_conversation(new_session_id)?
+            .context("Failed to load forked conversation")?;
+        self.conversation = conversation;
+        self.reset_active_runtime();
+
+        // 关闭所有面板和状态
+        self.message_panel = None;
+        self.command_palette.clear();
+        self.at_mention.clear();
+        self.draft_attachments.clear();
+        self.composer.clear();
+        self.composer
+            .set_placeholder("Ask TiDev about your code, task, or question...");
+        self.scroll_messages_to_bottom();
+
+        self.last_notice = Some(format!(
+            "Forked session with {} messages",
+            original_messages.len()
+        ));
 
         Ok(())
     }
