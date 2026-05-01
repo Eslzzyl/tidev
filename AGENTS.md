@@ -50,3 +50,9 @@ Do not add runtime migration code. If the schema changes, update `SCHEMA_SQL` in
 - `rtk/`
 - `nanobot/`
 - `zeroclaw/`
+
+## Web frontend
+
+web frontend in ./web/
+
+use pnpm as package manager.
