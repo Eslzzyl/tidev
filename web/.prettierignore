@@ -1,9 +1,11 @@
-# Package Managers
-package-lock.json
-pnpm-lock.yaml
-yarn.lock
-bun.lock
-bun.lockb
+# Build output
+dist
 
-# Miscellaneous
-/static/
+# Dependencies
+node_modules
+
+# Logs
+*.log
+
+# Misc
+.DS_Store

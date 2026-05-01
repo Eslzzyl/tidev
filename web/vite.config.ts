@@ -1,5 +1,18 @@
-import tailwindcss from '@tailwindcss/vite';
-import { sveltekit } from '@sveltejs/kit/vite';
-import { defineConfig } from 'vite';
+import { svelte } from '@sveltejs/vite-plugin-svelte'
+import tailwindcss from '@tailwindcss/vite'
+import { defineConfig } from 'vite'
 
-export default defineConfig({ plugins: [tailwindcss(), sveltekit()] });
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [tailwindcss(), svelte()],
+  server: {
+    port: 5173,
+    proxy: {
+      '/api': 'http://127.0.0.1:26502',
+    },
+  },
+  build: {
+    outDir: 'dist',
+    assetsDir: 'assets',
+  },
+})
