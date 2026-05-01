@@ -230,6 +230,7 @@ impl ToolRegistry {
         store: &SessionStore,
         session_id: uuid::Uuid,
         call: &crate::session::ToolCall,
+        mode: SessionMode,
     ) -> Result<crate::session::ToolExecutionResult> {
         if self.mcp.definition_for(&call.name).is_some() {
             return runtime.block_on(self.mcp.execute_call(call));
@@ -245,6 +246,7 @@ impl ToolRegistry {
             self.max_output_bytes,
             self.rtk_enabled,
             &self.memory_store,
+            mode,
         )?;
 
         // Image capability check: If the result contains images but the model doesn't support them,

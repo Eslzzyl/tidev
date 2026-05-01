@@ -492,6 +492,7 @@ impl App {
                 &self.store,
                 self.conversation.session_id,
                 &tool_call,
+                self.mode,
             )
             .unwrap_or_else(|error| ToolExecutionResult::new(format!("Tool failed: {error}")));
         self.record_tool_result(tool_call, result)?;
@@ -736,6 +737,7 @@ impl App {
                                 &self.store,
                                 self.conversation.session_id,
                                 &tool_call,
+                                self.mode,
                             )
                             .unwrap_or_else(|error| {
                                 ToolExecutionResult::new(format!("Tool failed: {error}"))

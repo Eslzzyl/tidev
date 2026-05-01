@@ -367,6 +367,7 @@ pub(super) fn execute_tool_call(
     max_output_bytes: usize,
     rtk_enabled: bool,
     memory_store: &Arc<crate::memory::types::MemoryStore>,
+    mode: crate::prompts::SessionMode,
 ) -> Result<ToolExecutionResult> {
     // Pre-execution checks for file read tracking
     let tool_name = crate::tooling::canonical_tool_name(&call.name);
@@ -401,6 +402,7 @@ pub(super) fn execute_tool_call(
         max_output_bytes,
         rtk_enabled,
         memory_store,
+        mode,
     )?;
 
     // Post-execution: record file reads

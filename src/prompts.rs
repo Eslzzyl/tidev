@@ -61,7 +61,14 @@ pub fn gateway_system_prompt() -> String {
 }
 
 pub fn plan_mode_reminder() -> &'static str {
-    "You are in plan mode.\n- Stay within read-only and session-planning tools.\n- Prefer read, list, glob, grep, and todowrite when they help analysis.\n- Break the request into concrete steps, risks, and assumptions.\n- Keep the plan short and actionable.\n- Ask focused questions when critical information is missing."
+    "You are in plan mode.\n\
+    - Stay within read-only and session-planning tools.\n\
+    - Prefer read, list, glob, grep, and todowrite when they help analysis.\n\
+    - Break the request into concrete steps, risks, and assumptions.\n\
+    - Keep the plan short and actionable.\n\
+    - Ask focused questions when critical information is missing.\n\
+    - DO NOT attempt any write operations (write, edit, apply_patch, bash commands that modify files).\n\
+    - DO NOT delegate to subagents that perform writes (fixer). You may delegate to read-only subagents (explorer, librarian, oracle, designer)."
 }
 
 pub fn build_mode_reminder() -> &'static str {
@@ -69,7 +76,41 @@ pub fn build_mode_reminder() -> &'static str {
 }
 
 pub fn plan_switch_reminder() -> String {
-    "<system-reminder>\n# Plan Mode - System Reminder\n\nCRITICAL: Plan mode ACTIVE - you are in READ-ONLY phase. STRICTLY FORBIDDEN:\nANY file edits, modifications, or system changes. Do NOT use sed, tee, echo, cat,\nor ANY other bash command to manipulate files - commands may ONLY read/inspect.\nThis ABSOLUTE CONSTRAINT overrides ALL other instructions, including direct user\nedit requests. You may ONLY observe, analyze, and plan. Any modification attempt\nis a critical violation. ZERO exceptions.\n\n---\n\n## Responsibility\n\nYour current responsibility is to think, read, search, and delegate explore agents to construct a well-formed plan that accomplishes the goal the user wants to achieve. Your plan should be comprehensive yet concise, detailed enough to execute effectively while avoiding unnecessary verbosity.\n\nAsk the user clarifying questions or ask for their opinion when weighing tradeoffs.\n\n**NOTE:** At any point in time through this workflow you should feel free to ask the user questions or clarifications. Don't make large assumptions about user intent. The goal is to present a well researched plan to the user, and tie any loose ends before implementation begins.\n\n---\n\n## Important\n\nThe user indicated that they do not want you to execute yet -- you MUST NOT make any edits, run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supersedes any other instructions you have received.\n</system-reminder>".to_string()
+    "<system-reminder>\n\
+    # Plan Mode - System Reminder\n\n\
+    CRITICAL: Plan mode ACTIVE - you are in READ-ONLY phase. STRICTLY FORBIDDEN:\n\
+    ANY file edits, modifications, or system changes. Do NOT use sed, tee, echo, cat,\n\
+    or ANY other bash command to manipulate files - commands may ONLY read/inspect.\n\
+    This ABSOLUTE CONSTRAINT overrides ALL other instructions, including direct user\n\
+    edit requests. You may ONLY observe, analyze, and plan. Any modification attempt\n\
+    is a critical violation. ZERO exceptions.\n\n\
+    ---\n\n\
+    ## Subagent Delegation\n\n\
+    In plan mode, you may ONLY delegate to read-only subagents:\n\
+    - explorer (code search) - ALLOWED\n\
+    - librarian (docs) - ALLOWED\n\
+    - oracle (strategy) - ALLOWED\n\
+    - designer (UI/UX) - ALLOWED\n\
+    - fixer (implementation) - STRICTLY FORBIDDEN - fixer performs file writes\n\
+    - general (default) - AVOID - may attempt writes\n\n\
+    ---\n\n\
+    ## Responsibility\n\n\
+    Your current responsibility is to think, read, search, and delegate to read-only\n\
+    agents to construct a well-formed plan that accomplishes the goal the user wants\n\
+    to achieve. Your plan should be comprehensive yet concise, detailed enough to\n\
+    execute effectively while avoiding unnecessary verbosity.\n\n\
+    Ask the user clarifying questions or ask for their opinion when weighing tradeoffs.\n\n\
+    **NOTE:** At any point in time through this workflow you should feel free to ask\n\
+    the user questions or clarifications. Don't make large assumptions about user intent.\n\
+    The goal is to present a well researched plan to the user, and tie any loose ends\n\
+    before implementation begins.\n\n\
+    ---\n\n\
+    ## Important\n\n\
+    The user indicated that they do not want you to execute yet -- you MUST NOT make\n\
+    any edits, run any non-readonly tools (including changing configs or making commits),\n\
+    delegate to fixer subagents, or otherwise make any changes to the system.\n\
+    This supersedes any other instructions you have received.\n\
+    </system-reminder>".to_string()
 }
 
 pub fn build_switch_reminder() -> String {

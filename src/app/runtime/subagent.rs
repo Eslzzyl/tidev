@@ -16,6 +16,7 @@ use crate::{
     agent::AgentDefinition,
     config::ActiveModel,
     llm::LlmClient,
+    prompts::SessionMode,
     session::{AssistantTurn, BackendEvent, Message, MessageRole, ToolCall, ToolExecutionResult},
     storage::SessionStore,
     tooling::{ToolRegistry, canonical_tool_name, execute_shell_tool_call},
@@ -377,6 +378,7 @@ async fn execute_child_tool_call(
                     &store,
                     context.child_session_id,
                     tool_call,
+                    SessionMode::Build,
                 )
             })?;
             Ok(result)

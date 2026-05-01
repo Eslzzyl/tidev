@@ -3,8 +3,9 @@ use serde_json::Value;
 use std::path::Path;
 use std::sync::Arc;
 
-use super::tools::{MemoryArgs, QuestionArgs, SkillArgs};use super::{SkillCatalog, ToolDefinition, ToolPermission, canonical_tool_name};
-use crate::{session::ToolCall, storage::SessionStore};
+use super::tools::{MemoryArgs, QuestionArgs, SkillArgs};
+use super::{SkillCatalog, ToolDefinition, ToolPermission, canonical_tool_name};
+use crate::{prompts::SessionMode, session::ToolCall, storage::SessionStore};
 
 pub mod exec;
 pub mod file;
@@ -51,6 +52,7 @@ pub fn execute_tool_call(
     max_output_bytes: usize,
     rtk_enabled: bool,
     memory_store: &Arc<crate::memory::types::MemoryStore>,
+    mode: SessionMode,
 ) -> Result<crate::session::ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
@@ -70,7 +72,7 @@ pub fn execute_tool_call(
                 .with_rtk_rewritten(result.rtk_rewritten)
         }
         Some("task") => {
-            let output = task::execute_tool_call(workspace_root, store, session_id, call)?;
+            let output = task::execute_tool_call(workspace_root, store, session_id, call, mode)?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("todowrite") => {

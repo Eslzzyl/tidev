@@ -541,7 +541,7 @@ impl TelegramChannel {
             crate::log_info!("Executing tool: {}", tool_call.name);
             let result =
                 self.tools
-                    .execute_call(&runtime, &self.store, conversation.session_id, &tool_call);
+                    .execute_call(&runtime, &self.store, conversation.session_id, &tool_call, SessionMode::Build);
 
             let execution_result = match result {
                 Ok(res) => res,

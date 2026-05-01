@@ -4,6 +4,7 @@ use std::path::Path;
 use uuid::Uuid;
 
 use crate::agent::AgentType;
+use crate::prompts::SessionMode;
 use crate::storage::SessionStore;
 use crate::tooling::tools::TaskArgs;
 use crate::tooling::{ToolDefinition, ToolPermission};
@@ -23,6 +24,7 @@ pub fn execute_tool_call(
     _store: &SessionStore,
     _session_id: Uuid,
     call: &crate::session::ToolCall,
+    mode: SessionMode,
 ) -> Result<String> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .map_err(|e| anyhow::anyhow!("failed to parse arguments for tool '{}': {}", call.name, e))?;
@@ -46,6 +48,15 @@ pub fn execute_tool_call(
     }
 
     let agent_type = AgentType::parse(subagent_type_str).unwrap_or(AgentType::General);
+
+    // In plan mode, reject delegation to fixer subagents (they perform writes)
+    if mode == SessionMode::Plan && agent_type == AgentType::Fixer {
+        bail!(
+            "Task delegation to fixer subagent rejected: Plan mode is read-only and does not allow write operations. \
+            You may delegate to read-only subagents (explorer, librarian, oracle, designer) in plan mode. \
+            Switch to build mode to use the fixer subagent."
+        );
+    }
 
     Ok(format!(
         "Started {agent_type} subagent task '{description}'",
