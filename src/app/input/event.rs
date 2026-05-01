@@ -2110,10 +2110,7 @@ impl App {
         )?;
 
         // 复制消息（从开头到选中的消息），为每条消息生成新的 ID
-        let original_messages: Vec<_> = self.conversation.messages[..=message_index]
-            .iter()
-            .cloned()
-            .collect();
+        let original_messages: Vec<_> = self.conversation.messages[..=message_index].to_vec();
 
         let mut id_mapping: std::collections::HashMap<Uuid, Uuid> = std::collections::HashMap::new();
 
@@ -2124,11 +2121,10 @@ impl App {
             new_message.id = new_id;
 
             // 更新 tool_call_id 引用（如果有）
-            if let Some(ref tool_call_id) = new_message.tool_call_id {
-                if let Some(&new_tool_call_id) = id_mapping.get(&Uuid::parse_str(tool_call_id).unwrap_or_else(|_| Uuid::nil())) {
+            if let Some(ref tool_call_id) = new_message.tool_call_id
+                && let Some(&new_tool_call_id) = id_mapping.get(&Uuid::parse_str(tool_call_id).unwrap_or_else(|_| Uuid::nil())) {
                     new_message.tool_call_id = Some(new_tool_call_id.to_string());
                 }
-            }
 
             self.store.append_message(new_session_id, &new_message)?;
         }

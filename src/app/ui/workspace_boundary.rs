@@ -83,14 +83,13 @@ pub(crate) fn extract_boundary_violation_path(
         }
         "apply_patch" => {
             // For apply_patch, we need to extract the file path from the patch
-            if let Some(patch) = args.get("patch").and_then(|v| v.as_str()) {
-                if let Some(file_path) = crate::tooling::extract_file_path_from_patch(patch) {
+            if let Some(patch) = args.get("patch").and_then(|v| v.as_str())
+                && let Some(file_path) = crate::tooling::extract_file_path_from_patch(patch) {
                     let path_buf = std::path::Path::new(&file_path);
                     if crate::tooling::builtin::utils::is_path_outside_workspace(workspace_root, path_buf) {
                         return Some(path_buf.to_path_buf());
                     }
                 }
-            }
         }
         "grep" => {
             if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
