@@ -29,6 +29,7 @@ use super::{
 
 const TOOL_OUTPUT_PREVIEW_LINES: usize = 5;
 const TOOL_OUTPUT_EXPANDED_MAX_LINES: usize = 100;
+const MAX_VISIBLE_QUEUED_PROMPTS: usize = 4;
 
 use crate::app::runtime::state::SelectableRegionRange;
 
@@ -897,13 +898,39 @@ impl App {
             area
         };
 
-        let composer_height = self
+        let composer_height_raw = self
             .composer
             .preferred_height(
                 main_area.width.saturating_sub(4),
                 self.config.ui.max_input_lines,
             )
             .min(main_area.height.saturating_sub(3).max(3));
+
+        // Calculate queued messages area height (frozen area above input box)
+        let queued_count = if self.conversation.parent_session_id.is_some() {
+            0
+        } else {
+            self.pending_prompt_queue.len()
+        };
+        let queued_height = if queued_count > 0 {
+            let visible = queued_count.min(MAX_VISIBLE_QUEUED_PROMPTS);
+            // inner: visible text lines + (visible-1) separator lines
+            let inner = visible + (visible.saturating_sub(1));
+            // +1 for "+N more" overflow, +2 for block top/bottom borders
+            let overflow = if queued_count > MAX_VISIBLE_QUEUED_PROMPTS {
+                1
+            } else {
+                0
+            };
+            (inner + overflow + 2)
+                .min(main_area.height.saturating_sub(6) as usize / 2)
+                .min(12)
+        } else {
+            0
+        };
+
+        let composer_height = composer_height_raw
+            .min(main_area.height.saturating_sub((queued_height as u16) + 3).max(3));
 
         // Handle workspace boundary dialog (similar to question dialog)
         if let Some(dialog) = self.workspace_boundary_dialog.clone() {
@@ -948,6 +975,7 @@ impl App {
 
         let layout = Layout::vertical([
             Constraint::Min(6),
+            Constraint::Length(queued_height as u16),
             Constraint::Length(composer_height),
             Constraint::Length(1),
             Constraint::Length(1),
@@ -956,9 +984,13 @@ impl App {
 
         self.render_messages(frame, layout[0]);
 
+        if queued_height > 0 {
+            self.render_queued_prompts(frame, layout[1]);
+        }
+
         // In subsession, show navigation panel instead of input box
         if self.conversation.parent_session_id.is_some() {
-            self.render_subsession_navigation(frame, layout[1]);
+            self.render_subsession_navigation(frame, layout[2]);
         } else {
             let prompt_title = match self.pending_mode.as_ref() {
                 Some(pending) if self.pending_request => {
@@ -972,18 +1004,107 @@ impl App {
             };
             self.render_input_block(
                 frame,
-                layout[1],
+                layout[2],
                 &prompt_title,
                 self.composer.placeholder(),
                 false,
             );
-            self.render_at_mention_palette(frame, layout[1]);
-            self.render_snippet_palette(frame, layout[1]);
-            self.render_command_palette(frame, layout[1]);
-            self.render_snippet_palette(frame, layout[1]);
+            self.render_at_mention_palette(frame, layout[2]);
+            self.render_snippet_palette(frame, layout[2]);
+            self.render_command_palette(frame, layout[2]);
+            self.render_snippet_palette(frame, layout[2]);
         }
-        self.render_prompt_footer(frame, layout[2]);
-        self.render_retrying_hint(frame, layout[3]);
+        self.render_prompt_footer(frame, layout[3]);
+        self.render_retrying_hint(frame, layout[4]);
+    }
+
+    /// Render a frozen area above the input box showing queued (pending) prompts.
+    /// Each queued message is displayed as a single truncated line with a separator
+    /// between items, wrapped in a top/bottom bordered block with a "QUEUE" badge.
+    fn render_queued_prompts(&mut self, frame: &mut Frame<'_>, area: Rect) {
+        let palette = self.palette();
+        let count = self.pending_prompt_queue.len();
+        let visible = count.min(MAX_VISIBLE_QUEUED_PROMPTS);
+
+        // Build title: " QUEUE " badge with background color + count
+        let title = Line::from(vec![
+            Span::styled(
+                " QUEUE ",
+                Style::default()
+                    .bg(palette.selection_bg)
+                    .fg(palette.selection_fg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" {} ", count),
+                Style::default().fg(palette.muted),
+            ),
+        ]);
+
+        let block = Block::default()
+            .borders(Borders::TOP | Borders::BOTTOM)
+            .border_style(Style::default().fg(palette.muted))
+            .title(title)
+            .title_alignment(Alignment::Left);
+
+        let inner = block.inner(area);
+        let inner_height = inner.height as usize;
+        let width = inner.width.max(1) as usize;
+
+        let mut y_offset = 0u16;
+
+        for (i, queued) in self.pending_prompt_queue.iter().take(visible).enumerate() {
+            if y_offset as usize >= inner_height {
+                break;
+            }
+
+            // Truncate prompt to a single line
+            let text = shorten_single_line(&queued.prompt, width);
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    text,
+                    Style::default()
+                        .fg(palette.muted)
+                        .add_modifier(Modifier::ITALIC),
+                )))
+                .wrap(Wrap { trim: false }),
+                Rect::new(inner.x, inner.y + y_offset, inner.width, 1),
+            );
+            y_offset += 1;
+
+            // Separator line (not after last visible item)
+            if i + 1 < visible && (y_offset as usize) < inner_height {
+                let sep = "─".repeat(width.saturating_sub(2));
+                frame.render_widget(
+                    Paragraph::new(Line::from(Span::styled(
+                        sep,
+                        Style::default().fg(palette.border),
+                    ))),
+                    Rect::new(
+                        inner.x + 1,
+                        inner.y + y_offset,
+                        inner.width.saturating_sub(2),
+                        1,
+                    ),
+                );
+                y_offset += 1;
+            }
+        }
+
+        // Overflow indicator
+        if count > MAX_VISIBLE_QUEUED_PROMPTS && (y_offset as usize) < inner_height {
+            let more_text = format!("+{} more...", count - MAX_VISIBLE_QUEUED_PROMPTS);
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    more_text,
+                    Style::default().fg(palette.muted),
+                ))),
+                Rect::new(inner.x, inner.y + y_offset, inner.width, 1),
+            );
+        }
+
+        // Render block last so it draws borders on top
+        frame.render_widget(block, area);
     }
 
     fn render_subsession_navigation(&self, frame: &mut Frame<'_>, area: Rect) {
