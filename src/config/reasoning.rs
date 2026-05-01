@@ -134,6 +134,53 @@ impl Qwen35ThinkingLevel {
     }
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GlmThinkingLevel {
+    #[default]
+    Off,
+    On,
+}
+
+impl GlmThinkingLevel {
+    /// 获取对应的 extra_body（用于 OpenAI Chat Completions API）
+    pub fn extra_body(&self) -> serde_json::Value {
+        match self {
+            Self::Off => serde_json::json!({
+                "chat_template_kwargs": { "enable_thinking": false }
+            }),
+            Self::On => serde_json::json!({
+                "chat_template_kwargs": { "enable_thinking": true }
+            }),
+        }
+    }
+
+    /// 获取显示名称
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::On => "On",
+        }
+    }
+
+    /// 获取切换后的下一个级别
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Off => Self::On,
+            Self::On => Self::Off,
+        }
+    }
+
+    /// 从显示名称解析（用于数据库加载）
+    pub fn from_display_name(name: &str) -> Self {
+        match name.to_lowercase().as_str() {
+            "off" => Self::Off,
+            "on" => Self::On,
+            _ => Self::Off,
+        }
+    }
+}
+
 /// 模型匹配的思考级别类型
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -142,6 +189,7 @@ pub enum ThinkingLevelType {
     None,
     DeepSeek(DeepSeekV4ThinkingLevel),
     Qwen(Qwen35ThinkingLevel),
+    Glm(GlmThinkingLevel),
 }
 
 impl ThinkingLevelType {
@@ -151,6 +199,7 @@ impl ThinkingLevelType {
             Self::None => "",
             Self::DeepSeek(level) => level.display_name(),
             Self::Qwen(level) => level.display_name(),
+            Self::Glm(level) => level.display_name(),
         }
     }
 
@@ -160,6 +209,7 @@ impl ThinkingLevelType {
             Self::None => Self::None,
             Self::DeepSeek(level) => Self::DeepSeek(level.next()),
             Self::Qwen(level) => Self::Qwen(level.next()),
+            Self::Glm(level) => Self::Glm(level.next()),
         }
     }
 
@@ -169,6 +219,7 @@ impl ThinkingLevelType {
             Self::None => None,
             Self::DeepSeek(level) => Some(level.extra_body()),
             Self::Qwen(level) => Some(level.extra_body()),
+            Self::Glm(level) => Some(level.extra_body()),
         }
     }
 
@@ -190,6 +241,7 @@ impl ThinkingLevelType {
                 }))
             }
             Self::Qwen(_) => None,
+            Self::Glm(_) => None,
         }
     }
 
@@ -210,6 +262,7 @@ impl fmt::Display for ThinkingLevelType {
             Self::None => write!(f, "none"),
             Self::DeepSeek(level) => write!(f, "deepseek:{}", level.display_name().to_lowercase()),
             Self::Qwen(level) => write!(f, "qwen:{}", level.display_name().to_lowercase()),
+            Self::Glm(level) => write!(f, "glm:{}", level.display_name().to_lowercase()),
         }
     }
 }
@@ -224,6 +277,7 @@ impl ThinkingLevelType {
                 Self::DeepSeek(DeepSeekV4ThinkingLevel::from_display_name(level))
             }
             ["qwen", level] => Self::Qwen(Qwen35ThinkingLevel::from_display_name(level)),
+            ["glm", level] => Self::Glm(GlmThinkingLevel::from_display_name(level)),
             _ => Self::None,
         }
     }
@@ -246,6 +300,10 @@ impl ThinkingMatcher {
         // 不能简单地包含 "3" 因为会匹配到 Qwen 3，而 Qwen 3 使用不同的开关方式
         else if model_lower.contains("qwen") && model_lower.contains("3.") {
             ThinkingLevelType::Qwen(Qwen35ThinkingLevel::On)
+        }
+        // GLM 模型: 包含 "glm"
+        else if model_lower.contains("glm") {
+            ThinkingLevelType::Glm(GlmThinkingLevel::On)
         } else {
             ThinkingLevelType::None
         }
