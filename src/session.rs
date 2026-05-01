@@ -744,6 +744,13 @@ pub enum BackendEvent {
         message_id: Uuid,
         file_diffs_json: String,
     },
+    /// Streaming output from a shell command execution.
+    ShellOutput {
+        session_id: Uuid,
+        content: String,
+        finished: bool,
+        exit_code: Option<i32>,
+    },
 }
 
 impl BackendEvent {
@@ -762,7 +769,8 @@ impl BackendEvent {
             | Self::UsageStats { session_id, .. }
             | Self::InstructionsLoaded { session_id, .. }
             | Self::ContextCompacted { session_id, .. }
-            | Self::SidebarSnapshotReady { session_id, .. } => *session_id,
+            | Self::SidebarSnapshotReady { session_id, .. }
+            | Self::ShellOutput { session_id, .. } => *session_id,
         }
     }
 
@@ -780,7 +788,7 @@ impl BackendEvent {
             | Self::SubagentCompleted { request_id, .. }
             | Self::UsageStats { request_id, .. }
             | Self::SidebarSnapshotReady { request_id, .. } => Some(*request_id),
-            Self::InstructionsLoaded { .. } | Self::ContextCompacted { .. } => None,
+            Self::InstructionsLoaded { .. } | Self::ContextCompacted { .. } | Self::ShellOutput { .. } => None,
         }
     }
 }

@@ -1037,6 +1037,7 @@ impl App {
             self.render_snippet_palette(frame, layout[2]);
             self.render_command_palette(frame, layout[2]);
             self.render_snippet_palette(frame, layout[2]);
+            self.render_shell_completion_palette(frame, layout[2]);
         }
         self.render_prompt_footer(frame, layout[3]);
         self.render_retrying_hint(frame, layout[4]);

@@ -1,6 +1,15 @@
 use super::*;
 use crate::agent::AgentType;
-use crate::session::{Message, MessageRole, ToolExecutionResult};
+use crate::session::{BackendEvent, Message, MessageRole, ToolExecutionResult};
+
+/// Determine the shell command and argument for each platform.
+fn shell_command() -> (&'static str, &'static str) {
+    if cfg!(windows) {
+        ("powershell", "-Command")
+    } else {
+        ("sh", "-c")
+    }
+}
 
 impl App {
     pub(crate) fn handle_event(&mut self, event: Event, runtime: &Runtime) -> Result<()> {
@@ -1280,8 +1289,35 @@ impl App {
             }
         }
 
-        // In shell mode, Tab does nothing (no mode toggle, no thinking level change)
+        // Shell mode completion popup navigation
+        if self.shell_completion.visible {
+            match key.code {
+                KeyCode::Esc => {
+                    self.shell_completion.clear();
+                    return Ok(());
+                }
+                KeyCode::Up => {
+                    self.shell_completion.move_selection(-1);
+                    return Ok(());
+                }
+                KeyCode::Down => {
+                    self.shell_completion.move_selection(1);
+                    return Ok(());
+                }
+                KeyCode::Tab | KeyCode::Enter => {
+                    self.accept_shell_completion();
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+
+        // In shell mode, Tab triggers command completion
         if self.shell_mode && key.code == KeyCode::Tab {
+            let prefix = self.composer.text().trim();
+            if !prefix.is_empty() {
+                self.shell_completion.fetch_completions(prefix);
+            }
             return Ok(());
         }
 
@@ -1415,18 +1451,13 @@ impl App {
         }
 
         // Handle shell mode Esc before composer processing
-        if self.shell_mode {
-            match key.code {
-                KeyCode::Esc => {
-                    self.shell_mode = false;
-                    self.composer.clear();
-                    self.last_notice = Some("Exited shell mode".to_string());
-                    self.command_palette
-                        .sync(self.composer.text(), &self.commands);
-                    return Ok(());
-                }
-                _ => {}
-            }
+        if self.shell_mode && key.code == KeyCode::Esc {
+            self.shell_mode = false;
+            self.composer.clear();
+            self.last_notice = Some("Exited shell mode".to_string());
+            self.command_palette
+                .sync(self.composer.text(), &self.commands);
+            return Ok(());
         }
 
         if let Some(submission) = self.composer.handle_key_with_history(key, true) {
@@ -1536,7 +1567,7 @@ impl App {
     ) -> Result<()> {
         if self.shell_mode {
             self.shell_mode = false;
-            return self.execute_shell_command(submission.trim());
+            return self.execute_shell_command(submission.trim(), runtime);
         }
 
         let trimmed = submission.trim();
@@ -1551,7 +1582,11 @@ impl App {
         Ok(())
     }
 
-    pub(crate) fn execute_shell_command(&mut self, command: &str) -> Result<()> {
+    pub(crate) fn execute_shell_command(
+        &mut self,
+        command: &str,
+        runtime: &Runtime,
+    ) -> Result<()> {
         let command = command.trim();
         if command.is_empty() {
             self.last_notice = Some("No command entered".to_string());
@@ -1564,65 +1599,77 @@ impl App {
         self.store
             .append_message(self.conversation.session_id, &user_message)?;
 
-        // Execute the command
-        let output = match std::process::Command::new("sh")
-            .arg("-c")
-            .arg(command)
-            .output()
-        {
-            Ok(output) => output,
-            Err(error) => {
-                let error_msg =
-                    Message::new(MessageRole::Shell, format!("Failed to execute command: {error}"));
-                self.conversation.push(error_msg.clone());
-                self.store
-                    .append_message(self.conversation.session_id, &error_msg)?;
-                self.last_notice = Some("Shell command failed to start".to_string());
-                self.scroll_messages_to_bottom();
-                return Ok(());
-            }
-        };
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let exit_code = output.status.code();
-
-        // Format the output as a code block
-        let result = if !stdout.is_empty() || !stderr.is_empty() {
-            let mut content = String::new();
-            if !stdout.is_empty() {
-                content.push_str(stdout.trim_end());
-            }
-            if !stderr.is_empty() {
-                if !content.is_empty() {
-                    content.push('\n');
-                }
-                content.push_str(stderr.trim_end());
-            }
-            match exit_code {
-                Some(0) => format!("```\n{content}\n```"),
-                Some(code) => format!("```\n{content}\n```\n\nExit code: {code}"),
-                None => format!("```\n{content}\n```"),
-            }
-        } else {
-            match exit_code {
-                Some(0) => "Command completed successfully (no output)".to_string(),
-                Some(code) => format!("Exit code: {code}"),
-                None => "Command completed (no output)".to_string(),
-            }
-        };
-
-        let assistant_message = Message::new(MessageRole::Shell, result);
-        self.conversation.push(assistant_message.clone());
-        self.store
-            .append_message(self.conversation.session_id, &assistant_message)?;
-
-        self.last_notice = match exit_code {
-            Some(0) => Some("Shell command completed successfully".to_string()),
-            Some(code) => Some(format!("Shell command completed with exit code {code}")),
-            None => Some("Shell command completed (exit code unknown)".to_string()),
-        };
+        // Add a streaming assistant message that will receive the output
+        let mut assistant_message = Message::streaming(MessageRole::Shell, "");
+        assistant_message.streaming = true;
+        self.conversation.push(assistant_message);
+        // Don't persist yet; will be persisted when output finishes
         self.scroll_messages_to_bottom();
+
+        // Clone what we need for the async task
+        let session_id = self.conversation.session_id;
+        let tx = self.backend_tx.clone();
+        let command_owned = command.to_string();
+
+        runtime.spawn(async move {
+            let (shell, arg) = shell_command();
+            let output = match std::process::Command::new(shell)
+                .arg(arg)
+                .arg(&command_owned)
+                .output()
+            {
+                Ok(output) => output,
+                Err(error) => {
+                    let _ = tx.send(BackendEvent::ShellOutput {
+                        session_id,
+                        content: format!("Failed to execute command: {error}"),
+                        finished: true,
+                        exit_code: None,
+                    });
+                    return;
+                }
+            };
+            let exit_code = output.status.code();
+            let mut content = String::new();
+            if output.status.success() {
+                content = String::from_utf8_lossy(&output.stdout).trim_end().to_string();
+                if content.is_empty() {
+                    content = String::from_utf8_lossy(&output.stderr).trim_end().to_string();
+                }
+            } else {
+                if !output.stdout.is_empty() {
+                    content.push_str(String::from_utf8_lossy(&output.stdout).trim_end());
+                }
+                if !output.stderr.is_empty() {
+                    if !content.is_empty() {
+                        content.push('\n');
+                    }
+                    content.push_str(String::from_utf8_lossy(&output.stderr).trim_end());
+                }
+            }
+
+            // Format as code block
+            let formatted = if !content.is_empty() {
+                match exit_code {
+                    Some(0) => format!("```\n{content}\n```"),
+                    Some(code) => format!("```\n{content}\n```\n\nExit code: {code}"),
+                    None => format!("```\n{content}\n```"),
+                }
+            } else {
+                match exit_code {
+                    Some(0) => "Command completed successfully (no output)".to_string(),
+                    Some(code) => format!("Exit code: {code}"),
+                    None => "Command completed (no output)".to_string(),
+                }
+            };
+
+            let _ = tx.send(BackendEvent::ShellOutput {
+                session_id,
+                content: formatted,
+                finished: true,
+                exit_code,
+            });
+        });
 
         Ok(())
     }
@@ -1788,6 +1835,25 @@ impl App {
             .replace_range(actual_start, cursor, &completion);
         self.snippet_state.clear();
         self.refresh_snippet_state();
+        self.command_palette
+            .sync(self.composer.text(), &self.commands);
+    }
+
+    pub(crate) fn accept_shell_completion(&mut self) {
+        let Some(completion) = self.shell_completion.accept() else {
+            return;
+        };
+
+        // Replace the entire input text with the completed command
+        let current = self.composer.text();
+        // Extract the prefix (everything before the cursor, or the entire text)
+        let cursor = self.composer.cursor();
+        let word_start = current[..cursor]
+            .rfind(|c: char| c.is_whitespace())
+            .map(|i| i + 1)
+            .unwrap_or(0);
+
+        self.composer.replace_range(word_start, cursor, &completion);
         self.command_palette
             .sync(self.composer.text(), &self.commands);
     }

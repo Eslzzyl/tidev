@@ -4,6 +4,7 @@ pub mod at_mention;
 pub mod composer;
 pub mod event;
 pub mod mouse_selection;
+pub mod shell_completion;
 pub mod snippet;
 
 pub use composer::Composer;

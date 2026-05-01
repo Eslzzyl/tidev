@@ -220,6 +220,66 @@ impl App {
         frame.render_stateful_widget(list, inner, &mut state);
     }
 
+    pub(super) fn render_shell_completion_palette(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+    ) {
+        if !self.shell_completion.visible || self.shell_completion.candidates.is_empty() {
+            return;
+        }
+
+        let palette = self.palette();
+        let width = area.width.min(72);
+        let height = (self.shell_completion.candidates.len() as u16)
+            .min(6)
+            .saturating_add(2);
+        let rect = Rect::new(
+            area.x,
+            area.y.saturating_sub(height),
+            width,
+            height,
+        );
+        let inner = rect.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+
+        let items: Vec<ListItem> = self
+            .shell_completion
+            .candidates
+            .iter()
+            .map(|cmd| {
+                ListItem::new(Line::from(Span::styled(
+                    cmd.clone(),
+                    Style::default().fg(palette.text),
+                )))
+            })
+            .collect();
+
+        let mut state = ListState::default();
+        state.select(Some(self.shell_completion.selected_index));
+
+        let panel = Block::default()
+            .style(Style::default().bg(palette.panel_alt))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.border_active()))
+            .title(format!("Commands ({})", self.shell_completion.candidates.len()));
+
+        let list = List::new(items)
+            .style(Style::default().bg(palette.panel_alt).fg(palette.text))
+            .highlight_style(
+                Style::default()
+                    .bg(palette.selection_bg)
+                    .fg(palette.selection_fg)
+                    .add_modifier(Modifier::BOLD),
+            );
+
+        frame.render_widget(Clear, rect);
+        frame.render_widget(panel, rect);
+        frame.render_stateful_widget(list, inner, &mut state);
+    }
+
     pub(super) fn render_connect_dialog(&self, frame: &mut Frame<'_>, area: Rect) {
         let Some(dialog) = &self.connect_dialog else {
             return;

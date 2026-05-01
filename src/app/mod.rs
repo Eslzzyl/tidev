@@ -62,6 +62,7 @@ use runtime::state::*;
 use crate::{
     app::at_mention::{AtMentionKind, AtMentionState, current_at_fragment},
     app::input::SnippetState,
+    app::input::shell_completion::ShellCompletionState,
     app::mcp_panel::McpPanelState,
     app::memory_panel::MemoryPanelState,
     app::message_panel::MessagePanelState,
@@ -126,6 +127,7 @@ struct App {
     skills_panel: Option<ui::skills_panel::SkillsPanelState>,
     at_mention: AtMentionState,
     snippet_state: SnippetState,
+    shell_completion: ShellCompletionState,
     pending_tool_execution: Option<PendingToolExecution>,
     permission_dialog: Option<PermissionDialogState>,
     workspace_boundary_dialog: Option<WorkspaceBoundaryDialogState>,
@@ -690,6 +692,7 @@ impl App {
             BackendEvent::InstructionsLoaded { .. } => "InstructionsLoaded",
             BackendEvent::ContextCompacted { .. } => "ContextCompacted",
             BackendEvent::SidebarSnapshotReady { .. } => "SidebarSnapshotReady",
+            BackendEvent::ShellOutput { .. } => "ShellOutput",
         };
         if event_type != "Delta"
             && event_type != "ReasoningDelta"
@@ -1133,6 +1136,52 @@ impl App {
                     }
                     // Invalidate render cache so sidebar re-renders
                     self.invalidate_active_message_render_cache_for(message_id);
+                }
+            }
+            BackendEvent::ShellOutput {
+                session_id: _,
+                content,
+                finished,
+                exit_code,
+            } => {
+                // Find the last streaming Shell assistant message
+                let last_shell_idx = self.conversation.messages.iter().rposition(|m| {
+                    matches!(m.role, MessageRole::Shell) && m.streaming
+                });
+
+                if let Some(idx) = last_shell_idx {
+                    let message_id = self.conversation.messages[idx].id;
+                    self.conversation.messages[idx].content = content.clone();
+                    self.message_layout_index.borrow_mut().valid = false;
+                    self.invalidate_active_message_render_cache_for(message_id);
+
+                    if finished {
+                        self.conversation.messages[idx].streaming = false;
+                        if let Some(code) = exit_code {
+                            if code == 0 {
+                                self.last_notice =
+                                    Some("Shell command completed successfully".to_string());
+                            } else {
+                                self.last_notice =
+                                    Some(format!("Shell command completed with exit code {code}"));
+                            }
+                        } else {
+                            self.last_notice =
+                                Some("Shell command completed (exit code unknown)".to_string());
+                        }
+                        // Persist the final message
+                        let persisted = self.conversation.messages[idx].clone();
+                        if let Err(e) = self.store.append_message(
+                            self.conversation.session_id,
+                            &persisted,
+                        ) {
+                            crate::log_warn!(
+                                "ShellOutput: failed to persist message: {}",
+                                e
+                            );
+                        }
+                        self.scroll_messages_to_bottom();
+                    }
                 }
             }
         }

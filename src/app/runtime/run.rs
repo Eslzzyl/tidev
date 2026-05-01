@@ -106,6 +106,7 @@ impl App {
             skills_panel: None,
             at_mention: AtMentionState::default(),
             snippet_state: SnippetState::default(),
+            shell_completion: ShellCompletionState::default(),
             pending_tool_execution: None,
             permission_dialog: None,
             workspace_boundary_dialog: None,
