@@ -6,6 +6,7 @@ use crate::{
     app::model_panel::{ModelPanelItem, ModelPanelState},
     app::permission::PermissionDialogState,
     app::question::QuestionDialogState,
+    app::ui::workspace_boundary::WorkspaceBoundaryDialogState,
     app::session_panel::{SessionPanelDialog, SessionPanelState, SessionViewMode},
     app::settings_panel::SettingsPanelState,
     app::theme_panel::ThemePanelState,
@@ -1722,6 +1723,64 @@ impl App {
                     .fg(palette.accent_soft),
             ),
             sections[3],
+        );
+    }
+
+    pub(super) fn render_workspace_boundary_dialog(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        dialog: &WorkspaceBoundaryDialogState,
+    ) {
+        let palette = self.palette();
+        let inner = area.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+
+        frame.render_widget(Clear, area);
+
+        let block = Block::default()
+            .style(Style::default().bg(palette.panel_alt))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.error))
+            .title(format!(" {} ", dialog.title()));
+        frame.render_widget(block, area);
+
+        let sections = Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Length(2),
+            Constraint::Length(2),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+        frame.render_widget(
+            Paragraph::new("A tool is trying to access a path outside the workspace:")
+                .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+            sections[0],
+        );
+
+        let path_text = format!(
+            "Requested: {}\nWorkspace: {}",
+            dialog.path_display(),
+            dialog.workspace_display()
+        );
+        frame.render_widget(
+            Paragraph::new(path_text)
+                .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
+            sections[1],
+        );
+
+        frame.render_widget(
+            Paragraph::new("Y allow once · A allow until exit · N deny once · D deny until exit · Esc deny once")
+                .style(
+                    Style::default()
+                        .bg(palette.panel_alt)
+                        .fg(palette.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            sections[2],
         );
     }
 

@@ -108,6 +108,8 @@ impl App {
             snippet_state: SnippetState::default(),
             pending_tool_execution: None,
             permission_dialog: None,
+            workspace_boundary_dialog: None,
+            workspace_boundary_permissions: std::collections::HashMap::new(),
             question_dialog: None,
             running_tool_executions: Vec::new(),
             running_subagent_executions: Vec::new(),
@@ -280,6 +282,8 @@ impl App {
             context_manager: self.context_manager.clone(),
             pending_tool_execution: self.pending_tool_execution.clone(),
             permission_dialog: self.permission_dialog.clone(),
+            workspace_boundary_dialog: self.workspace_boundary_dialog.clone(),
+            workspace_boundary_permissions: self.workspace_boundary_permissions.clone(),
             question_dialog: self.question_dialog.clone(),
             running_tool_executions: self.running_tool_executions.clone(),
             running_subagent_executions: self.running_subagent_executions.clone(),
@@ -405,6 +409,8 @@ impl App {
         self.context_manager = cached.context_manager;
         self.pending_tool_execution = cached.pending_tool_execution;
         self.permission_dialog = cached.permission_dialog;
+        self.workspace_boundary_dialog = cached.workspace_boundary_dialog;
+        self.workspace_boundary_permissions = cached.workspace_boundary_permissions;
         self.question_dialog = cached.question_dialog;
         self.running_tool_executions = cached.running_tool_executions;
         self.running_subagent_executions = cached.running_subagent_executions;
@@ -571,6 +577,8 @@ impl App {
             context_manager,
             pending_tool_execution: None,
             permission_dialog: None,
+            workspace_boundary_dialog: None,
+            workspace_boundary_permissions: std::collections::HashMap::new(),
             question_dialog: None,
             running_tool_executions: Vec::new(),
             running_subagent_executions: Vec::new(),

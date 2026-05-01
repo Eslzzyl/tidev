@@ -22,12 +22,12 @@ pub fn definitions() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition::new::<GlobArgs>(
             "glob",
-            "Find files matching a glob pattern inside the workspace",
+            "Find files matching a glob pattern (relative to workspace root, or absolute). Searching outside the workspace requires user confirmation.",
             ToolPermission::Search,
         ),
         ToolDefinition::new::<GrepArgs>(
             "grep",
-            "Search workspace files with a regular expression",
+            "Search files with a regular expression (relative to workspace root, or absolute). Searching outside the workspace requires user confirmation.",
             ToolPermission::Search,
         ),
     ]
@@ -37,6 +37,7 @@ pub fn execute_tool_call(
     workspace_root: &Path,
     call: &crate::session::ToolCall,
     _max_output_bytes: usize,
+    allow_outside: bool,
 ) -> Result<String> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
@@ -46,13 +47,13 @@ pub fn execute_tool_call(
             let args = serde_json::from_value::<GlobArgs>(arguments)
                 .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
             let path = args.path.unwrap_or_else(|| ".".to_string());
-            glob_paths(workspace_root, path, &args.pattern)
+            glob_paths(workspace_root, path, &args.pattern, allow_outside)
         }
         Some("grep") => {
             let args = serde_json::from_value::<GrepArgs>(arguments)
                 .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
             let path = args.path.unwrap_or_else(|| ".".to_string());
-            grep_paths(workspace_root, path, &args.pattern, args.include.as_deref())
+            grep_paths(workspace_root, path, &args.pattern, args.include.as_deref(), allow_outside)
         }
         Some(other) => bail!("unsupported search tool '{}'", other),
         None => bail!("unknown tool '{}'", call.name),
@@ -63,8 +64,9 @@ fn glob_paths(
     workspace_root: &Path,
     relative_path: impl AsRef<Path>,
     pattern: &str,
+    allow_outside: bool,
 ) -> Result<String> {
-    let search_root = resolve_workspace_path(workspace_root, relative_path.as_ref())?;
+    let search_root = resolve_workspace_path(workspace_root, relative_path.as_ref(), allow_outside)?;
     if !search_root.exists() {
         bail!("{} does not exist", search_root.display());
     }
@@ -176,12 +178,13 @@ fn grep_paths(
     relative_path: impl AsRef<Path>,
     pattern: &str,
     include: Option<&str>,
+    allow_outside: bool,
 ) -> Result<String> {
     if pattern.trim().is_empty() {
         bail!("pattern cannot be empty");
     }
 
-    let search_root = resolve_workspace_path(workspace_root, relative_path.as_ref())?;
+    let search_root = resolve_workspace_path(workspace_root, relative_path.as_ref(), allow_outside)?;
     if !search_root.exists() {
         bail!("{} does not exist", search_root.display());
     }

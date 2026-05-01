@@ -17,27 +17,27 @@ pub fn definitions() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition::new::<ReadArgs>(
             "read",
-            "Read a file or directory inside the workspace. Supports text files (with pagination), images (as attachments), and directory listing.",
+            "Read a file or directory (relative to workspace root, or absolute). Accessing files outside the workspace requires user confirmation. Supports text files (with pagination), images (as attachments), and directory listing.",
             ToolPermission::Read,
         ),
         ToolDefinition::new::<WriteArgs>(
             "write",
-            "Write a text file inside the workspace. If this is an existing file, you MUST use the Read tool first to read the file's contents. This tool will fail if you did not read the file first.",
+            "Write a text file (relative to workspace root, or absolute). Accessing files outside the workspace requires user confirmation. If this is an existing file, you MUST use the Read tool first to read the file's contents. This tool will fail if you did not read the file first.",
             ToolPermission::Write,
         ),
         ToolDefinition::new::<EditArgs>(
             "edit",
-            "Edit a file by replacing text inside it. You MUST use the Read tool at least once in the conversation before editing. This tool will error if you attempt an edit without reading the file. If the file has been modified since you last read it, you must read it again before editing.",
+            "Edit a file by replacing text inside it (relative to workspace root, or absolute). Accessing files outside the workspace requires user confirmation. You MUST use the Read tool at least once in the conversation before editing. This tool will error if you attempt an edit without reading the file. If the file has been modified since you last read it, you must read it again before editing.",
             ToolPermission::Edit,
         ),
         ToolDefinition::new::<ApplyPatchArgs>(
             "apply_patch",
-            "Apply a unified diff patch to a file inside the workspace. You MUST use the Read tool at least once before applying a patch to an existing file. This tool will fail if you did not read the file first.",
+            "Apply a unified diff patch to a file (relative to workspace root, or absolute). Accessing files outside the workspace requires user confirmation. You MUST use the Read tool at least once before applying a patch to an existing file. This tool will fail if you did not read the file first.",
             ToolPermission::Edit,
         ),
         ToolDefinition::new::<ListArgs>(
             "list",
-            "List entries in a directory inside the workspace",
+            "List entries in a directory (relative to workspace root, or absolute). Accessing directories outside the workspace requires user confirmation.",
             ToolPermission::Read,
         ),
     ]
@@ -48,6 +48,7 @@ pub fn execute_tool_call(
     config_dir: &Path,
     call: &crate::session::ToolCall,
     _max_output_bytes: usize,
+    allow_outside: bool,
 ) -> Result<crate::session::ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
@@ -62,12 +63,13 @@ pub fn execute_tool_call(
                 args.path,
                 args.offset,
                 args.limit,
+                allow_outside,
             )
         }
         Some("write") => {
             let args = serde_json::from_value::<WriteArgs>(arguments)
                 .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
-            let absolute_path = resolve_workspace_path(workspace_root, Path::new(&args.path))?;
+            let absolute_path = resolve_workspace_path(workspace_root, Path::new(&args.path), allow_outside)?;
             let original_exists = absolute_path.exists();
             let old_content = if original_exists {
                 read_existing_text(&absolute_path).unwrap_or_default()
@@ -75,7 +77,7 @@ pub fn execute_tool_call(
                 String::new()
             };
 
-            write_file(workspace_root, &args.path, &args.content)?;
+            write_file(workspace_root, &args.path, &args.content, allow_outside)?;
             Ok(file_change_output(
                 workspace_root,
                 &absolute_path,
@@ -94,6 +96,7 @@ pub fn execute_tool_call(
                 &args.old_text,
                 &args.new_text,
                 args.replace_all.unwrap_or(false),
+                allow_outside,
             )
         }
         Some("apply_patch") => {
@@ -103,7 +106,7 @@ pub fn execute_tool_call(
                 .with_context(|| format!("failed to parse patch for tool '{}'", call.name))?;
             let file_path = extract_patch_file_path(&patch)
                 .with_context(|| "failed to determine file path from patch".to_string())?;
-            let absolute_path = resolve_workspace_path(workspace_root, Path::new(&file_path))?;
+            let absolute_path = resolve_workspace_path(workspace_root, Path::new(&file_path), allow_outside)?;
             let original_exists = absolute_path.exists();
             let old_content = read_existing_text(&absolute_path)?;
             let updated = apply_patch_contents(&old_content, &patch)?;
@@ -136,7 +139,7 @@ pub fn execute_tool_call(
             let args = serde_json::from_value::<ListArgs>(arguments)
                 .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
             let path = args.path.unwrap_or_else(|| ".".to_string());
-            let output = list_dir(workspace_root, path)?;
+            let output = list_dir(workspace_root, path, allow_outside)?;
             Ok(crate::session::ToolExecutionResult::new(output))
         }
         Some(other) => bail!("unsupported file tool '{}'", other),
@@ -272,8 +275,9 @@ pub(super) fn read_path(
     relative_path: impl AsRef<Path>,
     offset: Option<i64>,
     limit: Option<i64>,
+    allow_outside: bool,
 ) -> Result<ToolExecutionResult> {
-    let path = resolve_workspace_path(workspace_root, relative_path.as_ref())?;
+    let path = resolve_workspace_path(workspace_root, relative_path.as_ref(), allow_outside)?;
 
     if !path.exists() {
         let suggestions = find_fuzzy_suggestions(workspace_root, relative_path.as_ref())?;
@@ -289,7 +293,7 @@ pub(super) fn read_path(
     }
 
     if path.is_dir() {
-        let output = list_dir(workspace_root, &relative_path)?;
+        let output = list_dir(workspace_root, &relative_path, allow_outside)?;
         let mut result = ToolExecutionResult::new(output);
         result
             .attachments
@@ -481,7 +485,7 @@ fn is_binary_file(path: &Path) -> Result<bool> {
 
 fn find_fuzzy_suggestions(workspace_root: &Path, relative_path: &Path) -> Result<Vec<String>> {
     let parent = relative_path.parent().unwrap_or(Path::new("."));
-    let absolute_parent = resolve_workspace_path(workspace_root, parent)?;
+    let absolute_parent = resolve_workspace_path(workspace_root, parent, false)?;
     if !absolute_parent.exists() || !absolute_parent.is_dir() {
         return Ok(vec![]);
     }
@@ -522,8 +526,9 @@ pub(super) fn write_file(
     workspace_root: &Path,
     relative_path: impl AsRef<Path>,
     content: &str,
+    allow_outside: bool,
 ) -> Result<()> {
-    let path = resolve_workspace_path(workspace_root, relative_path.as_ref())?;
+    let path = resolve_workspace_path(workspace_root, relative_path.as_ref(), allow_outside)?;
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -534,8 +539,12 @@ pub(super) fn write_file(
     Ok(())
 }
 
-pub(super) fn list_dir(workspace_root: &Path, relative_path: impl AsRef<Path>) -> Result<String> {
-    let path = resolve_workspace_path(workspace_root, relative_path.as_ref())?;
+pub(super) fn list_dir(
+    workspace_root: &Path,
+    relative_path: impl AsRef<Path>,
+    allow_outside: bool,
+) -> Result<String> {
+    let path = resolve_workspace_path(workspace_root, relative_path.as_ref(), allow_outside)?;
 
     if !path.is_dir() {
         bail!("{} is not a directory", path.display());
@@ -575,8 +584,9 @@ pub(super) fn edit_file(
     old_text: &str,
     new_text: &str,
     replace_all: bool,
+    allow_outside: bool,
 ) -> Result<ToolExecutionResult> {
-    let path = resolve_workspace_path(workspace_root, relative_path.as_ref())?;
+    let path = resolve_workspace_path(workspace_root, relative_path.as_ref(), allow_outside)?;
     let original_exists = path.exists();
     let old_contents =
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
@@ -1120,15 +1130,16 @@ fn multi_occurrence_replacer(content: &str, find: &str) -> Vec<String> {
 pub fn read_file_for_at_reference(
     workspace_root: &Path,
     relative_path: &str,
+    allow_outside: bool,
 ) -> Result<(String, bool)> {
-    let path = resolve_workspace_path(workspace_root, Path::new(relative_path))?;
+    let path = resolve_workspace_path(workspace_root, Path::new(relative_path), allow_outside)?;
 
     if !path.exists() {
         bail!("File not found: {}", path.display());
     }
 
     if path.is_dir() {
-        let output = list_dir(workspace_root, relative_path)?;
+        let output = list_dir(workspace_root, relative_path, allow_outside)?;
         return Ok((output, false));
     }
 

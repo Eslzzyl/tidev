@@ -231,6 +231,7 @@ impl ToolRegistry {
         session_id: uuid::Uuid,
         call: &crate::session::ToolCall,
         mode: SessionMode,
+        allow_outside: bool,
     ) -> Result<crate::session::ToolExecutionResult> {
         if self.mcp.definition_for(&call.name).is_some() {
             return runtime.block_on(self.mcp.execute_call(call));
@@ -247,6 +248,7 @@ impl ToolRegistry {
             self.rtk_enabled,
             &self.memory_store,
             mode,
+            allow_outside,
         )?;
 
         // Image capability check: If the result contains images but the model doesn't support them,
@@ -271,6 +273,7 @@ impl ToolRegistry {
                 let absolute_path = super::builtin::utils::resolve_workspace_path(
                     &self.workspace_root,
                     std::path::Path::new(path_str),
+                    allow_outside,
                 )?;
                 if absolute_path.exists() && absolute_path.is_file() {
                     self.file_read_tracker

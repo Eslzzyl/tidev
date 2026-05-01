@@ -210,3 +210,4 @@ fn sanitize_name(value: &str) -> String {
 }
 
 pub use tools::execute_shell_tool_call;
+pub use tools::extract_file_path_from_patch;

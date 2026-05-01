@@ -75,6 +75,7 @@ use crate::{
     app::settings_panel::SettingsPanelState,
     app::theme_panel::ThemePanelState,
     app::ui::rename::RenameSessionDialogState,
+    app::ui::workspace_boundary::WorkspaceBoundaryDialogState,
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
     context::ContextManager,
     instructions,
@@ -127,6 +128,10 @@ struct App {
     snippet_state: SnippetState,
     pending_tool_execution: Option<PendingToolExecution>,
     permission_dialog: Option<PermissionDialogState>,
+    workspace_boundary_dialog: Option<WorkspaceBoundaryDialogState>,
+    /// In-memory workspace boundary permissions (path -> allowed).
+    /// Cleared when tidev exits or session switches.
+    workspace_boundary_permissions: std::collections::HashMap<String, bool>,
     question_dialog: Option<QuestionDialogState>,
     running_tool_executions: Vec<RunningToolExecution>,
     running_subagent_executions: Vec<RunningSubagentExecution>,
@@ -276,7 +281,7 @@ impl App {
         }
 
         // For text files, read with truncation like opencode's read tool
-        match read_file_for_at_reference(&self.workspace_root, path) {
+        match read_file_for_at_reference(&self.workspace_root, path, false) {
             Ok((tool_output, truncated)) => {
                 // Also read full content for display purposes
                 let content = std::fs::read_to_string(&absolute).unwrap_or_else(|_| String::new());

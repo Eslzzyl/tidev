@@ -546,6 +546,7 @@ impl App {
     pub(crate) fn can_scroll_conversation(&self) -> bool {
         self.screen == Screen::Chat
             && self.permission_dialog.is_none()
+            && self.workspace_boundary_dialog.is_none()
             && self.connect_dialog.is_none()
             && self.theme_panel.is_none()
             && self.model_panel.is_none()
@@ -1076,6 +1077,10 @@ impl App {
 
         if self.permission_dialog.is_some() {
             return self.handle_permission_dialog_key(key, runtime);
+        }
+
+        if self.workspace_boundary_dialog.is_some() {
+            return self.handle_workspace_boundary_dialog_key(key, runtime);
         }
 
         if self.question_dialog.is_some() {

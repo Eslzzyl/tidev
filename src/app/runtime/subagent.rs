@@ -379,6 +379,7 @@ async fn execute_child_tool_call(
                     context.child_session_id,
                     tool_call,
                     SessionMode::Build,
+                    false, // allow_outside: subagent execution doesn't allow outside workspace
                 )
             })?;
             Ok(result)

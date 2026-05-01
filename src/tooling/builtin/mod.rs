@@ -53,16 +53,17 @@ pub fn execute_tool_call(
     rtk_enabled: bool,
     memory_store: &Arc<crate::memory::types::MemoryStore>,
     mode: SessionMode,
+    allow_outside: bool,
 ) -> Result<crate::session::ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
 
     let result = match canonical_tool_name(&call.name) {
         Some("read") | Some("write") | Some("edit") | Some("apply_patch") | Some("list") => {
-            file::execute_tool_call(workspace_root, config_dir, call, max_output_bytes)?
+            file::execute_tool_call(workspace_root, config_dir, call, max_output_bytes, allow_outside)?
         }
         Some("glob") | Some("grep") => {
-            let output = search::execute_tool_call(workspace_root, call, max_output_bytes)?;
+            let output = search::execute_tool_call(workspace_root, call, max_output_bytes, allow_outside)?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("bash") => {

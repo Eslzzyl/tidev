@@ -285,6 +285,62 @@ impl App {
                 continue;
             };
 
+            // Check for workspace boundary violations before proceeding
+            if let Some(violation_path) = crate::app::ui::workspace_boundary::extract_boundary_violation_path(
+                &self.workspace_root,
+                &tool_call,
+            ) {
+                let path_str = violation_path.display().to_string();
+
+                // Check stored permissions in memory
+                if let Some(allowed) = self.is_workspace_boundary_allowed(&path_str) {
+                    if !allowed {
+                        // Previously denied, record denial and continue
+                        let output = format!(
+                            "[User denied access] The path '{}' is outside the workspace.",
+                            path_str
+                        );
+                        self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
+                        self.advance_pending_tool_execution();
+                        continue;
+                    }
+                    // Previously allowed — execute with allow_outside=true
+                    let mut result = self
+                        .tools
+                        .execute_call(
+                            runtime.handle(),
+                            &self.store,
+                            self.conversation.session_id,
+                            &tool_call,
+                            self.mode,
+                            true,
+                        )
+                        .unwrap_or_else(|error| {
+                            ToolExecutionResult::new(format!("Tool failed: {error}"))
+                        });
+                    if !result.output.starts_with("Tool failed:") {
+                        result
+                            .output
+                            .push_str("\n\n[User approved access to path outside the workspace]");
+                    }
+                    self.record_tool_result(tool_call, result)?;
+                    self.advance_pending_tool_execution();
+                    continue;
+                } else {
+                    // No stored permission - show dialog
+                    self.workspace_boundary_dialog = Some(crate::app::ui::workspace_boundary::WorkspaceBoundaryDialogState {
+                        pending: crate::app::ui::workspace_boundary::PendingWorkspaceBoundaryCheck {
+                            tool_call: tool_call.clone(),
+                            requested_path: violation_path,
+                            workspace_root: self.workspace_root.clone(),
+                        },
+                        current_index,
+                        total,
+                    });
+                    return Ok(());
+                }
+            }
+
             if tool_call.name == "question" {
                 let args = match serde_json::from_str::<QuestionArgs>(&tool_call.arguments) {
                     Ok(args) => args,
@@ -493,6 +549,7 @@ impl App {
                 self.conversation.session_id,
                 &tool_call,
                 self.mode,
+                false, // allow_outside: normal execution doesn't allow outside workspace
             )
             .unwrap_or_else(|error| ToolExecutionResult::new(format!("Tool failed: {error}")));
         self.record_tool_result(tool_call, result)?;
@@ -738,6 +795,7 @@ impl App {
                                 self.conversation.session_id,
                                 &tool_call,
                                 self.mode,
+                                false, // allow_outside: normal execution doesn't allow outside workspace
                             )
                             .unwrap_or_else(|error| {
                                 ToolExecutionResult::new(format!("Tool failed: {error}"))

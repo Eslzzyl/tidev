@@ -167,7 +167,7 @@ macro_rules! tool_args {
 
 tool_args! {
     pub struct ReadArgs {
-        path: string("Path to read relative to the workspace root"),
+        path: string("Path to read (relative to workspace root, or absolute)"),
         offset: optional_integer("1-indexed line number to start reading from"),
         limit: optional_integer("Maximum number of lines to read"),
     }
@@ -175,14 +175,14 @@ tool_args! {
 
 tool_args! {
     pub struct WriteArgs {
-        path: string("Path to write relative to the workspace root"),
+        path: string("Path to write (relative to workspace root, or absolute)"),
         content: string("File contents to write"),
     }
 }
 
 tool_args! {
     pub struct EditArgs {
-        path: string("Path to edit relative to the workspace root"),
+        path: string("Path to edit (relative to workspace root, or absolute)"),
         old_text: string("Text to replace; must match exactly"),
         new_text: string("Replacement text"),
         replace_all: optional_boolean("Replace all matches instead of only the first"),
@@ -197,21 +197,21 @@ tool_args! {
 
 tool_args! {
     pub struct ListArgs {
-        path: optional_string("Directory path relative to the workspace root"),
+        path: optional_string("Directory path (relative to workspace root, or absolute)"),
     }
 }
 
 tool_args! {
     pub struct GlobArgs {
         pattern: string("Glob pattern to match against workspace-relative paths"),
-        path: optional_string("Directory path to search relative to the workspace root"),
+        path: optional_string("Directory path to search (relative to workspace root, or absolute)"),
     }
 }
 
 tool_args! {
     pub struct GrepArgs {
         pattern: string("Regular expression to search for in file contents"),
-        path: optional_string("Directory path to search relative to the workspace root"),
+        path: optional_string("Directory path to search (relative to workspace root, or absolute)"),
         include: optional_string("File glob to include in the search"),
     }
 }
@@ -403,6 +403,7 @@ pub(super) fn execute_tool_call(
         rtk_enabled,
         memory_store,
         mode,
+        false, // allow_outside: skill execution doesn't allow outside workspace
     )?;
 
     // Post-execution: record file reads
@@ -476,4 +477,24 @@ fn resolve_workspace_path_safe(
     }
 
     Ok(resolved)
+}
+
+/// Extract the file path from a unified diff patch string.
+/// Returns the file path if found, or None if parsing fails.
+pub fn extract_file_path_from_patch(patch: &str) -> Option<String> {
+    // Look for the "+++ " line which indicates the new file path
+    for line in patch.lines() {
+        if let Some(stripped) = line.strip_prefix("+++ ") {
+            // Remove any timestamp after the path (format: "+++ b/path/to/file\t2024-01-01...")
+            let path = stripped.split('\t').next().unwrap_or(stripped);
+            // Remove the "b/" prefix if present (standard git diff format)
+            let path = if let Some(p) = path.strip_prefix("b/") {
+                p
+            } else {
+                path
+            };
+            return Some(path.to_string());
+        }
+    }
+    None
 }
