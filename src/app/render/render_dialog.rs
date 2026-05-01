@@ -21,7 +21,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     prelude::{Frame, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Cell, List, ListItem, ListState, Paragraph, Row, Table, TableState, Wrap},
 };
 
 use super::{App, connect::ProviderPickerItem, render::*};
@@ -1124,8 +1124,31 @@ impl App {
                 sections[2],
             );
         } else {
-            let mut items: Vec<ListItem> = Vec::new();
+            // Compute minimum width needed for the right column
+            let max_right_width = matches
+                .iter()
+                .map(|&idx| {
+                    let session = &panel.sessions[idx];
+                    let pm = format!(
+                        "{} / {}",
+                        shorten(&session.provider_display_name, 12),
+                        shorten(&session.model_display_name, 14)
+                    );
+                    let time = session.updated_at.format("%Y-%m-%d %H:%M").to_string();
+                    let mut w = pm.chars().count() + 2 + time.chars().count();
+                    if session.session_id == self.conversation.session_id {
+                        w += 9; // "  current"
+                    }
+                    if session.parent_session_id.is_some() {
+                        w += 7; // "  child"
+                    }
+                    w
+                })
+                .max()
+                .unwrap_or(35)
+                .max(30) as u16;
 
+            let mut rows: Vec<Row> = Vec::new();
             let mut current_workspace = String::new();
 
             for index in matches.iter() {
@@ -1135,15 +1158,18 @@ impl App {
                     && session.workspace_root != current_workspace
                 {
                     if !current_workspace.is_empty() {
-                        items.push(ListItem::new(Line::from("")));
+                        rows.push(Row::new(vec![Cell::from(""), Cell::from("")]));
                     }
                     current_workspace = session.workspace_root.clone();
-                    items.push(ListItem::new(Line::from(vec![Span::styled(
-                        format!("[ {} ]", session.workspace_root),
-                        Style::default()
-                            .fg(palette.accent)
-                            .add_modifier(Modifier::BOLD),
-                    )])));
+                    rows.push(Row::new(vec![
+                        Cell::from(Line::from(vec![Span::styled(
+                            format!("[ {} ]", session.workspace_root),
+                            Style::default()
+                                .fg(palette.accent)
+                                .add_modifier(Modifier::BOLD),
+                        )])),
+                        Cell::from(""),
+                    ]));
                 }
 
                 let is_current = session.session_id == self.conversation.session_id;
@@ -1156,64 +1182,70 @@ impl App {
                     ""
                 };
 
-                let mut spans = vec![
+                // Left cell: checkbox + title
+                let left_line = Line::from(vec![
                     Span::raw(checkbox),
                     Span::styled(
-                        shorten(&session.title, 24),
+                        shorten(&session.title, sections[2].width.saturating_sub(max_right_width + 4) as usize),
                         Style::default()
                             .fg(palette.text)
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Span::raw("  "),
+                ]);
+
+                // Right cell: provider/model + time + optional badges (right-aligned)
+                let provider_model = format!(
+                    "{} / {}",
+                    shorten(&session.provider_display_name, 12),
+                    shorten(&session.model_display_name, 14)
+                );
+                let mut right_spans: Vec<Span> = vec![
                     Span::styled(
-                        format!("({})", session.session_id.simple()),
-                        Style::default().fg(palette.muted),
-                    ),
-                    Span::raw("  "),
-                    Span::styled(
-                        format!(
-                            "{} / {}",
-                            shorten(&session.provider_display_name, 12),
-                            shorten(&session.model_display_name, 14)
-                        ),
+                        provider_model.clone(),
                         Style::default().fg(palette.accent_soft),
                     ),
                     Span::raw("  "),
-                    Span::styled(updated_at, Style::default().fg(palette.muted)),
+                    Span::styled(
+                        updated_at.clone(),
+                        Style::default().fg(palette.muted),
+                    ),
                 ];
 
                 if is_current {
-                    spans.push(Span::raw("  "));
-                    spans.push(Span::styled(
+                    right_spans.push(Span::raw("  "));
+                    right_spans.push(Span::styled(
                         "current",
                         Style::default().fg(palette.success),
                     ));
                 }
                 if session.parent_session_id.is_some() {
-                    spans.push(Span::raw("  "));
-                    spans.push(Span::styled(
+                    right_spans.push(Span::raw("  "));
+                    right_spans.push(Span::styled(
                         "child",
                         Style::default().fg(palette.accent_soft),
                     ));
                 }
-                items.push(ListItem::new(Line::from(spans)));
+
+                let right_line = Line::from(right_spans).alignment(Alignment::Right);
+
+                rows.push(Row::new(vec![Cell::from(left_line), Cell::from(right_line)]));
             }
 
-            let mut state = ListState::default();
+            let mut state = TableState::default();
             state.select(Some(
                 panel.selected_index.min(matches.len().saturating_sub(1)),
             ));
 
-            let list = List::new(items)
+            let table = Table::new(rows, [Constraint::Fill(1), Constraint::Min(max_right_width)])
                 .style(Style::default().bg(palette.panel).fg(palette.text))
-                .highlight_style(
+                .row_highlight_style(
                     Style::default()
                         .bg(palette.selection_bg)
                         .fg(palette.selection_fg)
                         .add_modifier(Modifier::BOLD),
                 );
 
-            frame.render_stateful_widget(list, sections[2], &mut state);
+            frame.render_stateful_widget(table, sections[2], &mut state);
         }
 
         let help_text = if panel.operation_mode
