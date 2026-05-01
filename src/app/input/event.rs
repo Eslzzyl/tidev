@@ -726,9 +726,11 @@ impl App {
             message.streaming = false;
             // Keep original reasoning and content intact to preserve thinking at interruption point
             let persisted = message.clone();
+            let message_id = message.id;
             let _ = self
                 .store
                 .append_message(self.conversation.session_id, &persisted);
+            self.invalidate_active_message_render_cache_for(message_id);
         }
 
         self.last_notice = Some("Request cancelled".to_string());
