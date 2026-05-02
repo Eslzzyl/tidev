@@ -10,13 +10,31 @@ use uuid::Uuid;
 
 use crate::{
     config::reasoning::ThinkingLevelType,
-    session::{BackendEvent, Message, MessageRole},
+    session::{BackendEvent, Message, MessageRole, ToolCall},
     web::{
         error::{AppError, WebResult},
         event_bus::AppEvent,
         state::AppState,
     },
 };
+
+/// Tool call in the API
+#[derive(Serialize)]
+pub struct ApiToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: String,
+}
+
+impl From<&ToolCall> for ApiToolCall {
+    fn from(tc: &ToolCall) -> Self {
+        Self {
+            id: tc.id.clone(),
+            name: tc.name.clone(),
+            arguments: tc.arguments.clone(),
+        }
+    }
+}
 
 /// Message in the API
 #[derive(Serialize)]
@@ -25,6 +43,24 @@ pub struct ApiMessage {
     pub role: String,
     pub content: String,
     pub created_at: String,
+    /// Thinking/reasoning content for assistant messages
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
+    /// Tool call ID for tool role messages
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    /// Tool name for tool role messages
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+    /// Tool calls for assistant messages
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ApiToolCall>>,
+    /// Unified diff patch for write/edit tool results
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diff: Option<String>,
+    /// File path affected by the tool
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filepath: Option<String>,
 }
 
 /// List messages response
@@ -87,6 +123,20 @@ pub async fn list_messages(
             },
             content: msg.content,
             created_at: msg.created_at.to_rfc3339(),
+            reasoning: if msg.reasoning.is_empty() {
+                None
+            } else {
+                Some(msg.reasoning)
+            },
+            tool_call_id: msg.tool_call_id,
+            tool_name: msg.tool_name,
+            tool_calls: if msg.tool_calls.is_empty() {
+                None
+            } else {
+                Some(msg.tool_calls.iter().map(ApiToolCall::from).collect())
+            },
+            diff: msg.metadata.diff.clone(),
+            filepath: msg.metadata.filepath.clone(),
         })
         .collect();
 
@@ -274,6 +324,8 @@ pub async fn send_message(
                     request_id,
                     tool_call_id: tool_call.id,
                     output: result.output,
+                    diff: result.metadata.diff.clone(),
+                    filepath: result.metadata.filepath.clone(),
                 }),
                 _ => None,
             };

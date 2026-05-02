@@ -1,46 +1,12 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { sessionStore } from '../stores/session';
 	import { uiStore } from '../stores/ui';
 	import { api } from '../api/client';
 
-	let isCreating = $state(false);
-	let newSessionTitle = $state('');
-	let showNewSessionInput = $state(false);
-	let workspaceRoot = $state('');
-
-	// Load workspace info on mount
-	onMount(() => {
-		api.getWorkspace().then((workspace) => {
-			workspaceRoot = workspace.workspace_root;
-		}).catch((err) => {
-			console.error('Failed to load workspace:', err);
-		});
-	});
-
-	async function handleCreateSession() {
-		if (!newSessionTitle.trim()) return;
-
-		isCreating = true;
-		try {
-			const response = await api.createSession({
-				workspace_root: workspaceRoot || '.',
-				title: newSessionTitle.trim()
-			});
-			const { sessions } = await api.listSessions();
-			sessionStore.setSessions(sessions);
-			const session = await api.getSession(response.session_id);
-			sessionStore.setCurrentSession(session);
-			const { messages } = await api.listMessages(response.session_id);
-			sessionStore.setMessages(messages);
-			newSessionTitle = '';
-			showNewSessionInput = false;
-			uiStore.closeMobileMenu();
-		} catch (err) {
-			sessionStore.setError(err instanceof Error ? err.message : 'Failed to create session');
-		} finally {
-			isCreating = false;
-		}
+	function handleNewSession() {
+		// Start a draft session - clears the chat area but doesn't create session yet
+		sessionStore.startDraftSession();
+		uiStore.closeMobileMenu();
 	}
 
 	async function handleSelectSession(sessionId: string) {
@@ -93,40 +59,38 @@
 	<div class="flex items-center justify-between border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
 		<h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Sessions</h2>
 		<button
-			onclick={() => (showNewSessionInput = !showNewSessionInput)}
-			class="rounded p-1 text-neutral-600 hover:bg-neutral-200 dark:text-neutral-400 dark:hover:bg-neutral-800"
+			onclick={handleNewSession}
+			class="flex items-center gap-1 rounded bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
 			aria-label="New session"
 		>
-			<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+			<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
 			</svg>
+			<span>New</span>
 		</button>
 	</div>
 
-	<!-- New Session Input -->
-	{#if showNewSessionInput}
-		<div class="border-b border-neutral-200 p-3 dark:border-neutral-800">
-			<form onsubmit={(e) => { e.preventDefault(); handleCreateSession(); }} class="flex gap-2">
-				<input
-					type="text"
-					bind:value={newSessionTitle}
-					placeholder="Session name..."
-					class="flex-1 rounded border border-neutral-300 bg-white px-3 py-1.5 text-sm focus:border-neutral-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
-				/>
-				<button
-					type="submit"
-					disabled={isCreating || !newSessionTitle.trim()}
-					class="rounded bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
-				>
-					{isCreating ? '...' : 'Create'}
-				</button>
-			</form>
-		</div>
-	{/if}
-
 	<!-- Session List -->
 	<div class="flex-1 overflow-y-auto">
-		{#if $sessionStore.sessions.length === 0}
+		<!-- Draft Session Item -->
+		{#if $sessionStore.isDraftSession}
+			<div class="border-b border-neutral-200 dark:border-neutral-800">
+				<button
+					class="flex w-full items-center bg-blue-50 px-4 py-3 text-left dark:bg-blue-950/30"
+				>
+					<div class="min-w-0 flex-1">
+						<p class="truncate text-sm font-medium text-blue-900 dark:text-blue-100">
+							{$sessionStore.draftTitle}
+						</p>
+						<p class="mt-0.5 text-xs text-blue-600 dark:text-blue-400">
+							Draft • Type to create
+						</p>
+					</div>
+				</button>
+			</div>
+		{/if}
+
+		{#if $sessionStore.sessions.length === 0 && !$sessionStore.isDraftSession}
 			<div class="p-4 text-center text-sm text-neutral-500 dark:text-neutral-400">
 				No sessions yet
 			</div>

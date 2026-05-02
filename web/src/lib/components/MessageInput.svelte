@@ -2,7 +2,6 @@
 	import { sessionStore } from '../stores/session';
 	import { uiStore } from '../stores/ui';
 	import { api } from '../api/client';
-	import { sseClient } from '../api/sse';
 
 	let inputValue = $state('');
 	let isSubmitting = $state(false);
@@ -24,12 +23,62 @@
 
 	async function handleSubmit() {
 		if (!inputValue.trim() || isSubmitting) return;
+
+		// Handle draft session - create session on first message
+		if ($sessionStore.isDraftSession) {
+			await handleCreateSessionAndSendMessage();
+			return;
+		}
+
 		if (!$sessionStore.currentSessionId) {
 			sessionStore.setError('No active session');
 			return;
 		}
 
+		await sendMessageToSession($sessionStore.currentSessionId);
+	}
+
+	async function handleCreateSessionAndSendMessage() {
+		isSubmitting = true;
 		const content = inputValue.trim();
+
+		try {
+			// Get workspace info
+			const workspace = await api.getWorkspace();
+
+			// Create session with first message as title (truncated)
+			const title = content.length > 50 ? content.slice(0, 50) + '...' : content;
+
+			const { session_id } = await api.createSession({
+				workspace_root: workspace.workspace_root,
+				title
+			});
+
+			// Get the new session details
+			const session = await api.getSession(session_id);
+			sessionStore.commitDraftSession(session);
+
+			// Update sessions list
+			const { sessions } = await api.listSessions();
+			sessionStore.setSessions(sessions);
+
+			// Clear input and resize
+			inputValue = '';
+			if (textareaRef) textareaRef.style.height = 'auto';
+
+			// Send the first message
+			await sendMessageToSession(session_id);
+		} catch (err) {
+			sessionStore.setError(err instanceof Error ? err.message : 'Failed to create session');
+		} finally {
+			isSubmitting = false;
+		}
+	}
+
+	async function sendMessageToSession(sessionId: string) {
+		const content = inputValue.trim();
+		if (!content) return;
+
 		inputValue = '';
 		if (textareaRef) textareaRef.style.height = 'auto';
 
@@ -38,10 +87,10 @@
 
 		try {
 			// Send message
-			const response = await api.sendMessage($sessionStore.currentSessionId, { content });
+			await api.sendMessage(sessionId, { content });
 
 			// Refresh messages
-			const { messages } = await api.listMessages($sessionStore.currentSessionId);
+			const { messages } = await api.listMessages(sessionId);
 			sessionStore.setMessages(messages);
 		} catch (err) {
 			sessionStore.setError(err instanceof Error ? err.message : 'Failed to send message');
@@ -57,6 +106,22 @@
 			uiStore.setStreaming(false);
 		}
 	}
+
+	// Get placeholder text based on session state
+	let placeholderText = $state('Select a session or click New to start chatting');
+
+	$effect(() => {
+		if ($sessionStore.isDraftSession) {
+			placeholderText = 'Type your first message to create a new session...';
+		} else if ($sessionStore.currentSessionId) {
+			placeholderText = 'Type a message...';
+		} else {
+			placeholderText = 'Select a session or click New to start chatting';
+		}
+	});
+
+	// Check if input is enabled
+	let isInputEnabled = $derived($sessionStore.currentSessionId !== null || $sessionStore.isDraftSession);
 </script>
 
 <div class="border-t border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-950">
@@ -67,9 +132,9 @@
 				bind:value={inputValue}
 				onkeydown={handleKeydown}
 				oninput={autoResize}
-				placeholder={$sessionStore.currentSessionId ? 'Type a message...' : 'Select a session to start chatting'}
+				placeholder={placeholderText}
 				rows="1"
-				disabled={!$sessionStore.currentSessionId || isSubmitting}
+				disabled={!isInputEnabled || isSubmitting}
 				class="max-h-[200px] min-h-[44px] w-full resize-none rounded-xl border-0 bg-transparent px-3 py-2.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-0 disabled:opacity-50 dark:text-neutral-100"
 			></textarea>
 
@@ -86,7 +151,7 @@
 			{:else}
 				<button
 					onclick={handleSubmit}
-					disabled={!inputValue.trim() || !$sessionStore.currentSessionId || isSubmitting}
+					disabled={!inputValue.trim() || !isInputEnabled || isSubmitting}
 					class="mb-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-neutral-900 text-white transition-colors hover:bg-neutral-800 disabled:opacity-50 disabled:hover:bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
 					aria-label="Send message"
 				>
@@ -98,7 +163,11 @@
 		</div>
 
 		<div class="mt-2 text-center text-xs text-neutral-400 dark:text-neutral-600">
-			Press Enter to send, Shift+Enter for new line
+			{#if $sessionStore.isDraftSession}
+				Your first message will create a new session
+			{:else}
+				Press Enter to send, Shift+Enter for new line
+			{/if}
 		</div>
 	</div>
 </div>

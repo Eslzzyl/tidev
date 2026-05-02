@@ -18,11 +18,54 @@ export interface SessionDetail extends Session {
 	context_retained_from: number;
 }
 
+export interface FileDiff {
+	path: string;
+	file_path?: string;
+	status: 'added' | 'modified' | 'deleted';
+	additions: number;
+	deletions: number;
+}
+
+export interface TodoItem {
+	content?: string;
+	title?: string;
+	status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+	priority: 'low' | 'medium' | 'high';
+}
+
+export interface TokenUsage {
+	total_tokens?: number;
+	input_tokens?: number;
+	output_tokens?: number;
+}
+
+export interface ToolCall {
+	id: string;
+	name: string;
+	arguments: string;
+}
+
 export interface Message {
 	id: string;
 	role: 'user' | 'assistant' | 'system' | 'tool' | 'error' | 'shell';
 	content: string;
 	created_at: string;
+	// Optional metadata fields
+	file_diffs?: FileDiff[];
+	todos?: TodoItem[];
+	token_usage?: TokenUsage;
+	// Thinking/reasoning content for assistant messages
+	reasoning?: string;
+	// Tool call ID for tool role messages
+	tool_call_id?: string;
+	// Tool name for tool role messages
+	tool_name?: string;
+	// Tool calls for assistant messages
+	tool_calls?: ToolCall[];
+	// Unified diff patch for write/edit tool results (from ToolMetadata)
+	diff?: string;
+	// File path affected by the tool (from ToolMetadata)
+	filepath?: string;
 }
 
 export interface ModelInfo {

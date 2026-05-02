@@ -8,6 +8,9 @@ export interface SessionState {
 	messages: Message[];
 	isLoading: boolean;
 	error: string | null;
+	// Draft session state for new session flow
+	isDraftSession: boolean;
+	draftTitle: string;
 }
 
 function createSessionStore() {
@@ -17,7 +20,9 @@ function createSessionStore() {
 		currentSession: null,
 		messages: [],
 		isLoading: false,
-		error: null
+		error: null,
+		isDraftSession: false,
+		draftTitle: ''
 	});
 
 	return {
@@ -25,7 +30,7 @@ function createSessionStore() {
 		setSessions: (sessions: Session[]) =>
 			update((s) => ({ ...s, sessions, error: null })),
 		setCurrentSession: (session: SessionDetail | null) =>
-			update((s) => ({ ...s, currentSession: session, currentSessionId: session?.session_id ?? null })),
+			update((s) => ({ ...s, currentSession: session, currentSessionId: session?.session_id ?? null, isDraftSession: false })),
 		setCurrentSessionId: (id: string | null) =>
 			update((s) => ({ ...s, currentSessionId: id })),
 		setMessages: (messages: Message[]) =>
@@ -45,7 +50,33 @@ function createSessionStore() {
 				...s,
 				sessions: s.sessions.filter((sess) => sess.session_id !== sessionId),
 				currentSessionId: s.currentSessionId === sessionId ? null : s.currentSessionId,
-				currentSession: s.currentSessionId === sessionId ? null : s.currentSession
+				currentSession: s.currentSessionId === sessionId ? null : s.currentSession,
+				isDraftSession: s.currentSessionId === sessionId ? false : s.isDraftSession
+			})),
+		// Draft session methods
+		startDraftSession: (title: string = 'New Session') =>
+			update((s) => ({
+				...s,
+				currentSessionId: null,
+				currentSession: null,
+				messages: [],
+				isDraftSession: true,
+				draftTitle: title,
+				error: null
+			})),
+		commitDraftSession: (session: SessionDetail) =>
+			update((s) => ({
+				...s,
+				currentSessionId: session.session_id,
+				currentSession: session,
+				isDraftSession: false,
+				draftTitle: ''
+			})),
+		cancelDraftSession: () =>
+			update((s) => ({
+				...s,
+				isDraftSession: false,
+				draftTitle: ''
 			})),
 		reset: () =>
 			set({
@@ -54,7 +85,9 @@ function createSessionStore() {
 				currentSession: null,
 				messages: [],
 				isLoading: false,
-				error: null
+				error: null,
+				isDraftSession: false,
+				draftTitle: ''
 			})
 	};
 }
@@ -66,5 +99,10 @@ export const currentSessionMessages = derived(sessionStore, ($store) => $store.m
 
 export const isSessionActive = derived(
 	sessionStore,
-	($store) => $store.currentSessionId !== null
+	($store) => $store.currentSessionId !== null || $store.isDraftSession
+);
+
+export const hasActiveOrDraftSession = derived(
+	sessionStore,
+	($store) => $store.currentSessionId !== null || $store.isDraftSession
 );

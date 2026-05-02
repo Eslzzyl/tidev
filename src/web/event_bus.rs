@@ -31,6 +31,12 @@ pub enum AppEvent {
         request_id: u64,
         tool_call_id: String,
         output: String,
+        /// Unified diff patch for write/edit tools
+        #[serde(skip_serializing_if = "Option::is_none")]
+        diff: Option<String>,
+        /// File path affected by the tool
+        #[serde(skip_serializing_if = "Option::is_none")]
+        filepath: Option<String>,
     },
     /// Request user permission for tool
     PermissionRequest {

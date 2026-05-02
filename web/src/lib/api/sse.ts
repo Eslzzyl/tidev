@@ -67,8 +67,13 @@ export class SSEClient {
 			this.emit('aborted', JSON.parse(e.data));
 		});
 
-		this.eventSource.addEventListener('error', (e) => {
-			this.emit('error', JSON.parse(e.data));
+		this.eventSource.addEventListener('error', (e: MessageEvent) => {
+			try {
+				const data = e.data ? JSON.parse(e.data) : { error: 'Connection error' };
+				this.emit('error', data);
+			} catch {
+				this.emit('error', { error: 'Connection error' } as unknown as AppEvent);
+			}
 		});
 
 		this.eventSource.addEventListener('heartbeat', () => {

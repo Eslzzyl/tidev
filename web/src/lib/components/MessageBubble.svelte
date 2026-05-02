@@ -1,11 +1,17 @@
 <script lang="ts">
 	import type { Message } from '../api/client';
+	import MarkdownRenderer from './MarkdownRenderer.svelte';
+	import ThinkingBlock from './ThinkingBlock.svelte';
+	import ToolResult from './ToolResult.svelte';
+	import ToolCall from './ToolCall.svelte';
 
 	interface Props {
 		message: Message;
+		// Associated tool results for this message (for assistant messages)
+		toolResults?: Message[];
 	}
 
-	let { message }: Props = $props();
+	let { message, toolResults = [] }: Props = $props();
 
 	function getRoleColor(role: string): string {
 		switch (role) {
@@ -40,28 +46,36 @@
 				return role;
 		}
 	}
-
-	function formatContent(content: string): string {
-		// Simple formatting for code blocks
-		return content;
-	}
 </script>
 
-<div class="group flex gap-3 px-4 py-4 {message.role === 'user' ? 'flex-row-reverse' : ''}">
+<!-- All messages are left-aligned -->
+<div class="group flex gap-3 px-4 py-4">
 	<!-- Avatar -->
 	<div class="flex-shrink-0">
 		<div
 			class="flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium {message.role ===
 			'user'
 				? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
-				: 'bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-300'}"
+				: message.role === 'assistant'
+					? 'bg-blue-600 text-white dark:bg-blue-500'
+					: 'bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-300'}"
 		>
-			{message.role === 'user' ? 'U' : 'A'}
+			{#if message.role === 'user'}
+				U
+			{:else if message.role === 'assistant'}
+				A
+			{:else if message.role === 'system'}
+				S
+			{:else if message.role === 'tool'}
+				T
+			{:else}
+				?
+			{/if}
 		</div>
 	</div>
 
 	<!-- Message Content -->
-	<div class="flex max-w-[85%] flex-col {message.role === 'user' ? 'items-end' : 'items-start'}">
+	<div class="flex max-w-[85%] flex-col items-start">
 		<div class="mb-1 flex items-center gap-2">
 			<span class="text-xs font-medium text-neutral-500 dark:text-neutral-400">
 				{getRoleLabel(message.role)}
@@ -72,25 +86,58 @@
 		</div>
 
 		<div
-			class="rounded-2xl px-4 py-2.5 text-sm leading-relaxed {getRoleColor(message.role)} {message.role ===
-			'user'
-				? 'rounded-tr-sm'
-				: 'rounded-tl-sm'}"
+			class="w-full rounded-2xl px-4 py-2.5 text-sm leading-relaxed {getRoleColor(message.role)} rounded-tl-sm"
 		>
 			{#if message.role === 'assistant'}
-				<!-- For assistant messages, render with markdown-like formatting -->
-				<div class="prose prose-sm dark:prose-invert max-w-none">
-					{#each formatContent(message.content).split('\n') as line}
-						{#if line.startsWith('```')}
-							<pre class="mt-2 overflow-x-auto rounded bg-neutral-900 p-3 text-neutral-100"><code>{line.replace(/```/g, '')}</code></pre>
-						{:else if line.startsWith('`') && line.endsWith('`')}
-							<code class="rounded bg-neutral-200 px-1 py-0.5 text-xs dark:bg-neutral-700">{line.slice(1, -1)}</code>
-						{:else}
-							<p class="mb-1 last:mb-0">{line}</p>
-						{/if}
-					{/each}
+				<!-- Thinking/Reasoning block -->
+				{#if message.reasoning}
+					<ThinkingBlock content={message.reasoning} />
+				{/if}
+
+				<!-- Main content with markdown -->
+				<MarkdownRenderer content={message.content} />
+
+				<!-- Tool calls -->
+				{#if message.tool_calls && message.tool_calls.length > 0}
+					<div class="mb-2">
+						{#each message.tool_calls as toolCall (toolCall.id)}
+							<ToolCall toolName={toolCall.name} arguments={toolCall.arguments} />
+						{/each}
+					</div>
+				{/if}
+
+				<!-- Tool results (associated with this message's tool calls) -->
+				{#if toolResults.length > 0}
+					<div class="mt-3 border-t border-neutral-200 pt-2 dark:border-neutral-700">
+						{#each toolResults as result (result.id)}
+							<ToolResult
+								toolCallId={result.tool_call_id || ''}
+								toolName={result.tool_name || 'Unknown'}
+								output={result.content}
+								isError={result.role === 'error'}
+								diff={result.diff}
+								filepath={result.filepath}
+							/>
+						{/each}
+					</div>
+				{/if}
+			{:else if message.role === 'tool'}
+				<!-- Standalone tool result message -->
+				<ToolResult
+					toolCallId={message.tool_call_id || ''}
+					toolName={message.tool_name || 'Unknown'}
+					output={message.content}
+					defaultExpanded={false}
+					diff={message.diff}
+					filepath={message.filepath}
+				/>
+			{:else if message.role === 'error'}
+				<!-- Error message -->
+				<div class="text-red-600 dark:text-red-400">
+					<MarkdownRenderer content={message.content} />
 				</div>
 			{:else}
+				<!-- User, System, Shell messages -->
 				<p class="whitespace-pre-wrap">{message.content}</p>
 			{/if}
 		</div>
