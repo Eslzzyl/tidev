@@ -35,7 +35,7 @@ function createUIStore() {
 		? localStorage.getItem('theme') as Theme | null
 		: null;
 	const savedRightSidebarOpen = typeof localStorage !== 'undefined'
-		? localStorage.getItem('rightSidebarOpen') === 'true'
+		? localStorage.getItem('rightSidebarOpen') !== 'false'
 		: true;
 
 	const { subscribe, update } = writable<UIState>({

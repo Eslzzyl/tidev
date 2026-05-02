@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::{
     config::reasoning::ThinkingLevelType,
+    prompts::{self, SessionMode},
     session::{BackendEvent, Message, MessageRole, ToolCall},
     web::{
         error::{AppError, WebResult},
@@ -75,6 +76,15 @@ pub struct SendMessageRequest {
     pub content: String,
     #[serde(default)]
     pub thinking_level: Option<String>,
+    /// Optional model override. If not provided, uses session's default model.
+    #[serde(default)]
+    pub model_id: Option<String>,
+    /// Optional provider override. Required if model_id is provided.
+    #[serde(default)]
+    pub provider_id: Option<String>,
+    /// Session mode: "plan" or "build". If not provided, defaults to "build".
+    #[serde(default)]
+    pub mode: Option<String>,
 }
 
 /// Send message response
@@ -170,11 +180,49 @@ pub async fn send_message(
     // Track this request
     state.track_request(session_id, request_id).await;
 
+    // Parse session mode
+    let mode = body
+        .mode
+        .as_deref()
+        .and_then(|m| match m {
+            "plan" => Some(SessionMode::Plan),
+            "build" => Some(SessionMode::Build),
+            _ => None,
+        })
+        .unwrap_or(SessionMode::Build);
+
+    // Get existing messages for context (before appending user message)
+    let existing_messages = {
+        let store = state.store.lock().await;
+        store.load_messages(session_id)?
+    };
+
+    // Detect mode transition and inject switch reminder
+    let prev_mode = existing_messages
+        .iter()
+        .rev()
+        .find(|m| m.mode.is_some())
+        .and_then(|m| m.mode);
+
+    let content = if let Some(prev) = prev_mode {
+        if prev != mode {
+            let reminder = match mode {
+                SessionMode::Plan => prompts::plan_switch_reminder(),
+                SessionMode::Build => prompts::build_switch_reminder(),
+            };
+            format!("{}\n\n{}", reminder, body.content)
+        } else {
+            body.content.clone()
+        }
+    } else {
+        body.content.clone()
+    };
+
     // Add user message to database
     let user_message = Message {
         id: Uuid::new_v4(),
         role: MessageRole::User,
-        content: body.content.clone(),
+        content: content.clone(),
         attachments: vec![],
         reasoning: String::new(),
         tool_calls: vec![],
@@ -194,7 +242,7 @@ pub async fn send_message(
         snapshot_hash: None,
         patch_files: None,
         file_diffs: None,
-        mode: None,
+        mode: Some(mode),
         rtk_rewritten: false,
         thinking_level: None,
     };
@@ -210,30 +258,49 @@ pub async fn send_message(
     };
 
     // Get config and tools
-    let _thinking_level = body
+    let thinking_level = body
         .thinking_level
-        .map(|_| ThinkingLevelType::default())
+        .as_deref()
+        .map(ThinkingLevelType::from_string)
         .unwrap_or_default();
 
     // Get model config
     let config = state.config.read().await;
-    let provider = config
-        .providers
-        .get(&record.provider_id)
-        .cloned()
-        .ok_or_else(|| AppError::Internal("Provider not found".to_string()))?;
 
-    let model_config = provider
-        .models
-        .get(&record.model_id)
-        .cloned()
-        .ok_or_else(|| AppError::Internal("Model not found".to_string()))?;
-    
+    // Determine which provider and model to use
+    let (provider_id, provider, model_id, model_config) = if let (Some(pid), Some(mid)) = (&body.provider_id, &body.model_id) {
+        // Use the explicitly requested model
+        let provider = config
+            .providers
+            .get(pid)
+            .cloned()
+            .ok_or_else(|| AppError::BadRequest(format!("Provider '{}' not found", pid)))?;
+        let model_config = provider
+            .models
+            .get(mid)
+            .cloned()
+            .ok_or_else(|| AppError::BadRequest(format!("Model '{}' not found for provider '{}'", mid, pid)))?;
+        (pid.clone(), provider, mid.clone(), model_config)
+    } else {
+        // Use session's current model
+        let provider = config
+            .providers
+            .get(&record.provider_id)
+            .cloned()
+            .ok_or_else(|| AppError::Internal("Provider not found".to_string()))?;
+        let model_config = provider
+            .models
+            .get(&record.model_id)
+            .cloned()
+            .ok_or_else(|| AppError::Internal("Model not found".to_string()))?;
+        (record.provider_id.clone(), provider, record.model_id.clone(), model_config)
+    };
+
     let model = crate::config::ActiveModel {
-        provider_id: record.provider_id.clone(),
+        provider_id: provider_id.clone(),
         provider_display_name: provider.display_name.clone(),
-        model_id: record.model_id.clone(),
-        request_model_id: model_config.request_model_id.clone().unwrap_or_else(|| record.model_id.clone()),
+        model_id: model_id.clone(),
+        request_model_id: model_config.request_model_id.clone().unwrap_or_else(|| model_id.clone()),
         display_name: model_config.display_name.clone(),
         base_url: provider.base_url.clone(),
         api_key: None, // Will be loaded from auth store in LLM client
@@ -248,7 +315,7 @@ pub async fn send_message(
         supports_images: model_config.supports_images,
         system_prompt: model_config.system_prompt.clone().unwrap_or_default(),
         extra_body: model_config.extra_body.clone(),
-        thinking_level: ThinkingLevelType::default(),
+        thinking_level: thinking_level.clone(),
     };
 
     // Build tools (simplified - just built-in for now)
@@ -273,7 +340,7 @@ pub async fn send_message(
                 messages,
                 tools,
                 tx,
-                ThinkingLevelType::default(),
+                thinking_level,
             )
             .await;
     });

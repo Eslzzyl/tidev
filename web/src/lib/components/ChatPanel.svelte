@@ -236,19 +236,6 @@
 				</svg>
 			</button>
 
-			<!-- Connection Status -->
-			<div class="hidden items-center gap-2 sm:flex">
-				<div
-					class="h-2 w-2 rounded-full {$uiStore.connectionStatus === 'connected'
-						? 'bg-green-500'
-						: $uiStore.connectionStatus === 'connecting'
-							? 'bg-amber-500'
-							: 'bg-red-500'}"
-				></div>
-				<span class="text-xs text-neutral-500 dark:text-neutral-400">
-					{$uiStore.connectionStatus}
-				</span>
-			</div>
 		</div>
 	</div>
 

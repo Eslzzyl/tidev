@@ -1,6 +1,8 @@
 import { writable, derived } from 'svelte/store';
 import type { Session, SessionDetail, Message } from '../api/client';
 
+export type SessionMode = 'plan' | 'build';
+
 export interface SessionState {
 	sessions: Session[];
 	currentSessionId: string | null;
@@ -11,6 +13,8 @@ export interface SessionState {
 	// Draft session state for new session flow
 	isDraftSession: boolean;
 	draftTitle: string;
+	// Current session mode (plan/build)
+	mode: SessionMode;
 }
 
 function createSessionStore() {
@@ -22,7 +26,8 @@ function createSessionStore() {
 		isLoading: false,
 		error: null,
 		isDraftSession: false,
-		draftTitle: ''
+		draftTitle: '',
+		mode: 'build'
 	});
 
 	return {
@@ -52,6 +57,14 @@ function createSessionStore() {
 				currentSessionId: s.currentSessionId === sessionId ? null : s.currentSessionId,
 				currentSession: s.currentSessionId === sessionId ? null : s.currentSession,
 				isDraftSession: s.currentSessionId === sessionId ? false : s.isDraftSession
+			})),
+		// Mode methods
+		setMode: (mode: SessionMode) =>
+			update((s) => ({ ...s, mode })),
+		toggleMode: () =>
+			update((s) => ({
+				...s,
+				mode: s.mode === 'plan' ? 'build' : 'plan'
 			})),
 		// Draft session methods
 		startDraftSession: (title: string = 'New Session') =>
@@ -87,7 +100,8 @@ function createSessionStore() {
 				isLoading: false,
 				error: null,
 				isDraftSession: false,
-				draftTitle: ''
+				draftTitle: '',
+				mode: 'build'
 			})
 	};
 }

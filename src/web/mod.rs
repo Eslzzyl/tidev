@@ -8,7 +8,7 @@ pub mod state;
 use std::path::PathBuf;
 
 use crate::{
-    config::{AppConfig, ConfigPaths},
+    config::{AppConfig, AuthStore, ConfigPaths},
     llm::LlmClient,
     storage::SessionStore,
 };
@@ -60,8 +60,12 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     let workspace_root = workspace_root.canonicalize().unwrap_or(workspace_root);
     crate::log_info!("Workspace root: {}", workspace_root.display());
 
+    // Load auth store
+    let auth = AuthStore::load_or_create(&paths)?;
+    crate::log_info!("Auth store loaded");
+
     // Create app state
-    let state = AppState::new(store, event_bus, llm_client, config, workspace_root)?;
+    let state = AppState::new(store, event_bus, llm_client, config, auth, workspace_root)?;
 
     // Determine static file serving mode
     let static_mode = StaticMode::detect();

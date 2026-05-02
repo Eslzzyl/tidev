@@ -4,7 +4,11 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
-use crate::{config::AppConfig, llm::LlmClient, storage::SessionStore};
+use crate::{
+    config::{AppConfig, AuthStore},
+    llm::LlmClient,
+    storage::SessionStore,
+};
 
 use super::event_bus::EventBus;
 
@@ -19,6 +23,8 @@ pub struct AppState {
     pub llm_client: LlmClient,
     /// Application configuration
     pub config: Arc<RwLock<AppConfig>>,
+    /// Auth store (API keys)
+    pub auth: Arc<RwLock<AuthStore>>,
     /// Active request tracking (session_id -> request_id)
     pub active_requests: Arc<RwLock<std::collections::HashMap<uuid::Uuid, u64>>>,
     /// Current workspace root path
@@ -34,6 +40,7 @@ impl AppState {
         event_bus: EventBus,
         llm_client: LlmClient,
         config: AppConfig,
+        auth: AuthStore,
         workspace_root: PathBuf,
     ) -> anyhow::Result<Self> {
         crate::log_debug!("Creating new AppState");
@@ -42,6 +49,7 @@ impl AppState {
             event_bus,
             llm_client,
             config: Arc::new(RwLock::new(config)),
+            auth: Arc::new(RwLock::new(auth)),
             active_requests: Arc::new(RwLock::new(std::collections::HashMap::new())),
             workspace_root,
             cancel_token: CancellationToken::new(),

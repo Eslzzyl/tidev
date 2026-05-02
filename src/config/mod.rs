@@ -482,7 +482,7 @@ poll_timeout_secs = 30
         Ok(self)
     }
 
-    fn provider(&self, provider_id: &str) -> Option<&ProviderConfig> {
+    pub fn provider(&self, provider_id: &str) -> Option<&ProviderConfig> {
         self.providers
             .get(provider_id)
             .or_else(|| self.bundled_providers.get(provider_id))

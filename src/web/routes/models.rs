@@ -20,26 +20,30 @@ pub struct ListModelsResponse {
     pub models: Vec<ModelInfo>,
 }
 
-/// List all available models
+/// List all available models that have API keys configured
 pub async fn list_models(State(state): State<AppState>) -> WebResult<Json<ListModelsResponse>> {
     crate::log_debug!("Listing available models");
     let config = state.config.read().await;
+    let auth = state.auth.read().await;
 
-    let mut models = Vec::new();
+    let models: Vec<ModelInfo> = config
+        .connected_models(&auth)
+        .into_iter()
+        .map(|summary| {
+            let provider = config.provider(&summary.provider_id);
+            let model = provider
+                .and_then(|p| p.models.get(&summary.model_id));
+            ModelInfo {
+                id: summary.model_id,
+                display_name: summary.model_display_name,
+                provider_id: summary.provider_id,
+                provider_name: summary.provider_display_name,
+                supports_vision: model.map(|m| m.supports_images).unwrap_or(false),
+                supports_streaming: model.map(|m| m.supports_streaming).unwrap_or(true),
+            }
+        })
+        .collect();
 
-    for (provider_id, provider) in &config.providers {
-        for (model_id, model) in &provider.models {
-            models.push(ModelInfo {
-                id: model_id.clone(),
-                display_name: model.display_name.clone(),
-                provider_id: provider_id.clone(),
-                provider_name: provider.display_name.clone(),
-                supports_vision: model.supports_images,
-                supports_streaming: model.supports_streaming,
-            });
-        }
-    }
-
-    crate::log_info!("Listed {} models from {} providers", models.len(), config.providers.len());
+    crate::log_info!("Listed {} models with API keys configured", models.len());
     Ok(Json(ListModelsResponse { models }))
 }

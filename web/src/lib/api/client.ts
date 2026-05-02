@@ -100,6 +100,9 @@ export interface CreateSessionResponse {
 export interface SendMessageRequest {
 	content: string;
 	thinking_level?: string;
+	model_id?: string;
+	provider_id?: string;
+	mode?: string;
 }
 
 export interface SendMessageResponse {
