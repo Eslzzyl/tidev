@@ -30,6 +30,7 @@ impl Default for ServerConfig {
 /// Start the web server with graceful shutdown
 pub async fn start_server(state: AppState, config: ServerConfig) -> anyhow::Result<()> {
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
+    let cancel_token = state.cancel_token.clone();
 
     let app = create_router(state, config.static_config);
 
@@ -37,13 +38,13 @@ pub async fn start_server(state: AppState, config: ServerConfig) -> anyhow::Resu
     crate::log_info!("Web server listening on http://{}", addr);
 
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(shutdown_signal(cancel_token))
         .await?;
     Ok(())
 }
 
 /// Shutdown signal handler for graceful shutdown
-async fn shutdown_signal() {
+async fn shutdown_signal(cancel_token: tokio_util::sync::CancellationToken) {
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -69,6 +70,9 @@ async fn shutdown_signal() {
             crate::log_info!("Received SIGTERM, shutting down gracefully...");
         }
     }
+
+    // Signal all SSE connections to close
+    cancel_token.cancel();
 }
 
 /// Create router for testing or embedding

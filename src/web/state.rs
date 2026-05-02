@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::{Mutex, RwLock};
+use tokio_util::sync::CancellationToken;
 
 use crate::{config::AppConfig, llm::LlmClient, storage::SessionStore};
 
@@ -22,6 +23,8 @@ pub struct AppState {
     pub active_requests: Arc<RwLock<std::collections::HashMap<uuid::Uuid, u64>>>,
     /// Current workspace root path
     pub workspace_root: PathBuf,
+    /// Cancellation token for graceful shutdown
+    pub cancel_token: CancellationToken,
 }
 
 impl AppState {
@@ -41,6 +44,7 @@ impl AppState {
             config: Arc::new(RwLock::new(config)),
             active_requests: Arc::new(RwLock::new(std::collections::HashMap::new())),
             workspace_root,
+            cancel_token: CancellationToken::new(),
         })
     }
 
