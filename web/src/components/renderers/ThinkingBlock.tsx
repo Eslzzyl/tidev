@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface Props {
   content: string;
@@ -51,9 +52,7 @@ export function ThinkingBlock({ content, tokenCount, defaultExpanded = false }: 
 
       {expanded ? (
         <div className="border-t border-amber-200 px-4 py-3 dark:border-amber-800">
-          <pre className="whitespace-pre-wrap font-mono text-sm leading-relaxed text-amber-900 dark:text-amber-100">
-            {content}
-          </pre>
+          <MarkdownRenderer content={content} />
         </div>
       ) : (
         <div className="border-t border-amber-200 px-4 py-2 dark:border-amber-800">
