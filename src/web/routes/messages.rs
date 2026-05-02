@@ -44,6 +44,9 @@ pub struct ApiMessage {
     pub role: String,
     pub content: String,
     pub created_at: String,
+    /// When the message finished (for assistant messages)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
     /// Thinking/reasoning content for assistant messages
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<String>,
@@ -62,6 +65,8 @@ pub struct ApiMessage {
     /// File path affected by the tool
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filepath: Option<String>,
+    /// Whether the command was rewritten by RTK
+    pub rtk_rewritten: bool,
 }
 
 /// List messages response
@@ -133,6 +138,7 @@ pub async fn list_messages(
             },
             content: msg.content,
             created_at: msg.created_at.to_rfc3339(),
+            completed_at: msg.completed_at.map(|t| t.to_rfc3339()),
             reasoning: if msg.reasoning.is_empty() {
                 None
             } else {
@@ -147,6 +153,7 @@ pub async fn list_messages(
             },
             diff: msg.metadata.diff.clone(),
             filepath: msg.metadata.filepath.clone(),
+            rtk_rewritten: msg.rtk_rewritten,
         })
         .collect();
 
@@ -393,6 +400,7 @@ pub async fn send_message(
                     output: result.output,
                     diff: result.metadata.diff.clone(),
                     filepath: result.metadata.filepath.clone(),
+                    rtk_rewritten: result.rtk_rewritten,
                 }),
                 _ => None,
             };

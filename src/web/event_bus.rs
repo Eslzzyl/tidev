@@ -37,6 +37,9 @@ pub enum AppEvent {
         /// File path affected by the tool
         #[serde(skip_serializing_if = "Option::is_none")]
         filepath: Option<String>,
+        /// Whether the command was rewritten by RTK
+        #[serde(skip_serializing_if = "is_false")]
+        rtk_rewritten: bool,
     },
     /// Request user permission for tool
     PermissionRequest {
@@ -95,4 +98,9 @@ impl Default for EventBus {
     fn default() -> Self {
         Self::new(1024)
     }
+}
+
+/// Helper for serde skip_serializing_if on bool fields
+fn is_false(v: &bool) -> bool {
+    !v
 }

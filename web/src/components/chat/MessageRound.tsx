@@ -1,0 +1,115 @@
+import type { Round } from '../../types/round';
+import { MarkdownRenderer } from '../renderers/MarkdownRenderer';
+import { ThinkingBlock } from '../renderers/ThinkingBlock';
+import { ToolCallRow } from '../renderers/ToolCallRow';
+import { formatTime, getDuration } from '../../utils/format';
+
+interface Props {
+  round: Round;
+}
+
+export function MessageRound({ round }: Props) {
+  function getFooterParts(): string[] {
+    const parts: string[] = [];
+    if (round.modelName) parts.push(round.modelName);
+    const duration = round.completedAt
+      ? getDuration(round.userMessage.created_at, round.completedAt)
+      : null;
+    if (duration) parts.push(duration);
+    if (round.completedAt) {
+      parts.push(formatTime(round.completedAt));
+    }
+    return parts;
+  }
+
+  const footerParts = getFooterParts();
+
+  return (
+    <div className="border-b border-neutral-100 dark:border-neutral-900">
+      {/* User message */}
+      <div className="group flex gap-3 px-4 py-4">
+        <div className="flex-shrink-0">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-900 text-xs font-medium text-white dark:bg-neutral-100 dark:text-neutral-900">
+            U
+          </div>
+        </div>
+
+        <div className="flex max-w-[85%] flex-col items-start">
+          <div className="mb-1 flex items-center gap-2">
+            <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">You</span>
+            <span className="text-xs text-neutral-400 dark:text-neutral-600">
+              {formatTime(round.userMessage.created_at)}
+            </span>
+          </div>
+
+          <div className="w-full rounded-2xl rounded-tl-sm bg-neutral-100 px-4 py-2.5 text-sm leading-relaxed text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100">
+            <p className="whitespace-pre-wrap">{round.userMessage.content}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Assistant response */}
+      {(round.segments.length > 0 || round.reasoning) && (
+        <div className="group flex gap-3 px-4 py-4">
+          <div className="flex-shrink-0">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-xs font-medium text-white dark:bg-blue-500">
+              A
+            </div>
+          </div>
+
+          <div className="flex max-w-[85%] flex-1 flex-col items-start">
+            <div className="mb-1 flex items-center gap-2">
+              <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Assistant</span>
+              {round.completedAt && (
+                <span className="text-xs text-neutral-400 dark:text-neutral-600">
+                  {formatTime(round.completedAt)}
+                </span>
+              )}
+              {!round.completedAt && round.status === 'streaming' && (
+                <span className="text-xs text-neutral-400 dark:text-neutral-600">
+                  {formatTime(round.userMessage.created_at)}
+                </span>
+              )}
+              {round.status === 'streaming' && (
+                <span className="text-xs text-blue-500 dark:text-blue-400">streaming...</span>
+              )}
+            </div>
+
+            <div className="w-full rounded-2xl rounded-tl-sm bg-white px-4 py-2.5 text-sm leading-relaxed text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100">
+              {/* Thinking/Reasoning block */}
+              {round.reasoning && <ThinkingBlock content={round.reasoning} />}
+
+              {/* Ordered segments */}
+              {round.segments.map((segment, idx) => (
+                <div key={idx} className="mb-2 last:mb-0">
+                  {segment.type === 'text' && segment.content && (
+                    <MarkdownRenderer content={segment.content} />
+                  )}
+                  {segment.type === 'tool_call' && round.toolCallMap[segment.toolCallId] && (
+                    <ToolCallRow entry={round.toolCallMap[segment.toolCallId]} />
+                  )}
+                </div>
+              ))}
+
+              {/* Streaming indicator */}
+              {round.status === 'streaming' && round.segments.length === 0 && (
+                <div className="flex items-center gap-1 text-neutral-400">
+                  <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400" />
+                  <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400" style={{ animationDelay: '0.2s' }} />
+                  <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400" style={{ animationDelay: '0.4s' }} />
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            {round.status === 'complete' && footerParts.length > 0 && (
+              <div className="mt-0.5 text-xs text-neutral-400 dark:text-neutral-600">
+                {footerParts.join(' · ')}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
