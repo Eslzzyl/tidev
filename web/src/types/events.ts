@@ -1,5 +1,6 @@
 export type AppEvent =
   | { type: 'message_chunk'; session_id: string; request_id: number; content: string }
+  | { type: 'reasoning_chunk'; session_id: string; request_id: number; content: string }
   | { type: 'message_complete'; session_id: string; request_id: number }
   | {
       type: 'tool_call';

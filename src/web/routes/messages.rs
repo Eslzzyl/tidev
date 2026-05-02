@@ -37,6 +37,14 @@ impl From<&ToolCall> for ApiToolCall {
     }
 }
 
+/// Token usage in the API
+#[derive(Serialize)]
+pub struct ApiTokenUsage {
+    pub total_tokens: u32,
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+}
+
 /// Message in the API
 #[derive(Serialize)]
 pub struct ApiMessage {
@@ -67,6 +75,9 @@ pub struct ApiMessage {
     pub filepath: Option<String>,
     /// Whether the command was rewritten by RTK
     pub rtk_rewritten: bool,
+    /// Token usage for assistant messages
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_usage: Option<ApiTokenUsage>,
 }
 
 /// List messages response
@@ -154,6 +165,11 @@ pub async fn list_messages(
             diff: msg.metadata.diff.clone(),
             filepath: msg.metadata.filepath.clone(),
             rtk_rewritten: msg.rtk_rewritten,
+            token_usage: msg.total_tokens.map(|total| ApiTokenUsage {
+                total_tokens: total,
+                input_tokens: msg.input_tokens.unwrap_or(0),
+                output_tokens: msg.output_tokens.unwrap_or(0),
+            }),
         })
         .collect();
 
@@ -361,6 +377,15 @@ pub async fn send_message(
                     request_id,
                     content,
                 } => Some(AppEvent::MessageChunk {
+                    session_id,
+                    request_id,
+                    content,
+                }),
+                BackendEvent::ReasoningDelta {
+                    session_id,
+                    request_id,
+                    content,
+                } => Some(AppEvent::ReasoningChunk {
                     session_id,
                     request_id,
                     content,

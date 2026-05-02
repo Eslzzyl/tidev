@@ -55,7 +55,7 @@ function getToolColor(name: string): string {
 
 function getToolBg(name: string): string {
   if (isReadOnlyTool(name)) return 'bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800';
-  if (isWriteTool(name)) return 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800';
+  if (isWriteTool(name)) return 'border-neutral-200 dark:border-neutral-700';
   if (isBash(name)) return 'bg-violet-50 dark:bg-violet-950/30 border-violet-200 dark:border-violet-800';
   if (name === 'task') return 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800';
   return 'bg-neutral-50 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700';

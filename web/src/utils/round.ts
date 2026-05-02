@@ -20,8 +20,12 @@ export function buildRounds(messages: Message[]): Round[] {
       rounds.push(currentRound);
     } else if (currentRound) {
       if (msg.role === 'assistant') {
-        if (msg.reasoning && !currentRound.reasoning) {
-          currentRound.reasoning = msg.reasoning;
+        if (msg.reasoning) {
+          if (currentRound.reasoning) {
+            currentRound.reasoning += '\n' + msg.reasoning;
+          } else {
+            currentRound.reasoning = msg.reasoning;
+          }
         }
 
         if (msg.content) {

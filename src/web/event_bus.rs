@@ -12,6 +12,12 @@ pub enum AppEvent {
         request_id: u64,
         content: String,
     },
+    /// LLM reasoning/thinking chunk (streaming)
+    ReasoningChunk {
+        session_id: Uuid,
+        request_id: u64,
+        content: String,
+    },
     /// LLM message complete
     MessageComplete {
         session_id: Uuid,

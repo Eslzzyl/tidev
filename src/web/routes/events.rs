@@ -54,6 +54,7 @@ pub async fn events_stream(
                     let matches_session = match &event {
                         AppEvent::Heartbeat => true,
                         AppEvent::MessageChunk { session_id: sid, .. } => *sid == session_id,
+                        AppEvent::ReasoningChunk { session_id: sid, .. } => *sid == session_id,
                         AppEvent::MessageComplete { session_id: sid, .. } => *sid == session_id,
                         AppEvent::ToolCall { session_id: sid, .. } => *sid == session_id,
                         AppEvent::ToolResult { session_id: sid, .. } => *sid == session_id,
@@ -70,6 +71,7 @@ pub async fn events_stream(
                     let event_type = match &event {
                         AppEvent::Heartbeat => "heartbeat",
                         AppEvent::MessageChunk { .. } => "message.chunk",
+                        AppEvent::ReasoningChunk { .. } => "reasoning.chunk",
                         AppEvent::MessageComplete { .. } => "message.complete",
                         AppEvent::ToolCall { .. } => "tool.call",
                         AppEvent::ToolResult { .. } => "tool.result",

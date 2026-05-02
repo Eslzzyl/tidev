@@ -134,7 +134,7 @@ export function MessageInput() {
       toggleMode();
       return;
     }
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       handleSubmit();
     }
@@ -228,6 +228,18 @@ export function MessageInput() {
       <div className="mx-auto flex max-w-4xl flex-col gap-2">
         {/* Controls row */}
         <div className="flex items-center gap-2">
+          {/* Mode toggle */}
+          <button
+            onClick={toggleMode}
+            className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
+              mode === 'plan'
+                ? 'bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-300'
+                : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300'
+            }`}
+          >
+            {mode === 'plan' ? 'Plan' : 'Build'}
+          </button>
+
           {/* Model selector */}
           <div ref={dropdownRef} className="relative">
             <button
@@ -270,7 +282,10 @@ export function MessageInput() {
                             {model.display_name}
                           </span>
                           {model.supports_vision && (
-                            <span className="text-[10px] text-neutral-400">vision</span>
+                            <svg className="h-3.5 w-3.5 text-neutral-400" viewBox="0 0 24 24" fill="currentColor">
+                              <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" />
+                              <path fillRule="evenodd" d="M1.323 11.447C2.811 6.976 7.028 3.75 12.001 3.75c4.97 0 9.185 3.223 10.675 7.69.12.362.12.752 0 1.113-1.487 4.471-5.705 7.697-10.677 7.697-4.97 0-9.186-3.223-10.675-7.69a1.762 1.762 0 010-1.113zM17.25 12a5.25 5.25 0 11-10.5 0 5.25 5.25 0 0110.5 0z" clipRule="evenodd" />
+                            </svg>
                           )}
                         </button>
                       ))}
@@ -314,18 +329,6 @@ export function MessageInput() {
               )}
             </div>
           )}
-
-          {/* Mode toggle */}
-          <button
-            onClick={toggleMode}
-            className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
-              mode === 'plan'
-                ? 'bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-300'
-                : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300'
-            }`}
-          >
-            {mode === 'plan' ? 'Plan' : 'Build'}
-          </button>
         </div>
 
         {/* Input row */}
@@ -344,7 +347,7 @@ export function MessageInput() {
             }
             rows={1}
             disabled={!isInputEnabled}
-            className="min-h-[36px] max-h-[200px] flex-1 resize-none rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 placeholder-neutral-400 outline-none transition-colors focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500 dark:focus:border-neutral-400"
+            className="min-h-[44px] max-h-[200px] flex-1 resize-none rounded-xl border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 placeholder-neutral-400 outline-none transition-colors focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500 dark:focus:border-neutral-400"
           />
 
           {/* Send / Stop button */}

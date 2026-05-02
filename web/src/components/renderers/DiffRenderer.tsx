@@ -182,7 +182,7 @@ export function DiffRenderer({ diff, filepath }: Props) {
         <span
           className="flex-1 px-2 leading-relaxed font-mono text-xs whitespace-pre-wrap break-all"
           dangerouslySetInnerHTML={{
-            __html: line.type !== 'context' ? highlightLine(line.content, language) : escapeHtml(line.content),
+            __html: highlightLine(line.content, language),
           }}
         />
       </div>
@@ -208,12 +208,7 @@ export function DiffRenderer({ diff, filepath }: Props) {
                   <span
                     className="flex-1 px-2 leading-relaxed font-mono text-xs whitespace-pre-wrap break-all"
                     dangerouslySetInnerHTML={{
-                      __html:
-                        row.left.type !== 'empty'
-                          ? row.left.type === 'context'
-                            ? escapeHtml(row.left.content)
-                            : highlightLine(row.left.content, language)
-                          : '',
+                      __html: row.left.type !== 'empty' ? highlightLine(row.left.content, language) : '',
                     }}
                   />
                 </>
@@ -233,12 +228,7 @@ export function DiffRenderer({ diff, filepath }: Props) {
                   <span
                     className="flex-1 px-2 leading-relaxed font-mono text-xs whitespace-pre-wrap break-all"
                     dangerouslySetInnerHTML={{
-                      __html:
-                        row.right.type !== 'empty'
-                          ? row.right.type === 'context'
-                            ? escapeHtml(row.right.content)
-                            : highlightLine(row.right.content, language)
-                          : '',
+                      __html: row.right.type !== 'empty' ? highlightLine(row.right.content, language) : '',
                     }}
                   />
                 </>

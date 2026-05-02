@@ -46,6 +46,10 @@ export class SSEClient {
       this.emit('message.chunk', JSON.parse(e.data));
     });
 
+    this.eventSource.addEventListener('reasoning.chunk', (e: MessageEvent) => {
+      this.emit('reasoning.chunk', JSON.parse(e.data));
+    });
+
     this.eventSource.addEventListener('message.complete', (e: MessageEvent) => {
       this.emit('message.complete', JSON.parse(e.data));
     });
