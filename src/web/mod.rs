@@ -1,3 +1,4 @@
+pub mod assets;
 pub mod error;
 pub mod event_bus;
 pub mod routes;
@@ -12,15 +13,18 @@ use crate::{
 
 use self::{
     event_bus::EventBus,
+    routes::static_file::{StaticConfig, StaticMode},
     server::{ServerConfig, start_server},
     state::AppState,
 };
 
 /// Web subcommand options
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct WebOptions {
     pub host: Option<String>,
     pub port: Option<u16>,
+    /// Use filesystem instead of default dev mode (for development)
+    pub dev_fs: bool,
 }
 
 /// Run the web server
@@ -48,11 +52,34 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     // Create app state
     let state = AppState::new(store, event_bus, llm_client, config)?;
 
+    // Determine static file serving mode
+    let static_mode = StaticMode::detect();
+
+    let static_config = StaticConfig {
+        mode: static_mode,
+        use_fs: options.dev_fs,
+        ..Default::default()
+    };
+
     // Server configuration
     let server_config = ServerConfig {
         host: options.host.unwrap_or_else(|| "127.0.0.1".to_string()),
         port: options.port.unwrap_or(26502),
+        static_config,
     };
+
+    // Log the mode
+    if cfg!(debug_assertions) {
+        if options.dev_fs {
+            eprintln!("Frontend mode: DevFs (serving from web/dist)");
+        } else {
+            eprintln!("Frontend mode: Dev (showing development page)");
+            eprintln!("Tip: Run `cd web && pnpm dev` and visit http://localhost:5173 for HMR");
+            eprintln!("     Or use --dev-fs to serve from web/dist");
+        }
+    } else {
+        eprintln!("Frontend mode: Embedded (serving from binary)");
+    }
 
     // Start server
     start_server(state, server_config).await?;

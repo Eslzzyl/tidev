@@ -45,6 +45,9 @@ enum Command {
         /// Port to listen on
         #[arg(short, long)]
         port: Option<u16>,
+        /// Serve frontend from filesystem (web/dist) instead of embedded assets
+        #[arg(long)]
+        dev_fs: bool,
     },
 }
 
@@ -52,9 +55,9 @@ pub fn run() -> anyhow::Result<()> {
     match Cli::parse().command {
         None => app::run(),
         Some(Command::Gateway) => gateway::run(),
-        Some(Command::Web { host, port }) => {
+        Some(Command::Web { host, port, dev_fs }) => {
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(web::run(web::WebOptions { host, port }))
+            rt.block_on(web::run(web::WebOptions { host, port, dev_fs }))
         }
     }
 }

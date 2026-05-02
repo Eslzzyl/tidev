@@ -38,10 +38,12 @@ pub fn api_routes() -> Router<AppState> {
         .layer(CorsLayer::permissive())
 }
 
+use static_file::StaticConfig;
+
 /// Create the complete router
-pub fn create_router(state: AppState) -> Router {
+pub fn create_router(state: AppState, static_config: StaticConfig) -> Router {
     let api = api_routes();
-    let static_files = static_file::static_routes();
+    let static_files = static_file::static_routes(static_config);
 
     Router::new()
         .nest("/api", api)
