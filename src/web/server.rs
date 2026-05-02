@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 
 use axum::Router;
 use tokio::net::TcpListener;
+use tokio::signal;
 
 use super::{
     routes::{create_router, static_file::StaticConfig},
@@ -26,7 +27,7 @@ impl Default for ServerConfig {
     }
 }
 
-/// Start the web server
+/// Start the web server with graceful shutdown
 pub async fn start_server(state: AppState, config: ServerConfig) -> anyhow::Result<()> {
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
 
@@ -35,10 +36,39 @@ pub async fn start_server(state: AppState, config: ServerConfig) -> anyhow::Resu
     let listener = TcpListener::bind(&addr).await?;
     crate::log_info!("Web server listening on http://{}", addr);
 
-    axum::serve(listener, app).await?;
-
-    crate::log_info!("Web server stopped");
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
     Ok(())
+}
+
+/// Shutdown signal handler for graceful shutdown
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {
+            crate::log_info!("Received Ctrl+C, shutting down gracefully...");
+        }
+        _ = terminate => {
+            crate::log_info!("Received SIGTERM, shutting down gracefully...");
+        }
+    }
 }
 
 /// Create router for testing or embedding
