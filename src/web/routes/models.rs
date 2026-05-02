@@ -22,6 +22,7 @@ pub struct ListModelsResponse {
 
 /// List all available models
 pub async fn list_models(State(state): State<AppState>) -> WebResult<Json<ListModelsResponse>> {
+    crate::log_debug!("Listing available models");
     let config = state.config.read().await;
 
     let mut models = Vec::new();
@@ -39,5 +40,6 @@ pub async fn list_models(State(state): State<AppState>) -> WebResult<Json<ListMo
         }
     }
 
+    crate::log_info!("Listed {} models from {} providers", models.len(), config.providers.len());
     Ok(Json(ListModelsResponse { models }))
 }

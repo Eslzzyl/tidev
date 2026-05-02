@@ -29,11 +29,15 @@ pub struct WebOptions {
 
 /// Run the web server
 pub async fn run(options: WebOptions) -> anyhow::Result<()> {
-    eprintln!("Starting TiDev web server...");
-
-    // Load configuration
+    // Load configuration first (needed for logging setup)
     let paths = ConfigPaths::discover()?;
     let config = AppConfig::load_or_create(&paths)?;
+
+    // Initialize logging (console enabled for web mode)
+    let mut logging_config = config.logging.clone();
+    logging_config.console = true;
+    crate::logging::init(&paths.data_dir, logging_config);
+    crate::log_info!("Starting TiDev web server...");
 
     // Open database
     let data_dir = dirs::data_dir()
@@ -71,14 +75,14 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     // Log the mode
     if cfg!(debug_assertions) {
         if options.dev_fs {
-            eprintln!("Frontend mode: DevFs (serving from web/dist)");
+            crate::log_info!("Frontend mode: DevFs (serving from web/dist)");
         } else {
-            eprintln!("Frontend mode: Dev (showing development page)");
-            eprintln!("Tip: Run `cd web && pnpm dev` and visit http://localhost:5173 for HMR");
-            eprintln!("     Or use --dev-fs to serve from web/dist");
+            crate::log_info!("Frontend mode: Dev (showing development page)");
+            crate::log_info!("Tip: Run `cd web && pnpm dev` and visit http://localhost:5173 for HMR");
+            crate::log_info!("     Or use --dev-fs to serve from web/dist");
         }
     } else {
-        eprintln!("Frontend mode: Embedded (serving from binary)");
+        crate::log_info!("Frontend mode: Embedded (serving from binary)");
     }
 
     // Start server

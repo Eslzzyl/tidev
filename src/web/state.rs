@@ -29,6 +29,7 @@ impl AppState {
         llm_client: LlmClient,
         config: AppConfig,
     ) -> anyhow::Result<Self> {
+        crate::log_debug!("Creating new AppState");
         Ok(Self {
             store: Arc::new(Mutex::new(store)),
             event_bus,
@@ -40,6 +41,7 @@ impl AppState {
 
     /// Track an active request
     pub async fn track_request(&self, session_id: uuid::Uuid, request_id: u64) {
+        crate::log_debug!("Tracking request {} for session {}", request_id, session_id);
         let mut requests = self.active_requests.write().await;
         requests.insert(session_id, request_id);
     }
@@ -47,11 +49,14 @@ impl AppState {
     /// Get the active request for a session
     pub async fn get_active_request(&self, session_id: uuid::Uuid) -> Option<u64> {
         let requests = self.active_requests.read().await;
-        requests.get(&session_id).copied()
+        let result = requests.get(&session_id).copied();
+        crate::log_debug!("Getting active request for session {}: {:?}", session_id, result);
+        result
     }
 
     /// Remove an active request
     pub async fn remove_request(&self, session_id: uuid::Uuid) {
+        crate::log_debug!("Removing active request for session {}", session_id);
         let mut requests = self.active_requests.write().await;
         requests.remove(&session_id);
     }

@@ -28,6 +28,7 @@ pub async fn events_stream(
     Query(query): Query<EventsQuery>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let session_id = query.session;
+    crate::log_info!("SSE connection established for session {}", session_id);
     let rx = state.event_bus.subscribe();
 
     let stream = async_stream::stream! {

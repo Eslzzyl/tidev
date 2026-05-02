@@ -20,6 +20,8 @@ pub struct ListToolsResponse {
 
 /// List all available tools
 pub async fn list_tools() -> WebResult<Json<ListToolsResponse>> {
+    crate::log_debug!("Listing available tools");
+
     // For MVP, return static list of built-in tools
     let tools = vec![
         ToolInfo {
@@ -78,5 +80,6 @@ pub async fn list_tools() -> WebResult<Json<ListToolsResponse>> {
         },
     ];
 
+    crate::log_debug!("Listed {} tools", tools.len());
     Ok(Json(ListToolsResponse { tools }))
 }

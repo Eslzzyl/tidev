@@ -58,15 +58,19 @@ pub async fn list_messages(
     State(state): State<AppState>,
     AxumPath(session_id): AxumPath<Uuid>,
 ) -> WebResult<Json<ListMessagesResponse>> {
+    crate::log_debug!("Listing messages for session {}", session_id);
     let store = state.store.lock().await;
-    
+
     // Load messages for the session
     let messages_db = store.load_messages(session_id)?;
-    
+
     // Check if session exists by trying to load the record
     let _ = store
         .load_session_record(session_id)?
-        .ok_or_else(|| AppError::NotFound(format!("Session {} not found", session_id)))?;
+        .ok_or_else(|| {
+            crate::log_warn!("Session {} not found when listing messages", session_id);
+            AppError::NotFound(format!("Session {} not found", session_id))
+        })?;
     drop(store);
 
     let messages: Vec<ApiMessage> = messages_db
@@ -86,6 +90,7 @@ pub async fn list_messages(
         })
         .collect();
 
+    crate::log_debug!("Listed {} messages for session {}", messages.len(), session_id);
     Ok(Json(ListMessagesResponse { messages }))
 }
 
@@ -95,16 +100,22 @@ pub async fn send_message(
     AxumPath(session_id): AxumPath<Uuid>,
     Json(body): Json<SendMessageRequest>,
 ) -> WebResult<(StatusCode, Json<SendMessageResponse>)> {
+    crate::log_info!("Sending message to session {} (content length: {})", session_id, body.content.len());
+
     // Check if session exists
     let record = {
         let store = state.store.lock().await;
         store
             .load_session_record(session_id)?
-            .ok_or_else(|| AppError::NotFound(format!("Session {} not found", session_id)))?
+            .ok_or_else(|| {
+                crate::log_warn!("Session {} not found when sending message", session_id);
+                AppError::NotFound(format!("Session {} not found", session_id))
+            })?
     };
 
     // Generate request ID
     let request_id = rand::random::<u64>();
+    crate::log_debug!("Generated request ID {} for session {}", request_id, session_id);
 
     // Track this request
     state.track_request(session_id, request_id).await;
@@ -285,6 +296,8 @@ pub async fn abort_request(
     AxumPath(session_id): AxumPath<Uuid>,
     Json(body): Json<AbortRequest>,
 ) -> WebResult<StatusCode> {
+    crate::log_info!("Abort request for session {} request {}", session_id, body.request_id);
+
     // Check if there's an active request
     let active = state.get_active_request(session_id).await;
 
@@ -294,6 +307,9 @@ pub async fn abort_request(
             session_id,
             request_id: body.request_id,
         });
+        crate::log_info!("Aborted request {} for session {}", body.request_id, session_id);
+    } else {
+        crate::log_warn!("No active request {} found for session {}", body.request_id, session_id);
     }
 
     Ok(StatusCode::OK)

@@ -33,10 +33,11 @@ pub async fn start_server(state: AppState, config: ServerConfig) -> anyhow::Resu
     let app = create_router(state, config.static_config);
 
     let listener = TcpListener::bind(&addr).await?;
-    eprintln!("Web server listening on http://{}", addr);
+    crate::log_info!("Web server listening on http://{}", addr);
 
     axum::serve(listener, app).await?;
 
+    crate::log_info!("Web server stopped");
     Ok(())
 }
 

@@ -85,9 +85,11 @@ pub struct SessionDetail {
 pub async fn list_sessions(
     State(state): State<AppState>,
 ) -> WebResult<Json<SessionsResponse>> {
+    crate::log_debug!("Listing all sessions");
     let store = state.store.lock().await;
     let records = store.load_all_sessions()?;
     let sessions: Vec<SessionInfo> = records.into_iter().map(Into::into).collect();
+    crate::log_info!("Listed {} sessions", sessions.len());
     Ok(Json(SessionsResponse { sessions }))
 }
 
@@ -96,9 +98,11 @@ pub async fn create_session(
     State(state): State<AppState>,
     Json(body): Json<CreateSessionRequest>,
 ) -> WebResult<(StatusCode, Json<CreateSessionResponse>)> {
+    crate::log_info!("Creating new session in workspace: {}", body.workspace_root);
+
     // Get default provider and model from config
     let config = state.config.read().await;
-    
+
     // Find first enabled provider with an enabled model
     let (provider_id, provider, model_id, model) = config
         .providers
@@ -126,6 +130,7 @@ pub async fn create_session(
     )?;
     drop(store);
 
+    crate::log_info!("Created session {} with provider {} and model {}", session_id, provider_id, model_id);
     Ok((StatusCode::CREATED, Json(CreateSessionResponse { session_id })))
 }
 
@@ -134,12 +139,17 @@ pub async fn get_session(
     State(state): State<AppState>,
     AxumPath(session_id): AxumPath<Uuid>,
 ) -> WebResult<Json<SessionDetail>> {
+    crate::log_debug!("Getting session details for {}", session_id);
     let store = state.store.lock().await;
     let record = store
         .load_session_record(session_id)?
-        .ok_or_else(|| AppError::NotFound(format!("Session {} not found", session_id)))?;
+        .ok_or_else(|| {
+            crate::log_warn!("Session {} not found", session_id);
+            AppError::NotFound(format!("Session {} not found", session_id))
+        })?;
     drop(store);
 
+    crate::log_debug!("Retrieved session {} details", session_id);
     Ok(Json(SessionDetail {
         session_id: record.session_id,
         parent_session_id: record.parent_session_id,
@@ -161,7 +171,9 @@ pub async fn delete_session(
     State(state): State<AppState>,
     AxumPath(session_id): AxumPath<Uuid>,
 ) -> WebResult<StatusCode> {
+    crate::log_info!("Deleting session {}", session_id);
     let store = state.store.lock().await;
     store.delete_session(session_id)?;
+    crate::log_info!("Deleted session {}", session_id);
     Ok(StatusCode::NO_CONTENT)
 }

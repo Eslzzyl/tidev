@@ -79,7 +79,7 @@ mod tests {
         if has_embedded_assets() {
             let assets = list_assets();
             assert!(!assets.is_empty(), "Embedded assets should not be empty");
-            println!("Embedded assets: {:?}", assets);
+            eprintln!("Embedded assets: {:?}", assets);
         }
     }
 }
