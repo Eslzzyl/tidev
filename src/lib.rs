@@ -22,6 +22,7 @@ pub mod system_info;
 pub mod theme;
 pub mod tooling;
 pub mod utils;
+pub mod web;
 
 use clap::Parser;
 
@@ -36,12 +37,25 @@ struct Cli {
 enum Command {
     /// Start gateway server (all enabled platforms: Telegram, QQ, etc.)
     Gateway,
+    /// Start web server
+    Web {
+        /// Host to bind to
+        #[arg(short = 'H', long)]
+        host: Option<String>,
+        /// Port to listen on
+        #[arg(short, long)]
+        port: Option<u16>,
+    },
 }
 
 pub fn run() -> anyhow::Result<()> {
     match Cli::parse().command {
         None => app::run(),
         Some(Command::Gateway) => gateway::run(),
+        Some(Command::Web { host, port }) => {
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(web::run(web::WebOptions { host, port }))
+        }
     }
 }
 
