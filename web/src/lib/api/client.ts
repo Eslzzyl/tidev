@@ -46,6 +46,10 @@ export interface CreateSessionRequest {
 	title?: string;
 }
 
+export interface WorkspaceInfo {
+	workspace_root: string;
+}
+
 export interface CreateSessionResponse {
 	session_id: string;
 }
@@ -81,6 +85,9 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+	// Workspace
+	getWorkspace: () => fetchJson<WorkspaceInfo>(`${API_BASE}/workspace`),
+
 	// Sessions
 	listSessions: () => fetchJson<{ sessions: Session[] }>(`${API_BASE}/sessions`),
 

@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::{Mutex, RwLock};
@@ -19,6 +20,8 @@ pub struct AppState {
     pub config: Arc<RwLock<AppConfig>>,
     /// Active request tracking (session_id -> request_id)
     pub active_requests: Arc<RwLock<std::collections::HashMap<uuid::Uuid, u64>>>,
+    /// Current workspace root path
+    pub workspace_root: PathBuf,
 }
 
 impl AppState {
@@ -28,6 +31,7 @@ impl AppState {
         event_bus: EventBus,
         llm_client: LlmClient,
         config: AppConfig,
+        workspace_root: PathBuf,
     ) -> anyhow::Result<Self> {
         crate::log_debug!("Creating new AppState");
         Ok(Self {
@@ -36,6 +40,7 @@ impl AppState {
             llm_client,
             config: Arc::new(RwLock::new(config)),
             active_requests: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            workspace_root,
         })
     }
 

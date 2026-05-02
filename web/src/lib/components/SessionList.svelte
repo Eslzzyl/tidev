@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { sessionStore } from '../stores/session';
 	import { uiStore } from '../stores/ui';
 	import { api } from '../api/client';
@@ -6,6 +7,16 @@
 	let isCreating = $state(false);
 	let newSessionTitle = $state('');
 	let showNewSessionInput = $state(false);
+	let workspaceRoot = $state('');
+
+	// Load workspace info on mount
+	onMount(() => {
+		api.getWorkspace().then((workspace) => {
+			workspaceRoot = workspace.workspace_root;
+		}).catch((err) => {
+			console.error('Failed to load workspace:', err);
+		});
+	});
 
 	async function handleCreateSession() {
 		if (!newSessionTitle.trim()) return;
@@ -13,7 +24,7 @@
 		isCreating = true;
 		try {
 			const response = await api.createSession({
-				workspace_root: '.',
+				workspace_root: workspaceRoot || '.',
 				title: newSessionTitle.trim()
 			});
 			const { sessions } = await api.listSessions();

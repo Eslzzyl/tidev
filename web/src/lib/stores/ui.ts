@@ -8,6 +8,7 @@ export interface UIState {
 	mobileMenuOpen: boolean;
 	theme: Theme;
 	inputValue: string;
+	isLoading: boolean;
 	isStreaming: boolean;
 	connectionStatus: 'connected' | 'disconnected' | 'connecting';
 }
@@ -19,6 +20,7 @@ function createUIStore() {
 		mobileMenuOpen: false,
 		theme: 'system',
 		inputValue: '',
+		isLoading: false,
 		isStreaming: false,
 		connectionStatus: 'disconnected'
 	});
@@ -47,6 +49,7 @@ function createUIStore() {
 			update((s) => ({ ...s, theme }));
 		},
 		setInputValue: (value: string) => update((s) => ({ ...s, inputValue: value })),
+		setLoading: (isLoading: boolean) => update((s) => ({ ...s, isLoading })),
 		setStreaming: (isStreaming: boolean) => update((s) => ({ ...s, isStreaming })),
 		setConnectionStatus: (status: UIState['connectionStatus']) =>
 			update((s) => ({ ...s, connectionStatus: status }))

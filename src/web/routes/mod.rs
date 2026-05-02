@@ -18,6 +18,8 @@ pub fn api_routes() -> Router<AppState> {
     Router::new()
         // SSE events
         .route("/events", get(events::events_stream))
+        // Workspace
+        .route("/workspace", get(sessions::get_workspace))
         // Sessions
         .route("/sessions", get(sessions::list_sessions).post(sessions::create_session))
         .route(

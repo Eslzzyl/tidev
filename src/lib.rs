@@ -33,31 +33,33 @@ struct Cli {
     command: Option<Command>,
 }
 
-#[derive(clap::Subcommand, Debug)]
-enum Command {
-    /// Start gateway server (all enabled platforms: Telegram, QQ, etc.)
-    Gateway,
-    /// Start web server
-    Web {
-        /// Host to bind to
-        #[arg(short = 'H', long)]
-        host: Option<String>,
-        /// Port to listen on
-        #[arg(short, long)]
-        port: Option<u16>,
-        /// Serve frontend from filesystem (web/dist) instead of embedded assets
-        #[arg(long)]
-        dev_fs: bool,
-    },
-}
-
+    #[derive(clap::Subcommand, Debug)]
+    enum Command {
+        /// Start gateway server (all enabled platforms: Telegram, QQ, etc.)
+        Gateway,
+        /// Start web server
+        Web {
+            /// Host to bind to
+            #[arg(short = 'H', long)]
+            host: Option<String>,
+            /// Port to listen on
+            #[arg(short, long)]
+            port: Option<u16>,
+            /// Serve frontend from filesystem (web/dist) instead of embedded assets
+            #[arg(long)]
+            dev_fs: bool,
+            /// Workspace root path (defaults to current directory)
+            #[arg(short, long)]
+            workspace: Option<std::path::PathBuf>,
+        },
+    }
 pub fn run() -> anyhow::Result<()> {
     match Cli::parse().command {
         None => app::run(),
         Some(Command::Gateway) => gateway::run(),
-        Some(Command::Web { host, port, dev_fs }) => {
+        Some(Command::Web { host, port, dev_fs, workspace }) => {
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(web::run(web::WebOptions { host, port, dev_fs }))
+            rt.block_on(web::run(web::WebOptions { host, port, dev_fs, workspace_root: workspace }))
         }
     }
 }

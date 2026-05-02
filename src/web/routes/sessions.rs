@@ -81,15 +81,15 @@ pub struct SessionDetail {
     pub context_retained_from: usize,
 }
 
-/// List all sessions
+/// List all sessions for the current workspace
 pub async fn list_sessions(
     State(state): State<AppState>,
 ) -> WebResult<Json<SessionsResponse>> {
-    crate::log_debug!("Listing all sessions");
+    crate::log_debug!("Listing sessions for workspace: {}", state.workspace_root.display());
     let store = state.store.lock().await;
-    let records = store.load_all_sessions()?;
+    let records = store.load_sessions_for_workspace(&state.workspace_root)?;
     let sessions: Vec<SessionInfo> = records.into_iter().map(Into::into).collect();
-    crate::log_info!("Listed {} sessions", sessions.len());
+    crate::log_info!("Listed {} sessions for workspace", sessions.len());
     Ok(Json(SessionsResponse { sessions }))
 }
 
@@ -176,4 +176,20 @@ pub async fn delete_session(
     store.delete_session(session_id)?;
     crate::log_info!("Deleted session {}", session_id);
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Workspace info response
+#[derive(Serialize)]
+pub struct WorkspaceInfo {
+    pub workspace_root: String,
+}
+
+/// Get current workspace info
+pub async fn get_workspace(
+    State(state): State<AppState>,
+) -> WebResult<Json<WorkspaceInfo>> {
+    crate::log_debug!("Getting workspace info: {}", state.workspace_root.display());
+    Ok(Json(WorkspaceInfo {
+        workspace_root: state.workspace_root.display().to_string(),
+    }))
 }
