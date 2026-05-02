@@ -2,6 +2,7 @@ import type { Round } from '../../types/round';
 import { MarkdownRenderer } from '../renderers/MarkdownRenderer';
 import { ThinkingBlock } from '../renderers/ThinkingBlock';
 import { ToolCallRow } from '../renderers/ToolCallRow';
+import { CopyButton } from '../ui/CopyButton';
 import { formatTime, getDuration } from '../../utils/format';
 
 interface Props {
@@ -22,7 +23,15 @@ export function MessageRound({ round }: Props) {
     return parts;
   }
 
+  function getAssistantContent(): string {
+    return round.segments
+      .filter((s) => s.type === 'reasoning' || s.type === 'text')
+      .map((s) => s.content || '')
+      .join('\n\n');
+  }
+
   const footerParts = getFooterParts();
+  const assistantContent = getAssistantContent();
 
   return (
     <div className="border-b border-neutral-100 dark:border-neutral-900">
@@ -40,6 +49,7 @@ export function MessageRound({ round }: Props) {
             <span className="text-xs text-neutral-400 dark:text-neutral-600">
               {formatTime(round.userMessage.created_at)}
             </span>
+            <CopyButton content={round.userMessage.content} />
           </div>
 
           <div className="w-full rounded-2xl rounded-tl-sm bg-neutral-100 px-4 py-2.5 text-sm leading-relaxed text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100">
@@ -72,6 +82,9 @@ export function MessageRound({ round }: Props) {
               )}
               {round.status === 'streaming' && (
                 <span className="text-xs text-blue-500 dark:text-blue-400">streaming...</span>
+              )}
+              {round.status === 'complete' && assistantContent && (
+                <CopyButton content={assistantContent} />
               )}
             </div>
 

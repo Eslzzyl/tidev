@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { CopyButton } from '../ui/CopyButton';
 
 interface Props {
   content: string;
@@ -52,6 +53,10 @@ export function ThinkingBlock({ content, tokenCount, defaultExpanded = false }: 
 
       {expanded ? (
         <div className="border-t border-amber-200 px-4 py-3 dark:border-amber-800">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-xs font-medium text-amber-800 dark:text-amber-200">Thinking</span>
+            <CopyButton content={content} />
+          </div>
           <MarkdownRenderer content={content} />
         </div>
       ) : (
