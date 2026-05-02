@@ -148,14 +148,13 @@
 	});
 
 	// Handle scroll to detect if user manually scrolled up
-	function handleScroll() {
-		if (!messagesContainerRef) return;
-
-		const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef;
+function handleScroll() {
+		const scrollHeight = messagesContainerRef?.scrollHeight ?? 0;
+		const scrollTop = messagesContainerRef?.scrollTop ?? 0;
+		const clientHeight = messagesContainerRef?.clientHeight ?? 0;
 		const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
 		shouldAutoScroll = isNearBottom;
 	}
-
 	function scrollToBottom() {
 		if (messagesEndRef) {
 			messagesEndRef.scrollIntoView({ behavior: 'smooth' });
@@ -273,19 +272,6 @@
 		{/if}
 		<div bind:this={messagesEndRef}></div>
 	</div>
-
-	<!-- Scroll to bottom button -->
-	{#if !shouldAutoScroll && $sessionStore.messages.length > 0}
-		<button
-			onclick={scrollToBottom}
-			class="absolute bottom-24 right-6 rounded-full bg-neutral-900 p-2 text-white shadow-lg hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
-			aria-label="Scroll to bottom"
-		>
-			<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-			</svg>
-		</button>
-	{/if}
 
 	<!-- Input Area -->
 	<MessageInput />
