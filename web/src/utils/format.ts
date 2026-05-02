@@ -49,6 +49,17 @@ export function formatNumber(n: number): string {
 }
 
 /**
+ * Format token count with unit suffix (K, M, B, T).
+ */
+export function formatToken(n: number): string {
+  if (n < 1000) return n.toString();
+  if (n < 1_000_000) return (n / 1000).toFixed(1) + 'K';
+  if (n < 1_000_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n < 1_000_000_000_000) return (n / 1_000_000_000).toFixed(1) + 'B';
+  return (n / 1_000_000_000_000).toFixed(1) + 'T';
+}
+
+/**
  * Format workspace path (replace home with ~)
  */
 export function formatWorkspace(path: string): string {

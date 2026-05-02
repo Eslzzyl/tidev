@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useSessionStore } from '../../stores/useSessionStore';
 import { useUIStore } from '../../stores/useUIStore';
 import type { FileDiff, TodoItem, TokenUsage } from '../../types/api';
-import { formatNumber, formatWorkspace } from '../../utils/format';
+import { formatNumber, formatToken, formatWorkspace } from '../../utils/format';
 
 export function RightSidebar() {
   const messages = useSessionStore((s) => s.messages);
@@ -171,15 +171,15 @@ export function RightSidebar() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-neutral-500 dark:text-neutral-400">Total tokens</span>
-                  <span>{formatNumber(stats.totalTokens)}</span>
+                  <span>{formatToken(stats.totalTokens)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-neutral-500 dark:text-neutral-400">Input tokens</span>
-                  <span>{formatNumber(stats.inputTokens)}</span>
+                  <span>{formatToken(stats.inputTokens)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-neutral-500 dark:text-neutral-400">Output tokens</span>
-                  <span>{formatNumber(stats.outputTokens)}</span>
+                  <span>{formatToken(stats.outputTokens)}</span>
                 </div>
               </div>
             </div>
