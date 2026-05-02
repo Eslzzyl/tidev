@@ -24,6 +24,7 @@ export interface ToolCallEntry {
  */
 export type RoundSegment =
   | { type: 'text'; content: string }
+  | { type: 'reasoning'; content: string }
   | { type: 'tool_call'; toolCallId: string };
 
 /**
@@ -32,7 +33,6 @@ export type RoundSegment =
 export interface Round {
   id: string;
   userMessage: Message;
-  reasoning?: string;
   segments: RoundSegment[];
   toolCallMap: Record<string, ToolCallEntry>;
   status: 'user_only' | 'streaming' | 'complete';

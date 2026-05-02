@@ -157,12 +157,18 @@ export function useSSE(sessionId: string | null) {
 
       updateStreamingRound((prev) => {
         if (prev) {
-          // Append reasoning to existing round
-          const reasoning = prev.reasoning ? prev.reasoning + event.content : event.content;
-          return { ...prev, reasoning };
+          // Append reasoning to the last reasoning segment, or push a new one
+          const segments = [...prev.segments];
+          const lastSeg = segments[segments.length - 1];
+          if (lastSeg && lastSeg.type === 'reasoning') {
+            lastSeg.content += event.content;
+          } else {
+            segments.push({ type: 'reasoning', content: event.content });
+          }
+          return { ...prev, segments };
         }
 
-        // Create new streaming round with this reasoning
+        // Create new streaming round with this reasoning segment
         const state = useSessionStore.getState();
         const messages = state.messages;
         const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user');
@@ -171,10 +177,9 @@ export function useSSE(sessionId: string | null) {
         return {
           id: `streaming-${lastUserMsg.id}`,
           userMessage: lastUserMsg,
-          segments: [],
+          segments: [{ type: 'reasoning', content: event.content }],
           toolCallMap: {},
           status: 'streaming',
-          reasoning: event.content,
         };
       });
     };

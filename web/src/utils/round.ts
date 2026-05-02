@@ -21,11 +21,7 @@ export function buildRounds(messages: Message[]): Round[] {
     } else if (currentRound) {
       if (msg.role === 'assistant') {
         if (msg.reasoning) {
-          if (currentRound.reasoning) {
-            currentRound.reasoning += '\n' + msg.reasoning;
-          } else {
-            currentRound.reasoning = msg.reasoning;
-          }
+          currentRound.segments.push({ type: 'reasoning', content: msg.reasoning });
         }
 
         if (msg.content) {

@@ -49,7 +49,7 @@ export function MessageRound({ round }: Props) {
       </div>
 
       {/* Assistant response */}
-      {(round.segments.length > 0 || round.reasoning) && (
+      {round.segments.length > 0 && (
         <div className="group flex gap-3 px-4 py-4">
           <div className="flex-shrink-0">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-xs font-medium text-white dark:bg-blue-500">
@@ -76,12 +76,12 @@ export function MessageRound({ round }: Props) {
             </div>
 
             <div className="w-full rounded-2xl rounded-tl-sm bg-white px-4 py-2.5 text-sm leading-relaxed text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100">
-              {/* Thinking/Reasoning block */}
-              {round.reasoning && <ThinkingBlock content={round.reasoning} />}
-
-              {/* Ordered segments */}
+              {/* Ordered segments (reasoning inlined at correct position) */}
               {round.segments.map((segment, idx) => (
                 <div key={idx} className="mb-2 last:mb-0">
+                  {segment.type === 'reasoning' && segment.content && (
+                    <ThinkingBlock content={segment.content} />
+                  )}
                   {segment.type === 'text' && segment.content && (
                     <MarkdownRenderer content={segment.content} />
                   )}
