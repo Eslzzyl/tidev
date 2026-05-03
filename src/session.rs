@@ -788,7 +788,9 @@ impl BackendEvent {
             | Self::SubagentCompleted { request_id, .. }
             | Self::UsageStats { request_id, .. }
             | Self::SidebarSnapshotReady { request_id, .. } => Some(*request_id),
-            Self::InstructionsLoaded { .. } | Self::ContextCompacted { .. } | Self::ShellOutput { .. } => None,
+            Self::InstructionsLoaded { .. }
+            | Self::ContextCompacted { .. }
+            | Self::ShellOutput { .. } => None,
         }
     }
 }

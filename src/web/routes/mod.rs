@@ -23,7 +23,10 @@ pub fn api_routes() -> Router<AppState> {
         // Workspace
         .route("/workspace", get(sessions::get_workspace))
         // Sessions
-        .route("/sessions", get(sessions::list_sessions).post(sessions::create_session))
+        .route(
+            "/sessions",
+            get(sessions::list_sessions).post(sessions::create_session),
+        )
         .route(
             "/sessions/{id}",
             get(sessions::get_session).delete(sessions::delete_session),

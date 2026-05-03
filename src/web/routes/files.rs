@@ -1,5 +1,6 @@
 use axum::{
-    Json, extract::{Query, State},
+    Json,
+    extract::{Query, State},
 };
 use serde::{Deserialize, Serialize};
 
@@ -29,11 +30,13 @@ pub async fn search_files(
     Query(params): Query<SearchParams>,
 ) -> WebResult<Json<FileSearchResponse>> {
     let query = params.q.unwrap_or_default();
-    
+
     crate::log_debug!("File search request: query='{}'", query);
 
     // Ensure background indexing is started
-    state.file_search_index.ensure_background_indexing(&state.workspace_root);
+    state
+        .file_search_index
+        .ensure_background_indexing(&state.workspace_root);
 
     // Perform search
     let file_suggestions = state.file_search_index.search(&query);

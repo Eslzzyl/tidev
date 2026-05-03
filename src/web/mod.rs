@@ -65,7 +65,15 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     crate::log_info!("Auth store loaded");
 
     // Create app state
-    let state = AppState::new(store, event_bus, llm_client, config, auth, workspace_root, &paths)?;
+    let state = AppState::new(
+        store,
+        event_bus,
+        llm_client,
+        config,
+        auth,
+        workspace_root,
+        &paths,
+    )?;
 
     // Determine static file serving mode
     let static_mode = StaticMode::detect();
@@ -89,7 +97,9 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
             crate::log_info!("Frontend mode: DevFs (serving from web/dist)");
         } else {
             crate::log_info!("Frontend mode: Dev (showing development page)");
-            crate::log_info!("Tip: Run `cd web && pnpm dev` and visit http://localhost:5173 for HMR");
+            crate::log_info!(
+                "Tip: Run `cd web && pnpm dev` and visit http://localhost:5173 for HMR"
+            );
             crate::log_info!("     Or use --dev-fs to serve from web/dist");
         }
     } else {

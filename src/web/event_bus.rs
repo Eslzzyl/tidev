@@ -19,10 +19,7 @@ pub enum AppEvent {
         content: String,
     },
     /// LLM message complete
-    MessageComplete {
-        session_id: Uuid,
-        request_id: u64,
-    },
+    MessageComplete { session_id: Uuid, request_id: u64 },
     /// Token usage stats for a completed assistant message
     UsageStats {
         session_id: Uuid,
@@ -67,14 +64,9 @@ pub enum AppEvent {
         arguments: String,
     },
     /// Request was aborted
-    Aborted {
-        session_id: Uuid,
-        request_id: u64,
-    },
+    Aborted { session_id: Uuid, request_id: u64 },
     /// Messages were updated (e.g., after revert)
-    MessagesUpdated {
-        session_id: Uuid,
-    },
+    MessagesUpdated { session_id: Uuid },
     /// Error occurred
     Error {
         session_id: Uuid,

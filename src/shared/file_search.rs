@@ -306,7 +306,12 @@ impl FileSearchIndex {
 
         walk_workspace_entries(&workspace_root, |entry| {
             if entry.path.contains('/') {
-                let dir = entry.path.rsplit_once('/').map(|x| x.0).unwrap_or("").to_string();
+                let dir = entry
+                    .path
+                    .rsplit_once('/')
+                    .map(|x| x.0)
+                    .unwrap_or("")
+                    .to_string();
                 segments.entry(dir).or_default().push(entry);
             } else {
                 root_entries.push(entry);
@@ -327,7 +332,8 @@ impl FileSearchIndex {
             snapshot.revision = snapshot.revision.wrapping_add(1);
         }
 
-        self.completed_generation.store(generation, Ordering::Release);
+        self.completed_generation
+            .store(generation, Ordering::Release);
         crate::log_info!(
             "file search index built for {:?}, {} entries",
             workspace_root,

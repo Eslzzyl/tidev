@@ -21,7 +21,10 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     prelude::{Frame, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Cell, List, ListItem, ListState, Paragraph, Row, Table, TableState, Wrap},
+    widgets::{
+        Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState,
+        Wrap,
+    },
 };
 
 use super::{App, connect::ProviderPickerItem, render::*};
@@ -220,11 +223,7 @@ impl App {
         frame.render_stateful_widget(list, inner, &mut state);
     }
 
-    pub(super) fn render_shell_completion_palette(
-        &self,
-        frame: &mut Frame<'_>,
-        area: Rect,
-    ) {
+    pub(super) fn render_shell_completion_palette(&self, frame: &mut Frame<'_>, area: Rect) {
         if !self.shell_completion.visible || self.shell_completion.candidates.is_empty() {
             return;
         }
@@ -234,12 +233,7 @@ impl App {
         let height = (self.shell_completion.candidates.len() as u16)
             .min(6)
             .saturating_add(2);
-        let rect = Rect::new(
-            area.x,
-            area.y.saturating_sub(height),
-            width,
-            height,
-        );
+        let rect = Rect::new(area.x, area.y.saturating_sub(height), width, height);
         let inner = rect.inner(Margin {
             horizontal: 1,
             vertical: 1,
@@ -264,7 +258,10 @@ impl App {
             .style(Style::default().bg(palette.panel_alt))
             .borders(Borders::ALL)
             .border_style(Style::default().fg(palette.border_active()))
-            .title(format!("Commands ({})", self.shell_completion.candidates.len()));
+            .title(format!(
+                "Commands ({})",
+                self.shell_completion.candidates.len()
+            ));
 
         let list = List::new(items)
             .style(Style::default().bg(palette.panel_alt).fg(palette.text))
@@ -1186,7 +1183,10 @@ impl App {
                 let left_line = Line::from(vec![
                     Span::raw(checkbox),
                     Span::styled(
-                        shorten(&session.title, sections[2].width.saturating_sub(max_right_width + 4) as usize),
+                        shorten(
+                            &session.title,
+                            sections[2].width.saturating_sub(max_right_width + 4) as usize,
+                        ),
                         Style::default()
                             .fg(palette.text)
                             .add_modifier(Modifier::BOLD),
@@ -1205,10 +1205,7 @@ impl App {
                         Style::default().fg(palette.accent_soft),
                     ),
                     Span::raw("  "),
-                    Span::styled(
-                        updated_at.clone(),
-                        Style::default().fg(palette.muted),
-                    ),
+                    Span::styled(updated_at.clone(), Style::default().fg(palette.muted)),
                 ];
 
                 if is_current {
@@ -1228,7 +1225,10 @@ impl App {
 
                 let right_line = Line::from(right_spans).alignment(Alignment::Right);
 
-                rows.push(Row::new(vec![Cell::from(left_line), Cell::from(right_line)]));
+                rows.push(Row::new(vec![
+                    Cell::from(left_line),
+                    Cell::from(right_line),
+                ]));
             }
 
             let mut state = TableState::default();
@@ -1236,14 +1236,17 @@ impl App {
                 panel.selected_index.min(matches.len().saturating_sub(1)),
             ));
 
-            let table = Table::new(rows, [Constraint::Fill(1), Constraint::Min(max_right_width)])
-                .style(Style::default().bg(palette.panel).fg(palette.text))
-                .row_highlight_style(
-                    Style::default()
-                        .bg(palette.selection_bg)
-                        .fg(palette.selection_fg)
-                        .add_modifier(Modifier::BOLD),
-                );
+            let table = Table::new(
+                rows,
+                [Constraint::Fill(1), Constraint::Min(max_right_width)],
+            )
+            .style(Style::default().bg(palette.panel).fg(palette.text))
+            .row_highlight_style(
+                Style::default()
+                    .bg(palette.selection_bg)
+                    .fg(palette.selection_fg)
+                    .add_modifier(Modifier::BOLD),
+            );
 
             frame.render_stateful_widget(table, sections[2], &mut state);
         }

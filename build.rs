@@ -40,7 +40,10 @@ fn main() {
             match status {
                 Ok(s) if s.success() => {}
                 Ok(s) => {
-                    eprintln!("Warning: pnpm install failed with exit code: {:?}", s.code());
+                    eprintln!(
+                        "Warning: pnpm install failed with exit code: {:?}",
+                        s.code()
+                    );
                     return;
                 }
                 Err(e) => {
@@ -70,12 +73,7 @@ fn main() {
     }
 }
 
-fn should_rebuild(
-    dist_path: &Path,
-    src_path: &Path,
-    package_json: &Path,
-    lockfile: &Path,
-) -> bool {
+fn should_rebuild(dist_path: &Path, src_path: &Path, package_json: &Path, lockfile: &Path) -> bool {
     // 如果 dist 不存在，需要构建
     if !dist_path.exists() {
         return true;
@@ -91,14 +89,16 @@ fn should_rebuild(
         }
         // 检查 package.json
         if let Some(t) = get_mtime(package_json)
-            && t > dist_time {
-                return true;
-            }
+            && t > dist_time
+        {
+            return true;
+        }
         // 检查 lockfile
         if let Some(t) = get_mtime(lockfile)
-            && t > dist_time {
-                return true;
-            }
+            && t > dist_time
+        {
+            return true;
+        }
     }
 
     false
@@ -110,19 +110,21 @@ fn get_mtime(path: &Path) -> Option<SystemTime> {
 
 fn is_path_newer_than(path: &Path, threshold: SystemTime) -> bool {
     if let Some(mtime) = get_mtime(path)
-        && mtime > threshold {
-            return true;
-        }
+        && mtime > threshold
+    {
+        return true;
+    }
 
     // 如果是目录，递归检查子项
     if path.is_dir()
-        && let Ok(entries) = std::fs::read_dir(path) {
-            for entry in entries.flatten() {
-                if is_path_newer_than(&entry.path(), threshold) {
-                    return true;
-                }
+        && let Ok(entries) = std::fs::read_dir(path)
+    {
+        for entry in entries.flatten() {
+            if is_path_newer_than(&entry.path(), threshold) {
+                return true;
             }
         }
+    }
 
     false
 }

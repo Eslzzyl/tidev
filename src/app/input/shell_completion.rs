@@ -73,17 +73,21 @@ impl ShellCompletionState {
         self.command_cache.clear();
         let (shell, args, flag) = if cfg!(windows) {
             // On Windows, use PowerShell to get commands
-            ("powershell", "-Command", "Get-Command | Select-Object -ExpandProperty Name")
+            (
+                "powershell",
+                "-Command",
+                "Get-Command | Select-Object -ExpandProperty Name",
+            )
         } else {
             // On Unix, use bash compgen
-            ("sh", "-c", "compgen -c 2>/dev/null || echo 'cd ls mkdir rm cp mv cat echo grep find git cargo make python node npm docker'")
+            (
+                "sh",
+                "-c",
+                "compgen -c 2>/dev/null || echo 'cd ls mkdir rm cp mv cat echo grep find git cargo make python node npm docker'",
+            )
         };
 
-        if let Ok(output) = Command::new(shell)
-            .arg(args)
-            .arg(flag)
-            .output()
-        {
+        if let Ok(output) = Command::new(shell).arg(args).arg(flag).output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {
                 let trimmed = line.trim();

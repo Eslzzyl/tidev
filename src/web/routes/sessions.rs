@@ -82,10 +82,11 @@ pub struct SessionDetail {
 }
 
 /// List all sessions for the current workspace
-pub async fn list_sessions(
-    State(state): State<AppState>,
-) -> WebResult<Json<SessionsResponse>> {
-    crate::log_debug!("Listing sessions for workspace: {}", state.workspace_root.display());
+pub async fn list_sessions(State(state): State<AppState>) -> WebResult<Json<SessionsResponse>> {
+    crate::log_debug!(
+        "Listing sessions for workspace: {}",
+        state.workspace_root.display()
+    );
     let store = state.store.lock().await;
     let records = store.load_sessions_for_workspace(&state.workspace_root)?;
     let sessions: Vec<SessionInfo> = records.into_iter().map(Into::into).collect();
@@ -130,8 +131,16 @@ pub async fn create_session(
     )?;
     drop(store);
 
-    crate::log_info!("Created session {} with provider {} and model {}", session_id, provider_id, model_id);
-    Ok((StatusCode::CREATED, Json(CreateSessionResponse { session_id })))
+    crate::log_info!(
+        "Created session {} with provider {} and model {}",
+        session_id,
+        provider_id,
+        model_id
+    );
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateSessionResponse { session_id }),
+    ))
 }
 
 /// Get session details
@@ -141,12 +150,10 @@ pub async fn get_session(
 ) -> WebResult<Json<SessionDetail>> {
     crate::log_debug!("Getting session details for {}", session_id);
     let store = state.store.lock().await;
-    let record = store
-        .load_session_record(session_id)?
-        .ok_or_else(|| {
-            crate::log_warn!("Session {} not found", session_id);
-            AppError::NotFound(format!("Session {} not found", session_id))
-        })?;
+    let record = store.load_session_record(session_id)?.ok_or_else(|| {
+        crate::log_warn!("Session {} not found", session_id);
+        AppError::NotFound(format!("Session {} not found", session_id))
+    })?;
     drop(store);
 
     crate::log_debug!("Retrieved session {} details", session_id);
@@ -185,9 +192,7 @@ pub struct WorkspaceInfo {
 }
 
 /// Get current workspace info
-pub async fn get_workspace(
-    State(state): State<AppState>,
-) -> WebResult<Json<WorkspaceInfo>> {
+pub async fn get_workspace(State(state): State<AppState>) -> WebResult<Json<WorkspaceInfo>> {
     crate::log_debug!("Getting workspace info: {}", state.workspace_root.display());
     Ok(Json(WorkspaceInfo {
         workspace_root: state.workspace_root.display().to_string(),

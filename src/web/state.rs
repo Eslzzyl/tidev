@@ -51,10 +51,10 @@ impl AppState {
         paths: &ConfigPaths,
     ) -> anyhow::Result<Self> {
         crate::log_debug!("Creating new AppState");
-        
+
         // Create snapshot service for undo operations
         let snapshot = SnapshotService::new(&workspace_root, paths)?;
-        
+
         Ok(Self {
             store: Arc::new(Mutex::new(store)),
             event_bus,
@@ -80,7 +80,11 @@ impl AppState {
     pub async fn get_active_request(&self, session_id: uuid::Uuid) -> Option<u64> {
         let requests = self.active_requests.read().await;
         let result = requests.get(&session_id).copied();
-        crate::log_debug!("Getting active request for session {}: {:?}", session_id, result);
+        crate::log_debug!(
+            "Getting active request for session {}: {:?}",
+            session_id,
+            result
+        );
         result
     }
 

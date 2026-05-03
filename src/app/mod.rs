@@ -62,7 +62,6 @@ use runtime::state::*;
 use crate::{
     app::at_mention::{AtMentionKind, AtMentionState},
     app::input::SnippetState,
-    shared::file_search::current_at_fragment,
     app::input::shell_completion::ShellCompletionState,
     app::mcp_panel::McpPanelState,
     app::memory_panel::MemoryPanelState,
@@ -88,6 +87,7 @@ use crate::{
     prompts::{SessionMode, init_command},
     provider_setup::ConnectDialog,
     session::{AssistantTurn, BackendEvent, Conversation, Message, MessageAttachment, MessageRole},
+    shared::file_search::current_at_fragment,
     snapshot::{FileDiff, SnapshotService},
     storage::SessionStore,
     theme::{ThemeManager, ThemeName},
@@ -1147,9 +1147,11 @@ impl App {
                 exit_code,
             } => {
                 // Find the last streaming Shell assistant message
-                let last_shell_idx = self.conversation.messages.iter().rposition(|m| {
-                    matches!(m.role, MessageRole::Shell) && m.streaming
-                });
+                let last_shell_idx = self
+                    .conversation
+                    .messages
+                    .iter()
+                    .rposition(|m| matches!(m.role, MessageRole::Shell) && m.streaming);
 
                 if let Some(idx) = last_shell_idx {
                     let message_id = self.conversation.messages[idx].id;
@@ -1173,14 +1175,11 @@ impl App {
                         }
                         // Persist the final message
                         let persisted = self.conversation.messages[idx].clone();
-                        if let Err(e) = self.store.append_message(
-                            self.conversation.session_id,
-                            &persisted,
-                        ) {
-                            crate::log_warn!(
-                                "ShellOutput: failed to persist message: {}",
-                                e
-                            );
+                        if let Err(e) = self
+                            .store
+                            .append_message(self.conversation.session_id, &persisted)
+                        {
+                            crate::log_warn!("ShellOutput: failed to persist message: {}", e);
                         }
                         self.scroll_messages_to_bottom();
                     }

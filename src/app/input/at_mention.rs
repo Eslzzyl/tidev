@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::shared::file_search::{
-    current_at_fragment, FileEntryKind, FileSearchIndex, FileSuggestion,
+    FileEntryKind, FileSearchIndex, FileSuggestion, current_at_fragment,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -183,8 +183,7 @@ mod tests {
 
         fs::write(workspace.join("alpha.txt"), "alpha").expect("failed to write file");
         fs::create_dir(workspace.join("beta")).expect("failed to create dir");
-        fs::write(workspace.join("beta").join("gamma.txt"), "gamma")
-            .expect("failed to write file");
+        fs::write(workspace.join("beta").join("gamma.txt"), "gamma").expect("failed to write file");
 
         let mut state = AtMentionState::default();
         state.sync(workspace, "@alp", 4);

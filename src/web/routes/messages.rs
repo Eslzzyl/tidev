@@ -167,12 +167,10 @@ pub async fn list_messages(
         .collect();
 
     // Check if session exists by trying to load the record
-    let _ = store
-        .load_session_record(session_id)?
-        .ok_or_else(|| {
-            crate::log_warn!("Session {} not found when listing messages", session_id);
-            AppError::NotFound(format!("Session {} not found", session_id))
-        })?;
+    let _ = store.load_session_record(session_id)?.ok_or_else(|| {
+        crate::log_warn!("Session {} not found when listing messages", session_id);
+        AppError::NotFound(format!("Session {} not found", session_id))
+    })?;
     drop(store);
 
     let messages: Vec<ApiMessage> = messages_db
@@ -241,7 +239,11 @@ pub async fn list_messages(
         })
         .collect();
 
-    crate::log_debug!("Listed {} messages for session {}", messages.len(), session_id);
+    crate::log_debug!(
+        "Listed {} messages for session {}",
+        messages.len(),
+        session_id
+    );
     Ok(Json(ListMessagesResponse { messages, todos }))
 }
 
@@ -251,22 +253,28 @@ pub async fn send_message(
     AxumPath(session_id): AxumPath<Uuid>,
     Json(body): Json<SendMessageRequest>,
 ) -> WebResult<(StatusCode, Json<SendMessageResponse>)> {
-    crate::log_info!("Sending message to session {} (content length: {})", session_id, body.content.len());
+    crate::log_info!(
+        "Sending message to session {} (content length: {})",
+        session_id,
+        body.content.len()
+    );
 
     // Check if session exists
     let record = {
         let store = state.store.lock().await;
-        store
-            .load_session_record(session_id)?
-            .ok_or_else(|| {
-                crate::log_warn!("Session {} not found when sending message", session_id);
-                AppError::NotFound(format!("Session {} not found", session_id))
-            })?
+        store.load_session_record(session_id)?.ok_or_else(|| {
+            crate::log_warn!("Session {} not found when sending message", session_id);
+            AppError::NotFound(format!("Session {} not found", session_id))
+        })?
     };
 
     // Generate request ID
     let request_id = rand::random::<u64>();
-    crate::log_debug!("Generated request ID {} for session {}", request_id, session_id);
+    crate::log_debug!(
+        "Generated request ID {} for session {}",
+        request_id,
+        session_id
+    );
 
     // Track this request
     state.track_request(session_id, request_id).await;
@@ -359,39 +367,46 @@ pub async fn send_message(
     let config = state.config.read().await;
 
     // Determine which provider and model to use
-    let (provider_id, provider, model_id, model_config) = if let (Some(pid), Some(mid)) = (&body.provider_id, &body.model_id) {
-        // Use the explicitly requested model
-        let provider = config
-            .providers
-            .get(pid)
-            .cloned()
-            .ok_or_else(|| AppError::BadRequest(format!("Provider '{}' not found", pid)))?;
-        let model_config = provider
-            .models
-            .get(mid)
-            .cloned()
-            .ok_or_else(|| AppError::BadRequest(format!("Model '{}' not found for provider '{}'", mid, pid)))?;
-        (pid.clone(), provider, mid.clone(), model_config)
-    } else {
-        // Use session's current model
-        let provider = config
-            .providers
-            .get(&record.provider_id)
-            .cloned()
-            .ok_or_else(|| AppError::Internal("Provider not found".to_string()))?;
-        let model_config = provider
-            .models
-            .get(&record.model_id)
-            .cloned()
-            .ok_or_else(|| AppError::Internal("Model not found".to_string()))?;
-        (record.provider_id.clone(), provider, record.model_id.clone(), model_config)
-    };
+    let (provider_id, provider, model_id, model_config) =
+        if let (Some(pid), Some(mid)) = (&body.provider_id, &body.model_id) {
+            // Use the explicitly requested model
+            let provider = config
+                .providers
+                .get(pid)
+                .cloned()
+                .ok_or_else(|| AppError::BadRequest(format!("Provider '{}' not found", pid)))?;
+            let model_config = provider.models.get(mid).cloned().ok_or_else(|| {
+                AppError::BadRequest(format!("Model '{}' not found for provider '{}'", mid, pid))
+            })?;
+            (pid.clone(), provider, mid.clone(), model_config)
+        } else {
+            // Use session's current model
+            let provider = config
+                .providers
+                .get(&record.provider_id)
+                .cloned()
+                .ok_or_else(|| AppError::Internal("Provider not found".to_string()))?;
+            let model_config = provider
+                .models
+                .get(&record.model_id)
+                .cloned()
+                .ok_or_else(|| AppError::Internal("Model not found".to_string()))?;
+            (
+                record.provider_id.clone(),
+                provider,
+                record.model_id.clone(),
+                model_config,
+            )
+        };
 
     let model = crate::config::ActiveModel {
         provider_id: provider_id.clone(),
         provider_display_name: provider.display_name.clone(),
         model_id: model_id.clone(),
-        request_model_id: model_config.request_model_id.clone().unwrap_or_else(|| model_id.clone()),
+        request_model_id: model_config
+            .request_model_id
+            .clone()
+            .unwrap_or_else(|| model_id.clone()),
         display_name: model_config.display_name.clone(),
         base_url: provider.base_url.clone(),
         api_key: None, // Will be loaded from auth store in LLM client
@@ -458,9 +473,14 @@ pub async fn send_message(
                     request_id,
                     content,
                 }),
-                BackendEvent::Finished { session_id, request_id, .. } => {
-                    Some(AppEvent::MessageComplete { session_id, request_id })
-                }
+                BackendEvent::Finished {
+                    session_id,
+                    request_id,
+                    ..
+                } => Some(AppEvent::MessageComplete {
+                    session_id,
+                    request_id,
+                }),
                 BackendEvent::Failed {
                     session_id,
                     request_id,
@@ -545,7 +565,11 @@ pub async fn abort_request(
     AxumPath(session_id): AxumPath<Uuid>,
     Json(body): Json<AbortRequest>,
 ) -> WebResult<StatusCode> {
-    crate::log_info!("Abort request for session {} request {}", session_id, body.request_id);
+    crate::log_info!(
+        "Abort request for session {} request {}",
+        session_id,
+        body.request_id
+    );
 
     // Check if there's an active request
     let active = state.get_active_request(session_id).await;
@@ -556,9 +580,17 @@ pub async fn abort_request(
             session_id,
             request_id: body.request_id,
         });
-        crate::log_info!("Aborted request {} for session {}", body.request_id, session_id);
+        crate::log_info!(
+            "Aborted request {} for session {}",
+            body.request_id,
+            session_id
+        );
     } else {
-        crate::log_warn!("No active request {} found for session {}", body.request_id, session_id);
+        crate::log_warn!(
+            "No active request {} found for session {}",
+            body.request_id,
+            session_id
+        );
     }
 
     Ok(StatusCode::OK)
@@ -690,7 +722,9 @@ pub async fn revert_to_message(
     drop(store);
 
     // Publish event to notify clients
-    state.event_bus.publish(AppEvent::MessagesUpdated { session_id });
+    state
+        .event_bus
+        .publish(AppEvent::MessagesUpdated { session_id });
 
     crate::log_info!(
         "Revert completed: session {} reverted to message {}, {} messages hidden",

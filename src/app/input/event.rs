@@ -1586,11 +1586,7 @@ impl App {
         Ok(())
     }
 
-    pub(crate) fn execute_shell_command(
-        &mut self,
-        command: &str,
-        runtime: &Runtime,
-    ) -> Result<()> {
+    pub(crate) fn execute_shell_command(&mut self, command: &str, runtime: &Runtime) -> Result<()> {
         let command = command.trim();
         if command.is_empty() {
             self.last_notice = Some("No command entered".to_string());
@@ -1636,9 +1632,13 @@ impl App {
             let exit_code = output.status.code();
             let mut content = String::new();
             if output.status.success() {
-                content = String::from_utf8_lossy(&output.stdout).trim_end().to_string();
+                content = String::from_utf8_lossy(&output.stdout)
+                    .trim_end()
+                    .to_string();
                 if content.is_empty() {
-                    content = String::from_utf8_lossy(&output.stderr).trim_end().to_string();
+                    content = String::from_utf8_lossy(&output.stderr)
+                        .trim_end()
+                        .to_string();
                 }
             } else {
                 if !output.stdout.is_empty() {

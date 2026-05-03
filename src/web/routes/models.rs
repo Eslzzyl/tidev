@@ -31,8 +31,7 @@ pub async fn list_models(State(state): State<AppState>) -> WebResult<Json<ListMo
         .into_iter()
         .map(|summary| {
             let provider = config.provider(&summary.provider_id);
-            let model = provider
-                .and_then(|p| p.models.get(&summary.model_id));
+            let model = provider.and_then(|p| p.models.get(&summary.model_id));
             ModelInfo {
                 id: summary.model_id,
                 display_name: summary.model_display_name,

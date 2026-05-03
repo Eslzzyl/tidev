@@ -1,7 +1,7 @@
 use axum::{
+    Router,
     response::{Html, IntoResponse},
     routing::get,
-    Router,
 };
 use std::path::PathBuf;
 use tower_http::services::ServeDir;

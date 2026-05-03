@@ -5,16 +5,13 @@ use axum::{
     extract::{Query, State},
     response::sse::{Event, Sse},
 };
-use futures_util::stream::Stream;
 use futures_util::StreamExt;
+use futures_util::stream::Stream;
 use serde::Deserialize;
 use tokio_stream::wrappers::BroadcastStream;
 use uuid::Uuid;
 
-use crate::web::{
-    event_bus::AppEvent,
-    state::AppState,
-};
+use crate::web::{event_bus::AppEvent, state::AppState};
 
 /// Query parameters for SSE connection
 #[derive(Deserialize)]
@@ -99,10 +96,9 @@ pub async fn events_stream(
         crate::log_info!("SSE connection closed for session {}", session_id);
     };
 
-    Sse::new(stream)
-        .keep_alive(
-            axum::response::sse::KeepAlive::new()
-                .interval(Duration::from_secs(10))
-                .text("{}"),
-        )
+    Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(Duration::from_secs(10))
+            .text("{}"),
+    )
 }

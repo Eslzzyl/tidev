@@ -5,10 +5,7 @@ use axum::{
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::web::{
-    error::WebResult,
-    state::AppState,
-};
+use crate::web::{error::WebResult, state::AppState};
 
 /// Todo item for API
 #[derive(Serialize)]
