@@ -1,4 +1,4 @@
-import { useReducer, useEffect, useRef, useMemo } from "react";
+import { useReducer, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   X,
   Search,
@@ -112,42 +112,57 @@ export function SkillsDialog({ isOpen, onClose, onSelect }: SkillsDialogProps) {
     return filteredSkills[idx] ?? null;
   }, [filteredSkills, state.selectedIndex]);
 
-  function handleKeyDown(e: React.KeyboardEvent) {
-    const max = filteredSkills.length;
-    if (max === 0) return;
-
-    switch (e.key) {
-      case "Escape":
-        e.preventDefault();
-        onClose();
-        break;
-      case "ArrowDown":
-        e.preventDefault();
-        dispatch({ type: "NAV_DOWN", max });
-        break;
-      case "ArrowUp":
-        e.preventDefault();
-        dispatch({ type: "NAV_UP", max });
-        break;
-      case "Enter":
-        e.preventDefault();
-        if (selectedSkill) onSelect(selectedSkill.name);
-        break;
-    }
-  }
-
   function handleSkillClick(skill: SkillInfo) {
     onSelect(skill.name);
   }
 
+  // Handle arrow keys, Enter, and ESC
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      const max = filteredSkills.length;
+      if (max === 0) return;
+
+      switch (e.key) {
+        case "ArrowDown":
+          e.preventDefault();
+          dispatch({ type: "NAV_DOWN", max });
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          dispatch({ type: "NAV_UP", max });
+          break;
+        case "Enter":
+          e.preventDefault();
+          if (selectedSkill) onSelect(selectedSkill.name);
+          break;
+      }
+    },
+    [filteredSkills.length, selectedSkill, onSelect],
+  );
+
+  // Close on ESC key
+  useEffect(() => {
+    if (!isOpen) return;
+
+    function handleEsc(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    }
+
+    document.addEventListener("keydown", handleEsc);
+    return () => document.removeEventListener("keydown", handleEsc);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onKeyDown={handleKeyDown}
-    >
-      <div className="flex h-[85vh] w-full max-w-3xl flex-col rounded-lg bg-white shadow-lg dark:bg-neutral-900">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div
+        className="flex h-[85vh] w-full max-w-3xl flex-col rounded-lg bg-white shadow-lg dark:bg-neutral-900"
+        onKeyDown={handleKeyDown}
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
           <div className="flex items-center gap-2">
