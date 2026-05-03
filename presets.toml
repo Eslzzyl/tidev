@@ -208,3 +208,106 @@ max_output_tokens = 131072
 temperature = 1.0
 supports_streaming = true
 supports_images = true
+
+[providers.opencode-go]
+display_name = "OpenCode Go"
+base_url = "https://opencode.ai/zen/go/v1/chat/completions"
+
+[providers.opencode-go.models.glm-5-1]
+request_model_id = "glm-5.1"
+display_name = "GLM-5.1"
+context_window = 200000
+max_output_tokens = 32768
+temperature = 0.7
+supports_streaming = true
+supports_images = false
+
+[providers.opencode-go.models.glm-5]
+request_model_id = "glm-5"
+display_name = "GLM-5"
+context_window = 200000
+max_output_tokens = 32768
+temperature = 0.7
+supports_streaming = true
+supports_images = false
+
+[providers.opencode-go.models.kimi-k2-5]
+request_model_id = "kimi-k2.5"
+display_name = "Kimi-K2.5"
+context_window = 200000
+max_output_tokens = 32768
+temperature = 0.7
+supports_streaming = true
+supports_images = true
+
+[providers.opencode-go.models.kimi-k2-6]
+request_model_id = "kimi-k2.6"
+display_name = "Kimi-K2.6"
+context_window = 200000
+max_output_tokens = 32768
+temperature = 0.7
+supports_streaming = true
+supports_images = true
+
+[providers.opencode-go.models.deepseek-v4-pro]
+request_model_id = "deepseek-v4-pro"
+display_name = "DeepSeek-V4-Pro"
+context_window = 1048576
+max_output_tokens = 262144
+temperature = 0.7
+supports_streaming = true
+supports_images = false
+
+[providers.opencode-go.models.deepseek-v4-flash]
+request_model_id = "deepseek-v4-flash"
+display_name = "DeepSeek-V4-Flash"
+context_window = 1048576
+max_output_tokens = 262144
+temperature = 0.7
+supports_streaming = true
+supports_images = false
+
+[providers.opencode-go.models.mimo-v2-5-pro]
+request_model_id = "mimo-v2.5-pro"
+display_name = "MiMo-V2.5-Pro"
+context_window = 1048576
+max_output_tokens = 131072
+temperature = 1.0
+supports_streaming = true
+supports_images = false
+
+[providers.opencode-go.models.mimo-v2-5]
+request_model_id = "mimo-v2.5"
+display_name = "MiMo-V2.5"
+context_window = 1048576
+max_output_tokens = 131072
+temperature = 1.0
+supports_streaming = true
+supports_images = false
+
+[providers.opencode-go.minimax-m-2-7]
+request_model_id = "minimax-m2.7"
+display_name = "MiniMax-M2.7"
+context_window = 200000
+max_output_tokens = 32768
+temperature = 0.7
+supports_streaming = true
+supports_images = false
+
+[providers.opencode-go.minimax-m-2-5]
+request_model_id = "minimax-m2.5"
+display_name = "MiniMax-M2.5"
+context_window = 200000
+max_output_tokens = 32768
+temperature = 0.7
+supports_streaming = true
+supports_images = false
+
+[providers.opencode-go.qwen-3-6-plus]
+request_model_id = "qwen3.6-plus"
+display_name = "Qwen3.6-Plus"
+context_window = 200000
+max_output_tokens = 32768
+temperature = 0.7
+supports_streaming = true
+supports_images = false
