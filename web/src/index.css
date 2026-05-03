@@ -80,6 +80,7 @@ body {
 .prose code {
   font-family:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  word-break: break-word;
 }
 
 .prose p {
@@ -328,6 +329,7 @@ body {
   font-family:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   color: #262626;
+  word-break: break-word;
 }
 
 .dark .markdown-body :not(pre) > code {

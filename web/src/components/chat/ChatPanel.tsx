@@ -312,7 +312,7 @@ export function ChatPanel() {
       <div
         ref={setMessagesContainerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto"
+        className="flex-1 overflow-y-auto overflow-x-hidden"
       >
         {!currentSessionId && !isDraftSession ? (
           <div className="flex h-full items-center justify-center">
