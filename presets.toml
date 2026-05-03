@@ -211,7 +211,7 @@ supports_images = true
 
 [providers.opencode-go]
 display_name = "OpenCode Go"
-base_url = "https://opencode.ai/zen/go/v1/chat/completions"
+base_url = "https://opencode.ai/zen/go/v1"
 
 [providers.opencode-go.models.glm-5-1]
 request_model_id = "glm-5.1"
