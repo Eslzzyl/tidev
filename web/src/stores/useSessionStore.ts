@@ -79,7 +79,11 @@ export const useSessionStore = create<SessionState & SessionActions>((set) => ({
   setCurrentSessionId: (id) =>
     set({ currentSessionId: id, currentRequestId: null }),
 
-  setMessages: (messages) => set({ messages }),
+  setMessages: (messages) => {
+    console.log("[Store] setMessages called, count:", messages.length,
+      "messages:", JSON.stringify(messages.map(m => ({id: m.id?.substring(0,16), role: m.role, content: m.content?.substring(0,20), completed_at: m.completed_at}))));
+    set({ messages });
+  },
 
   setTodos: (todos) => set({ todos }),
 

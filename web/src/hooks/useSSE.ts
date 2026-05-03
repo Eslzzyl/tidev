@@ -6,6 +6,7 @@ import { api } from "../api/client";
 import type { AppEvent } from "../types/events";
 import type { Round, ToolCallEntry } from "../types/round";
 import type { UsageStatsData } from "../stores/useSessionStore";
+import type { Message, ToolCall } from "../types/api";
 
 export function useSSE(sessionId: string | null) {
   const [streamingRound, setStreamingRound] = useState<Round | null>(null);
@@ -38,7 +39,11 @@ export function useSSE(sessionId: string | null) {
       const lastUserMsg = [...messages]
         .reverse()
         .find((m) => m.role === "user");
-      if (!lastUserMsg) return null;
+      if (!lastUserMsg) {
+        console.log("[SSE] createStreamingRound: no user message found, messages:", messages.length);
+        return null;
+      }
+      console.log("[SSE] createStreamingRound: found user msg id:", lastUserMsg.id.substring(0,20));
 
       return {
         id: `streaming-${lastUserMsg.id}`,
@@ -149,9 +154,14 @@ export function useSSE(sessionId: string | null) {
       updateStreamingRound((prev) => {
         if (prev) {
           const segments = [...prev.segments];
-          const lastSeg = segments[segments.length - 1];
+          const lastIdx = segments.length - 1;
+          const lastSeg = segments[lastIdx];
           if (lastSeg && lastSeg.type === "text") {
-            lastSeg.content += event.content;
+            // Create a new segment object (immutable) to avoid mutating prev state
+            segments[lastIdx] = {
+              ...lastSeg,
+              content: lastSeg.content + event.content,
+            };
           } else {
             segments.push({ type: "text", content: event.content });
           }
@@ -164,7 +174,11 @@ export function useSSE(sessionId: string | null) {
         const lastUserMsg = [...messages]
           .reverse()
           .find((m) => m.role === "user");
-        if (!lastUserMsg) return null;
+        if (!lastUserMsg) {
+          console.log("[SSE] handleMessageChunk: no user msg found in store, messages:", messages.length);
+          return null;
+        }
+        console.log("[SSE] handleMessageChunk: creating streaming round with user msg:", lastUserMsg.id.substring(0,20));
 
         return {
           id: `streaming-${lastUserMsg.id}`,
@@ -183,9 +197,14 @@ export function useSSE(sessionId: string | null) {
         if (prev) {
           // Append reasoning to the last reasoning segment, or push a new one
           const segments = [...prev.segments];
-          const lastSeg = segments[segments.length - 1];
+          const lastIdx = segments.length - 1;
+          const lastSeg = segments[lastIdx];
           if (lastSeg && lastSeg.type === "reasoning") {
-            lastSeg.content += event.content;
+            // Create a new segment object (immutable) to avoid mutating prev state
+            segments[lastIdx] = {
+              ...lastSeg,
+              content: lastSeg.content + event.content,
+            };
           } else {
             segments.push({ type: "reasoning", content: event.content });
           }
@@ -198,7 +217,11 @@ export function useSSE(sessionId: string | null) {
         const lastUserMsg = [...messages]
           .reverse()
           .find((m) => m.role === "user");
-        if (!lastUserMsg) return null;
+        if (!lastUserMsg) {
+          console.log("[SSE] handleReasoningChunk: no user msg found, messages:", messages.length);
+          return null;
+        }
+        console.log("[SSE] handleReasoningChunk: creating streaming round, user msg:", lastUserMsg.id.substring(0,20));
 
         return {
           id: `streaming-${lastUserMsg.id}`,
@@ -206,38 +229,70 @@ export function useSSE(sessionId: string | null) {
           segments: [{ type: "reasoning", content: event.content }],
           toolCallMap: {},
           status: "streaming",
-        };
-      });
+        };      });
     };
 
     const handleMessageComplete = () => {
+      console.log("[SSE] message.complete fired, currentSessionId:", currentSessionId);
       setStreaming(false);
 
-      // Finalize the streaming round
-      updateStreamingRound((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          status: "complete",
-          completedAt: new Date().toISOString(),
-        };
-      });
+      // The backend persists the assistant to the database before sending
+      // message.complete, so the API response includes all messages.
+      // We still build a local version from streamed segments as the
+      // authoritative source for the current turn's display content.
+      const round = streamingRef.current;
 
-      // Refresh messages from API
-      if (currentSessionId) {
-        api.listMessages(currentSessionId).then(({ messages, todos }) => {
-          setMessages(messages);
-          useSessionStore.getState().setTodos(todos ?? []);
+      if (currentSessionId && round) {
+        const textContent = round.segments
+          .filter((s) => s.type === "text")
+          .map((s) => s.content)
+          .join("");
+        const reasoningContent = round.segments
+          .filter((s) => s.type === "reasoning")
+          .map((s) => s.content)
+          .join("\n\n");
+
+        // Collect tool calls that were fully streamed
+        const toolCalls: ToolCall[] = Object.values(round.toolCallMap)
+          .filter((e) => e.argumentsComplete)
+          .map((e) => ({ id: e.id, name: e.name, arguments: e.arguments }));
+
+        const assistantMsg: Message = {
+          id: `stream-final-${Date.now()}`,
+          role: "assistant",
+          content: textContent || "",
+          ...(reasoningContent ? { reasoning: reasoningContent } : {}),
+          ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+          created_at: new Date().toISOString(),
+          completed_at: new Date().toISOString(),
+        };
+
+        console.log("[SSE] constructing assistant from stream, text:", textContent.length, "chars, toolCalls:", toolCalls.length);
+
+        // Fetch messages from the API (backend now persists the assistant
+        // before sending message.complete, so apiMessages includes all
+        // user + assistant messages).  Replace the last assistant with our
+        // locally-constructed version to ensure the displayed content matches
+        // exactly what was streamed.
+        api.listMessages(currentSessionId).then(({ messages: apiMessages }) => {
+          const msgs = [...apiMessages];
+          const lastIdx = msgs.length - 1;
+          if (lastIdx >= 0 && msgs[lastIdx].role === "assistant") {
+            msgs[lastIdx] = assistantMsg;
+          } else {
+            msgs.push(assistantMsg);
+          }
+          console.log("[SSE] merging API msgs (", apiMessages.length, ") with constructed assistant, total:", msgs.length);
+          setMessages(msgs);
           useSessionStore.getState().setCurrentUsageStats(null);
-          streamingRef.current = null;
-          setStreamingRound(null);
         });
       } else {
         useSessionStore.getState().setCurrentUsageStats(null);
-        streamingRef.current = null;
-        setStreamingRound(null);
       }
-    };
+
+      streamingRef.current = null;
+      setStreamingRound(null);
+    };   
 
     const handleErrorEvent = (event: AppEvent) => {
       if (event.type === "error") {
@@ -296,6 +351,7 @@ export function useSSE(sessionId: string | null) {
       sseClient.off("connected", handleConnected);
       sseClient.off("messages.updated", handleMessagesUpdated);
       sseClient.disconnect();
+      setStreamingRound(null);
       streamingRef.current = null;
     };
   }, [

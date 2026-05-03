@@ -372,8 +372,7 @@ pub async fn send_message(
         if let (Some(pid), Some(mid)) = (&body.provider_id, &body.model_id) {
             // Use the explicitly requested model
             let provider = config
-                .providers
-                .get(pid)
+                .provider(pid)
                 .cloned()
                 .ok_or_else(|| AppError::BadRequest(format!("Provider '{}' not found", pid)))?;
             let model_config = provider.models.get(mid).cloned().ok_or_else(|| {
@@ -383,8 +382,7 @@ pub async fn send_message(
         } else {
             // Use session's current model
             let provider = config
-                .providers
-                .get(&record.provider_id)
+                .provider(&record.provider_id)
                 .cloned()
                 .ok_or_else(|| AppError::Internal("Provider not found".to_string()))?;
             let model_config = provider
@@ -440,6 +438,12 @@ pub async fn send_message(
     // Create channel for backend events
     let (tx, mut rx) = unbounded_channel::<BackendEvent>();
     let event_bus = state.event_bus.clone();
+    // Clone the store so the SSE forwarding task can persist the assistant
+    // message — the web flow bypasses the App struct's normal event handling
+    // pipeline (process_backend_events → handle_backend_event →
+    // finish_assistant_turn → store.append_message), so the assistant never
+    // gets saved to the database without this explicit persistence.
+    let store = state.store.clone();
 
     // Spawn task to handle LLM stream
     let llm_client = state.llm_client.clone();
@@ -461,9 +465,35 @@ pub async fn send_message(
             .await;
     });
 
-    // Spawn task to forward events to event bus
+    // Spawn task to forward events to event bus AND persist the assistant
+    // message when streaming finishes.
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
+            // For Finished, we must persist the assistant message to the DB
+            // before forwarding the SSE event. The web flow's LLM events go
+            // through this channel directly to the SSE bus, bypassing the App
+            // struct's handle_backend_event → finish_assistant_turn path.
+            if let BackendEvent::Finished {
+                session_id,
+                request_id: _,
+                turn,
+            } = &event
+            {
+                let content = turn.content.clone();
+                let reasoning = turn.reasoning.clone();
+                let tool_calls = turn.tool_calls.clone();
+
+                let store_lock = store.lock().await;
+                let mut msg = Message::new(MessageRole::Assistant, &content);
+                msg.reasoning = reasoning;
+                msg.tool_calls = tool_calls;
+                msg.streaming = false;
+                msg.completed_at = Some(Utc::now());
+                if let Err(e) = store_lock.append_message(*session_id, &msg) {
+                    crate::log_error!("Failed to persist assistant message: {e}");
+                }
+            }
+
             let app_event = match event {
                 BackendEvent::Delta {
                     session_id,
@@ -934,8 +964,7 @@ pub async fn compact_session(
     let (provider_id, provider, model_id, model_config) = {
         let config = state.config.read().await;
         let provider = config
-            .providers
-            .get(&record.provider_id)
+            .provider(&record.provider_id)
             .cloned()
             .ok_or_else(|| AppError::Internal("Provider not found".to_string()))?;
         let model_config = provider

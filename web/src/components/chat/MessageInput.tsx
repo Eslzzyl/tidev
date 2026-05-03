@@ -75,6 +75,7 @@ export function MessageInput({
   const [isLoadingTodos, setIsLoadingTodos] = useState(false);
 
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
+  const currentSession = useSessionStore((s) => s.currentSession);
   const isDraftSession = useSessionStore((s) => s.isDraftSession);
   const mode = useSessionStore((s) => s.mode);
   const toggleMode = useSessionStore((s) => s.toggleMode);
@@ -142,20 +143,32 @@ export function MessageInput({
     }
   }, []);
 
-  // Load models
+  // Load models and set initial selection
   useEffect(() => {
     api
       .listModels()
       .then(({ models: modelList }) => {
         setModels(modelList);
-        if (!selectedModelId && modelList.length > 0) {
+
+        // Prefer the session's current model, otherwise default to first model
+        const sessionModelId = currentSession?.model_id;
+        const sessionProviderId = currentSession?.provider_id;
+        const sessionModel = sessionModelId && sessionProviderId
+          ? modelList.find((m) => m.id === sessionModelId && m.provider_id === sessionProviderId)
+          : null;
+
+        if (sessionModel) {
+          setSelectedModelId(sessionModel.id);
+          setSelectedProviderId(sessionModel.provider_id);
+          updateThinkingLevels(sessionModel.id);
+        } else if (!selectedModelId && modelList.length > 0) {
           setSelectedModelId(modelList[0].id);
           setSelectedProviderId(modelList[0].provider_id);
           updateThinkingLevels(modelList[0].id);
         }
       })
       .catch(() => {});
-  }, [selectedModelId, updateThinkingLevels]);
+  }, [selectedModelId, updateThinkingLevels, currentSession]);
 
   // Close dropdowns on click outside
   useEffect(() => {
@@ -312,6 +325,8 @@ export function MessageInput({
         const { session_id } = await api.createSession({
           workspace_root: workspace.workspace_root,
           title: content.slice(0, 50),
+          provider_id: selectedProviderId ?? undefined,
+          model_id: selectedModelId ?? undefined,
         });
         sessionId = session_id;
 
@@ -330,6 +345,16 @@ export function MessageInput({
         url.searchParams.set("session", sessionId);
         window.history.replaceState({}, "", url.toString());
       }
+
+      // Add the user message to the store immediately so the SSE handler
+      // finds it as the last user message when creating the streaming round.
+      const pendingId = `pending-${Date.now()}`;
+      useSessionStore.getState().addMessage({
+        id: pendingId,
+        role: "user",
+        content,
+        created_at: new Date().toISOString(),
+      });
 
       // Send message
       const requestBody: {

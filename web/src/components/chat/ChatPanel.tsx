@@ -34,10 +34,29 @@ export function ChatPanel() {
   const completedRounds = useMemo(() => buildRounds(messages), [messages]);
 
   const allRounds = useMemo(() => {
-    const rounds = [...completedRounds];
+    const rounds: (Round | SystemMessageBlockType)[] = [...completedRounds];
     if (streamingRound) {
-      rounds.push(streamingRound);
+      console.log("[ChatPanel] streamingRound present, completedRounds:", completedRounds.length,
+        "streamingRound.userMessage.id:", streamingRound.userMessage.id.substring(0,20),
+        "streamingRound.status:", streamingRound.status,
+        "streamingRound.segments:", streamingRound.segments.length);
+      // When streaming, the streaming round contains a reference to the user
+      // message that is already present in completedRounds (derived from the
+      // messages store). Remove any completed round that references the same
+      // user message to avoid duplicate user message rendering.
+      const filtered = rounds.filter((r) => {
+        if ("userMessage" in r) {
+          const keep = (r as Round).userMessage.id !== streamingRound.userMessage.id;
+          if (!keep) console.log("[ChatPanel] filtering out completed round", (r as Round).id);
+          return keep;
+        }
+        return true;
+      });
+      console.log("[ChatPanel] allRounds count:", filtered.length + 1, "(filtered:", filtered.length, "+ streaming: 1)");
+      filtered.push(streamingRound);
+      return filtered;
     }
+    console.log("[ChatPanel] no streamingRound, completedRounds:", completedRounds.length);
     return rounds;
   }, [completedRounds, streamingRound]);
 

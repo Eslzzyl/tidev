@@ -89,11 +89,12 @@ export function WelcomePage() {
           setWorkspaceRoot(root);
         }
 
-        // Create session with the input as title
-        // Model is determined from config default-model
+        // Create session, passing the selected provider/model if any
         const { session_id } = await api.createSession({
           workspace_root: root,
           title: payload.inputValue,
+          provider_id: payload.providerId ?? undefined,
+          model_id: payload.modelId ?? undefined,
         });
 
         // Load the new session
@@ -106,16 +107,19 @@ export function WelcomePage() {
         setMessages(messages);
         useSessionStore.getState().setTodos(todos ?? []);
 
-        // Send the user message
-        // Model is determined from config default-model
+        // Send the user message, passing the selected provider/model
         const requestBody: {
           content: string;
           mode?: string;
+          model_id?: string;
+          provider_id?: string;
           thinking_level?: string;
         } = { content: payload.inputValue };
 
         if (payload.mode) requestBody.mode = payload.mode;
         if (payload.thinkingLevel) requestBody.thinking_level = payload.thinkingLevel;
+        if (payload.modelId) requestBody.model_id = payload.modelId;
+        if (payload.providerId) requestBody.provider_id = payload.providerId;
 
         // Start streaming state before sending
         setStreaming(true);
@@ -123,10 +127,20 @@ export function WelcomePage() {
         const { request_id } = await api.sendMessage(session_id, requestBody);
         useSessionStore.getState().setCurrentRequestId(request_id);
 
-        // Refresh messages to get the user message that was just saved
-        const { messages: updatedMessages, todos: updatedTodos } = await api.listMessages(session_id);
-        setMessages(updatedMessages);
-        useSessionStore.getState().setTodos(updatedTodos ?? []);
+        // Add the user message directly to the store so it appears immediately.
+        // We avoid calling api.listMessages() here because it races with the
+        // SSE handler's handleMessageComplete: if that handler has already
+        // fetched the full [user, assistant] messages from the API, our
+        // subsequent setMessages() would overwrite them with stale data.
+        const pendingId = `pending-${Date.now()}`;
+        console.log("[WelcomePage] addMessage before:", JSON.stringify(useSessionStore.getState().messages.map(m => ({id: m.id, role: m.role, content: m.content.substring(0,20)}))));
+        useSessionStore.getState().addMessage({
+          id: pendingId,
+          role: "user",
+          content: payload.inputValue,
+          created_at: new Date().toISOString(),
+        });
+        console.log("[WelcomePage] addMessage after:", JSON.stringify(useSessionStore.getState().messages.map(m => ({id: m.id, role: m.role, content: m.content.substring(0,20)}))));
 
         // Refresh sessions list
         const { sessions: updatedSessions } = await api.listSessions();

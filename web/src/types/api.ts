@@ -87,6 +87,8 @@ export interface ToolInfo {
 export interface CreateSessionRequest {
   workspace_root: string;
   title?: string;
+  provider_id?: string;
+  model_id?: string;
 }
 
 export interface SetDefaultModelRequest {

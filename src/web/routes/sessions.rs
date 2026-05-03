@@ -56,6 +56,10 @@ pub struct CreateSessionRequest {
     pub workspace_root: String,
     #[serde(default)]
     pub title: Option<String>,
+    #[serde(default)]
+    pub provider_id: Option<String>,
+    #[serde(default)]
+    pub model_id: Option<String>,
 }
 
 /// Create session response
@@ -119,8 +123,16 @@ pub async fn create_session(
 
     // Get default provider and model from config
     let config = state.config.read().await;
-    let provider_id = config.default_provider.clone();
-    let model_id = config.default_model.clone();
+
+    // Use provided values if given, otherwise fall back to config defaults
+    let provider_id = body
+        .provider_id
+        .clone()
+        .unwrap_or_else(|| config.default_provider.clone());
+    let model_id = body
+        .model_id
+        .clone()
+        .unwrap_or_else(|| config.default_model.clone());
 
     // Get display names
     let (provider_display_name, model_display_name) =

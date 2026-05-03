@@ -23,6 +23,12 @@ export class SSEClient {
   private connectInternal() {
     if (!this.sessionId) return;
 
+    // Close any existing connection to prevent duplicate streams
+    if (this.eventSource) {
+      this.eventSource.close();
+      this.eventSource = null;
+    }
+
     const url = `/api/events?session=${this.sessionId}`;
     this.eventSource = new EventSource(url);
 
