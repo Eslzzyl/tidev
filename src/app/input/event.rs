@@ -1888,7 +1888,19 @@ impl App {
                 | CommandAction::Undo
                 | CommandAction::Redo
                 | CommandAction::Session
-                | CommandAction::Clear => {}
+                | CommandAction::Clear
+                | CommandAction::Balance
+                | CommandAction::Connect
+                | CommandAction::Mcp
+                | CommandAction::Model
+                | CommandAction::Message
+                | CommandAction::Rename
+                | CommandAction::Settings
+                | CommandAction::Stats
+                | CommandAction::Init
+                | CommandAction::Memory
+                | CommandAction::Agents
+                | CommandAction::Skills => {}
                 _ => {
                     self.last_notice = Some(
                         "A response is still streaming. Wait for it to finish before changing sessions.".to_string(),
