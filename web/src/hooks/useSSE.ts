@@ -5,6 +5,7 @@ import { useUIStore } from '../stores/useUIStore';
 import { api } from '../api/client';
 import type { AppEvent } from '../types/events';
 import type { Round, ToolCallEntry } from '../types/round';
+import type { UsageStatsData } from '../stores/useSessionStore';
 
 export function useSSE(sessionId: string | null) {
   const [streamingRound, setStreamingRound] = useState<Round | null>(null);
@@ -41,6 +42,19 @@ export function useSSE(sessionId: string | null) {
         toolCallMap: {},
         status: 'streaming',
       };
+    };
+
+    const handleUsageStats = (event: AppEvent) => {
+      if (event.type !== 'usage_stats') return;
+      const stats: UsageStatsData = {
+        total_tokens: event.total_tokens,
+        input_tokens: event.input_tokens,
+        output_tokens: event.output_tokens,
+        cache_read_tokens: event.cache_read_tokens,
+        cache_write_tokens: event.cache_write_tokens,
+        tokens_per_second: event.tokens_per_second,
+      };
+      useSessionStore.getState().setCurrentUsageStats(stats);
     };
 
     const handleToolCall = (event: AppEvent) => {
@@ -202,10 +216,12 @@ export function useSSE(sessionId: string | null) {
         api.listMessages(currentSessionId).then(({ messages, todos }) => {
           setMessages(messages);
           useSessionStore.getState().setTodos(todos ?? []);
+          useSessionStore.getState().setCurrentUsageStats(null);
           streamingRef.current = null;
           setStreamingRound(null);
         });
       } else {
+        useSessionStore.getState().setCurrentUsageStats(null);
         streamingRef.current = null;
         setStreamingRound(null);
       }
@@ -237,6 +253,7 @@ export function useSSE(sessionId: string | null) {
     sseClient.on('message.chunk', handleMessageChunk);
     sseClient.on('reasoning.chunk', handleReasoningChunk);
     sseClient.on('message.complete', handleMessageComplete);
+    sseClient.on('usage.stats', handleUsageStats);
     sseClient.on('error', handleErrorEvent);
     sseClient.on('aborted', handleAborted);
     sseClient.on('connected', handleConnected);
@@ -250,6 +267,7 @@ export function useSSE(sessionId: string | null) {
       sseClient.off('message.chunk', handleMessageChunk);
       sseClient.off('reasoning.chunk', handleReasoningChunk);
       sseClient.off('message.complete', handleMessageComplete);
+      sseClient.off('usage.stats', handleUsageStats);
       sseClient.off('error', handleErrorEvent);
       sseClient.off('aborted', handleAborted);
       sseClient.off('connected', handleConnected);

@@ -23,6 +23,17 @@ pub enum AppEvent {
         session_id: Uuid,
         request_id: u64,
     },
+    /// Token usage stats for a completed assistant message
+    UsageStats {
+        session_id: Uuid,
+        request_id: u64,
+        input_tokens: u32,
+        output_tokens: u32,
+        total_tokens: u32,
+        cache_read_tokens: u32,
+        cache_write_tokens: u32,
+        tokens_per_second: Option<f32>,
+    },
     /// Tool call requested
     ToolCall {
         session_id: Uuid,

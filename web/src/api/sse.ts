@@ -54,6 +54,10 @@ export class SSEClient {
       this.emit('message.complete', JSON.parse(e.data));
     });
 
+    this.eventSource.addEventListener('usage.stats', (e: MessageEvent) => {
+      this.emit('usage.stats', JSON.parse(e.data));
+    });
+
     this.eventSource.addEventListener('tool.call', (e: MessageEvent) => {
       this.emit('tool.call', JSON.parse(e.data));
     });

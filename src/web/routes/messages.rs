@@ -183,6 +183,13 @@ pub async fn list_messages(
                 serde_json::from_str::<Vec<crate::snapshot::FileDiff>>(json_str).ok()
             });
 
+            crate::log_debug!(
+                "list_messages: msg role={} cache_read_tokens={:?} total_tokens={:?}",
+                msg.role.db_value(),
+                msg.cache_read_tokens,
+                msg.total_tokens,
+            );
+
             ApiMessage {
                 id: msg.id.to_string(),
                 role: match msg.role {
@@ -488,6 +495,35 @@ pub async fn send_message(
                     filepath: result.metadata.filepath.clone(),
                     rtk_rewritten: result.rtk_rewritten,
                 }),
+                BackendEvent::UsageStats {
+                    session_id,
+                    request_id,
+                    input_tokens,
+                    output_tokens,
+                    total_tokens,
+                    cache_read_tokens,
+                    cache_write_tokens,
+                    duration_ms,
+                    ..
+                } => {
+                    let tokens_per_second = duration_ms.and_then(|ms| {
+                        if ms > 0 {
+                            Some(total_tokens as f32 / (ms as f32 / 1000.0))
+                        } else {
+                            None
+                        }
+                    });
+                    Some(AppEvent::UsageStats {
+                        session_id,
+                        request_id,
+                        input_tokens,
+                        output_tokens,
+                        total_tokens,
+                        cache_read_tokens,
+                        cache_write_tokens,
+                        tokens_per_second,
+                    })
+                }
                 _ => None,
             };
 

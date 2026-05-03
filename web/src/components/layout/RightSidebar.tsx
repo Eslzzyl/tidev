@@ -9,10 +9,11 @@ export function RightSidebar() {
   const messages = useSessionStore((s) => s.messages);
   const currentSession = useSessionStore((s) => s.currentSession);
   const sessionTodos = useSessionStore((s) => s.todos);
+  const currentUsageStats = useSessionStore((s) => s.currentUsageStats);
 
   const closeMobileRightSidebar = useUIStore((s) => s.closeMobileRightSidebar);
 
-  // Stats derived from messages
+  // Stats derived from messages + current usage stats from SSE
   const stats = useMemo(() => {
     const assistantMessages = messages.filter((m) => m.role === 'assistant');
     let totalTokens = 0;
@@ -38,10 +39,23 @@ export function RightSidebar() {
       }
     }
 
+    // Merge live usage stats from SSE (for the current streaming response)
+    if (currentUsageStats) {
+      totalTokens += currentUsageStats.total_tokens || 0;
+      inputTokens += currentUsageStats.input_tokens || 0;
+      outputTokens += currentUsageStats.output_tokens || 0;
+      cacheReadTokens += currentUsageStats.cache_read_tokens || 0;
+      cacheWriteTokens += currentUsageStats.cache_write_tokens || 0;
+      if (currentUsageStats.tokens_per_second != null) {
+        totalTpsSum += currentUsageStats.tokens_per_second;
+        tpsCount += 1;
+      }
+    }
+
     const avgTps = tpsCount > 0 ? totalTpsSum / tpsCount : null;
 
     return {
-      requestCount: assistantMessages.length,
+      requestCount: assistantMessages.length + (currentUsageStats ? 1 : 0),
       totalTokens,
       inputTokens,
       outputTokens,
@@ -49,7 +63,7 @@ export function RightSidebar() {
       cacheWriteTokens,
       avgTps,
     };
-  }, [messages]);
+  }, [messages, currentUsageStats]);
 
   // File diffs
   const fileDiffs = useMemo(() => {

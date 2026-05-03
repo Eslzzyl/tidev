@@ -3,6 +3,17 @@ export type AppEvent =
   | { type: 'reasoning_chunk'; session_id: string; request_id: number; content: string }
   | { type: 'message_complete'; session_id: string; request_id: number }
   | {
+      type: 'usage_stats';
+      session_id: string;
+      request_id: number;
+      total_tokens: number;
+      input_tokens: number;
+      output_tokens: number;
+      cache_read_tokens: number;
+      cache_write_tokens: number;
+      tokens_per_second?: number;
+    }
+  | {
       type: 'tool_call';
       session_id: string;
       request_id: number;

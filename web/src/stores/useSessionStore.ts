@@ -3,12 +3,22 @@ import type { Session, SessionDetail, Message, TodoItem } from '../types/api';
 
 export type SessionMode = 'plan' | 'build';
 
+export interface UsageStatsData {
+  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  tokens_per_second?: number;
+}
+
 export interface SessionState {
   sessions: Session[];
   currentSessionId: string | null;
   currentSession: SessionDetail | null;
   messages: Message[];
   todos: TodoItem[];
+  currentUsageStats: UsageStatsData | null;
   isLoading: boolean;
   error: string | null;
   isDraftSession: boolean;
@@ -23,6 +33,7 @@ export interface SessionActions {
   setCurrentSessionId: (id: string | null) => void;
   setMessages: (messages: Message[]) => void;
   setTodos: (todos: TodoItem[]) => void;
+  setCurrentUsageStats: (stats: UsageStatsData | null) => void;
   addMessage: (message: Message) => void;
   updateMessageContent: (id: string, content: string) => void;
   setLoading: (isLoading: boolean) => void;
@@ -35,26 +46,6 @@ export interface SessionActions {
   commitDraftSession: (session: SessionDetail) => void;
   cancelDraftSession: () => void;
   setCurrentRequestId: (id: number | null) => void;
-  reset: () => void;
-}
-export interface SessionActions {
-  setSessions: (sessions: Session[]) => void;
-  setCurrentSession: (session: SessionDetail | null) => void;
-  setCurrentSessionId: (id: string | null) => void;
-  setMessages: (messages: Message[]) => void;
-  addMessage: (message: Message) => void;
-  updateMessageContent: (id: string, content: string) => void;
-  setLoading: (isLoading: boolean) => void;
-  setError: (error: string | null) => void;
-  clearError: () => void;
-  removeSession: (sessionId: string) => void;
-  setMode: (mode: SessionMode) => void;
-  toggleMode: () => void;
-  startDraftSession: (title?: string) => void;
-  commitDraftSession: (session: SessionDetail) => void;
-  cancelDraftSession: () => void;
-  setCurrentRequestId: (id: number | null) => void;
-  goToWelcome: () => void;
   reset: () => void;
 }
 
@@ -64,6 +55,7 @@ const initialState: SessionState = {
   currentSession: null,
   messages: [],
   todos: [],
+  currentUsageStats: null,
   isLoading: false,
   error: null,
   isDraftSession: false,
@@ -71,7 +63,6 @@ const initialState: SessionState = {
   mode: 'build',
   currentRequestId: null,
 };
-
 export const useSessionStore = create<SessionState & SessionActions>((set) => ({
   ...initialState,
 
@@ -90,6 +81,8 @@ export const useSessionStore = create<SessionState & SessionActions>((set) => ({
   setMessages: (messages) => set({ messages }),
 
   setTodos: (todos) => set({ todos }),
+
+  setCurrentUsageStats: (stats) => set({ currentUsageStats: stats }),
 
   addMessage: (message) =>
     set((state) => ({ messages: [...state.messages, message] })),
