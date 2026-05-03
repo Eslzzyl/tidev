@@ -3,6 +3,7 @@ import { useSessionStore } from './stores/useSessionStore';
 import { useUIStore, getEffectiveTheme } from './stores/useUIStore';
 import { api } from './api/client';
 import { Settings } from './components/Settings';
+import { WelcomePage } from './components/WelcomePage';
 import { LeftSidebar } from './components/layout/LeftSidebar';
 import { RightSidebar } from './components/layout/RightSidebar';
 import { ResizeHandle } from './components/layout/ResizeHandle';
@@ -21,6 +22,8 @@ function App() {
   const setSessions = useSessionStore((s) => s.setSessions);
   const setCurrentSession = useSessionStore((s) => s.setCurrentSession);
   const setMessages = useSessionStore((s) => s.setMessages);
+  const currentSessionId = useSessionStore((s) => s.currentSessionId);
+  const isDraftSession = useSessionStore((s) => s.isDraftSession);
   const theme = useUIStore((s) => s.theme);
   const leftSidebarWidth = useUIStore((s) => s.leftSidebarWidth);
   const rightSidebarWidth = useUIStore((s) => s.rightSidebarWidth);
@@ -67,12 +70,13 @@ function App() {
         const params = new URLSearchParams(window.location.search);
         const sessionId = params.get('session');
         if (sessionId) {
-          const [session, { messages }] = await Promise.all([
+          const [session, { messages, todos }] = await Promise.all([
             api.getSession(sessionId),
             api.listMessages(sessionId),
           ]);
           setCurrentSession(session);
           setMessages(messages);
+          useSessionStore.getState().setTodos(todos ?? []);
         }
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : 'Failed to load sessions');
@@ -156,41 +160,48 @@ function App() {
     );
   }
 
+  // Show welcome page when no session is selected
+  const showWelcomePage = !currentSessionId && !isDraftSession;
+
   return (
     <>
       <Settings />
 
       <div className="h-screen w-full bg-white dark:bg-neutral-950">
         <div className="flex h-full">
-          {/* Left Sidebar */}
-          <aside
-            className={`fixed inset-y-0 left-0 z-50 transform border-r border-neutral-200 bg-white transition-transform duration-200 ease-in-out md:relative md:translate-x-0 dark:border-neutral-800 dark:bg-neutral-950 ${
-              mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
-            }`}
-            style={{ width: leftSidebarWidth }}
-          >
-            <LeftSidebar />
-          </aside>
+          {/* Left Sidebar - hidden on welcome page */}
+          {!showWelcomePage && (
+            <>
+              <aside
+                className={`fixed inset-y-0 left-0 z-50 transform border-r border-neutral-200 bg-white transition-transform duration-200 ease-in-out md:relative md:translate-x-0 dark:border-neutral-800 dark:bg-neutral-950 ${
+                  mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
+                }`}
+                style={{ width: leftSidebarWidth }}
+              >
+                <LeftSidebar />
+              </aside>
 
-          {/* Left Resize Handle */}
-          <ResizeHandle onResizeStart={handleLeftResizeStart} isResizing={isResizingLeft} />
+              {/* Left Resize Handle */}
+              <ResizeHandle onResizeStart={handleLeftResizeStart} isResizing={isResizingLeft} />
 
-          {/* Mobile overlay */}
-          {mobileMenuOpen && (
-            <button
-              onClick={closeMobileMenu}
-              className="fixed inset-0 z-40 bg-black/50 md:hidden"
-              aria-label="Close menu"
-            />
+              {/* Mobile overlay */}
+              {mobileMenuOpen && (
+                <button
+                  onClick={closeMobileMenu}
+                  className="fixed inset-0 z-40 bg-black/50 md:hidden"
+                  aria-label="Close menu"
+                />
+              )}
+            </>
           )}
 
           {/* Main content */}
           <main className="relative flex-1 min-w-0">
-            <ChatPanel />
+            {showWelcomePage ? <WelcomePage /> : <ChatPanel />}
           </main>
 
-          {/* Right Sidebar */}
-          {rightSidebarOpen && (
+          {/* Right Sidebar - hidden on welcome page */}
+          {!showWelcomePage && rightSidebarOpen && (
             <>
               <ResizeHandle onResizeStart={handleRightResizeStart} isResizing={isResizingRight} />
 
@@ -203,18 +214,20 @@ function App() {
             </>
           )}
 
-          {/* Mobile Right Sidebar */}
-          <aside
-            className={`fixed inset-y-0 right-0 z-50 transform border-l border-neutral-200 bg-white transition-transform duration-200 ease-in-out md:hidden dark:border-neutral-800 dark:bg-neutral-950 ${
-              mobileRightSidebarOpen ? 'translate-x-0' : 'translate-x-full'
-            }`}
-            style={{ width: 280 }}
-          >
-            <RightSidebar />
-          </aside>
+          {/* Mobile Right Sidebar - hidden on welcome page */}
+          {!showWelcomePage && (
+            <aside
+              className={`fixed inset-y-0 right-0 z-50 transform border-l border-neutral-200 bg-white transition-transform duration-200 ease-in-out md:hidden dark:border-neutral-800 dark:bg-neutral-950 ${
+                mobileRightSidebarOpen ? 'translate-x-0' : 'translate-x-full'
+              }`}
+              style={{ width: 280 }}
+            >
+              <RightSidebar />
+            </aside>
+          )}
 
-          {/* Mobile overlay for right sidebar */}
-          {mobileRightSidebarOpen && (
+          {/* Mobile overlay for right sidebar - hidden on welcome page */}
+          {!showWelcomePage && mobileRightSidebarOpen && (
             <button
               onClick={closeMobileRightSidebar}
               className="fixed inset-0 z-40 bg-black/50 md:hidden"

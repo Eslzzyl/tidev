@@ -199,8 +199,9 @@ export function useSSE(sessionId: string | null) {
 
       // Refresh messages from API
       if (currentSessionId) {
-        api.listMessages(currentSessionId).then(({ messages }) => {
+        api.listMessages(currentSessionId).then(({ messages, todos }) => {
           setMessages(messages);
+          useSessionStore.getState().setTodos(todos ?? []);
           streamingRef.current = null;
           setStreamingRound(null);
         });

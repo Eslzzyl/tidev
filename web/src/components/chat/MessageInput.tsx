@@ -206,12 +206,13 @@ export function MessageInput() {
         sessionId = session_id;
 
         // Update store
-        const [session, { messages }] = await Promise.all([
+        const [session, { messages, todos }] = await Promise.all([
           api.getSession(sessionId),
           api.listMessages(sessionId),
         ]);
         commitDraftSession(session);
         setMessages(messages);
+        useSessionStore.getState().setTodos(todos ?? []);
         setCurrentSessionId(sessionId);
 
         // Update URL

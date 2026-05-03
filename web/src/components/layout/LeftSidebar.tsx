@@ -20,21 +20,24 @@ export function LeftSidebar() {
   const setLoading = useSessionStore((s) => s.setLoading);
   const closeMobileMenu = useUIStore((s) => s.closeMobileMenu);
 
+  const goToWelcome = useSessionStore((s) => s.goToWelcome);
+
   const handleNewSession = useCallback(() => {
-    startDraftSession();
+    goToWelcome();
     closeMobileMenu();
-  }, [startDraftSession, closeMobileMenu]);
+  }, [goToWelcome, closeMobileMenu]);
 
   const handleSelectSession = useCallback(
     async (sessionId: string) => {
       try {
         setLoading(true);
-        const [session, { messages }] = await Promise.all([
+        const [session, { messages, todos }] = await Promise.all([
           api.getSession(sessionId),
           api.listMessages(sessionId),
         ]);
         setCurrentSession(session);
         setMessages(messages);
+        useSessionStore.getState().setTodos(todos ?? []);
         closeMobileMenu();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load session');

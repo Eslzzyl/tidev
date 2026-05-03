@@ -38,6 +38,8 @@ export interface TokenUsage {
   total_tokens?: number;
   input_tokens?: number;
   output_tokens?: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
 }
 
 export interface ToolCall {
@@ -55,6 +57,7 @@ export interface Message {
   file_diffs?: FileDiff[];
   todos?: TodoItem[];
   token_usage?: TokenUsage;
+  tokens_per_second?: number;
   reasoning?: string;
   tool_call_id?: string;
   tool_name?: string;

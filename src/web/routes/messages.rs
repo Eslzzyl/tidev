@@ -43,6 +43,27 @@ pub struct ApiTokenUsage {
     pub total_tokens: u32,
     pub input_tokens: u32,
     pub output_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<u32>,
+}
+
+/// File diff in the API
+#[derive(Serialize)]
+pub struct ApiFileDiff {
+    pub path: String,
+    pub status: String,
+    pub additions: usize,
+    pub deletions: usize,
+}
+
+/// Todo item in the API
+#[derive(Serialize)]
+pub struct ApiTodoItem {
+    pub content: String,
+    pub status: String,
+    pub priority: String,
 }
 
 /// Message in the API
@@ -78,12 +99,20 @@ pub struct ApiMessage {
     /// Token usage for assistant messages
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_usage: Option<ApiTokenUsage>,
+    /// Tokens per second for this assistant message
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens_per_second: Option<f32>,
+    /// File diffs for this message (from write/edit/delete tool results)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_diffs: Option<Vec<ApiFileDiff>>,
 }
 
 /// List messages response
 #[derive(Serialize)]
 pub struct ListMessagesResponse {
     pub messages: Vec<ApiMessage>,
+    /// Session-level todos (aggregated from all todowrite calls)
+    pub todos: Vec<ApiTodoItem>,
 }
 
 /// Send message request
@@ -126,6 +155,17 @@ pub async fn list_messages(
     // Load messages for the session
     let messages_db = store.load_messages(session_id)?;
 
+    // Load session-level todos
+    let todos_db = store.load_todos(session_id)?;
+    let todos: Vec<ApiTodoItem> = todos_db
+        .into_iter()
+        .map(|t| ApiTodoItem {
+            content: t.content,
+            status: t.status,
+            priority: t.priority,
+        })
+        .collect();
+
     // Check if session exists by trying to load the record
     let _ = store
         .load_session_record(session_id)?
@@ -137,44 +177,65 @@ pub async fn list_messages(
 
     let messages: Vec<ApiMessage> = messages_db
         .into_iter()
-        .map(|msg| ApiMessage {
-            id: msg.id.to_string(),
-            role: match msg.role {
-                MessageRole::User => "user".to_string(),
-                MessageRole::Assistant => "assistant".to_string(),
-                MessageRole::System => "system".to_string(),
-                MessageRole::Tool => "tool".to_string(),
-                MessageRole::Error => "error".to_string(),
-                MessageRole::Shell => "shell".to_string(),
-            },
-            content: msg.content,
-            created_at: msg.created_at.to_rfc3339(),
-            completed_at: msg.completed_at.map(|t| t.to_rfc3339()),
-            reasoning: if msg.reasoning.is_empty() {
-                None
-            } else {
-                Some(msg.reasoning)
-            },
-            tool_call_id: msg.tool_call_id,
-            tool_name: msg.tool_name,
-            tool_calls: if msg.tool_calls.is_empty() {
-                None
-            } else {
-                Some(msg.tool_calls.iter().map(ApiToolCall::from).collect())
-            },
-            diff: msg.metadata.diff.clone(),
-            filepath: msg.metadata.filepath.clone(),
-            rtk_rewritten: msg.rtk_rewritten,
-            token_usage: msg.total_tokens.map(|total| ApiTokenUsage {
-                total_tokens: total,
-                input_tokens: msg.input_tokens.unwrap_or(0),
-                output_tokens: msg.output_tokens.unwrap_or(0),
-            }),
+        .map(|msg| {
+            // Parse file_diffs from the stored JSON string
+            let file_diffs = msg.file_diffs.as_deref().and_then(|json_str| {
+                serde_json::from_str::<Vec<crate::snapshot::FileDiff>>(json_str).ok()
+            });
+
+            ApiMessage {
+                id: msg.id.to_string(),
+                role: match msg.role {
+                    MessageRole::User => "user".to_string(),
+                    MessageRole::Assistant => "assistant".to_string(),
+                    MessageRole::System => "system".to_string(),
+                    MessageRole::Tool => "tool".to_string(),
+                    MessageRole::Error => "error".to_string(),
+                    MessageRole::Shell => "shell".to_string(),
+                },
+                content: msg.content,
+                created_at: msg.created_at.to_rfc3339(),
+                completed_at: msg.completed_at.map(|t| t.to_rfc3339()),
+                reasoning: if msg.reasoning.is_empty() {
+                    None
+                } else {
+                    Some(msg.reasoning)
+                },
+                tool_call_id: msg.tool_call_id,
+                tool_name: msg.tool_name,
+                tool_calls: if msg.tool_calls.is_empty() {
+                    None
+                } else {
+                    Some(msg.tool_calls.iter().map(ApiToolCall::from).collect())
+                },
+                diff: msg.metadata.diff.clone(),
+                filepath: msg.metadata.filepath.clone(),
+                rtk_rewritten: msg.rtk_rewritten,
+                token_usage: (msg.total_tokens.or(msg.cache_read_tokens)).map(|_| ApiTokenUsage {
+                    total_tokens: msg.total_tokens.unwrap_or(0),
+                    input_tokens: msg.input_tokens.unwrap_or(0),
+                    output_tokens: msg.output_tokens.unwrap_or(0),
+                    cache_read_tokens: msg.cache_read_tokens,
+                    cache_write_tokens: msg.cache_write_tokens,
+                }),
+                tokens_per_second: msg.tokens_per_second,
+                file_diffs: file_diffs.map(|diffs| {
+                    diffs
+                        .into_iter()
+                        .map(|d| ApiFileDiff {
+                            path: d.file,
+                            status: d.status.unwrap_or_else(|| "modified".to_string()),
+                            additions: d.additions,
+                            deletions: d.deletions,
+                        })
+                        .collect()
+                }),
+            }
         })
         .collect();
 
     crate::log_debug!("Listed {} messages for session {}", messages.len(), session_id);
-    Ok(Json(ListMessagesResponse { messages }))
+    Ok(Json(ListMessagesResponse { messages, todos }))
 }
 
 /// Send a message to the session

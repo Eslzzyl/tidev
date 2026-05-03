@@ -4,6 +4,7 @@ import type {
   Message,
   ModelInfo,
   ToolInfo,
+  TodoItem,
   CreateSessionRequest,
   CreateSessionResponse,
   SendMessageRequest,
@@ -63,7 +64,7 @@ export const api = {
 
   // Messages
   listMessages: (sessionId: string) =>
-    fetchJson<{ messages: Message[] }>(`${API_BASE}/sessions/${sessionId}/messages`),
+    fetchJson<{ messages: Message[]; todos: TodoItem[] }>(`${API_BASE}/sessions/${sessionId}/messages`),
 
   sendMessage: (sessionId: string, data: SendMessageRequest) =>
     fetchJson<SendMessageResponse>(`${API_BASE}/sessions/${sessionId}/messages`, {

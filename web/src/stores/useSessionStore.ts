@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Session, SessionDetail, Message } from '../types/api';
+import type { Session, SessionDetail, Message, TodoItem } from '../types/api';
 
 export type SessionMode = 'plan' | 'build';
 
@@ -8,6 +8,7 @@ export interface SessionState {
   currentSessionId: string | null;
   currentSession: SessionDetail | null;
   messages: Message[];
+  todos: TodoItem[];
   isLoading: boolean;
   error: string | null;
   isDraftSession: boolean;
@@ -16,6 +17,26 @@ export interface SessionState {
   currentRequestId: number | null;
 }
 
+export interface SessionActions {
+  setSessions: (sessions: Session[]) => void;
+  setCurrentSession: (session: SessionDetail | null) => void;
+  setCurrentSessionId: (id: string | null) => void;
+  setMessages: (messages: Message[]) => void;
+  setTodos: (todos: TodoItem[]) => void;
+  addMessage: (message: Message) => void;
+  updateMessageContent: (id: string, content: string) => void;
+  setLoading: (isLoading: boolean) => void;
+  setError: (error: string | null) => void;
+  clearError: () => void;
+  removeSession: (sessionId: string) => void;
+  setMode: (mode: SessionMode) => void;
+  toggleMode: () => void;
+  startDraftSession: (title?: string) => void;
+  commitDraftSession: (session: SessionDetail) => void;
+  cancelDraftSession: () => void;
+  setCurrentRequestId: (id: number | null) => void;
+  reset: () => void;
+}
 export interface SessionActions {
   setSessions: (sessions: Session[]) => void;
   setCurrentSession: (session: SessionDetail | null) => void;
@@ -33,6 +54,7 @@ export interface SessionActions {
   commitDraftSession: (session: SessionDetail) => void;
   cancelDraftSession: () => void;
   setCurrentRequestId: (id: number | null) => void;
+  goToWelcome: () => void;
   reset: () => void;
 }
 
@@ -41,6 +63,7 @@ const initialState: SessionState = {
   currentSessionId: null,
   currentSession: null,
   messages: [],
+  todos: [],
   isLoading: false,
   error: null,
   isDraftSession: false,
@@ -65,6 +88,8 @@ export const useSessionStore = create<SessionState & SessionActions>((set) => ({
     set({ currentSessionId: id, currentRequestId: null }),
 
   setMessages: (messages) => set({ messages }),
+
+  setTodos: (todos) => set({ todos }),
 
   addMessage: (message) =>
     set((state) => ({ messages: [...state.messages, message] })),
@@ -117,6 +142,17 @@ export const useSessionStore = create<SessionState & SessionActions>((set) => ({
     set({ isDraftSession: false, draftTitle: '' }),
 
   setCurrentRequestId: (id) => set({ currentRequestId: id }),
+
+  goToWelcome: () =>
+    set({
+      currentSessionId: null,
+      currentSession: null,
+      messages: [],
+      isDraftSession: false,
+      draftTitle: '',
+      error: null,
+      currentRequestId: null,
+    }),
 
   reset: () => set(initialState),
 }));
