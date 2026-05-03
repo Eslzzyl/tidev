@@ -1,9 +1,19 @@
-import { useMemo } from 'react';
-import { X, CheckCircle2, Circle, Clock, XCircle, AlertTriangle, Plus, Minus, Pencil } from 'lucide-react';
-import { useSessionStore } from '../../stores/useSessionStore';
-import { useUIStore } from '../../stores/useUIStore';
-import type { FileDiff, TodoItem, TokenUsage } from '../../types/api';
-import { formatNumber, formatToken, formatWorkspace } from '../../utils/format';
+import { useMemo } from "react";
+import {
+  X,
+  CheckCircle2,
+  Circle,
+  Clock,
+  XCircle,
+  AlertTriangle,
+  Plus,
+  Minus,
+  Pencil,
+} from "lucide-react";
+import { useSessionStore } from "../../stores/useSessionStore";
+import { useUIStore } from "../../stores/useUIStore";
+import type { FileDiff, TodoItem, TokenUsage } from "../../types/api";
+import { formatNumber, formatToken, formatWorkspace } from "../../utils/format";
 
 export function RightSidebar() {
   const messages = useSessionStore((s) => s.messages);
@@ -15,7 +25,7 @@ export function RightSidebar() {
 
   // Stats derived from messages + current usage stats from SSE
   const stats = useMemo(() => {
-    const assistantMessages = messages.filter((m) => m.role === 'assistant');
+    const assistantMessages = messages.filter((m) => m.role === "assistant");
     let totalTokens = 0;
     let inputTokens = 0;
     let outputTokens = 0;
@@ -69,7 +79,7 @@ export function RightSidebar() {
   const fileDiffs = useMemo(() => {
     const diffs: Array<{
       path: string;
-      status: 'added' | 'modified' | 'deleted';
+      status: "added" | "modified" | "deleted";
       additions: number;
       deletions: number;
     }> = [];
@@ -79,7 +89,7 @@ export function RightSidebar() {
       const fileDiffsArr = msg.file_diffs as FileDiff[] | undefined;
       if (fileDiffsArr && Array.isArray(fileDiffsArr)) {
         for (const diff of fileDiffsArr) {
-          const key = diff.path || diff.file_path || 'unknown';
+          const key = diff.path || diff.file_path || "unknown";
           if (seen.has(key)) continue;
           seen.add(key);
           diffs.push({
@@ -101,49 +111,59 @@ export function RightSidebar() {
 
   // Undo state detection
   const isUndoActive = useMemo(() => {
-    return messages.some((m) => m.content.includes('undo') || m.role === 'system');
+    return messages.some(
+      (m) => m.content.includes("undo") || m.role === "system",
+    );
   }, [messages]);
 
-  const workspacePath = currentSession?.workspace_root ?? '';
+  const workspacePath = currentSession?.workspace_root ?? "";
   const displayPath = formatWorkspace(workspacePath);
 
-  const providerName = currentSession?.provider_display_name ?? '';
-  const modelName = currentSession?.model_display_name ?? '';
+  const providerName = currentSession?.provider_display_name ?? "";
+  const modelName = currentSession?.model_display_name ?? "";
 
   // Todo status icon matching TUI style
   const getTodoIcon = (status: string) => {
     switch (status) {
-      case 'completed':
-        return <CheckCircle2 className="h-4 w-4 text-green-500 dark:text-green-400" />;
-      case 'in_progress':
+      case "completed":
+        return (
+          <CheckCircle2 className="h-4 w-4 text-green-500 dark:text-green-400" />
+        );
+      case "in_progress":
         return <Clock className="h-4 w-4 text-blue-500 dark:text-blue-400" />;
-      case 'cancelled':
-        return <XCircle className="h-4 w-4 text-neutral-400 dark:text-neutral-500" />;
+      case "cancelled":
+        return (
+          <XCircle className="h-4 w-4 text-neutral-400 dark:text-neutral-500" />
+        );
       default:
-        return <Circle className="h-4 w-4 text-neutral-500 dark:text-neutral-400" />;
+        return (
+          <Circle className="h-4 w-4 text-neutral-500 dark:text-neutral-400" />
+        );
     }
   };
 
   // File status icon matching TUI style
   const getFileStatusIcon = (status: string) => {
     switch (status) {
-      case 'added':
+      case "added":
         return <Plus className="h-4 w-4 text-green-600 dark:text-green-400" />;
-      case 'deleted':
+      case "deleted":
         return <Minus className="h-4 w-4 text-red-600 dark:text-red-400" />;
       default:
-        return <Pencil className="h-4 w-4 text-amber-600 dark:text-amber-400" />;
+        return (
+          <Pencil className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+        );
     }
   };
 
   const getFileStatusColor = (status: string) => {
     switch (status) {
-      case 'added':
-        return 'text-green-700 dark:text-green-400';
-      case 'deleted':
-        return 'text-red-700 dark:text-red-400';
+      case "added":
+        return "text-green-700 dark:text-green-400";
+      case "deleted":
+        return "text-red-700 dark:text-red-400";
       default:
-        return 'text-amber-700 dark:text-amber-400';
+        return "text-amber-700 dark:text-amber-400";
     }
   };
 
@@ -173,7 +193,10 @@ export function RightSidebar() {
                 <h3 className="mb-1 text-xs font-bold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
                   Workspace
                 </h3>
-                <p className="truncate text-sm text-neutral-600 dark:text-neutral-400" title={workspacePath}>
+                <p
+                  className="truncate text-sm text-neutral-600 dark:text-neutral-400"
+                  title={workspacePath}
+                >
                   {displayPath}
                 </p>
               </div>
@@ -247,10 +270,14 @@ export function RightSidebar() {
                       <span className="flex-shrink-0">
                         {getFileStatusIcon(diff.status)}
                       </span>
-                      <span className={`flex-1 truncate ${getFileStatusColor(diff.status)}`}>
-                        {diff.path.split('/').pop() || diff.path}
+                      <span
+                        className={`flex-1 truncate ${getFileStatusColor(diff.status)}`}
+                      >
+                        {diff.path.split("/").pop() || diff.path}
                       </span>
-                      <span className={`flex-shrink-0 text-xs ${getFileStatusColor(diff.status)}`}>
+                      <span
+                        className={`flex-shrink-0 text-xs ${getFileStatusColor(diff.status)}`}
+                      >
                         +{diff.additions}/-{diff.deletions}
                       </span>
                     </li>
@@ -277,12 +304,13 @@ export function RightSidebar() {
                       </span>
                       <span
                         className={`flex-1 ${
-                          todo.status === 'completed' || todo.status === 'cancelled'
-                            ? 'text-neutral-400 line-through dark:text-neutral-500'
-                            : 'text-neutral-700 dark:text-neutral-300'
+                          todo.status === "completed" ||
+                          todo.status === "cancelled"
+                            ? "text-neutral-400 line-through dark:text-neutral-500"
+                            : "text-neutral-700 dark:text-neutral-300"
                         }`}
                       >
-                        {todo.priority === 'high' && (
+                        {todo.priority === "high" && (
                           <AlertTriangle className="mr-0.5 inline h-3.5 w-3.5 text-amber-500" />
                         )}
                         {todo.content}
@@ -301,7 +329,8 @@ export function RightSidebar() {
                   <span>Undo active</span>
                 </p>
                 <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                  Conversation was reverted. New messages will branch from this point.
+                  Conversation was reverted. New messages will branch from this
+                  point.
                 </p>
               </div>
             )}

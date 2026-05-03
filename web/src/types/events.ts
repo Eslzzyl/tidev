@@ -1,9 +1,19 @@
 export type AppEvent =
-  | { type: 'message_chunk'; session_id: string; request_id: number; content: string }
-  | { type: 'reasoning_chunk'; session_id: string; request_id: number; content: string }
-  | { type: 'message_complete'; session_id: string; request_id: number }
   | {
-      type: 'usage_stats';
+      type: "message_chunk";
+      session_id: string;
+      request_id: number;
+      content: string;
+    }
+  | {
+      type: "reasoning_chunk";
+      session_id: string;
+      request_id: number;
+      content: string;
+    }
+  | { type: "message_complete"; session_id: string; request_id: number }
+  | {
+      type: "usage_stats";
       session_id: string;
       request_id: number;
       total_tokens: number;
@@ -14,7 +24,7 @@ export type AppEvent =
       tokens_per_second?: number;
     }
   | {
-      type: 'tool_call';
+      type: "tool_call";
       session_id: string;
       request_id: number;
       tool_call_id: string;
@@ -22,7 +32,7 @@ export type AppEvent =
       arguments: string;
     }
   | {
-      type: 'tool_result';
+      type: "tool_result";
       session_id: string;
       request_id: number;
       tool_call_id: string;
@@ -32,13 +42,13 @@ export type AppEvent =
       rtk_rewritten?: boolean;
     }
   | {
-      type: 'permission_request';
+      type: "permission_request";
       session_id: string;
       request_id: number;
       tool_call_id: string;
       tool_name: string;
       arguments: string;
     }
-  | { type: 'aborted'; session_id: string; request_id: number }
-  | { type: 'error'; session_id: string; request_id: number; message: string }
-  | { type: 'heartbeat' };
+  | { type: "aborted"; session_id: string; request_id: number }
+  | { type: "error"; session_id: string; request_id: number; message: string }
+  | { type: "heartbeat" };

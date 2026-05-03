@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import hljs from 'highlight.js';
+import { useMemo } from "react";
+import hljs from "highlight.js";
 
 interface CodeLine {
   lineNum: number;
@@ -35,7 +35,7 @@ function parseContentLines(output: string): CodeLine[] {
   const lines: CodeLine[] = [];
   const linePattern = /^(\d+):\s?(.*)$/m;
 
-  for (const raw of body.split('\n')) {
+  for (const raw of body.split("\n")) {
     const m = raw.match(linePattern);
     if (m) {
       lines.push({ lineNum: parseInt(m[1], 10), text: m[2] });
@@ -49,23 +49,60 @@ function parseContentLines(output: string): CodeLine[] {
  * Detect the programming language from the file path.
  */
 function detectLanguage(fp: string): string {
-  const ext = fp.split('.').pop()?.toLowerCase() || '';
+  const ext = fp.split(".").pop()?.toLowerCase() || "";
   const langMap: Record<string, string> = {
-    rs: 'rust', ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',
-    py: 'python', go: 'go', rb: 'ruby', java: 'java', kt: 'kotlin',
-    scala: 'scala', swift: 'swift', c: 'c', h: 'c', cpp: 'cpp', hpp: 'cpp',
-    cc: 'cpp', cxx: 'cpp', cs: 'csharp', php: 'php',
-    html: 'html', css: 'css', scss: 'scss', sass: 'sass', less: 'less',
-    sql: 'sql', sh: 'bash', bash: 'bash', zsh: 'bash', yaml: 'yaml',
-    yml: 'yaml', toml: 'toml', json: 'json', xml: 'xml', md: 'markdown',
-    mdx: 'markdown', svelte: 'svelte', vue: 'vue', lua: 'lua', dart: 'dart',
-    r: 'r', zig: 'zig', nim: 'nim',
+    rs: "rust",
+    ts: "typescript",
+    tsx: "tsx",
+    js: "javascript",
+    jsx: "jsx",
+    py: "python",
+    go: "go",
+    rb: "ruby",
+    java: "java",
+    kt: "kotlin",
+    scala: "scala",
+    swift: "swift",
+    c: "c",
+    h: "c",
+    cpp: "cpp",
+    hpp: "cpp",
+    cc: "cpp",
+    cxx: "cpp",
+    cs: "csharp",
+    php: "php",
+    html: "html",
+    css: "css",
+    scss: "scss",
+    sass: "sass",
+    less: "less",
+    sql: "sql",
+    sh: "bash",
+    bash: "bash",
+    zsh: "bash",
+    yaml: "yaml",
+    yml: "yaml",
+    toml: "toml",
+    json: "json",
+    xml: "xml",
+    md: "markdown",
+    mdx: "markdown",
+    svelte: "svelte",
+    vue: "vue",
+    lua: "lua",
+    dart: "dart",
+    r: "r",
+    zig: "zig",
+    nim: "nim",
   };
-  return langMap[ext] || '';
+  return langMap[ext] || "";
 }
 
 function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function highlightLine(line: string, language: string): string {
@@ -81,7 +118,7 @@ function highlightLine(line: string, language: string): string {
 export function CodeLinesRenderer({ output, filepath }: Props) {
   const fp = useMemo(() => filepath || extractPath(output), [output, filepath]);
   const codeLines = useMemo(() => parseContentLines(output), [output]);
-  const language = useMemo(() => (fp ? detectLanguage(fp) : ''), [fp]);
+  const language = useMemo(() => (fp ? detectLanguage(fp) : ""), [fp]);
 
   // Fallback: if no structured lines found, render as plain text
   if (codeLines.length === 0) {

@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import { Lightbulb, ChevronDown } from 'lucide-react';
-import { MarkdownRenderer } from './MarkdownRenderer';
-import { CopyButton } from '../ui/CopyButton';
+import { useState } from "react";
+import { Lightbulb, ChevronDown } from "lucide-react";
+import { MarkdownRenderer } from "./MarkdownRenderer";
+import { CopyButton } from "../ui/CopyButton";
 
 interface Props {
   content: string;
@@ -9,7 +9,11 @@ interface Props {
   defaultExpanded?: boolean;
 }
 
-export function ThinkingBlock({ content, tokenCount, defaultExpanded = true }: Props) {
+export function ThinkingBlock({
+  content,
+  tokenCount,
+  defaultExpanded = true,
+}: Props) {
   const [expanded, setExpanded] = useState(defaultExpanded);
 
   return (
@@ -22,10 +26,11 @@ export function ThinkingBlock({ content, tokenCount, defaultExpanded = true }: P
         >
           <Lightbulb className="h-3.5 w-3.5 text-amber-500 dark:text-amber-400" />
           <span className="text-xs font-medium text-neutral-400 dark:text-neutral-500">
-            Thinking{tokenCount ? ` (${tokenCount.toLocaleString()} tokens)` : ''}
+            Thinking
+            {tokenCount ? ` (${tokenCount.toLocaleString()} tokens)` : ""}
           </span>
           <ChevronDown
-            className={`h-3 w-3 text-neutral-400 transition-transform duration-200 dark:text-neutral-500 ${expanded ? 'rotate-180' : ''}`}
+            className={`h-3 w-3 text-neutral-400 transition-transform duration-200 dark:text-neutral-500 ${expanded ? "rotate-180" : ""}`}
           />
         </button>
         <CopyButton content={content} />

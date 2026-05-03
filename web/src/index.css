@@ -1,5 +1,5 @@
-@import 'tailwindcss';
-@import 'highlight.js/styles/github.css';
+@import "tailwindcss";
+@import "highlight.js/styles/github.css";
 
 /* Enable class-based dark mode for Tailwind v4 */
 @custom-variant dark (&:where(.dark, .dark *));
@@ -33,7 +33,13 @@
 
 /* Base styles */
 html {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -72,7 +78,8 @@ body {
 }
 
 .prose code {
-  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
 .prose p {
@@ -85,8 +92,12 @@ body {
 
 /* Animate spin for loading */
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .animate-spin {
@@ -314,7 +325,8 @@ body {
   padding-top: 0.125rem;
   padding-bottom: 0.125rem;
   font-size: 0.875rem;
-  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   color: #262626;
 }
 
@@ -329,7 +341,8 @@ body {
   line-height: 1.625;
 }
 
-.markdown-body ul, .markdown-body ol {
+.markdown-body ul,
+.markdown-body ol {
   margin-top: 0.5rem;
   margin-bottom: 0.5rem;
   margin-left: 1.25rem;
@@ -345,15 +358,24 @@ body {
   margin-bottom: 0.25rem;
 }
 
-.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 {
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
   margin-top: 0.75rem;
   margin-bottom: 0.75rem;
   font-weight: 600;
 }
 
-.markdown-body h1 { font-size: 1.25rem; }
-.markdown-body h2 { font-size: 1.125rem; }
-.markdown-body h3 { font-size: 1rem; }
+.markdown-body h1 {
+  font-size: 1.25rem;
+}
+.markdown-body h2 {
+  font-size: 1.125rem;
+}
+.markdown-body h3 {
+  font-size: 1rem;
+}
 
 .markdown-body blockquote {
   margin-top: 0.5rem;
@@ -378,7 +400,8 @@ body {
   font-size: 0.875rem;
 }
 
-.markdown-body th, .markdown-body td {
+.markdown-body th,
+.markdown-body td {
   border-width: 1px;
   border-color: #d4d4d4;
   padding-left: 0.75rem;
@@ -387,7 +410,8 @@ body {
   padding-bottom: 0.5rem;
 }
 
-.dark .markdown-body th, .dark .markdown-body td {
+.dark .markdown-body th,
+.dark .markdown-body td {
   border-color: #525252;
 }
 

@@ -1,15 +1,25 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { ChevronDown, Camera, Square, ArrowUp, ListTodo, CheckCircle2, Circle, Loader2, XCircle } from 'lucide-react';
-import { useSessionStore } from '../../stores/useSessionStore';
-import { useUIStore } from '../../stores/useUIStore';
-import { api } from '../../api/client';
-import { FileMentionPopover } from './FileMentionPopover';
-import type { ModelInfo, FileSuggestion, TodoItem } from '../../types/api';
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import {
+  ChevronDown,
+  Camera,
+  Square,
+  ArrowUp,
+  ListTodo,
+  CheckCircle2,
+  Circle,
+  Loader2,
+  XCircle,
+} from "lucide-react";
+import { useSessionStore } from "../../stores/useSessionStore";
+import { useUIStore } from "../../stores/useUIStore";
+import { api } from "../../api/client";
+import { FileMentionPopover } from "./FileMentionPopover";
+import type { ModelInfo, FileSuggestion, TodoItem } from "../../types/api";
 
 type ThinkingOption = { label: string; value: string };
 
 export function MessageInput() {
-  const [inputValue, setInputValue] = useState('');
+  const [inputValue, setInputValue] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -24,11 +34,13 @@ export function MessageInput() {
   // Models state
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
-  const [modelSearchQuery, setModelSearchQuery] = useState('');
+  const [modelSearchQuery, setModelSearchQuery] = useState("");
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
-  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(
+    null,
+  );
   const [thinkingOptions, setThinkingOptions] = useState<ThinkingOption[]>([]);
-  const [selectedThinking, setSelectedThinking] = useState<string>('');
+  const [selectedThinking, setSelectedThinking] = useState<string>("");
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement>(null);
@@ -63,7 +75,7 @@ export function MessageInput() {
       (m) =>
         m.display_name.toLowerCase().includes(q) ||
         m.id.toLowerCase().includes(q) ||
-        m.provider_name.toLowerCase().includes(q)
+        m.provider_name.toLowerCase().includes(q),
     );
   }, [models, modelSearchQuery]);
 
@@ -83,58 +95,70 @@ export function MessageInput() {
   // Update thinking levels based on model
   const updateThinkingLevels = useCallback((modelId: string) => {
     const id = modelId.toLowerCase();
-    if (id.includes('deepseek') && id.includes('4')) {
+    if (id.includes("deepseek") && id.includes("4")) {
       setThinkingOptions([
-        { label: 'Off', value: 'deepseek:Off' },
-        { label: 'High', value: 'deepseek:High' },
-        { label: 'Max', value: 'deepseek:Max' },
+        { label: "Off", value: "deepseek:Off" },
+        { label: "High", value: "deepseek:High" },
+        { label: "Max", value: "deepseek:Max" },
       ]);
-      setSelectedThinking('deepseek:Off');
-    } else if (id.includes('qwen') && id.includes('3.')) {
+      setSelectedThinking("deepseek:Off");
+    } else if (id.includes("qwen") && id.includes("3.")) {
       setThinkingOptions([
-        { label: 'Off', value: 'qwen:Off' },
-        { label: 'On', value: 'qwen:On' },
+        { label: "Off", value: "qwen:Off" },
+        { label: "On", value: "qwen:On" },
       ]);
-      setSelectedThinking('qwen:Off');
-    } else if (id.includes('glm')) {
+      setSelectedThinking("qwen:Off");
+    } else if (id.includes("glm")) {
       setThinkingOptions([
-        { label: 'Off', value: 'glm:Off' },
-        { label: 'On', value: 'glm:On' },
+        { label: "Off", value: "glm:Off" },
+        { label: "On", value: "glm:On" },
       ]);
-      setSelectedThinking('glm:Off');
+      setSelectedThinking("glm:Off");
     } else {
       setThinkingOptions([]);
-      setSelectedThinking('');
+      setSelectedThinking("");
     }
   }, []);
 
   // Load models
   useEffect(() => {
-    api.listModels().then(({ models: modelList }) => {
-      setModels(modelList);
-      if (!selectedModelId && modelList.length > 0) {
-        setSelectedModelId(modelList[0].id);
-        setSelectedProviderId(modelList[0].provider_id);
-        updateThinkingLevels(modelList[0].id);
-      }
-    }).catch(() => {});
+    api
+      .listModels()
+      .then(({ models: modelList }) => {
+        setModels(modelList);
+        if (!selectedModelId && modelList.length > 0) {
+          setSelectedModelId(modelList[0].id);
+          setSelectedProviderId(modelList[0].provider_id);
+          updateThinkingLevels(modelList[0].id);
+        }
+      })
+      .catch(() => {});
   }, [selectedModelId, updateThinkingLevels]);
 
   // Close dropdowns on click outside
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node)
+      ) {
         setModelDropdownOpen(false);
       }
-      if (thinkingDropdownRef.current && !thinkingDropdownRef.current.contains(e.target as Node)) {
+      if (
+        thinkingDropdownRef.current &&
+        !thinkingDropdownRef.current.contains(e.target as Node)
+      ) {
         setThinkingDropdownOpen(false);
       }
-      if (todoDropdownRef.current && !todoDropdownRef.current.contains(e.target as Node)) {
+      if (
+        todoDropdownRef.current &&
+        !todoDropdownRef.current.contains(e.target as Node)
+      ) {
         setTodoDropdownOpen(false);
       }
     }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   // Load todos when session changes
@@ -145,7 +169,8 @@ export function MessageInput() {
     }
 
     setIsLoadingTodos(true);
-    api.getTodos(currentSessionId)
+    api
+      .getTodos(currentSessionId)
       .then((response) => {
         setTodos(response.todos);
       })
@@ -162,25 +187,30 @@ export function MessageInput() {
   // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height =
+        Math.min(textareaRef.current.scrollHeight, 200) + "px";
     }
   }, [inputValue]);
 
   function handleKeydown(event: React.KeyboardEvent) {
     // Don't handle Tab/Enter if file mention popover is visible
     if (fileMention?.visible) {
-      if (event.key === 'Enter' || event.key === 'Tab') {
+      if (event.key === "Enter" || event.key === "Tab") {
         return;
       }
     }
 
-    if (event.key === 'Tab') {
+    if (event.key === "Tab") {
       event.preventDefault();
       toggleMode();
       return;
     }
-    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !event.nativeEvent.isComposing
+    ) {
       event.preventDefault();
       handleSubmit();
     }
@@ -217,8 +247,8 @@ export function MessageInput() {
 
         // Update URL
         const url = new URL(window.location.href);
-        url.searchParams.set('session', sessionId);
-        window.history.replaceState({}, '', url.toString());
+        url.searchParams.set("session", sessionId);
+        window.history.replaceState({}, "", url.toString());
       }
 
       // Send message
@@ -237,9 +267,9 @@ export function MessageInput() {
 
       const { request_id } = await api.sendMessage(sessionId, requestBody);
       setCurrentRequestId(request_id);
-      setInputValue('');
+      setInputValue("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send message');
+      setError(err instanceof Error ? err.message : "Failed to send message");
       setStreaming(false);
     } finally {
       setIsSubmitting(false);
@@ -249,7 +279,9 @@ export function MessageInput() {
   async function handleStop() {
     if (currentSessionId && currentRequestId) {
       try {
-        await api.abortRequest(currentSessionId, { request_id: currentRequestId });
+        await api.abortRequest(currentSessionId, {
+          request_id: currentRequestId,
+        });
       } catch {
         // ignore
       }
@@ -259,9 +291,12 @@ export function MessageInput() {
   }
 
   // Detect @ mention in input
-  function detectAtFragment(input: string, cursor: number): { atIndex: number; query: string } | null {
+  function detectAtFragment(
+    input: string,
+    cursor: number,
+  ): { atIndex: number; query: string } | null {
     const prefix = input.slice(0, cursor);
-    const atIndex = prefix.lastIndexOf('@');
+    const atIndex = prefix.lastIndexOf("@");
     if (atIndex === -1) return null;
 
     // Check if @ is preceded by valid character
@@ -280,13 +315,16 @@ export function MessageInput() {
   }
 
   // Calculate popover position based on textarea and cursor
-  function calculatePopoverPosition(textarea: HTMLTextAreaElement, atIndex: number): { x: number; y: number } {
+  function calculatePopoverPosition(
+    textarea: HTMLTextAreaElement,
+    atIndex: number,
+  ): { x: number; y: number } {
     const textBeforeAt = textarea.value.slice(0, atIndex);
-    const lines = textBeforeAt.split('\n');
+    const lines = textBeforeAt.split("\n");
     const currentLineText = lines[lines.length - 1];
 
     // Create a mirror element to measure text position
-    const mirror = document.createElement('div');
+    const mirror = document.createElement("div");
     const computedStyle = getComputedStyle(textarea);
     mirror.style.cssText = `
       position: fixed;
@@ -305,7 +343,7 @@ export function MessageInput() {
     document.body.appendChild(mirror);
 
     // Measure the width of text before @
-    const textSpan = document.createElement('span');
+    const textSpan = document.createElement("span");
     textSpan.textContent = currentLineText;
     mirror.appendChild(textSpan);
 
@@ -315,9 +353,15 @@ export function MessageInput() {
     document.body.removeChild(mirror);
 
     // Calculate position: at the @ character, in viewport coordinates
-    const x = textareaRect.left + textRect.width + parseInt(computedStyle.paddingLeft || '0');
+    const x =
+      textareaRect.left +
+      textRect.width +
+      parseInt(computedStyle.paddingLeft || "0");
     // Position at the top of current line (popover will extend upward)
-    const y = textareaRect.top + (lines.length - 1) * parseInt(computedStyle.lineHeight || '20') + parseInt(computedStyle.paddingTop || '0');
+    const y =
+      textareaRect.top +
+      (lines.length - 1) * parseInt(computedStyle.lineHeight || "20") +
+      parseInt(computedStyle.paddingTop || "0");
 
     return { x, y };
   }
@@ -344,12 +388,12 @@ export function MessageInput() {
   }
 
   // Handle file selection from popover
-  function handleFileSelect(path: string, kind: FileSuggestion['kind']) {
+  function handleFileSelect(path: string, kind: FileSuggestion["kind"]) {
     if (!fileMention || !textareaRef.current) return;
 
     const before = inputValue.slice(0, fileMention.atPosition);
     const after = inputValue.slice(textareaRef.current.selectionStart);
-    const replacement = kind === 'directory' ? `@${path}/` : `@${path}`;
+    const replacement = kind === "directory" ? `@${path}/` : `@${path}`;
 
     const newValue = before + replacement + after;
     setInputValue(newValue);
@@ -369,7 +413,7 @@ export function MessageInput() {
     setSelectedModelId(model.id);
     setSelectedProviderId(model.provider_id);
     setModelDropdownOpen(false);
-    setModelSearchQuery('');
+    setModelSearchQuery("");
     updateThinkingLevels(model.id);
   }
 
@@ -386,12 +430,12 @@ export function MessageInput() {
           <button
             onClick={toggleMode}
             className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
-              mode === 'plan'
-                ? 'bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-300'
-                : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300'
+              mode === "plan"
+                ? "bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-300"
+                : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300"
             }`}
           >
-            {mode === 'plan' ? 'Plan' : 'Build'}
+            {mode === "plan" ? "Plan" : "Build"}
           </button>
 
           {/* Model selector */}
@@ -401,7 +445,7 @@ export function MessageInput() {
               className="flex items-center gap-1 rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
             >
               <span className="max-w-[120px] truncate">
-                {selectedModelDisplay?.display_name || 'Select model'}
+                {selectedModelDisplay?.display_name || "Select model"}
               </span>
               <ChevronDown className="h-3 w-3" />
             </button>
@@ -419,27 +463,29 @@ export function MessageInput() {
                   />
                 </div>
                 <div className="max-h-64 overflow-y-auto">
-                  {Array.from(groupedModels.entries()).map(([provider, providerModels]) => (
-                    <div key={provider}>
-                      <div className="px-3 py-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                        {provider}
+                  {Array.from(groupedModels.entries()).map(
+                    ([provider, providerModels]) => (
+                      <div key={provider}>
+                        <div className="px-3 py-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">
+                          {provider}
+                        </div>
+                        {providerModels.map((model) => (
+                          <button
+                            key={model.id}
+                            onClick={() => handleModelSelect(model)}
+                            className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 ${selectedModelId === model.id ? "bg-neutral-100 dark:bg-neutral-800" : ""}`}
+                          >
+                            <span className="flex-1 font-medium text-neutral-900 dark:text-neutral-100">
+                              {model.display_name}
+                            </span>
+                            {model.supports_vision && (
+                              <Camera className="h-3.5 w-3.5 text-neutral-400" />
+                            )}
+                          </button>
+                        ))}
                       </div>
-                      {providerModels.map((model) => (
-                        <button
-                          key={model.id}
-                          onClick={() => handleModelSelect(model)}
-                          className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 ${selectedModelId === model.id ? 'bg-neutral-100 dark:bg-neutral-800' : ''}`}
-                        >
-                          <span className="flex-1 font-medium text-neutral-900 dark:text-neutral-100">
-                            {model.display_name}
-                          </span>
-                          {model.supports_vision && (
-                            <Camera className="h-3.5 w-3.5 text-neutral-400" />
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  ))}
+                    ),
+                  )}
                 </div>
               </div>
             )}
@@ -453,7 +499,8 @@ export function MessageInput() {
                 className="flex items-center gap-1 rounded bg-amber-50 px-2 py-1 text-xs text-amber-700 hover:bg-amber-100 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/50"
               >
                 <span>
-                  {thinkingOptions.find((t) => t.value === selectedThinking)?.label || 'Thinking'}
+                  {thinkingOptions.find((t) => t.value === selectedThinking)
+                    ?.label || "Thinking"}
                 </span>
                 <ChevronDown className="h-3 w-3" />
               </button>
@@ -467,7 +514,7 @@ export function MessageInput() {
                         setSelectedThinking(option.value);
                         setThinkingDropdownOpen(false);
                       }}
-                      className={`flex w-full px-3 py-2 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 ${selectedThinking === option.value ? 'bg-neutral-100 dark:bg-neutral-800 font-medium' : ''}`}
+                      className={`flex w-full px-3 py-2 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 ${selectedThinking === option.value ? "bg-neutral-100 dark:bg-neutral-800 font-medium" : ""}`}
                     >
                       {option.label}
                     </button>
@@ -489,38 +536,56 @@ export function MessageInput() {
               >
                 <ListTodo className="h-3.5 w-3.5" />
                 <span>{todos.length}</span>
-                <ChevronDown className={`h-3 w-3 transition-transform ${todoDropdownOpen ? 'rotate-180' : ''}`} />
+                <ChevronDown
+                  className={`h-3 w-3 transition-transform ${todoDropdownOpen ? "rotate-180" : ""}`}
+                />
               </button>
 
               {todoDropdownOpen && (
                 <div className="absolute bottom-full right-0 z-50 mb-1 w-72 max-h-80 overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
                   <div className="border-b border-neutral-200 bg-neutral-50 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-800">
                     <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
-                      Todo List ({todos.filter(t => t.status === 'pending' || t.status === 'in_progress').length} pending)
+                      Todo List (
+                      {
+                        todos.filter(
+                          (t) =>
+                            t.status === "pending" ||
+                            t.status === "in_progress",
+                        ).length
+                      }{" "}
+                      pending)
                     </span>
                   </div>
                   <div className="max-h-64 overflow-y-auto py-1">
                     {todos.map((todo, index) => {
                       const getStatusIcon = () => {
                         switch (todo.status) {
-                          case 'completed':
-                            return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />;
-                          case 'in_progress':
-                            return <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-500" />;
-                          case 'cancelled':
-                            return <XCircle className="h-3.5 w-3.5 text-neutral-400" />;
+                          case "completed":
+                            return (
+                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                            );
+                          case "in_progress":
+                            return (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-500" />
+                            );
+                          case "cancelled":
+                            return (
+                              <XCircle className="h-3.5 w-3.5 text-neutral-400" />
+                            );
                           default:
-                            return <Circle className="h-3.5 w-3.5 text-blue-500" />;
+                            return (
+                              <Circle className="h-3.5 w-3.5 text-blue-500" />
+                            );
                         }
                       };
                       const getPriorityColor = () => {
                         switch (todo.priority) {
-                          case 'high':
-                            return 'text-red-600 dark:text-red-400';
-                          case 'medium':
-                            return 'text-amber-600 dark:text-amber-400';
+                          case "high":
+                            return "text-red-600 dark:text-red-400";
+                          case "medium":
+                            return "text-amber-600 dark:text-amber-400";
                           default:
-                            return 'text-neutral-600 dark:text-neutral-400';
+                            return "text-neutral-600 dark:text-neutral-400";
                         }
                       };
                       return (
@@ -528,9 +593,13 @@ export function MessageInput() {
                           key={index}
                           className="flex items-start gap-2 px-3 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800"
                         >
-                          <div className="mt-0.5 flex-shrink-0">{getStatusIcon()}</div>
+                          <div className="mt-0.5 flex-shrink-0">
+                            {getStatusIcon()}
+                          </div>
                           <div className="flex-1 min-w-0">
-                            <p className={`text-xs leading-relaxed ${getPriorityColor()} ${todo.status === 'completed' || todo.status === 'cancelled' ? 'line-through opacity-60' : ''}`}>
+                            <p
+                              className={`text-xs leading-relaxed ${getPriorityColor()} ${todo.status === "completed" || todo.status === "cancelled" ? "line-through opacity-60" : ""}`}
+                            >
                               {todo.content}
                             </p>
                           </div>
@@ -553,10 +622,10 @@ export function MessageInput() {
             onKeyDown={handleKeydown}
             placeholder={
               isDraftSession
-                ? 'Type your first message to create the session...'
+                ? "Type your first message to create the session..."
                 : currentSessionId
-                  ? 'Type a message...'
-                  : 'Select or create a session to start'
+                  ? "Type a message..."
+                  : "Select or create a session to start"
             }
             rows={1}
             disabled={!isInputEnabled}

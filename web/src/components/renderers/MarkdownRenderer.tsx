@@ -1,6 +1,6 @@
-import ReactMarkdown from 'react-markdown';
-import rehypeHighlight from 'rehype-highlight';
-import type { ComponentProps } from 'react';
+import ReactMarkdown from "react-markdown";
+import rehypeHighlight from "rehype-highlight";
+import type { ComponentProps } from "react";
 
 interface Props {
   content: string;
@@ -9,7 +9,7 @@ interface Props {
 /**
  * Custom link component that opens in a new tab.
  */
-function CustomLink(props: ComponentProps<'a'>) {
+function CustomLink(props: ComponentProps<"a">) {
   return (
     <a
       {...props}

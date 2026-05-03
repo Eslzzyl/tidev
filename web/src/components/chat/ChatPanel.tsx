@@ -1,13 +1,13 @@
-import { useMemo, useEffect, useState, useCallback } from 'react';
-import { Menu, Settings, Info } from 'lucide-react';
-import { useSessionStore } from '../../stores/useSessionStore';
-import { useUIStore } from '../../stores/useUIStore';
-import { useSSE } from '../../hooks/useSSE';
-import { api } from '../../api/client';
-import { buildRounds } from '../../utils/round';
-import { MessageRound } from './MessageRound';
-import { MessageInput } from './MessageInput';
-import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { useMemo, useEffect, useState, useCallback } from "react";
+import { Menu, Settings, Info } from "lucide-react";
+import { useSessionStore } from "../../stores/useSessionStore";
+import { useUIStore } from "../../stores/useUIStore";
+import { useSSE } from "../../hooks/useSSE";
+import { api } from "../../api/client";
+import { buildRounds } from "../../utils/round";
+import { MessageRound } from "./MessageRound";
+import { MessageInput } from "./MessageInput";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 
 export function ChatPanel() {
   const messages = useSessionStore((s) => s.messages);
@@ -18,7 +18,9 @@ export function ChatPanel() {
 
   const toggleMobileMenu = useUIStore((s) => s.toggleMobileMenu);
   const toggleRightSidebar = useUIStore((s) => s.toggleRightSidebar);
-  const toggleMobileRightSidebar = useUIStore((s) => s.toggleMobileRightSidebar);
+  const toggleMobileRightSidebar = useUIStore(
+    (s) => s.toggleMobileRightSidebar,
+  );
   const toggleSettings = useUIStore((s) => s.toggleSettings);
 
   const streamingRound = useSSE(currentSessionId);
@@ -34,21 +36,24 @@ export function ChatPanel() {
   }, [completedRounds, streamingRound]);
 
   // Auto-scroll
-  const [messagesContainerRef, setMessagesContainerRef] = useState<HTMLDivElement | null>(null);
-  const [messagesEndRef, setMessagesEndRef] = useState<HTMLDivElement | null>(null);
+  const [messagesContainerRef, setMessagesContainerRef] =
+    useState<HTMLDivElement | null>(null);
+  const [messagesEndRef, setMessagesEndRef] = useState<HTMLDivElement | null>(
+    null,
+  );
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
   const [isFirstLoad, setIsFirstLoad] = useState(true);
 
   useEffect(() => {
     if (isFirstLoad && allRounds.length > 0 && messagesEndRef) {
-      messagesEndRef.scrollIntoView({ behavior: 'instant' });
+      messagesEndRef.scrollIntoView({ behavior: "instant" });
       setIsFirstLoad(false);
     }
   }, [allRounds.length, isFirstLoad, messagesEndRef]);
 
   useEffect(() => {
     if (!isFirstLoad && shouldAutoScroll && messagesEndRef) {
-      messagesEndRef.scrollIntoView({ behavior: 'smooth' });
+      messagesEndRef.scrollIntoView({ behavior: "smooth" });
     }
   });
 
@@ -67,14 +72,16 @@ export function ChatPanel() {
 
   const scrollToBottom = useCallback(() => {
     if (messagesEndRef) {
-      messagesEndRef.scrollIntoView({ behavior: 'smooth' });
+      messagesEndRef.scrollIntoView({ behavior: "smooth" });
       setShouldAutoScroll(true);
     }
   }, [messagesEndRef]);
 
   // Undo state
   const [undoDialogOpen, setUndoDialogOpen] = useState(false);
-  const [undoTargetMessageId, setUndoTargetMessageId] = useState<string | null>(null);
+  const [undoTargetMessageId, setUndoTargetMessageId] = useState<string | null>(
+    null,
+  );
   const [isUndoing, setIsUndoing] = useState(false);
   const [undoError, setUndoError] = useState<string | null>(null);
 
@@ -94,17 +101,21 @@ export function ChatPanel() {
     setUndoError(null);
 
     try {
-      const result = await api.revertToMessage(currentSessionId, undoTargetMessageId);
+      const result = await api.revertToMessage(
+        currentSessionId,
+        undoTargetMessageId,
+      );
 
       // Refresh messages and todos after revert
-      const { messages: updatedMessages, todos: updatedTodos } = await api.listMessages(currentSessionId);
+      const { messages: updatedMessages, todos: updatedTodos } =
+        await api.listMessages(currentSessionId);
       setMessages(updatedMessages);
       setTodos(updatedTodos);
 
       setUndoDialogOpen(false);
       setUndoTargetMessageId(null);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to undo';
+      const message = error instanceof Error ? error.message : "Failed to undo";
       setUndoError(message);
     } finally {
       setIsUndoing(false);
@@ -135,16 +146,26 @@ export function ChatPanel() {
 
           {isDraftSession ? (
             <div>
-              <h1 className="text-sm font-semibold text-blue-600 dark:text-blue-400">{draftTitle}</h1>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">Draft Session</p>
+              <h1 className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+                {draftTitle}
+              </h1>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                Draft Session
+              </p>
             </div>
           ) : currentSession ? (
             <div>
-              <h1 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{currentSession.title}</h1>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">{currentSession.model_display_name}</p>
+              <h1 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                {currentSession.title}
+              </h1>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                {currentSession.model_display_name}
+              </p>
             </div>
           ) : (
-            <h1 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Select a session</h1>
+            <h1 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+              Select a session
+            </h1>
           )}
         </div>
 
@@ -197,8 +218,8 @@ export function ChatPanel() {
             <div className="text-center">
               <p className="text-neutral-500 dark:text-neutral-400">
                 {isDraftSession
-                  ? 'Type your first message to create the session'
-                  : 'No messages yet. Start a conversation!'}
+                  ? "Type your first message to create the session"
+                  : "No messages yet. Start a conversation!"}
               </p>
             </div>
           </div>

@@ -1,15 +1,28 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
-  Folder, Image, File, FileCode, FileText, FileJson, FileCog,
-  FileTerminal, FileType, FileImage, FileLock2, FileArchive,
-  FileVideo, FileAudio, FileSpreadsheet, FileWarning,
-} from 'lucide-react';
-import { api } from '../../api/client';
-import type { FileSuggestion } from '../../types/api';
+  Folder,
+  Image,
+  File,
+  FileCode,
+  FileText,
+  FileJson,
+  FileCog,
+  FileTerminal,
+  FileType,
+  FileImage,
+  FileLock2,
+  FileArchive,
+  FileVideo,
+  FileAudio,
+  FileSpreadsheet,
+  FileWarning,
+} from "lucide-react";
+import { api } from "../../api/client";
+import type { FileSuggestion } from "../../types/api";
 
 interface FileMentionPopoverProps {
   query: string;
-  onSelect: (path: string, kind: FileSuggestion['kind']) => void;
+  onSelect: (path: string, kind: FileSuggestion["kind"]) => void;
   onClose: () => void;
   position: { x: number; y: number };
 }
@@ -18,7 +31,12 @@ interface FileSuggestionWithIcon extends FileSuggestion {
   icon: React.ReactNode;
 }
 
-export function FileMentionPopover({ query, onSelect, onClose, position }: FileMentionPopoverProps) {
+export function FileMentionPopover({
+  query,
+  onSelect,
+  onClose,
+  position,
+}: FileMentionPopoverProps) {
   const [suggestions, setSuggestions] = useState<FileSuggestionWithIcon[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -37,7 +55,7 @@ export function FileMentionPopover({ query, onSelect, onClose, position }: FileM
         setSuggestions(suggestionsWithIcons);
         setSelectedIndex(0);
       } catch (error) {
-        console.error('Failed to search files:', error);
+        console.error("Failed to search files:", error);
         setSuggestions([]);
       } finally {
         setLoading(false);
@@ -53,49 +71,54 @@ export function FileMentionPopover({ query, onSelect, onClose, position }: FileM
       if (suggestions.length === 0) return;
 
       switch (e.key) {
-        case 'ArrowDown':
+        case "ArrowDown":
           e.preventDefault();
           setSelectedIndex((prev) => (prev + 1) % suggestions.length);
           break;
-        case 'ArrowUp':
+        case "ArrowUp":
           e.preventDefault();
-          setSelectedIndex((prev) => (prev - 1 + suggestions.length) % suggestions.length);
+          setSelectedIndex(
+            (prev) => (prev - 1 + suggestions.length) % suggestions.length,
+          );
           break;
-        case 'Enter':
-        case 'Tab':
+        case "Enter":
+        case "Tab":
           e.preventDefault();
           if (suggestions[selectedIndex]) {
             const suggestion = suggestions[selectedIndex];
             onSelect(suggestion.path, suggestion.kind);
           }
           break;
-        case 'Escape':
+        case "Escape":
           e.preventDefault();
           onClose();
           break;
       }
     };
 
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [suggestions, selectedIndex, onSelect, onClose]);
 
   // Handle click outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+      if (
+        popoverRef.current &&
+        !popoverRef.current.contains(e.target as Node)
+      ) {
         onClose();
       }
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [onClose]);
 
   // Scroll selected item into view
   const selectedRef = useCallback((node: HTMLDivElement | null) => {
     if (node) {
-      node.scrollIntoView({ block: 'nearest' });
+      node.scrollIntoView({ block: "nearest" });
     }
   }, []);
 
@@ -117,10 +140,12 @@ export function FileMentionPopover({ query, onSelect, onClose, position }: FileM
       {/* Header */}
       <div className="flex items-center justify-between border-b border-neutral-100 px-3 py-2 dark:border-neutral-700">
         <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-          Files {query ? `· @${query}` : ''}
+          Files {query ? `· @${query}` : ""}
         </span>
         {loading && (
-          <span className="text-xs text-neutral-400 dark:text-neutral-500">Loading...</span>
+          <span className="text-xs text-neutral-400 dark:text-neutral-500">
+            Loading...
+          </span>
         )}
       </div>
 
@@ -138,8 +163,8 @@ export function FileMentionPopover({ query, onSelect, onClose, position }: FileM
             onClick={() => onSelect(suggestion.path, suggestion.kind)}
             className={`flex cursor-pointer items-center gap-2 px-3 py-2 text-sm ${
               index === selectedIndex
-                ? 'bg-neutral-100 dark:bg-neutral-700'
-                : 'hover:bg-neutral-50 dark:hover:bg-neutral-750'
+                ? "bg-neutral-100 dark:bg-neutral-700"
+                : "hover:bg-neutral-50 dark:hover:bg-neutral-750"
             }`}
           >
             <span className="flex-shrink-0 text-neutral-500 dark:text-neutral-400">
@@ -162,126 +187,129 @@ export function FileMentionPopover({ query, onSelect, onClose, position }: FileM
   );
 }
 
-function getFileIcon(kind: FileSuggestion['kind'], path: string): React.ReactNode {
+function getFileIcon(
+  kind: FileSuggestion["kind"],
+  path: string,
+): React.ReactNode {
   // Directory
-  if (kind === 'directory') return <Folder className="h-4 w-4" />;
+  if (kind === "directory") return <Folder className="h-4 w-4" />;
   // Image (classified by backend)
-  if (kind === 'image') return <Image className="h-4 w-4" />;
+  if (kind === "image") return <Image className="h-4 w-4" />;
 
   // Parse extension from path
-  const ext = path.split('.').pop()?.toLowerCase() || '';
+  const ext = path.split(".").pop()?.toLowerCase() || "";
 
   switch (ext) {
     // Code files
-    case 'rs':
-    case 'ts':
-    case 'tsx':
-    case 'js':
-    case 'jsx':
-    case 'mjs':
-    case 'cjs':
-    case 'py':
-    case 'go':
-    case 'rb':
-    case 'java':
-    case 'kt':
-    case 'swift':
-    case 'c':
-    case 'h':
-    case 'cpp':
-    case 'hpp':
-    case 'cs':
-    case 'php':
-    case 'r':
-    case 'scala':
-    case 'zig':
+    case "rs":
+    case "ts":
+    case "tsx":
+    case "js":
+    case "jsx":
+    case "mjs":
+    case "cjs":
+    case "py":
+    case "go":
+    case "rb":
+    case "java":
+    case "kt":
+    case "swift":
+    case "c":
+    case "h":
+    case "cpp":
+    case "hpp":
+    case "cs":
+    case "php":
+    case "r":
+    case "scala":
+    case "zig":
       return <FileCode className="h-4 w-4" />;
 
     // Shell scripts
-    case 'sh':
-    case 'bash':
-    case 'zsh':
-    case 'fish':
+    case "sh":
+    case "bash":
+    case "zsh":
+    case "fish":
       return <FileTerminal className="h-4 w-4" />;
 
     // JSON
-    case 'json':
-    case 'jsonc':
+    case "json":
+    case "jsonc":
       return <FileJson className="h-4 w-4" />;
 
     // Config / data files
-    case 'yaml':
-    case 'yml':
-    case 'toml':
-    case 'env':
-    case 'ini':
-    case 'cfg':
-    case 'conf':
+    case "yaml":
+    case "yml":
+    case "toml":
+    case "env":
+    case "ini":
+    case "cfg":
+    case "conf":
       return <FileCog className="h-4 w-4" />;
 
     // Markdown / text
-    case 'md':
-    case 'mdx':
-    case 'txt':
-    case 'log':
+    case "md":
+    case "mdx":
+    case "txt":
+    case "log":
       return <FileText className="h-4 w-4" />;
 
     // Stylesheets
-    case 'css':
-    case 'scss':
-    case 'sass':
-    case 'less':
+    case "css":
+    case "scss":
+    case "sass":
+    case "less":
       return <FileType className="h-4 w-4" />;
 
     // Image files (not caught by backend kind)
-    case 'svg':
-    case 'ico':
+    case "svg":
+    case "ico":
       return <FileImage className="h-4 w-4" />;
 
     // Lock files
-    case 'lock':
+    case "lock":
       return <FileLock2 className="h-4 w-4" />;
 
     // Archives
-    case 'zip':
-    case 'tar':
-    case 'gz':
-    case 'tgz':
-    case 'bz2':
-    case 'xz':
-    case 'rar':
-    case '7z':
+    case "zip":
+    case "tar":
+    case "gz":
+    case "tgz":
+    case "bz2":
+    case "xz":
+    case "rar":
+    case "7z":
       return <FileArchive className="h-4 w-4" />;
 
     // Video
-    case 'mp4':
-    case 'avi':
-    case 'mov':
-    case 'mkv':
-    case 'webm':
+    case "mp4":
+    case "avi":
+    case "mov":
+    case "mkv":
+    case "webm":
       return <FileVideo className="h-4 w-4" />;
 
     // Audio
-    case 'mp3':
-    case 'wav':
-    case 'flac':
-    case 'ogg':
-    case 'aac':
+    case "mp3":
+    case "wav":
+    case "flac":
+    case "ogg":
+    case "aac":
       return <FileAudio className="h-4 w-4" />;
 
     // Spreadsheets
-    case 'csv':
-    case 'xlsx':
-    case 'xls':
+    case "csv":
+    case "xlsx":
+    case "xls":
       return <FileSpreadsheet className="h-4 w-4" />;
 
     // Binary / compiled
-    case 'wasm':
-    case 'so':
-    case 'dylib':
-    case 'dll':
-    case 'exe':
-    case 'bin':
+    case "wasm":
+    case "so":
+    case "dylib":
+    case "dll":
+    case "exe":
+    case "bin":
       return <FileWarning className="h-4 w-4" />;
 
     // Default
@@ -290,7 +318,10 @@ function getFileIcon(kind: FileSuggestion['kind'], path: string): React.ReactNod
   }
 }
 
-function highlightMatches(display: string, matchedIndices: number[]): React.ReactNode {
+function highlightMatches(
+  display: string,
+  matchedIndices: number[],
+): React.ReactNode {
   if (!matchedIndices || matchedIndices.length === 0) {
     return display;
   }
@@ -301,13 +332,16 @@ function highlightMatches(display: string, matchedIndices: number[]): React.Reac
   for (const index of matchedIndices) {
     if (index > lastIndex) {
       result.push(
-        <span key={`text-${index}`}>{display.slice(lastIndex, index)}</span>
+        <span key={`text-${index}`}>{display.slice(lastIndex, index)}</span>,
       );
     }
     result.push(
-      <span key={`match-${index}`} className="font-bold text-neutral-900 dark:text-neutral-100">
+      <span
+        key={`match-${index}`}
+        className="font-bold text-neutral-900 dark:text-neutral-100"
+      >
         {display[index]}
-      </span>
+      </span>,
     );
     lastIndex = index + 1;
   }

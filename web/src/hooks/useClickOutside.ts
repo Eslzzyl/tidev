@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef } from "react";
 
 export function useClickOutside(
-  handler: () => void
+  handler: () => void,
 ): React.RefObject<HTMLDivElement | null> {
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -16,8 +16,8 @@ export function useClickOutside(
       }
     };
 
-    document.addEventListener('click', handleClick, true);
-    return () => document.removeEventListener('click', handleClick, true);
+    document.addEventListener("click", handleClick, true);
+    return () => document.removeEventListener("click", handleClick, true);
   }, [handler]);
 
   return ref;

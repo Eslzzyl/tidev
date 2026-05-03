@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from "react";
 
 export function useAutoScroll(deps: unknown[]) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -15,20 +15,20 @@ export function useAutoScroll(deps: unknown[]) {
   }, []);
 
   const scrollToBottom = useCallback(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
     setShouldAutoScroll(true);
   }, []);
 
   useEffect(() => {
     if (isFirstLoad.current && deps.some(Boolean)) {
-      endRef.current?.scrollIntoView({ behavior: 'instant' });
+      endRef.current?.scrollIntoView({ behavior: "instant" });
       isFirstLoad.current = false;
     }
   }, deps);
 
   useEffect(() => {
     if (!isFirstLoad.current && shouldAutoScroll) {
-      endRef.current?.scrollIntoView({ behavior: 'smooth' });
+      endRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   });
 

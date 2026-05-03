@@ -1,9 +1,9 @@
-import { useCallback } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
-import { useSessionStore } from '../../stores/useSessionStore';
-import { useUIStore } from '../../stores/useUIStore';
-import { api } from '../../api/client';
-import { formatSessionDate } from '../../utils/format';
+import { useCallback } from "react";
+import { Plus, Trash2 } from "lucide-react";
+import { useSessionStore } from "../../stores/useSessionStore";
+import { useUIStore } from "../../stores/useUIStore";
+import { api } from "../../api/client";
+import { formatSessionDate } from "../../utils/format";
 
 export function LeftSidebar() {
   const sessions = useSessionStore((s) => s.sessions);
@@ -40,32 +40,36 @@ export function LeftSidebar() {
         useSessionStore.getState().setTodos(todos ?? []);
         closeMobileMenu();
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load session');
+        setError(err instanceof Error ? err.message : "Failed to load session");
       } finally {
         setLoading(false);
       }
     },
-    [setLoading, setCurrentSession, setMessages, closeMobileMenu, setError]
+    [setLoading, setCurrentSession, setMessages, closeMobileMenu, setError],
   );
 
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
-      if (!confirm('Delete this session?')) return;
+      if (!confirm("Delete this session?")) return;
       try {
         await api.deleteSession(sessionId);
         removeSession(sessionId);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to delete session');
+        setError(
+          err instanceof Error ? err.message : "Failed to delete session",
+        );
       }
     },
-    [removeSession, setError]
+    [removeSession, setError],
   );
 
   return (
     <div className="flex h-full flex-col bg-neutral-50 dark:bg-neutral-900">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] dark:border-neutral-800">
-        <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Sessions</h2>
+        <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+          Sessions
+        </h2>
         <button
           onClick={handleNewSession}
           className="flex items-center gap-1 rounded bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
@@ -82,8 +86,12 @@ export function LeftSidebar() {
           <div className="border-b border-neutral-200 dark:border-neutral-800">
             <button className="flex w-full items-center bg-blue-50 px-4 py-3 text-left dark:bg-blue-950/30">
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-blue-900 dark:text-blue-100">{draftTitle}</p>
-                <p className="mt-0.5 text-xs text-blue-600 dark:text-blue-400">Draft • Type to create</p>
+                <p className="truncate text-sm font-medium text-blue-900 dark:text-blue-100">
+                  {draftTitle}
+                </p>
+                <p className="mt-0.5 text-xs text-blue-600 dark:text-blue-400">
+                  Draft • Type to create
+                </p>
               </div>
             </button>
           </div>
@@ -101,8 +109,8 @@ export function LeftSidebar() {
                   onClick={() => handleSelectSession(session.session_id)}
                   className={`flex w-full items-center px-4 py-3 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
                     currentSessionId === session.session_id
-                      ? 'bg-neutral-100 dark:bg-neutral-800'
-                      : ''
+                      ? "bg-neutral-100 dark:bg-neutral-800"
+                      : ""
                   }`}
                 >
                   <div className="min-w-0 flex-1 pr-8">
@@ -110,7 +118,8 @@ export function LeftSidebar() {
                       {session.title}
                     </p>
                     <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
-                      {session.model_display_name} • {formatSessionDate(session.updated_at)}
+                      {session.model_display_name} •{" "}
+                      {formatSessionDate(session.updated_at)}
                     </p>
                   </div>
                 </button>

@@ -13,30 +13,34 @@ import type {
   WorkspaceInfo,
   FileSuggestion,
   TodosResponse,
-} from '../types/api';
+} from "../types/api";
 
-const API_BASE = '/api';
+const API_BASE = "/api";
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   try {
     const response = await fetch(url, {
       ...options,
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         ...options?.headers,
       },
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+      const error = await response
+        .json()
+        .catch(() => ({ error: "Unknown error" }));
       throw new Error(error.error || `HTTP ${response.status}`);
     }
 
     return response.json();
   } catch (error) {
     // Handle network errors (e.g., cannot connect to backend)
-    if (error instanceof TypeError && error.message.includes('fetch')) {
-      throw new Error('Cannot connect to the server. Please check your network connection and try again.');
+    if (error instanceof TypeError && error.message.includes("fetch")) {
+      throw new Error(
+        "Cannot connect to the server. Please check your network connection and try again.",
+      );
     }
     throw error;
   }
@@ -47,34 +51,41 @@ export const api = {
   getWorkspace: () => fetchJson<WorkspaceInfo>(`${API_BASE}/workspace`),
 
   // Sessions
-  listSessions: () => fetchJson<{ sessions: Session[] }>(`${API_BASE}/sessions`),
+  listSessions: () =>
+    fetchJson<{ sessions: Session[] }>(`${API_BASE}/sessions`),
 
   createSession: (data: CreateSessionRequest) =>
     fetchJson<CreateSessionResponse>(`${API_BASE}/sessions`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(data),
     }),
 
-  getSession: (id: string) => fetchJson<SessionDetail>(`${API_BASE}/sessions/${id}`),
+  getSession: (id: string) =>
+    fetchJson<SessionDetail>(`${API_BASE}/sessions/${id}`),
 
   deleteSession: (id: string) =>
-    fetch(`${API_BASE}/sessions/${id}`, { method: 'DELETE' }).then((r) => {
+    fetch(`${API_BASE}/sessions/${id}`, { method: "DELETE" }).then((r) => {
       if (!r.ok) throw new Error(`Failed to delete session: ${r.status}`);
     }),
 
   // Messages
   listMessages: (sessionId: string) =>
-    fetchJson<{ messages: Message[]; todos: TodoItem[] }>(`${API_BASE}/sessions/${sessionId}/messages`),
+    fetchJson<{ messages: Message[]; todos: TodoItem[] }>(
+      `${API_BASE}/sessions/${sessionId}/messages`,
+    ),
 
   sendMessage: (sessionId: string, data: SendMessageRequest) =>
-    fetchJson<SendMessageResponse>(`${API_BASE}/sessions/${sessionId}/messages`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+    fetchJson<SendMessageResponse>(
+      `${API_BASE}/sessions/${sessionId}/messages`,
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+    ),
 
   abortRequest: (sessionId: string, data: AbortRequest) =>
     fetch(`${API_BASE}/sessions/${sessionId}/abort`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(data),
     }),
 
@@ -87,7 +98,7 @@ export const api = {
   // Files (@-mention search)
   searchFiles: (query: string) =>
     fetchJson<{ suggestions: FileSuggestion[] }>(
-      `${API_BASE}/files/search?q=${encodeURIComponent(query)}`
+      `${API_BASE}/files/search?q=${encodeURIComponent(query)}`,
     ),
 
   // Todos
@@ -96,11 +107,12 @@ export const api = {
 
   // Revert / Undo
   revertToMessage: (sessionId: string, messageId: string) =>
-    fetchJson<{ success: boolean; reverted_to_message_id: string; hidden_message_count: number }>(
-      `${API_BASE}/sessions/${sessionId}/revert`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ message_id: messageId }),
-      }
-    ),
+    fetchJson<{
+      success: boolean;
+      reverted_to_message_id: string;
+      hidden_message_count: number;
+    }>(`${API_BASE}/sessions/${sessionId}/revert`, {
+      method: "POST",
+      body: JSON.stringify({ message_id: messageId }),
+    }),
 };

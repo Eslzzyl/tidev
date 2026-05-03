@@ -1,11 +1,15 @@
-import { X, Sun, Moon, Monitor } from 'lucide-react';
-import { useUIStore, getEffectiveTheme, type Theme } from '../stores/useUIStore';
-import { useClickOutside } from '../hooks/useClickOutside';
+import { X, Sun, Moon, Monitor } from "lucide-react";
+import {
+  useUIStore,
+  getEffectiveTheme,
+  type Theme,
+} from "../stores/useUIStore";
+import { useClickOutside } from "../hooks/useClickOutside";
 
 const themes: { value: Theme; label: string; icon: React.ReactNode }[] = [
-  { value: 'light', label: 'Light', icon: <Sun className="h-8 w-8" /> },
-  { value: 'dark', label: 'Dark', icon: <Moon className="h-8 w-8" /> },
-  { value: 'system', label: 'System', icon: <Monitor className="h-8 w-8" /> },
+  { value: "light", label: "Light", icon: <Sun className="h-8 w-8" /> },
+  { value: "dark", label: "Dark", icon: <Moon className="h-8 w-8" /> },
+  { value: "system", label: "System", icon: <Monitor className="h-8 w-8" /> },
 ];
 
 export function Settings() {
@@ -28,7 +32,9 @@ export function Settings() {
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-neutral-200 px-6 py-4 dark:border-neutral-800">
-          <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Settings</h2>
+          <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+            Settings
+          </h2>
           <button
             onClick={closeSettings}
             className="rounded p-1 text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
@@ -41,7 +47,9 @@ export function Settings() {
         {/* Content */}
         <div className="p-6">
           <div>
-            <h3 className="mb-3 text-sm font-medium text-neutral-900 dark:text-neutral-100">Appearance</h3>
+            <h3 className="mb-3 text-sm font-medium text-neutral-900 dark:text-neutral-100">
+              Appearance
+            </h3>
             <p className="mb-4 text-sm text-neutral-500 dark:text-neutral-400">
               Choose your preferred color theme
             </p>
@@ -53,8 +61,8 @@ export function Settings() {
                   onClick={() => setTheme(t.value)}
                   className={`flex flex-col items-center gap-2 rounded-lg border p-4 transition-all ${
                     t.value === theme
-                      ? 'border-neutral-900 bg-neutral-50 dark:border-neutral-100 dark:bg-neutral-800'
-                      : 'border-neutral-200 hover:border-neutral-300 dark:border-neutral-700 dark:hover:border-neutral-600'
+                      ? "border-neutral-900 bg-neutral-50 dark:border-neutral-100 dark:bg-neutral-800"
+                      : "border-neutral-200 hover:border-neutral-300 dark:border-neutral-700 dark:hover:border-neutral-600"
                   }`}
                 >
                   {t.icon}
@@ -62,7 +70,9 @@ export function Settings() {
                     {t.label}
                   </span>
                   {t.value === theme && (
-                    <span className="text-xs text-neutral-500 dark:text-neutral-400">Active</span>
+                    <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                      Active
+                    </span>
                   )}
                 </button>
               ))}
@@ -71,7 +81,9 @@ export function Settings() {
 
           <div className="mt-6 rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-neutral-600 dark:text-neutral-400">Current theme</span>
+              <span className="text-sm text-neutral-600 dark:text-neutral-400">
+                Current theme
+              </span>
               <span className="rounded bg-neutral-100 px-2 py-1 text-xs font-medium uppercase text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
                 {effectiveTheme}
               </span>

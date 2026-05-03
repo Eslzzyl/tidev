@@ -1,7 +1,7 @@
-import { create } from 'zustand';
-import type { Session, SessionDetail, Message, TodoItem } from '../types/api';
+import { create } from "zustand";
+import type { Session, SessionDetail, Message, TodoItem } from "../types/api";
 
-export type SessionMode = 'plan' | 'build';
+export type SessionMode = "plan" | "build";
 
 export interface UsageStatsData {
   total_tokens: number;
@@ -60,8 +60,8 @@ const initialState: SessionState = {
   isLoading: false,
   error: null,
   isDraftSession: false,
-  draftTitle: '',
-  mode: 'build',
+  draftTitle: "",
+  mode: "build",
   currentRequestId: null,
 };
 export const useSessionStore = create<SessionState & SessionActions>((set) => ({
@@ -91,7 +91,7 @@ export const useSessionStore = create<SessionState & SessionActions>((set) => ({
   updateMessageContent: (id, content) =>
     set((state) => ({
       messages: state.messages.map((m) =>
-        m.id === id ? { ...m, content: m.content + content } : m
+        m.id === id ? { ...m, content: m.content + content } : m,
       ),
     })),
 
@@ -112,9 +112,9 @@ export const useSessionStore = create<SessionState & SessionActions>((set) => ({
 
   setMode: (mode) => set({ mode }),
   toggleMode: () =>
-    set((state) => ({ mode: state.mode === 'plan' ? 'build' : 'plan' })),
+    set((state) => ({ mode: state.mode === "plan" ? "build" : "plan" })),
 
-  startDraftSession: (title = 'New Session') =>
+  startDraftSession: (title = "New Session") =>
     set({
       currentSessionId: null,
       currentSession: null,
@@ -129,11 +129,10 @@ export const useSessionStore = create<SessionState & SessionActions>((set) => ({
       currentSessionId: session.session_id,
       currentSession: session,
       isDraftSession: false,
-      draftTitle: '',
+      draftTitle: "",
     }),
 
-  cancelDraftSession: () =>
-    set({ isDraftSession: false, draftTitle: '' }),
+  cancelDraftSession: () => set({ isDraftSession: false, draftTitle: "" }),
 
   setCurrentRequestId: (id) => set({ currentRequestId: id }),
 
@@ -143,7 +142,7 @@ export const useSessionStore = create<SessionState & SessionActions>((set) => ({
       currentSession: null,
       messages: [],
       isDraftSession: false,
-      draftTitle: '',
+      draftTitle: "",
       error: null,
       currentRequestId: null,
     }),

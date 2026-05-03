@@ -1,10 +1,10 @@
-import type { Round } from '../../types/round';
-import { MarkdownRenderer } from '../renderers/MarkdownRenderer';
-import { ThinkingBlock } from '../renderers/ThinkingBlock';
-import { ToolCallRow } from '../renderers/ToolCallRow';
-import { CopyButton } from '../ui/CopyButton';
-import { UndoButton } from './UndoButton';
-import { formatTime, getDuration } from '../../utils/format';
+import type { Round } from "../../types/round";
+import { MarkdownRenderer } from "../renderers/MarkdownRenderer";
+import { ThinkingBlock } from "../renderers/ThinkingBlock";
+import { ToolCallRow } from "../renderers/ToolCallRow";
+import { CopyButton } from "../ui/CopyButton";
+import { UndoButton } from "./UndoButton";
+import { formatTime, getDuration } from "../../utils/format";
 
 interface Props {
   round: Round;
@@ -28,9 +28,9 @@ export function MessageRound({ round, onUndoRequest, canUndo = true }: Props) {
 
   function getAssistantContent(): string {
     return round.segments
-      .filter((s) => s.type === 'reasoning' || s.type === 'text')
-      .map((s) => s.content || '')
-      .join('\n\n');
+      .filter((s) => s.type === "reasoning" || s.type === "text")
+      .map((s) => s.content || "")
+      .join("\n\n");
   }
 
   const footerParts = getFooterParts();
@@ -43,7 +43,8 @@ export function MessageRound({ round, onUndoRequest, canUndo = true }: Props) {
   };
 
   // Only show undo button for completed rounds with assistant response
-  const showUndoButton = canUndo && round.status === 'complete' && onUndoRequest;
+  const showUndoButton =
+    canUndo && round.status === "complete" && onUndoRequest;
 
   return (
     <div className="border-b border-neutral-100 dark:border-neutral-900">
@@ -55,9 +56,11 @@ export function MessageRound({ round, onUndoRequest, canUndo = true }: Props) {
           </div>
         </div>
 
-          <div className="flex max-w-[85%] flex-col items-start">
+        <div className="flex max-w-[85%] flex-col items-start">
           <div className="mb-1 flex items-center gap-2">
-            <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">You</span>
+            <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
+              You
+            </span>
             <span className="text-xs text-neutral-400 dark:text-neutral-600">
               {formatTime(round.userMessage.created_at)}
             </span>
@@ -81,21 +84,25 @@ export function MessageRound({ round, onUndoRequest, canUndo = true }: Props) {
 
           <div className="flex max-w-[85%] flex-1 flex-col items-start">
             <div className="mb-1 flex items-center gap-2">
-              <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Assistant</span>
+              <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
+                Assistant
+              </span>
               {round.completedAt && (
                 <span className="text-xs text-neutral-400 dark:text-neutral-600">
                   {formatTime(round.completedAt)}
                 </span>
               )}
-              {!round.completedAt && round.status === 'streaming' && (
+              {!round.completedAt && round.status === "streaming" && (
                 <span className="text-xs text-neutral-400 dark:text-neutral-600">
                   {formatTime(round.userMessage.created_at)}
                 </span>
               )}
-              {round.status === 'streaming' && (
-                <span className="text-xs text-blue-500 dark:text-blue-400">streaming...</span>
+              {round.status === "streaming" && (
+                <span className="text-xs text-blue-500 dark:text-blue-400">
+                  streaming...
+                </span>
               )}
-              {round.status === 'complete' && assistantContent && (
+              {round.status === "complete" && assistantContent && (
                 <CopyButton content={assistantContent} />
               )}
             </div>
@@ -104,32 +111,41 @@ export function MessageRound({ round, onUndoRequest, canUndo = true }: Props) {
               {/* Ordered segments (reasoning inlined at correct position) */}
               {round.segments.map((segment, idx) => (
                 <div key={idx} className="mb-2 last:mb-0">
-                  {segment.type === 'reasoning' && segment.content && (
+                  {segment.type === "reasoning" && segment.content && (
                     <ThinkingBlock content={segment.content} />
                   )}
-                  {segment.type === 'text' && segment.content && (
+                  {segment.type === "text" && segment.content && (
                     <MarkdownRenderer content={segment.content} />
                   )}
-                  {segment.type === 'tool_call' && round.toolCallMap[segment.toolCallId] && (
-                    <ToolCallRow entry={round.toolCallMap[segment.toolCallId]} />
-                  )}
+                  {segment.type === "tool_call" &&
+                    round.toolCallMap[segment.toolCallId] && (
+                      <ToolCallRow
+                        entry={round.toolCallMap[segment.toolCallId]}
+                      />
+                    )}
                 </div>
               ))}
 
               {/* Streaming indicator */}
-              {round.status === 'streaming' && round.segments.length === 0 && (
+              {round.status === "streaming" && round.segments.length === 0 && (
                 <div className="flex items-center gap-1 text-neutral-400">
                   <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400" />
-                  <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400" style={{ animationDelay: '0.2s' }} />
-                  <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400" style={{ animationDelay: '0.4s' }} />
+                  <div
+                    className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400"
+                    style={{ animationDelay: "0.2s" }}
+                  />
+                  <div
+                    className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400"
+                    style={{ animationDelay: "0.4s" }}
+                  />
                 </div>
               )}
             </div>
 
             {/* Footer */}
-            {round.status === 'complete' && footerParts.length > 0 && (
+            {round.status === "complete" && footerParts.length > 0 && (
               <div className="mt-0.5 text-xs text-neutral-400 dark:text-neutral-600">
-                {footerParts.join(' · ')}
+                {footerParts.join(" · ")}
               </div>
             )}
           </div>

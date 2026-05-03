@@ -1,4 +1,4 @@
-import { AlertTriangle, X } from 'lucide-react';
+import { AlertTriangle, X } from "lucide-react";
 
 interface ConfirmDialogProps {
   isOpen: boolean;
@@ -15,8 +15,8 @@ export function ConfirmDialog({
   isOpen,
   title,
   message,
-  confirmText = 'Confirm',
-  cancelText = 'Cancel',
+  confirmText = "Confirm",
+  cancelText = "Cancel",
   onConfirm,
   onCancel,
   isLoading = false,
@@ -30,7 +30,9 @@ export function ConfirmDialog({
         <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
           <div className="flex items-center gap-2 text-amber-600 dark:text-amber-500">
             <AlertTriangle className="h-5 w-5" />
-            <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">{title}</h3>
+            <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">
+              {title}
+            </h3>
           </div>
           <button
             onClick={onCancel}
@@ -43,7 +45,9 @@ export function ConfirmDialog({
 
         {/* Content */}
         <div className="px-4 py-4">
-          <p className="text-sm text-neutral-600 dark:text-neutral-400">{message}</p>
+          <p className="text-sm text-neutral-600 dark:text-neutral-400">
+            {message}
+          </p>
         </div>
 
         {/* Footer */}

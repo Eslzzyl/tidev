@@ -1,15 +1,22 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
-import { ChevronDown, MessageSquare, Clock, MoreHorizontal, X, Settings } from 'lucide-react';
-import { useSessionStore } from '../stores/useSessionStore';
-import { useUIStore } from '../stores/useUIStore';
-import { api } from '../api/client';
-import { formatSessionDate } from '../utils/format';
-import type { Session } from '../types/api';
+import { useState, useCallback, useEffect, useRef } from "react";
+import {
+  ChevronDown,
+  MessageSquare,
+  Clock,
+  MoreHorizontal,
+  X,
+  Settings,
+} from "lucide-react";
+import { useSessionStore } from "../stores/useSessionStore";
+import { useUIStore } from "../stores/useUIStore";
+import { api } from "../api/client";
+import { formatSessionDate } from "../utils/format";
+import type { Session } from "../types/api";
 
 const MAX_RECENT_SESSIONS = 5;
 
 export function WelcomePage() {
-  const [inputValue, setInputValue] = useState('');
+  const [inputValue, setInputValue] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAllSessions, setShowAllSessions] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -31,8 +38,8 @@ export function WelcomePage() {
         setShowAllSessions(false);
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   // Refresh sessions and workspace on mount
@@ -43,11 +50,12 @@ export function WelcomePage() {
     ]).catch(() => {});
   }, [setSessions]);
 
-  const [workspaceRoot, setWorkspaceRoot] = useState<string>('');
+  const [workspaceRoot, setWorkspaceRoot] = useState<string>("");
   useEffect(() => {
-    api.getWorkspace()
+    api
+      .getWorkspace()
       .then((info) => setWorkspaceRoot(info.workspace_root))
-      .catch(() => setWorkspaceRoot(''));
+      .catch(() => setWorkspaceRoot(""));
   }, []);
 
   const handleSubmit = useCallback(
@@ -85,13 +93,23 @@ export function WelcomePage() {
         const { sessions: updatedSessions } = await api.listSessions();
         setSessions(updatedSessions);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to create session');
+        setError(
+          err instanceof Error ? err.message : "Failed to create session",
+        );
       } finally {
         setIsSubmitting(false);
-        setInputValue('');
+        setInputValue("");
       }
     },
-    [inputValue, isSubmitting, workspaceRoot, setCurrentSession, setMessages, setSessions, setError]
+    [
+      inputValue,
+      isSubmitting,
+      workspaceRoot,
+      setCurrentSession,
+      setMessages,
+      setSessions,
+      setError,
+    ],
   );
 
   const handleSelectSession = useCallback(
@@ -106,21 +124,24 @@ export function WelcomePage() {
         setMessages(messages);
         useSessionStore.getState().setTodos(todos ?? []);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load session');
+        setError(err instanceof Error ? err.message : "Failed to load session");
       } finally {
         setLoading(false);
       }
     },
-    [setLoading, setCurrentSession, setMessages, setError]
+    [setLoading, setCurrentSession, setMessages, setError],
   );
 
   const handleNewSessionClick = useCallback(() => {
-    startDraftSession('New Session');
+    startDraftSession("New Session");
   }, [startDraftSession]);
 
   // Sort sessions by updated_at desc and take top 5
   const recentSessions = [...sessions]
-    .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+    .sort(
+      (a, b) =>
+        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+    )
     .slice(0, MAX_RECENT_SESSIONS);
 
   const hasMoreSessions = sessions.length > MAX_RECENT_SESSIONS;
@@ -164,7 +185,7 @@ export function WelcomePage() {
               disabled={!inputValue.trim() || isSubmitting}
               className="absolute right-3 top-1/2 -translate-y-1/2 rounded-xl bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
             >
-              {isSubmitting ? '...' : 'Go'}
+              {isSubmitting ? "..." : "Go"}
             </button>
           </div>
           <p className="mt-2 text-center text-xs text-neutral-400 dark:text-neutral-500">
@@ -190,7 +211,7 @@ export function WelcomePage() {
                   <MoreHorizontal className="h-3.5 w-3.5" />
                   More
                   <ChevronDown
-                    className={`h-3 w-3 transition-transform ${showAllSessions ? 'rotate-180' : ''}`}
+                    className={`h-3 w-3 transition-transform ${showAllSessions ? "rotate-180" : ""}`}
                   />
                 </button>
 
@@ -212,7 +233,8 @@ export function WelcomePage() {
                       {[...sessions]
                         .sort(
                           (a, b) =>
-                            new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+                            new Date(b.updated_at).getTime() -
+                            new Date(a.updated_at).getTime(),
                         )
                         .map((session) => (
                           <button
@@ -229,7 +251,8 @@ export function WelcomePage() {
                                 {session.title}
                               </p>
                               <p className="text-xs text-neutral-400">
-                                {session.model_display_name} • {formatSessionDate(session.updated_at)}
+                                {session.model_display_name} •{" "}
+                                {formatSessionDate(session.updated_at)}
                               </p>
                             </div>
                           </button>
@@ -254,7 +277,8 @@ export function WelcomePage() {
                     {session.title}
                   </p>
                   <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                    {session.model_display_name} • {formatSessionDate(session.updated_at)}
+                    {session.model_display_name} •{" "}
+                    {formatSessionDate(session.updated_at)}
                   </p>
                 </div>
               </button>

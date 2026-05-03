@@ -1,4 +1,4 @@
-import { Undo2 } from 'lucide-react';
+import { Undo2 } from "lucide-react";
 
 interface UndoButtonProps {
   onClick: () => void;

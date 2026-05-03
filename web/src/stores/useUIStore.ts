@@ -1,6 +1,6 @@
-import { create } from 'zustand';
+import { create } from "zustand";
 
-export type Theme = 'light' | 'dark' | 'system';
+export type Theme = "light" | "dark" | "system";
 
 export interface UIState {
   sidebarOpen: boolean;
@@ -12,7 +12,7 @@ export interface UIState {
   inputValue: string;
   isLoading: boolean;
   isStreaming: boolean;
-  connectionStatus: 'connected' | 'disconnected' | 'connecting';
+  connectionStatus: "connected" | "disconnected" | "connecting";
   leftSidebarWidth: number;
   rightSidebarWidth: number;
 }
@@ -36,7 +36,7 @@ export interface UIActions {
   setInputValue: (value: string) => void;
   setLoading: (isLoading: boolean) => void;
   setStreaming: (isStreaming: boolean) => void;
-  setConnectionStatus: (status: UIState['connectionStatus']) => void;
+  setConnectionStatus: (status: UIState["connectionStatus"]) => void;
 }
 
 const DEFAULT_LEFT_SIDEBAR_WIDTH = 256;
@@ -46,16 +46,16 @@ const MAX_SIDEBAR_WIDTH = 500;
 
 function loadLocalStorage() {
   const savedLeftWidth = parseInt(
-    localStorage.getItem('leftSidebarWidth') || '',
-    10
+    localStorage.getItem("leftSidebarWidth") || "",
+    10,
   );
   const savedRightWidth = parseInt(
-    localStorage.getItem('rightSidebarWidth') || '',
-    10
+    localStorage.getItem("rightSidebarWidth") || "",
+    10,
   );
-  const savedTheme = localStorage.getItem('theme') as Theme | null;
+  const savedTheme = localStorage.getItem("theme") as Theme | null;
   const savedRightSidebarOpen =
-    localStorage.getItem('rightSidebarOpen') !== 'false';
+    localStorage.getItem("rightSidebarOpen") !== "false";
 
   return {
     leftSidebarWidth: isNaN(savedLeftWidth)
@@ -64,7 +64,7 @@ function loadLocalStorage() {
     rightSidebarWidth: isNaN(savedRightWidth)
       ? DEFAULT_RIGHT_SIDEBAR_WIDTH
       : savedRightWidth,
-    theme: (savedTheme || 'system') as Theme,
+    theme: (savedTheme || "system") as Theme,
     rightSidebarOpen: savedRightSidebarOpen,
   };
 }
@@ -78,10 +78,10 @@ const initialState: UIState = {
   mobileMenuOpen: false,
   mobileRightSidebarOpen: false,
   theme: persisted.theme,
-  inputValue: '',
+  inputValue: "",
   isLoading: false,
   isStreaming: false,
-  connectionStatus: 'disconnected',
+  connectionStatus: "disconnected",
   leftSidebarWidth: persisted.leftSidebarWidth,
   rightSidebarWidth: persisted.rightSidebarWidth,
 };
@@ -100,17 +100,17 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   toggleRightSidebar: () =>
     set((s) => {
       const newOpen = !s.rightSidebarOpen;
-      localStorage.setItem('rightSidebarOpen', String(newOpen));
+      localStorage.setItem("rightSidebarOpen", String(newOpen));
       return { rightSidebarOpen: newOpen };
     }),
 
   openRightSidebar: () => {
-    localStorage.setItem('rightSidebarOpen', 'true');
+    localStorage.setItem("rightSidebarOpen", "true");
     set({ rightSidebarOpen: true });
   },
 
   closeRightSidebar: () => {
-    localStorage.setItem('rightSidebarOpen', 'false');
+    localStorage.setItem("rightSidebarOpen", "false");
     set({ rightSidebarOpen: false });
   },
 
@@ -125,19 +125,19 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   closeMobileRightSidebar: () => set({ mobileRightSidebarOpen: false }),
 
   setTheme: (theme) => {
-    localStorage.setItem('theme', theme);
+    localStorage.setItem("theme", theme);
     set({ theme });
   },
 
   setLeftSidebarWidth: (width) => {
     const clamped = clampSidebarWidth(width);
-    localStorage.setItem('leftSidebarWidth', String(clamped));
+    localStorage.setItem("leftSidebarWidth", String(clamped));
     set({ leftSidebarWidth: clamped });
   },
 
   setRightSidebarWidth: (width) => {
     const clamped = clampSidebarWidth(width);
-    localStorage.setItem('rightSidebarWidth', String(clamped));
+    localStorage.setItem("rightSidebarWidth", String(clamped));
     set({ rightSidebarWidth: clamped });
   },
 
@@ -150,14 +150,14 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
 /**
  * Derive the effective theme (resolving 'system' to light/dark).
  */
-export function getEffectiveTheme(theme: Theme): 'light' | 'dark' {
-  if (theme === 'system') {
-    if (typeof window !== 'undefined') {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches
-        ? 'dark'
-        : 'light';
+export function getEffectiveTheme(theme: Theme): "light" | "dark" {
+  if (theme === "system") {
+    if (typeof window !== "undefined") {
+      return window.matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light";
     }
-    return 'light';
+    return "light";
   }
   return theme;
 }

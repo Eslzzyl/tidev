@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Check, Clipboard } from 'lucide-react';
+import { useState } from "react";
+import { Check, Clipboard } from "lucide-react";
 
 interface CopyButtonProps {
   content: string;
@@ -14,7 +14,7 @@ export function CopyButton({ content }: CopyButtonProps) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
-      console.error('Failed to copy:', err);
+      console.error("Failed to copy:", err);
     }
   }
 
@@ -24,7 +24,11 @@ export function CopyButton({ content }: CopyButtonProps) {
       className="ml-2 rounded p-1 text-neutral-400 transition-colors hover:bg-neutral-200 hover:text-neutral-600 dark:text-neutral-500 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
       title="Copy to clipboard"
     >
-      {copied ? <Check className="h-4 w-4" /> : <Clipboard className="h-4 w-4" />}
+      {copied ? (
+        <Check className="h-4 w-4" />
+      ) : (
+        <Clipboard className="h-4 w-4" />
+      )}
     </button>
   );
 }

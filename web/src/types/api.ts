@@ -19,15 +19,15 @@ export interface SessionDetail extends Session {
 export interface FileDiff {
   path: string;
   file_path?: string;
-  status: 'added' | 'modified' | 'deleted';
+  status: "added" | "modified" | "deleted";
   additions: number;
   deletions: number;
 }
 
 export interface TodoItem {
   content: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
-  priority: 'low' | 'medium' | 'high';
+  status: "pending" | "in_progress" | "completed" | "cancelled";
+  priority: "low" | "medium" | "high";
 }
 
 export interface TodosResponse {
@@ -50,7 +50,7 @@ export interface ToolCall {
 
 export interface Message {
   id: string;
-  role: 'user' | 'assistant' | 'system' | 'tool' | 'error' | 'shell';
+  role: "user" | "assistant" | "system" | "tool" | "error" | "shell";
   content: string;
   created_at: string;
   completed_at?: string;
@@ -115,6 +115,6 @@ export interface AbortRequest {
 export interface FileSuggestion {
   path: string;
   display: string;
-  kind: 'file' | 'directory' | 'image';
+  kind: "file" | "directory" | "image";
   matched_indices: number[];
 }
