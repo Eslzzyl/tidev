@@ -1,0 +1,117 @@
+use axum::{Json, extract::State};
+use serde::{Deserialize, Serialize};
+
+use crate::web::{state::AppState, error::AppError};
+
+/// Set default model request
+#[derive(Deserialize)]
+pub struct SetDefaultModelRequest {
+    pub provider_id: String,
+    pub model_id: String,
+}
+
+/// Set default model response
+#[derive(Serialize)]
+pub struct SetDefaultModelResponse {
+    pub success: bool,
+    pub provider_id: String,
+    pub model_id: String,
+    pub provider_display_name: String,
+    pub model_display_name: String,
+}
+
+/// Set the default model for new sessions
+pub async fn set_default_model(
+    State(state): State<AppState>,
+    Json(body): Json<SetDefaultModelRequest>,
+) -> Result<Json<SetDefaultModelResponse>, AppError> {
+    crate::log_info!(
+        "Setting default model to {}/{}",
+        body.provider_id,
+        body.model_id
+    );
+
+    // Verify the provider and model exist
+    let config = state.config.read().await;
+    let provider = config
+        .provider(&body.provider_id)
+        .ok_or_else(|| AppError::BadRequest(format!("Provider '{}' not found", body.provider_id)))?;
+    let model = provider
+        .models
+        .get(&body.model_id)
+        .ok_or_else(|| {
+            AppError::BadRequest(format!(
+                "Model '{}' not found for provider '{}'",
+                body.model_id, body.provider_id
+            ))
+        })?;
+
+    let provider_display_name = provider.display_name.clone();
+    let model_display_name = model.display_name.clone();
+    drop(config);
+
+    // Update config
+    let mut config = state.config.write().await;
+    config.default_provider = body.provider_id.clone();
+    config.default_model = body.model_id.clone();
+
+    // Save config to file
+    if let Err(e) = config.save(&state.config_paths) {
+        crate::log_error!("Failed to save config: {}", e);
+        return Err(AppError::Internal(format!("Failed to save config: {}", e)));
+    }
+    drop(config);
+
+    crate::log_info!(
+        "Default model set to {} ({}) / {} ({})",
+        body.provider_id,
+        provider_display_name,
+        body.model_id,
+        model_display_name
+    );
+
+    Ok(Json(SetDefaultModelResponse {
+        success: true,
+        provider_id: body.provider_id,
+        model_id: body.model_id,
+        provider_display_name,
+        model_display_name,
+    }))
+}
+
+/// Get current default model
+#[derive(Serialize)]
+pub struct GetDefaultModelResponse {
+    pub provider_id: String,
+    pub model_id: String,
+    pub provider_display_name: String,
+    pub model_display_name: String,
+}
+
+pub async fn get_default_model(
+    State(state): State<AppState>,
+) -> Result<Json<GetDefaultModelResponse>, AppError> {
+    let config = state.config.read().await;
+
+    let provider_id = config.default_provider.clone();
+    let model_id = config.default_model.clone();
+
+    // Get display names
+    let (provider_display_name, model_display_name) = if let Some(provider) = config.provider(&provider_id) {
+        let model_name = provider
+            .models
+            .get(&model_id)
+            .map(|m| m.display_name.clone())
+            .unwrap_or_else(|| model_id.clone());
+        (provider.display_name.clone(), model_name)
+    } else {
+        (provider_id.clone(), model_id.clone())
+    };
+
+    Ok(Json(GetDefaultModelResponse {
+        provider_id,
+        model_id,
+        provider_display_name,
+        model_display_name,
+    }))
+}

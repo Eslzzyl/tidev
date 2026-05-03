@@ -400,6 +400,15 @@ pub async fn send_message(
             )
         };
 
+    // Get API key from auth store
+    let auth = state.auth.read().await;
+    let api_key = auth
+        .providers
+        .get(&provider_id)
+        .and_then(|entry| entry.api_key.clone())
+        .filter(|value| !value.trim().is_empty());
+    drop(auth);
+
     let model = crate::config::ActiveModel {
         provider_id: provider_id.clone(),
         provider_display_name: provider.display_name.clone(),
@@ -410,7 +419,7 @@ pub async fn send_message(
             .unwrap_or_else(|| model_id.clone()),
         display_name: model_config.display_name.clone(),
         base_url: provider.base_url.clone(),
-        api_key: None, // Will be loaded from auth store in LLM client
+        api_key,
         api_type: match provider.api_type.as_deref() {
             Some("anthropic") => crate::config::ApiType::Anthropic,
             Some("openai_responses") => crate::config::ApiType::OpenAiResponses,

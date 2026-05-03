@@ -119,18 +119,23 @@ pub async fn create_session(
 
     // Get default provider and model from config
     let config = state.config.read().await;
+    let provider_id = config.default_provider.clone();
+    let model_id = config.default_model.clone();
 
-    // Find first enabled provider with an enabled model
-    let (provider_id, provider, model_id, model) = config
-        .providers
-        .iter()
-        .find_map(|(pid, p)| {
-            p.models
-                .iter()
-                .next()
-                .map(|(mid, m)| (pid.clone(), p.clone(), mid.clone(), m.clone()))
-        })
-        .ok_or_else(|| AppError::Internal("No provider/model found".to_string()))?;
+    // Get display names
+    let (provider_display_name, model_display_name) =
+        if let Some(provider) = config.provider(&provider_id) {
+            let model_name = provider
+                .models
+                .get(&model_id)
+                .map(|m| m.display_name.clone())
+                .unwrap_or_else(|| model_id.clone());
+            (provider.display_name.clone(), model_name)
+        } else {
+            (provider_id.clone(), model_id.clone())
+        };
+
+    drop(config);
 
     let session_id = Uuid::new_v4();
     let title = body.title.unwrap_or_else(|| "New Session".to_string());
@@ -140,9 +145,9 @@ pub async fn create_session(
         session_id,
         Path::new(&body.workspace_root),
         &provider_id,
-        &provider.display_name,
+        &provider_display_name,
         &model_id,
-        &model.display_name,
+        &model_display_name,
         &title,
     )?;
     drop(store);

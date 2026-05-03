@@ -17,6 +17,9 @@ import type {
   ProviderInfo,
   ConnectProviderRequest,
   CreateProviderRequest,
+  SetDefaultModelRequest,
+  SetDefaultModelResponse,
+  GetDefaultModelResponse,
 } from "../types/api";
 
 const API_BASE = "/api";
@@ -156,6 +159,14 @@ export const api = {
 
   // Init prompt
   getInitPrompt: () => fetchJson<{ prompt: string }>(`${API_BASE}/init`),
+
+  // Config
+  getDefaultModel: () => fetchJson<GetDefaultModelResponse>(`${API_BASE}/config/default-model`),
+  setDefaultModel: (data: SetDefaultModelRequest) =>
+    fetchJson<SetDefaultModelResponse>(`${API_BASE}/config/default-model`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 
   // Providers
   listProviders: () =>

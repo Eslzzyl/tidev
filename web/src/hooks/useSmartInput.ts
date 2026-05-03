@@ -207,19 +207,41 @@ export function useSmartInput(
     }
   }, []);
 
-  // Fetch models on mount
+  // Fetch models and default model on mount
   useEffect(() => {
-    api
-      .listModels()
-      .then(({ models }) => {
+    Promise.all([api.listModels(), api.getDefaultModel().catch(() => null)])
+      .then(([{ models }, defaultModel]) => {
         setModels(models);
-        // Auto-select first model if none selected
+
+        // Select model: use initialModelId, or config default, or first available
         if (!selectedModelId && models.length > 0) {
-          const firstModel = models[0];
-          setSelectedModelId(firstModel.id);
-          setSelectedProviderId(firstModel.provider_id);
-          updateThinkingLevels(firstModel.id);
-          onModelChange?.(firstModel);
+          let modelToSelect: ModelInfo | undefined;
+
+          if (initialModelId) {
+            // Use explicitly provided initial model
+            modelToSelect = models.find((m) => m.id === initialModelId);
+          }
+
+          if (!modelToSelect && defaultModel) {
+            // Use config default model
+            modelToSelect = models.find(
+              (m) =>
+                m.id === defaultModel.model_id &&
+                m.provider_id === defaultModel.provider_id,
+            );
+          }
+
+          if (!modelToSelect) {
+            // Fall back to first available model
+            modelToSelect = models[0];
+          }
+
+          if (modelToSelect) {
+            setSelectedModelId(modelToSelect.id);
+            setSelectedProviderId(modelToSelect.provider_id);
+            updateThinkingLevels(modelToSelect.id);
+            onModelChange?.(modelToSelect);
+          }
         }
       })
       .catch(console.error);
@@ -265,6 +287,15 @@ export function useSmartInput(
       setModelDropdownOpen(false);
       setModelSearchQuery("");
       updateThinkingLevels(model.id);
+
+      // Save as default model in config
+      api.setDefaultModel({
+        provider_id: model.provider_id,
+        model_id: model.id,
+      }).catch(() => {
+        // Silently fail - non-critical operation
+      });
+
       onModelChange?.(model);
     },
     [onModelChange, updateThinkingLevels],

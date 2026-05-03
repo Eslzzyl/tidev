@@ -89,6 +89,26 @@ export interface CreateSessionRequest {
   title?: string;
 }
 
+export interface SetDefaultModelRequest {
+  provider_id: string;
+  model_id: string;
+}
+
+export interface SetDefaultModelResponse {
+  success: boolean;
+  provider_id: string;
+  model_id: string;
+  provider_display_name: string;
+  model_display_name: string;
+}
+
+export interface GetDefaultModelResponse {
+  provider_id: string;
+  model_id: string;
+  provider_display_name: string;
+  model_display_name: string;
+}
+
 export interface WorkspaceInfo {
   workspace_root: string;
 }

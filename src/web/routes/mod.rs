@@ -1,3 +1,4 @@
+pub mod config;
 pub mod events;
 pub mod files;
 pub mod messages;
@@ -50,6 +51,8 @@ pub fn api_routes() -> Router<AppState> {
         .route("/init", get(sessions::get_init_prompt))
         // Models
         .route("/models", get(models::list_models))
+        // Config
+        .route("/config/default-model", get(config::get_default_model).post(config::set_default_model))
         // Providers
         .route("/providers", get(providers::list_providers).post(providers::create_provider))
         .route(

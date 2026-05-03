@@ -30,7 +30,11 @@ export function WelcomePage() {
   const setMessages = useSessionStore((s) => s.setMessages);
   const setError = useSessionStore((s) => s.setError);
   const setLoading = useSessionStore((s) => s.setLoading);
+  const currentSessionId = useSessionStore((s) => s.currentSessionId);
+  const currentRequestId = useSessionStore((s) => s.currentRequestId);
   const toggleSettings = useUIStore((s) => s.toggleSettings);
+  const isStreaming = useUIStore((s) => s.isStreaming);
+  const setStreaming = useUIStore((s) => s.setStreaming);
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -86,6 +90,7 @@ export function WelcomePage() {
         }
 
         // Create session with the input as title
+        // Model is determined from config default-model
         const { session_id } = await api.createSession({
           workspace_root: root,
           title: payload.inputValue,
@@ -101,17 +106,51 @@ export function WelcomePage() {
         setMessages(messages);
         useSessionStore.getState().setTodos(todos ?? []);
 
+        // Send the user message
+        // Model is determined from config default-model
+        const requestBody: {
+          content: string;
+          mode?: string;
+          thinking_level?: string;
+        } = { content: payload.inputValue };
+
+        if (payload.mode) requestBody.mode = payload.mode;
+        if (payload.thinkingLevel) requestBody.thinking_level = payload.thinkingLevel;
+
+        // Start streaming state before sending
+        setStreaming(true);
+
+        const { request_id } = await api.sendMessage(session_id, requestBody);
+        useSessionStore.getState().setCurrentRequestId(request_id);
+
+        // Refresh messages to get the user message that was just saved
+        const { messages: updatedMessages, todos: updatedTodos } = await api.listMessages(session_id);
+        setMessages(updatedMessages);
+        useSessionStore.getState().setTodos(updatedTodos ?? []);
+
         // Refresh sessions list
         const { sessions: updatedSessions } = await api.listSessions();
         setSessions(updatedSessions);
       } catch (err) {
+        setStreaming(false);
         setError(
           err instanceof Error ? err.message : "Failed to create session",
         );
       }
     },
-    [workspaceRoot, setCurrentSession, setMessages, setSessions, setError],
+    [workspaceRoot, setCurrentSession, setMessages, setSessions, setError, setStreaming],
   );
+
+  const handleStop = useCallback(async () => {
+    if (currentSessionId && currentRequestId) {
+      try {
+        await api.abortRequest(currentSessionId, { request_id: currentRequestId });
+      } catch {
+        // Ignore abort errors
+      }
+    }
+    setStreaming(false);
+  }, [currentSessionId, currentRequestId, setStreaming]);
 
   const handleSelectSession = useCallback(
     async (session: Session) => {
@@ -174,6 +213,8 @@ export function WelcomePage() {
           autoFocus
           className="w-full"
           workspacePath={workspaceRoot}
+          isStreaming={isStreaming}
+          onStop={handleStop}
         />
       </div>
 
