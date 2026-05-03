@@ -5,9 +5,10 @@ use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    config::{AppConfig, AuthStore},
+    config::{AppConfig, AuthStore, ConfigPaths},
     llm::LlmClient,
     shared::file_search::FileSearchIndex,
+    snapshot::SnapshotService,
     storage::SessionStore,
 };
 
@@ -34,6 +35,8 @@ pub struct AppState {
     pub cancel_token: CancellationToken,
     /// File search index for @-mention completion
     pub file_search_index: Arc<FileSearchIndex>,
+    /// Snapshot service for undo/revert operations
+    pub snapshot: Arc<SnapshotService>,
 }
 
 impl AppState {
@@ -45,8 +48,13 @@ impl AppState {
         config: AppConfig,
         auth: AuthStore,
         workspace_root: PathBuf,
+        paths: &ConfigPaths,
     ) -> anyhow::Result<Self> {
         crate::log_debug!("Creating new AppState");
+        
+        // Create snapshot service for undo operations
+        let snapshot = SnapshotService::new(&workspace_root, paths)?;
+        
         Ok(Self {
             store: Arc::new(Mutex::new(store)),
             event_bus,
@@ -57,6 +65,7 @@ impl AppState {
             workspace_root,
             cancel_token: CancellationToken::new(),
             file_search_index: Arc::new(FileSearchIndex::new()),
+            snapshot: Arc::new(snapshot),
         })
     }
 

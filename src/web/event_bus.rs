@@ -71,6 +71,10 @@ pub enum AppEvent {
         session_id: Uuid,
         request_id: u64,
     },
+    /// Messages were updated (e.g., after revert)
+    MessagesUpdated {
+        session_id: Uuid,
+    },
     /// Error occurred
     Error {
         session_id: Uuid,

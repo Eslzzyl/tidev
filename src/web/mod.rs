@@ -65,7 +65,7 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     crate::log_info!("Auth store loaded");
 
     // Create app state
-    let state = AppState::new(store, event_bus, llm_client, config, auth, workspace_root)?;
+    let state = AppState::new(store, event_bus, llm_client, config, auth, workspace_root, &paths)?;
 
     // Determine static file serving mode
     let static_mode = StaticMode::detect();

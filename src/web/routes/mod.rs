@@ -36,6 +36,7 @@ pub fn api_routes() -> Router<AppState> {
             get(messages::list_messages).post(messages::send_message),
         )
         .route("/sessions/{id}/abort", post(messages::abort_request))
+        .route("/sessions/{id}/revert", post(messages::revert_to_message))
         // Models
         .route("/models", get(models::list_models))
         // Tools

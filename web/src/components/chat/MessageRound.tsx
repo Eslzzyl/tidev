@@ -3,13 +3,16 @@ import { MarkdownRenderer } from '../renderers/MarkdownRenderer';
 import { ThinkingBlock } from '../renderers/ThinkingBlock';
 import { ToolCallRow } from '../renderers/ToolCallRow';
 import { CopyButton } from '../ui/CopyButton';
+import { UndoButton } from './UndoButton';
 import { formatTime, getDuration } from '../../utils/format';
 
 interface Props {
   round: Round;
+  onUndoRequest?: (messageId: string) => void;
+  canUndo?: boolean;
 }
 
-export function MessageRound({ round }: Props) {
+export function MessageRound({ round, onUndoRequest, canUndo = true }: Props) {
   function getFooterParts(): string[] {
     const parts: string[] = [];
     if (round.modelName) parts.push(round.modelName);
@@ -33,6 +36,15 @@ export function MessageRound({ round }: Props) {
   const footerParts = getFooterParts();
   const assistantContent = getAssistantContent();
 
+  const handleUndo = () => {
+    if (onUndoRequest) {
+      onUndoRequest(round.userMessage.id);
+    }
+  };
+
+  // Only show undo button for completed rounds with assistant response
+  const showUndoButton = canUndo && round.status === 'complete' && onUndoRequest;
+
   return (
     <div className="border-b border-neutral-100 dark:border-neutral-900">
       {/* User message */}
@@ -43,15 +55,15 @@ export function MessageRound({ round }: Props) {
           </div>
         </div>
 
-        <div className="flex max-w-[85%] flex-col items-start">
+          <div className="flex max-w-[85%] flex-col items-start">
           <div className="mb-1 flex items-center gap-2">
             <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">You</span>
             <span className="text-xs text-neutral-400 dark:text-neutral-600">
               {formatTime(round.userMessage.created_at)}
             </span>
             <CopyButton content={round.userMessage.content} />
+            {showUndoButton && <UndoButton onClick={handleUndo} />}
           </div>
-
           <div className="w-full rounded-2xl rounded-tl-sm bg-neutral-100 px-4 py-2.5 text-sm leading-relaxed text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100">
             <p className="whitespace-pre-wrap">{round.userMessage.content}</p>
           </div>

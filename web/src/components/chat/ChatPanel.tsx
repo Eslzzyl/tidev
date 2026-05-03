@@ -3,9 +3,11 @@ import { Menu, Settings, Info } from 'lucide-react';
 import { useSessionStore } from '../../stores/useSessionStore';
 import { useUIStore } from '../../stores/useUIStore';
 import { useSSE } from '../../hooks/useSSE';
+import { api } from '../../api/client';
 import { buildRounds } from '../../utils/round';
 import { MessageRound } from './MessageRound';
 import { MessageInput } from './MessageInput';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 
 export function ChatPanel() {
   const messages = useSessionStore((s) => s.messages);
@@ -69,6 +71,54 @@ export function ChatPanel() {
       setShouldAutoScroll(true);
     }
   }, [messagesEndRef]);
+
+  // Undo state
+  const [undoDialogOpen, setUndoDialogOpen] = useState(false);
+  const [undoTargetMessageId, setUndoTargetMessageId] = useState<string | null>(null);
+  const [isUndoing, setIsUndoing] = useState(false);
+  const [undoError, setUndoError] = useState<string | null>(null);
+
+  const setMessages = useSessionStore((s) => s.setMessages);
+  const setTodos = useSessionStore((s) => s.setTodos);
+
+  const handleUndoRequest = useCallback((messageId: string) => {
+    setUndoTargetMessageId(messageId);
+    setUndoDialogOpen(true);
+    setUndoError(null);
+  }, []);
+
+  const handleConfirmUndo = useCallback(async () => {
+    if (!currentSessionId || !undoTargetMessageId) return;
+
+    setIsUndoing(true);
+    setUndoError(null);
+
+    try {
+      const result = await api.revertToMessage(currentSessionId, undoTargetMessageId);
+
+      // Refresh messages and todos after revert
+      const { messages: updatedMessages, todos: updatedTodos } = await api.listMessages(currentSessionId);
+      setMessages(updatedMessages);
+      setTodos(updatedTodos);
+
+      setUndoDialogOpen(false);
+      setUndoTargetMessageId(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to undo';
+      setUndoError(message);
+    } finally {
+      setIsUndoing(false);
+    }
+  }, [currentSessionId, undoTargetMessageId, setMessages, setTodos]);
+
+  const handleCancelUndo = useCallback(() => {
+    setUndoDialogOpen(false);
+    setUndoTargetMessageId(null);
+    setUndoError(null);
+  }, []);
+
+  // Determine if undo should be disabled (during streaming or when there's no session)
+  const canUndo = !!currentSessionId && !streamingRound;
 
   return (
     <div className="flex h-full flex-col bg-white dark:bg-neutral-950">
@@ -155,7 +205,12 @@ export function ChatPanel() {
         ) : (
           <div className="divide-y divide-neutral-100 dark:divide-neutral-900">
             {allRounds.map((round) => (
-              <MessageRound key={round.id} round={round} />
+              <MessageRound
+                key={round.id}
+                round={round}
+                onUndoRequest={handleUndoRequest}
+                canUndo={canUndo}
+              />
             ))}
           </div>
         )}
@@ -164,6 +219,25 @@ export function ChatPanel() {
 
       {/* Input Area */}
       <MessageInput />
+
+      {/* Undo Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={undoDialogOpen}
+        title="Undo to this message?"
+        message="This will restore files to the state before this message was sent. All messages after this point will be hidden but can be restored later."
+        confirmText="Undo"
+        cancelText="Cancel"
+        onConfirm={handleConfirmUndo}
+        onCancel={handleCancelUndo}
+        isLoading={isUndoing}
+      />
+
+      {/* Undo Error Toast (simple inline display) */}
+      {undoError && (
+        <div className="absolute bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-red-600 px-4 py-2 text-sm text-white shadow-lg">
+          {undoError}
+        </div>
+      )}
     </div>
   );
 }

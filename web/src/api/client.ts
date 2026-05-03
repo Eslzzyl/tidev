@@ -93,4 +93,14 @@ export const api = {
   // Todos
   getTodos: (sessionId: string) =>
     fetchJson<TodosResponse>(`${API_BASE}/sessions/${sessionId}/todos`),
+
+  // Revert / Undo
+  revertToMessage: (sessionId: string, messageId: string) =>
+    fetchJson<{ success: boolean; reverted_to_message_id: string; hidden_message_count: number }>(
+      `${API_BASE}/sessions/${sessionId}/revert`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ message_id: messageId }),
+      }
+    ),
 };

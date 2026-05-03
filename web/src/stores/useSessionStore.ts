@@ -46,6 +46,7 @@ export interface SessionActions {
   commitDraftSession: (session: SessionDetail) => void;
   cancelDraftSession: () => void;
   setCurrentRequestId: (id: number | null) => void;
+  goToWelcome: () => void;
   reset: () => void;
 }
 

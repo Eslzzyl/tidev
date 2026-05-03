@@ -563,3 +563,222 @@ pub async fn abort_request(
 
     Ok(StatusCode::OK)
 }
+
+/// Revert request
+#[derive(Deserialize)]
+pub struct RevertRequest {
+    pub message_id: Uuid,
+}
+
+/// Revert response
+#[derive(Serialize)]
+pub struct RevertResponse {
+    pub success: bool,
+    pub reverted_to_message_id: String,
+    pub hidden_message_count: usize,
+}
+
+/// A single step-level patch stored within a round.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct StepPatch {
+    hash: String,
+    files: Vec<String>,
+    step: usize,
+}
+
+/// Revert session state to a specific user message.
+/// This will restore files to the state before that message was sent,
+/// and hide all messages after it (they can be restored via redo).
+pub async fn revert_to_message(
+    State(state): State<AppState>,
+    AxumPath(session_id): AxumPath<Uuid>,
+    Json(body): Json<RevertRequest>,
+) -> WebResult<Json<RevertResponse>> {
+    crate::log_info!(
+        "Revert request for session {} to message {}",
+        session_id,
+        body.message_id
+    );
+
+    let store = state.store.lock().await;
+
+    // Load session to verify it exists
+    let _session = store
+        .load_session_record(session_id)?
+        .ok_or_else(|| AppError::NotFound(format!("Session {} not found", session_id)))?;
+
+    // Load all messages for the session
+    let messages = store.load_messages(session_id)?;
+
+    // Find the target message and verify it's a user message
+    let target_message = messages
+        .iter()
+        .find(|m| m.id == body.message_id)
+        .ok_or_else(|| AppError::NotFound(format!("Message {} not found", body.message_id)))?;
+
+    if !matches!(target_message.role, MessageRole::User) {
+        return Err(AppError::BadRequest(
+            "Can only revert to user messages".to_string(),
+        ));
+    }
+
+    // Collect patches from messages after the target
+    let patches = collect_patches_after_message(&messages, body.message_id)?;
+    crate::log_info!("Collected {} patches to revert", patches.len());
+
+    // Capture redo snapshot (current state) if not already saved
+    let redo_snapshot = match store.load_redo_snapshot(session_id)? {
+        Some(existing) => {
+            crate::log_info!("Using existing redo snapshot");
+            existing
+        }
+        None => {
+            crate::log_info!("Capturing new redo snapshot");
+            drop(store); // Release lock before async operation
+            match state.snapshot.track().await {
+                Ok(Some(hash)) => {
+                    crate::log_info!("Captured redo snapshot hash={}", hash);
+                    hash
+                }
+                Ok(None) => {
+                    crate::log_info!("No changes to snapshot");
+                    String::new()
+                }
+                Err(error) => {
+                    crate::log_warn!("Failed to capture redo snapshot: {}", error);
+                    String::new()
+                }
+            }
+        }
+    };
+
+    // Restore files using redo snapshot first (to undo previous reverts)
+    let store = state.store.lock().await;
+    if let Some(existing_snapshot) = store.load_redo_snapshot(session_id)? {
+        crate::log_info!("Restoring redo snapshot");
+        if let Err(error) = state.snapshot.restore(&existing_snapshot).await {
+            crate::log_warn!("Failed to restore redo snapshot: {}", error);
+        }
+    }
+
+    // Apply revert patches
+    if !patches.is_empty() {
+        crate::log_info!("Reverting {} patches", patches.len());
+        if let Err(error) = state.snapshot.revert(&patches).await {
+            crate::log_warn!("Revert partially failed: {}", error);
+        }
+    }
+
+    // Calculate how many messages will be hidden
+    let target_index = messages
+        .iter()
+        .position(|m| m.id == body.message_id)
+        .unwrap_or(0);
+    let hidden_count = messages.len().saturating_sub(target_index + 1);
+
+    // Update revert marker in database
+    store.set_revert_message_id(
+        session_id,
+        Some(body.message_id),
+        if redo_snapshot.is_empty() {
+            None
+        } else {
+            Some(&redo_snapshot)
+        },
+    )?;
+
+    drop(store);
+
+    // Publish event to notify clients
+    state.event_bus.publish(AppEvent::MessagesUpdated { session_id });
+
+    crate::log_info!(
+        "Revert completed: session {} reverted to message {}, {} messages hidden",
+        session_id,
+        body.message_id,
+        hidden_count
+    );
+
+    Ok(Json(RevertResponse {
+        success: true,
+        reverted_to_message_id: body.message_id.to_string(),
+        hidden_message_count: hidden_count,
+    }))
+}
+
+/// Collect patches from messages after the target message.
+fn collect_patches_after_message(
+    messages: &[Message],
+    message_id: Uuid,
+) -> anyhow::Result<Vec<crate::snapshot::Patch>> {
+    let mut patches = Vec::new();
+    let mut found = false;
+
+    // Iterate through messages in forward order
+    for message in messages {
+        if found {
+            patches = collect_patches_from_message(patches, message);
+            continue;
+        }
+
+        if message.id == message_id {
+            found = true;
+            // Also include the target message's own patches
+            patches = collect_patches_from_message(patches, message);
+        }
+    }
+
+    // Reverse so the OLDEST patches are processed first
+    patches.reverse();
+
+    Ok(patches)
+}
+
+/// Extract patches from a single message's patch_files.
+fn extract_patches_from_message(message: &Message) -> Vec<crate::snapshot::Patch> {
+    use crate::snapshot::Patch;
+
+    let Some(patch_files_str) = &message.patch_files else {
+        return Vec::new();
+    };
+
+    // Try nested format first
+    if let Ok(step_patches) = serde_json::from_str::<Vec<StepPatch>>(patch_files_str) {
+        return step_patches
+            .into_iter()
+            .map(|sp| Patch {
+                hash: sp.hash,
+                files: sp.files,
+            })
+            .collect();
+    }
+
+    // Fallback: old flat format
+    if let Ok(files) = serde_json::from_str::<Vec<String>>(patch_files_str)
+        && !files.is_empty()
+        && let Some(hash) = &message.snapshot_hash
+    {
+        return vec![Patch {
+            hash: hash.clone(),
+            files,
+        }];
+    }
+
+    Vec::new()
+}
+
+/// Collect patches from a message, inserting at the beginning.
+fn collect_patches_from_message(
+    mut patches: Vec<crate::snapshot::Patch>,
+    message: &Message,
+) -> Vec<crate::snapshot::Patch> {
+    let msg_patches = extract_patches_from_message(message);
+    if msg_patches.is_empty() {
+        return patches;
+    }
+
+    for msg_patch in msg_patches.into_iter().rev() {
+        patches.insert(0, msg_patch);
+    }
+    patches
+}

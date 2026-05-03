@@ -62,6 +62,7 @@ pub async fn events_stream(
                         AppEvent::PermissionRequest { session_id: sid, .. } => *sid == session_id,
                         AppEvent::Aborted { session_id: sid, .. } => *sid == session_id,
                         AppEvent::Error { session_id: sid, .. } => *sid == session_id,
+                        AppEvent::MessagesUpdated { session_id: sid } => *sid == session_id,
                     };
 
                     if !matches_session {
@@ -80,6 +81,7 @@ pub async fn events_stream(
                         AppEvent::PermissionRequest { .. } => "permission.request",
                         AppEvent::Aborted { .. } => "aborted",
                         AppEvent::Error { .. } => "error",
+                        AppEvent::MessagesUpdated { .. } => "messages.updated",
                     };
 
                     let json = match serde_json::to_string(&event) {
