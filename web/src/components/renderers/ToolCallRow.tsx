@@ -1,8 +1,24 @@
-import { useState } from 'react';
-import { Loader2, ChevronDown } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import {
+  Loader2,
+  ChevronDown,
+  FileText,
+  FolderTree,
+  Search,
+  Files,
+  FileEdit,
+  FileDiff,
+  Terminal,
+  Sparkles,
+  LayoutTemplate,
+  ListTodo,
+  Wrench,
+} from 'lucide-react';
 import type { ToolCallEntry } from '../../types/round';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { DiffRenderer } from './DiffRenderer';
+import { CodeLinesRenderer } from './CodeLinesRenderer';
+import { TodoRenderer } from './TodoRenderer';
 
 interface Props {
   entry: ToolCallEntry;
@@ -20,29 +36,35 @@ function isBash(name: string): boolean {
   return name === 'bash';
 }
 
-function getToolIcon(name: string): string {
+function isTodo(name: string): boolean {
+  return name === 'todowrite';
+}
+
+function getToolIcon(name: string): React.ComponentType<{ className?: string }> {
   switch (name) {
     case 'read':
-      return 'M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z';
+      return FileText;
     case 'list':
-      return 'M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z';
+      return FolderTree;
     case 'grep':
-      return 'm21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z';
+      return Search;
     case 'glob':
-      return 'M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 0 0-1.883 2.542l.857 6a2.25 2.25 0 0 0 2.227 1.932H19.05a2.25 2.25 0 0 0 2.227-1.932l.857-6a2.25 2.25 0 0 0-1.883-2.542m-16.5 0V6A2.25 2.25 0 0 1 6 3.75h3.879a1.5 1.5 0 0 1 1.06.44l2.122 2.12a1.5 1.5 0 0 0 1.06.44H18A2.25 2.25 0 0 1 20.25 9v.776';
+      return Files;
     case 'write':
     case 'edit':
-      return 'm16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125';
+      return FileEdit;
     case 'apply_patch':
-      return 'M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m3.75 9v6m3-3H9m1.5-12H5.625c-.621 0-1.125.5-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z';
+      return FileDiff;
     case 'bash':
-      return 'm6.75 7.5 3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0 0 21 18V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v12a2.25 2.25 0 0 0 2.25 2.25Z';
+      return Terminal;
     case 'skill':
-      return 'M12 18v-5.25m0 0a6.01 6.01 0 0 0 1.5-.189m-1.5.189a6.01 6.01 0 0 1-1.5-.189m3.75 7.478a12.06 12.06 0 0 1-4.5 0m3.75 2.383a14.406 14.406 0 0 1-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 1 0-7.517 0c.85.493 1.509 1.333 1.509 2.316V18';
+      return Sparkles;
     case 'task':
-      return 'M2.375 6.75A2.25 2.25 0 0 1 4.625 4.5h14.75a2.25 2.25 0 0 1 2.25 2.25v10.5a2.25 2.25 0 0 1-2.25 2.25H4.625a2.25 2.25 0 0 1-2.25-2.25V6.75Zm16.5 0H5.125v4.5h13.75v-4.5Zm-13.75 6v3h13.75v-3H5.125Z';
+      return LayoutTemplate;
+    case 'todowrite':
+      return ListTodo;
     default:
-      return 'M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5';
+      return Wrench;
   }
 }
 
@@ -51,6 +73,7 @@ function getToolColor(name: string): string {
   if (isWriteTool(name)) return 'text-emerald-600 dark:text-emerald-400';
   if (isBash(name)) return 'text-violet-600 dark:text-violet-400';
   if (name === 'task') return 'text-amber-600 dark:text-amber-400';
+  if (isTodo(name)) return 'text-rose-600 dark:text-rose-400';
   return 'text-neutral-600 dark:text-neutral-400';
 }
 
@@ -59,7 +82,21 @@ function getToolBg(name: string): string {
   if (isWriteTool(name)) return 'border-neutral-200 dark:border-neutral-700';
   if (isBash(name)) return 'bg-violet-50 dark:bg-violet-950/30 border-violet-200 dark:border-violet-800';
   if (name === 'task') return 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800';
+  if (isTodo(name)) return 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800';
   return 'bg-neutral-50 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700';
+}
+
+function getToolLabel(name: string): string {
+  switch (name) {
+    case 'read': return 'Read';
+    case 'list': return 'List';
+    case 'grep': return 'Search';
+    case 'glob': return 'Find';
+    case 'skill': return 'Loaded skill';
+    case 'bash': return 'bash';
+    case 'todowrite': return 'Todos';
+    default: return name;
+  }
 }
 
 function summarizeArguments(name: string, entry: ToolCallEntry): string {
@@ -96,7 +133,7 @@ function summarizeArguments(name: string, entry: ToolCallEntry): string {
       case 'todowrite': {
         const todos = args.todos;
         if (Array.isArray(todos)) {
-          return `${todos.length} todo(s)`;
+          return `${todos.length} item(s)`;
         }
         return '(todos)';
       }
@@ -116,14 +153,9 @@ function getResultSummary(entry: ToolCallEntry): string {
   if (entry.result.isError) return ' failed';
 
   const name = entry.name;
-  const canonical = ['read', 'list', 'grep', 'glob', 'skill'].includes(name) ? name : '';
+  const canonical = ['list', 'grep', 'glob', 'skill'].includes(name) ? name : '';
 
   switch (canonical) {
-    case 'read': {
-      return output.length > 80
-        ? ` ${output.split('\n')[0].slice(0, 60)}...`
-        : ` ${output.split('\n')[0] || ''}`;
-    }
     case 'list': {
       const count = output.split('\n').filter((l) => l.trim()).length;
       return ` ${count} item(s)`;
@@ -141,27 +173,16 @@ function getResultSummary(entry: ToolCallEntry): string {
   }
 }
 
-function getActionLabel(name: string): string {
-  switch (name) {
-    case 'read': return 'Read';
-    case 'list': return 'List';
-    case 'grep': return 'Search';
-    case 'glob': return 'Find';
-    case 'skill': return 'Loaded skill';
-    default: return name;
-  }
-}
-
 function getCollapsedLabel(entry: ToolCallEntry): string {
   const name = entry.name;
   if (isReadOnlyTool(name)) {
-    return `${getActionLabel(name)} ${summarizeArguments(name, entry)}${entry.result ? getResultSummary(entry) : ' ...'}`;
+    return `${getToolLabel(name)} ${summarizeArguments(name, entry)}${entry.result ? getResultSummary(entry) : ' ...'}`;
   }
   if (isWriteTool(name)) {
     return `${name === 'apply_patch' ? 'Apply patch' : name === 'edit' ? 'Edit' : 'Write'} ${summarizeArguments(name, entry)}`;
   }
-  if (isBash(name)) {
-    return `bash ${summarizeArguments(name, entry)}`;
+  if (isTodo(name)) {
+    return `${getToolLabel(name)} ${summarizeArguments(name, entry)}`;
   }
   return `${name} ${summarizeArguments(name, entry)}`;
 }
@@ -170,36 +191,75 @@ function getExitCode(entry: ToolCallEntry): number | null {
   return entry.result?.exitCode ?? null;
 }
 
+/**
+ * Get the bash command from parsed arguments, for display purposes.
+ */
+function getBashCommand(entry: ToolCallEntry): string {
+  try {
+    const args = JSON.parse(entry.arguments);
+    return args.command || '';
+  } catch {
+    return '';
+  }
+}
+
 export function ToolCallRow({ entry }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const didAutoExpand = useRef(false);
 
-  // If the only result is empty or "Done", keep collapsed
+  // Determine auto-expand conditions
   const isEmptyResult =
     entry.result &&
     entry.resultComplete &&
     (!entry.result.output || entry.result.output.trim() === '' || entry.result.output.trim() === 'Done');
 
-  // For bash: auto-expand if error or has output
-  const shouldAutoExpand =
-    isBash(entry.name) && entry.resultComplete && !isEmptyResult;
-  // For write tools: auto-expand to show diff
+  const hasBashOutput = isBash(entry.name) && entry.resultComplete && !isEmptyResult;
   const hasDiff = entry.result && entry.result.diff;
 
-  const isExpanded = expanded || shouldAutoExpand || (hasDiff && entry.resultComplete);
+  // Auto-expand once when result arrives (like defaultExpanded for ThinkingBlock)
+  // After that, user toggle fully controls the state
+  useEffect(() => {
+    if (didAutoExpand.current) return;
+    if (hasBashOutput || (hasDiff && entry.resultComplete)) {
+      didAutoExpand.current = true;
+      setExpanded(true);
+    }
+  }, [hasBashOutput, hasDiff, entry.resultComplete]);
+
+  // isExpanded is purely controlled by the `expanded` state — user toggle always works
+  const isExpanded = expanded;
+
+  function handleToggle() {
+    setExpanded((prev) => !prev);
+  }
 
   return (
     <div className={`my-2 overflow-hidden rounded-lg border ${getToolBg(entry.name)}`}>
       {/* Collapsed Header (always visible) */}
       <button
-        onClick={() => setExpanded(!expanded)}
+        onClick={handleToggle}
         className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-black/5 dark:hover:bg-white/5"
       >
-        <svg className={`h-4 w-4 flex-shrink-0 ${getToolColor(entry.name)}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={getToolIcon(entry.name)} />
-        </svg>
-        <span className="flex-1 truncate text-xs font-medium text-neutral-700 dark:text-neutral-300">
-          {getCollapsedLabel(entry)}
-        </span>
+        {(() => {
+          const Icon = getToolIcon(entry.name);
+          return <Icon className={`h-3.5 w-3.5 flex-shrink-0 ${getToolColor(entry.name)}`} />;
+        })()}
+
+        {/* Collapsed label: show different layout for bash */}
+        {isBash(entry.name) ? (
+          <div className="flex flex-1 flex-col min-w-0">
+            <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
+              bash
+            </span>
+            <span className="truncate font-mono text-xs text-neutral-500 dark:text-neutral-400">
+              $ {getBashCommand(entry) || '...'}
+            </span>
+          </div>
+        ) : (
+          <span className="flex-1 truncate text-xs font-medium text-neutral-700 dark:text-neutral-300">
+            {getCollapsedLabel(entry)}
+          </span>
+        )}
 
         {/* Spinner for incomplete tool calls */}
         {!entry.resultComplete && entry.argumentsComplete && (
@@ -209,7 +269,7 @@ export function ToolCallRow({ entry }: Props) {
         {/* Expand/collapse indicator */}
         {entry.resultComplete && (
           <ChevronDown
-            className={`h-3.5 w-3.5 text-neutral-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+            className={`h-3.5 w-3.5 flex-shrink-0 text-neutral-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
           />
         )}
       </button>
@@ -223,20 +283,37 @@ export function ToolCallRow({ entry }: Props) {
               <DiffRenderer diff={entry.result.diff} filepath={entry.result.filepath || ''} />
             )}
 
-            {/* Bash output */}
+            {/* Bash: show command + output */}
             {isBash(entry.name) && (
-              <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-neutral-700 dark:text-neutral-300">
-                {entry.result.output}
-              </pre>
+              <div className="space-y-1">
+                <div className="overflow-x-auto whitespace-pre-wrap break-all rounded bg-black/5 px-3 py-1.5 font-mono text-xs leading-relaxed text-neutral-600 dark:bg-white/5 dark:text-neutral-400">
+                  $ {getBashCommand(entry)}
+                </div>
+                {entry.result.output && (
+                  <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-neutral-700 dark:text-neutral-300">
+                    {entry.result.output}
+                  </pre>
+                )}
+              </div>
             )}
 
-            {/* Read-only tools: render as markdown */}
-            {isReadOnlyTool(entry.name) && (
+            {/* Read tool: render as code lines with line numbers */}
+            {entry.name === 'read' && (
+              <CodeLinesRenderer output={entry.result.output} filepath={entry.result.filepath} />
+            )}
+
+            {/* Todo tool: render as structured list */}
+            {isTodo(entry.name) && (
+              <TodoRenderer output={entry.result.output} />
+            )}
+
+            {/* Other read-only tools: render as markdown */}
+            {isReadOnlyTool(entry.name) && entry.name !== 'read' && (
               <MarkdownRenderer content={entry.result.output} />
             )}
 
             {/* Default: render as markdown */}
-            {!isReadOnlyTool(entry.name) && !isBash(entry.name) && !isWriteTool(entry.name) && (
+            {!isReadOnlyTool(entry.name) && !isBash(entry.name) && !isWriteTool(entry.name) && !isTodo(entry.name) && (
               <MarkdownRenderer content={entry.result.output} />
             )}
           </div>
