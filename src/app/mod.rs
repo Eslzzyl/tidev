@@ -140,6 +140,7 @@ struct App {
     workspace_boundary_approved: std::collections::HashMap<String, bool>,
     question_dialog: Option<QuestionDialogState>,
     fork_confirm_dialog: Option<ui::fork_confirm::ForkConfirmDialogState>,
+    undo_confirm_dialog: Option<ui::undo_confirm::UndoConfirmDialogState>,
     running_tool_executions: Vec<RunningToolExecution>,
     running_subagent_executions: Vec<RunningSubagentExecution>,
     pending_assistant_turns: std::collections::HashSet<Uuid>,

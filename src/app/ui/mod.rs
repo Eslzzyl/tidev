@@ -16,4 +16,5 @@ pub mod settings_panel;
 pub mod skills_panel;
 pub mod stats_panel;
 pub mod theme_panel;
+pub mod undo_confirm;
 pub mod workspace_boundary;

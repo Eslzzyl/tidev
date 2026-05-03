@@ -269,7 +269,7 @@ impl App {
         Ok(())
     }
 
-    fn revert_to_message(
+    pub(crate) fn revert_to_message(
         &mut self,
         message_id: Uuid,
         message_content: String,

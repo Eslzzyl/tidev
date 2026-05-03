@@ -83,6 +83,9 @@ impl App {
         if self.fork_confirm_dialog.is_some() {
             self.render_fork_confirm_dialog(frame, area);
         }
+        if self.undo_confirm_dialog.is_some() {
+            self.render_undo_confirm_dialog(frame, area);
+        }
         self.finish_mouse_selection(frame);
         self.render_toast(frame);
     }

@@ -1166,6 +1166,10 @@ impl App {
             return self.handle_fork_confirm_dialog_key(key, runtime);
         }
 
+        if self.undo_confirm_dialog.is_some() {
+            return self.handle_undo_confirm_dialog_key(key, runtime);
+        }
+
         if let Some(dialog) = self.connect_dialog.clone() {
             self.handle_connect_dialog_key(key, dialog)?;
             return Ok(());
@@ -2223,6 +2227,16 @@ impl App {
                         ));
                 }
             }
+            KeyCode::Char('u') => {
+                let query = self.composer.text().to_string();
+                if let Some(message) = panel.selected_message(&query) {
+                    self.undo_confirm_dialog =
+                        Some(crate::app::ui::undo_confirm::UndoConfirmDialogState::new(
+                            message.message_id,
+                            message.content.clone(),
+                        ));
+                }
+            }
             KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let query = self.composer.text().to_string();
                 let mut next_panel = panel;
@@ -2347,6 +2361,51 @@ impl App {
             "Forked session with {} messages",
             original_messages.len()
         ));
+
+        Ok(())
+    }
+
+    pub(crate) fn handle_undo_confirm_dialog_key(
+        &mut self,
+        key: KeyEvent,
+        runtime: &Runtime,
+    ) -> Result<()> {
+        match key.code {
+            KeyCode::Enter => {
+                self.confirm_undo_to_message(runtime)?;
+            }
+            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                self.undo_confirm_dialog = None;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub(crate) fn confirm_undo_to_message(&mut self, runtime: &Runtime) -> Result<()> {
+        let Some(dialog) = self.undo_confirm_dialog.take() else {
+            return Ok(());
+        };
+
+        // 查找选中的消息并克隆所需数据
+        let message_data = self
+            .conversation
+            .messages
+            .iter()
+            .find(|m| m.id == dialog.selected_message_id)
+            .map(|m| (m.id, m.content.clone()));
+
+        let Some((message_id, message_content)) = message_data else {
+            self.last_notice = Some("Selected message not found".to_string());
+            return Ok(());
+        };
+
+        // 关闭 message_panel
+        self.close_message_panel();
+
+        // 调用 revert_to_message 执行 undo
+        self.revert_to_message(message_id, message_content, runtime)?;
+        self.last_notice = Some("Undo complete".to_string());
 
         Ok(())
     }

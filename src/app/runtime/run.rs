@@ -114,6 +114,7 @@ impl App {
             workspace_boundary_approved: std::collections::HashMap::new(),
             question_dialog: None,
             fork_confirm_dialog: None,
+            undo_confirm_dialog: None,
             running_tool_executions: Vec::new(),
             running_subagent_executions: Vec::new(),
             pending_assistant_turns: std::collections::HashSet::new(),
