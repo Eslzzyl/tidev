@@ -442,12 +442,19 @@ impl App {
                 continue;
             }
 
-            let path = self.workspace_root.join(source);
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                // Use relative path as cache key to match what
-                // system_prompt_and_sources_with_cache uses for lookups
+            // Build the full path and canonicalize it to match the format
+            // used by system_paths() in system_prompt_and_sources_with_cache().
+            // This ensures cache lookups will find the cached content.
+            let path = if std::path::Path::new(source).is_absolute() {
+                std::path::PathBuf::from(source)
+            } else {
+                self.workspace_root.join(source)
+            };
+            let canonical_path = path.canonicalize().unwrap_or_else(|_| path.clone());
+
+            if let Ok(content) = std::fs::read_to_string(&canonical_path) {
                 self.instruction_content_cache
-                    .insert(source.clone(), content);
+                    .insert(canonical_path.display().to_string(), content);
             }
         }
 
