@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { Plus, Trash2 } from 'lucide-react';
 import { useSessionStore } from '../../stores/useSessionStore';
 import { useUIStore } from '../../stores/useUIStore';
 import { api } from '../../api/client';
@@ -67,9 +68,7 @@ export function LeftSidebar() {
           className="flex items-center gap-1 rounded bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
           aria-label="New session"
         >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
+          <Plus className="h-4 w-4" />
           <span>New</span>
         </button>
       </div>
@@ -117,9 +116,7 @@ export function LeftSidebar() {
                   className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-1 text-neutral-400 opacity-0 hover:text-red-600 group-hover:opacity-100 dark:text-neutral-500 dark:hover:text-red-400"
                   aria-label="Delete session"
                 >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
+                  <Trash2 className="h-4 w-4" />
                 </button>
               </li>
             ))}

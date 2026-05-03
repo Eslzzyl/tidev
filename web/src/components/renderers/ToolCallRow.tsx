@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Loader2, ChevronDown } from 'lucide-react';
 import type { ToolCallEntry } from '../../types/round';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { DiffRenderer } from './DiffRenderer';
@@ -202,22 +203,14 @@ export function ToolCallRow({ entry }: Props) {
 
         {/* Spinner for incomplete tool calls */}
         {!entry.resultComplete && entry.argumentsComplete && (
-          <svg className="h-3.5 w-3.5 animate-spin text-neutral-400" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-neutral-400" />
         )}
 
         {/* Expand/collapse indicator */}
         {entry.resultComplete && (
-          <svg
+          <ChevronDown
             className={`h-3.5 w-3.5 text-neutral-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
+          />
         )}
       </button>
 

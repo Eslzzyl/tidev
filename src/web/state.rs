@@ -7,6 +7,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     config::{AppConfig, AuthStore},
     llm::LlmClient,
+    shared::file_search::FileSearchIndex,
     storage::SessionStore,
 };
 
@@ -31,6 +32,8 @@ pub struct AppState {
     pub workspace_root: PathBuf,
     /// Cancellation token for graceful shutdown
     pub cancel_token: CancellationToken,
+    /// File search index for @-mention completion
+    pub file_search_index: Arc<FileSearchIndex>,
 }
 
 impl AppState {
@@ -53,6 +56,7 @@ impl AppState {
             active_requests: Arc::new(RwLock::new(std::collections::HashMap::new())),
             workspace_root,
             cancel_token: CancellationToken::new(),
+            file_search_index: Arc::new(FileSearchIndex::new()),
         })
     }
 

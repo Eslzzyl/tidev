@@ -1,4 +1,5 @@
 pub mod events;
+pub mod files;
 pub mod messages;
 pub mod models;
 pub mod sessions;
@@ -36,6 +37,8 @@ pub fn api_routes() -> Router<AppState> {
         .route("/models", get(models::list_models))
         // Tools
         .route("/tools", get(tools::list_tools))
+        // Files (for @-mention)
+        .route("/files/search", get(files::search_files))
         // CORS
         .layer(CorsLayer::permissive())
 }

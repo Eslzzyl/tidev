@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { X, CheckCircle2, Circle, XCircle, AlertTriangle } from 'lucide-react';
 import { useSessionStore } from '../../stores/useSessionStore';
 import { useUIStore } from '../../stores/useUIStore';
 import type { FileDiff, TodoItem, TokenUsage } from '../../types/api';
@@ -107,12 +108,17 @@ export function RightSidebar() {
     }
   }
 
-  function getTodoIcon(status: string): string {
+  function getTodoIcon(status: string): React.ReactNode {
     switch (status) {
-      case 'completed': return '✔';
-      case 'in_progress': return '●';
-      case 'cancelled': return '✗';
-      case 'pending': default: return '○';
+      case 'completed':
+        return <CheckCircle2 className="h-3.5 w-3.5" />;
+      case 'in_progress':
+        return <Circle className="h-3.5 w-3.5 fill-current" />;
+      case 'cancelled':
+        return <XCircle className="h-3.5 w-3.5" />;
+      case 'pending':
+      default:
+        return <Circle className="h-3.5 w-3.5" />;
     }
   }
 
@@ -126,9 +132,7 @@ export function RightSidebar() {
           className="rounded p-1 text-neutral-500 hover:bg-neutral-100 md:hidden dark:text-neutral-400 dark:hover:bg-neutral-800"
           aria-label="Close info panel"
         >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
+          <X className="h-4 w-4" />
         </button>
       </div>
 
@@ -234,7 +238,7 @@ export function RightSidebar() {
                       }`}>
                         {todo.content}
                         {todo.priority === 'high' && (
-                          <span className="ml-1 text-amber-500">⚠</span>
+                          <AlertTriangle className="ml-1 inline h-3 w-3 text-amber-500" />
                         )}
                       </span>
                     </li>

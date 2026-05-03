@@ -10,25 +10,34 @@ import type {
   SendMessageResponse,
   AbortRequest,
   WorkspaceInfo,
+  FileSuggestion,
 } from '../types/api';
 
 const API_BASE = '/api';
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-  });
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...options?.headers,
+      },
+    });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(error.error || `HTTP ${response.status}`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(error.error || `HTTP ${response.status}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    // Handle network errors (e.g., cannot connect to backend)
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      throw new Error('Cannot connect to the server. Please check your network connection and try again.');
+    }
+    throw error;
   }
-
-  return response.json();
 }
 
 export const api = {
@@ -72,4 +81,10 @@ export const api = {
 
   // Tools
   listTools: () => fetchJson<{ tools: ToolInfo[] }>(`${API_BASE}/tools`),
+
+  // Files (@-mention search)
+  searchFiles: (query: string) =>
+    fetchJson<{ suggestions: FileSuggestion[] }>(
+      `${API_BASE}/files/search?q=${encodeURIComponent(query)}`
+    ),
 };

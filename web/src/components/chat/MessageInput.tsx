@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { ChevronDown, Camera, Square, ArrowUp } from 'lucide-react';
 import { useSessionStore } from '../../stores/useSessionStore';
 import { useUIStore } from '../../stores/useUIStore';
 import { api } from '../../api/client';
-import type { ModelInfo } from '../../types/api';
+import { FileMentionPopover } from './FileMentionPopover';
+import type { ModelInfo, FileSuggestion } from '../../types/api';
 
 type ThinkingOption = { label: string; value: string };
 
@@ -10,6 +12,14 @@ export function MessageInput() {
   const [inputValue, setInputValue] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // File mention (@) state
+  const [fileMention, setFileMention] = useState<{
+    visible: boolean;
+    query: string;
+    atPosition: number;
+    cursorPosition: { x: number; y: number };
+  } | null>(null);
 
   // Models state
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -129,6 +139,13 @@ export function MessageInput() {
   }, [inputValue]);
 
   function handleKeydown(event: React.KeyboardEvent) {
+    // Don't handle Tab/Enter if file mention popover is visible
+    if (fileMention?.visible) {
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        return;
+      }
+    }
+
     if (event.key === 'Tab') {
       event.preventDefault();
       toggleMode();
@@ -211,6 +228,113 @@ export function MessageInput() {
     }
   }
 
+  // Detect @ mention in input
+  function detectAtFragment(input: string, cursor: number): { atIndex: number; query: string } | null {
+    const prefix = input.slice(0, cursor);
+    const atIndex = prefix.lastIndexOf('@');
+    if (atIndex === -1) return null;
+
+    // Check if @ is preceded by valid character
+    if (atIndex > 0) {
+      const prev = prefix[atIndex - 1];
+      if (!/\s/.test(prev) && !/[([{"'/\\]/.test(prev)) {
+        return null;
+      }
+    }
+
+    const query = prefix.slice(atIndex + 1);
+    // Query cannot contain whitespace
+    if (/\s/.test(query)) return null;
+
+    return { atIndex, query };
+  }
+
+  // Calculate popover position based on textarea and cursor
+  function calculatePopoverPosition(textarea: HTMLTextAreaElement, atIndex: number): { x: number; y: number } {
+    const textBeforeAt = textarea.value.slice(0, atIndex);
+    const lines = textBeforeAt.split('\n');
+    const currentLineText = lines[lines.length - 1];
+
+    // Create a mirror element to measure text position
+    const mirror = document.createElement('div');
+    const computedStyle = getComputedStyle(textarea);
+    mirror.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      visibility: hidden;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      font: ${computedStyle.font};
+      padding: ${computedStyle.padding};
+      border: ${computedStyle.border};
+      width: ${textarea.clientWidth}px;
+      line-height: ${computedStyle.lineHeight};
+    `;
+    mirror.textContent = currentLineText;
+    document.body.appendChild(mirror);
+
+    // Measure the width of text before @
+    const textSpan = document.createElement('span');
+    textSpan.textContent = currentLineText;
+    mirror.appendChild(textSpan);
+
+    const textRect = textSpan.getBoundingClientRect();
+    const textareaRect = textarea.getBoundingClientRect();
+
+    document.body.removeChild(mirror);
+
+    // Calculate position: at the @ character, in viewport coordinates
+    const x = textareaRect.left + textRect.width + parseInt(computedStyle.paddingLeft || '0');
+    // Position at the top of current line (popover will extend upward)
+    const y = textareaRect.top + (lines.length - 1) * parseInt(computedStyle.lineHeight || '20') + parseInt(computedStyle.paddingTop || '0');
+
+    return { x, y };
+  }
+
+  // Handle input change with @ detection
+  function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const value = e.target.value;
+    const cursor = e.target.selectionStart || 0;
+
+    setInputValue(value);
+
+    const atFragment = detectAtFragment(value, cursor);
+    if (atFragment) {
+      const position = calculatePopoverPosition(e.target, atFragment.atIndex);
+      setFileMention({
+        visible: true,
+        query: atFragment.query,
+        atPosition: atFragment.atIndex,
+        cursorPosition: position,
+      });
+    } else {
+      setFileMention(null);
+    }
+  }
+
+  // Handle file selection from popover
+  function handleFileSelect(path: string, kind: FileSuggestion['kind']) {
+    if (!fileMention || !textareaRef.current) return;
+
+    const before = inputValue.slice(0, fileMention.atPosition);
+    const after = inputValue.slice(textareaRef.current.selectionStart);
+    const replacement = kind === 'directory' ? `@${path}/` : `@${path}`;
+
+    const newValue = before + replacement + after;
+    setInputValue(newValue);
+    setFileMention(null);
+
+    // Focus back to textarea and set cursor position
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        const newCursorPos = before.length + replacement.length;
+        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
+      }
+    }, 0);
+  }
+
   function handleModelSelect(model: ModelInfo) {
     setSelectedModelId(model.id);
     setSelectedProviderId(model.provider_id);
@@ -249,9 +373,7 @@ export function MessageInput() {
               <span className="max-w-[120px] truncate">
                 {selectedModelDisplay?.display_name || 'Select model'}
               </span>
-              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
+              <ChevronDown className="h-3 w-3" />
             </button>
 
             {modelDropdownOpen && (
@@ -282,10 +404,7 @@ export function MessageInput() {
                             {model.display_name}
                           </span>
                           {model.supports_vision && (
-                            <svg className="h-3.5 w-3.5 text-neutral-400" viewBox="0 0 24 24" fill="currentColor">
-                              <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" />
-                              <path fillRule="evenodd" d="M1.323 11.447C2.811 6.976 7.028 3.75 12.001 3.75c4.97 0 9.185 3.223 10.675 7.69.12.362.12.752 0 1.113-1.487 4.471-5.705 7.697-10.677 7.697-4.97 0-9.186-3.223-10.675-7.69a1.762 1.762 0 010-1.113zM17.25 12a5.25 5.25 0 11-10.5 0 5.25 5.25 0 0110.5 0z" clipRule="evenodd" />
-                            </svg>
+                            <Camera className="h-3.5 w-3.5 text-neutral-400" />
                           )}
                         </button>
                       ))}
@@ -306,9 +425,7 @@ export function MessageInput() {
                 <span>
                   {thinkingOptions.find((t) => t.value === selectedThinking)?.label || 'Thinking'}
                 </span>
-                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
+                <ChevronDown className="h-3 w-3" />
               </button>
 
               {thinkingDropdownOpen && (
@@ -336,7 +453,7 @@ export function MessageInput() {
           <textarea
             ref={textareaRef}
             value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={handleKeydown}
             placeholder={
               isDraftSession
@@ -350,6 +467,16 @@ export function MessageInput() {
             className="min-h-[44px] max-h-[200px] flex-1 resize-none rounded-xl border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 placeholder-neutral-400 outline-none transition-colors focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500 dark:focus:border-neutral-400"
           />
 
+          {/* File Mention Popover */}
+          {fileMention?.visible && (
+            <FileMentionPopover
+              query={fileMention.query}
+              position={fileMention.cursorPosition}
+              onSelect={handleFileSelect}
+              onClose={() => setFileMention(null)}
+            />
+          )}
+
           {/* Send / Stop button */}
           {isStreaming ? (
             <button
@@ -357,9 +484,7 @@ export function MessageInput() {
               className="mb-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-500"
               aria-label="Stop generating"
             >
-              <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                <rect x="6" y="6" width="12" height="12" rx="2" />
-              </svg>
+              <Square className="h-4 w-4" fill="currentColor" />
             </button>
           ) : (
             <button
@@ -368,9 +493,7 @@ export function MessageInput() {
               className="mb-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-neutral-900 text-white transition-colors hover:bg-neutral-800 disabled:opacity-50 disabled:hover:bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
               aria-label="Send message"
             >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-              </svg>
+              <ArrowUp className="h-4 w-4" />
             </button>
           )}
         </div>

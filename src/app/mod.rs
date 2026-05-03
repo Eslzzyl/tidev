@@ -60,8 +60,9 @@ pub use ui::theme_panel;
 use runtime::state::*;
 
 use crate::{
-    app::at_mention::{AtMentionKind, AtMentionState, current_at_fragment},
+    app::at_mention::{AtMentionKind, AtMentionState},
     app::input::SnippetState,
+    shared::file_search::current_at_fragment,
     app::input::shell_completion::ShellCompletionState,
     app::mcp_panel::McpPanelState,
     app::memory_panel::MemoryPanelState,

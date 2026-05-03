@@ -1,10 +1,11 @@
+import { X, Sun, Moon, Monitor } from 'lucide-react';
 import { useUIStore, getEffectiveTheme, type Theme } from '../stores/useUIStore';
 import { useClickOutside } from '../hooks/useClickOutside';
 
-const themes: { value: Theme; label: string; icon: string }[] = [
-  { value: 'light', label: 'Light', icon: '☀️' },
-  { value: 'dark', label: 'Dark', icon: '🌙' },
-  { value: 'system', label: 'System', icon: '💻' },
+const themes: { value: Theme; label: string; icon: React.ReactNode }[] = [
+  { value: 'light', label: 'Light', icon: <Sun className="h-8 w-8" /> },
+  { value: 'dark', label: 'Dark', icon: <Moon className="h-8 w-8" /> },
+  { value: 'system', label: 'System', icon: <Monitor className="h-8 w-8" /> },
 ];
 
 export function Settings() {
@@ -33,9 +34,7 @@ export function Settings() {
             className="rounded p-1 text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
             aria-label="Close settings"
           >
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <X className="h-5 w-5" />
           </button>
         </div>
 
@@ -58,7 +57,7 @@ export function Settings() {
                       : 'border-neutral-200 hover:border-neutral-300 dark:border-neutral-700 dark:hover:border-neutral-600'
                   }`}
                 >
-                  <span className="text-2xl">{t.icon}</span>
+                  {t.icon}
                   <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
                     {t.label}
                   </span>

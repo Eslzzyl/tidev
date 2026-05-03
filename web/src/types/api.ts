@@ -105,3 +105,10 @@ export interface SendMessageResponse {
 export interface AbortRequest {
   request_id: number;
 }
+
+export interface FileSuggestion {
+  path: string;
+  display: string;
+  kind: 'file' | 'directory' | 'image';
+  matched_indices: number[];
+}

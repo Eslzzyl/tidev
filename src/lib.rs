@@ -15,6 +15,7 @@ pub mod notifications;
 pub mod prompts;
 pub mod provider_setup;
 pub mod session;
+pub mod shared;
 pub mod snapshot;
 pub mod stats;
 pub mod storage;
