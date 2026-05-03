@@ -21,13 +21,14 @@ export function buildRounds(
       };
       rounds.push(currentRound);
     } else if (msg.role === "system") {
-      // Standalone system message (e.g. compaction)
+      // Standalone system message (e.g. compaction).
+      // Do NOT reset currentRound here: subsequent assistant/tool messages
+      // that belong to the preceding user round must still be grouped together.
       rounds.push({
         id: `system-${msg.id}`,
         message: msg,
         kind: "system",
       });
-      currentRound = null;
     } else if (currentRound) {
       if (msg.role === "assistant") {
         if (msg.reasoning) {
