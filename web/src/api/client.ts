@@ -11,6 +11,7 @@ import type {
   AbortRequest,
   WorkspaceInfo,
   FileSuggestion,
+  TodosResponse,
 } from '../types/api';
 
 const API_BASE = '/api';
@@ -87,4 +88,8 @@ export const api = {
     fetchJson<{ suggestions: FileSuggestion[] }>(
       `${API_BASE}/files/search?q=${encodeURIComponent(query)}`
     ),
+
+  // Todos
+  getTodos: (sessionId: string) =>
+    fetchJson<TodosResponse>(`${API_BASE}/sessions/${sessionId}/todos`),
 };

@@ -71,7 +71,7 @@ export function RightSidebar() {
     }> = [];
 
     for (const msg of messages) {
-      const todosArr = msg.todos as TodoItem[] | undefined;
+      const todosArr = msg.todos as (TodoItem & { title?: string })[] | undefined;
       if (todosArr && Array.isArray(todosArr)) {
         for (const todo of todosArr) {
           items.push({

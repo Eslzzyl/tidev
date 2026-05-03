@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { ChevronDown, Camera, Square, ArrowUp } from 'lucide-react';
+import { ChevronDown, Camera, Square, ArrowUp, ListTodo, CheckCircle2, Circle, Loader2, XCircle } from 'lucide-react';
 import { useSessionStore } from '../../stores/useSessionStore';
 import { useUIStore } from '../../stores/useUIStore';
 import { api } from '../../api/client';
 import { FileMentionPopover } from './FileMentionPopover';
-import type { ModelInfo, FileSuggestion } from '../../types/api';
+import type { ModelInfo, FileSuggestion, TodoItem } from '../../types/api';
 
 type ThinkingOption = { label: string; value: string };
 
@@ -32,6 +32,12 @@ export function MessageInput() {
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement>(null);
+  const todoDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Todos state
+  const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [todoDropdownOpen, setTodoDropdownOpen] = useState(false);
+  const [isLoadingTodos, setIsLoadingTodos] = useState(false);
 
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
   const isDraftSession = useSessionStore((s) => s.isDraftSession);
@@ -123,10 +129,33 @@ export function MessageInput() {
       if (thinkingDropdownRef.current && !thinkingDropdownRef.current.contains(e.target as Node)) {
         setThinkingDropdownOpen(false);
       }
+      if (todoDropdownRef.current && !todoDropdownRef.current.contains(e.target as Node)) {
+        setTodoDropdownOpen(false);
+      }
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Load todos when session changes
+  useEffect(() => {
+    if (!currentSessionId) {
+      setTodos([]);
+      return;
+    }
+
+    setIsLoadingTodos(true);
+    api.getTodos(currentSessionId)
+      .then((response) => {
+        setTodos(response.todos);
+      })
+      .catch(() => {
+        setTodos([]);
+      })
+      .finally(() => {
+        setIsLoadingTodos(false);
+      });
+  }, [currentSessionId]);
 
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
 
@@ -442,6 +471,72 @@ export function MessageInput() {
                       {option.label}
                     </button>
                   ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Spacer to push todo button to the right */}
+          <div className="flex-1" />
+
+          {/* Todo list dropdown */}
+          {currentSessionId && todos.length > 0 && (
+            <div ref={todoDropdownRef} className="relative">
+              <button
+                onClick={() => setTodoDropdownOpen(!todoDropdownOpen)}
+                className="flex items-center gap-1.5 rounded bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
+              >
+                <ListTodo className="h-3.5 w-3.5" />
+                <span>{todos.length}</span>
+                <ChevronDown className={`h-3 w-3 transition-transform ${todoDropdownOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {todoDropdownOpen && (
+                <div className="absolute bottom-full right-0 z-50 mb-1 w-72 max-h-80 overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
+                  <div className="border-b border-neutral-200 bg-neutral-50 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-800">
+                    <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
+                      Todo List ({todos.filter(t => t.status === 'pending' || t.status === 'in_progress').length} pending)
+                    </span>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto py-1">
+                    {todos.map((todo, index) => {
+                      const getStatusIcon = () => {
+                        switch (todo.status) {
+                          case 'completed':
+                            return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />;
+                          case 'in_progress':
+                            return <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-500" />;
+                          case 'cancelled':
+                            return <XCircle className="h-3.5 w-3.5 text-neutral-400" />;
+                          default:
+                            return <Circle className="h-3.5 w-3.5 text-blue-500" />;
+                        }
+                      };
+                      const getPriorityColor = () => {
+                        switch (todo.priority) {
+                          case 'high':
+                            return 'text-red-600 dark:text-red-400';
+                          case 'medium':
+                            return 'text-amber-600 dark:text-amber-400';
+                          default:
+                            return 'text-neutral-600 dark:text-neutral-400';
+                        }
+                      };
+                      return (
+                        <div
+                          key={index}
+                          className="flex items-start gap-2 px-3 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800"
+                        >
+                          <div className="mt-0.5 flex-shrink-0">{getStatusIcon()}</div>
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-xs leading-relaxed ${getPriorityColor()} ${todo.status === 'completed' || todo.status === 'cancelled' ? 'line-through opacity-60' : ''}`}>
+                              {todo.content}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>

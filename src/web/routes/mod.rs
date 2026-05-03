@@ -4,6 +4,7 @@ pub mod messages;
 pub mod models;
 pub mod sessions;
 pub mod static_file;
+pub mod todos;
 pub mod tools;
 
 use axum::{
@@ -27,6 +28,8 @@ pub fn api_routes() -> Router<AppState> {
             "/sessions/{id}",
             get(sessions::get_session).delete(sessions::delete_session),
         )
+        // Todos
+        .route("/sessions/{id}/todos", get(todos::get_todos))
         // Messages
         .route(
             "/sessions/{id}/messages",

@@ -25,10 +25,13 @@ export interface FileDiff {
 }
 
 export interface TodoItem {
-  content?: string;
-  title?: string;
+  content: string;
   status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
   priority: 'low' | 'medium' | 'high';
+}
+
+export interface TodosResponse {
+  todos: TodoItem[];
 }
 
 export interface TokenUsage {
