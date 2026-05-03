@@ -35,18 +35,16 @@ pub async fn handle_embedded_request(uri: Uri) -> impl IntoResponse {
     }
 
     // If path is empty or directory-like, try index.html
-    if path.is_empty() || path.ends_with('/') {
-        if let Some(response) = serve_file(&format!("{}index.html", path)) {
+    if (path.is_empty() || path.ends_with('/'))
+        && let Some(response) = serve_file(&format!("{}index.html", path)) {
             return response;
         }
-    }
 
     // Try appending .html for SPA routes
-    if !path.contains('.') {
-        if let Some(response) = serve_file(&format!("{}.html", path)) {
+    if !path.contains('.')
+        && let Some(response) = serve_file(&format!("{}.html", path)) {
             return response;
         }
-    }
 
     // Fallback to index.html for SPA routing (client-side routing)
     if let Some(response) = serve_file("index.html") {

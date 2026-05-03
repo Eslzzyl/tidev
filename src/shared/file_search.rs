@@ -283,7 +283,7 @@ impl FileSearchIndex {
                 .lock()
                 .unwrap()
                 .as_ref()
-                .map_or(true, |handle| handle.id != watcher_id)
+                .is_none_or(|handle| handle.id != watcher_id)
             {
                 break;
             }
@@ -306,7 +306,7 @@ impl FileSearchIndex {
 
         walk_workspace_entries(&workspace_root, |entry| {
             if entry.path.contains('/') {
-                let dir = entry.path.rsplitn(2, '/').nth(1).unwrap_or("").to_string();
+                let dir = entry.path.rsplit_once('/').map(|x| x.0).unwrap_or("").to_string();
                 segments.entry(dir).or_default().push(entry);
             } else {
                 root_entries.push(entry);

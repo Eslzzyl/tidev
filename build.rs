@@ -90,17 +90,15 @@ fn should_rebuild(
             return true;
         }
         // 检查 package.json
-        if let Some(t) = get_mtime(package_json) {
-            if t > dist_time {
+        if let Some(t) = get_mtime(package_json)
+            && t > dist_time {
                 return true;
             }
-        }
         // 检查 lockfile
-        if let Some(t) = get_mtime(lockfile) {
-            if t > dist_time {
+        if let Some(t) = get_mtime(lockfile)
+            && t > dist_time {
                 return true;
             }
-        }
     }
 
     false
@@ -111,22 +109,20 @@ fn get_mtime(path: &Path) -> Option<SystemTime> {
 }
 
 fn is_path_newer_than(path: &Path, threshold: SystemTime) -> bool {
-    if let Some(mtime) = get_mtime(path) {
-        if mtime > threshold {
+    if let Some(mtime) = get_mtime(path)
+        && mtime > threshold {
             return true;
         }
-    }
 
     // 如果是目录，递归检查子项
-    if path.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(path) {
+    if path.is_dir()
+        && let Ok(entries) = std::fs::read_dir(path) {
             for entry in entries.flatten() {
                 if is_path_newer_than(&entry.path(), threshold) {
                     return true;
                 }
             }
         }
-    }
 
     false
 }
