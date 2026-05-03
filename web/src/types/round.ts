@@ -41,6 +41,15 @@ export interface Round {
 }
 
 /**
+ * A system-level message rendered as a standalone block (e.g. compaction).
+ */
+export interface SystemMessageBlock {
+  id: string;
+  message: Message;
+  kind: "system";
+}
+
+/**
  * Get all tool call entries from a round in segment order.
  */
 export function orderedToolCalls(round: Round): ToolCallEntry[] {

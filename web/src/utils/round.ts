@@ -1,11 +1,13 @@
 import type { Message } from "../types/api";
-import type { Round, ToolCallEntry, RoundSegment } from "../types/round";
+import type { Round, ToolCallEntry, RoundSegment, SystemMessageBlock } from "../types/round";
 
 /**
- * Build a list of Rounds from a flat list of Messages.
+ * Build a list of Rounds and SystemMessageBlocks from a flat list of Messages.
  */
-export function buildRounds(messages: Message[]): Round[] {
-  const rounds: Round[] = [];
+export function buildRounds(
+  messages: Message[],
+): (Round | SystemMessageBlock)[] {
+  const rounds: (Round | SystemMessageBlock)[] = [];
   let currentRound: Round | null = null;
 
   for (const msg of messages) {
@@ -18,6 +20,14 @@ export function buildRounds(messages: Message[]): Round[] {
         status: "user_only",
       };
       rounds.push(currentRound);
+    } else if (msg.role === "system") {
+      // Standalone system message (e.g. compaction)
+      rounds.push({
+        id: `system-${msg.id}`,
+        message: msg,
+        kind: "system",
+      });
+      currentRound = null;
     } else if (currentRound) {
       if (msg.role === "assistant") {
         if (msg.reasoning) {
@@ -109,4 +119,4 @@ export function buildRounds(messages: Message[]): Round[] {
   return rounds;
 }
 
-export type { Round, ToolCallEntry, RoundSegment };
+export type { Round, ToolCallEntry, RoundSegment, SystemMessageBlock };

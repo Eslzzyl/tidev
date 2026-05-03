@@ -6,6 +6,8 @@ import { useSSE } from "../../hooks/useSSE";
 import { api } from "../../api/client";
 import { buildRounds } from "../../utils/round";
 import { MessageRound } from "./MessageRound";
+import { SystemMessageBlock } from "../renderers/SystemMessageBlock";
+import type { Round, SystemMessageBlock as SystemMessageBlockType } from "../../types/round";
 import { MessageInput } from "./MessageInput";
 import { MessageDialog } from "./MessageDialog";
 import { RenameDialog } from "./RenameDialog";
@@ -332,14 +334,18 @@ export function ChatPanel() {
           </div>
         ) : (
           <div className="divide-y divide-neutral-100 dark:divide-neutral-900">
-            {allRounds.map((round) => (
-              <MessageRound
-                key={round.id}
-                round={round}
-                onUndoRequest={handleUndoRequest}
-                canUndo={canUndo}
-              />
-            ))}
+            {allRounds.map((item) =>
+              "kind" in item && item.kind === "system" ? (
+                <SystemMessageBlock key={item.id} message={item.message} />
+              ) : (
+                <MessageRound
+                  key={(item as Round).id}
+                  round={item as Round}
+                  onUndoRequest={handleUndoRequest}
+                  canUndo={canUndo}
+                />
+              ),
+            )}
           </div>
         )}
         <div ref={setMessagesEndRef} />

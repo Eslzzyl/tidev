@@ -259,6 +259,16 @@ export function useSSE(sessionId: string | null) {
       setConnectionStatus("connected");
     };
 
+    const handleMessagesUpdated = () => {
+      // Refresh messages from API (e.g. after compaction completes)
+      if (currentSessionId) {
+        api.listMessages(currentSessionId).then(({ messages, todos }) => {
+          setMessages(messages);
+          useSessionStore.getState().setTodos(todos ?? []);
+        });
+      }
+    };
+
     // Register SSE listeners
     sseClient.on("tool.call", handleToolCall);
     sseClient.on("tool.result", handleToolResult);
@@ -269,6 +279,7 @@ export function useSSE(sessionId: string | null) {
     sseClient.on("error", handleErrorEvent);
     sseClient.on("aborted", handleAborted);
     sseClient.on("connected", handleConnected);
+    sseClient.on("messages.updated", handleMessagesUpdated);
 
     // Connect
     sseClient.connect(sessionId);
@@ -283,6 +294,7 @@ export function useSSE(sessionId: string | null) {
       sseClient.off("error", handleErrorEvent);
       sseClient.off("aborted", handleAborted);
       sseClient.off("connected", handleConnected);
+      sseClient.off("messages.updated", handleMessagesUpdated);
       sseClient.disconnect();
       streamingRef.current = null;
     };

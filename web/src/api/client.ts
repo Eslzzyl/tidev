@@ -140,6 +140,13 @@ export const api = {
       { method: "POST" },
     ),
 
+  // Compact session context
+  compactSession: (sessionId: string) =>
+    fetchJson<{ request_id: number }>(
+      `${API_BASE}/sessions/${sessionId}/compact`,
+      { method: "POST" },
+    ),
+
   // Rename session
   renameSession: (sessionId: string, title: string) =>
     fetchJson<{ success: boolean; title: string }>(

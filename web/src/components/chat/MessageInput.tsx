@@ -368,6 +368,8 @@ export function MessageInput({
       executeUndo();
     } else if (name === "redo") {
       executeRedo();
+    } else if (name === "compact") {
+      executeCompact();
     } else if (name === "init") {
       executeInit();
     } else if (name === "rename" || name === "title") {
@@ -389,6 +391,8 @@ export function MessageInput({
       await executeUndo();
     } else if (name === "redo") {
       await executeRedo();
+    } else if (name === "compact") {
+      await executeCompact();
     } else if (name === "init") {
       await executeInit();
     } else if (name === "rename" || name === "title") {
@@ -443,6 +447,19 @@ export function MessageInput({
       setTimeout(() => textareaRef.current?.focus(), 0);
     } catch (error) {
       console.error("Failed to load init prompt:", error);
+    }
+  }
+
+  async function executeCompact() {
+    const sessionId = currentSessionId;
+    if (!sessionId) return;
+
+    try {
+      await api.compactSession(sessionId);
+      // The compaction runs in the background; SSE will send
+      // messages.updated when it completes, triggering a refresh.
+    } catch (error) {
+      console.error("Compact failed:", error);
     }
   }
 

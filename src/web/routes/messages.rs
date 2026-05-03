@@ -10,8 +10,9 @@ use uuid::Uuid;
 
 use crate::{
     config::reasoning::ThinkingLevelType,
+    context::ContextManager,
     prompts::{self, SessionMode},
-    session::{BackendEvent, Message, MessageRole, ToolCall},
+    session::{BackendEvent, Conversation, Message, MessageRole, ToolCall},
     web::{
         error::{AppError, WebResult},
         event_bus::AppEvent,
@@ -866,4 +867,169 @@ fn collect_patches_from_message(
         patches.insert(0, msg_patch);
     }
     patches
+}
+
+/// Response for compact session
+#[derive(Serialize)]
+pub struct CompactSessionResponse {
+    pub request_id: u64,
+}
+
+/// Compact session context (analogous to TUI's /compact command).
+pub async fn compact_session(
+    State(state): State<AppState>,
+    AxumPath(session_id): AxumPath<Uuid>,
+) -> WebResult<(StatusCode, Json<CompactSessionResponse>)> {
+    crate::log_info!("Compacting session {}", session_id);
+
+    // Load session record
+    let record = {
+        let store = state.store.lock().await;
+        store.load_session_record(session_id)?.ok_or_else(|| {
+            AppError::NotFound(format!("Session {} not found", session_id))
+        })?
+    };
+
+    // Load existing messages
+    let messages = {
+        let store = state.store.lock().await;
+        store.load_messages(session_id)?
+    };
+
+    // Generate request ID
+    let request_id = rand::random::<u64>();
+
+    // Build conversation
+    let mut conversation = Conversation::new(
+        session_id,
+        &record.workspace_root,
+        &record.provider_id,
+        &record.provider_display_name,
+        &record.model_id,
+        &record.model_display_name,
+        &record.title,
+    );
+    conversation.messages = messages;
+    if let Some(summary) = &record.context_summary {
+        conversation.set_context_state(
+            Some(summary.clone()),
+            record.context_retained_from,
+        );
+    }
+
+    // Build context manager from existing state
+    let mut context_manager =
+        ContextManager::from_state(record.context_summary.clone(), record.context_retained_from);
+
+    // Resolve active model
+    let (provider_id, provider, model_id, model_config) = {
+        let config = state.config.read().await;
+        let provider = config
+            .providers
+            .get(&record.provider_id)
+            .cloned()
+            .ok_or_else(|| AppError::Internal("Provider not found".to_string()))?;
+        let model_config = provider
+            .models
+            .get(&record.model_id)
+            .cloned()
+            .ok_or_else(|| AppError::Internal("Model not found".to_string()))?;
+        (
+            record.provider_id.clone(),
+            provider,
+            record.model_id.clone(),
+            model_config,
+        )
+    };
+
+    let active_model = crate::config::ActiveModel {
+        provider_id: provider_id.clone(),
+        provider_display_name: provider.display_name.clone(),
+        model_id: model_id.clone(),
+        request_model_id: model_config
+            .request_model_id
+            .clone()
+            .unwrap_or_else(|| model_id.clone()),
+        display_name: model_config.display_name.clone(),
+        base_url: provider.base_url.clone(),
+        api_key: None,
+        api_type: match provider.api_type.as_deref() {
+            Some("anthropic") => crate::config::ApiType::Anthropic,
+            Some("openai_responses") => crate::config::ApiType::OpenAiResponses,
+            _ => crate::config::ApiType::OpenAiChatCompletions,
+        },
+        temperature: model_config.temperature,
+        context_window: model_config.context_window,
+        max_output_tokens: model_config.max_output_tokens,
+        supports_images: model_config.supports_images,
+        system_prompt: model_config.system_prompt.clone().unwrap_or_default(),
+        extra_body: model_config.extra_body.clone(),
+        thinking_level: ThinkingLevelType::None,
+    };
+
+    let store = state.store.clone();
+    let llm = state.llm_client.clone();
+    let event_bus = state.event_bus.clone();
+
+    // Spawn compaction in background
+    tokio::spawn(async move {
+        crate::log_info!(
+            "Starting compaction background task for session {}",
+            session_id
+        );
+
+        let result = context_manager
+            .compact(&llm, &active_model, &conversation, true, None)
+            .await;
+
+        match result {
+            Ok(true) => {
+                if let Some(summary) = context_manager.summary.clone() {
+                    // Create a System message with the compaction summary
+                    let system_msg = Message::compaction(summary);
+
+                    // Persist the message
+                    {
+                        let store = store.lock().await;
+                        if let Err(e) = store.append_message(session_id, &system_msg) {
+                            crate::log_warn!(
+                                "Failed to persist compaction message: {}",
+                                e
+                            );
+                        }
+                        if let Err(e) = store.update_session_context_state(
+                            session_id,
+                            context_manager.summary.as_deref(),
+                            context_manager.retained_from,
+                        ) {
+                            crate::log_warn!(
+                                "Failed to persist compacted context state: {}",
+                                e
+                            );
+                        }
+                    }
+                    crate::log_info!("Compaction completed for session {}", session_id);
+                } else {
+                    crate::log_info!(
+                        "Compaction produced no summary for session {}",
+                        session_id
+                    );
+                }
+            }
+            Ok(false) => {
+                crate::log_info!("Compaction skipped (not needed) for session {}", session_id);
+            }
+            Err(e) => {
+                crate::log_warn!("Compaction failed for session {}: {}", session_id, e);
+            }
+        }
+
+        // Notify SSE clients that messages have changed
+        event_bus.publish(AppEvent::MessagesUpdated { session_id });
+    });
+
+    Ok((
+        axum::http::StatusCode::ACCEPTED,
+        Json(CompactSessionResponse { request_id }),
+    ))
 }

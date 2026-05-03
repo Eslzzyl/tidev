@@ -44,6 +44,7 @@ pub fn api_routes() -> Router<AppState> {
         .route("/sessions/{id}/abort", post(messages::abort_request))
         .route("/sessions/{id}/revert", post(messages::revert_to_message))
         .route("/sessions/{id}/redo", post(messages::redo_last_undo))
+        .route("/sessions/{id}/compact", post(messages::compact_session))
         .route("/sessions/{id}/rename", post(sessions::rename_session))
         // Init prompt
         .route("/init", get(sessions::get_init_prompt))
