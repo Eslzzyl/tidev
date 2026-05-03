@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use anyhow::Result;
 
@@ -6,7 +6,7 @@ use crate::{
     config::ActiveModel,
     llm::LlmClient,
     prompts::{self, SessionMode, compression_system_prompt},
-    session::{Conversation, Message, MessageAttachment, MessageRole, tool_output_preview},
+    session::{Conversation, Message, MessageAttachment, MessageRole, ToolExecutionResult, tool_output_preview},
 };
 
 #[derive(Clone, Debug)]
@@ -129,7 +129,8 @@ impl ContextManager {
         current_mode: SessionMode,
     ) -> Vec<Message> {
         let mut messages = Vec::new();
-        let mut pending_tool_calls = HashSet::new();
+        // Map from tool_call_id → tool_name to track which tool calls still need results.
+        let mut pending_tool_calls: HashMap<String, String> = HashMap::new();
         let mut was_plan_mode = current_mode == SessionMode::Plan;
 
         if let Some(summary) = &self.summary {
@@ -173,7 +174,7 @@ impl ContextManager {
                     pending_tool_calls = message
                         .tool_calls
                         .iter()
-                        .map(|tool_call| tool_call.id.clone())
+                        .map(|tool_call| (tool_call.id.clone(), tool_call.name.clone()))
                         .collect();
                     messages.push(message.clone());
                 }
@@ -182,13 +183,32 @@ impl ContextManager {
                         continue;
                     };
 
-                    if pending_tool_calls.remove(tool_call_id) {
+                    if pending_tool_calls.remove(tool_call_id).is_some() {
                         messages.push(message.clone());
                     }
                 }
                 MessageRole::Error => {}
                 MessageRole::Shell => {}
             }
+        }
+
+        // After processing all visible messages, inject synthetic failure results for any
+        // tool calls that are still pending (i.e. the assistant asked to call a tool but no
+        // corresponding result message was found). This can happen if tool execution was
+        // interrupted or if the conversation state is inconsistent.
+        for (tool_call_id, tool_name) in &pending_tool_calls {
+            crate::log_warn!(
+                "build_request_messages: orphaned tool call id={} name={}, injecting synthetic failure",
+                tool_call_id,
+                tool_name
+            );
+            messages.push(Message::tool_result(
+                tool_call_id.clone(),
+                tool_name.clone(),
+                ToolExecutionResult::new(
+                    "Tool call failed: execution was interrupted or did not complete",
+                ),
+            ));
         }
 
         if current_mode == SessionMode::Plan && !was_plan_mode {
