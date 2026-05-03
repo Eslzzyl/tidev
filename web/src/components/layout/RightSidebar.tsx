@@ -109,13 +109,10 @@ export function RightSidebar() {
   // Session-level todos from store (aggregated by backend)
   const todos: TodoItem[] = sessionTodos;
 
-  // Undo state detection
-  const isUndoActive = useMemo(() => {
-    return messages.some(
-      (m) => m.content.includes("undo") || m.role === "system",
-    );
-  }, [messages]);
-
+      {/* Undo state detection */}
+      const isUndoActive = useMemo(() => {
+        return currentSession?.revert_message_id != null;
+      }, [currentSession]);
   const workspacePath = currentSession?.workspace_root ?? "";
   const displayPath = formatWorkspace(workspacePath);
 

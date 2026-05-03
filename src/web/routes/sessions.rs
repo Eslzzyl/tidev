@@ -94,6 +94,7 @@ pub struct SessionDetail {
     pub updated_at: String,
     pub context_summary: Option<String>,
     pub context_retained_from: usize,
+    pub revert_message_id: Option<Uuid>,
 }
 
 /// List all sessions for the current workspace
@@ -169,6 +170,7 @@ pub async fn get_session(
         crate::log_warn!("Session {} not found", session_id);
         AppError::NotFound(format!("Session {} not found", session_id))
     })?;
+    let revert_message_id = store.load_revert_message_id(session_id)?;
     drop(store);
 
     crate::log_debug!("Retrieved session {} details", session_id);
@@ -185,6 +187,7 @@ pub async fn get_session(
         updated_at: record.updated_at.to_rfc3339(),
         context_summary: record.context_summary,
         context_retained_from: record.context_retained_from,
+        revert_message_id,
     }))
 }
 
