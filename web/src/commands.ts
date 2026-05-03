@@ -7,7 +7,8 @@ export type CommandAction =
   | "init"
   | "redo"
   | "rename"
-  | "skills";
+  | "skills"
+  | "connect";
 
 export interface CommandSpec {
   name: string;
@@ -72,6 +73,13 @@ export const COMMANDS: CommandSpec[] = [
     description: "Browse and load available skills",
     usage: "/skills",
     action: "skills",
+  },
+  {
+    name: "connect",
+    aliases: [],
+    description: "Connect to LLM providers",
+    usage: "/connect",
+    action: "connect",
   },
 ];
 

@@ -125,3 +125,44 @@ export interface SkillInfo {
   description: string;
   location: string;
 }
+
+// Provider types
+export interface ProviderModelInfo {
+  id: string;
+  display_name: string;
+  context_window: number;
+  max_output_tokens: number;
+  temperature: number;
+  supports_images: boolean;
+  supports_streaming: boolean;
+}
+
+export interface ProviderInfo {
+  id: string;
+  display_name: string;
+  source: "bundled" | "user";
+  connected: boolean;
+  base_url: string;
+  models: ProviderModelInfo[];
+}
+
+export interface ConnectProviderRequest {
+  api_key: string;
+}
+
+export interface CreateModelRequest {
+  model_id: string;
+  display_name: string;
+  context_window: number;
+  max_output_tokens: number;
+  temperature: number;
+  supports_images?: boolean;
+}
+
+export interface CreateProviderRequest {
+  provider_id: string;
+  display_name: string;
+  base_url: string;
+  api_key: string;
+  models: CreateModelRequest[];
+}

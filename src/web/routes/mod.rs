@@ -2,6 +2,7 @@ pub mod events;
 pub mod files;
 pub mod messages;
 pub mod models;
+pub mod providers;
 pub mod sessions;
 pub mod skills;
 pub mod static_file;
@@ -10,7 +11,7 @@ pub mod tools;
 
 use axum::{
     Router,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use tower_http::cors::CorsLayer;
 
@@ -48,6 +49,16 @@ pub fn api_routes() -> Router<AppState> {
         .route("/init", get(sessions::get_init_prompt))
         // Models
         .route("/models", get(models::list_models))
+        // Providers
+        .route("/providers", get(providers::list_providers).post(providers::create_provider))
+        .route(
+            "/providers/{id}",
+            delete(providers::delete_provider),
+        )
+        .route(
+            "/providers/{id}/connect",
+            post(providers::connect_provider).delete(providers::disconnect_provider),
+        )
         // Tools
         .route("/tools", get(tools::list_tools))
         // Skills

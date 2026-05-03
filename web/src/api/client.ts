@@ -14,6 +14,9 @@ import type {
   FileSuggestion,
   TodosResponse,
   SkillInfo,
+  ProviderInfo,
+  ConnectProviderRequest,
+  CreateProviderRequest,
 } from "../types/api";
 
 const API_BASE = "/api";
@@ -146,4 +149,38 @@ export const api = {
 
   // Init prompt
   getInitPrompt: () => fetchJson<{ prompt: string }>(`${API_BASE}/init`),
+
+  // Providers
+  listProviders: () =>
+    fetchJson<{ providers: ProviderInfo[] }>(`${API_BASE}/providers`),
+
+  connectProvider: (id: string, data: ConnectProviderRequest) =>
+    fetch(`${API_BASE}/providers/${encodeURIComponent(id)}/connect`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }).then((r) => {
+      if (!r.ok) throw new Error(`Failed to connect provider: ${r.status}`);
+    }),
+
+  disconnectProvider: (id: string) =>
+    fetch(`${API_BASE}/providers/${encodeURIComponent(id)}/connect`, {
+      method: "DELETE",
+    }).then((r) => {
+      if (!r.ok) throw new Error(`Failed to disconnect provider: ${r.status}`);
+    }),
+
+  createProvider: (data: CreateProviderRequest) =>
+    fetch(`${API_BASE}/providers`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }).then((r) => {
+      if (!r.ok) throw new Error(`Failed to create provider: ${r.status}`);
+    }),
+
+  deleteProvider: (id: string) =>
+    fetch(`${API_BASE}/providers/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }).then((r) => {
+      if (!r.ok) throw new Error(`Failed to delete provider: ${r.status}`);
+    }),
 };

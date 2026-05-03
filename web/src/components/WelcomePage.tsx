@@ -11,6 +11,7 @@ import { useSessionStore } from "../stores/useSessionStore";
 import { useUIStore } from "../stores/useUIStore";
 import { SmartInput } from "./SmartInput";
 import { SkillsDialog } from "./chat/SkillsDialog";
+import { ConnectDialog } from "./chat/ConnectDialog";
 import { api } from "../api/client";
 import { formatSessionDate } from "../utils/format";
 import type { Session } from "../types/api";
@@ -20,6 +21,7 @@ const MAX_RECENT_SESSIONS = 5;
 export function WelcomePage() {
   const [showAllSessions, setShowAllSessions] = useState(false);
   const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
+  const [connectDialogOpen, setConnectDialogOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const sessions = useSessionStore((s) => s.sessions);
@@ -60,6 +62,8 @@ export function WelcomePage() {
   const handleSlashCommand = useCallback((command: string) => {
     if (command === "skills" || command === "skill") {
       setSkillsDialogOpen(true);
+    } else if (command === "connect") {
+      setConnectDialogOpen(true);
     }
     // Other commands are not applicable on welcome page
   }, []);
@@ -284,6 +288,12 @@ export function WelcomePage() {
           // The skill content would need to be inserted into input
           setSkillsDialogOpen(false);
         }}
+      />
+
+      {/* Connect Dialog */}
+      <ConnectDialog
+        isOpen={connectDialogOpen}
+        onClose={() => setConnectDialogOpen(false)}
       />
     </div>
   );

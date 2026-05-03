@@ -5,12 +5,15 @@ use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    config::{AppConfig, AuthStore, ConfigPaths},
+    config::{AppConfig, AuthStore},
     llm::LlmClient,
     shared::file_search::FileSearchIndex,
     snapshot::SnapshotService,
     storage::SessionStore,
 };
+
+// Re-export ConfigPaths for use in routes
+pub use crate::config::ConfigPaths;
 
 use super::event_bus::EventBus;
 
@@ -33,6 +36,8 @@ pub struct AppState {
     pub workspace_root: PathBuf,
     /// Config directory path (for SkillCatalog discovery)
     pub config_dir: PathBuf,
+    /// Config paths for saving config/auth files
+    pub config_paths: crate::config::ConfigPaths,
     /// Cancellation token for graceful shutdown
     pub cancel_token: CancellationToken,
     /// File search index for @-mention completion
@@ -66,6 +71,7 @@ impl AppState {
             active_requests: Arc::new(RwLock::new(std::collections::HashMap::new())),
             workspace_root,
             config_dir: paths.config_dir.clone(),
+            config_paths: paths.clone(),
             cancel_token: CancellationToken::new(),
             file_search_index: Arc::new(FileSearchIndex::new()),
             snapshot: Arc::new(snapshot),

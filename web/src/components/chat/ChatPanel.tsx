@@ -10,6 +10,7 @@ import { MessageInput } from "./MessageInput";
 import { MessageDialog } from "./MessageDialog";
 import { RenameDialog } from "./RenameDialog";
 import { SkillsDialog } from "./SkillsDialog";
+import { ConnectDialog } from "./ConnectDialog";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 
 export function ChatPanel() {
@@ -100,6 +101,9 @@ export function ChatPanel() {
   const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
   const [skillInsert, setSkillInsert] = useState<{ text: string } | null>(null);
 
+  // Connect dialog state
+  const [connectDialogOpen, setConnectDialogOpen] = useState(false);
+
   const setMessages = useSessionStore((s) => s.setMessages);
   const setTodos = useSessionStore((s) => s.setTodos);
 
@@ -151,6 +155,8 @@ export function ChatPanel() {
       setRenameDialogOpen(true);
     } else if (command === "skills") {
       setSkillsDialogOpen(true);
+    } else if (command === "connect") {
+      setConnectDialogOpen(true);
     }
   }, []);
 
@@ -389,6 +395,12 @@ export function ChatPanel() {
         isOpen={skillsDialogOpen}
         onClose={() => setSkillsDialogOpen(false)}
         onSelect={handleSkillSelect}
+      />
+
+      {/* Connect Dialog (/connect command) */}
+      <ConnectDialog
+        isOpen={connectDialogOpen}
+        onClose={() => setConnectDialogOpen(false)}
       />
     </div>
   );

@@ -53,6 +53,12 @@ impl AuthStore {
             .filter(|value| !value.trim().is_empty())
     }
 
+    pub fn remove_api_key(&mut self, provider_id: &str) {
+        if let Some(provider) = self.providers.get_mut(provider_id) {
+            provider.api_key = None;
+        }
+    }
+
     pub fn set_telegram_bot_token(&mut self, token: impl Into<String>) {
         let token = token.into();
         self.channels
