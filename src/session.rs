@@ -243,7 +243,7 @@ impl MessageRole {
     }
 }
 
-pub const COMPACTION_MESSAGE_LABEL: &str = "Session compacted";
+pub const COMPACTION_MESSAGE_LABEL: &str = "Compaction";
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ToolCall {

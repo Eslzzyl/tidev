@@ -1994,7 +1994,8 @@ impl App {
                         .content
                         .split_once("\n\n")
                         .map(|(_, summary)| summary)
-                        .unwrap_or("");
+                        .unwrap_or("")
+                        .trim();
 
                     let mut lines = Vec::new();
                     lines.push(Line::from(""));
@@ -2003,12 +2004,14 @@ impl App {
                         body_width,
                         palette,
                     ));
-                    lines.push(Line::from(""));
-                    lines.extend(self.render_text_body_lines(
-                        summary,
-                        body_width,
-                        Some(self.workspace_root.as_path()),
-                    ));
+                    if !summary.is_empty() {
+                        lines.push(Line::from(""));
+                        lines.extend(self.render_text_body_lines(
+                            summary,
+                            body_width,
+                            Some(self.workspace_root.as_path()),
+                        ));
+                    }
                     lines.push(Line::from(""));
                     return vec![(palette.background, lines)];
                 }

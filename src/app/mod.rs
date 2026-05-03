@@ -86,7 +86,7 @@ use crate::{
     notifications,
     prompts::{SessionMode, init_command},
     provider_setup::ConnectDialog,
-    session::{AssistantTurn, BackendEvent, Conversation, Message, MessageAttachment, MessageRole},
+    session::{AssistantTurn, BackendEvent, COMPACTION_MESSAGE_LABEL, Conversation, Message, MessageAttachment, MessageRole},
     shared::file_search::current_at_fragment,
     snapshot::{FileDiff, SnapshotService},
     storage::SessionStore,
@@ -717,7 +717,9 @@ impl App {
 
                 if let Some(message) = self.conversation.messages.last_mut()
                     && message.streaming
-                    && matches!(message.role, MessageRole::Assistant)
+                    && (matches!(message.role, MessageRole::Assistant)
+                        || (matches!(message.role, MessageRole::System)
+                            && message.content.starts_with(COMPACTION_MESSAGE_LABEL)))
                 {
                     message.content.push_str(&content);
                     let message_id = message.id;
