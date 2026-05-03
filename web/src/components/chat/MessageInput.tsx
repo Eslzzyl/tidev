@@ -14,11 +14,22 @@ import { useSessionStore } from "../../stores/useSessionStore";
 import { useUIStore } from "../../stores/useUIStore";
 import { api } from "../../api/client";
 import { FileMentionPopover } from "./FileMentionPopover";
-import type { ModelInfo, FileSuggestion, TodoItem } from "../../types/api";
+import { commandFragment, getSuggestions } from "../../commands";
+import type {
+  ModelInfo,
+  FileSuggestion,
+  TodoItem,
+} from "../../types/api";
+import type { CommandSuggestion } from "../../commands";
 
 type ThinkingOption = { label: string; value: string };
 
-export function MessageInput() {
+interface MessageInputProps {
+  onSlashCommand?: (command: string) => void;
+  skillInsert?: { text: string } | null;
+}
+
+export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps) {
   const [inputValue, setInputValue] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -30,6 +41,19 @@ export function MessageInput() {
     atPosition: number;
     cursorPosition: { x: number; y: number };
   } | null>(null);
+
+  // Command palette (/command) state
+  const [commandPalette, setCommandPalette] = useState<{
+    visible: boolean;
+    selectedIndex: number;
+    suggestions: CommandSuggestion[];
+    position: { x: number; y: number };
+  }>({
+    visible: false,
+    selectedIndex: 0,
+    suggestions: [],
+    position: { x: 0, y: 0 },
+  });
 
   // Models state
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -194,6 +218,45 @@ export function MessageInput() {
   }, [inputValue]);
 
   function handleKeydown(event: React.KeyboardEvent) {
+    // Command palette navigation takes priority
+    if (commandPalette.visible && commandPalette.suggestions.length > 0) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeCommandPalette();
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setCommandPalette((prev) => ({
+          ...prev,
+          selectedIndex:
+            prev.selectedIndex > 0
+              ? prev.selectedIndex - 1
+              : prev.suggestions.length - 1,
+        }));
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setCommandPalette((prev) => ({
+          ...prev,
+          selectedIndex:
+            prev.selectedIndex < prev.suggestions.length - 1
+              ? prev.selectedIndex + 1
+              : 0,
+        }));
+        return;
+      }
+      if (event.key === "Tab" || event.key === "Enter") {
+        event.preventDefault();
+        const selected = commandPalette.suggestions[commandPalette.selectedIndex];
+        if (selected) {
+          executeCommand(selected.spec.name);
+        }
+        return;
+      }
+    }
+
     // Don't handle Tab/Enter if file mention popover is visible
     if (fileMention?.visible) {
       if (event.key === "Enter" || event.key === "Tab") {
@@ -219,6 +282,12 @@ export function MessageInput() {
   async function handleSubmit() {
     const content = inputValue.trim();
     if (!content || !isInputEnabled || isSubmitting) return;
+
+    // Check for slash commands
+    if (content.startsWith("/")) {
+      handleSlashCommand(content);
+      return;
+    }
 
     setIsSubmitting(true);
     setStreaming(true);
@@ -274,6 +343,106 @@ export function MessageInput() {
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function handleSlashCommand(command: string) {
+    const cmd = command.toLowerCase();
+    const name = cmd.startsWith("/") ? cmd.slice(1).split(" ")[0] : cmd;
+
+    setInputValue("");
+
+    if (name === "message" || name === "msg") {
+      onSlashCommand?.("message");
+    } else if (name === "undo") {
+      executeUndo();
+    } else if (name === "redo") {
+      executeRedo();
+    } else if (name === "init") {
+      executeInit();
+    } else if (name === "rename" || name === "title") {
+      onSlashCommand?.("rename");
+    } else if (name === "new" || name === "clear") {
+      useSessionStore.getState().goToWelcome();
+    } else if (name === "skills" || name === "skill") {
+      onSlashCommand?.("skills");
+    }
+  }
+
+  async function executeCommand(name: string) {
+    setInputValue("");
+    closeCommandPalette();
+
+    if (name === "message" || name === "msg") {
+      onSlashCommand?.("message");
+    } else if (name === "undo") {
+      await executeUndo();
+    } else if (name === "redo") {
+      await executeRedo();
+    } else if (name === "init") {
+      await executeInit();
+    } else if (name === "rename" || name === "title") {
+      onSlashCommand?.("rename");
+    } else if (name === "new" || name === "clear") {
+      useSessionStore.getState().goToWelcome();
+    } else if (name === "skills" || name === "skill") {
+      onSlashCommand?.("skills");
+    }
+  }
+
+  async function executeUndo() {
+    const sessionId = currentSessionId;
+    if (!sessionId) return;
+
+    const messages = useSessionStore.getState().messages;
+    const userMessages = messages.filter((m) => m.role === "user");
+    if (userMessages.length === 0) return;
+
+    const lastUserMessage = userMessages[userMessages.length - 1];
+
+    try {
+      await api.revertToMessage(sessionId, lastUserMessage.id);
+      const { messages: updatedMessages, todos } =
+        await api.listMessages(sessionId);
+      useSessionStore.getState().setMessages(updatedMessages);
+      useSessionStore.getState().setTodos(todos ?? []);
+    } catch (error) {
+      console.error("Undo failed:", error);
+    }
+  }
+
+  async function executeRedo() {
+    const sessionId = currentSessionId;
+    if (!sessionId) return;
+
+    try {
+      await api.redoSession(sessionId);
+      const { messages: updatedMessages, todos } =
+        await api.listMessages(sessionId);
+      useSessionStore.getState().setMessages(updatedMessages);
+      useSessionStore.getState().setTodos(todos ?? []);
+    } catch (error) {
+      console.error("Redo failed:", error);
+    }
+  }
+
+  async function executeInit() {
+    try {
+      const { prompt } = await api.getInitPrompt();
+      setInputValue(prompt);
+      // Focus the textarea so user can review/edit before sending
+      setTimeout(() => textareaRef.current?.focus(), 0);
+    } catch (error) {
+      console.error("Failed to load init prompt:", error);
+    }
+  }
+
+  function closeCommandPalette() {
+    setCommandPalette({
+      visible: false,
+      selectedIndex: 0,
+      suggestions: [],
+      position: { x: 0, y: 0 },
+    });
   }
 
   async function handleStop() {
@@ -366,24 +535,52 @@ export function MessageInput() {
     return { x, y };
   }
 
-  // Handle input change with @ detection
+  // Handle skill insert from SkillsDialog
+  const prevSkillInsertRef = useRef<{ text: string } | null>(null);
+  useEffect(() => {
+    if (skillInsert && skillInsert !== prevSkillInsertRef.current) {
+      prevSkillInsertRef.current = skillInsert;
+      setInputValue(skillInsert.text);
+      setTimeout(() => textareaRef.current?.focus(), 0);
+    } else if (!skillInsert) {
+      prevSkillInsertRef.current = null;
+    }
+  }, [skillInsert]);
+
+  // Handle input change with @ detection and /command detection
   function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     const value = e.target.value;
     const cursor = e.target.selectionStart || 0;
 
     setInputValue(value);
 
+    // Check for @ file mention
     const atFragment = detectAtFragment(value, cursor);
     if (atFragment) {
-      const position = calculatePopoverPosition(e.target, atFragment.atIndex);
       setFileMention({
         visible: true,
         query: atFragment.query,
         atPosition: atFragment.atIndex,
-        cursorPosition: position,
+        cursorPosition: calculatePopoverPosition(e.target, atFragment.atIndex),
       });
     } else {
       setFileMention(null);
+    }
+
+    // Check for / command palette
+    const fragment = commandFragment(value);
+    if (fragment !== null) {
+      const suggestions = getSuggestions(fragment);
+      // Calculate position at the start of input (where / is)
+      const position = calculatePopoverPosition(e.target, 0);
+      setCommandPalette({
+        visible: true,
+        selectedIndex: 0,
+        suggestions,
+        position: { x: position.x, y: position.y },
+      });
+    } else {
+      closeCommandPalette();
     }
   }
 
@@ -640,6 +837,62 @@ export function MessageInput() {
               onSelect={handleFileSelect}
               onClose={() => setFileMention(null)}
             />
+          )}
+
+          {/* Command Palette (/command) */}
+          {commandPalette.visible && commandPalette.suggestions.length > 0 && (
+            <div
+              className="fixed z-50 w-full max-w-sm"
+              style={{
+                left: commandPalette.position.x,
+                top: commandPalette.position.y - 8,
+                transform: "translateY(-100%)",
+              }}
+            >
+              <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
+                <div className="max-h-64 overflow-y-auto py-1">
+                  {commandPalette.suggestions.map((suggestion, index) => (
+                    <button
+                      key={suggestion.spec.name}
+                      onClick={() => {
+                        executeCommand(suggestion.spec.name);
+                        textareaRef.current?.focus();
+                      }}
+                      onMouseEnter={() =>
+                        setCommandPalette((prev) => ({
+                          ...prev,
+                          selectedIndex: index,
+                        }))
+                      }
+                      className={`flex w-full items-center gap-3 px-4 py-2 text-left ${
+                        index === commandPalette.selectedIndex
+                          ? "bg-blue-50 dark:bg-blue-900/30"
+                          : "hover:bg-neutral-50 dark:hover:bg-neutral-800"
+                      }`}
+                    >
+                      <span
+                        className={`flex-shrink-0 rounded px-1.5 py-0.5 font-mono text-xs font-medium ${
+                          index === commandPalette.selectedIndex
+                            ? "bg-blue-200 text-blue-800 dark:bg-blue-800 dark:text-blue-200"
+                            : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
+                        }`}
+                      >
+                        /{suggestion.spec.name}
+                      </span>
+                      <span className="truncate text-xs text-neutral-500 dark:text-neutral-400">
+                        {suggestion.spec.description}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <div className="border-t border-neutral-100 px-4 py-1.5 text-[10px] text-neutral-400 dark:border-neutral-800 dark:text-neutral-500">
+                  <kbd className="rounded bg-neutral-100 px-1 py-0.5 font-mono dark:bg-neutral-800">↵</kbd> Execute ·{" "}
+                  <kbd className="rounded bg-neutral-100 px-1 py-0.5 font-mono dark:bg-neutral-800">Tab</kbd> Execute ·{" "}
+                  <kbd className="rounded bg-neutral-100 px-1 py-0.5 font-mono dark:bg-neutral-800">↑↓</kbd> Navigate ·{" "}
+                  <kbd className="rounded bg-neutral-100 px-1 py-0.5 font-mono dark:bg-neutral-800">Esc</kbd> Close
+                </div>
+              </div>
+            </div>
           )}
 
           {/* Send / Stop button */}

@@ -3,6 +3,7 @@ pub mod files;
 pub mod messages;
 pub mod models;
 pub mod sessions;
+pub mod skills;
 pub mod static_file;
 pub mod todos;
 pub mod tools;
@@ -31,6 +32,7 @@ pub fn api_routes() -> Router<AppState> {
             "/sessions/{id}",
             get(sessions::get_session).delete(sessions::delete_session),
         )
+        .route("/sessions/{id}/fork", post(sessions::fork_session))
         // Todos
         .route("/sessions/{id}/todos", get(todos::get_todos))
         // Messages
@@ -40,10 +42,16 @@ pub fn api_routes() -> Router<AppState> {
         )
         .route("/sessions/{id}/abort", post(messages::abort_request))
         .route("/sessions/{id}/revert", post(messages::revert_to_message))
+        .route("/sessions/{id}/redo", post(messages::redo_last_undo))
+        .route("/sessions/{id}/rename", post(sessions::rename_session))
+        // Init prompt
+        .route("/init", get(sessions::get_init_prompt))
         // Models
         .route("/models", get(models::list_models))
         // Tools
         .route("/tools", get(tools::list_tools))
+        // Skills
+        .route("/skills", get(skills::list_skills))
         // Files (for @-mention)
         .route("/files/search", get(files::search_files))
         // CORS

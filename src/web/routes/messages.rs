@@ -740,6 +740,57 @@ pub async fn revert_to_message(
     }))
 }
 
+/// Redo response
+#[derive(Serialize)]
+pub struct RedoResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+/// Redo the last undo — restore files from the redo snapshot and clear revert state.
+pub async fn redo_last_undo(
+    State(state): State<AppState>,
+    AxumPath(session_id): AxumPath<Uuid>,
+) -> WebResult<Json<RedoResponse>> {
+    crate::log_info!("Redo request for session {}", session_id);
+
+    let store = state.store.lock().await;
+
+    // Load the redo snapshot
+    let redo_snapshot = store.load_redo_snapshot(session_id)?;
+    let Some(snapshot_hash) = redo_snapshot else {
+        drop(store);
+        return Ok(Json(RedoResponse {
+            success: true,
+            message: "Nothing to redo".to_string(),
+        }));
+    };
+
+    // Restore files from the redo snapshot
+    if !snapshot_hash.is_empty() {
+        crate::log_info!("Restoring redo snapshot {}", snapshot_hash);
+        if let Err(error) = state.snapshot.restore(&snapshot_hash).await {
+            crate::log_warn!("Redo restore failed: {}", error);
+        }
+    }
+
+    // Clear the revert state
+    store.set_revert_message_id(session_id, None, None)?;
+    drop(store);
+
+    // Publish event to notify clients
+    state
+        .event_bus
+        .publish(AppEvent::MessagesUpdated { session_id });
+
+    crate::log_info!("Redo completed for session {}", session_id);
+
+    Ok(Json(RedoResponse {
+        success: true,
+        message: "Redo complete".to_string(),
+    }))
+}
+
 /// Collect patches from messages after the target message.
 fn collect_patches_after_message(
     messages: &[Message],

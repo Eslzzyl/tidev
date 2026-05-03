@@ -118,3 +118,9 @@ export interface FileSuggestion {
   kind: "file" | "directory" | "image";
   matched_indices: number[];
 }
+
+export interface SkillInfo {
+  name: string;
+  description: string;
+  location: string;
+}

@@ -31,6 +31,8 @@ pub struct AppState {
     pub active_requests: Arc<RwLock<std::collections::HashMap<uuid::Uuid, u64>>>,
     /// Current workspace root path
     pub workspace_root: PathBuf,
+    /// Config directory path (for SkillCatalog discovery)
+    pub config_dir: PathBuf,
     /// Cancellation token for graceful shutdown
     pub cancel_token: CancellationToken,
     /// File search index for @-mention completion
@@ -63,6 +65,7 @@ impl AppState {
             auth: Arc::new(RwLock::new(auth)),
             active_requests: Arc::new(RwLock::new(std::collections::HashMap::new())),
             workspace_root,
+            config_dir: paths.config_dir.clone(),
             cancel_token: CancellationToken::new(),
             file_search_index: Arc::new(FileSearchIndex::new()),
             snapshot: Arc::new(snapshot),

@@ -7,6 +7,9 @@ import { api } from "../../api/client";
 import { buildRounds } from "../../utils/round";
 import { MessageRound } from "./MessageRound";
 import { MessageInput } from "./MessageInput";
+import { MessageDialog } from "./MessageDialog";
+import { RenameDialog } from "./RenameDialog";
+import { SkillsDialog } from "./SkillsDialog";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 
 export function ChatPanel() {
@@ -85,6 +88,18 @@ export function ChatPanel() {
   const [isUndoing, setIsUndoing] = useState(false);
   const [undoError, setUndoError] = useState<string | null>(null);
 
+  // Message dialog state
+  const [messageDialogOpen, setMessageDialogOpen] = useState(false);
+  const [isForking, setIsForking] = useState(false);
+
+  // Rename dialog state
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
+
+  // Skills dialog state
+  const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
+  const [skillInsert, setSkillInsert] = useState<{ text: string } | null>(null);
+
   const setMessages = useSessionStore((s) => s.setMessages);
   const setTodos = useSessionStore((s) => s.setTodos);
 
@@ -127,6 +142,95 @@ export function ChatPanel() {
     setUndoTargetMessageId(null);
     setUndoError(null);
   }, []);
+
+  // Slash command handler
+  const handleSlashCommand = useCallback((command: string) => {
+    if (command === "message") {
+      setMessageDialogOpen(true);
+    } else if (command === "rename") {
+      setRenameDialogOpen(true);
+    } else if (command === "skills") {
+      setSkillsDialogOpen(true);
+    }
+  }, []);
+
+  // Fork handler
+  const handleForkFromMessage = useCallback(
+    async (messageId: string) => {
+      if (!currentSessionId) return;
+
+      setIsForking(true);
+      try {
+        const result = await api.forkSession(
+          currentSessionId,
+          messageId,
+          `Fork: ${currentSession?.title || "New Session"}`,
+        );
+
+        // Navigate to the new forked session
+        const [session, { messages: forkedMessages, todos }] =
+          await Promise.all([
+            api.getSession(result.session_id),
+            api.listMessages(result.session_id),
+          ]);
+
+        useSessionStore.getState().setCurrentSession(session);
+        useSessionStore.getState().setMessages(forkedMessages);
+        useSessionStore.getState().setTodos(todos ?? []);
+
+        // Update URL
+        const url = new URL(window.location.href);
+        url.searchParams.set("session", result.session_id);
+        window.history.replaceState({}, "", url.toString());
+
+        setMessageDialogOpen(false);
+      } catch (error) {
+        console.error("Fork failed:", error);
+      } finally {
+        setIsForking(false);
+      }
+    },
+    [currentSessionId, currentSession],
+  );
+
+  // Rename handler
+  const handleRenameConfirm = useCallback(
+    async (title: string) => {
+      if (!currentSessionId) return;
+
+      setIsRenaming(true);
+      try {
+        await api.renameSession(currentSessionId, title);
+        // Refresh session to get updated data
+        const session = await api.getSession(currentSessionId);
+        useSessionStore.getState().setCurrentSession(session);
+        setRenameDialogOpen(false);
+      } catch (error) {
+        console.error("Rename failed:", error);
+      } finally {
+        setIsRenaming(false);
+      }
+    },
+    [currentSessionId],
+  );
+
+  // Skill select handler
+  const handleSkillSelect = useCallback((skillName: string) => {
+    setSkillsDialogOpen(false);
+    setSkillInsert({ text: `/skill ${skillName} ` });
+  }, []);
+
+  // Undo from message dialog
+  const handleUndoFromDialog = useCallback(
+    (messageId: string) => {
+      setMessageDialogOpen(false);
+      // Reuse the existing undo flow
+      setUndoTargetMessageId(messageId);
+      setUndoDialogOpen(true);
+      setUndoError(null);
+    },
+    [],
+  );
 
   // Determine if undo should be disabled (during streaming or when there's no session)
   const canUndo = !!currentSessionId && !streamingRound;
@@ -239,7 +343,10 @@ export function ChatPanel() {
       </div>
 
       {/* Input Area */}
-      <MessageInput />
+      <MessageInput
+        onSlashCommand={handleSlashCommand}
+        skillInsert={skillInsert}
+      />
 
       {/* Undo Confirmation Dialog */}
       <ConfirmDialog
@@ -259,6 +366,33 @@ export function ChatPanel() {
           {undoError}
         </div>
       )}
+
+      {/* Message Dialog (/message command) */}
+      <MessageDialog
+        isOpen={messageDialogOpen}
+        messages={messages}
+        onClose={() => setMessageDialogOpen(false)}
+        onFork={handleForkFromMessage}
+        onUndo={handleUndoFromDialog}
+        isUndoing={isUndoing}
+        isForking={isForking}
+      />
+
+      {/* Rename Dialog (/rename command) */}
+      <RenameDialog
+        isOpen={renameDialogOpen}
+        currentTitle={currentSession?.title || ""}
+        onClose={() => setRenameDialogOpen(false)}
+        onConfirm={handleRenameConfirm}
+        isLoading={isRenaming}
+      />
+
+      {/* Skills Dialog (/skills command) */}
+      <SkillsDialog
+        isOpen={skillsDialogOpen}
+        onClose={() => setSkillsDialogOpen(false)}
+        onSelect={handleSkillSelect}
+      />
     </div>
   );
 }

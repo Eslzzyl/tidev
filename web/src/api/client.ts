@@ -13,6 +13,7 @@ import type {
   WorkspaceInfo,
   FileSuggestion,
   TodosResponse,
+  SkillInfo,
 } from "../types/api";
 
 const API_BASE = "/api";
@@ -95,6 +96,9 @@ export const api = {
   // Tools
   listTools: () => fetchJson<{ tools: ToolInfo[] }>(`${API_BASE}/tools`),
 
+  // Skills
+  listSkills: () => fetchJson<{ skills: SkillInfo[] }>(`${API_BASE}/skills`),
+
   // Files (@-mention search)
   searchFiles: (query: string) =>
     fetchJson<{ suggestions: FileSuggestion[] }>(
@@ -115,4 +119,32 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ message_id: messageId }),
     }),
+
+  // Fork session from a message
+  forkSession: (sessionId: string, messageId: string, title?: string) =>
+    fetchJson<{
+      session_id: string;
+      message_count: number;
+    }>(`${API_BASE}/sessions/${sessionId}/fork`, {
+      method: "POST",
+      body: JSON.stringify({ message_id: messageId, title }),
+    }),
+
+  // Redo
+  redoSession: (sessionId: string) =>
+    fetchJson<{ success: boolean; message: string }>(
+      `${API_BASE}/sessions/${sessionId}/redo`,
+      { method: "POST" },
+    ),
+
+  // Rename session
+  renameSession: (sessionId: string, title: string) =>
+    fetchJson<{ success: boolean; title: string }>(
+      `${API_BASE}/sessions/${sessionId}/rename`,
+      { method: "POST", body: JSON.stringify({ title }) },
+    ),
+
+  // Init prompt
+  getInitPrompt: () =>
+    fetchJson<{ prompt: string }>(`${API_BASE}/init`),
 };
