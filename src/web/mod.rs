@@ -6,11 +6,17 @@ pub mod server;
 pub mod state;
 
 use std::path::PathBuf;
+use std::sync::Arc;
+
+use tokio::sync::Mutex;
 
 use crate::{
+    agent::runtime::AgentRuntime,
     config::{AppConfig, AuthStore, ConfigPaths},
     llm::LlmClient,
+    mcp::McpManager,
     storage::SessionStore,
+    tooling::{FileReadTracker, ToolRegistry},
 };
 
 use self::{
@@ -19,6 +25,16 @@ use self::{
     server::{ServerConfig, start_server},
     state::AppState,
 };
+
+/// Find the git worktree root by looking for a .git directory.
+fn find_git_worktree(start: &std::path::Path) -> Option<PathBuf> {
+    for ancestor in start.ancestors() {
+        if ancestor.join(".git").is_dir() {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    None
+}
 
 /// Web subcommand options
 #[derive(Debug, Clone, Default)]
@@ -64,6 +80,41 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     let auth = AuthStore::load_or_create(&paths)?;
     crate::log_info!("Auth store loaded");
 
+    // Create shared agent runtime (ToolRegistry, MemoryStore, etc.)
+    let memory_store = Arc::new(crate::memory::types::MemoryStore::open(&paths.database_file)?);
+    let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
+    let file_read_tracker = Arc::new(FileReadTracker::new());
+    let worktree = find_git_worktree(&workspace_root);
+    let mut tools = ToolRegistry::new(
+        workspace_root.clone(),
+        paths.config_dir.clone(),
+        config.skills.clone(),
+        mcp,
+        config.permissions.clone(),
+        file_read_tracker,
+        memory_store,
+        config.rtk.enabled,
+        worktree,
+    );
+
+    // Resolve default model to set on tools
+    if let Ok(default_model) = config.resolve_active_model(&auth) {
+        tools.set_active_model(default_model);
+    }
+
+    let agent = AgentRuntime {
+        workspace_root: workspace_root.clone(),
+        config_dir: paths.config_dir.clone(),
+        config_paths: paths.clone(),
+        store: Arc::new(Mutex::new(store.clone())),
+        llm_client: llm_client.clone(),
+        tools,
+        instructions: config.instructions.clone(),
+        instruction_content_cache: std::collections::HashMap::new(),
+    };
+
+    crate::log_info!("Agent runtime created");
+
     // Create app state
     let state = AppState::new(
         store,
@@ -73,6 +124,7 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
         auth,
         workspace_root,
         &paths,
+        agent,
     )?;
 
     // Determine static file serving mode

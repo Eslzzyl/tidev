@@ -5,6 +5,7 @@ use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    agent::runtime::AgentRuntime,
     config::{AppConfig, AuthStore},
     llm::LlmClient,
     shared::file_search::FileSearchIndex,
@@ -44,6 +45,8 @@ pub struct AppState {
     pub file_search_index: Arc<FileSearchIndex>,
     /// Snapshot service for undo/revert operations
     pub snapshot: Arc<SnapshotService>,
+    /// Shared agent runtime (tools, system prompt, agent loop)
+    pub agent: AgentRuntime,
 }
 
 impl AppState {
@@ -56,6 +59,7 @@ impl AppState {
         auth: AuthStore,
         workspace_root: PathBuf,
         paths: &ConfigPaths,
+        agent: AgentRuntime,
     ) -> anyhow::Result<Self> {
         crate::log_debug!("Creating new AppState");
 
@@ -75,6 +79,7 @@ impl AppState {
             cancel_token: CancellationToken::new(),
             file_search_index: Arc::new(FileSearchIndex::new()),
             snapshot: Arc::new(snapshot),
+            agent,
         })
     }
 

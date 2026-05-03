@@ -93,6 +93,10 @@ impl ToolRegistry {
         self.mcp.summaries()
     }
 
+    pub fn memory_store(&self) -> Arc<crate::memory::types::MemoryStore> {
+        self.memory_store.clone()
+    }
+
     pub fn mcp_manager(&self) -> McpManager {
         self.mcp.clone()
     }
