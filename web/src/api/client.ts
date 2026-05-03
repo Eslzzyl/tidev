@@ -145,6 +145,5 @@ export const api = {
     ),
 
   // Init prompt
-  getInitPrompt: () =>
-    fetchJson<{ prompt: string }>(`${API_BASE}/init`),
+  getInitPrompt: () => fetchJson<{ prompt: string }>(`${API_BASE}/init`),
 };

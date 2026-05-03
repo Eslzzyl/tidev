@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   MessageSquare,
@@ -9,6 +9,8 @@ import {
 } from "lucide-react";
 import { useSessionStore } from "../stores/useSessionStore";
 import { useUIStore } from "../stores/useUIStore";
+import { SmartInput } from "./SmartInput";
+import { SkillsDialog } from "./chat/SkillsDialog";
 import { api } from "../api/client";
 import { formatSessionDate } from "../utils/format";
 import type { Session } from "../types/api";
@@ -16,9 +18,8 @@ import type { Session } from "../types/api";
 const MAX_RECENT_SESSIONS = 5;
 
 export function WelcomePage() {
-  const [inputValue, setInputValue] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAllSessions, setShowAllSessions] = useState(false);
+  const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const sessions = useSessionStore((s) => s.sessions);
@@ -27,8 +28,6 @@ export function WelcomePage() {
   const setMessages = useSessionStore((s) => s.setMessages);
   const setError = useSessionStore((s) => s.setError);
   const setLoading = useSessionStore((s) => s.setLoading);
-  const startDraftSession = useSessionStore((s) => s.startDraftSession);
-  const theme = useUIStore((s) => s.theme);
   const toggleSettings = useUIStore((s) => s.toggleSettings);
 
   // Close menu when clicking outside
@@ -58,12 +57,21 @@ export function WelcomePage() {
       .catch(() => setWorkspaceRoot(""));
   }, []);
 
-  const handleSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!inputValue.trim() || isSubmitting) return;
+  const handleSlashCommand = useCallback((command: string) => {
+    if (command === "skills" || command === "skill") {
+      setSkillsDialogOpen(true);
+    }
+    // Other commands are not applicable on welcome page
+  }, []);
 
-      setIsSubmitting(true);
+  const handleSubmit = useCallback(
+    async (payload: {
+      inputValue: string;
+      modelId: string | null;
+      providerId: string | null;
+      mode: "plan" | "build";
+      thinkingLevel: string | null;
+    }) => {
       try {
         // Get workspace if not loaded yet
         let root = workspaceRoot;
@@ -76,7 +84,7 @@ export function WelcomePage() {
         // Create session with the input as title
         const { session_id } = await api.createSession({
           workspace_root: root,
-          title: inputValue.trim(),
+          title: payload.inputValue,
         });
 
         // Load the new session
@@ -96,20 +104,9 @@ export function WelcomePage() {
         setError(
           err instanceof Error ? err.message : "Failed to create session",
         );
-      } finally {
-        setIsSubmitting(false);
-        setInputValue("");
       }
     },
-    [
-      inputValue,
-      isSubmitting,
-      workspaceRoot,
-      setCurrentSession,
-      setMessages,
-      setSessions,
-      setError,
-    ],
+    [workspaceRoot, setCurrentSession, setMessages, setSessions, setError],
   );
 
   const handleSelectSession = useCallback(
@@ -131,10 +128,6 @@ export function WelcomePage() {
     },
     [setLoading, setCurrentSession, setMessages, setError],
   );
-
-  const handleNewSessionClick = useCallback(() => {
-    startDraftSession("New Session");
-  }, [startDraftSession]);
 
   // Sort sessions by updated_at desc and take top 5
   const recentSessions = [...sessions]
@@ -167,31 +160,17 @@ export function WelcomePage() {
         </p>
       </div>
 
-      {/* Input Box */}
+      {/* Smart Input Box */}
       <div className="w-full max-w-2xl">
-        <form onSubmit={handleSubmit} className="relative">
-          <div className="relative rounded-2xl border border-neutral-200 bg-white shadow-lg dark:border-neutral-800 dark:bg-neutral-900">
-            <input
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              placeholder="What would you like to work on?"
-              className="w-full rounded-2xl bg-transparent px-6 py-4 pr-16 text-base text-neutral-900 placeholder-neutral-400 outline-none dark:text-neutral-100 dark:placeholder-neutral-500"
-              disabled={isSubmitting}
-              autoFocus
-            />
-            <button
-              type="submit"
-              disabled={!inputValue.trim() || isSubmitting}
-              className="absolute right-3 top-1/2 -translate-y-1/2 rounded-xl bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
-            >
-              {isSubmitting ? "..." : "Go"}
-            </button>
-          </div>
-          <p className="mt-2 text-center text-xs text-neutral-400 dark:text-neutral-500">
-            Press Enter to create a new session
-          </p>
-        </form>
+        <SmartInput
+          onSubmit={handleSubmit}
+          onSlashCommand={handleSlashCommand}
+          placeholder="What would you like to work on?"
+          multiline={false}
+          autoFocus
+          className="w-full"
+          workspacePath={workspaceRoot}
+        />
       </div>
 
       {/* Recent Sessions */}
@@ -295,6 +274,17 @@ export function WelcomePage() {
           </p>
         </div>
       )}
+
+      {/* Skills Dialog */}
+      <SkillsDialog
+        isOpen={skillsDialogOpen}
+        onClose={() => setSkillsDialogOpen(false)}
+        onSelect={(content) => {
+          // On welcome page, we just close the dialog
+          // The skill content would need to be inserted into input
+          setSkillsDialogOpen(false);
+        }}
+      />
     </div>
   );
 }

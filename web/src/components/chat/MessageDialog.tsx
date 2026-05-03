@@ -42,9 +42,7 @@ export function MessageDialog({
     const ids = new Set(
       messages
         .filter(
-          (m) =>
-            m.role === "user" &&
-            m.content.toLowerCase().includes(query),
+          (m) => m.role === "user" && m.content.toLowerCase().includes(query),
         )
         .map((m) => m.id),
     );
@@ -133,7 +131,11 @@ export function MessageDialog({
                       <div className="min-w-0 flex-1">
                         <div className="mb-1 flex items-center gap-2">
                           <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                            {isUser ? "You" : isAssistant ? "Assistant" : msg.role}
+                            {isUser
+                              ? "You"
+                              : isAssistant
+                                ? "Assistant"
+                                : msg.role}
                           </span>
                           <span className="text-xs text-neutral-400 dark:text-neutral-600">
                             {formatTime(msg.created_at)}

@@ -221,16 +221,13 @@ export function ChatPanel() {
   }, []);
 
   // Undo from message dialog
-  const handleUndoFromDialog = useCallback(
-    (messageId: string) => {
-      setMessageDialogOpen(false);
-      // Reuse the existing undo flow
-      setUndoTargetMessageId(messageId);
-      setUndoDialogOpen(true);
-      setUndoError(null);
-    },
-    [],
-  );
+  const handleUndoFromDialog = useCallback((messageId: string) => {
+    setMessageDialogOpen(false);
+    // Reuse the existing undo flow
+    setUndoTargetMessageId(messageId);
+    setUndoDialogOpen(true);
+    setUndoError(null);
+  }, []);
 
   // Determine if undo should be disabled (during streaming or when there's no session)
   const canUndo = !!currentSessionId && !streamingRound;

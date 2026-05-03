@@ -1,6 +1,13 @@
 /** Slash command definitions for the web frontend */
 
-export type CommandAction = "message" | "undo" | "new" | "init" | "redo" | "rename" | "skills";
+export type CommandAction =
+  | "message"
+  | "undo"
+  | "new"
+  | "init"
+  | "redo"
+  | "rename"
+  | "skills";
 
 export interface CommandSpec {
   name: string;

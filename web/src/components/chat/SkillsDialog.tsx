@@ -1,5 +1,12 @@
 import { useReducer, useEffect, useRef, useMemo } from "react";
-import { X, Search, BookOpen, FileText, Loader2, AlertCircle } from "lucide-react";
+import {
+  X,
+  Search,
+  BookOpen,
+  FileText,
+  Loader2,
+  AlertCircle,
+} from "lucide-react";
 import { api } from "../../api/client";
 import type { SkillInfo } from "../../types/api";
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   ChevronDown,
   Camera,
@@ -12,24 +12,21 @@ import {
 } from "lucide-react";
 import { useSessionStore } from "../../stores/useSessionStore";
 import { useUIStore } from "../../stores/useUIStore";
-import { api } from "../../api/client";
 import { FileMentionPopover } from "./FileMentionPopover";
 import { commandFragment, getSuggestions } from "../../commands";
-import type {
-  ModelInfo,
-  FileSuggestion,
-  TodoItem,
-} from "../../types/api";
+import { api } from "../../api/client";
+import type { ModelInfo, FileSuggestion, TodoItem } from "../../types/api";
 import type { CommandSuggestion } from "../../commands";
-
-type ThinkingOption = { label: string; value: string };
 
 interface MessageInputProps {
   onSlashCommand?: (command: string) => void;
   skillInsert?: { text: string } | null;
 }
 
-export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps) {
+export function MessageInput({
+  onSlashCommand,
+  skillInsert,
+}: MessageInputProps) {
   const [inputValue, setInputValue] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -63,8 +60,10 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(
     null,
   );
+  type ThinkingOption = { label: string; value: string };
   const [thinkingOptions, setThinkingOptions] = useState<ThinkingOption[]>([]);
   const [selectedThinking, setSelectedThinking] = useState<string>("");
+  const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement>(null);
@@ -78,7 +77,6 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
   const isDraftSession = useSessionStore((s) => s.isDraftSession);
   const mode = useSessionStore((s) => s.mode);
-  const setMode = useSessionStore((s) => s.setMode);
   const toggleMode = useSessionStore((s) => s.toggleMode);
   const commitDraftSession = useSessionStore((s) => s.commitDraftSession);
   const setCurrentSessionId = useSessionStore((s) => s.setCurrentSessionId);
@@ -92,7 +90,7 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
   const isInputEnabled = currentSessionId !== null || isDraftSession;
 
   // Filtered models
-  const filteredModels = useMemo(() => {
+  const filteredModels = (() => {
     if (!modelSearchQuery.trim()) return models;
     const q = modelSearchQuery.toLowerCase();
     return models.filter(
@@ -101,10 +99,10 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
         m.id.toLowerCase().includes(q) ||
         m.provider_name.toLowerCase().includes(q),
     );
-  }, [models, modelSearchQuery]);
+  })();
 
   // Grouped models
-  const groupedModels = useMemo(() => {
+  const groupedModels = (() => {
     const groups = new Map<string, ModelInfo[]>();
     for (const m of filteredModels) {
       const key = m.provider_name || m.provider_id;
@@ -114,7 +112,7 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
       groups.get(key)!.push(m);
     }
     return groups;
-  }, [filteredModels]);
+  })();
 
   // Update thinking levels based on model
   const updateThinkingLevels = useCallback((modelId: string) => {
@@ -188,6 +186,7 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
   // Load todos when session changes
   useEffect(() => {
     if (!currentSessionId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTodos([]);
       return;
     }
@@ -206,8 +205,6 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
       });
   }, [currentSessionId]);
 
-  const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
-
   // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
@@ -216,6 +213,19 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
         Math.min(textareaRef.current.scrollHeight, 200) + "px";
     }
   }, [inputValue]);
+
+  // Handle skill insert
+  useEffect(() => {
+    if (skillInsert?.text && textareaRef.current) {
+      const cursorPos = textareaRef.current.selectionStart || 0;
+      const newValue =
+        inputValue.slice(0, cursorPos) +
+        skillInsert.text +
+        inputValue.slice(cursorPos);
+      setInputValue(newValue);
+      textareaRef.current.focus();
+    }
+  }, [skillInsert, inputValue]);
 
   function handleKeydown(event: React.KeyboardEvent) {
     // Command palette navigation takes priority
@@ -249,7 +259,8 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
       }
       if (event.key === "Tab" || event.key === "Enter") {
         event.preventDefault();
-        const selected = commandPalette.suggestions[commandPalette.selectedIndex];
+        const selected =
+          commandPalette.suggestions[commandPalette.selectedIndex];
         if (selected) {
           executeCommand(selected.spec.name);
         }
@@ -429,7 +440,6 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
     try {
       const { prompt } = await api.getInitPrompt();
       setInputValue(prompt);
-      // Focus the textarea so user can review/edit before sending
       setTimeout(() => textareaRef.current?.focus(), 0);
     } catch (error) {
       console.error("Failed to load init prompt:", error);
@@ -527,25 +537,10 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
       textRect.width +
       parseInt(computedStyle.paddingLeft || "0");
     // Position at the top of current line (popover will extend upward)
-    const y =
-      textareaRect.top +
-      (lines.length - 1) * parseInt(computedStyle.lineHeight || "20") +
-      parseInt(computedStyle.paddingTop || "0");
+    const y = textareaRect.top + parseInt(computedStyle.paddingTop || "0");
 
     return { x, y };
   }
-
-  // Handle skill insert from SkillsDialog
-  const prevSkillInsertRef = useRef<{ text: string } | null>(null);
-  useEffect(() => {
-    if (skillInsert && skillInsert !== prevSkillInsertRef.current) {
-      prevSkillInsertRef.current = skillInsert;
-      setInputValue(skillInsert.text);
-      setTimeout(() => textareaRef.current?.focus(), 0);
-    } else if (!skillInsert) {
-      prevSkillInsertRef.current = null;
-    }
-  }, [skillInsert]);
 
   // Handle input change with @ detection and /command detection
   function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
@@ -732,77 +727,56 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
                 className="flex items-center gap-1.5 rounded bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
               >
                 <ListTodo className="h-3.5 w-3.5" />
-                <span>{todos.length}</span>
-                <ChevronDown
-                  className={`h-3 w-3 transition-transform ${todoDropdownOpen ? "rotate-180" : ""}`}
-                />
+                <span>
+                  {todos.filter((t) => t.status === "completed").length}/
+                  {todos.length}
+                </span>
+                <ChevronDown className="h-3 w-3" />
               </button>
 
               {todoDropdownOpen && (
-                <div className="absolute bottom-full right-0 z-50 mb-1 w-72 max-h-80 overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
-                  <div className="border-b border-neutral-200 bg-neutral-50 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-800">
+                <div className="absolute bottom-full right-0 z-50 mb-1 w-64 rounded-lg border border-neutral-200 bg-white shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
+                  <div className="border-b border-neutral-100 px-3 py-2 dark:border-neutral-800">
                     <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
-                      Todo List (
-                      {
-                        todos.filter(
-                          (t) =>
-                            t.status === "pending" ||
-                            t.status === "in_progress",
-                        ).length
-                      }{" "}
-                      pending)
+                      Todo List
                     </span>
                   </div>
-                  <div className="max-h-64 overflow-y-auto py-1">
-                    {todos.map((todo, index) => {
-                      const getStatusIcon = () => {
-                        switch (todo.status) {
-                          case "completed":
-                            return (
-                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                            );
-                          case "in_progress":
-                            return (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-500" />
-                            );
-                          case "cancelled":
-                            return (
-                              <XCircle className="h-3.5 w-3.5 text-neutral-400" />
-                            );
-                          default:
-                            return (
-                              <Circle className="h-3.5 w-3.5 text-blue-500" />
-                            );
-                        }
-                      };
-                      const getPriorityColor = () => {
-                        switch (todo.priority) {
-                          case "high":
-                            return "text-red-600 dark:text-red-400";
-                          case "medium":
-                            return "text-amber-600 dark:text-amber-400";
-                          default:
-                            return "text-neutral-600 dark:text-neutral-400";
-                        }
-                      };
-                      return (
+                  <div className="max-h-48 overflow-y-auto py-1">
+                    {isLoadingTodos ? (
+                      <div className="flex items-center justify-center py-4">
+                        <Loader2 className="h-4 w-4 animate-spin text-neutral-400" />
+                      </div>
+                    ) : todos.length === 0 ? (
+                      <div className="px-3 py-2 text-xs text-neutral-500 dark:text-neutral-400">
+                        No todos yet
+                      </div>
+                    ) : (
+                      todos.map((todo, index) => (
                         <div
                           key={index}
-                          className="flex items-start gap-2 px-3 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800"
+                          className="flex items-start gap-2 px-3 py-1.5"
                         >
-                          <div className="mt-0.5 flex-shrink-0">
-                            {getStatusIcon()}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p
-                              className={`text-xs leading-relaxed ${getPriorityColor()} ${todo.status === "completed" || todo.status === "cancelled" ? "line-through opacity-60" : ""}`}
-                            >
-                              {todo.content}
-                            </p>
-                          </div>
+                          {todo.status === "completed" ? (
+                            <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-green-500" />
+                          ) : todo.status === "in_progress" ? (
+                            <Loader2 className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 animate-spin text-blue-500" />
+                          ) : todo.status === "cancelled" ? (
+                            <XCircle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-red-500" />
+                          ) : (
+                            <Circle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-neutral-400" />
+                          )}
+                          <span
+                            className={`text-xs ${
+                              todo.status === "completed"
+                                ? "text-neutral-500 line-through dark:text-neutral-500"
+                                : "text-neutral-700 dark:text-neutral-300"
+                            }`}
+                          >
+                            {todo.content}
+                          </span>
                         </div>
-                      );
-                    })}
+                      ))
+                    )}
                   </div>
                 </div>
               )}
@@ -811,35 +785,8 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
         </div>
 
         {/* Input row */}
-        <div className="flex items-end gap-2">
-          <textarea
-            ref={textareaRef}
-            value={inputValue}
-            onChange={handleInputChange}
-            onKeyDown={handleKeydown}
-            placeholder={
-              isDraftSession
-                ? "Type your first message to create the session..."
-                : currentSessionId
-                  ? "Type a message..."
-                  : "Select or create a session to start"
-            }
-            rows={1}
-            disabled={!isInputEnabled}
-            className="min-h-[44px] max-h-[200px] flex-1 resize-none rounded-xl border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 placeholder-neutral-400 outline-none transition-colors focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500 dark:focus:border-neutral-400"
-          />
-
-          {/* File Mention Popover */}
-          {fileMention?.visible && (
-            <FileMentionPopover
-              query={fileMention.query}
-              position={fileMention.cursorPosition}
-              onSelect={handleFileSelect}
-              onClose={() => setFileMention(null)}
-            />
-          )}
-
-          {/* Command Palette (/command) */}
+        <div className="relative">
+          {/* Command palette */}
           {commandPalette.visible && commandPalette.suggestions.length > 0 && (
             <div
               className="fixed z-50 w-full max-w-sm"
@@ -858,12 +805,6 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
                         executeCommand(suggestion.spec.name);
                         textareaRef.current?.focus();
                       }}
-                      onMouseEnter={() =>
-                        setCommandPalette((prev) => ({
-                          ...prev,
-                          selectedIndex: index,
-                        }))
-                      }
                       className={`flex w-full items-center gap-3 px-4 py-2 text-left ${
                         index === commandPalette.selectedIndex
                           ? "bg-blue-50 dark:bg-blue-900/30"
@@ -886,34 +827,75 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
                   ))}
                 </div>
                 <div className="border-t border-neutral-100 px-4 py-1.5 text-[10px] text-neutral-400 dark:border-neutral-800 dark:text-neutral-500">
-                  <kbd className="rounded bg-neutral-100 px-1 py-0.5 font-mono dark:bg-neutral-800">↵</kbd> Execute ·{" "}
-                  <kbd className="rounded bg-neutral-100 px-1 py-0.5 font-mono dark:bg-neutral-800">Tab</kbd> Execute ·{" "}
-                  <kbd className="rounded bg-neutral-100 px-1 py-0.5 font-mono dark:bg-neutral-800">↑↓</kbd> Navigate ·{" "}
-                  <kbd className="rounded bg-neutral-100 px-1 py-0.5 font-mono dark:bg-neutral-800">Esc</kbd> Close
+                  <kbd className="rounded bg-neutral-100 px-1 py-0.5 font-mono dark:bg-neutral-800">
+                    ↵
+                  </kbd>{" "}
+                  Execute ·{" "}
+                  <kbd className="rounded bg-neutral-100 px-1 py-0.5 font-mono dark:bg-neutral-800">
+                    Tab
+                  </kbd>{" "}
+                  Execute ·{" "}
+                  <kbd className="rounded bg-neutral-100 px-1 py-0.5 font-mono dark:bg-neutral-800">
+                    ↑↓
+                  </kbd>{" "}
+                  Navigate ·{" "}
+                  <kbd className="rounded bg-neutral-100 px-1 py-0.5 font-mono dark:bg-neutral-800">
+                    Esc
+                  </kbd>{" "}
+                  Close
                 </div>
               </div>
             </div>
           )}
 
-          {/* Send / Stop button */}
-          {isStreaming ? (
-            <button
-              onClick={handleStop}
-              className="mb-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-500"
-              aria-label="Stop generating"
-            >
-              <Square className="h-4 w-4" fill="currentColor" />
-            </button>
-          ) : (
-            <button
-              onClick={handleSubmit}
-              disabled={!inputValue.trim() || !isInputEnabled || isSubmitting}
-              className="mb-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-neutral-900 text-white transition-colors hover:bg-neutral-800 disabled:opacity-50 disabled:hover:bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
-              aria-label="Send message"
-            >
-              <ArrowUp className="h-4 w-4" />
-            </button>
+          {/* File mention popover */}
+          {fileMention?.visible && (
+            <FileMentionPopover
+              query={fileMention.query}
+              position={fileMention.cursorPosition}
+              onSelect={handleFileSelect}
+              onClose={() => setFileMention(null)}
+            />
           )}
+
+          <textarea
+            ref={textareaRef}
+            value={inputValue}
+            onChange={handleInputChange}
+            onKeyDown={handleKeydown}
+            placeholder={
+              isDraftSession
+                ? "Type your first message to create the session..."
+                : currentSessionId
+                  ? "Type a message..."
+                  : "Select or create a session to start"
+            }
+            rows={1}
+            disabled={!isInputEnabled}
+            className="min-h-[44px] max-h-[200px] w-full resize-none rounded-xl border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 placeholder-neutral-400 outline-none transition-colors focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500 dark:focus:border-neutral-400"
+          />
+
+          {/* Send/Stop button */}
+          <div className="absolute bottom-2 right-2 flex items-end">
+            {isStreaming ? (
+              <button
+                onClick={handleStop}
+                className="mb-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-red-100 text-red-600 transition-colors hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50"
+                aria-label="Stop streaming"
+              >
+                <Square className="h-4 w-4" fill="currentColor" />
+              </button>
+            ) : (
+              <button
+                onClick={handleSubmit}
+                disabled={!inputValue.trim() || !isInputEnabled || isSubmitting}
+                className="mb-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-neutral-900 text-white transition-colors hover:bg-neutral-800 disabled:opacity-50 disabled:hover:bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+                aria-label="Send message"
+              >
+                <ArrowUp className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
