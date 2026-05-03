@@ -130,7 +130,7 @@ export function WelcomePage() {
       {/* Settings Button */}
       <button
         onClick={toggleSettings}
-        className="absolute right-4 top-4 rounded-lg p-2 text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+        className="absolute right-4 top-[max(1rem,env(safe-area-inset-top))] rounded-lg p-2 text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
         aria-label="Settings"
       >
         <Settings className="h-5 w-5" />

@@ -64,7 +64,7 @@ export function LeftSidebar() {
   return (
     <div className="flex h-full flex-col bg-neutral-50 dark:bg-neutral-900">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
+      <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] dark:border-neutral-800">
         <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Sessions</h2>
         <button
           onClick={handleNewSession}

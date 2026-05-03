@@ -135,7 +135,7 @@ function App() {
 
   if (isLoading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-white dark:bg-neutral-950">
+      <div className="flex h-[100dvh] items-center justify-center bg-white dark:bg-neutral-950">
         <div className="text-center">
           <div className="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-900 dark:border-neutral-700 dark:border-t-neutral-100" />
           <p className="text-sm text-neutral-600 dark:text-neutral-400">Loading...</p>
@@ -146,7 +146,7 @@ function App() {
 
   if (loadError) {
     return (
-      <div className="flex h-screen items-center justify-center bg-white dark:bg-neutral-950">
+      <div className="flex h-[100dvh] items-center justify-center bg-white dark:bg-neutral-950">
         <div className="text-center">
           <p className="mb-2 text-red-600 dark:text-red-400">{loadError}</p>
           <button
@@ -167,7 +167,7 @@ function App() {
     <>
       <Settings />
 
-      <div className="h-screen w-full bg-white dark:bg-neutral-950">
+      <div className="h-[100dvh] w-full bg-white dark:bg-neutral-950">
         <div className="flex h-full">
           {/* Left Sidebar - hidden on welcome page */}
           {!showWelcomePage && (
