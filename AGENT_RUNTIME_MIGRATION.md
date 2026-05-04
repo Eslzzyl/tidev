@@ -139,11 +139,15 @@ struct ApprovedTool {
 | `src/gateway/qq.rs` | 添加 `auto_approve_permissions: false` |
 | `src/gateway/telegram/channel.rs` | 添加 `auto_approve_permissions: false` |
 
-### 消息排队（Message Queue）
+### 消息排队（Message Queue）—— 显示队列 + 运行时队列
 
 `AgentRuntime` 内置消息排队机制。前端通过 `agent.queue_user_message(QueuedUserMessage)` 推送消息，`run_agent_loop` 在每个 turn 完成后自动拾取。
 
-注意：TUI 的旧 `queue_prompt()` / `drain_queued_prompts()` 尚未移除，仅供旧 flow（background session、session switching）使用。新 flow 通过 `agent.queue_user_message()` 投递。
+TUI 保留了 `pending_prompt_queue` 作为**显示专用队列**。当用户在 agent 运行时输入新消息：
+1. `queue_prompt()` 调用 `agent.queue_user_message()` 投递到运行时队列
+2. 同时推送到 `pending_prompt_queue` 供 UI 渲染（"QUEUE" 面板 + 状态栏计数）
+3. `spawn_agent_loop()` 启动时清空显示队列（因为运行时会拾取所有排队的消息）
+4. 旧 `drain_queued_prompts()` 已移除
 
 ---
 
@@ -228,12 +232,16 @@ struct ApprovedTool {
 
 ## 下一步
 
-### 1. 🟢 TUI 遗留清理（建议立即做）
+### ✅ 已完成 — TUI 遗留清理
 
-- **合并旧 `queue_prompt` / `drain_queued_prompts`**：新 flow 已用 `agent.queue_user_message()`，旧机制仅供旧 flow 使用。
-- **逐步移除旧 `start_assistant_turn` 依赖**：该函数在旧 flow 中被 `try_start_parallel_execution` 和 `resolve_workspace_boundary_dialog` 调用。这些旧路径当前仍用于 background session 切换，可后续统一成权限通道。
+- **移除 `start_assistant_turn`**：所有调用点已迁移到 `spawn_agent_loop`
+- **移除 `drain_queued_prompts`**：消息排队由 `agent.queue_user_message()` 处理
+- **保留 `pending_prompt_queue` 仅用于 UI 渲染**：`queue_prompt` 同时推送到运行时队列和显示队列
+- **旧 flow 出口路径**（`try_start_parallel_execution` / `process_pending_tool_execution` / `resolve_workspace_boundary_dialog` 中的旧路径）已替换为 `self.pending_request = false`
 
-### 2. 🟡 测试覆盖（中等优先级）
+### 下一步
+
+### 1. 🟡 测试覆盖（中等优先级）
 
 最优先的测试：
 
@@ -243,12 +251,12 @@ struct ApprovedTool {
 | `PendingToolApproval` 通道流程 | 核心架构：确保审批→执行→继续循环正确 |
 | `record_tool_result` 跳过 DB 写入 | 数据完整：确保不产生重复消息 |
 
-### 3. 🟡 子代理修复（低优先级）
+### 2. 🟡 子代理修复（低优先级）
 
 - 排查 future 非 `Send` 的来源（`McpManager`、`http::Client`）
 - 修复后可用 `Box::pin` 解决递归类型问题
 - 子代理可改为并行执行
 
-### 4. 🔴 Gateway 端到端测试（低优先级）
+### 3. 🔴 Gateway 端到端测试（低优先级）
 
 当前无端到端测试。Web/Gateway 依赖手动测试。
