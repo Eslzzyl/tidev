@@ -73,21 +73,23 @@
 - `run_single_streaming_turn()` → `compose_system_prompt()` 替换为 `agent.compose_system_prompt()`
 - `run_single_streaming_turn()` → `build_request_messages()` 替换为 `agent.build_request_messages()`
 - `tool_definitions()` 替换为 `agent.tool_definitions()`
+- `execute_tool_calls()` → 改为调用 `agent.execute_tool_calls()` 执行+持久化，保留 Telegram 特有的结果发送和 `append_tool_event`
 - 移除对 `shared::compose_system_prompt` 的依赖
 
 **QQ gateway (`src/gateway/qq.rs`) 已完成：**
 - 相同的改动（新增 agent 字段、替换 compose/build/tool_definitions）
-
+- `execute_tool_calls()` → 改为调用 `agent.execute_tool_calls()`，保留 QQ 特有的结果发送
 **`src/gateway/shared.rs`**：
 - 移除了不再使用的 `compose_system_prompt()` 函数
 - 保留 `compose_instruction_prompt()`（仍被 `gateway/mod.rs` 使用）
 
 **仍然保留的 gateway 特有逻辑：**
 - Draft editing（Telegram 的消息编辑）
-- 工具结果发送给用户
+- 工具结果发送给用户（每个平台不同的 API）
 - 取消支持（`check_cancellation`）/stop 命令
 - 对话管理（`load_or_create_chat_conversation`）
 - 模型选择交互
+- `append_tool_event`（Telegram 特有的工具日志记录）
 
 ### 3. 改进 AgentRuntime 本身 ✅
 
@@ -150,8 +152,8 @@
 | `src/web/state.rs` | +6 行 |
 | `src/web/mod.rs` | +45 行 |
 | `src/web/routes/messages.rs` | ~-140 行净减少 (删除旧重复代码) |
-| `src/gateway/telegram/channel.rs` | +40 行（新增 agent 字段 + 替换调用） |
-| `src/gateway/qq.rs` | +40 行（新增 agent 字段 + 替换调用） |
+| `src/gateway/telegram/channel.rs` | +50 行（新增 agent 字段 + 替换 compose/build/execute） |
+| `src/gateway/qq.rs` | +40 行（新增 agent 字段 + 替换 compose/build/execute） |
 | `src/gateway/shared.rs` | -18 行（删除 compose_system_prompt） |
 | `src/app/mod.rs` | -10 行（compose_system_prompt 简化为委托调用） |
 | `src/app/runtime/run.rs` | +12 行（App::new_with_paths 中初始化 AgentRuntime） |

@@ -558,40 +558,41 @@ impl TelegramChannel {
         conversation: &mut Conversation,
         tool_calls: Vec<ToolCall>,
     ) -> Result<()> {
-        let runtime = tokio::runtime::Handle::current();
-        for tool_call in tool_calls {
-            crate::log_info!("Executing tool: {}", tool_call.name);
-            let result = self.tools.execute_call(
-                &runtime,
-                &self.store,
-                conversation.session_id,
-                &tool_call,
+        let request_id = self.request_seq;
+        let session_id = conversation.session_id;
+
+        // Use shared AgentRuntime for execution, persistence, and events
+        let results = self
+            .agent
+            .execute_tool_calls(
+                session_id,
+                request_id,
+                &tool_calls,
                 SessionMode::Build,
-                false,
-            );
+                // Create a temporary channel for events; we mainly care about the returned results
+                &tokio::sync::mpsc::unbounded_channel::<BackendEvent>().0,
+            )
+            .await?;
 
-            let execution_result = match result {
-                Ok(res) => res,
-                Err(error) => crate::session::ToolExecutionResult::new(format!("Error: {error}")),
-            };
-
+        for (tool_call, execution_result) in &results {
             let display_result =
                 execution_result.preview_for_storage(Some(tool_call.name.as_str()));
             let output_for_tool_event = display_result.output.clone();
 
+            // Update in-memory conversation
             let tool_message =
-                Message::tool_result(&tool_call.id, &tool_call.name, execution_result);
+                Message::tool_result(&tool_call.id, &tool_call.name, execution_result.clone());
+            let tool_msg_id = tool_message.id;
+            conversation.push(tool_message);
+
+            // Log tool event (Telegram-specific)
             self.store.append_tool_event(
-                conversation.session_id,
-                tool_message.id,
+                session_id,
+                tool_msg_id,
                 &tool_call.name,
                 &tool_call.arguments,
                 &output_for_tool_event,
             )?;
-
-            conversation.push(tool_message.clone());
-            self.store
-                .append_message(conversation.session_id, &tool_message)?;
 
             // Send tool result to user
             let tool_result_text = format!(

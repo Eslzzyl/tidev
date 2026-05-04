@@ -19,7 +19,7 @@ use crate::{
     config::{ActiveModel, AppConfig, AuthStore},
     llm::LlmClient,
     prompts::SessionMode,
-    session::{AssistantTurn, Conversation, Message, MessageRole, ToolCall, ToolExecutionResult},
+    session::{AssistantTurn, BackendEvent, Conversation, Message, MessageRole, ToolCall},
     storage::SessionStore,
     tooling::ToolRegistry,
 };
@@ -578,35 +578,31 @@ impl QQChannel {
         &mut self,
         channel_id: &str,
         msg_id: &str,
-        runtime: &tokio::runtime::Handle,
+        _runtime: &tokio::runtime::Handle,
         conversation: &mut Conversation,
         tool_calls: Vec<ToolCall>,
     ) -> Result<()> {
-        for tool_call in tool_calls {
-            crate::log_info!("Executing tool: {}", tool_call.name);
-            let result = self.tools.execute_call(
-                runtime,
-                &self.store,
+        // Use shared AgentRuntime for execution, persistence, and events
+        let results = self
+            .agent
+            .execute_tool_calls(
                 conversation.session_id,
-                &tool_call,
+                0, // request_id not critical for QQ
+                &tool_calls,
                 SessionMode::Build,
-                false,
-            );
+                &tokio::sync::mpsc::unbounded_channel::<BackendEvent>().0,
+            )
+            .await?;
 
-            let execution_result = match result {
-                Ok(res) => res,
-                Err(error) => ToolExecutionResult::new(format!("Error: {error}")),
-            };
-
+        for (tool_call, execution_result) in &results {
             let display_result =
                 execution_result.preview_for_storage(Some(tool_call.name.as_str()));
             let output_for_tool_event = display_result.output.clone();
 
+            // Update in-memory conversation
             let tool_message =
-                Message::tool_result(&tool_call.id, &tool_call.name, execution_result);
-            conversation.push(tool_message.clone());
-            self.store
-                .append_message(conversation.session_id, &tool_message)?;
+                Message::tool_result(&tool_call.id, &tool_call.name, execution_result.clone());
+            conversation.push(tool_message);
 
             // Send tool result to user
             let tool_result_text = format!(

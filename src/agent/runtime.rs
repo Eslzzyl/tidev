@@ -318,7 +318,9 @@ impl AgentRuntime {
     /// Persists tool-result messages to the database and emits
     /// [`BackendEvent::ToolCompleted`] for each executed tool.
     ///
-    /// Returns the number of tools executed.
+    /// Returns a list of `(tool_call, result)` pairs for callers that need
+    /// to inspect or forward the results (e.g. gateway channels that send
+    /// results to users).
     pub async fn execute_tool_calls(
         &self,
         session_id: uuid::Uuid,
@@ -326,9 +328,9 @@ impl AgentRuntime {
         tool_calls: &[ToolCall],
         mode: SessionMode,
         event_tx: &UnboundedSender<BackendEvent>,
-    ) -> Result<usize> {
+    ) -> Result<Vec<(ToolCall, ToolExecutionResult)>> {
         let runtime = tokio::runtime::Handle::current();
-        let mut count = 0usize;
+        let mut results = Vec::with_capacity(tool_calls.len());
 
         for tool_call in tool_calls {
             let result = {
@@ -353,18 +355,18 @@ impl AgentRuntime {
                 store.append_message(session_id, &tool_msg)?;
             }
 
-            // Emit event
+            // Emit event (clone result so we can return it)
             let _ = event_tx.send(BackendEvent::ToolCompleted {
                 session_id,
                 request_id,
                 tool_call: tool_call.clone(),
-                result,
+                result: result.clone(),
             });
 
-            count += 1;
+            results.push((tool_call.clone(), result));
         }
 
-        Ok(count)
+        Ok(results)
     }
 
     /// Persist an assistant message to the database.
@@ -465,7 +467,7 @@ impl AgentRuntime {
             }
 
             // 8. Execute tools and persist results
-            self.execute_tool_calls(
+            let _ = self.execute_tool_calls(
                 session_id,
                 request_id,
                 &turn.tool_calls,
