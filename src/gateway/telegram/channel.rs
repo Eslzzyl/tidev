@@ -111,6 +111,7 @@ impl TelegramChannel {
             instructions: config.instructions.clone(),
             instruction_content_cache: std::collections::HashMap::new(),
             queued_messages: std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+            auto_approve_permissions: false,
         };
         Self {
             workspace_root,

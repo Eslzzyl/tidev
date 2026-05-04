@@ -24,7 +24,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use anyhow::Result;
 use chrono::Utc;
-use tokio::sync::{Mutex, mpsc::UnboundedSender};
+use tokio::sync::{Mutex, mpsc::UnboundedSender, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -58,6 +58,30 @@ pub struct QueuedUserMessage {
     pub thinking_level: Option<ThinkingLevelType>,
 }
 
+/// A tool call with an optional rejection reason.
+///
+/// Sent by frontends through the permission channel to tell
+/// `run_agent_loop` which tools are approved and which are rejected.
+#[derive(Debug)]
+pub struct ApprovedTool {
+    pub tool_call: ToolCall,
+    /// If `Some`, the tool is rejected; this [`ToolExecutionResult`] will
+    /// be persisted as the tool's output.  If `None`, the tool is approved
+    /// for execution.
+    pub rejection: Option<ToolExecutionResult>,
+}
+
+/// Request sent by `run_agent_loop` to the frontend for tool call approval.
+///
+/// The frontend must respond via `response_tx` with a list of
+/// [`ApprovedTool`] entries, one per tool call in `tool_calls`.
+#[derive(Debug)]
+pub struct PendingToolApproval {
+    pub tool_calls: Vec<ToolCall>,
+    pub mode: SessionMode,
+    pub response_tx: oneshot::Sender<Vec<ApprovedTool>>,
+}
+
 /// Shared agent runtime that both TUI and web can use.
 #[derive(Clone)]
 pub struct AgentRuntime {
@@ -75,6 +99,15 @@ pub struct AgentRuntime {
     /// After each turn completes, the loop processes the next message
     /// automatically.  Frontends push through [`queue_user_message`].
     pub queued_messages: Arc<StdMutex<VecDeque<QueuedUserMessage>>>,
+    /// When `false` (default), tools that need user confirmation are
+    /// rejected with an error instead of executed.  When `true`, all
+    /// tools are executed without interactive confirmation.
+    ///
+    /// The TUI sets this to `true` because it handles interactive
+    /// permission dialogs itself via the [`PendingToolApproval`] channel.
+    /// Web and gateway frontends typically leave this `false` as a
+    /// safe default: tools that require approval are simply rejected.
+    pub auto_approve_permissions: bool,
 }
 
 impl AgentRuntime {
@@ -390,6 +423,16 @@ impl AgentRuntime {
     ///
     /// Returns a list of `(tool_call, result)` pairs for callers that need
     /// to inspect or forward the results.
+    /// Execute tool calls with optional mode-based permission filtering.
+    ///
+    /// Before executing each tool, checks:
+    /// 1. Whether the tool is allowed in the current mode (`can_execute`).
+    ///    Disallowed tools are rejected with an error result.
+    /// 2. Whether the tool needs user confirmation.  If
+    ///    `auto_approve_permissions` is `false`, these tools are rejected
+    ///    with an error.  If `true`, they execute without confirmation
+    ///    (the TUI handles confirmation itself via the permission channel).
+    #[allow(clippy::too_many_arguments)]
     pub async fn execute_tool_calls(
         &mut self,
         session_id: uuid::Uuid,
@@ -403,10 +446,57 @@ impl AgentRuntime {
         let mut results: Vec<(ToolCall, ToolExecutionResult)> =
             Vec::with_capacity(tool_calls.len());
 
+        // ─── Phase 0: Mode-based + confirmation filtering ────────────
+        // Reject tools that are not allowed in the current mode, or that
+        // need confirmation when auto_approve is off.
+        let mut filtered: Vec<&ToolCall> = Vec::with_capacity(tool_calls.len());
+        for call in tool_calls {
+            if !self.tools.can_execute(&call.name, mode) {
+                crate::log_info!(
+                    "execute_tool_calls: rejecting '{}' — not allowed in {:?} mode",
+                    call.name, mode
+                );
+                let result = ToolExecutionResult::new(format!(
+                    "Tool '{}' is disabled in {:?} mode",
+                    call.name, mode
+                ));
+                self.persist_tool_result(session_id, request_id, call, &result, event_tx)
+                    .await?;
+                results.push((call.clone(), result));
+                continue;
+            }
+
+            if !self.auto_approve_permissions {
+                if let Some(def) = self.tools.definition_for(&call.name) {
+                    if def.needs_confirmation() {
+                        crate::log_info!(
+                            "execute_tool_calls: rejecting '{}' — needs confirmation and auto_approve is off",
+                            call.name
+                        );
+                        let result = ToolExecutionResult::new(format!(
+                            "Tool '{}' requires user approval in this mode",
+                            call.name
+                        ));
+                        self.persist_tool_result(session_id, request_id, call, &result, event_tx)
+                            .await?;
+                        results.push((call.clone(), result));
+                        continue;
+                    }
+                }
+            }
+
+            filtered.push(call);
+        }
+
+        // All tools filtered out — return early
+        if filtered.is_empty() {
+            return Ok(results);
+        }
+
         // Separate tool calls by execution strategy.
         let mut read_only: Vec<&ToolCall> = Vec::new();
         let mut write: Vec<&ToolCall> = Vec::new();
-        for call in tool_calls {
+        for call in &filtered {
             if self.tools.is_read_only_call(call) {
                 read_only.push(call);
             } else {
@@ -806,7 +896,31 @@ impl AgentRuntime {
     /// tool list instead of calling `self.tool_definitions()`.  This is used
     /// internally by [`run_subagent`](Self::run_subagent) to restrict tools
     /// based on the subagent's [`AgentDefinition`].
+    ///
+    /// If `permission_tx` is provided, tool calls are not executed directly.
+    /// Instead, a [`PendingToolApproval`] is sent through the channel and
+    /// the loop waits for the frontend to approve/reject each tool.  This
+    /// is used by the TUI to implement interactive permission dialogs.
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_agent_loop_with_tools(
+        &mut self,
+        session_id: uuid::Uuid,
+        model: ActiveModel,
+        context_manager: &mut ContextManager,
+        mode: SessionMode,
+        thinking_level: ThinkingLevelType,
+        tools: Vec<ToolDefinition>,
+        event_tx: UnboundedSender<BackendEvent>,
+        cancel_token: Option<CancellationToken>,
+    ) -> Result<()> {
+        self.run_agent_loop_with_tools_inner(
+            session_id, model, context_manager, mode, thinking_level,
+            tools, event_tx, cancel_token, None,
+        ).await
+    }
+
+    /// Internal implementation with optional permission channel.
+    async fn run_agent_loop_with_tools_inner(
         &mut self,
         session_id: uuid::Uuid,
         mut model: ActiveModel,
@@ -816,6 +930,7 @@ impl AgentRuntime {
         tools: Vec<ToolDefinition>,
         event_tx: UnboundedSender<BackendEvent>,
         cancel_token: Option<CancellationToken>,
+        permission_tx: Option<tokio::sync::mpsc::UnboundedSender<PendingToolApproval>>,
     ) -> Result<()> {
         let mut request_id: u64 = rand::random();
 
@@ -887,23 +1002,64 @@ impl AgentRuntime {
                 return Ok(());
             }
 
+            // ─── 6a. Permission approval (frontend interception) ─────────
+            //
+            // If a permission channel is configured, send all tool calls to
+            // the frontend for approval.  The frontend can approve, reject,
+            // or partially approve tools.  Rejected tools are persisted as
+            // error results; approved tools proceed to execution.
+            //
+            // Without a permission channel (Web/Gateway), all tool calls
+            // proceed directly — non-interactive filtering (can_execute,
+            // needs_confirmation) is handled inside execute_tool_calls below.
+
+            let mut task_calls: Vec<ToolCall> = Vec::new();
+            let mut other_calls: Vec<ToolCall> = Vec::new();
+
+            if let Some(ref perm_tx) = permission_tx {
+                let (resp_tx, resp_rx) = oneshot::channel();
+                let _ = perm_tx.send(PendingToolApproval {
+                    tool_calls: turn.tool_calls.clone(),
+                    mode,
+                    response_tx: resp_tx,
+                });
+
+                match resp_rx.await {
+                    Ok(approvals) => {
+                        for approved in approvals {
+                            if let Some(rejection) = approved.rejection {
+                                self.persist_tool_result(
+                                    session_id, request_id,
+                                    &approved.tool_call, &rejection, &event_tx,
+                                ).await?;
+                            } else if approved.tool_call.name == "task" {
+                                task_calls.push(approved.tool_call);
+                            } else {
+                                other_calls.push(approved.tool_call);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        crate::log_info!("run_agent_loop: permission channel closed, stopping loop");
+                        return Ok(());
+                    }
+                }
+            } else {
+                // No permission channel — partition tool calls normally
+                for tc in turn.tool_calls {
+                    if tc.name == "task" {
+                        task_calls.push(tc);
+                    } else {
+                        other_calls.push(tc);
+                    }
+                }
+            }
+
             // Check cancellation again before executing tools
             if let Some(ref ct) = cancel_token {
                 if ct.is_cancelled() {
                     crate::log_info!("run_agent_loop: cancelled before tool execution");
                     return Ok(());
-                }
-            }
-
-            // 7. Partition tool calls: subagents (task) are handled inline;
-            //    the rest go through execute_tool_calls.
-            let mut task_calls: Vec<ToolCall> = Vec::new();
-            let mut other_calls: Vec<ToolCall> = Vec::new();
-            for tc in turn.tool_calls {
-                if tc.name == "task" {
-                    task_calls.push(tc);
-                } else {
-                    other_calls.push(tc);
                 }
             }
 
@@ -986,6 +1142,30 @@ impl AgentRuntime {
             cancel_token,
         )
         .await
+    }
+
+    /// Run the full agent loop with a permission approval channel.
+    ///
+    /// When tool calls are generated, the loop sends a [`PendingToolApproval`]
+    /// through `permission_tx` and waits for the frontend to approve/reject
+    /// each tool.  This is used by the TUI to implement interactive permission
+    /// dialogs.  Web and gateway frontends use [`run_agent_loop`] instead.
+    pub async fn run_agent_loop_with_permission_channel(
+        &mut self,
+        session_id: uuid::Uuid,
+        model: ActiveModel,
+        context_manager: &mut ContextManager,
+        mode: SessionMode,
+        thinking_level: ThinkingLevelType,
+        event_tx: UnboundedSender<BackendEvent>,
+        cancel_token: Option<CancellationToken>,
+        permission_tx: tokio::sync::mpsc::UnboundedSender<PendingToolApproval>,
+    ) -> Result<()> {
+        let tools = self.tool_definitions();
+        self.run_agent_loop_with_tools_inner(
+            session_id, model, context_manager, mode, thinking_level,
+            tools, event_tx, cancel_token, Some(permission_tx),
+        ).await
     }
 
     /// Optionally compact the session context after a completed turn.
@@ -1121,6 +1301,7 @@ mod tests {
             instructions: vec![],
             instruction_content_cache: Default::default(),
             queued_messages: std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+            auto_approve_permissions: false,
         };
         (agent, tmp)
     }

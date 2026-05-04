@@ -78,6 +78,7 @@ impl App {
             instructions: config.instructions.clone(),
             instruction_content_cache: std::collections::HashMap::new(),
             queued_messages: std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+            auto_approve_permissions: true, // TUI handles permissions via channel
         };
         let last_notice = None;
         let retrying_hint = None;
@@ -177,6 +178,9 @@ impl App {
             tool_result_card_bounds: Vec::new(),
             subagent_task_map: std::collections::HashMap::new(),
             running_subagent_card_bounds: Vec::new(),
+            pending_permission_rx: None,
+            pending_permission_response: None,
+            pending_rejected_tools: Vec::new(),
             selectable_regions: Vec::new(),
             message_scroll_target: None,
             todos: Vec::new(),

@@ -60,7 +60,7 @@ pub use ui::theme_panel;
 use runtime::state::*;
 
 use crate::{
-    agent::runtime::AgentRuntime,
+    agent::runtime::{AgentRuntime, PendingToolApproval},
     app::at_mention::{AtMentionKind, AtMentionState},
     app::input::SnippetState,
     app::input::shell_completion::ShellCompletionState,
@@ -86,7 +86,7 @@ use crate::{
     notifications,
     prompts::{SessionMode, init_command},
     provider_setup::ConnectDialog,
-    session::{AssistantTurn, BackendEvent, COMPACTION_MESSAGE_LABEL, Conversation, Message, MessageAttachment, MessageRole},
+    session::{AssistantTurn, BackendEvent, COMPACTION_MESSAGE_LABEL, Conversation, Message, MessageAttachment, MessageRole, ToolCall, ToolExecutionResult},
     shared::file_search::current_at_fragment,
     snapshot::{FileDiff, SnapshotService},
     storage::SessionStore,
@@ -202,6 +202,18 @@ struct App {
     /// Running subagent card screen bounds: (execution_index, screen_rect)
     /// Recalculated every frame in render_messages()
     running_subagent_card_bounds: Vec<(usize, Rect)>,
+    /// Permission channel receiver — receives [`PendingToolApproval`] from
+    /// the spawned `run_agent_loop` task when tool calls need approval.
+    pending_permission_rx:
+        Option<tokio::sync::mpsc::UnboundedReceiver<crate::agent::runtime::PendingToolApproval>>,
+    /// The oneshot sender for the current pending permission approval.
+    /// Set when we receive a `PendingToolApproval` and consumed when we
+    /// send the response back to `run_agent_loop`.
+    pending_permission_response:
+        Option<tokio::sync::oneshot::Sender<Vec<crate::agent::runtime::ApprovedTool>>>,
+    /// Buffer for rejected tool results during permission channel processing.
+    /// Cleared when the approval response is sent.
+    pending_rejected_tools: Vec<(ToolCall, ToolExecutionResult)>,
     pub(crate) selectable_regions: Vec<Rect>,
     message_scroll_target: Option<Uuid>,
     todos: Vec<TodoItem>,
@@ -584,6 +596,25 @@ impl App {
             self.handle_backend_event(event, runtime)?;
         }
 
+        // Check for pending permission approvals from the agent runtime.
+        // Take ownership of the receiver to avoid borrow conflicts.
+        if let Some(mut rx) = self.pending_permission_rx.take() {
+            while let Ok(approval) = rx.try_recv() {
+                crate::log_info!(
+                    "process_backend_events: received PendingToolApproval with {} tool call(s)",
+                    approval.tool_calls.len()
+                );
+                // Store the response channel
+                self.pending_permission_response = Some(approval.response_tx);
+                self.pending_rejected_tools.clear();
+
+                // Create PendingToolExecution and start permission processing
+                self.begin_tool_execution(approval.tool_calls, approval.mode, runtime)?;
+            }
+            // Put the receiver back
+            self.pending_permission_rx = Some(rx);
+        }
+
         Ok(())
     }
 
@@ -805,7 +836,11 @@ impl App {
                 if let Some(idx) = running_idx {
                     let running = self.running_tool_executions.remove(idx);
                     self.record_tool_result(running.tool_call, result)?;
-                    self.try_start_parallel_execution(runtime)?;
+                    // In permission channel mode, the agent runtime handles loop
+                    // continuation automatically.  Don't call the old flow.
+                    if self.pending_permission_rx.is_none() {
+                        self.try_start_parallel_execution(runtime)?;
+                    }
                 }
             }
             BackendEvent::SubagentStatus {
@@ -1148,30 +1183,11 @@ impl App {
             turn.tool_calls.len(),
             turn.finish_reason
         );
-        let turn_mode = self
-            .conversation
-            .messages
-            .iter()
-            .rev()
-            .find_map(|message| {
-                if matches!(message.role, MessageRole::Assistant) && message.streaming {
-                    message.mode
-                } else {
-                    None
-                }
-            })
-            .or_else(|| {
-                self.conversation
-                    .messages
-                    .iter()
-                    .rev()
-                    .find(|message| matches!(message.role, MessageRole::User))
-                    .and_then(|message| message.mode)
-            })
-            .unwrap_or(self.mode);
-        let mut persisted_message = None;
-        let mut finished_message_id = None;
 
+        // Update the in-memory streaming message with the final turn data.
+        // Persistence is handled by `run_agent_loop` internally.
+        let mut finished_message_id = None;
+        let has_tool_calls = !turn.tool_calls.is_empty();
         if let Some(message) = self.conversation.messages.last_mut()
             && message.streaming
             && matches!(message.role, MessageRole::Assistant)
@@ -1182,7 +1198,7 @@ impl App {
             message.streaming = false;
             finished_message_id = Some(message.id);
             if message.mode.is_none() {
-                message.mode = Some(turn_mode);
+                message.mode = Some(self.mode);
             }
 
             if let Some(ref usage) = self.context_usage {
@@ -1194,60 +1210,65 @@ impl App {
                 message.model_id = Some(usage.model_id.clone());
                 message.completed_at = Some(chrono::Utc::now());
             }
-
-            persisted_message = Some(message.clone());
         }
 
         if let Some(message_id) = finished_message_id {
             self.invalidate_active_message_render_cache_for(message_id);
         }
 
-        if let Some(message) = persisted_message {
-            runtime.block_on(
-                self.agent
-                    .persist_message(self.conversation.session_id, &message),
-            )?;
+        // If no tool calls, this is the final turn — clean up.
+        // If tool calls exist, the permission channel will handle approval
+        // and `run_agent_loop` will continue the loop.
+        if !has_tool_calls {
+            self.last_notice = Some(match turn.finish_reason.as_deref() {
+                Some(reason) if reason != "stop" => format!("Response finished ({reason})"),
+                _ => "Response complete".to_string(),
+            });
+            self.pending_request = false;
+            self.abort_confirmation_deadline = None;
+
+            // Apply pending mode switch if any
+            if let Some(new_mode) = self.pending_mode.take() {
+                self.mode = new_mode;
+                self.refresh_tools();
+                self.last_notice = Some(format!("Mode switched to {}", new_mode.as_str()));
+            }
+
+            if let Err(error) = self.finalize_snapshot_for_last_user_message_sync(runtime) {
+                crate::log_warn!("failed to finalize snapshot: {}", error);
+            }
+
+            // Drain queued prompts only in the old flow (no permission channel).
+            // In the new flow, queue_user_message handles this via run_agent_loop.
+            if self.pending_permission_rx.is_none() {
+                self.drain_queued_prompts(runtime);
+            }
+
+            self.notifications.notify("Response complete");
+        } else {
+            // Tool calls are present — keep `pending_request` true.
+            // Permission approval will happen via the channel, and
+            // `run_agent_loop` will execute approved tools automatically.
+            self.last_notice = Some(format!("Processing {} tool call(s)...", turn.tool_calls.len()));
         }
-
-        if !turn.tool_calls.is_empty() {
-            let tool_names: Vec<_> = turn.tool_calls.iter().map(|tc| tc.name.as_str()).collect();
-            crate::log_info!(
-                "finish_assistant_turn: calling begin_tool_execution for {:?}",
-                tool_names
-            );
-            self.last_notice = Some(format!("Running {} tool call(s)...", turn.tool_calls.len()));
-
-            self.begin_tool_execution(turn.tool_calls, turn_mode, runtime)?;
-            return Ok(());
-        }
-
-        // End of round: apply pending mode switch if any
-        if let Some(new_mode) = self.pending_mode.take() {
-            self.mode = new_mode;
-            self.refresh_tools();
-            self.last_notice = Some(format!("Mode switched to {}", new_mode.as_str()));
-        }
-
-        self.pending_request = false;
-        self.abort_confirmation_deadline = None;
-
-        if let Err(error) = self.finalize_snapshot_for_last_user_message_sync(runtime) {
-            crate::log_warn!("failed to finalize snapshot: {}", error);
-        }
-
-        self.last_notice = Some(match turn.finish_reason.as_deref() {
-            Some(reason) if reason != "stop" => format!("Response finished ({reason})"),
-            _ => "Response complete".to_string(),
-        });
-        self.schedule_context_compaction_for_session(self.conversation.session_id, runtime, None);
-        self.drain_queued_prompts(runtime);
-
-        self.notifications.notify("Response complete");
 
         Ok(())
     }
 
     fn queue_prompt(&mut self, prompt: String, attachments: Vec<MessageAttachment>) {
+        // In the new flow (permission channel active), use the runtime's
+        // queue_user_message so that run_agent_loop picks it up automatically.
+        if self.pending_permission_rx.is_some() {
+            let msg = crate::agent::runtime::QueuedUserMessage {
+                content: prompt,
+                attachments,
+                mode: Some(self.mode),
+                thinking_level: Some(self.thinking_level.clone()),
+            };
+            self.agent.queue_user_message(msg);
+            return;
+        }
+        // Old flow: use the legacy pending_prompt_queue
         self.pending_prompt_queue
             .push_back(QueuedPrompt::new(prompt, attachments));
     }
@@ -1354,7 +1375,84 @@ impl App {
 
         self.schedule_context_compaction_for_session(self.conversation.session_id, runtime, None);
 
-        self.start_assistant_turn(runtime)
+        self.spawn_agent_loop(runtime)
+    }
+
+    /// Spawn the agent loop in a background task.
+    ///
+    /// Creates a permission channel for tool call approval and spawns
+    /// `run_agent_loop_with_permission_channel` to handle the full
+    /// LLM + tool execution loop.
+    fn spawn_agent_loop(&mut self, runtime: &Runtime) -> Result<()> {
+        crate::log_info!(
+            "spawn_agent_loop: session_id={}, message_count={}",
+            self.conversation.session_id,
+            self.conversation.messages.len()
+        );
+
+        self.pending_request = true;
+        self.abort_confirmation_deadline = None;
+        self.active_request_id = self.active_request_id.wrapping_add(1);
+        let request_id = self.active_request_id;
+        crate::log_info!("spawn_agent_loop: new request_id={}", request_id);
+
+        self.last_notice = Some(match self.mode {
+            SessionMode::Plan => "Planning...".to_string(),
+            SessionMode::Build => "Thinking...".to_string(),
+        });
+
+        // Create a streaming message in the in-memory conversation for UI display
+        let mut assistant_message = Message::streaming(MessageRole::Assistant, "");
+        assistant_message.mode = Some(self.mode);
+        self.conversation.push(assistant_message);
+
+        // Create permission channel for tool call approval
+        let (permission_tx, permission_rx) =
+            tokio::sync::mpsc::unbounded_channel::<PendingToolApproval>();
+        self.pending_permission_rx = Some(permission_rx);
+        self.pending_permission_response = None;
+
+        // Clone resources for the spawned task
+        let mut agent = self.agent.clone();
+        let tx = self.backend_tx.clone();
+        let session_id = self.conversation.session_id;
+        let model = self.active_model.clone();
+        let mode = self.mode;
+        let thinking_level = self
+            .conversation
+            .messages
+            .iter()
+            .rev()
+            .find(|m| m.role == MessageRole::User)
+            .and_then(|m| m.thinking_level.clone())
+            .unwrap_or_else(|| self.thinking_level.clone());
+
+        runtime.spawn(async move {
+            let mut context_manager = ContextManager::new();
+
+            if let Err(e) = agent
+                .run_agent_loop_with_permission_channel(
+                    session_id,
+                    model,
+                    &mut context_manager,
+                    mode,
+                    thinking_level,
+                    tx,
+                    None, // cancel_token
+                    permission_tx,
+                )
+                .await
+            {
+                crate::log_error!("spawn_agent_loop: agent loop failed: {}", e);
+            }
+
+            crate::log_info!(
+                "spawn_agent_loop: agent loop completed for session {}",
+                session_id
+            );
+        });
+
+        Ok(())
     }
 
     fn resolve_fallback_model(config: &AppConfig, auth: &AuthStore) -> Result<ActiveModel> {

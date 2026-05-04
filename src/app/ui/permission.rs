@@ -3,6 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use std::sync::{Arc, atomic::AtomicBool};
 use tokio::runtime::Runtime;
 
+use crate::agent::runtime::ApprovedTool;
 use crate::agent::{AgentDefinition, AgentType};
 use crate::prompts::SessionMode;
 use crate::session::{ToolCall, ToolExecutionResult};
@@ -222,6 +223,9 @@ impl App {
             return Ok(());
         }
 
+        let is_permission_channel = self.pending_permission_response.is_some();
+        let mut rejected: Vec<(ToolCall, ToolExecutionResult)> = Vec::new();
+
         let mut question_opened = false;
 
         loop {
@@ -247,7 +251,11 @@ impl App {
                     tool_call.name,
                     effective_mode.as_str()
                 );
-                self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
+                if is_permission_channel {
+                    rejected.push((tool_call, ToolExecutionResult::new(output)));
+                } else {
+                    self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
+                }
                 self.advance_pending_tool_execution();
                 continue;
             }
@@ -272,15 +280,23 @@ impl App {
                         "Tool '{}' was denied by remembered permission",
                         permission_label
                     );
-                    self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
+                    if is_permission_channel {
+                        rejected.push((tool_call, ToolExecutionResult::new(output)));
+                    } else {
+                        self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
+                    }
                     self.advance_pending_tool_execution();
+                    continue;
                 }
-                continue;
             }
 
             let Some(definition) = self.tools.definition_for(&tool_call.name) else {
                 let output = format!("Tool '{}' is unknown", tool_call.name);
-                self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
+                if is_permission_channel {
+                    rejected.push((tool_call, ToolExecutionResult::new(output)));
+                } else {
+                    self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
+                }
                 self.advance_pending_tool_execution();
                 continue;
             };
@@ -302,11 +318,28 @@ impl App {
                             "[User denied access] The path '{}' is outside the workspace.",
                             path_str
                         );
-                        self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
+                        if is_permission_channel {
+                            rejected.push((tool_call, ToolExecutionResult::new(output)));
+                        } else {
+                            self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
+                        }
                         self.advance_pending_tool_execution();
                         continue;
                     }
                     // Previously allowed — execute with allow_outside=true
+                    if is_permission_channel {
+                        // In channel mode, don't execute synchronously.
+                        // The runtime will execute it with allow_outside tracked
+                        // via workspace_boundary_approved.
+                        self.workspace_boundary_approved
+                            .insert(tool_call.id.clone(), true);
+                        self.pending_tool_execution
+                            .as_mut()
+                            .unwrap()
+                            .add_ready(tool_call);
+                        self.advance_pending_tool_execution();
+                        continue;
+                    }
                     if Self::is_readonly_tool(&tool_call.name) {
                         // Record boundary approval for async dispatch
                         self.workspace_boundary_approved
@@ -326,11 +359,9 @@ impl App {
                         self.mode,
                         true,
                     );
-                    let mut result = runtime
-                        .block_on(handle)
-                        .unwrap_or_else(|join_err| {
-                            ToolExecutionResult::new(format!("Tool failed: {join_err}"))
-                        });
+                    let mut result = runtime.block_on(handle).unwrap_or_else(|join_err| {
+                        ToolExecutionResult::new(format!("Tool failed: {join_err}"))
+                    });
                     if !result.output.starts_with("Tool failed:") {
                         result
                             .output
@@ -361,24 +392,26 @@ impl App {
                 let args = match serde_json::from_str::<QuestionArgs>(&tool_call.arguments) {
                     Ok(args) => args,
                     Err(error) => {
-                        self.record_tool_result(
-                            tool_call,
-                            ToolExecutionResult::new(format!(
-                                "Tool failed: failed to decode question arguments: {error}"
-                            )),
-                        )?;
+                        let output =
+                            format!("Tool failed: failed to decode question arguments: {error}");
+                        if is_permission_channel {
+                            rejected.push((tool_call, ToolExecutionResult::new(output)));
+                        } else {
+                            self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
+                        }
                         self.advance_pending_tool_execution();
                         continue;
                     }
                 };
 
                 if args.questions.is_empty() {
-                    self.record_tool_result(
-                        tool_call,
-                        ToolExecutionResult::new(
-                            "Tool failed: question tool requires at least one question",
-                        ),
-                    )?;
+                    let output =
+                        "Tool failed: question tool requires at least one question".to_string();
+                    if is_permission_channel {
+                        rejected.push((tool_call, ToolExecutionResult::new(output)));
+                    } else {
+                        self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
+                    }
                     self.advance_pending_tool_execution();
                     continue;
                 }
@@ -418,6 +451,9 @@ impl App {
             .unwrap_or_default();
 
         if !ready_calls.is_empty() {
+            if is_permission_channel {
+                return self.send_permission_approval(ready_calls, rejected, runtime);
+            }
             return self.start_parallel_execution(ready_calls, runtime);
         }
 
@@ -435,6 +471,10 @@ impl App {
                 self.running_subagent_executions.len()
             );
             self.pending_tool_execution = None;
+            if is_permission_channel {
+                // All tools rejected — send empty approval to continue the loop
+                return self.send_permission_approval(ready_calls, rejected, runtime);
+            }
             if self.running_subagent_executions.is_empty() {
                 // Capture an intermediate snapshot after tool execution and before the
                 // next LLM step, enabling per-step patch computation at round end.
@@ -454,6 +494,61 @@ impl App {
                 self.running_subagent_executions.len()
             );
         }
+
+        Ok(())
+    }
+
+    /// Send the permission approval response and clear state.
+    fn send_permission_approval(
+        &mut self,
+        mut ready_calls: Vec<ToolCall>,
+        mut rejected: Vec<(ToolCall, ToolExecutionResult)>,
+        _runtime: &Runtime,
+    ) -> Result<()> {
+        let response_tx = match self.pending_permission_response.take() {
+            Some(tx) => tx,
+            None => return Ok(()),
+        };
+        self.pending_tool_execution = None;
+
+        // Merge any rejected tools that were added outside the main loop
+        // (e.g. from resolve_permission_prompt or question dialog resolution)
+        rejected.append(&mut self.pending_rejected_tools);
+
+        // Build approved list: None = execute, Some(error) = reject
+        let mut approvals: Vec<ApprovedTool> = rejected
+            .into_iter()
+            .map(|(tc, result)| ApprovedTool {
+                tool_call: tc,
+                rejection: Some(result),
+            })
+            .collect();
+        for tc in ready_calls.drain(..) {
+            approvals.push(ApprovedTool {
+                tool_call: tc,
+                rejection: None,
+            });
+        }
+
+        crate::log_info!(
+            "send_permission_approval: sending {} approvals ({} approved)",
+            approvals.len(),
+            approvals.iter().filter(|a| a.rejection.is_none()).count()
+        );
+
+        // Record approved tool calls as running for UI display
+        for approval in &approvals {
+            if approval.rejection.is_none() {
+                self.running_tool_executions.push(RunningToolExecution::new(
+                    self.active_request_id,
+                    approval.tool_call.clone(),
+                    Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                ));
+            }
+        }
+
+        // Send response — the runtime loop will continue automatically
+        let _ = response_tx.send(approvals);
 
         Ok(())
     }
@@ -489,7 +584,12 @@ impl App {
             format!("Tool '{}' was denied", dialog.display_name)
         };
 
-        self.record_tool_result(dialog.tool_call, ToolExecutionResult::new(output))?;
+        if self.pending_permission_response.is_some() {
+            self.pending_rejected_tools
+                .push((dialog.tool_call, ToolExecutionResult::new(output)));
+        } else {
+            self.record_tool_result(dialog.tool_call, ToolExecutionResult::new(output))?;
+        }
         self.advance_pending_tool_execution();
         self.process_pending_tool_execution(runtime)
     }
@@ -906,11 +1006,9 @@ impl App {
                             self.mode,
                             false, // allow_outside: normal execution doesn't allow outside workspace
                         );
-                        let result = runtime
-                            .block_on(handle)
-                            .unwrap_or_else(|join_err| {
-                                ToolExecutionResult::new(format!("Tool failed: {join_err}"))
-                            });
+                        let result = runtime.block_on(handle).unwrap_or_else(|join_err| {
+                            ToolExecutionResult::new(format!("Tool failed: {join_err}"))
+                        });
                         self.record_tool_result(tool_call, result)?;
                     }
                 }
@@ -949,6 +1047,7 @@ impl App {
         tool_call: ToolCall,
         result: ToolExecutionResult,
     ) -> Result<()> {
+        let is_runtime_flow = self.pending_permission_rx.is_some();
         let display_result = if tool_call.name == "task" {
             // Subagent (task) results should not be preview-truncated;
             // the caller expects the complete output for correct decision-making.
@@ -963,13 +1062,17 @@ impl App {
             display_result,
         );
 
-        self.store.append_tool_event(
-            self.conversation.session_id,
-            message.id,
-            &tool_call.name,
-            &tool_call.arguments,
-            &output_for_tool_event,
-        )?;
+        // In runtime flow, persistence is handled by AgentRuntime::persist_tool_result.
+        // We only need to append the tool event for lookup purposes.
+        if !is_runtime_flow {
+            self.store.append_tool_event(
+                self.conversation.session_id,
+                message.id,
+                &tool_call.name,
+                &tool_call.arguments,
+                &output_for_tool_event,
+            )?;
+        }
 
         if !result.instruction_sources.is_empty() {
             self.update_loaded_instruction_sources(&result.instruction_sources)
@@ -977,8 +1080,10 @@ impl App {
         }
 
         self.conversation.push(message.clone());
-        self.store
-            .append_message(self.conversation.session_id, &message)?;
+        if !is_runtime_flow {
+            self.store
+                .append_message(self.conversation.session_id, &message)?;
+        }
 
         // Invalidate layout index and render cache since we added a new message
         self.message_layout_index.borrow_mut().valid = false;

@@ -656,7 +656,16 @@ impl App {
             return Ok(());
         };
 
-        if allow {
+        if self.pending_permission_response.is_some() {
+            // Permission channel mode — result is sent back via channel
+            let output = if allow {
+                dialog.formatted_output()
+            } else {
+                "Tool 'question' was dismissed by user".to_string()
+            };
+            self.pending_rejected_tools
+                .push((dialog.tool_call, ToolExecutionResult::new(output)));
+        } else if allow {
             let output = dialog.formatted_output();
             self.record_tool_result(dialog.tool_call, ToolExecutionResult::new(output))?;
         } else {

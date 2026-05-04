@@ -109,13 +109,13 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
         store: Arc::new(Mutex::new(store.clone())),
         llm_client: llm_client.clone(),
         tools,
-        instructions: config.instructions.clone(),
-        instruction_content_cache: std::collections::HashMap::new(),
-        queued_messages: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
-    };
+            instructions: config.instructions.clone(),
+            instruction_content_cache: std::collections::HashMap::new(),
+            queued_messages: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+            auto_approve_permissions: false,
+        };
 
     crate::log_info!("Agent runtime created");
-
     // Create app state
     let state = AppState::new(
         store,
