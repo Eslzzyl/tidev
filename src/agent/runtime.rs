@@ -330,43 +330,110 @@ impl AgentRuntime {
         event_tx: &UnboundedSender<BackendEvent>,
     ) -> Result<Vec<(ToolCall, ToolExecutionResult)>> {
         let runtime = tokio::runtime::Handle::current();
-        let mut results = Vec::with_capacity(tool_calls.len());
+        let mut results: Vec<(ToolCall, ToolExecutionResult)> =
+            Vec::with_capacity(tool_calls.len());
 
-        for tool_call in tool_calls {
-            let result = {
-                let store = self.store.lock().await;
-                match self.tools.execute_call(
-                    &runtime,
-                    &store,
-                    session_id,
-                    tool_call,
-                    mode,
-                    false,
-                ) {
-                    Ok(r) => r,
-                    Err(e) => ToolExecutionResult::new(format!("Error: {e}")),
-                }
-            };
+        // Separate tool calls into read-only (parallel-safe) and write (serial).
+        //
+        // Read-only tools (Read/Search permission): read files, search code,
+        // fetch web pages — no side effects, safe to run concurrently.
+        //
+        // Write tools (Write/Edit/Execute/Session permission): modify files,
+        // run commands, change session state — must execute one-by-one to
+        // prevent conflicts (e.g. two edits to the same file).
+        let mut read_only: Vec<&ToolCall> = Vec::new();
+        let mut write: Vec<&ToolCall> = Vec::new();
+        for call in tool_calls {
+            if self.tools.is_read_only_call(call) {
+                read_only.push(call);
+            } else {
+                write.push(call);
+            }
+        }
 
-            // Persist tool result message
-            let tool_msg = Message::tool_result(&tool_call.id, &tool_call.name, result.clone());
+        // Phase 1: Execute read-only tools in parallel on blocking threads
+        // with catch_unwind protection.
+        if !read_only.is_empty() {
+            let mut stores: Vec<SessionStore> = Vec::with_capacity(read_only.len());
             {
                 let store = self.store.lock().await;
-                store.append_message(session_id, &tool_msg)?;
+                for _ in 0..read_only.len() {
+                    stores.push(store.clone());
+                }
             }
 
-            // Emit event (clone result so we can return it)
-            let _ = event_tx.send(BackendEvent::ToolCompleted {
-                session_id,
-                request_id,
-                tool_call: tool_call.clone(),
-                result: result.clone(),
-            });
+            let mut handles: Vec<(
+                ToolCall,
+                tokio::task::JoinHandle<ToolExecutionResult>,
+            )> = Vec::with_capacity(read_only.len());
+            for (tool_call, store) in read_only.into_iter().zip(stores) {
+                let handle = self.tools.execute_call_spawned(
+                    runtime.clone(),
+                    store,
+                    session_id,
+                    tool_call.clone(),
+                    mode,
+                    false,
+                );
+                handles.push((tool_call.clone(), handle));
+            }
 
+            for (tool_call, handle) in handles {
+                let result = handle.await.unwrap_or_else(|join_err| {
+                    ToolExecutionResult::new(format!(
+                        "Tool task panicked/aborted: {join_err}"
+                    ))
+                });
+                results.push((tool_call, result));
+            }
+        }
+
+        // Phase 2: Execute write tools serially on blocking threads with
+        // catch_unwind protection. Each tool completes (including DB
+        // persistence) before the next starts.
+        for tool_call in write {
+            let store = {
+                let s = self.store.lock().await;
+                s.clone()
+            };
+            let handle = self.tools.execute_call_spawned(
+                runtime.clone(),
+                store,
+                session_id,
+                tool_call.clone(),
+                mode,
+                false,
+            );
+            let result = handle.await.unwrap_or_else(|join_err| {
+                ToolExecutionResult::new(format!(
+                    "Tool task panicked/aborted: {join_err}"
+                ))
+            });
             results.push((tool_call.clone(), result));
         }
 
+        // Phase 3: Persist tool results and emit events sequentially
+        // (DB writes must be ordered and use the shared connection).
+        for (tool_call, result) in &results {
+            self.persist_tool_result(session_id, request_id, tool_call, result, event_tx)
+                .await?;
+        }
+
         Ok(results)
+    }
+
+    /// Persist a pre-built message to the database.
+    ///
+    /// Useful when the caller has already constructed the message with
+    /// token usage, mode, and other fields set (e.g. TUI's flow).
+    pub async fn persist_message(
+        &self,
+        session_id: uuid::Uuid,
+        msg: &Message,
+    ) -> Result<()> {
+        let store = self.store.lock().await;
+        store.append_message(session_id, msg)?;
+        Ok(())
     }
 
     /// Persist an assistant message to the database.
@@ -383,6 +450,34 @@ impl AgentRuntime {
 
         let store = self.store.lock().await;
         store.append_message(session_id, &msg)?;
+        Ok(())
+    }
+
+    /// Persist a tool result to the database and emit a `ToolCompleted` event.
+    ///
+    /// This encapsulates the common pattern: create a `Message::tool_result`,
+    /// append it to the DB, and send the `ToolCompleted` event. Both
+    /// `execute_tool_calls` and the TUI's `record_tool_result` can delegate
+    /// to this method.
+    pub async fn persist_tool_result(
+        &self,
+        session_id: uuid::Uuid,
+        request_id: u64,
+        tool_call: &ToolCall,
+        result: &ToolExecutionResult,
+        event_tx: &UnboundedSender<BackendEvent>,
+    ) -> Result<()> {
+        let tool_msg = Message::tool_result(&tool_call.id, &tool_call.name, result.clone());
+        {
+            let store = self.store.lock().await;
+            store.append_message(session_id, &tool_msg)?;
+        }
+        let _ = event_tx.send(BackendEvent::ToolCompleted {
+            session_id,
+            request_id,
+            tool_call: tool_call.clone(),
+            result: result.clone(),
+        });
         Ok(())
     }
 

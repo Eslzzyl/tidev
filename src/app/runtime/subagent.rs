@@ -369,17 +369,18 @@ async fn execute_child_tool_call(
             Ok(result)
         }
         _ => {
-            let result = tokio::task::block_in_place(|| {
-                let store = SessionStore::open(&context.store_path)?;
-                context.tools.execute_call(
-                    &context.runtime_handle,
-                    &store,
-                    context.child_session_id,
-                    tool_call,
-                    SessionMode::Build,
-                    false, // allow_outside: subagent execution doesn't allow outside workspace
-                )
-            })?;
+            let store = SessionStore::open(&context.store_path)?;
+            let handle = context.tools.execute_call_spawned(
+                context.runtime_handle.clone(),
+                store,
+                context.child_session_id,
+                tool_call.clone(),
+                SessionMode::Build,
+                false, // allow_outside: subagent execution doesn't allow outside workspace
+            );
+            let result = handle.await.unwrap_or_else(|join_err| {
+                ToolExecutionResult::new(format!("Tool failed: {join_err}"))
+            });
             Ok(result)
         }
     }

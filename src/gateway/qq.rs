@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
@@ -8,9 +8,10 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
+use tokio::sync::mpsc::unbounded_channel;
 use tokio::time::{Duration, sleep};
+use tokio_util::sync::CancellationToken;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 use uuid::Uuid;
 
@@ -19,7 +20,7 @@ use crate::{
     config::{ActiveModel, AppConfig, AuthStore},
     llm::LlmClient,
     prompts::SessionMode,
-    session::{AssistantTurn, BackendEvent, Conversation, Message, MessageRole, ToolCall},
+    session::{Conversation, Message, MessageRole},
     storage::SessionStore,
     tooling::ToolRegistry,
 };
@@ -66,9 +67,11 @@ pub struct QQChannel {
     pub auth: AuthStore,
     pub store: SessionStore,
     pub llm: LlmClient,
+    #[allow(dead_code)]
     pub tools: ToolRegistry,
     /// Shared AgentRuntime for compose_system_prompt / build_request_messages.
     pub agent: AgentRuntime,
+    #[allow(dead_code)]
     pub instruction_prompt: String,
     pub allowlist: HashSet<String>,
     pub client: QQClient,
@@ -78,9 +81,9 @@ pub struct QQChannel {
     pub msg_seq: u32,
     /// Gateway start time for uptime calculation.
     pub start_time: Instant,
-    /// Cancellation flags per channel_id for /stop command.
-    /// When set to true, the current task will be stopped after current streaming completes.
-    cancellation_flags: HashMap<String, Arc<AtomicBool>>,
+    /// Cancellation tokens per channel_id for /stop command.
+    /// When cancelled, the agent loop stops after the current turn/tool execution completes.
+    cancellation_tokens: HashMap<String, CancellationToken>,
     /// Interactive model selection state per channel_id.
     /// When a user is in this state, their next message is handled as selection input,
     /// not sent to the agent.
@@ -131,7 +134,7 @@ impl QQChannel {
             last_seq: None,
             msg_seq: 0,
             start_time: Instant::now(),
-            cancellation_flags: HashMap::new(),
+            cancellation_tokens: HashMap::new(),
             model_selection_states: HashMap::new(),
             compacting_sessions: HashSet::new(),
         }
@@ -412,6 +415,12 @@ impl QQChannel {
         })
     }
 
+    /// Run the full agent loop using shared AgentRuntime.
+    ///
+    /// Replaces the previous run_agent_with_tools + run_single_streaming_turn
+    /// + llm_completion_turn + execute_tool_calls methods with a single call
+    /// to AgentRuntime::run_agent_loop. The agent loop handles streaming,
+    /// tool execution, persistence, compaction, and cancellation internally.
     async fn run_agent_with_tools(
         &mut self,
         channel_id: &str,
@@ -420,199 +429,74 @@ impl QQChannel {
         active_model: &crate::config::ActiveModel,
     ) -> Result<()> {
         crate::log_info!(
-            "Starting QQ agent: channel_id={}, model={}, session={}",
+            "QQ agent: channel_id={}, model={}, session={}",
             channel_id,
             active_model.label(),
             conversation.session_id
         );
 
-        let runtime = tokio::runtime::Handle::current();
+        // Create cancellation token for this run
+        let cancel_token = CancellationToken::new();
+        self.cancellation_tokens
+            .insert(channel_id.to_string(), cancel_token.clone());
 
-        for _ in 1..=8 {
-            // Check for cancellation at the start of each round
-            if self.check_cancellation(channel_id) {
-                crate::log_info!("Task cancelled by user: channel_id={}", channel_id);
+        // Ensure tools have the active model set for correct filtering
+        self.agent.tools.set_active_model(active_model.clone());
 
-                // Send cancellation confirmation
-                self.send_markdown(channel_id, "🛑 Task stopped.", Some(msg_id))
-                    .await?;
-                return Ok(());
-            }
-
-            let turn = self
-                .run_single_streaming_turn(conversation, active_model)
-                .await?;
-
-            if turn.tool_calls.is_empty() {
-                let final_text = turn.content.trim();
-                if !final_text.is_empty() {
-                    self.msg_seq += 1;
-                    self.client
-                        .send_message_markdown(channel_id, final_text, Some(msg_id), self.msg_seq)
-                        .await?;
-                }
-
-                let mut assistant_message =
-                    Message::new(MessageRole::Assistant, turn.content.clone());
-                assistant_message.reasoning = turn.reasoning.clone();
-                conversation.push(assistant_message.clone());
-                self.store
-                    .append_message(conversation.session_id, &assistant_message)?;
-
-                return Ok(());
-            }
-
-            self.execute_tool_calls(channel_id, msg_id, &runtime, conversation, turn.tool_calls)
-                .await?;
-        }
-
-        bail!("assistant exceeded maximum tool rounds; aborting to prevent loop")
-    }
-
-    async fn run_single_streaming_turn(
-        &mut self,
-        conversation: &mut Conversation,
-        active_model: &crate::config::ActiveModel,
-    ) -> Result<AssistantTurn> {
-        self.tools.set_active_model(active_model.clone());
-
-        let context_manager = crate::context::ContextManager::from_state(
+        // Build context manager from conversation state
+        let mut context_manager = crate::context::ContextManager::from_state(
             conversation.context_summary.clone(),
             conversation.context_retained_from,
         );
 
-        // Use shared AgentRuntime for system prompt composition and message building
-        let (system_prompt, _) = self.agent.compose_system_prompt(
-            &active_model.system_prompt,
-            SessionMode::Build,
-        );
-        let request_messages = self.agent.build_request_messages(
-            &conversation.visible_messages(),
-            &context_manager,
-            SessionMode::Build,
-        );
-        let tool_definitions = self.agent.tool_definitions();
+        let session_id = conversation.session_id;
+        let (event_tx, _event_rx) = unbounded_channel();
 
-        let mut request_model = active_model.clone();
-        request_model.system_prompt = system_prompt;
+        let result = self
+            .agent
+            .run_agent_loop(
+                session_id,
+                active_model.clone(),
+                &mut context_manager,
+                SessionMode::Build,
+                active_model.thinking_level.clone(),
+                event_tx,
+                Some(cancel_token.clone()),
+            )
+            .await;
 
-        let turn = self
-            .llm_completion_turn(&request_model, request_messages, tool_definitions)
-            .await?;
+        // Clean up cancellation token
+        self.cancellation_tokens.remove(channel_id);
 
-        let mut assistant_message = Message::new(MessageRole::Assistant, turn.content.clone());
-        assistant_message.tool_calls = turn.tool_calls.clone();
-        assistant_message.reasoning = turn.reasoning.clone();
+        // Handle errors
+        if let Err(ref e) = result {
+            crate::log_error!("QQ agent loop failed: {}", e);
+            self.send_markdown(channel_id, &format!("Error: {e}"), Some(msg_id))
+                .await?;
+            return Ok(());
+        }
 
-        conversation.push(assistant_message.clone());
-        self.store
-            .append_message(conversation.session_id, &assistant_message)?;
+        // If cancelled by user
+        if cancel_token.is_cancelled() {
+            self.send_markdown(channel_id, "🛑 Task stopped.", Some(msg_id))
+                .await?;
+            return Ok(());
+        }
 
-        Ok(turn)
-    }
-
-    async fn llm_completion_turn(
-        &self,
-        model: &crate::config::ActiveModel,
-        messages: Vec<Message>,
-        tools: Vec<crate::tooling::ToolDefinition>,
-    ) -> Result<AssistantTurn> {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let session_id = Uuid::new_v4();
-        let request_id = 1;
-
-        let client = self.llm.clone();
-        let model = model.clone();
-
-        tokio::spawn(async move {
-            let thinking_level = model.thinking_level.clone();
-            client
-                .stream_chat(
-                    session_id,
-                    request_id,
-                    model,
-                    messages,
-                    tools,
-                    tx,
-                    thinking_level,
-                )
-                .await;
-        });
-
-        let mut turn = AssistantTurn::default();
-        while let Some(event) = rx.recv().await {
-            match event {
-                crate::session::BackendEvent::Delta { content, .. } => {
-                    turn.content.push_str(&content);
+        // Send the final assistant message to the user.
+        // All intermediate tool results and iterations are persisted by
+        // run_agent_loop; we only need to emit the final result.
+        if let Ok(messages) = self.store.load_messages(session_id) {
+            if let Some(last_msg) = messages.last() {
+                if last_msg.role == MessageRole::Assistant
+                    && !last_msg.content.trim().is_empty()
+                {
+                    self.send_markdown(channel_id, &last_msg.content, Some(msg_id))
+                        .await?;
                 }
-                crate::session::BackendEvent::ReasoningDelta { content, .. } => {
-                    turn.reasoning.push_str(&content);
-                }
-                crate::session::BackendEvent::ToolCallUpdated { tool_call, .. } => {
-                    if let Some(existing) =
-                        turn.tool_calls.iter_mut().find(|tc| tc.id == tool_call.id)
-                    {
-                        *existing = tool_call;
-                    } else {
-                        turn.tool_calls.push(tool_call);
-                    }
-                }
-                crate::session::BackendEvent::Failed { error, .. } => {
-                    bail!("LLM Error: {}", error);
-                }
-                crate::session::BackendEvent::Finished {
-                    turn: assistant_turn,
-                    ..
-                } => {
-                    turn = assistant_turn;
-                    break;
-                }
-                _ => {}
             }
         }
 
-        Ok(turn)
-    }
-
-    async fn execute_tool_calls(
-        &mut self,
-        channel_id: &str,
-        msg_id: &str,
-        _runtime: &tokio::runtime::Handle,
-        conversation: &mut Conversation,
-        tool_calls: Vec<ToolCall>,
-    ) -> Result<()> {
-        // Use shared AgentRuntime for execution, persistence, and events
-        let results = self
-            .agent
-            .execute_tool_calls(
-                conversation.session_id,
-                0, // request_id not critical for QQ
-                &tool_calls,
-                SessionMode::Build,
-                &tokio::sync::mpsc::unbounded_channel::<BackendEvent>().0,
-            )
-            .await?;
-
-        for (tool_call, execution_result) in &results {
-            let display_result =
-                execution_result.preview_for_storage(Some(tool_call.name.as_str()));
-            let output_for_tool_event = display_result.output.clone();
-
-            // Update in-memory conversation
-            let tool_message =
-                Message::tool_result(&tool_call.id, &tool_call.name, execution_result.clone());
-            conversation.push(tool_message);
-
-            // Send tool result to user
-            let tool_result_text = format!(
-                "🔧 *{}*\n```\n{}\n```",
-                tool_call.name,
-                truncate_for_markdown(&output_for_tool_event)
-            );
-            self.send_markdown(channel_id, &tool_result_text, Some(msg_id))
-                .await?;
-        }
         Ok(())
     }
 
@@ -1046,35 +930,15 @@ impl QQChannel {
         msg_id: &str,
         _chat_key: &str,
     ) -> Result<()> {
-        // Get or create cancellation flag for this channel
-        let flag = self
-            .cancellation_flags
-            .entry(channel_id.to_string())
-            .or_insert_with(|| Arc::new(AtomicBool::new(false)));
-
-        if flag.load(Ordering::SeqCst) {
-            // Already stopping
-            self.send_markdown(channel_id, "Already stopping...", Some(msg_id))
-                .await?;
+        if let Some(token) = self.cancellation_tokens.get(channel_id) {
+            token.cancel();
+            // run_agent_loop checks the token and stops; the "🛑 Task stopped."
+            // message is sent by run_agent_with_tools after the loop returns.
         } else {
-            // Set the cancellation flag
-            flag.store(true, Ordering::SeqCst);
-            // We'll send confirmation after the task actually stops
-            // The actual stopping is handled in run_agent_with_tools
+            self.send_markdown(channel_id, "No active task to stop.", Some(msg_id))
+                .await?;
         }
         Ok(())
-    }
-
-    /// Check and clear cancellation flag, return true if cancelled.
-    fn check_cancellation(&self, channel_id: &str) -> bool {
-        if let Some(flag) = self.cancellation_flags.get(channel_id)
-            && flag.load(Ordering::SeqCst)
-        {
-            // Clear the flag
-            flag.store(false, Ordering::SeqCst);
-            return true;
-        }
-        false
     }
 
     /// Handle /compact command - compact session context.
@@ -1265,6 +1129,7 @@ fn format_session_summary(conversation: &Conversation, active_model: &ActiveMode
     )
 }
 
+#[allow(dead_code)]
 fn truncate_for_markdown(value: &str) -> String {
     const MAX_CHARS: usize = 500;
     let mut out = String::new();

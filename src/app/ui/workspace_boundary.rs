@@ -171,18 +171,22 @@ impl App {
         // Note: Shell commands are handled by RTK system for security,
         // so we don't need special handling here.
 
-        // Execute the tool with allow_outside=true
-        let mut result = self
-            .tools
-            .execute_call(
-                runtime.handle(),
-                &self.store,
-                self.conversation.session_id,
-                &tool_call,
-                self.mode,
-                true, // allow_outside: this tool has been allowed by user
-            )
-            .unwrap_or_else(|error| ToolExecutionResult::new(format!("Tool failed: {error}")));
+        // Execute the tool with allow_outside=true on a blocking thread
+        // with catch_unwind protection.
+        let handle = self.tools.execute_call_spawned(
+            runtime.handle().clone(),
+            self.store.clone(),
+            self.conversation.session_id,
+            tool_call.clone(),
+            self.mode,
+            true, // allow_outside: this tool has been allowed by user
+        );
+        let mut result =
+            runtime
+                .block_on(handle)
+                .unwrap_or_else(|join_err| {
+                    ToolExecutionResult::new(format!("Tool failed: {join_err}"))
+                });
 
         // Inject a note into the output indicating this was an outside-workspace access
         // that the user approved. Skip if the tool itself failed.

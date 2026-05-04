@@ -318,18 +318,18 @@ impl App {
                         self.advance_pending_tool_execution();
                         continue;
                     }
-                    let mut result = self
-                        .tools
-                        .execute_call(
-                            runtime.handle(),
-                            &self.store,
-                            self.conversation.session_id,
-                            &tool_call,
-                            self.mode,
-                            true,
-                        )
-                        .unwrap_or_else(|error| {
-                            ToolExecutionResult::new(format!("Tool failed: {error}"))
+                    let handle = self.tools.execute_call_spawned(
+                        runtime.handle().clone(),
+                        self.store.clone(),
+                        self.conversation.session_id,
+                        tool_call.clone(),
+                        self.mode,
+                        true,
+                    );
+                    let mut result = runtime
+                        .block_on(handle)
+                        .unwrap_or_else(|join_err| {
+                            ToolExecutionResult::new(format!("Tool failed: {join_err}"))
                         });
                     if !result.output.starts_with("Tool failed:") {
                         result
@@ -557,17 +557,19 @@ impl App {
             return Ok(true);
         }
 
-        let result = self
-            .tools
-            .execute_call(
-                runtime.handle(),
-                &self.store,
-                self.conversation.session_id,
-                &tool_call,
-                self.mode,
-                false, // allow_outside: normal execution doesn't allow outside workspace
-            )
-            .unwrap_or_else(|error| ToolExecutionResult::new(format!("Tool failed: {error}")));
+        // Execute on blocking thread with catch_unwind protection,
+        // block synchronously for the result via runtime.block_on.
+        let handle = self.tools.execute_call_spawned(
+            runtime.handle().clone(),
+            self.store.clone(),
+            self.conversation.session_id,
+            tool_call.clone(),
+            self.mode,
+            false, // allow_outside: normal execution doesn't allow outside workspace
+        );
+        let result = runtime.block_on(handle).unwrap_or_else(|join_err| {
+            ToolExecutionResult::new(format!("Tool failed: {join_err}"))
+        });
         self.record_tool_result(tool_call, result)?;
         self.advance_pending_tool_execution();
         Ok(false)
@@ -793,21 +795,23 @@ impl App {
         let tx = self.backend_tx.clone();
         let tools = self.tools.clone();
         let store = self.store.clone();
-        let runtime_handle = runtime.handle().clone();
         let mode = self.mode;
 
-        runtime.spawn_blocking(move || {
-            let result = tools
-                .execute_call(
-                    &runtime_handle,
-                    &store,
-                    session_id,
-                    &tool_call,
-                    mode,
-                    allow_outside,
-                )
-                .unwrap_or_else(|error| ToolExecutionResult::new(format!("Tool failed: {error}")));
+        // Use execute_call_spawned for catch_unwind protection and
+        // offloading to the blocking thread pool.
+        let handle = tools.execute_call_spawned(
+            runtime.handle().clone(),
+            store,
+            session_id,
+            tool_call.clone(),
+            mode,
+            allow_outside,
+        );
 
+        runtime.spawn(async move {
+            let result = handle.await.unwrap_or_else(|join_err| {
+                ToolExecutionResult::new(format!("Tool failed: {join_err}"))
+            });
             let _ = tx.send(crate::session::BackendEvent::ToolCompleted {
                 session_id,
                 request_id,
@@ -892,18 +896,20 @@ impl App {
                 }
                 _ => {
                     if !self.should_run_tool_async(&tool_call) {
-                        let result = self
-                            .tools
-                            .execute_call(
-                                runtime.handle(),
-                                &self.store,
-                                self.conversation.session_id,
-                                &tool_call,
-                                self.mode,
-                                false, // allow_outside: normal execution doesn't allow outside workspace
-                            )
-                            .unwrap_or_else(|error| {
-                                ToolExecutionResult::new(format!("Tool failed: {error}"))
+                        // Execute on blocking thread with catch_unwind protection,
+                        // block synchronously for the result via runtime.block_on.
+                        let handle = self.tools.execute_call_spawned(
+                            runtime.handle().clone(),
+                            self.store.clone(),
+                            self.conversation.session_id,
+                            tool_call.clone(),
+                            self.mode,
+                            false, // allow_outside: normal execution doesn't allow outside workspace
+                        );
+                        let result = runtime
+                            .block_on(handle)
+                            .unwrap_or_else(|join_err| {
+                                ToolExecutionResult::new(format!("Tool failed: {join_err}"))
                             });
                         self.record_tool_result(tool_call, result)?;
                     }

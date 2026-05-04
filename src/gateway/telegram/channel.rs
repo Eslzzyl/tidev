@@ -1,18 +1,17 @@
 //! Telegram channel implementation.
 
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::time::{Duration, sleep};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::{
@@ -21,7 +20,7 @@ use crate::{
     context::ContextManager,
     llm::LlmClient,
     prompts::{SessionMode, gateway_system_prompt},
-    session::{AssistantTurn, BackendEvent, Conversation, Message, MessageRole, ToolCall},
+    session::{BackendEvent, Conversation, Message, MessageRole},
     storage::SessionStore,
     tooling::ToolRegistry,
 };
@@ -72,9 +71,8 @@ pub struct TelegramChannel {
     pub request_seq: u64,
     /// Gateway start time for uptime calculation.
     pub start_time: Instant,
-    /// Cancellation flags per chat_id for /stop command.
-    /// When set to true, the current task will be stopped after current streaming completes.
-    cancellation_flags: HashMap<i64, Arc<AtomicBool>>,
+    /// Cancellation tokens per chat_id for /stop command.
+    cancellation_tokens: HashMap<i64, CancellationToken>,
     /// Interactive model selection state per chat_id.
     /// When a user is in this state, their next message is handled as selection input,
     /// not sent to the agent.
@@ -128,7 +126,7 @@ impl TelegramChannel {
             offset: 0,
             request_seq: 0,
             start_time: Instant::now(),
-            cancellation_flags: HashMap::new(),
+            cancellation_tokens: HashMap::new(),
             model_selection_states: HashMap::new(),
             balance_selection_states: HashMap::new(),
             compacting_sessions: HashSet::new(),
@@ -301,6 +299,11 @@ impl TelegramChannel {
         Ok(())
     }
 
+    /// Run the full agent loop using shared AgentRuntime.
+    ///
+    /// Replaces run_agent_with_tools + run_single_streaming_turn + execute_tool_calls.
+    /// Handles draft editing for streaming and sends tool results in real-time via
+    /// a spawned event handler task.
     async fn run_agent_with_tools(
         &mut self,
         source_message: &TelegramMessage,
@@ -308,7 +311,7 @@ impl TelegramChannel {
         active_model: &ActiveModel,
     ) -> Result<()> {
         crate::log_info!(
-            "Starting agent: chat_id={}, model={}, session={}",
+            "Telegram agent: chat_id={}, model={}, session={}",
             source_message.chat.id,
             active_model.label(),
             conversation.session_id
@@ -334,280 +337,143 @@ impl TelegramChannel {
             }
         };
 
-        let mut has_tool_calls = false;
+        // Set up cancellation
+        let cancel_token = CancellationToken::new();
+        self.cancellation_tokens
+            .insert(source_message.chat.id, cancel_token.clone());
 
-        loop {
-            if self.check_cancellation(source_message.chat.id) {
-                self.send_reply_chunks(source_message, "Stopped.").await?;
-                return Ok(());
-            }
+        // Ensure tools have the active model
+        self.agent.tools.set_active_model(active_model.clone());
 
-            let turn = self
-                .run_single_streaming_turn(
-                    source_message,
-                    conversation,
-                    active_model,
-                    &draft_message_id,
-                )
-                .await?;
-
-            if turn.tool_calls.is_empty() {
-                let final_text = normalize_assistant_output(&turn.content);
-                crate::log_info!(
-                    "Agent completed: session={}, content_len={}",
-                    conversation.session_id,
-                    final_text.len()
-                );
-
-                // Persist assistant turn
-                let assistant_message = Message::new(MessageRole::Assistant, final_text.clone());
-                conversation.push(assistant_message.clone());
-                self.store
-                    .append_message(conversation.session_id, &assistant_message)?;
-
-                // If we had tool calls, send final response as a new message
-                // instead of editing the draft (so it appears at the end)
-                if has_tool_calls {
-                    // Delete the draft message first
-                    let _ = self.cancel_draft(&recipient, &draft_message_id).await;
-                    // Send final response as new message
-                    self.send_reply_chunks(source_message, &final_text).await?;
-                } else {
-                    // No tool calls - use finalize_draft to update the initial message
-                    if self
-                        .finalize_draft(&recipient, &draft_message_id, &final_text)
-                        .await
-                        .is_err()
-                    {
-                        // Fallback: send as new message
-                        self.send_reply_chunks(source_message, &final_text).await?;
-                    }
-                }
-                return Ok(());
-            }
-
-            // Mark that we've had tool calls
-            has_tool_calls = true;
-
-            // Show tool call progress - use update_draft_progress
-            let status = format!("🔧 Running {} tool call(s)...", turn.tool_calls.len());
-            if self
-                .update_draft_progress(&recipient, &draft_message_id, &status)
-                .await
-                .is_err()
-            {
-                // Fallback: send as new message
-                self.send_reply_chunks(source_message, &status).await?;
-            }
-
-            self.execute_tool_calls(source_message, conversation, turn.tool_calls)
-                .await?;
-        }
-    }
-
-    async fn run_single_streaming_turn(
-        &mut self,
-        source_message: &TelegramMessage,
-        conversation: &mut Conversation,
-        active_model: &ActiveModel,
-        draft_message_id: &str,
-    ) -> Result<AssistantTurn> {
-        self.tools.set_active_model(active_model.clone());
-
-        let context_manager = ContextManager::from_state(
+        // Build context manager from conversation state
+        let mut context_manager = ContextManager::from_state(
             conversation.context_summary.clone(),
             conversation.context_retained_from,
         );
 
-        // Use shared AgentRuntime for system prompt composition and message building
-        let (system_prompt, _) = self.agent.compose_system_prompt(
-            &active_model.system_prompt,
-            SessionMode::Build,
-        );
-        let request_messages = self.agent.build_request_messages(
-            &conversation.visible_messages(),
-            &context_manager,
-            SessionMode::Build,
-        );
-        let tool_definitions = self.agent.tool_definitions();
-
-        let mut request_model = active_model.clone();
-        request_model.system_prompt = system_prompt;
-
-        self.request_seq = self.request_seq.wrapping_add(1);
-        if self.request_seq == 0 {
-            self.request_seq = 1;
-        }
-
-        let request_id = self.request_seq;
         let session_id = conversation.session_id;
+        let (event_tx, mut event_rx) = unbounded_channel();
 
-        let (tx, mut rx) = unbounded_channel();
-        let llm = self.llm.clone();
+        // Clone resources for the event handler task
+        let bot = self.bot.clone();
+        let chat_id = source_message.chat.id;
+        let thread_id = source_message.message_thread_id;
+        let msg_id = source_message.message_id;
+        let draft_id = draft_message_id.clone();
 
-        tokio::spawn(async move {
-            let thinking_level = request_model.thinking_level.clone();
-            llm.stream_chat(
-                session_id,
-                request_id,
-                request_model,
-                request_messages,
-                tool_definitions,
-                tx,
-                thinking_level,
-            )
-            .await;
+        // Spawn event handler for real-time draft updates and tool results
+        let event_handle = tokio::spawn(async move {
+            let mut streamed = String::new();
+            let mut last_edit =
+                Instant::now() - Duration::from_millis(TELEGRAM_DRAFT_EDIT_INTERVAL_MS);
+            let draft_id: i64 = match draft_id.parse() {
+                Ok(id) => id,
+                Err(_) => return,
+            };
+
+            while let Some(event) = event_rx.recv().await {
+                match event {
+                    BackendEvent::Delta { content, .. } => {
+                        streamed.push_str(&content);
+                        let preview = preview_for_streaming(&streamed);
+                        let now = Instant::now();
+                        if now.duration_since(last_edit).as_millis() as u64
+                            >= TELEGRAM_DRAFT_EDIT_INTERVAL_MS
+                            || streamed.len() >= TELEGRAM_MAX_MESSAGE_LENGTH
+                        {
+                            let _ = bot.edit_message_text_html(0, draft_id, &preview).await;
+                            last_edit = now;
+                        }
+                    }
+                    BackendEvent::ToolCompleted {
+                        tool_call, result, ..
+                    } => {
+                        let display =
+                            result.preview_for_storage(Some(tool_call.name.as_str()));
+                        let text = format!(
+                            "🔧 <b>{}</b>\n<pre><code class=\"language-text\">{}</code></pre>",
+                            tool_call.name,
+                            truncate_for_html(&display.output)
+                        );
+                        let _ = bot
+                            .send_message_html(chat_id, thread_id, &text, Some(msg_id))
+                            .await;
+                    }
+                    BackendEvent::Finished { .. } => {
+                        // Agent loop will handle finalization after run_agent_loop returns
+                    }
+                    _ => {}
+                }
+            }
         });
 
-        let mut turn = AssistantTurn::default();
-        let mut streamed_reasoning = String::new();
-        let mut last_edit = Instant::now() - Duration::from_millis(TELEGRAM_DRAFT_EDIT_INTERVAL_MS);
+        // Run the complete agent loop
+        let result = self
+            .agent
+            .run_agent_loop(
+                session_id,
+                active_model.clone(),
+                &mut context_manager,
+                SessionMode::Build,
+                active_model.thinking_level.clone(),
+                event_tx,
+                Some(cancel_token.clone()),
+            )
+            .await;
 
-        // Build recipient for draft updates
-        let recipient = if let Some(thread_id) = source_message.message_thread_id {
-            format!("{}:{}", source_message.chat.id, thread_id)
-        } else {
-            source_message.chat.id.to_string()
-        };
+        // Clean up cancellation token
+        self.cancellation_tokens.remove(&source_message.chat.id);
 
-        while let Some(event) = rx.recv().await {
-            match event {
-                BackendEvent::Delta {
-                    session_id: event_session_id,
-                    request_id: event_req_id,
-                    content,
-                    ..
-                } if event_session_id == session_id && event_req_id == request_id => {
-                    if content.is_empty() {
-                        continue;
-                    }
+        // Wait for event handler to finish
+        let _ = event_handle.await;
 
-                    turn.content.push_str(&content);
-                    let preview = preview_for_streaming(&turn.content);
+        // Handle errors
+        if let Err(ref e) = result {
+            crate::log_error!("Telegram agent loop failed: {}", e);
+            let error_msg = format!("Error: {e}");
+            let _ = self
+                .cancel_draft(&recipient, &draft_message_id)
+                .await;
+            self.send_reply_chunks(source_message, &error_msg)
+                .await?;
+            return Ok(());
+        }
 
-                    if streamed_reasoning.len() < turn.content.len() {
-                        let new_reasoning = &turn.content[streamed_reasoning.len()..];
-                        streamed_reasoning.push_str(new_reasoning);
-                    }
+        // Handle cancellation
+        if cancel_token.is_cancelled() {
+            self.send_reply_chunks(source_message, "Stopped.")
+                .await?;
+            return Ok(());
+        }
 
-                    let now = Instant::now();
-                    if now.duration_since(last_edit).as_millis() as u64
-                        >= TELEGRAM_DRAFT_EDIT_INTERVAL_MS
-                        || turn.content.len() >= TELEGRAM_MAX_MESSAGE_LENGTH
-                    {
+        // Send final response
+        if let Ok(messages) = self.store.load_messages(session_id) {
+            if let Some(last_msg) = messages.last() {
+                if last_msg.role == MessageRole::Assistant
+                    && !last_msg.content.trim().is_empty()
+                {
+                    let final_text = normalize_assistant_output(&last_msg.content);
+
+                    if last_msg.tool_calls.is_empty() {
+                        // No tool calls — finalize the draft message
                         if self
-                            .update_draft(&recipient, draft_message_id, &preview)
+                            .finalize_draft(&recipient, &draft_message_id, &final_text)
                             .await
                             .is_err()
                         {
-                            // Fallback: send as new message
-                            self.send_reply_chunks(source_message, &preview).await?;
+                            self.send_reply_chunks(source_message, &final_text)
+                                .await?;
                         }
-                        last_edit = now;
-                    }
-                }
-                BackendEvent::ReasoningDelta {
-                    session_id: event_session_id,
-                    request_id: event_req_id,
-                    content,
-                    ..
-                } if event_session_id == session_id && event_req_id == request_id => {
-                    turn.reasoning.push_str(&content);
-                }
-                BackendEvent::ToolCallUpdated {
-                    session_id: event_session_id,
-                    request_id: event_req_id,
-                    tool_call,
-                    ..
-                } if event_session_id == session_id && event_req_id == request_id => {
-                    if let Some(existing) =
-                        turn.tool_calls.iter_mut().find(|tc| tc.id == tool_call.id)
-                    {
-                        *existing = tool_call;
                     } else {
-                        turn.tool_calls.push(tool_call);
+                        // Had tool calls — delete draft and send as new message
+                        let _ = self
+                            .cancel_draft(&recipient, &draft_message_id)
+                            .await;
+                        self.send_reply_chunks(source_message, &final_text)
+                            .await?;
                     }
                 }
-                BackendEvent::Failed {
-                    session_id: event_session_id,
-                    request_id: event_req_id,
-                    error,
-                    ..
-                } if event_session_id == session_id && event_req_id == request_id => {
-                    bail!("LLM Error: {}", error);
-                }
-                BackendEvent::Finished {
-                    session_id: event_session_id,
-                    request_id: event_req_id,
-                    turn: finished_turn,
-                    ..
-                } if event_session_id == session_id && event_req_id == request_id => {
-                    turn = finished_turn;
-                    break;
-                }
-                _ => {}
             }
-        }
-
-        Ok(turn)
-    }
-
-    async fn execute_tool_calls(
-        &mut self,
-        source_message: &TelegramMessage,
-        conversation: &mut Conversation,
-        tool_calls: Vec<ToolCall>,
-    ) -> Result<()> {
-        let request_id = self.request_seq;
-        let session_id = conversation.session_id;
-
-        // Use shared AgentRuntime for execution, persistence, and events
-        let results = self
-            .agent
-            .execute_tool_calls(
-                session_id,
-                request_id,
-                &tool_calls,
-                SessionMode::Build,
-                // Create a temporary channel for events; we mainly care about the returned results
-                &tokio::sync::mpsc::unbounded_channel::<BackendEvent>().0,
-            )
-            .await?;
-
-        for (tool_call, execution_result) in &results {
-            let display_result =
-                execution_result.preview_for_storage(Some(tool_call.name.as_str()));
-            let output_for_tool_event = display_result.output.clone();
-
-            // Update in-memory conversation
-            let tool_message =
-                Message::tool_result(&tool_call.id, &tool_call.name, execution_result.clone());
-            let tool_msg_id = tool_message.id;
-            conversation.push(tool_message);
-
-            // Log tool event (Telegram-specific)
-            self.store.append_tool_event(
-                session_id,
-                tool_msg_id,
-                &tool_call.name,
-                &tool_call.arguments,
-                &output_for_tool_event,
-            )?;
-
-            // Send tool result to user
-            let tool_result_text = format!(
-                "🔧 *{}*\n```\n{}\n```",
-                tool_call.name,
-                truncate_for_markdown(&output_for_tool_event)
-            );
-            self.send_reply_chunks(source_message, &tool_result_text)
-                .await?;
-
-            crate::log_debug!(
-                "Tool result recorded: name={}, result_len={}",
-                tool_call.name,
-                output_for_tool_event.len()
-            );
         }
 
         Ok(())
@@ -1302,36 +1168,17 @@ impl TelegramChannel {
         source_message: &TelegramMessage,
         _chat_key: &str,
     ) -> Result<()> {
-        // Get or create cancellation flag for this chat
-        let flag = self
-            .cancellation_flags
-            .entry(source_message.chat.id)
-            .or_insert_with(|| Arc::new(AtomicBool::new(false)));
-
-        // Check if there's already a task running
-        if flag.load(Ordering::SeqCst) {
-            // Already stopping
-            self.send_reply_chunks(source_message, "Already stopping...")
+        if let Some(token) = self.cancellation_tokens.get(&source_message.chat.id) {
+            token.cancel();
+            // The "Stopped." message is sent by run_agent_with_tools after
+            // the agent loop returns.
+            self.send_reply_chunks(source_message, "🛑 Stopping...")
                 .await?;
         } else {
-            // Set the cancellation flag
-            flag.store(true, Ordering::SeqCst);
-            // We'll send confirmation after the task actually stops
-            // The actual stopping is handled in run_agent_with_tools_inner
+            self.send_reply_chunks(source_message, "No active task to stop.")
+                .await?;
         }
         Ok(())
-    }
-
-    /// Check and clear cancellation flag, return true if cancelled.
-    fn check_cancellation(&self, chat_id: i64) -> bool {
-        if let Some(flag) = self.cancellation_flags.get(&chat_id)
-            && flag.load(Ordering::SeqCst)
-        {
-            // Clear the flag
-            flag.store(false, Ordering::SeqCst);
-            return true;
-        }
-        false
     }
 
     /// Finalize draft message with final content.
@@ -1390,15 +1237,16 @@ fn trim_for_telegram(value: &str) -> String {
     out
 }
 
-fn truncate_for_markdown(value: &str) -> String {
+fn truncate_for_html(value: &str) -> String {
     const MAX_CHARS: usize = 500;
     let mut out = String::new();
     for ch in value.chars().take(MAX_CHARS) {
-        // Escape backticks to avoid breaking markdown code blocks
-        if ch == '`' {
-            out.push_str("\\`");
-        } else {
-            out.push(ch);
+        match ch {
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '&' => out.push_str("&amp;"),
+            '"' => out.push_str("&quot;"),
+            _ => out.push(ch),
         }
     }
     if value.chars().count() > MAX_CHARS {

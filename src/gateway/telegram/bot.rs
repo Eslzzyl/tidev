@@ -8,6 +8,7 @@ use reqwest::Client;
 use super::types::{SendMessageRequest, TelegramApiResponse, TelegramSentMessage, TelegramUpdate};
 
 /// Telegram bot API client.
+#[derive(Clone)]
 pub struct TelegramBot {
     token: String,
     http: Client,

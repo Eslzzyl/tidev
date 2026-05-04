@@ -434,10 +434,12 @@ impl App {
         assistant_message.mode = Some(self.mode);
         self.conversation.push(assistant_message);
 
-        let messages = self
-            .context_manager
-            .build_request_messages(&self.conversation, self.mode);
-        let tools = self.tools.all_definitions();
+        let messages = self.agent.build_request_messages(
+            self.conversation.visible_messages(),
+            &self.context_manager,
+            self.mode,
+        );
+        let tools = self.agent.tool_definitions();
         let tx = self.backend_tx.clone();
         let session_id = self.conversation.session_id;
 
@@ -1201,8 +1203,10 @@ impl App {
         }
 
         if let Some(message) = persisted_message {
-            self.store
-                .append_message(self.conversation.session_id, &message)?;
+            runtime.block_on(
+                self.agent
+                    .persist_message(self.conversation.session_id, &message),
+            )?;
         }
 
         if !turn.tool_calls.is_empty() {

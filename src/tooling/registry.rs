@@ -1,12 +1,16 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tokio::task::JoinHandle;
 
 use crate::mcp::McpManager;
 use crate::memory::types::MemoryStore;
 use crate::tooling::SkillCatalog;
 use crate::{
-    config::PermissionConfig, prompts::SessionMode, session::ToolCall, storage::SessionStore,
+    config::PermissionConfig,
+    prompts::SessionMode,
+    session::{ToolCall, ToolExecutionResult},
+    storage::SessionStore,
 };
 
 use super::tools::tool_definitions;
@@ -213,6 +217,21 @@ impl ToolRegistry {
         })
     }
 
+    /// Returns `true` if the tool call is read-only and can safely be
+    /// executed in parallel with other read-only calls.
+    ///
+    /// Tools with `Read` or `Search` permission are inherently read-only.
+    /// All other tools (`Write`, `Edit`, `Execute`, `Session`) mutate state
+    /// and must be executed serially to prevent conflicts.
+    pub fn is_read_only_call(&self, call: &ToolCall) -> bool {
+        self.definition_for(&call.name).is_some_and(|def| {
+            matches!(
+                def.permission,
+                super::ToolPermission::Read | super::ToolPermission::Search
+            )
+        })
+    }
+
     pub fn definition_for(&self, tool_name: &str) -> Option<ToolDefinition> {
         if let Some(definition) = self
             .definitions
@@ -238,10 +257,10 @@ impl ToolRegistry {
         runtime: &tokio::runtime::Handle,
         store: &SessionStore,
         session_id: uuid::Uuid,
-        call: &crate::session::ToolCall,
+        call: &ToolCall,
         mode: SessionMode,
         allow_outside: bool,
-    ) -> Result<crate::session::ToolExecutionResult> {
+    ) -> Result<ToolExecutionResult> {
         if self.mcp.definition_for(&call.name).is_some() {
             return runtime.block_on(self.mcp.execute_call(call));
         }
@@ -292,5 +311,51 @@ impl ToolRegistry {
         }
 
         Ok(result)
+    }
+
+    /// Execute a tool call on a blocking thread with panic protection.
+    ///
+    /// Clones all inputs (ToolRegistry is cheap to clone, SessionStore::clone
+    /// opens a new SQLite connection), spawns a blocking tokio task, wraps the
+    /// execution in `catch_unwind`, and returns a `JoinHandle`.
+    ///
+    /// Never panics — caught panics become a `ToolExecutionResult` with an
+    /// error message.
+    pub fn execute_call_spawned(
+        &self,
+        runtime_handle: tokio::runtime::Handle,
+        store: SessionStore,
+        session_id: uuid::Uuid,
+        call: ToolCall,
+        mode: SessionMode,
+        allow_outside: bool,
+    ) -> JoinHandle<ToolExecutionResult> {
+        let registry = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                registry.execute_call(
+                    &runtime_handle,
+                    &store,
+                    session_id,
+                    &call,
+                    mode,
+                    allow_outside,
+                )
+            }));
+            match result {
+                Ok(Ok(r)) => r,
+                Ok(Err(e)) => ToolExecutionResult::new(format!("Error: {e}")),
+                Err(panic) => {
+                    let msg = if let Some(s) = panic.downcast_ref::<String>() {
+                        s.clone()
+                    } else if let Some(s) = panic.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else {
+                        "unknown panic".to_string()
+                    };
+                    ToolExecutionResult::new(format!("Tool panicked: {msg}"))
+                }
+            }
+        })
     }
 }
