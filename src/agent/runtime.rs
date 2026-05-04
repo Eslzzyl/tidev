@@ -16,9 +16,11 @@
 //!       └──── persist results ←── execute tools ←┘
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::future::Future;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use anyhow::Result;
 use chrono::Utc;
@@ -26,6 +28,7 @@ use tokio::sync::{Mutex, mpsc::UnboundedSender};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    agent::{AgentDefinition, AgentType},
     config::{
         reasoning::ThinkingLevelType,
         ActiveModel, ConfigPaths,
@@ -34,12 +37,26 @@ use crate::{
     instructions,
     prompts::SessionMode,
     session::{
-        AssistantTurn, BackendEvent, Message, MessageRole, ToolCall, ToolExecutionResult,
+        AssistantTurn, BackendEvent, Message, MessageAttachment, MessageRole, ToolCall,
+        ToolExecutionResult,
     },
     storage::SessionStore,
     system_info::SystemInfo,
-    tooling::{ToolDefinition, ToolRegistry},
+    tooling::{ToolDefinition, ToolRegistry, canonical_tool_name},
 };
+
+/// A user message received while the agent loop was already processing a turn.
+///
+/// After the current turn completes, `run_agent_loop` picks up the next
+/// queued message, persists it to the database, and continues the loop.
+/// This is the shared mechanism for "type-ahead" across all frontends.
+#[derive(Clone, Debug)]
+pub struct QueuedUserMessage {
+    pub content: String,
+    pub attachments: Vec<MessageAttachment>,
+    pub mode: Option<crate::prompts::SessionMode>,
+    pub thinking_level: Option<ThinkingLevelType>,
+}
 
 /// Shared agent runtime that both TUI and web can use.
 #[derive(Clone)]
@@ -54,9 +71,31 @@ pub struct AgentRuntime {
     pub instructions: Vec<String>,
     /// Cache for instruction file contents to avoid re-reading.
     pub instruction_content_cache: HashMap<String, String>,
+    /// Queue of user messages received while the agent loop is running.
+    /// After each turn completes, the loop processes the next message
+    /// automatically.  Frontends push through [`queue_user_message`].
+    pub queued_messages: Arc<StdMutex<VecDeque<QueuedUserMessage>>>,
 }
 
 impl AgentRuntime {
+    /// Enqueue a user message for processing after the current turn ends.
+    ///
+    /// This is the shared "type-ahead" mechanism — when a frontend receives
+    /// a user message while `run_agent_loop` is still processing, it can
+    /// call this method and the loop will pick it up automatically.
+    ///
+    /// Returns `true` if the message was queued (the loop is running).
+    /// Returns `false` if the queue is not being consumed (no loop active);
+    /// the frontend should start a new loop manually.
+    pub fn queue_user_message(&self, msg: QueuedUserMessage) -> bool {
+        let mut queue = self.queued_messages.lock().unwrap();
+        let was_empty = queue.is_empty();
+        queue.push_back(msg);
+        // If the queue already had items, the loop is definitely running.
+        // If it was empty, the caller needs to verify a loop is active.
+        !was_empty
+    }
+
     /// Compose the system prompt for a turn.
     ///
     /// Returns `(prompt, instruction_sources)`.
@@ -296,6 +335,30 @@ impl AgentRuntime {
                 } => {
                     turn.upsert_tool_call(tool_call);
                 }
+                BackendEvent::UsageStats {
+                    input_tokens,
+                    output_tokens,
+                    total_tokens,
+                    cache_read_tokens,
+                    cache_write_tokens,
+                    model_id,
+                    duration_ms,
+                    ..
+                } => {
+                    turn.input_tokens = Some(input_tokens);
+                    turn.output_tokens = Some(output_tokens);
+                    turn.total_tokens = Some(total_tokens);
+                    turn.cache_read_tokens = Some(cache_read_tokens);
+                    turn.cache_write_tokens = Some(cache_write_tokens);
+                    turn.model_id = Some(model_id.clone());
+                    turn.tokens_per_second = duration_ms.and_then(|ms| {
+                        if ms > 0 {
+                            Some(total_tokens as f32 / (ms as f32 / 1000.0))
+                        } else {
+                            None
+                        }
+                    });
+                }
                 BackendEvent::Finished {
                     turn: finished_turn,
                     ..
@@ -318,29 +381,29 @@ impl AgentRuntime {
     /// Persists tool-result messages to the database and emits
     /// [`BackendEvent::ToolCompleted`] for each executed tool.
     ///
+    /// Execution order:
+    /// 1. **Read-only** tools in parallel (catch_unwind protected)
+    /// 2. **Subagent** (`task`) tools in parallel — each runs a nested
+    ///    `run_agent_loop` with its own cloned [`AgentRuntime`]
+    /// 3. **Write** tools serially (catch_unwind protected)
+    /// 4. All results persisted sequentially
+    ///
     /// Returns a list of `(tool_call, result)` pairs for callers that need
-    /// to inspect or forward the results (e.g. gateway channels that send
-    /// results to users).
+    /// to inspect or forward the results.
     pub async fn execute_tool_calls(
-        &self,
+        &mut self,
         session_id: uuid::Uuid,
         request_id: u64,
         tool_calls: &[ToolCall],
         mode: SessionMode,
         event_tx: &UnboundedSender<BackendEvent>,
+        _parent_model: &crate::config::ActiveModel,
     ) -> Result<Vec<(ToolCall, ToolExecutionResult)>> {
         let runtime = tokio::runtime::Handle::current();
         let mut results: Vec<(ToolCall, ToolExecutionResult)> =
             Vec::with_capacity(tool_calls.len());
 
-        // Separate tool calls into read-only (parallel-safe) and write (serial).
-        //
-        // Read-only tools (Read/Search permission): read files, search code,
-        // fetch web pages — no side effects, safe to run concurrently.
-        //
-        // Write tools (Write/Edit/Execute/Session permission): modify files,
-        // run commands, change session state — must execute one-by-one to
-        // prevent conflicts (e.g. two edits to the same file).
+        // Separate tool calls by execution strategy.
         let mut read_only: Vec<&ToolCall> = Vec::new();
         let mut write: Vec<&ToolCall> = Vec::new();
         for call in tool_calls {
@@ -351,8 +414,7 @@ impl AgentRuntime {
             }
         }
 
-        // Phase 1: Execute read-only tools in parallel on blocking threads
-        // with catch_unwind protection.
+        // ─── Phase 1: Read-only tools in parallel ───────────────────────
         if !read_only.is_empty() {
             let mut stores: Vec<SessionStore> = Vec::with_capacity(read_only.len());
             {
@@ -388,9 +450,7 @@ impl AgentRuntime {
             }
         }
 
-        // Phase 2: Execute write tools serially on blocking threads with
-        // catch_unwind protection. Each tool completes (including DB
-        // persistence) before the next starts.
+        // ─── Phase 2: Write tools serially ──────────────────────────────
         for tool_call in write {
             let store = {
                 let s = self.store.lock().await;
@@ -412,8 +472,7 @@ impl AgentRuntime {
             results.push((tool_call.clone(), result));
         }
 
-        // Phase 3: Persist tool results and emit events sequentially
-        // (DB writes must be ordered and use the shared connection).
+        // ─── Phase 4: Persist results and emit events sequentially ──────
         for (tool_call, result) in &results {
             self.persist_tool_result(session_id, request_id, tool_call, result, event_tx)
                 .await?;
@@ -437,6 +496,10 @@ impl AgentRuntime {
     }
 
     /// Persist an assistant message to the database.
+    ///
+    /// Captured token usage from [`AssistantTurn`] is automatically written
+    /// to the stored message, so consumers of `run_agent_loop` do not need
+    /// to manually set token fields.
     pub async fn persist_assistant_message(
         &self,
         session_id: uuid::Uuid,
@@ -447,6 +510,14 @@ impl AgentRuntime {
         msg.tool_calls = turn.tool_calls.clone();
         msg.streaming = false;
         msg.completed_at = Some(Utc::now());
+        // Token usage captured from UsageStats during streaming
+        msg.input_tokens = turn.input_tokens;
+        msg.output_tokens = turn.output_tokens;
+        msg.total_tokens = turn.total_tokens;
+        msg.cache_read_tokens = turn.cache_read_tokens;
+        msg.cache_write_tokens = turn.cache_write_tokens;
+        msg.model_id = turn.model_id.clone();
+        msg.tokens_per_second = turn.tokens_per_second;
 
         let store = self.store.lock().await;
         store.append_message(session_id, &msg)?;
@@ -481,26 +552,268 @@ impl AgentRuntime {
         Ok(())
     }
 
-    /// Run the full agent loop.
+    /// Run a sub-agent (`task` tool) in a dedicated child session.
     ///
-    /// 1. Load messages from DB
-    /// 2. Compose system prompt
-    /// 3. Build request messages
-    /// 4. Stream LLM (events forwarded to `event_tx`; `Finished` is already
-    ///    emitted by the LLM stream and forwarded via `run_single_turn`)
-    /// 5. Persist assistant message
-    /// 6. If tool calls: execute each, persist results, emit `ToolCompleted`
-    /// 7. Loop back to step 1 until no more tool calls
+    /// This method **owns `self`** (a clone created by `execute_tool_calls`)
+    /// so it can call `run_agent_loop_with_tools` which needs `&mut self`.
     ///
-    /// If `cancel_token` is provided and cancelled, the loop stops after the
-    /// current turn/tool execution completes.
-    pub async fn run_agent_loop(
+    /// 1. Parse the [`TaskArgs`] from the tool call
+    /// 2. Create a child session (with parent reference, copied permissions)
+    /// 3. Filter tools per the subagent's [`AgentDefinition`]
+    /// 4. Run `run_agent_loop_with_tools` for the child
+    /// 5. Return the last assistant message content
+    ///
+    /// All panics/errors are caught and returned as a [`ToolExecutionResult`]
+    /// so this never throws from the perspective of `execute_tool_calls`.
+    pub async fn run_subagent(
+        mut self,
+        parent_session_id: uuid::Uuid,
+        parent_request_id: u64,
+        tool_call: ToolCall,
+        event_tx: UnboundedSender<BackendEvent>,
+        cancel_token: Option<CancellationToken>,
+        parent_model: crate::config::ActiveModel,
+    ) -> ToolExecutionResult {
+        let result = self
+            .run_subagent_inner(
+                parent_session_id,
+                parent_request_id,
+                &tool_call,
+                &event_tx,
+                cancel_token,
+                &parent_model,
+            )
+            .await;
+        match result {
+            Ok(output) => ToolExecutionResult::new(output),
+            Err(e) => ToolExecutionResult::new(format!("Subagent failed: {e}")),
+        }
+    }
+
+    async fn run_subagent_inner(
+        &mut self,
+        parent_session_id: uuid::Uuid,
+        _parent_request_id: u64,
+        tool_call: &ToolCall,
+        event_tx: &UnboundedSender<BackendEvent>,
+        cancel_token: Option<CancellationToken>,
+        parent_model: &crate::config::ActiveModel,
+    ) -> anyhow::Result<String> {
+        use crate::tooling::TaskArgs;
+
+        // 1. Parse tool call arguments
+        let args = serde_json::from_str::<TaskArgs>(&tool_call.arguments)?;
+        let description = args.description.trim().to_string();
+        let prompt = args.prompt.trim().to_string();
+        let subagent_type = args.subagent_type.unwrap_or_default();
+        let agent_type = AgentType::parse(&subagent_type).unwrap_or(AgentType::General);
+        let agent_def = AgentDefinition::new(agent_type);
+
+        let child_session_id = uuid::Uuid::new_v4();
+        let parent_record = {
+            let store = self.store.lock().await;
+            store
+                .load_session_record(parent_session_id)?
+                .ok_or_else(|| anyhow::anyhow!("parent session not found"))?
+        };
+
+        // Use agent's model override if set, else inherit parent model
+        let child_model = agent_def
+            .model_override
+            .clone()
+            .unwrap_or_else(|| parent_model.clone());
+
+        // 2. Create child session
+        {
+            let store = self.store.lock().await;
+            let agent_label = agent_type.display_name();
+            let child_title = format!("Task ({agent_label}): {description}");
+
+            store.create_session_with_parent(
+                child_session_id,
+                parent_session_id,
+                &self.workspace_root,
+                &parent_record.provider_id,
+                &parent_record.provider_display_name,
+                &child_model.model_id,
+                &child_model.display_name,
+                &child_title,
+            )?;
+            store.copy_tool_permissions(parent_session_id, child_session_id)?;
+
+            let bootstrap = Message::new(MessageRole::System, agent_def.bootstrap_content());
+            store.append_message(child_session_id, &bootstrap)?;
+            let user_msg = Message::new(MessageRole::User, prompt);
+            store.append_message(child_session_id, &user_msg)?;
+        }
+
+        // 3. Filter tools based on agent definition
+        let all_tools = self.tool_definitions();
+        let tools: Vec<ToolDefinition> = if let Some(allowed) = &agent_def.allowed_tools {
+            all_tools
+                .into_iter()
+                .filter(|def| {
+                    allowed.contains(&def.name)
+                        || matches!(canonical_tool_name(&def.name), Some("question"))
+                })
+                .collect()
+        } else {
+            all_tools
+        };
+
+        // 4. Run an inline agent loop for the child session.
+        //    We do NOT call run_agent_loop_with_tools here to avoid async
+        //    recursive type detection (the methods would form a cycle).
+        //    Instead we replicate the loop body using the same primitives
+        //    (run_single_turn, persist_assistant_message, persist_tool_result).
+        let mut child_context = ContextManager::new();
+        let child_thinking = child_model.thinking_level.clone();
+        let mut request_sequence: u64 = rand::random();
+        let runtime = tokio::runtime::Handle::current();
+
+        loop {
+            // Check cancellation
+            if let Some(ref ct) = cancel_token {
+                if ct.is_cancelled() {
+                    crate::log_info!("run_subagent: cancelled");
+                    return Ok(String::new());
+                }
+            }
+
+            // Load messages
+            let db_messages = {
+                let store = self.store.lock().await;
+                store.load_messages(child_session_id)?
+            };
+
+            // Compose + build
+            let (system_prompt, _sources) =
+                self.compose_system_prompt(&child_model.system_prompt, SessionMode::Build);
+            let mut model_for_turn = child_model.clone();
+            model_for_turn.system_prompt = system_prompt;
+            let request_messages =
+                self.build_request_messages(&db_messages, &mut child_context, SessionMode::Build);
+
+            // Stream LLM
+            let turn = self
+                .run_single_turn(
+                    child_session_id,
+                    request_sequence,
+                    model_for_turn,
+                    request_messages,
+                    tools.clone(),
+                    child_thinking.clone(),
+                    event_tx,
+                )
+                .await?;
+
+            // Persist assistant message
+            self.persist_assistant_message(child_session_id, &turn)
+                .await?;
+
+            // If no tool calls, done
+            if turn.tool_calls.is_empty() {
+                break String::new();
+            }
+
+            // Execute tools (no sub-sub-agents: task tools treated as errors)
+            let mut tool_results: Vec<(ToolCall, ToolExecutionResult)> = Vec::new();
+            for tc in &turn.tool_calls {
+                if tc.name == "task" {
+                    tool_results.push((
+                        tc.clone(),
+                        ToolExecutionResult::new(
+                            "Sub-agent nesting too deep: task tool unavailable in nested sessions",
+                        ),
+                    ));
+                    continue;
+                }
+
+                if self.tools.is_read_only_call(tc) {
+                    // Read-only: parallel execution via spawn_blocking
+                    let store = {
+                        let s = self.store.lock().await;
+                        s.clone()
+                    };
+                    let handle = self.tools.execute_call_spawned(
+                        runtime.clone(),
+                        store,
+                        child_session_id,
+                        tc.clone(),
+                        SessionMode::Build,
+                        false,
+                    );
+                    let result = handle.await.unwrap_or_else(|join_err| {
+                        ToolExecutionResult::new(format!(
+                            "Tool task panicked/aborted: {join_err}"
+                        ))
+                    });
+                    tool_results.push((tc.clone(), result));
+                } else {
+                    // Write tool: serial execution
+                    let store = {
+                        let s = self.store.lock().await;
+                        s.clone()
+                    };
+                    let handle = self.tools.execute_call_spawned(
+                        runtime.clone(),
+                        store,
+                        child_session_id,
+                        tc.clone(),
+                        SessionMode::Build,
+                        false,
+                    );
+                    let result = handle.await.unwrap_or_else(|join_err| {
+                        ToolExecutionResult::new(format!(
+                            "Tool task panicked/aborted: {join_err}"
+                        ))
+                    });
+                    tool_results.push((tc.clone(), result));
+                }
+            }
+
+            // Persist tool results
+            for (tc, result) in &tool_results {
+                self.persist_tool_result(
+                    child_session_id,
+                    request_sequence,
+                    tc,
+                    result,
+                    event_tx,
+                )
+                .await?;
+            }
+
+            request_sequence = request_sequence.wrapping_add(1);
+        };
+
+        // 5. Read last assistant message from child session
+        let store = self.store.lock().await;
+        let messages = store.load_messages(child_session_id)?;
+        let output = messages
+            .into_iter()
+            .rev()
+            .find(|m| m.role == MessageRole::Assistant && !m.content.is_empty())
+            .map(|m| m.content)
+            .unwrap_or_default();
+
+        Ok(output)
+    }
+
+    /// Run the full agent loop with the given tool definitions.
+    ///
+    /// Same as [`run_agent_loop`](Self::run_agent_loop) but uses the provided
+    /// tool list instead of calling `self.tool_definitions()`.  This is used
+    /// internally by [`run_subagent`](Self::run_subagent) to restrict tools
+    /// based on the subagent's [`AgentDefinition`].
+    pub async fn run_agent_loop_with_tools(
         &mut self,
         session_id: uuid::Uuid,
         mut model: ActiveModel,
         context_manager: &mut ContextManager,
         mode: SessionMode,
         thinking_level: ThinkingLevelType,
+        tools: Vec<ToolDefinition>,
         event_tx: UnboundedSender<BackendEvent>,
         cancel_token: Option<CancellationToken>,
     ) -> Result<()> {
@@ -528,10 +841,7 @@ impl AgentRuntime {
             // 3. Build request messages
             let request_messages = self.build_request_messages(&db_messages, context_manager, mode);
 
-            // 4. Get tool definitions
-            let tools = self.tool_definitions();
-
-            // 5. Stream LLM — `Finished` is already forwarded to event_tx
+            // 4. Stream LLM — `Finished` is already forwarded to event_tx
             //    by `run_single_turn`.
             let turn = self
                 .run_single_turn(
@@ -539,25 +849,41 @@ impl AgentRuntime {
                     request_id,
                     model.clone(),
                     request_messages,
-                    tools,
+                    tools.clone(),
                     thinking_level.clone(),
                     &event_tx,
                 )
                 .await?;
 
-            // 6. Persist assistant message (Finished was already emitted)
+            // 5. Persist assistant message (Finished was already emitted)
             self.persist_assistant_message(session_id, &turn).await?;
 
-            // 7. If no tool calls, we're done — run compaction before returning
+            // 6. If no tool calls, check for queued user messages before
+            //    compacting and returning.  This implements the shared
+            //    "type-ahead" mechanism — frontends push messages through
+            //    `queue_user_message()` while the loop is running.
             if turn.tool_calls.is_empty() {
-                // Run context compaction if the conversation has grown large
-                self.maybe_compact(
-                    session_id,
-                    &model,
-                    context_manager,
-                    &event_tx,
-                )
-                .await;
+                let next_msg = self.queued_messages.lock().unwrap().pop_front();
+                if let Some(qmsg) = next_msg {
+                    crate::log_info!(
+                        "run_agent_loop: processing queued message ({} chars)",
+                        qmsg.content.len()
+                    );
+                    let mut user_msg = Message::new(MessageRole::User, &qmsg.content);
+                    user_msg.attachments = qmsg.attachments;
+                    user_msg.mode = qmsg.mode;
+                    user_msg.thinking_level = qmsg.thinking_level;
+                    user_msg.completed_at = Some(Utc::now());
+                    {
+                        let store = self.store.lock().await;
+                        store.append_message(session_id, &user_msg)?;
+                    }
+                    // Continue the loop — the next iteration picks up the
+                    // newly persisted user message.
+                    request_id = rand::random::<u64>();
+                    continue;
+                }
+                self.maybe_compact(session_id, &model, context_manager, &event_tx).await;
                 return Ok(());
             }
 
@@ -569,19 +895,97 @@ impl AgentRuntime {
                 }
             }
 
-            // 8. Execute tools and persist results
-            let _ = self.execute_tool_calls(
-                session_id,
-                request_id,
-                &turn.tool_calls,
-                mode,
-                &event_tx,
-            )
-            .await?;
+            // 7. Partition tool calls: subagents (task) are handled inline;
+            //    the rest go through execute_tool_calls.
+            let mut task_calls: Vec<ToolCall> = Vec::new();
+            let mut other_calls: Vec<ToolCall> = Vec::new();
+            for tc in turn.tool_calls {
+                if tc.name == "task" {
+                    task_calls.push(tc);
+                } else {
+                    other_calls.push(tc);
+                }
+            }
 
-            // 9. Generate new request ID for next iteration
+            // 7a. Subagent (task) tools — run them one at a time.
+            // FIXME: Parallel execution would be desirable but requires the
+            // subagent's future to be `Send` for tokio::spawn.
+            for tc in &task_calls {
+                let agent = self.clone();
+                let owned_tc = tc.clone();
+                let tx = event_tx.clone();
+                let sid = session_id;
+                let rid = request_id;
+                let pm = model.clone();
+
+                // Box the subagent call as a trait object to break async
+                // recursive type detection.  run_subagent → run_subagent_inner
+                // → run_agent_loop_with_tools creates an infinite-size future
+                // cycle; boxing hides the concrete type.
+                let result: ToolExecutionResult = {
+                    let fut: Pin<Box<dyn Future<Output = ToolExecutionResult> + Send>> =
+                        Box::pin(agent.run_subagent(sid, rid, owned_tc, tx, None, pm));
+                    fut.await
+                };
+                // Persist subagent result
+                self.persist_tool_result(session_id, request_id, tc, &result, &event_tx)
+                    .await?;
+            }
+
+            // 7b. Regular tools through execute_tool_calls
+            if !other_calls.is_empty() {
+                let _ = self
+                    .execute_tool_calls(
+                        session_id,
+                        request_id,
+                        &other_calls,
+                        mode,
+                        &event_tx,
+                        &model,
+                    )
+                    .await?;
+            }
+
+            // 8. Generate new request ID for next iteration
             request_id = rand::random::<u64>();
         }
+    }
+
+    /// Run the full agent loop.
+    ///
+    /// 1. Load messages from DB
+    /// 2. Compose system prompt
+    /// 3. Build request messages
+    /// 4. Stream LLM (events forwarded to `event_tx`; `Finished` is already
+    ///    emitted by the LLM stream and forwarded via `run_single_turn`)
+    /// 5. Persist assistant message
+    /// 6. If tool calls: execute each, persist results, emit `ToolCompleted`
+    /// 7. Loop back to step 1 until no more tool calls
+    ///
+    /// If `cancel_token` is provided and cancelled, the loop stops after the
+    /// current turn/tool execution completes.
+    pub async fn run_agent_loop(
+        &mut self,
+        session_id: uuid::Uuid,
+        model: ActiveModel,
+        context_manager: &mut ContextManager,
+        mode: SessionMode,
+        thinking_level: ThinkingLevelType,
+        event_tx: UnboundedSender<BackendEvent>,
+        cancel_token: Option<CancellationToken>,
+    ) -> Result<()> {
+        let tools = self.tool_definitions();
+        self.run_agent_loop_with_tools(
+            session_id,
+            model,
+            context_manager,
+            mode,
+            thinking_level,
+            tools,
+            event_tx,
+            cancel_token,
+        )
+        .await
     }
 
     /// Optionally compact the session context after a completed turn.
@@ -716,6 +1120,7 @@ mod tests {
             ),
             instructions: vec![],
             instruction_content_cache: Default::default(),
+            queued_messages: std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
         };
         (agent, tmp)
     }

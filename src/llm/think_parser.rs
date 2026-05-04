@@ -132,5 +132,6 @@ pub(super) fn finalize_turn(
         reasoning: reasoning_text,
         tool_calls,
         finish_reason: Some(final_finish_reason),
+        ..Default::default()
     }
 }

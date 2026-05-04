@@ -77,6 +77,7 @@ impl App {
             tools: tools.clone(),
             instructions: config.instructions.clone(),
             instruction_content_cache: std::collections::HashMap::new(),
+            queued_messages: std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
         };
         let last_notice = None;
         let retrying_hint = None;

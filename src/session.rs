@@ -262,6 +262,21 @@ pub struct AssistantTurn {
     pub tool_calls: Vec<ToolCall>,
     #[serde(default)]
     pub finish_reason: Option<String>,
+    /// Token usage captured from UsageStats event during streaming.
+    #[serde(default)]
+    pub input_tokens: Option<u32>,
+    #[serde(default)]
+    pub output_tokens: Option<u32>,
+    #[serde(default)]
+    pub total_tokens: Option<u32>,
+    #[serde(default)]
+    pub cache_read_tokens: Option<u32>,
+    #[serde(default)]
+    pub cache_write_tokens: Option<u32>,
+    #[serde(default)]
+    pub model_id: Option<String>,
+    #[serde(default)]
+    pub tokens_per_second: Option<f32>,
 }
 
 impl AssistantTurn {

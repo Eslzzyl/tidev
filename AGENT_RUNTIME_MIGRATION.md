@@ -103,6 +103,70 @@ Web/Gateway 流程（AgentRuntime 自动管理）:
 
 ## 尚未完成的工作
 
+### 🟡 ✅ 子代理（Subagent）迁移 — 部分完成（见已知问题）
+
+`run_subagent()` 和 `run_subagent_inner()` 已添加到 `AgentRuntime`。子代理执行流程：
+
+1. 解析 `TaskArgs`（description, prompt, subagent_type）
+2. 根据 subagent_type 创建 `AgentDefinition`（含工具过滤规则）
+3. 创建子 session（复制父 session 的权限）
+4. 运行内联 agent loop（独立循环，不调用 `run_agent_loop_with_tools`）
+5. 读取子 session 的最后一条 assistant 消息作为结果
+
+**在 `run_agent_loop_with_tools` 中的集成：**
+- `task` 工具调用在 `execute_tool_calls` **之前**被提取
+- 每个 `task` 调用通过 `run_subagent()` 顺序执行
+- 结果通过 `persist_tool_result()` 持久化，与普通工具结果一致
+
+**已知问题（留待后续解决）：**
+
+| 问题 | 描述 | 原因 |
+|------|------|------|
+| 🔴 **串行执行** | 多个 subagent 顺序执行而非并行 | `run_subagent()` 的 future 不满足 `Send`，无法用于 `tokio::spawn`。根源在于其内部持有 `&mut self` 跨 `.await` 点，某些字段（需排查）导致 future 非 `Send`。 |
+| 🔴 **独立循环** | `run_subagent_inner` 复制了 `run_agent_loop_with_tools` 的循环体 | 避免 async 递归类型检测（Rust 编译器会检测到 `run_agent_loop_with_tools → execute_tool_calls → run_subagent → run_subagent_inner → run_agent_loop_with_tools` 的循环）。Boxing 一层 trait object 可以解决，但子 agent 的 future 非 `Send` 问题阻止了此方案。 |
+| 🟡 **无嵌套子代理** | `task` 工具在子 session 中返回 "nesting too deep" 错误 | 同上，独立循环不包含 `task` 处理逻辑。 |
+
+**修复方向：**
+1. 排查 `AgentRuntime` 或其子组件中导致 future 非 `Send` 的字段（候选：`McpManager`、`LlmClient` 的 `http::Client`）
+2. 修复后，`run_subagent_inner` 可改用 `run_agent_loop_with_tools`（通过 `Box::pin` 阻断递归检测）
+3. 子 agent 执行改为 `tokio::spawn` + `join_all` 实现并行
+
+### ✅ 消息排队（Message Queue）— 已完成
+
+`AgentRuntime` 现已内置消息排队机制。前端通过 `agent.queue_user_message(QueuedUserMessage)` 在 loop 运行时推送消息，`run_agent_loop` 在每个 turn 完成后自动拾取下一条消息，持久化到 DB 并继续循环。
+
+| 组件 | 集成状态 |
+|------|----------|
+| `AgentRuntime::queued_messages` | `Arc<StdMutex<VecDeque<QueuedUserMessage>>>` |
+| `AgentRuntime::queue_user_message()` | 公开方法，前端调用 |
+| `run_agent_loop_with_tools` | turn 完成后检查队列，非空则 `continue` |
+| TUI (`src/app/runtime/run.rs`) | 构造器已初始化队列 |
+| Web (`src/web/mod.rs`) | 构造器已初始化队列 |
+| Gateway QQ (`src/gateway/qq.rs`) | 构造器已初始化队列 |
+| Gateway Telegram (`src/gateway/telegram/channel.rs`) | 构造器已初始化队列 |
+
+**TUI 现状**：`queue_prompt()` / `drain_queued_prompts()` 尚未移除（TUI 仍在使用手动循环）。待 Step 4（TUI 接入 `run_agent_loop`）时统一替换。
+
+### ✅ Web 后端
+
+Web 已完成迁移，无变更。
+
+### 🔴 Gateway QQ / Telegram
+
+Gateway 已完成迁移，无变更。
+
+| 测试 | 状态 |
+|------|------|
+| `execute_call_spawned` 单元测试（panic 捕获 + 错误处理） | ❌ |
+| `execute_tool_calls` 集成测试（并行/串行调度 + 持久化） | ❌ |
+| `run_agent_loop` 集成测试（Mock LLM） | ❌ |
+| `run_subagent` 集成测试 | ❌ |
+| Gateway 端到端测试 | ❌ |
+
+### 🟢 Token 用量跟踪 — 已完成
+
+`AssistantTurn` 新增 token 字段（`input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `model_id`），`run_single_turn()` 在 streaming 过程中从 `UsageStats` 事件捕获，`persist_assistant_message()` 自动写入 DB。三个前端不再需要各自处理 token 持久化。
+
 ### 🔴 TUI 接入 `run_agent_loop`（收益最大）
 
 **问题：** TUI 的 `start_assistant_turn` + `finish_assistant_turn` + `begin_tool_execution` 三块逻辑（合计 ~600 行）与 `run_agent_loop()` 完全重复。
@@ -111,14 +175,19 @@ Web/Gateway 流程（AgentRuntime 自动管理）:
 1. TUI 的事件流是单通道（`backend_tx`/`backend_rx`），`run_agent_loop` 要求传入 `event_tx`
 2. TUI 有**交互式权限检查**（对话框、工作区边界、问题工具），这是写入工具特有的、`run_agent_loop` 不提供的
 3. TUI 需要实时更新 UI（状态面板、loading 提示），`run_agent_loop` 的事件通道需要映射到 TUI 的事件循环
-4. TUI 的 token 用量跟踪（`UsageStats` → `ContextUsage`）在 AgentRuntime 中未捕获
-5. TUI 的子代理（subagent）执行是异步的（通过独立会话），与 `run_agent_loop` 的同步风格不同
+4. TUI 在 turn 结束后需要处理消息排队（`drain_queued_prompts`）和 snapshot 等
 
 **建议方案：** 不是简单替换 `start_assistant_turn`，而是让 `run_agent_loop` 作为轮询内核，TUI 在其上包装权限检查和 UI 更新层。
 
 ### 🟠 `record_tool_result` → `agent.persist_tool_result()`
 
 `record_tool_result()`（`permission.rs:~30 行`）的 DB 持久化 + 事件发送部分可以委托给 `agent.persist_tool_result()`，保留 TUI 特有的 in-memory conversation 更新、cache 清理等。
+
+### 注意事项（更新）
+
+5. **子 agent 的 `Send` 限制**：`run_subagent` 的 future 非 `Send`，导致无法使用 `tokio::spawn` 并行执行。所有子 agent 当前顺序执行。这是 Rust async trait 的一个已知困难，需要在字段级别排查非 Send 来源。
+
+6. **Async 递归限制**：`run_subagent_inner` 使用独立循环而非 `run_agent_loop_with_tools`，因为后者的 async 状态机包含到 `run_subagent_inner` 的间接递归，导致无限大小的 future 类型。Boxing 一层 `Pin<Box<dyn Future>>` 理论上可解决，但需先解决 future 的 `Send` 问题。
 
 ### 🟡 测试
 
