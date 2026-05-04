@@ -614,6 +614,7 @@ impl App {
             BackendEvent::ContextCompacted { .. } => "ContextCompacted",
             BackendEvent::SidebarSnapshotReady { .. } => "SidebarSnapshotReady",
             BackendEvent::ShellOutput { .. } => "ShellOutput",
+            BackendEvent::TurnStarting { .. } => "TurnStarting",
         };
         if event_type != "Delta"
             && event_type != "ReasoningDelta"
@@ -1108,6 +1109,22 @@ impl App {
                     }
                 }
             }
+            BackendEvent::TurnStarting {
+                session_id: _,
+                request_id,
+            } => {
+                crate::log_info!(
+                    "TurnStarting: new request_id={}, previous active_request_id={}",
+                    request_id,
+                    self.active_request_id
+                );
+                self.active_request_id = request_id;
+
+                // Create a new streaming assistant message for the next turn
+                let mut assistant_message = Message::streaming(MessageRole::Assistant, "");
+                assistant_message.mode = Some(self.mode);
+                self.conversation.push(assistant_message);
+            }
         }
 
         Ok(())
@@ -1343,6 +1360,7 @@ impl App {
             if let Err(e) = agent
                 .run_agent_loop_with_permission_channel(
                     session_id,
+                    request_id,
                     model,
                     &mut context_manager,
                     mode,

@@ -766,6 +766,13 @@ pub enum BackendEvent {
         finished: bool,
         exit_code: Option<i32>,
     },
+    /// Emitted by the agent loop when a new turn starts (after executing
+    /// tool calls from the previous turn).  Frontends should use this to
+    /// update their active request ID and create a new streaming message.
+    TurnStarting {
+        session_id: Uuid,
+        request_id: u64,
+    },
 }
 
 impl BackendEvent {
@@ -785,7 +792,8 @@ impl BackendEvent {
             | Self::InstructionsLoaded { session_id, .. }
             | Self::ContextCompacted { session_id, .. }
             | Self::SidebarSnapshotReady { session_id, .. }
-            | Self::ShellOutput { session_id, .. } => *session_id,
+            | Self::ShellOutput { session_id, .. }
+            | Self::TurnStarting { session_id, .. } => *session_id,
         }
     }
 
@@ -802,7 +810,8 @@ impl BackendEvent {
             | Self::SubagentToolResult { request_id, .. }
             | Self::SubagentCompleted { request_id, .. }
             | Self::UsageStats { request_id, .. }
-            | Self::SidebarSnapshotReady { request_id, .. } => Some(*request_id),
+            | Self::SidebarSnapshotReady { request_id, .. }
+            | Self::TurnStarting { request_id, .. } => Some(*request_id),
             Self::InstructionsLoaded { .. }
             | Self::ContextCompacted { .. }
             | Self::ShellOutput { .. } => None,

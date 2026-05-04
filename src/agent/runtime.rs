@@ -863,8 +863,9 @@ impl AgentRuntime {
         event_tx: UnboundedSender<BackendEvent>,
         cancel_token: Option<CancellationToken>,
     ) -> Result<()> {
+        let request_id: u64 = rand::random();
         self.run_agent_loop_with_tools_inner(
-            session_id, model, context_manager, mode, thinking_level,
+            request_id, session_id, model, context_manager, mode, thinking_level,
             tools, event_tx, cancel_token, None,
         ).await
     }
@@ -872,6 +873,7 @@ impl AgentRuntime {
     /// Internal implementation with optional permission channel.
     async fn run_agent_loop_with_tools_inner(
         &mut self,
+        request_id: u64,
         session_id: uuid::Uuid,
         mut model: ActiveModel,
         context_manager: &mut ContextManager,
@@ -882,7 +884,7 @@ impl AgentRuntime {
         cancel_token: Option<CancellationToken>,
         permission_tx: Option<tokio::sync::mpsc::UnboundedSender<PendingToolApproval>>,
     ) -> Result<()> {
-        let mut request_id: u64 = rand::random();
+        let mut request_id = request_id;
 
         loop {
             // Check cancellation
@@ -1101,8 +1103,15 @@ impl AgentRuntime {
                     .await?;
             }
 
-            // 8. Generate new request ID for next iteration
+            // 8. Continue loop with new request ID for next turn
             request_id = rand::random::<u64>();
+
+            // Notify frontend about the next turn so it can create a
+            // streaming message and update its active_request_id.
+            let _ = event_tx.send(BackendEvent::TurnStarting {
+                session_id,
+                request_id,
+            });
         }
     }
 
@@ -1152,6 +1161,7 @@ impl AgentRuntime {
     pub async fn run_agent_loop_with_permission_channel(
         &mut self,
         session_id: uuid::Uuid,
+        request_id: u64,
         model: ActiveModel,
         context_manager: &mut ContextManager,
         mode: SessionMode,
@@ -1162,7 +1172,7 @@ impl AgentRuntime {
     ) -> Result<()> {
         let tools = self.tool_definitions();
         self.run_agent_loop_with_tools_inner(
-            session_id, model, context_manager, mode, thinking_level,
+            request_id, session_id, model, context_manager, mode, thinking_level,
             tools, event_tx, cancel_token, Some(permission_tx),
         ).await
     }
