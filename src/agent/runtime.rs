@@ -752,14 +752,21 @@ impl AgentRuntime {
         };
 
         // 4. Run an inline agent loop for the child session.
-        //    We do NOT call run_agent_loop_with_tools here to avoid async
-        //    recursive type detection (the methods would form a cycle).
-        //    Instead we replicate the loop body using the same primitives
-        //    (run_single_turn, persist_assistant_message, persist_tool_result).
+        //    We use our own loop (not run_agent_loop_with_tools) because
+        //    the shared loop's future is not `Send`, which prevents us
+        //    from using tokio::spawn for parallel subagent execution.
+        //    The tool execution part delegates to the shared
+        //    execute_tool_calls to avoid duplicating that logic.
+        //
+        //    Remove the `task` tool from the tool list so subagents cannot
+        //    delegate further (no nested sub-agents).
         let mut child_context = ContextManager::new();
         let child_thinking = child_model.thinking_level.clone();
         let mut request_sequence: u64 = rand::random();
-        let runtime = tokio::runtime::Handle::current();
+        let tools: Vec<ToolDefinition> = tools
+            .into_iter()
+            .filter(|t| t.name != "task")
+            .collect();
 
         loop {
             // Check cancellation
@@ -803,79 +810,22 @@ impl AgentRuntime {
 
             // If no tool calls, done
             if turn.tool_calls.is_empty() {
-                break String::new();
+                break;
             }
 
-            // Execute tools (no sub-sub-agents: task tools treated as errors)
-            let mut tool_results: Vec<(ToolCall, ToolExecutionResult)> = Vec::new();
-            for tc in &turn.tool_calls {
-                if tc.name == "task" {
-                    tool_results.push((
-                        tc.clone(),
-                        ToolExecutionResult::new(
-                            "Sub-agent nesting too deep: task tool unavailable in nested sessions",
-                        ),
-                    ));
-                    continue;
-                }
-
-                if self.tools.is_read_only_call(tc) {
-                    // Read-only: parallel execution via spawn_blocking
-                    let store = {
-                        let s = self.store.lock().await;
-                        s.clone()
-                    };
-                    let handle = self.tools.execute_call_spawned(
-                        runtime.clone(),
-                        store,
-                        child_session_id,
-                        tc.clone(),
-                        SessionMode::Build,
-                        false,
-                    );
-                    let result = handle.await.unwrap_or_else(|join_err| {
-                        ToolExecutionResult::new(format!(
-                            "Tool task panicked/aborted: {join_err}"
-                        ))
-                    });
-                    tool_results.push((tc.clone(), result));
-                } else {
-                    // Write tool: serial execution
-                    let store = {
-                        let s = self.store.lock().await;
-                        s.clone()
-                    };
-                    let handle = self.tools.execute_call_spawned(
-                        runtime.clone(),
-                        store,
-                        child_session_id,
-                        tc.clone(),
-                        SessionMode::Build,
-                        false,
-                    );
-                    let result = handle.await.unwrap_or_else(|join_err| {
-                        ToolExecutionResult::new(format!(
-                            "Tool task panicked/aborted: {join_err}"
-                        ))
-                    });
-                    tool_results.push((tc.clone(), result));
-                }
-            }
-
-            // Persist tool results
-            for (tc, result) in &tool_results {
-                self.persist_tool_result(
-                    child_session_id,
-                    request_sequence,
-                    tc,
-                    result,
-                    event_tx,
-                )
-                .await?;
-            }
+            // Execute tools via the shared execute_tool_calls (parallel read-only, serial write)
+            self.execute_tool_calls(
+                child_session_id,
+                request_sequence,
+                &turn.tool_calls,
+                SessionMode::Build,
+                event_tx,
+                &child_model,
+            )
+            .await?;
 
             request_sequence = request_sequence.wrapping_add(1);
-        };
+        }
 
         // 5. Read last assistant message from child session
         let store = self.store.lock().await;
