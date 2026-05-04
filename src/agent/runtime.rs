@@ -758,7 +758,7 @@ impl AgentRuntime {
         //
         //    Remove the `task` tool from the tool list so subagents cannot
         //    delegate further (no nested sub-agents).
-        let mut child_context = ContextManager::new();
+        let child_context = ContextManager::new();
         let child_thinking = child_model.thinking_level.clone();
         let mut request_sequence: u64 = rand::random();
         let tools: Vec<ToolDefinition> = tools
