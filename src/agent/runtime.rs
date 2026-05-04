@@ -1032,7 +1032,7 @@ impl AgentRuntime {
         &mut self,
         request_id: u64,
         session_id: uuid::Uuid,
-        mut model: ActiveModel,
+        model: ActiveModel,
         context_manager: &mut ContextManager,
         mode: SessionMode,
         thinking_level: ThinkingLevelType,
@@ -1059,18 +1059,23 @@ impl AgentRuntime {
 
             // 2. Compose system prompt
             let (system_prompt, _sources) = self.compose_system_prompt(&model.system_prompt, mode);
-            model.system_prompt = system_prompt;
 
             // 3. Build request messages
             let request_messages = self.build_request_messages(&db_messages, context_manager, mode);
 
             // 4. Stream LLM — `Finished` is already forwarded to event_tx
             //    by `run_single_turn`.
+            // NOTE: clone model and set composed prompt on the clone so the
+            // original model.system_prompt stays intact across loop iterations.
+            // Writing the composed prompt back to model would cause the system
+            // prompt to grow on every turn, breaking prefix caching.
+            let mut model_for_turn = model.clone();
+            model_for_turn.system_prompt = system_prompt;
             let turn = self
                 .run_single_turn(
                     session_id,
                     request_id,
-                    model.clone(),
+                    model_for_turn,
                     request_messages,
                     tools.clone(),
                     thinking_level.clone(),
