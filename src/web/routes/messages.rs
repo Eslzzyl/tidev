@@ -451,6 +451,7 @@ pub async fn send_message(
                 mode,
                 thinking_level,
                 tx,
+                None, // cancel_token — web uses event_bus for abort signaling
             )
             .await
         {

@@ -16,6 +16,7 @@ use tokio::time::{Duration, sleep};
 use uuid::Uuid;
 
 use crate::{
+    agent::runtime::AgentRuntime,
     config::{ActiveModel, AppConfig, AuthStore},
     context::ContextManager,
     llm::LlmClient,
@@ -32,7 +33,6 @@ use crate::gateway::channel::SendMessage;
 use crate::gateway::commands::{
     CommandInvocation, GATEWAY_COMMANDS, format_status_summary, gateway_help_text, parse_command,
 };
-use crate::gateway::shared::compose_system_prompt;
 
 pub const GATEWAY_PLATFORM_TELEGRAM: &str = "telegram";
 pub const TELEGRAM_MAX_MESSAGE_LENGTH: usize = 4096;
@@ -62,6 +62,8 @@ pub struct TelegramChannel {
     pub store: SessionStore,
     pub llm: LlmClient,
     pub tools: ToolRegistry,
+    /// Shared AgentRuntime for compose_system_prompt / build_request_messages / execute_tool_calls.
+    pub agent: AgentRuntime,
     pub instruction_prompt: String,
     pub allowlist: HashSet<String>,
     pub poll_timeout_secs: u64,
@@ -98,7 +100,19 @@ impl TelegramChannel {
         allowlist: HashSet<String>,
         poll_timeout_secs: u64,
         bot_token: String,
+        paths: &crate::config::ConfigPaths,
     ) -> Self {
+        // Build shared AgentRuntime from the same resources
+        let agent = AgentRuntime {
+            workspace_root: workspace_root.clone(),
+            config_dir: paths.config_dir.clone(),
+            config_paths: paths.clone(),
+            store: Arc::new(tokio::sync::Mutex::new(store.clone())),
+            llm_client: llm.clone(),
+            tools: tools.clone(),
+            instructions: config.instructions.clone(),
+            instruction_content_cache: std::collections::HashMap::new(),
+        };
         Self {
             workspace_root,
             config,
@@ -106,6 +120,7 @@ impl TelegramChannel {
             store,
             llm,
             tools,
+            agent,
             instruction_prompt,
             allowlist,
             poll_timeout_secs,
@@ -404,13 +419,20 @@ impl TelegramChannel {
             conversation.context_retained_from,
         );
 
-        let request_messages =
-            context_manager.build_request_messages(conversation, SessionMode::Build);
-        let tool_definitions = self.tools.all_definitions();
+        // Use shared AgentRuntime for system prompt composition and message building
+        let (system_prompt, _) = self.agent.compose_system_prompt(
+            &active_model.system_prompt,
+            SessionMode::Build,
+        );
+        let request_messages = self.agent.build_request_messages(
+            &conversation.visible_messages(),
+            &context_manager,
+            SessionMode::Build,
+        );
+        let tool_definitions = self.agent.tool_definitions();
 
         let mut request_model = active_model.clone();
-        request_model.system_prompt =
-            compose_system_prompt(&active_model.system_prompt, &self.instruction_prompt);
+        request_model.system_prompt = system_prompt;
 
         self.request_seq = self.request_seq.wrapping_add(1);
         if self.request_seq == 0 {

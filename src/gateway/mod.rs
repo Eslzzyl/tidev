@@ -119,6 +119,7 @@ async fn run_async() -> Result<()> {
             allowlist,
             config.gateway.telegram.poll_timeout_secs.max(1),
             bot_token,
+            &paths,
         );
 
         orchestrator.add(Box::new(channel));
@@ -181,6 +182,7 @@ async fn run_async() -> Result<()> {
             app_id,
             app_secret,
             config.gateway.qq.sandbox,
+            &paths,
         );
 
         orchestrator.add(Box::new(channel));

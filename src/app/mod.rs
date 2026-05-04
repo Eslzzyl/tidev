@@ -60,6 +60,7 @@ pub use ui::theme_panel;
 use runtime::state::*;
 
 use crate::{
+    agent::runtime::AgentRuntime,
     app::at_mention::{AtMentionKind, AtMentionState},
     app::input::SnippetState,
     app::input::shell_completion::ShellCompletionState,
@@ -79,7 +80,6 @@ use crate::{
     app::ui::workspace_boundary::WorkspaceBoundaryDialogState,
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
     context::ContextManager,
-    instructions,
     llm::LlmClient,
     mcp::McpManager,
     memory::types::MemoryStore,
@@ -113,6 +113,8 @@ struct App {
     conversation: Conversation,
     context_manager: ContextManager,
     tools: ToolRegistry,
+    /// Shared AgentRuntime for compose_system_prompt / build_request_messages.
+    agent: AgentRuntime,
     file_read_tracker: Arc<FileReadTracker>,
     commands: CommandRegistry,
     command_palette: CommandPaletteState,
@@ -494,64 +496,10 @@ impl App {
     }
 
     fn compose_system_prompt(&mut self) -> (String, Vec<String>) {
-        let base_prompt = self.active_model.system_prompt.trim();
-        let mode_reminder = self.mode.reminder();
-        let (instruction_prompt, sources, new_cache) =
-            instructions::system_prompt_and_sources_with_cache(
-                &self.workspace_root,
-                &self.paths.config_dir,
-                &self.config.instructions,
-                &self.instruction_content_cache,
-            )
-            .unwrap_or_default();
-
-        // Update the cache with newly loaded contents
-        self.instruction_content_cache = new_cache;
-
-        let mut prompt = String::new();
-        if !base_prompt.is_empty() {
-            prompt.push_str(base_prompt);
-        }
-        if !instruction_prompt.is_empty() {
-            if !prompt.is_empty() {
-                prompt.push_str("\n\n");
-            }
-            prompt.push_str(&instruction_prompt);
-        }
-        if !prompt.is_empty() {
-            prompt.push_str("\n\n");
-        }
-        prompt.push_str(mode_reminder);
-
-        // Add system environment information
-        let system_info = crate::system_info::SystemInfo::detect();
-        let working_dir = std::env::current_dir()
-            .map(|p| p.display().to_string())
-            .unwrap_or_default();
-        let is_git = crate::system_info::is_git_repo(&self.workspace_root);
-        prompt.push_str("\n\nHere is some useful information about the environment:\n<env>\n  ");
-        prompt.push_str(&format!("Working directory: {}\n  ", working_dir));
-        prompt.push_str(&format!(
-            "Workspace root folder: {}\n  ",
-            self.workspace_root.display()
-        ));
-        prompt.push_str(&format!(
-            "Is directory a git repo: {}\n  ",
-            if is_git { "yes" } else { "no" }
-        ));
-        prompt.push_str(&system_info.format_env());
-        prompt.push_str("\n</env>");
-
-        // Add workspace memories
-        let ws = self.workspace_root.display().to_string();
-        if let Ok(memories) = self.memory_store.select_hot(&ws, 5, 800) {
-            let memory_prompt = MemoryStore::format_for_prompt(&memories);
-            if !memory_prompt.is_empty() {
-                prompt.push_str(&memory_prompt);
-            }
-        }
-
-        (prompt, sources)
+        self.agent.compose_system_prompt(
+            &self.active_model.system_prompt,
+            self.mode,
+        )
     }
 
     fn update_loaded_instruction_sources(&mut self, sources: &[String]) -> Result<()> {

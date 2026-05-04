@@ -67,6 +67,17 @@ impl App {
 
         let active_model = fallback_model.clone();
         tools.set_active_model(active_model.clone());
+        // Build shared AgentRuntime from the same resources
+        let agent = AgentRuntime {
+            workspace_root: workspace_root.clone(),
+            config_dir: paths.config_dir.clone(),
+            config_paths: paths.clone(),
+            store: Arc::new(tokio::sync::Mutex::new(store.clone())),
+            llm_client: llm.clone(),
+            tools: tools.clone(),
+            instructions: config.instructions.clone(),
+            instruction_content_cache: std::collections::HashMap::new(),
+        };
         let last_notice = None;
         let retrying_hint = None;
 
@@ -91,6 +102,7 @@ impl App {
             conversation,
             context_manager: ContextManager::new(),
             tools,
+            agent,
             file_read_tracker,
             commands,
             command_palette,

@@ -15,6 +15,7 @@ use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessa
 use uuid::Uuid;
 
 use crate::{
+    agent::runtime::AgentRuntime,
     config::{ActiveModel, AppConfig, AuthStore},
     llm::LlmClient,
     prompts::SessionMode,
@@ -26,7 +27,6 @@ use crate::{
 use super::channel::Channel;
 use super::commands::{CommandInvocation, format_status_summary, gateway_help_text, parse_command};
 use super::qq_client::QQClient;
-use super::shared;
 
 pub const GATEWAY_PLATFORM_QQ: &str = "qq";
 
@@ -67,6 +67,8 @@ pub struct QQChannel {
     pub store: SessionStore,
     pub llm: LlmClient,
     pub tools: ToolRegistry,
+    /// Shared AgentRuntime for compose_system_prompt / build_request_messages.
+    pub agent: AgentRuntime,
     pub instruction_prompt: String,
     pub allowlist: HashSet<String>,
     pub client: QQClient,
@@ -101,7 +103,19 @@ impl QQChannel {
         app_id: String,
         app_secret: String,
         sandbox: bool,
+        paths: &crate::config::ConfigPaths,
     ) -> Self {
+        // Build shared AgentRuntime from the same resources
+        let agent = AgentRuntime {
+            workspace_root: workspace_root.clone(),
+            config_dir: paths.config_dir.clone(),
+            config_paths: paths.clone(),
+            store: Arc::new(tokio::sync::Mutex::new(store.clone())),
+            llm_client: llm.clone(),
+            tools: tools.clone(),
+            instructions: config.instructions.clone(),
+            instruction_content_cache: std::collections::HashMap::new(),
+        };
         Self {
             workspace_root,
             config,
@@ -109,6 +123,7 @@ impl QQChannel {
             store,
             llm,
             tools,
+            agent,
             instruction_prompt,
             allowlist,
             client: QQClient::new(app_id, app_secret, sandbox),
@@ -466,13 +481,20 @@ impl QQChannel {
             conversation.context_retained_from,
         );
 
-        let request_messages = context_manager
-            .build_request_messages(conversation, crate::prompts::SessionMode::Build);
-        let tool_definitions = self.tools.all_definitions();
+        // Use shared AgentRuntime for system prompt composition and message building
+        let (system_prompt, _) = self.agent.compose_system_prompt(
+            &active_model.system_prompt,
+            SessionMode::Build,
+        );
+        let request_messages = self.agent.build_request_messages(
+            &conversation.visible_messages(),
+            &context_manager,
+            SessionMode::Build,
+        );
+        let tool_definitions = self.agent.tool_definitions();
 
         let mut request_model = active_model.clone();
-        request_model.system_prompt =
-            shared::compose_system_prompt(&active_model.system_prompt, &self.instruction_prompt);
+        request_model.system_prompt = system_prompt;
 
         let turn = self
             .llm_completion_turn(&request_model, request_messages, tool_definitions)

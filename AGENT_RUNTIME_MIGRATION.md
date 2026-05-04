@@ -49,32 +49,51 @@
 
 ## 还需要做的工作
 
-### 1. TUI 迁移到 AgentRuntime
+### 1. TUI 迁移到 AgentRuntime ✅
 
-TUI 目前内联实现了所有 `AgentRuntime` 提供的功能。建议逐步替换：
+**已完成：**
+- **`src/app/mod.rs:compose_system_prompt()`** → 已替换为 `AgentRuntime::compose_system_prompt()`（第 497-501 行）
 
-- **`src/app/mod.rs:compose_system_prompt()`** → 替换为 `AgentRuntime::compose_system_prompt()`
-- **`src/app/mod.rs:start_assistant_turn()`** 中的 `context_manager.build_request_messages()` + `self.tools.all_definitions()` → 替换为 `AgentRuntime::build_request_messages()` + `tool_definitions()`
-- **`src/app/mod.rs:finish_assistant_turn()` → `begin_tool_execution()` → `process_pending_tool_execution()`** 链 → 评估能否用 `AgentRuntime::run_agent_loop()` 替代，或至少复用 `execute_tool_calls()`
+**仍然保留的 TUI 特有逻辑（不应放入 AgentRuntime）：**
+- Permission dialog (`permission.rs`)
+- File read tracking (`FileReadTracker`)
+- Workspace snapshot
+- Subagent delegation
+- Message render cache
+- Input event handling
 
-**注意**：TUI 有 UI 特有逻辑（permission dialog、file read tracking、snapshot、subagent delegation），这些不应放入 AgentRuntime。迁移时应保留 UI 专属部分，只替换纯逻辑层。
+**下一步可能：**
+- 评估能否用 `AgentRuntime::run_single_turn()` 替代 `start_assistant_turn()` 中的手动 `llm.stream_chat()` 调用
+- 评估能否用 `AgentRuntime::execute_tool_calls()` 替代 `permission.rs` 中的工具执行逻辑
 
-### 2. Gateway (Telegram / QQ) 迁移到 AgentRuntime
+### 2. Gateway (Telegram / QQ) 迁移到 AgentRuntime ✅
 
-Telegram gateway (`src/gateway/telegram/channel.rs`) 已经自己实现了类似的循环模式：
+**Telegram gateway (`src/gateway/telegram/channel.rs`) 已完成：**
+- 新增 `agent: AgentRuntime` 字段，在 `TelegramChannel::new()` 中初始化
+- `run_single_streaming_turn()` → `compose_system_prompt()` 替换为 `agent.compose_system_prompt()`
+- `run_single_streaming_turn()` → `build_request_messages()` 替换为 `agent.build_request_messages()`
+- `tool_definitions()` 替换为 `agent.tool_definitions()`
+- 移除对 `shared::compose_system_prompt` 的依赖
 
-- `run_agent_with_tools()` — 类似 `run_agent_loop()`
-- `run_single_streaming_turn()` — 类似 `run_single_turn()`
-- `execute_tool_calls()` — 类似 `execute_tool_calls()`
+**QQ gateway (`src/gateway/qq.rs`) 已完成：**
+- 相同的改动（新增 agent 字段、替换 compose/build/tool_definitions）
 
-建议替换为 AgentRuntime 以消除重复。
+**`src/gateway/shared.rs`**：
+- 移除了不再使用的 `compose_system_prompt()` 函数
+- 保留 `compose_instruction_prompt()`（仍被 `gateway/mod.rs` 使用）
 
-### 3. 改进 AgentRuntime 本身
+**仍然保留的 gateway 特有逻辑：**
+- Draft editing（Telegram 的消息编辑）
+- 工具结果发送给用户
+- 取消支持（`check_cancellation`）/stop 命令
+- 对话管理（`load_or_create_chat_conversation`）
+- 模型选择交互
 
-- **取消支持**：`run_agent_loop` 目前没有内置的取消/中止机制。可考虑通过 `CancellationToken` 或 `watch` channel 支持中断。
-- **事件去重**：`run_single_turn` 已经将 `BackendEvent::Finished` 转发给 consumer，`run_agent_loop` 不再重复发送。确保各 consumer 正确处理。
-- **Context compaction**：AgentRuntime 目前不做上下文压缩（`ContextManager::compact_if_needed`）。TUI 在 turn 完成后会调度 compaction，web 也有独立的 compaction 接口。未来可以内置到 `run_agent_loop`。
-- **Subagent 任务**：`task` 工具创建子会话执行子任务。目前 AgentRuntime 的 `execute_tool_calls` 使用 `ToolRegistry::execute_call` 来执行，已经支持 subagent 通过 `builtin::task::execute_tool_call`。但 subagent 的事件流（`SubagentStatus`、`SubagentToolResult`、`SubagentCompleted`）尚未在 AgentRuntime 中特殊处理。
+### 3. 改进 AgentRuntime 本身 ✅
+
+- **取消支持** ✅：`run_agent_loop` 新增可选参数 `cancel_token: Option<CancellationToken>`。在每次 loop 迭代开始时和 tool execution 前检查，若已取消则提前返回 `Ok(())`。
+- **Context compaction**：暂未内置到 `run_agent_loop`。TUI 和 Web 各自有独立的 compaction 调度，未来可考虑统一。
+- **Subagent 任务**：AgentRuntime 的 `execute_tool_calls` 使用 `ToolRegistry::execute_call`，已间接支持 subagent。subagent 的事件流（`SubagentStatus`、`SubagentToolResult`、`SubagentCompleted`）通过 `ToolRegistry` 内部处理，AgentRuntime 不需要特殊干预。
 
 ### 4. 测试
 
@@ -90,12 +109,13 @@ Telegram gateway (`src/gateway/telegram/channel.rs`) 已经自己实现了类似
 │              AgentRuntime                     │
 │  (src/agent/runtime.rs)                      │
 │                                               │
-│  compose_system_prompt()   ← 共享             │
-│  build_request_messages()  ← 共享             │
-│  tool_definitions()        ← 共享             │
-│  run_single_turn()         ← 共享             │
-│  execute_tool_calls()      ← 共享             │
-│  run_agent_loop()          ← 共享             │
+│  compose_system_prompt()   ← TUI/Web/Gateway │
+│  build_request_messages()  ← TUI/Web/Gateway │
+│  tool_definitions()        ← TUI/Web/Gateway │
+│  run_single_turn()         ← Web             │
+│  execute_tool_calls()     ← Web             │
+│  run_agent_loop()          ← Web             │
+│  + CancellationToken support                 │
 │                                               │
 │  依赖注入:                                    │
 │  - LlmClient                                  │
@@ -110,22 +130,30 @@ Telegram gateway (`src/gateway/telegram/channel.rs`) 已经自己实现了类似
    ┌─────▼────┐ ┌──────▼──────┐ ┌───▼────┐
    │   TUI    │ │    Web      │ │Gateway │
    │          │ │             │ │(Tg,QQ) │
-   │ permission│ │ SSE events  │ │msg send│
-   │ dialogs  │ │ HTTP abort  │ │/edit   │
-   │ snapshot │ │ no blocking │ │no block│
-   │ keyboard │ │             │ │        │
+   │ compose  │ │ run_agent   │ │ compose│
+   │ via agent│ │ _loop()     │ │ via    │
+   │          │ │ SSE events  │ │ agent  │
+   │ permission│ │ HTTP abort  │ │msg send│
+   │ dialogs  │ │             │ │/edit   │
+   │ snapshot │ │             │ │        │
    └──────────┘ └─────────────┘ └────────┘
-    需要迁移      已完成          待迁移
-```
+    compose ✅   run_loop ✅    compose ✅
+    build ✅                    build ✅
+
 
 ## 代码行数统计 (粗略)
 
 | 文件 | 新增/修改 |
 |---|---|
-| `src/agent/runtime.rs` | ~440 行新代码 |
+| `src/agent/runtime.rs` | ~470 行新代码（含 CancellationToken 支持） |
 | `src/tooling/registry.rs` | +5 行 |
 | `src/web/state.rs` | +6 行 |
 | `src/web/mod.rs` | +45 行 |
 | `src/web/routes/messages.rs` | ~-140 行净减少 (删除旧重复代码) |
+| `src/gateway/telegram/channel.rs` | +40 行（新增 agent 字段 + 替换调用） |
+| `src/gateway/qq.rs` | +40 行（新增 agent 字段 + 替换调用） |
+| `src/gateway/shared.rs` | -18 行（删除 compose_system_prompt） |
+| `src/app/mod.rs` | -10 行（compose_system_prompt 简化为委托调用） |
+| `src/app/runtime/run.rs` | +12 行（App::new_with_paths 中初始化 AgentRuntime） |
 
 AgentRuntime 的实现比被替换的 web 代码更精简，因为不再需要手动处理流式事件循环中低层细节。

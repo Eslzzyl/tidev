@@ -23,6 +23,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use chrono::Utc;
 use tokio::sync::{Mutex, mpsc::UnboundedSender};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     config::{
@@ -393,6 +394,9 @@ impl AgentRuntime {
     /// 5. Persist assistant message
     /// 6. If tool calls: execute each, persist results, emit `ToolCompleted`
     /// 7. Loop back to step 1 until no more tool calls
+    ///
+    /// If `cancel_token` is provided and cancelled, the loop stops after the
+    /// current turn/tool execution completes.
     pub async fn run_agent_loop(
         &mut self,
         session_id: uuid::Uuid,
@@ -401,10 +405,19 @@ impl AgentRuntime {
         mode: SessionMode,
         thinking_level: ThinkingLevelType,
         event_tx: UnboundedSender<BackendEvent>,
+        cancel_token: Option<CancellationToken>,
     ) -> Result<()> {
         let mut request_id: u64 = rand::random();
 
         loop {
+            // Check cancellation
+            if let Some(ref ct) = cancel_token {
+                if ct.is_cancelled() {
+                    crate::log_info!("run_agent_loop: cancelled");
+                    return Ok(());
+                }
+            }
+
             // 1. Load messages from DB
             let db_messages = {
                 let store = self.store.lock().await;
@@ -441,6 +454,14 @@ impl AgentRuntime {
             // 7. If no tool calls, we're done
             if turn.tool_calls.is_empty() {
                 return Ok(());
+            }
+
+            // Check cancellation again before executing tools
+            if let Some(ref ct) = cancel_token {
+                if ct.is_cancelled() {
+                    crate::log_info!("run_agent_loop: cancelled before tool execution");
+                    return Ok(());
+                }
             }
 
             // 8. Execute tools and persist results
