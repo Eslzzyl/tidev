@@ -1063,28 +1063,77 @@ impl AgentRuntime {
                 }
             }
 
-            // 7a. Subagent (task) tools — run them one at a time.
-            // FIXME: Parallel execution would be desirable but requires the
-            // subagent's future to be `Send` for tokio::spawn.
-            for tc in &task_calls {
-                let agent = self.clone();
-                let owned_tc = tc.clone();
-                let tx = event_tx.clone();
-                let sid = session_id;
-                let rid = request_id;
-                let pm = model.clone();
+            // 7a. Subagent (task) tools — read-only types (Explorer, Librarian,
+            // Oracle) run in parallel; write-capable types (Designer, Fixer,
+            // General) run serially.
+            let mut task_handles: Vec<(
+                ToolCall,
+                tokio::task::JoinHandle<ToolExecutionResult>,
+            )> = Vec::new();
 
-                // Box the subagent call as a trait object to break async
-                // recursive type detection.  run_subagent → run_subagent_inner
-                // → run_agent_loop_with_tools creates an infinite-size future
-                // cycle; boxing hides the concrete type.
-                let result: ToolExecutionResult = {
-                    let fut: Pin<Box<dyn Future<Output = ToolExecutionResult> + Send>> =
-                        Box::pin(agent.run_subagent(sid, rid, owned_tc, tx, None, pm));
-                    fut.await
-                };
-                // Persist subagent result
-                self.persist_tool_result(session_id, request_id, tc, &result, &event_tx)
+            for tc in task_calls {
+                // Determine if this subagent is read-only by parsing the
+                // task arguments to extract the subagent_type field.
+                let is_read_only = serde_json::from_str::<crate::tooling::TaskArgs>(
+                    &tc.arguments,
+                )
+                .ok()
+                .and_then(|args| {
+                    args.subagent_type
+                        .as_deref()
+                        .and_then(AgentType::parse)
+                })
+                .map_or(false, |t| t.is_read_only());
+
+                if is_read_only {
+                    // Read-only subagent — spawn in parallel
+                    let agent = self.clone();
+                    let owned_tc = tc.clone();
+                    let tx = event_tx.clone();
+                    let sid = session_id;
+                    let rid = request_id;
+                    let pm = model.clone();
+
+                    let handle = tokio::spawn(async move {
+                        let fut: Pin<
+                            Box<dyn Future<Output = ToolExecutionResult> + Send>,
+                        > = Box::pin(
+                            agent.run_subagent(sid, rid, owned_tc, tx, None, pm),
+                        );
+                        fut.await
+                    });
+                    task_handles.push((tc, handle));
+                } else {
+                    // Write-capable subagent — run serially to avoid ordering
+                    // issues with filesystem and database mutations.
+                    let agent = self.clone();
+                    let owned_tc = tc.clone();
+                    let tx = event_tx.clone();
+                    let sid = session_id;
+                    let rid = request_id;
+                    let pm = model.clone();
+
+                    let result: ToolExecutionResult = {
+                        let fut: Pin<
+                            Box<dyn Future<Output = ToolExecutionResult> + Send>,
+                        > = Box::pin(
+                            agent.run_subagent(sid, rid, owned_tc, tx, None, pm),
+                        );
+                        fut.await
+                    };
+                    self.persist_tool_result(session_id, request_id, &tc, &result, &event_tx)
+                        .await?;
+                }
+            }
+
+            // Collect parallel task results in order
+            for (tc, handle) in task_handles {
+                let result = handle.await.unwrap_or_else(|e| {
+                    ToolExecutionResult::new(format!(
+                        "Subagent task panicked/aborted: {e}"
+                    ))
+                });
+                self.persist_tool_result(session_id, request_id, &tc, &result, &event_tx)
                     .await?;
             }
 
