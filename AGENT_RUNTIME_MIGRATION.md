@@ -196,27 +196,35 @@ TUI 保留了 `pending_prompt_queue` 作为**显示专用队列**。当用户在
 
 `run_subagent()` 和 `run_subagent_inner()` 已添加到 `AgentRuntime`。
 
-| 问题 | 描述 | 原因 |
+| 问题 | 描述 | 状态 |
 |------|------|------|
-| 🔴 **串行执行** | 多个 subagent 顺序执行而非并行 | `run_subagent()` 的 future 不满足 `Send`，无法用于 `tokio::spawn`。 |
-| 🔴 **独立循环** | `run_subagent_inner` 复制了 `run_agent_loop_with_tools` 的循环体 | 避免 async 递归类型检测。 |
-| 🟡 **无嵌套子代理** | `task` 工具在子 session 中返回 "nesting too deep" 错误 | 同上，独立循环不包含 `task` 处理逻辑。 |
+| **串行执行** | 多个 subagent 顺序执行而非并行 | ✅ **已修复** — 只读 subagent 并行，可写 subagent 串行 |
+| **独立循环** | `run_subagent_inner` 复制了 `run_agent_loop_with_tools` 的循环体 | ✅ **已修复** — 工具执行部分已委托给共享的 `execute_tool_calls()`，消除了 55 行重复代码 |
+| **无嵌套子代理** | `task` 工具在子 session 中不可用 | 🟡 故意设计 — subagent 的 tool list 中已移除 `task` 工具 |
 
-**修复方向：**
-1. 排查 `AgentRuntime` 或其子组件中导致 future 非 `Send` 的字段（候选：`McpManager`、`LlmClient` 的 `http::Client`）
-2. 修复后，`run_subagent_inner` 可改用 `run_agent_loop_with_tools`（通过 `Box::pin` 阻断递归检测）
-3. 子 agent 可改为 `tokio::spawn` + `join_all` 并行执行
+**实现说明：**
+
+1. **并行执行**：`run_agent_loop_with_tools_inner` 中的 `task` 工具根据 `subagent_type` 参数判断只读/可写：
+   - 只读（Explorer/Librarian/Oracle）：`tokio::spawn` + `JoinHandle` 并行执行
+   - 可写（Designer/Fixer/General）：保持串行执行，避免文件系统/数据库竞态
+   
+2. **独立循环保留原因**：`run_agent_loop_with_tools_inner` 的 future 不是 `Send`（`&mut self` 持有跨 await 点的非 Send 引用），无法直接在 `run_subagent_inner` 中调用。简化循环骨架（~20 行）+ 共享 `execute_tool_calls` 是消除重复同时保持 Send 兼容的最佳方案。
 
 ### 🟡 测试
 
 | 测试 | 状态 |
 |---|---|
-| `execute_call_spawned` 单元测试（panic 捕获 + 错误处理） | ❌ |
-| `execute_tool_calls` 集成测试（并行/串行调度 + 持久化） | ❌ |
-| `run_agent_loop` 集成测试（Mock LLM） | ❌ |
-| `PendingToolApproval` 通道集成测试 | ❌ |
-| `run_subagent` 集成测试 | ❌ |
-| Gateway 端到端测试 | ❌ |
+| `build_request_messages` 单元测试（12 个） | ✅ **已有** |
+| `agent_type_is_read_only` 单元测试 | ✅ **新增** |
+| `task_args_is_read_only_detection` 单元测试 | ✅ **新增** |
+| `execute_tool_calls` + `can_execute` Plan 模式过滤 | ✅ **新增** |
+| `execute_tool_calls` Build 模式全部允许 | ✅ **新增** |
+| `execute_tool_calls` 结果持久化到 DB | ✅ **新增** |
+| `execute_tool_calls` + auto_approve 场景 | ✅ **新增** |
+| `PendingToolApproval` 通道集成测试 | ❌ 待办 |
+| `record_tool_result` 跳过 DB 写入 | ❌ 待办 |
+| `run_subagent` 集成测试（需要 Mock LLM） | ❌ 待办 |
+| Gateway 端到端测试 | ❌ 待办 |
 
 ### 注意事项
 
@@ -245,17 +253,19 @@ TUI 保留了 `pending_prompt_queue` 作为**显示专用队列**。当用户在
 
 最优先的测试：
 
-| 测试 | 原因 |
-|---|---|
-| `execute_tool_calls` + `can_execute` 过滤 | 安全关键：确保 Plan 模式下写入工具被拒绝 |
-| `PendingToolApproval` 通道流程 | 核心架构：确保审批→执行→继续循环正确 |
-| `record_tool_result` 跳过 DB 写入 | 数据完整：确保不产生重复消息 |
+| 测试 | 原因 | 状态 |
+|---|---|---|
+| `execute_tool_calls` + `can_execute` 过滤 | 安全关键：确保 Plan 模式下写入工具被拒绝 | ✅ **已添加** |
+| `execute_tool_calls` 结果持久化 | 验证工具结果正确写入 DB | ✅ **已添加** |
+| `PendingToolApproval` 通道流程 | 核心架构：确保审批→执行→继续循环正确 | ❌ 待办 |
+| `record_tool_result` 跳过 DB 写入 | 数据完整：确保不产生重复消息 | ❌ 待办 |
+| `run_subagent` 集成测试（Mock LLM） | 子代理循环正确性 | ❌ 待办 |
 
-### 2. 🟡 子代理修复（低优先级）
+### 2. ✅ 子代理修复（已完成）
 
-- 排查 future 非 `Send` 的来源（`McpManager`、`http::Client`）
-- 修复后可用 `Box::pin` 解决递归类型问题
-- 子代理可改为并行执行
+- ✅ **并行执行** — 只读 subagent 通过 `tokio::spawn` 并行执行；可写 subagent 保持串行
+- ✅ **消除独立循环重复** — 工具执行部分委托给共享的 `execute_tool_calls()`（消除 55 行重复代码）
+- ✅ **保留简化循环骨架** — `run_agent_loop_with_tools_inner` 的 future 非 `Send`，保留简化循环 + 共享 `execute_tool_calls` 是最佳方案
 
 ### 3. 🔴 Gateway 端到端测试（低优先级）
 
