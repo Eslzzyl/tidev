@@ -453,8 +453,16 @@ impl AgentRuntime {
             // 6. Persist assistant message (Finished was already emitted)
             self.persist_assistant_message(session_id, &turn).await?;
 
-            // 7. If no tool calls, we're done
+            // 7. If no tool calls, we're done — run compaction before returning
             if turn.tool_calls.is_empty() {
+                // Run context compaction if the conversation has grown large
+                self.maybe_compact(
+                    session_id,
+                    &model,
+                    context_manager,
+                    &event_tx,
+                )
+                .await;
                 return Ok(());
             }
 
@@ -479,5 +487,323 @@ impl AgentRuntime {
             // 9. Generate new request ID for next iteration
             request_id = rand::random::<u64>();
         }
+    }
+
+    /// Optionally compact the session context after a completed turn.
+    ///
+    /// Loads the conversation from DB, checks whether compaction is needed,
+    /// runs it if so, and persists the updated context state back to DB.
+    /// Errors are logged but not propagated (compaction is best-effort).
+    async fn maybe_compact(
+        &self,
+        session_id: uuid::Uuid,
+        model: &ActiveModel,
+        context_manager: &mut ContextManager,
+        event_tx: &UnboundedSender<BackendEvent>,
+    ) {
+        let conversation = match self.load_conversation(session_id).await {
+            Ok(Some(c)) => c,
+            _ => return,
+        };
+
+        if !context_manager.needs_compaction(&conversation, model) {
+            return;
+        }
+
+        match context_manager
+            .compact(
+                &self.llm_client,
+                model,
+                &conversation,
+                false,
+                None,
+            )
+            .await
+        {
+            Ok(true) => {
+                // Persist updated context state
+                if let Ok(ref store) = self.store.try_lock() {
+                    let _ = store.update_session_context_state(
+                        session_id,
+                        context_manager.summary.as_deref(),
+                        context_manager.retained_from,
+                    );
+                }
+                crate::log_info!(
+                    "run_agent_loop: context compacted for session {}",
+                    session_id
+                );
+                let _ = event_tx.send(BackendEvent::ContextCompacted {
+                    session_id,
+                    compacted: true,
+                    manual: false,
+                    summary: context_manager.summary.clone(),
+                    retained_from: context_manager.retained_from,
+                    error: None,
+                });
+            }
+            Ok(false) => {
+                // Compaction skipped (not needed after all)
+            }
+            Err(e) => {
+                crate::log_warn!("run_agent_loop: context compaction failed: {e}");
+                let _ = event_tx.send(BackendEvent::ContextCompacted {
+                    session_id,
+                    compacted: false,
+                    manual: false,
+                    summary: None,
+                    retained_from: 0,
+                    error: Some(e.to_string()),
+                });
+            }
+        }
+    }
+
+    /// Load a full conversation (session record + messages) from the store.
+    async fn load_conversation(
+        &self,
+        session_id: uuid::Uuid,
+    ) -> Result<Option<crate::session::Conversation>> {
+        let store = self.store.lock().await;
+        store.load_conversation(session_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    use crate::{
+        config::ConfigPaths,
+        context::ContextManager,
+        prompts::SessionMode,
+        session::{Message, MessageRole, ToolCall, ToolExecutionResult},
+        storage::SessionStore,
+    };
+
+    use super::AgentRuntime;
+
+    /// Create a minimal AgentRuntime backed by a tempfile database.
+    fn agent_runtime() -> (AgentRuntime, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("test.db");
+        let store = SessionStore::open(&db_path).unwrap();
+        let ws = tmp.path().join("workspace");
+        std::fs::create_dir_all(&ws).unwrap();
+        let config_dir = tmp.path().join("config");
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let agent = AgentRuntime {
+            workspace_root: ws,
+            config_dir,
+            config_paths: ConfigPaths {
+                config_dir: tmp.path().join("config"),
+                data_dir: tmp.path().join("data"),
+                config_file: tmp.path().join("config").join("config.toml"),
+                database_file: db_path.clone(),
+                auth_file: tmp.path().join("auth.json"),
+            },
+            store: Arc::new(Mutex::new(store)),
+            llm_client: crate::llm::LlmClient::new().unwrap(),
+            tools: crate::tooling::ToolRegistry::new(
+                tmp.path().join("workspace"),
+                tmp.path().join("config"),
+                vec![],
+                crate::mcp::McpManager::new(tmp.path().join("workspace"), Default::default()),
+                crate::config::PermissionConfig::default(),
+                std::sync::Arc::new(crate::tooling::FileReadTracker::new()),
+                std::sync::Arc::new(
+                    crate::memory::types::MemoryStore::open(&db_path).unwrap(),
+                ),
+                false,
+                None,
+            ),
+            instructions: vec![],
+            instruction_content_cache: Default::default(),
+        };
+        (agent, tmp)
+    }
+
+    #[test]
+    fn build_request_messages_basic_filtering() {
+        let msgs = vec![
+            Message::new(MessageRole::User, "Hello"),
+            Message::new(MessageRole::Assistant, "Hi there!"),
+            Message::new(MessageRole::User, "What is the weather?"),
+            Message::new(MessageRole::Assistant, "Let me check."),
+        ];
+        let (agent, _tmp) = agent_runtime();
+        let cm = ContextManager {
+            retained_from: 2,
+            ..ContextManager::new()
+        };
+        let result = agent.build_request_messages(&msgs, &cm, SessionMode::Build);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].content, "What is the weather?");
+        assert_eq!(result[1].content, "Let me check.");
+    }
+
+    #[test]
+    fn build_request_messages_empty_after_retained() {
+        let msgs = vec![
+            Message::new(MessageRole::User, "Hello"),
+            Message::new(MessageRole::Assistant, "Hi"),
+        ];
+        let (agent, _tmp) = agent_runtime();
+        let cm = ContextManager {
+            retained_from: 2,
+            ..ContextManager::new()
+        };
+        let result = agent.build_request_messages(&msgs, &cm, SessionMode::Build);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn build_request_messages_skips_streaming_messages() {
+        let (agent, _tmp) = agent_runtime();
+        let msgs = vec![
+            Message::new(MessageRole::User, "hello"),
+            Message::streaming(MessageRole::Assistant, "still typing..."),
+        ];
+        let result = agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        assert!(!result.iter().any(|m| m.content == "still typing..."));
+    }
+
+    #[test]
+    fn build_request_messages_keeps_valid_tool_results() {
+        let (agent, _tmp) = agent_runtime();
+        let mut assistant = Message::new(MessageRole::Assistant, "searching");
+        assistant.tool_calls = vec![ToolCall {
+            id: "tc-1".to_string(),
+            name: "grep".to_string(),
+            arguments: "{}".to_string(),
+        }];
+        let msgs = vec![
+            Message::new(MessageRole::User, "find it"),
+            assistant.clone(),
+            Message::tool_result("tc-1", "grep", ToolExecutionResult::new("found!")),
+            Message::new(MessageRole::Assistant, "result"),
+        ];
+        let result = agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        let roles: Vec<_> = result.iter().map(|m| m.role.clone()).collect();
+        assert_eq!(roles, vec![
+            MessageRole::User,
+            MessageRole::Assistant,
+            MessageRole::Tool,
+            MessageRole::Assistant,
+        ]);
+    }
+
+    #[test]
+    fn build_request_messages_injects_orphan_tool_failures() {
+        let (agent, _tmp) = agent_runtime();
+        let mut assistant = Message::new(MessageRole::Assistant, "");
+        assistant.tool_calls = vec![ToolCall {
+            id: "orphan".to_string(),
+            name: "edit".to_string(),
+            arguments: "{}".to_string(),
+        }];
+        let msgs = vec![
+            assistant,
+            Message::new(MessageRole::User, "what happened?"),
+        ];
+        let result = agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        let roles: Vec<_> = result.iter().map(|m| m.role.clone()).collect();
+        assert_eq!(roles, vec![
+            MessageRole::Assistant,
+            MessageRole::Tool,
+            MessageRole::User,
+        ]);
+        let tool_msg = &result[1];
+        assert_eq!(tool_msg.tool_call_id.as_deref(), Some("orphan"));
+        assert!(tool_msg.content.contains("interrupted"));
+    }
+
+    #[test]
+    fn build_request_messages_orphan_before_user_regression() {
+        let (agent, _tmp) = agent_runtime();
+        let mut orphan_tool_call = Message::new(MessageRole::Assistant, "");
+        orphan_tool_call.tool_calls = vec![ToolCall {
+            id: "orphan-call".to_string(),
+            name: "edit".to_string(),
+            arguments: "{}".to_string(),
+        }];
+        let msgs = vec![
+            orphan_tool_call,
+            Message::new(MessageRole::User, "the edit failed"),
+        ];
+        let result = agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        let roles: Vec<_> = result.iter().map(|m| m.role.clone()).collect();
+        assert_eq!(roles, vec![
+            MessageRole::Assistant,
+            MessageRole::Tool,
+            MessageRole::User,
+        ]);
+        let synthetic = &result[1];
+        assert_eq!(synthetic.role, MessageRole::Tool);
+        assert_eq!(synthetic.tool_call_id.as_deref(), Some("orphan-call"));
+    }
+
+    #[test]
+    fn build_request_messages_mode_switch_injection() {
+        let (agent, _tmp) = agent_runtime();
+        // Assistant was in Build mode → now Plan mode → inject plan switch reminder
+        let mut assistant = Message::new(MessageRole::Assistant, "ok");
+        assistant.mode = Some(SessionMode::Build);
+        let msgs = vec![
+            Message::new(MessageRole::User, "do something"),
+            assistant,
+            Message::new(MessageRole::User, "now plan it"),
+        ];
+        let result = agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Plan);
+        // The last user message should have the plan switch reminder prepended
+        let last_user = result.iter().rev().find(|m| m.role == MessageRole::User).unwrap();
+        assert!(
+            last_user.content.contains("PLAN MODE") || last_user.content.contains("plan"),
+            "Expected plan mode reminder in user message, got: {}",
+            last_user.content
+        );
+    }
+
+    #[test]
+    fn build_request_messages_context_summary() {
+        let (agent, _tmp) = agent_runtime();
+        let cm = ContextManager {
+            summary: Some("Previous context was about Rust".to_string()),
+            ..ContextManager::new()
+        };
+        let msgs = vec![
+            Message::new(MessageRole::User, "continue"),
+        ];
+        let result = agent.build_request_messages(&msgs, &cm, SessionMode::Build);
+        assert!(result[0].content.contains("Previous context was about Rust"));
+        assert_eq!(result[0].role, MessageRole::System);
+    }
+
+    #[test]
+    fn build_request_messages_tool_result_cleared_by_new_user() {
+        let (agent, _tmp) = agent_runtime();
+        let msgs = vec![
+            Message::new(MessageRole::User, "hello"),
+            Message::tool_result("nonexistent", "grep", ToolExecutionResult::new("data")),
+            Message::new(MessageRole::Assistant, "reply"),
+        ];
+        let result = agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        let roles: Vec<_> = result.iter().map(|m| m.role.clone()).collect();
+        assert_eq!(roles, vec![MessageRole::User, MessageRole::Assistant]);
+    }
+
+    #[test]
+    fn build_request_messages_empty_assistant_skipped() {        let (agent, _tmp) = agent_runtime();
+        let msgs = vec![
+            Message::new(MessageRole::User, "hello"),
+            Message::new(MessageRole::Assistant, ""),
+            Message::new(MessageRole::Assistant, "real reply"),
+        ];
+        let result = agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].content, "hello");
+        assert_eq!(result[1].content, "real reply");
     }
 }
