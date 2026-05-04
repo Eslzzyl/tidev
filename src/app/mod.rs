@@ -447,13 +447,6 @@ impl App {
         None
     }
 
-    fn compose_system_prompt(&mut self) -> (String, Vec<String>) {
-        self.agent.compose_system_prompt(
-            &self.active_model.system_prompt,
-            self.mode,
-        )
-    }
-
     fn update_loaded_instruction_sources(&mut self, sources: &[String]) -> Result<()> {
         let display_sources: Vec<String> = sources
             .iter()
@@ -1214,7 +1207,7 @@ impl App {
 
         // Add to display queue for UI rendering
         self.pending_prompt_queue
-            .push_back(crate::app::runtime::state::QueuedPrompt::new(prompt, attachments));
+            .push_back(crate::app::runtime::state::QueuedPrompt::new(prompt));
     }
 
     fn submit_prompt_now(

@@ -488,16 +488,14 @@ impl QQChannel {
         // Send the final assistant message to the user.
         // All intermediate tool results and iterations are persisted by
         // run_agent_loop; we only need to emit the final result.
-        if let Ok(messages) = self.store.load_messages(session_id) {
-            if let Some(last_msg) = messages.last() {
-                if last_msg.role == MessageRole::Assistant
+        if let Ok(messages) = self.store.load_messages(session_id)
+            && let Some(last_msg) = messages.last()
+                && last_msg.role == MessageRole::Assistant
                     && !last_msg.content.trim().is_empty()
                 {
                     self.send_markdown(channel_id, &last_msg.content, Some(msg_id))
                         .await?;
                 }
-            }
-        }
 
         Ok(())
     }

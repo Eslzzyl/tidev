@@ -149,14 +149,12 @@ pub(crate) enum Screen {
 #[derive(Clone, Debug)]
 pub(crate) struct QueuedPrompt {
     pub(crate) prompt: String,
-    pub(crate) attachments: Vec<MessageAttachment>,
 }
 
 impl QueuedPrompt {
-    pub(crate) fn new(prompt: impl Into<String>, attachments: Vec<MessageAttachment>) -> Self {
+    pub(crate) fn new(prompt: impl Into<String>) -> Self {
         Self {
             prompt: prompt.into(),
-            attachments,
         }
     }
 }

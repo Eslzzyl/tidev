@@ -678,7 +678,7 @@ impl App {
     pub(crate) fn handle_request_abort_key(
         &mut self,
         key: KeyEvent,
-        runtime: &Runtime,
+        _runtime: &Runtime,
     ) -> Result<bool> {
         if key.code != KeyCode::Esc || !self.pending_request {
             return Ok(false);
@@ -2488,8 +2488,7 @@ impl App {
     pub(crate) fn handle_rename_session_dialog_key(
         &mut self,
         key: KeyEvent,
-        _runtime: &Runtime,
-    ) -> Result<()> {
+        _runtime: &Runtime,    ) -> Result<()> {
         match key.code {
             KeyCode::Esc => {
                 self.close_rename_session_dialog();

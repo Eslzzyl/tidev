@@ -466,9 +466,9 @@ impl AgentRuntime {
                 continue;
             }
 
-            if !self.auto_approve_permissions {
-                if let Some(def) = self.tools.definition_for(&call.name) {
-                    if def.needs_confirmation() {
+            if !self.auto_approve_permissions
+                && let Some(def) = self.tools.definition_for(&call.name)
+                    && def.needs_confirmation() {
                         crate::log_info!(
                             "execute_tool_calls: rejecting '{}' — needs confirmation and auto_approve is off",
                             call.name
@@ -482,8 +482,6 @@ impl AgentRuntime {
                         results.push((call.clone(), result));
                         continue;
                     }
-                }
-            }
 
             filtered.push(call);
         }
@@ -770,12 +768,11 @@ impl AgentRuntime {
 
         loop {
             // Check cancellation
-            if let Some(ref ct) = cancel_token {
-                if ct.is_cancelled() {
+            if let Some(ref ct) = cancel_token
+                && ct.is_cancelled() {
                     crate::log_info!("run_subagent: cancelled");
                     return Ok(String::new());
                 }
-            }
 
             // Load messages
             let db_messages = {
@@ -789,7 +786,7 @@ impl AgentRuntime {
             let mut model_for_turn = child_model.clone();
             model_for_turn.system_prompt = system_prompt;
             let request_messages =
-                self.build_request_messages(&db_messages, &mut child_context, SessionMode::Build);
+                self.build_request_messages(&db_messages, &child_context, SessionMode::Build);
 
             // Stream LLM
             let turn = self
@@ -888,12 +885,11 @@ impl AgentRuntime {
 
         loop {
             // Check cancellation
-            if let Some(ref ct) = cancel_token {
-                if ct.is_cancelled() {
+            if let Some(ref ct) = cancel_token
+                && ct.is_cancelled() {
                     crate::log_info!("run_agent_loop: cancelled");
                     return Ok(());
                 }
-            }
 
             // 1. Load messages from DB
             let db_messages = {
@@ -1008,12 +1004,11 @@ impl AgentRuntime {
             }
 
             // Check cancellation again before executing tools
-            if let Some(ref ct) = cancel_token {
-                if ct.is_cancelled() {
+            if let Some(ref ct) = cancel_token
+                && ct.is_cancelled() {
                     crate::log_info!("run_agent_loop: cancelled before tool execution");
                     return Ok(());
                 }
-            }
 
             // 7a. Subagent (task) tools — read-only types (Explorer, Librarian,
             // Oracle) run in parallel; write-capable types (Designer, Fixer,
@@ -1035,7 +1030,7 @@ impl AgentRuntime {
                         .as_deref()
                         .and_then(AgentType::parse)
                 })
-                .map_or(false, |t| t.is_read_only());
+                .is_some_and(|t| t.is_read_only());
 
                 if is_read_only {
                     // Read-only subagent — spawn in parallel

@@ -449,9 +449,9 @@ impl TelegramChannel {
         }
 
         // Send final response
-        if let Ok(messages) = self.store.load_messages(session_id) {
-            if let Some(last_msg) = messages.last() {
-                if last_msg.role == MessageRole::Assistant
+        if let Ok(messages) = self.store.load_messages(session_id)
+            && let Some(last_msg) = messages.last()
+                && last_msg.role == MessageRole::Assistant
                     && !last_msg.content.trim().is_empty()
                 {
                     let final_text = normalize_assistant_output(&last_msg.content);
@@ -475,8 +475,6 @@ impl TelegramChannel {
                             .await?;
                     }
                 }
-            }
-        }
 
         Ok(())
     }
