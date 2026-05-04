@@ -979,8 +979,8 @@ impl App {
                     if self.pending_tool_execution.is_none()
                         && self.running_subagent_executions.is_empty()
                     {
-                        crate::log_info!("SubagentCompleted: calling start_assistant_turn");
-                        self.start_assistant_turn(runtime)?;
+                        crate::log_info!("SubagentCompleted: calling spawn_agent_loop");
+                        self.spawn_agent_loop(runtime)?;
                     } else if !self.running_subagent_executions.is_empty() {
                         self.last_notice = Some(format!(
                             "Waiting for {} subagent(s)...",

@@ -625,7 +625,7 @@ impl App {
                 session_id
             );
             if !self.pending_request {
-                self.start_assistant_turn(runtime)?;
+                self.spawn_agent_loop(runtime)?;
             }
         }
 
