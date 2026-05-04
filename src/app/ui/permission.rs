@@ -505,6 +505,11 @@ impl App {
         mut rejected: Vec<(ToolCall, ToolExecutionResult)>,
         _runtime: &Runtime,
     ) -> Result<()> {
+        crate::log_info!(
+            "send_permission_approval: ready_calls={}, rejected={}",
+            ready_calls.len(),
+            rejected.len(),
+        );
         let response_tx = match self.pending_permission_response.take() {
             Some(tx) => tx,
             None => return Ok(()),
@@ -521,12 +526,19 @@ impl App {
             .map(|(tc, result)| ApprovedTool {
                 tool_call: tc,
                 rejection: Some(result),
+                child_session_id: None,
             })
             .collect();
         for tc in ready_calls.drain(..) {
+            let child_session_id = if tc.name == "task" {
+                Some(uuid::Uuid::new_v4())
+            } else {
+                None
+            };
             approvals.push(ApprovedTool {
                 tool_call: tc,
                 rejection: None,
+                child_session_id,
             });
         }
 
@@ -536,7 +548,9 @@ impl App {
             approvals.iter().filter(|a| a.rejection.is_none()).count()
         );
 
-        // Record approved tool calls as running for UI display
+        // Record approved tool calls as running for UI display.
+        // For "task" tools, also create RunningSubagentExecution entries
+        // so the TUI can show subagent cards with status updates.
         for approval in &approvals {
             if approval.rejection.is_none() {
                 self.running_tool_executions.push(RunningToolExecution::new(
@@ -544,6 +558,30 @@ impl App {
                     approval.tool_call.clone(),
                     Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 ));
+
+                // If this is a task/subagent tool, also track it as a
+                // RunningSubagentExecution so the runtime's SubagentStatus
+                // events can update the subagent card in the UI.
+                if approval.tool_call.name == "task" {
+                    if let Ok(args) = serde_json::from_str::<crate::tooling::TaskArgs>(
+                        &approval.tool_call.arguments,
+                    ) {
+                        let child_session_id = approval.child_session_id.unwrap_or_else(uuid::Uuid::new_v4);
+                        let subagent_type_str = args.subagent_type.unwrap_or_default();
+                        let description = args.description.trim().to_string();
+                        self.running_subagent_executions.push(
+                            RunningSubagentExecution::new(
+                                self.active_request_id,
+                                self.conversation.session_id,
+                                approval.tool_call.clone(),
+                                child_session_id,
+                                description,
+                                subagent_type_str,
+                                Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                            ),
+                        );
+                    }
+                }
             }
         }
 

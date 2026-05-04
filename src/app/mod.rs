@@ -766,6 +766,11 @@ impl App {
                 if let Some(idx) = running_idx {
                     let running = self.running_tool_executions.remove(idx);
                     self.record_tool_result(running.tool_call, result)?;
+
+                    // Also clean up running_subagent_executions for task tools
+                    self.running_subagent_executions
+                        .retain(|e| e.request_id != request_id);
+
                     // In permission channel mode, the agent runtime handles loop
                     // continuation automatically.  Don't call the old flow.
                     if self.pending_permission_rx.is_none() {
@@ -790,7 +795,12 @@ impl App {
                 if let Some(execution) = self
                     .running_subagent_executions
                     .iter_mut()
-                    .find(|execution| execution.child_session_id == child_session_id)
+                    .find(|execution| {
+                        // Runtime flow: match by request_id
+                        execution.request_id == request_id
+                        // Old TUI flow: match by child_session_id
+                        || execution.child_session_id == child_session_id
+                    })
                 {
                     execution.status = SubagentStatus::from_status_text(&status_text);
                     execution.current_tool_call = current_tool_call;

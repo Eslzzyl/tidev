@@ -69,6 +69,10 @@ pub struct ApprovedTool {
     /// be persisted as the tool's output.  If `None`, the tool is approved
     /// for execution.
     pub rejection: Option<ToolExecutionResult>,
+    /// Pre-generated child session ID for subagent (task) tools.
+    /// When set, the runtime will use this ID instead of generating a random one,
+    /// allowing the TUI to track and navigate to the child session accurately.
+    pub child_session_id: Option<uuid::Uuid>,
 }
 
 /// Request sent by `run_agent_loop` to the frontend for tool call approval.
@@ -661,6 +665,7 @@ impl AgentRuntime {
         event_tx: UnboundedSender<BackendEvent>,
         cancel_token: Option<CancellationToken>,
         parent_model: crate::config::ActiveModel,
+        child_session_id: Option<uuid::Uuid>,
     ) -> ToolExecutionResult {
         let result = self
             .run_subagent_inner(
@@ -670,6 +675,7 @@ impl AgentRuntime {
                 &event_tx,
                 cancel_token,
                 &parent_model,
+                child_session_id,
             )
             .await;
         match result {
@@ -681,11 +687,12 @@ impl AgentRuntime {
     async fn run_subagent_inner(
         &mut self,
         parent_session_id: uuid::Uuid,
-        _parent_request_id: u64,
+        parent_request_id: u64,
         tool_call: &ToolCall,
         event_tx: &UnboundedSender<BackendEvent>,
         cancel_token: Option<CancellationToken>,
         parent_model: &crate::config::ActiveModel,
+        child_session_id: Option<uuid::Uuid>,
     ) -> anyhow::Result<String> {
         use crate::tooling::TaskArgs;
 
@@ -697,7 +704,42 @@ impl AgentRuntime {
         let agent_type = AgentType::parse(&subagent_type).unwrap_or(AgentType::General);
         let agent_def = AgentDefinition::new(agent_type);
 
-        let child_session_id = uuid::Uuid::new_v4();
+        let child_session_id = child_session_id.unwrap_or_else(uuid::Uuid::new_v4);
+
+        // Helper to emit SubagentStatus events to BOTH parent and child sessions,
+        // matching the pre-refactor send_status() in src/app/runtime/subagent.rs.
+        // The child-session event updates the subsession conversation in the TUI;
+        // the parent-session event updates the subagent card overlay.
+        let send_status = |event_tx: &UnboundedSender<BackendEvent>,
+                           status_text: String,
+                           current_tool_call: Option<ToolCall>,
+                           content_delta: Option<String>,
+                           reasoning_delta: Option<String>| {
+            // Send to child session (for subsession conversation view)
+            let _ = event_tx.send(BackendEvent::SubagentStatus {
+                session_id: child_session_id,
+                request_id: parent_request_id,
+                child_session_id,
+                status_text: status_text.clone(),
+                current_tool_call: current_tool_call.clone(),
+                assistant_message: None,
+                content_delta: content_delta.clone(),
+                reasoning_delta: reasoning_delta.clone(),
+            });
+            // Send to parent session (for subagent card in main conversation)
+            let _ = event_tx.send(BackendEvent::SubagentStatus {
+                session_id: parent_session_id,
+                request_id: parent_request_id,
+                child_session_id,
+                status_text,
+                current_tool_call,
+                assistant_message: None,
+                content_delta,
+                reasoning_delta,
+            });
+        };
+
+        // Look up parent session record
         let parent_record = {
             let store = self.store.lock().await;
             store
@@ -749,15 +791,7 @@ impl AgentRuntime {
             all_tools
         };
 
-        // 4. Run an inline agent loop for the child session.
-        //    We use our own loop (not run_agent_loop_with_tools) because
-        //    the shared loop's future is not `Send`, which prevents us
-        //    from using tokio::spawn for parallel subagent execution.
-        //    The tool execution part delegates to the shared
-        //    execute_tool_calls to avoid duplicating that logic.
-        //
-        //    Remove the `task` tool from the tool list so subagents cannot
-        //    delegate further (no nested sub-agents).
+        // ─── The loop body and tool execution follow below ─────────────
         let child_context = ContextManager::new();
         let child_thinking = child_model.thinking_level.clone();
         let mut request_sequence: u64 = rand::random();
@@ -765,6 +799,8 @@ impl AgentRuntime {
             .into_iter()
             .filter(|t| t.name != "task")
             .collect();
+
+        send_status(event_tx, format!("Thinking ({})", agent_type.display_name()), None, None, None);
 
         loop {
             // Check cancellation
@@ -788,18 +824,123 @@ impl AgentRuntime {
             let request_messages =
                 self.build_request_messages(&db_messages, &child_context, SessionMode::Build);
 
-            // Stream LLM
-            let turn = self
-                .run_single_turn(
+            send_status(event_tx, "Thinking".to_string(), None, None, None);
+
+            // Emit TurnStarting so the TUI updates active_request_id and
+            // creates a streaming message for this turn in the child session.
+            let _ = event_tx.send(BackendEvent::TurnStarting {
+                session_id: child_session_id,
+                request_id: request_sequence,
+            });
+
+            // ─── Custom streaming loop (replaces run_single_turn) ─────────
+            // We inline the streaming logic so we can emit SubagentStatus events
+            // with content deltas (matching the pre-refactor subagent.rs).
+            // Standard events (Delta, ToolCallUpdated, etc.) are still forwarded
+            // to event_tx for regular conversation updates.
+            use tokio::sync::mpsc::unbounded_channel;
+            let (stream_tx, mut stream_rx) = unbounded_channel();
+            let llm = self.llm_client.clone();
+            let model_for_task = model_for_turn.clone();
+            let msgs = request_messages.clone();
+            let tl = child_thinking.clone();
+            let stream_req_id = request_sequence;
+            let tools_for_spawn = tools.clone();
+            tokio::spawn(async move {
+                llm.stream_chat(
                     child_session_id,
-                    request_sequence,
-                    model_for_turn,
-                    request_messages,
-                    tools.clone(),
-                    child_thinking.clone(),
-                    event_tx,
+                    stream_req_id,
+                    model_for_task,
+                    msgs,
+                    tools_for_spawn,
+                    stream_tx,
+                    tl,
                 )
-                .await?;
+                .await;
+            });
+
+            let mut turn = AssistantTurn::default();
+            let mut finished = false;
+            let mut last_sent_content_len: usize = 0;
+            let mut last_sent_reasoning_len: usize = 0;
+
+            while let Some(event) = stream_rx.recv().await {
+                // Forward to parent event channel (for standard conversation updates)
+                let _ = event_tx.send(event.clone());
+
+                match event {
+                    BackendEvent::Delta { content, .. } => {
+                        turn.content.push_str(&content);
+                        let content_delta = if turn.content.len() > last_sent_content_len {
+                            let delta = turn.content[last_sent_content_len..].to_string();
+                            last_sent_content_len = turn.content.len();
+                            Some(delta)
+                        } else {
+                            None
+                        };
+                        send_status(
+                            event_tx,
+                            "Writing output".to_string(),
+                            None,
+                            content_delta,
+                            None,
+                        );
+                    }
+                    BackendEvent::ReasoningDelta { content, .. } => {
+                        turn.reasoning.push_str(&content);
+                        let reasoning_delta = if turn.reasoning.len() > last_sent_reasoning_len {
+                            let delta = turn.reasoning[last_sent_reasoning_len..].to_string();
+                            last_sent_reasoning_len = turn.reasoning.len();
+                            Some(delta)
+                        } else {
+                            None
+                        };
+                        send_status(
+                            event_tx,
+                            "Thinking".to_string(),
+                            None,
+                            None,
+                            reasoning_delta,
+                        );
+                    }
+                    BackendEvent::ToolCallUpdated { tool_call, .. } => {
+                        turn.upsert_tool_call(tool_call.clone());
+                        send_status(
+                            event_tx,
+                            "Tool".to_string(),
+                            Some(tool_call),
+                            None,
+                            None,
+                        );
+                    }
+                    BackendEvent::Finished {
+                        turn: finished_turn,
+                        ..
+                    } => {
+                        turn = finished_turn;
+                        finished = true;
+                        break;
+                    }
+                    BackendEvent::Failed { error, .. } => {
+                        anyhow::bail!("LLM Error: {}", error);
+                    }
+                    BackendEvent::UsageStats { .. }
+                    | BackendEvent::Retrying { .. }
+                    | BackendEvent::ContextCompacted { .. }
+                    | BackendEvent::SidebarSnapshotReady { .. }
+                    | BackendEvent::ShellOutput { .. }
+                    | BackendEvent::TurnStarting { .. }
+                    | BackendEvent::InstructionsLoaded { .. }
+                    | BackendEvent::ToolCompleted { .. }
+                    | BackendEvent::SubagentStatus { .. }
+                    | BackendEvent::SubagentToolResult { .. }
+                    | BackendEvent::SubagentCompleted { .. } => {}
+                }
+            }
+
+            if !finished {
+                anyhow::bail!("Subagent stream ended without a final turn");
+            }
 
             // Persist assistant message
             self.persist_assistant_message(child_session_id, &turn)
@@ -807,19 +948,39 @@ impl AgentRuntime {
 
             // If no tool calls, done
             if turn.tool_calls.is_empty() {
+                send_status(event_tx, "Completed".to_string(), None, None, None);
                 break;
             }
 
-            // Execute tools via the shared execute_tool_calls (parallel read-only, serial write)
-            self.execute_tool_calls(
-                child_session_id,
-                request_sequence,
-                &turn.tool_calls,
-                SessionMode::Build,
-                event_tx,
-                &child_model,
-            )
-            .await?;
+            // Execute tools — send status for each tool call (like old subagent.rs)
+            for tool_call in &turn.tool_calls {
+                use crate::tooling::canonical_tool_name;
+                let canonical = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
+                let summary = format!("Tool: {canonical}");
+                send_status(event_tx, summary, Some(tool_call.clone()), None, None);
+
+                let result = self
+                    .execute_tool_calls(
+                        child_session_id,
+                        request_sequence,
+                        std::slice::from_ref(tool_call),
+                        SessionMode::Build,
+                        event_tx,
+                        &child_model,
+                    )
+                    .await?
+                    .into_iter()
+                    .next()
+                    .map(|(_, r)| r)
+                    .unwrap_or_else(|| ToolExecutionResult::new("Tool execution returned no result"));
+
+                self.persist_tool_result(
+                    child_session_id, request_sequence,
+                    tool_call, &result, event_tx,
+                ).await?;
+
+                send_status(event_tx, "Working".to_string(), None, None, None);
+            }
 
             request_sequence = request_sequence.wrapping_add(1);
         }
@@ -837,8 +998,7 @@ impl AgentRuntime {
         Ok(output)
     }
 
-    /// Run the full agent loop with the given tool definitions.
-    ///
+    /// Run the full agent loop with the given tool definitions.    ///
     /// Same as [`run_agent_loop`](Self::run_agent_loop) but uses the provided
     /// tool list instead of calling `self.tool_definitions()`.  This is used
     /// internally by [`run_subagent`](Self::run_subagent) to restrict tools
@@ -961,7 +1121,7 @@ impl AgentRuntime {
             // proceed directly — non-interactive filtering (can_execute,
             // needs_confirmation) is handled inside execute_tool_calls below.
 
-            let mut task_calls: Vec<ToolCall> = Vec::new();
+            let mut task_calls: Vec<(ToolCall, Option<uuid::Uuid>)> = Vec::new();
             let mut other_calls: Vec<ToolCall> = Vec::new();
 
             if let Some(ref perm_tx) = permission_tx {
@@ -981,7 +1141,7 @@ impl AgentRuntime {
                                     &approved.tool_call, &rejection, &event_tx,
                                 ).await?;
                             } else if approved.tool_call.name == "task" {
-                                task_calls.push(approved.tool_call);
+                                task_calls.push((approved.tool_call, approved.child_session_id));
                             } else {
                                 other_calls.push(approved.tool_call);
                             }
@@ -996,7 +1156,7 @@ impl AgentRuntime {
                 // No permission channel — partition tool calls normally
                 for tc in turn.tool_calls {
                     if tc.name == "task" {
-                        task_calls.push(tc);
+                        task_calls.push((tc, None));
                     } else {
                         other_calls.push(tc);
                     }
@@ -1018,7 +1178,7 @@ impl AgentRuntime {
                 tokio::task::JoinHandle<ToolExecutionResult>,
             )> = Vec::new();
 
-            for tc in task_calls {
+            for (tc, child_sid) in task_calls {
                 // Determine if this subagent is read-only by parsing the
                 // task arguments to extract the subagent_type field.
                 let is_read_only = serde_json::from_str::<crate::tooling::TaskArgs>(
@@ -1036,6 +1196,7 @@ impl AgentRuntime {
                     // Read-only subagent — spawn in parallel
                     let agent = self.clone();
                     let owned_tc = tc.clone();
+                    let owned_child_sid = child_sid;
                     let tx = event_tx.clone();
                     let sid = session_id;
                     let rid = request_id;
@@ -1045,7 +1206,7 @@ impl AgentRuntime {
                         let fut: Pin<
                             Box<dyn Future<Output = ToolExecutionResult> + Send>,
                         > = Box::pin(
-                            agent.run_subagent(sid, rid, owned_tc, tx, None, pm),
+                            agent.run_subagent(sid, rid, owned_tc, tx, None, pm, owned_child_sid),
                         );
                         fut.await
                     });
@@ -1055,6 +1216,7 @@ impl AgentRuntime {
                     // issues with filesystem and database mutations.
                     let agent = self.clone();
                     let owned_tc = tc.clone();
+                    let owned_child_sid = child_sid;
                     let tx = event_tx.clone();
                     let sid = session_id;
                     let rid = request_id;
@@ -1064,7 +1226,7 @@ impl AgentRuntime {
                         let fut: Pin<
                             Box<dyn Future<Output = ToolExecutionResult> + Send>,
                         > = Box::pin(
-                            agent.run_subagent(sid, rid, owned_tc, tx, None, pm),
+                            agent.run_subagent(sid, rid, owned_tc, tx, None, pm, owned_child_sid),
                         );
                         fut.await
                     };
