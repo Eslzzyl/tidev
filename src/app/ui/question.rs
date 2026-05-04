@@ -515,7 +515,6 @@ impl App {
                 .set_placeholder("Ask TiDev about your code, task, or question...");
             self.last_notice = Some("Question dialog dismissed, request stopped".to_string());
             self.abort_current_request();
-            self.drain_queued_prompts(runtime);
             return Ok(());
         }
 

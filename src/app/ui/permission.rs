@@ -479,8 +479,8 @@ impl App {
                 // Capture an intermediate snapshot after tool execution and before the
                 // next LLM step, enabling per-step patch computation at round end.
                 self.capture_step_snapshot(runtime);
-                crate::log_info!("process_pending_tool_execution: calling start_assistant_turn");
-                self.start_assistant_turn(runtime)?;
+                crate::log_info!("process_pending_tool_execution: old flow — no permission channel");
+                self.pending_request = false;
             } else {
                 self.last_notice = Some(format!(
                     "Waiting for {} subagent(s)...",
@@ -1025,7 +1025,7 @@ impl App {
             if self.running_subagent_executions.is_empty() {
                 // Capture step snapshot before next LLM step (start_parallel_execution path)
                 self.capture_step_snapshot(runtime);
-                self.start_assistant_turn(runtime)?;
+                self.pending_request = false;
             } else {
                 self.last_notice = Some(format!(
                     "Waiting for {} subagent(s)...",
@@ -1124,7 +1124,7 @@ impl App {
             if self.running_subagent_executions.is_empty() {
                 // Capture step snapshot before next LLM step (try_start_parallel_execution path)
                 self.capture_step_snapshot(runtime);
-                self.start_assistant_turn(runtime)?;
+                self.pending_request = false;
             } else {
                 self.last_notice = Some(format!(
                     "Waiting for {} subagent(s)...",

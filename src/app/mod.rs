@@ -151,8 +151,10 @@ struct App {
     leader_key_pending: bool,
     composer: Composer,
     draft_attachments: Vec<MessageAttachment>,
-    pending_prompt_queue: std::collections::VecDeque<QueuedPrompt>,
     pending_request: bool,
+    /// Display-only queue of messages waiting to be processed by the agent loop.
+    /// Kept for UI rendering — actual queueing goes through AgentRuntime.
+    pending_prompt_queue: std::collections::VecDeque<crate::app::runtime::state::QueuedPrompt>,
     active_request_id: u64,
     abort_confirmation_deadline: Option<Instant>,
     last_notice: Option<String>,
@@ -415,70 +417,6 @@ impl App {
             return candidate.to_path_buf();
         }
         self.workspace_root.join(path)
-    }
-
-    fn start_assistant_turn(&mut self, runtime: &Runtime) -> Result<()> {
-        crate::log_info!(
-            "start_assistant_turn: session_id={}, message_count={}",
-            self.conversation.session_id,
-            self.conversation.messages.len()
-        );
-
-        self.pending_request = true;
-        self.abort_confirmation_deadline = None;
-        self.active_request_id = self.active_request_id.wrapping_add(1);
-        let request_id = self.active_request_id;
-        crate::log_info!("start_assistant_turn: new request_id={}", request_id);
-        self.last_notice = Some(match self.mode {
-            SessionMode::Plan => "Planning...".to_string(),
-            SessionMode::Build => "Thinking...".to_string(),
-        });
-
-        let llm = self.llm.clone();
-        let (system_prompt, instruction_sources) = self.compose_system_prompt();
-
-        let mut model = self.active_model.clone();
-        model.system_prompt = system_prompt;
-
-        self.update_loaded_instruction_sources(&instruction_sources)?;
-
-        let mut assistant_message = Message::streaming(MessageRole::Assistant, "");
-        assistant_message.mode = Some(self.mode);
-        self.conversation.push(assistant_message);
-
-        let messages = self.agent.build_request_messages(
-            self.conversation.visible_messages(),
-            &self.context_manager,
-            self.mode,
-        );
-        let tools = self.agent.tool_definitions();
-        let tx = self.backend_tx.clone();
-        let session_id = self.conversation.session_id;
-
-        // 获取 thinking level：从最后一条用户消息获取，如果没有则 fallback 到模型默认
-        let thinking_level = self
-            .conversation
-            .messages
-            .iter()
-            .rev()
-            .find(|m| m.role == MessageRole::User)
-            .and_then(|m| m.thinking_level.clone())
-            .unwrap_or_else(|| self.thinking_level.clone());
-
-        runtime.spawn(async move {
-            llm.stream_chat(
-                session_id,
-                request_id,
-                model,
-                messages,
-                tools,
-                tx,
-                thinking_level,
-            )
-            .await;
-        });
-
-        Ok(())
     }
 
     fn refresh_tools(&mut self) {
@@ -807,7 +745,6 @@ impl App {
                     self.store
                         .append_message(self.conversation.session_id, &persisted)?;
                     self.last_notice = Some(error.clone());
-                    self.drain_queued_prompts(runtime);
                     return Ok(());
                 }
 
@@ -816,7 +753,6 @@ impl App {
                 self.store
                     .append_message(self.conversation.session_id, &message)?;
                 self.last_notice = Some(error);
-                self.drain_queued_prompts(runtime);
             }
             BackendEvent::ToolCompleted {
                 session_id: _,
@@ -1238,12 +1174,6 @@ impl App {
                 crate::log_warn!("failed to finalize snapshot: {}", error);
             }
 
-            // Drain queued prompts only in the old flow (no permission channel).
-            // In the new flow, queue_user_message handles this via run_agent_loop.
-            if self.pending_permission_rx.is_none() {
-                self.drain_queued_prompts(runtime);
-            }
-
             self.notifications.notify("Response complete");
         } else {
             // Tool calls are present — keep `pending_request` true.
@@ -1256,40 +1186,18 @@ impl App {
     }
 
     fn queue_prompt(&mut self, prompt: String, attachments: Vec<MessageAttachment>) {
-        // In the new flow (permission channel active), use the runtime's
-        // queue_user_message so that run_agent_loop picks it up automatically.
-        if self.pending_permission_rx.is_some() {
-            let msg = crate::agent::runtime::QueuedUserMessage {
-                content: prompt,
-                attachments,
-                mode: Some(self.mode),
-                thinking_level: Some(self.thinking_level.clone()),
-            };
-            self.agent.queue_user_message(msg);
-            return;
-        }
-        // Old flow: use the legacy pending_prompt_queue
+        // Queue via runtime for processing
+        let msg = crate::agent::runtime::QueuedUserMessage {
+            content: prompt.clone(),
+            attachments: attachments.clone(),
+            mode: Some(self.mode),
+            thinking_level: Some(self.thinking_level.clone()),
+        };
+        self.agent.queue_user_message(msg);
+
+        // Add to display queue for UI rendering
         self.pending_prompt_queue
-            .push_back(QueuedPrompt::new(prompt, attachments));
-    }
-
-    fn drain_queued_prompts(&mut self, runtime: &Runtime) {
-        while !self.pending_request {
-            let Some(queued_prompt) = self.pending_prompt_queue.pop_front() else {
-                break;
-            };
-
-            if let Err(error) =
-                self.submit_prompt_now(queued_prompt.prompt, queued_prompt.attachments, runtime)
-            {
-                self.last_notice = Some(error.to_string());
-                break;
-            }
-
-            if self.pending_request {
-                break;
-            }
-        }
+            .push_back(crate::app::runtime::state::QueuedPrompt::new(prompt, attachments));
     }
 
     fn submit_prompt_now(
@@ -1393,6 +1301,8 @@ impl App {
         self.pending_request = true;
         self.abort_confirmation_deadline = None;
         self.active_request_id = self.active_request_id.wrapping_add(1);
+        // Clear display queue — runtime will pick up queued messages
+        self.pending_prompt_queue.clear();
         let request_id = self.active_request_id;
         crate::log_info!("spawn_agent_loop: new request_id={}", request_id);
 

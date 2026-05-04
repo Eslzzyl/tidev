@@ -689,7 +689,6 @@ impl App {
             .is_some_and(|deadline| deadline > Instant::now())
         {
             self.abort_current_request();
-            self.drain_queued_prompts(runtime);
             return Ok(true);
         }
 
@@ -1330,7 +1329,7 @@ impl App {
                 // Cancel pending mode switch if user toggles again
                 self.pending_mode = None;
                 self.last_notice = Some("Mode switch cancelled".to_string());
-            } else if self.pending_request {
+            } else if self.pending_request || !self.pending_prompt_queue.is_empty() {
                 // Request in progress: defer mode switch to next message
                 let new_mode = self.mode.toggle();
                 self.pending_mode = Some(new_mode);
