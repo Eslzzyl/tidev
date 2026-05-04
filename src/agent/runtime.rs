@@ -154,7 +154,24 @@ impl AgentRuntime {
             match message.role {
                 MessageRole::System => {}
                 MessageRole::User => {
-                    pending_tool_calls.clear();
+                    // Inject synthetic failure results for any orphaned tool calls
+                    // before the user message, so the provider doesn't see an
+                    // assistant(tool_calls) without corresponding tool results.
+                    for (tool_call_id, tool_name) in pending_tool_calls.drain() {
+                        crate::log_warn!(
+                            "build_request_messages: injecting synthetic failure for orphaned \
+                             tool call id={} name={} before user message",
+                            tool_call_id,
+                            tool_name
+                        );
+                        result.push(Message::tool_result(
+                            tool_call_id,
+                            tool_name,
+                            ToolExecutionResult::new(
+                                "Tool call failed: execution was interrupted or did not complete",
+                            ),
+                        ));
+                    }
                     result.push(message.clone());
                     if let Some(m) = message.mode {
                         was_plan_mode = m == SessionMode::Plan;

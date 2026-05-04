@@ -152,7 +152,24 @@ impl ContextManager {
             match message.role {
                 MessageRole::System => {}
                 MessageRole::User => {
-                    pending_tool_calls.clear();
+                    // Inject synthetic failure results for any orphaned tool calls
+                    // before the user message, so the provider doesn't see an
+                    // assistant(tool_calls) without corresponding tool results.
+                    for (tool_call_id, tool_name) in pending_tool_calls.drain() {
+                        crate::log_warn!(
+                            "build_request_messages: injecting synthetic failure for orphaned \
+                             tool call id={} name={} before user message",
+                            tool_call_id,
+                            tool_name
+                        );
+                        messages.push(Message::tool_result(
+                            tool_call_id,
+                            tool_name,
+                            ToolExecutionResult::new(
+                                "Tool call failed: execution was interrupted or did not complete",
+                            ),
+                        ));
+                    }
                     messages.push(message.clone());
                     if let Some(mode) = message.mode {
                         was_plan_mode = mode == SessionMode::Plan;
@@ -623,6 +640,39 @@ mod tests {
             orphan_request_messages
                 .iter()
                 .all(|message| !matches!(message.role, MessageRole::Tool))
+        );
+
+        // Regression test: orphaned tool calls before a user message should
+        // get synthetic failure results injected BEFORE the user message,
+        // not cleared by it. The sequence must be:
+        //   assistant(tool_calls) → tool(synthetic failure) → user
+        // not:
+        //   assistant(tool_calls) → user  ← rejected by providers
+        let mut orphan_tool_call = Message::new(MessageRole::Assistant, "");
+        orphan_tool_call.tool_calls = vec![ToolCall {
+            id: "orphan-call".to_string(),
+            name: "edit".to_string(),
+            arguments: "{}".to_string(),
+        }];
+        let conversation_with_orphan = test_conversation(vec![
+            orphan_tool_call,
+            Message::new(MessageRole::User, "the edit failed"),
+        ]);
+        let manager = ContextManager::new();
+        let request_messages =
+            manager.build_request_messages(&conversation_with_orphan, SessionMode::Build);
+        let roles: Vec<_> = request_messages
+            .iter()
+            .map(|message| message.role.label())
+            .collect();
+        // Should be: assistant → tool → user  (NOT assistant → user)
+        assert_eq!(roles, vec!["assistant", "tool", "user"]);
+        let synthetic_tool = &request_messages[1];
+        assert_eq!(synthetic_tool.role, MessageRole::Tool);
+        assert_eq!(synthetic_tool.tool_call_id.as_deref(), Some("orphan-call"));
+        assert!(
+            synthetic_tool.content.contains("interrupted"),
+            "synthetic tool result should mention interruption"
         );
     }
 }
