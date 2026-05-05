@@ -1289,12 +1289,13 @@ impl AgentRuntime {
                     let sid = session_id;
                     let rid = request_id;
                     let pm = model.clone();
+                    let ct = cancel_token.clone();
 
                     let handle = tokio::spawn(async move {
                         let fut: Pin<
                             Box<dyn Future<Output = ToolExecutionResult> + Send>,
                         > = Box::pin(
-                            agent.run_subagent(sid, rid, owned_tc, tx, None, pm, owned_child_sid),
+                            agent.run_subagent(sid, rid, owned_tc, tx, ct, pm, owned_child_sid),
                         );
                         fut.await
                     });
@@ -1314,7 +1315,7 @@ impl AgentRuntime {
                         let fut: Pin<
                             Box<dyn Future<Output = ToolExecutionResult> + Send>,
                         > = Box::pin(
-                            agent.run_subagent(sid, rid, owned_tc, tx, None, pm, owned_child_sid),
+                            agent.run_subagent(sid, rid, owned_tc, tx, cancel_token.clone(), pm, owned_child_sid),
                         );
                         fut.await
                     };
