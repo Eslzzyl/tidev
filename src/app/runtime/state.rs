@@ -26,8 +26,10 @@ use crate::{
     app::commands::CommandPaletteState,
     app::input::Composer,
     config::ActiveModel,
+    config::reasoning::ThinkingLevelType,
     context::ContextManager,
     provider_setup::ConnectDialog,
+    prompts::SessionMode,
     session::{Conversation, MessageAttachment},
     tooling::TodoItem,
 };
@@ -149,12 +151,23 @@ pub(crate) enum Screen {
 #[derive(Clone, Debug)]
 pub(crate) struct QueuedPrompt {
     pub(crate) prompt: String,
+    pub(crate) attachments: Vec<MessageAttachment>,
+    pub(crate) mode: Option<SessionMode>,
+    pub(crate) thinking_level: Option<ThinkingLevelType>,
 }
 
 impl QueuedPrompt {
-    pub(crate) fn new(prompt: impl Into<String>) -> Self {
+    pub(crate) fn new(
+        prompt: impl Into<String>,
+        attachments: Vec<MessageAttachment>,
+        mode: Option<SessionMode>,
+        thinking_level: Option<ThinkingLevelType>,
+    ) -> Self {
         Self {
             prompt: prompt.into(),
+            attachments,
+            mode,
+            thinking_level,
         }
     }
 }

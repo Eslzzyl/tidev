@@ -218,8 +218,8 @@ impl AgentRuntime {
 
         if let Some(summary) = &context_manager.summary {
             result.push(Message::new(
-                MessageRole::System,
-                format!("Context summary for continuation:\n{summary}"),
+                MessageRole::User,
+                format!("Earlier conversation summary:\n{summary}"),
             ));
         }
 
@@ -1109,6 +1109,14 @@ impl AgentRuntime {
                     // Continue the loop — the next iteration picks up the
                     // newly persisted user message.
                     request_id = rand::random::<u64>();
+
+                    // Notify frontend about the new turn so it can create a
+                    // streaming message and update its active_request_id.
+                    let _ = event_tx.send(BackendEvent::TurnStarting {
+                        session_id,
+                        request_id,
+                    });
+
                     continue;
                 }
                 self.maybe_compact(session_id, &model, context_manager, mode, &event_tx).await;

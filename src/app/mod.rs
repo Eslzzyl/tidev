@@ -1123,6 +1123,28 @@ impl App {
                 );
                 self.active_request_id = request_id;
 
+                // If the previous turn finished without tool calls, this
+                // TurnStarting is from a queued message being dequeued by
+                // the agent loop.  Pop from the display queue, push a user
+                // message card into the conversation, and reset
+                // pending_request so the UI shows the spinner again.
+                if !self.pending_request {
+                    if let Some(queued) = self.pending_prompt_queue.pop_front() {
+                        let mut user_message =
+                            Message::new(MessageRole::User, &queued.prompt);
+                        user_message.attachments = queued.attachments;
+                        user_message.mode = queued.mode;
+                        user_message.thinking_level = queued.thinking_level;
+                        self.conversation.push(user_message);
+                        self.scroll_messages_to_bottom();
+                    }
+                    self.pending_request = true;
+                    self.last_notice = Some(match self.mode {
+                        SessionMode::Plan => "Planning...".to_string(),
+                        SessionMode::Build => "Thinking...".to_string(),
+                    });
+                }
+
                 // Create a new streaming assistant message for the next turn
                 let mut assistant_message = Message::streaming(MessageRole::Assistant, "");
                 assistant_message.mode = Some(self.mode);
@@ -1206,18 +1228,26 @@ impl App {
     }
 
     fn queue_prompt(&mut self, prompt: String, attachments: Vec<MessageAttachment>) {
+        let mode = self.mode;
+        let thinking_level = self.thinking_level.clone();
+
         // Queue via runtime for processing
         let msg = crate::agent::runtime::QueuedUserMessage {
             content: prompt.clone(),
             attachments: attachments.clone(),
-            mode: Some(self.mode),
-            thinking_level: Some(self.thinking_level.clone()),
+            mode: Some(mode),
+            thinking_level: Some(thinking_level.clone()),
         };
         self.agent.queue_user_message(msg);
 
         // Add to display queue for UI rendering
         self.pending_prompt_queue
-            .push_back(crate::app::runtime::state::QueuedPrompt::new(prompt));
+            .push_back(crate::app::runtime::state::QueuedPrompt::new(
+                prompt,
+                attachments,
+                Some(mode),
+                Some(thinking_level),
+            ));
     }
 
     fn submit_prompt_now(
@@ -1348,6 +1378,8 @@ impl App {
         let session_id = self.conversation.session_id;
         let model = self.active_model.clone();
         let mode = self.mode;
+        let context_summary = self.conversation.context_summary.clone();
+        let context_retained_from = self.conversation.context_retained_from;
         let thinking_level = self
             .conversation
             .messages
@@ -1358,7 +1390,10 @@ impl App {
             .unwrap_or_else(|| self.thinking_level.clone());
 
         runtime.spawn(async move {
-            let mut context_manager = ContextManager::new();
+            let mut context_manager = ContextManager::from_state(
+                context_summary,
+                context_retained_from,
+            );
 
             if let Err(e) = agent
                 .run_agent_loop_with_permission_channel(
