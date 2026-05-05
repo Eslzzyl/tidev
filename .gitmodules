@@ -6,11 +6,19 @@
 	path = codex
 	url = https://github.com/openai/codex.git
 	shallow = true
-[submodule "zeroclaw"]	path = zeroclaw
+[submodule "zeroclaw"]
+	path = zeroclaw
 	url = https://github.com/zeroclaw-labs/zeroclaw.git
 	shallow = true
 [submodule "nanobot"]
 	path = nanobot
 	url = https://github.com/HKUDS/nanobot.git
-
-
+	shallow = true
+[submodule "openchamber"]
+	path = openchamber
+	url = https://github.com/openchamber/openchamber.git
+	shallow = true
+[submodule "opencode-dynamic-context-pruning"]
+	path = opencode-dynamic-context-pruning
+	url = https://github.com/Opencode-DCP/opencode-dynamic-context-pruning.git
+	shallow = true
