@@ -582,6 +582,9 @@ impl AgentRuntime {
                         "Tool task panicked/aborted: {join_err}"
                     ))
                 });
+                // Persist read-only results immediately (Phase 1.5)
+                self.persist_tool_result(session_id, request_id, &tool_call, &result, event_tx)
+                    .await?;
                 results.push((tool_call, result));
             }
         }
@@ -605,13 +608,10 @@ impl AgentRuntime {
                     "Tool task panicked/aborted: {join_err}"
                 ))
             });
-            results.push((tool_call.clone(), result));
-        }
-
-        // ─── Phase 4: Persist results and emit events sequentially ──────
-        for (tool_call, result) in &results {
-            self.persist_tool_result(session_id, request_id, tool_call, result, event_tx)
+            // Persist write result immediately so diffs render one at a time
+            self.persist_tool_result(session_id, request_id, &tool_call, &result, event_tx)
                 .await?;
+            results.push((tool_call.clone(), result));
         }
 
         Ok(results)
