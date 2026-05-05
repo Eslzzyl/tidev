@@ -300,6 +300,14 @@ async fn run_subagent_loop(context: &SubagentTaskContext) -> Result<String> {
         assistant_message.reasoning = turn.reasoning.clone();
         assistant_message.tool_calls = turn.tool_calls.clone();
         assistant_message.streaming = false;
+        // Copy token data from the turn so sidebar statistics are accurate
+        assistant_message.input_tokens = turn.input_tokens;
+        assistant_message.output_tokens = turn.output_tokens;
+        assistant_message.total_tokens = turn.total_tokens;
+        assistant_message.cache_read_tokens = turn.cache_read_tokens;
+        assistant_message.cache_write_tokens = turn.cache_write_tokens;
+        assistant_message.model_id = turn.model_id.clone();
+        assistant_message.tokens_per_second = turn.tokens_per_second;
         update_child_message(context, &assistant_message)?;
 
         if turn.tool_calls.is_empty() {
