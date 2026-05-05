@@ -45,7 +45,7 @@ pub fn classify_response_status(status: reqwest::StatusCode, body: Option<String
 
     match code {
         // Retryable: server errors and rate limits
-        408 | 429 | 500 | 502 | 503 | 504 => NetworkError::Retryable { message },
+        408 | 429 | 500 | 502 | 503 | 504 | 520 | 529 => NetworkError::Retryable { message },
         // Non-retryable: auth, not found, payload too large
         401 | 403 | 404 | 413 => NetworkError::NonRetryable { message },
         // Unexpected but treat as non-retryable
@@ -146,9 +146,14 @@ fn classify_reqwest_error(error: &reqwest::Error) -> NetworkError {
 /// Attempts to downcast the inner error to `reqwest::Error` for classification.
 /// Falls back to non-retryable if downcast fails.
 pub fn classify_anyhow_error(error: anyhow::Error) -> NetworkError {
-    // Try to downcast to reqwest::Error
+    // Try to downcast to reqwest::Error (transport-level errors)
     if let Some(reqwest_error) = error.downcast_ref::<reqwest::Error>() {
         return classify_reqwest_error(reqwest_error);
+    }
+
+    // Try to downcast to NetworkError (HTTP status errors from provider modules)
+    if let Some(network_error) = error.downcast_ref::<NetworkError>() {
+        return network_error.clone();
     }
 
     // Non-retryable fallback

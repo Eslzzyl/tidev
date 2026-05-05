@@ -5,6 +5,7 @@ mod openai;
 mod responses;
 mod think_parser;
 
+use std::time::Duration;
 use anyhow::{Context, Result};
 use reqwest::Client;
 use tokio::sync::mpsc::UnboundedSender;
@@ -27,6 +28,8 @@ impl LlmClient {
     pub fn new() -> Result<Self> {
         let http = Client::builder()
             .user_agent("tidev/0.1")
+            .timeout(Duration::from_secs(120))
+            .connect_timeout(Duration::from_secs(15))
             .build()
             .context("failed to construct HTTP client")?;
 
