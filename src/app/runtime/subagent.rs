@@ -374,6 +374,8 @@ async fn execute_child_tool_call(
                 context.tools.max_output_bytes(),
                 context.tools.rtk_enabled(),
                 context.cancel_requested.clone(),
+                context.child_session_id,
+                Some(context.tx.clone()),
             )?;
             Ok(result)
         }

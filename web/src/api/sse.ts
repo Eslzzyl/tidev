@@ -99,6 +99,10 @@ export class SSEClient {
     this.eventSource.addEventListener("heartbeat", () => {
       this.emit("heartbeat", undefined as unknown as AppEvent);
     });
+
+    this.eventSource.addEventListener("shell.output", (e: MessageEvent) => {
+      this.emit("shell.output", JSON.parse(e.data));
+    });
   }
 
   disconnect() {

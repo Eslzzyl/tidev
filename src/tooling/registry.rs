@@ -1,10 +1,12 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
 use crate::mcp::McpManager;
 use crate::memory::types::MemoryStore;
+use crate::session::BackendEvent;
 use crate::tooling::SkillCatalog;
 use crate::{
     config::PermissionConfig,
@@ -357,5 +359,114 @@ impl ToolRegistry {
                 }
             }
         })
+    }
+
+    /// Execute a tool call on a blocking thread with streaming output events.
+    ///
+    /// Like [`execute_call_spawned`], but the bash tool will emit
+    /// [`BackendEvent::ShellOutput`] events as output is produced.
+    /// Other tools ignore the sender and execute normally.
+    pub fn execute_call_spawned_streaming(
+        &self,
+        runtime_handle: tokio::runtime::Handle,
+        store: SessionStore,
+        session_id: uuid::Uuid,
+        call: ToolCall,
+        mode: SessionMode,
+        allow_outside: bool,
+        event_tx: UnboundedSender<BackendEvent>,
+    ) -> JoinHandle<ToolExecutionResult> {
+        let registry = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let result =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    registry.execute_call_with_stream(
+                        &runtime_handle,
+                        &store,
+                        session_id,
+                        &call,
+                        mode,
+                        allow_outside,
+                        event_tx,
+                    )
+                }));
+            match result {
+                Ok(Ok(r)) => r,
+                Ok(Err(e)) => ToolExecutionResult::new(format!("Error: {e}")),
+                Err(panic) => {
+                    let msg = if let Some(s) = panic.downcast_ref::<String>() {
+                        s.clone()
+                    } else if let Some(s) = panic.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else {
+                        "unknown panic".to_string()
+                    };
+                    ToolExecutionResult::new(format!("Tool panicked: {msg}"))
+                }
+            }
+        })
+    }
+
+    /// Like [`execute_call`] but threads a streaming event sender to the bash tool.
+    fn execute_call_with_stream(
+        &self,
+        runtime: &tokio::runtime::Handle,
+        store: &SessionStore,
+        session_id: uuid::Uuid,
+        call: &ToolCall,
+        mode: SessionMode,
+        allow_outside: bool,
+        event_tx: UnboundedSender<BackendEvent>,
+    ) -> Result<ToolExecutionResult> {
+        if self.mcp.definition_for(&call.name).is_some() {
+            return runtime.block_on(self.mcp.execute_call(call));
+        }
+
+        let mut result = super::builtin::execute_tool_call_streaming(
+            &self.workspace_root,
+            &self.config_dir,
+            &self.skills,
+            store,
+            session_id,
+            call,
+            self.max_output_bytes,
+            self.rtk_enabled,
+            &self.memory_store,
+            mode,
+            allow_outside,
+            Some(event_tx),
+        )?;
+
+        // Image capability check
+        if !self.model_supports_images() && !result.attachments.is_empty() {
+            let had_images = result
+                .attachments
+                .iter()
+                .any(|a| matches!(a, crate::session::MessageAttachment::Image { .. }));
+            if had_images {
+                result
+                    .attachments
+                    .retain(|a| !matches!(a, crate::session::MessageAttachment::Image { .. }));
+                result.output.push_str("\n\n(Note: Image reading was attempted, but the current model does not support image input. Images have been removed from the request.)");
+            }
+        }
+
+        // For "read" tool, record the read if it was successful
+        if super::canonical_tool_name(&call.name) == Some("read") {
+            let arguments: serde_json::Value = serde_json::from_str(&call.arguments)?;
+            if let Some(path_str) = arguments.get("path").and_then(|v| v.as_str()) {
+                let absolute_path = super::builtin::utils::resolve_workspace_path(
+                    &self.workspace_root,
+                    std::path::Path::new(path_str),
+                    allow_outside,
+                )?;
+                if absolute_path.exists() && absolute_path.is_file() {
+                    self.file_read_tracker
+                        .record_read(store, session_id, &absolute_path)?;
+                }
+            }
+        }
+
+        Ok(result)
     }
 }

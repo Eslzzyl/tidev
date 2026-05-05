@@ -775,7 +775,56 @@ impl App {
 
                 if let Some(idx) = running_idx {
                     let running = self.running_tool_executions.remove(idx);
-                    self.record_tool_result(running.tool_call, result)?;
+
+                    // For bash tool calls streamed via ShellOutput, find and
+                    // finalize the existing Tool message instead of creating
+                    // a duplicate via record_tool_result.
+                    if tool_call.name == "bash" {
+                        let tool_idx = self
+                            .conversation
+                            .messages
+                            .iter()
+                            .rposition(|m| {
+                                m.role == MessageRole::Tool
+                                && m.tool_call_id.as_deref() == Some(&tool_call.id)
+                            });
+                        if let Some(tool_idx) = tool_idx {
+                            let display_result = result.preview_for_storage(Some("bash"));
+                            let message_id = self.conversation.messages[tool_idx].id;
+                            self.conversation.messages[tool_idx].content = display_result.output;
+                            self.conversation.messages[tool_idx].streaming = false;
+                            self.conversation.messages[tool_idx].attachments = display_result.attachments;
+                            self.message_layout_index.borrow_mut().valid = false;
+                            // Invalidate the parent Assistant message's render cache
+                            if let Some(assistant_id) = self
+                                .conversation
+                                .messages
+                                .iter()
+                                .rev()
+                                .skip_while(|m| m.id != message_id)
+                                .find(|m| m.role == MessageRole::Assistant)
+                                .map(|m| m.id)
+                            {
+                                self.invalidate_active_message_render_cache_for(assistant_id);
+                            }
+                            // Persist the final message
+                            let persisted = self.conversation.messages[tool_idx].clone();
+                            if let Err(e) = self
+                                .store
+                                .append_message(self.conversation.session_id, &persisted)
+                            {
+                                crate::log_warn!(
+                                    "ToolCompleted/bash: failed to persist: {}",
+                                    e
+                                );
+                            }
+                        } else {
+                            // Fallback: no streaming message existed
+                            self.record_tool_result(tool_call, result)?;
+                        }
+                    } else {
+                        self.record_tool_result(running.tool_call, result)?;
+                    }
 
                     // Also clean up running_subagent_executions for task tools
                     self.running_subagent_executions
@@ -1081,43 +1130,72 @@ impl App {
                 session_id: _,
                 content,
                 finished,
-                exit_code,
+                exit_code: _,
             } => {
-                // Find the last streaming Shell assistant message
-                let last_shell_idx = self
-                    .conversation
-                    .messages
+                // Stream bash output into a ToolResult message in real-time,
+                // preserving the original tool card style.
+                // Match by the running bash execution's tool_call_id to
+                // correctly handle multiple tool calls in the same turn.
+                let running_bash = self
+                    .running_tool_executions
                     .iter()
-                    .rposition(|m| matches!(m.role, MessageRole::Shell) && m.streaming);
+                    .find(|r| r.tool_call.name == "bash");
+                let bash_tool_call_id = running_bash.map(|r| r.tool_call.id.as_str());
 
-                if let Some(idx) = last_shell_idx {
-                    let message_id = self.conversation.messages[idx].id;
-                    self.conversation.messages[idx].content = content.clone();
-                    self.message_layout_index.borrow_mut().valid = false;
-                    self.invalidate_active_message_render_cache_for(message_id);
+                if let Some(tool_call_id) = bash_tool_call_id {
+                    let existing = self
+                        .conversation
+                        .messages
+                        .iter()
+                        .rposition(|m| {
+                            m.role == MessageRole::Tool
+                                && m.streaming
+                                && m.tool_call_id.as_deref() == Some(tool_call_id)
+                        });
 
-                    if finished {
-                        self.conversation.messages[idx].streaming = false;
-                        if let Some(code) = exit_code {
-                            if code == 0 {
-                                self.last_notice =
-                                    Some("Shell command completed successfully".to_string());
-                            } else {
-                                self.last_notice =
-                                    Some(format!("Shell command completed with exit code {code}"));
-                            }
-                        } else {
-                            self.last_notice =
-                                Some("Shell command completed (exit code unknown)".to_string());
+                    if let Some(idx) = existing {
+                        // Update streaming tool message content.
+                        // The render cache is keyed by the parent Assistant
+                        // message's ID, so we must invalidate that one.
+                        let message_id = self.conversation.messages[idx].id;
+                        self.conversation.messages[idx].content = content.clone();
+                        if finished {
+                            self.conversation.messages[idx].streaming = false;
                         }
-                        // Persist the final message
-                        let persisted = self.conversation.messages[idx].clone();
-                        if let Err(e) = self
-                            .store
-                            .append_message(self.conversation.session_id, &persisted)
+                        self.message_layout_index.borrow_mut().valid = false;
+                        // Invalidate the parent Assistant message's render cache
+                        // so the tool call card re-renders with new content.
+                        if let Some(assistant_id) = self
+                            .conversation
+                            .messages
+                            .iter()
+                            .rev()
+                            .skip_while(|m| m.id != message_id)
+                            .find(|m| m.role == MessageRole::Assistant)
+                            .map(|m| m.id)
                         {
-                            crate::log_warn!("ShellOutput: failed to persist message: {}", e);
+                            self.invalidate_active_message_render_cache_for(assistant_id);
                         }
+                        if finished {
+                            let persisted = self.conversation.messages[idx].clone();
+                            if let Err(e) = self
+                                .store
+                                .append_message(self.conversation.session_id, &persisted)
+                            {
+                                crate::log_warn!("ShellOutput: failed to persist message: {}", e);
+                            }
+                            self.scroll_messages_to_bottom();
+                        }
+                    } else {
+                        // Create a new streaming ToolResult message.
+                        let running = running_bash.unwrap();
+                        let mut msg = Message::new(MessageRole::Tool, &content);
+                        msg.tool_call_id = Some(running.tool_call.id.clone());
+                        msg.tool_name = Some(running.tool_call.name.clone());
+                        msg.streaming = !finished;
+                        self.conversation.push(msg);
+                        self.message_layout_index.borrow_mut().valid = false;
+                        self.clear_message_render_cache();
                         self.scroll_messages_to_bottom();
                     }
                 }

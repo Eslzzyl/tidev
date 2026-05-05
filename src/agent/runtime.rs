@@ -595,14 +595,30 @@ impl AgentRuntime {
                 let s = self.store.lock().await;
                 s.clone()
             };
-            let handle = self.tools.execute_call_spawned(
-                runtime.clone(),
-                store,
-                session_id,
-                tool_call.clone(),
-                mode,
-                false,
-            );
+
+            // Bash tool calls get streaming: output is sent chunk-by-chunk
+            // via ShellOutput events while the command runs.
+            let is_bash = tool_call.name == "bash" || canonical_tool_name(&tool_call.name) == Some("bash");
+            let handle = if is_bash {
+                self.tools.execute_call_spawned_streaming(
+                    runtime.clone(),
+                    store,
+                    session_id,
+                    tool_call.clone(),
+                    mode,
+                    false,
+                    event_tx.clone(),
+                )
+            } else {
+                self.tools.execute_call_spawned(
+                    runtime.clone(),
+                    store,
+                    session_id,
+                    tool_call.clone(),
+                    mode,
+                    false,
+                )
+            };
             let result = handle.await.unwrap_or_else(|join_err| {
                 ToolExecutionResult::new(format!(
                     "Tool task panicked/aborted: {join_err}"

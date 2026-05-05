@@ -7,14 +7,18 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
+        mpsc,
     },
     thread,
     time::Duration,
 };
+use tokio::sync::mpsc::UnboundedSender;
 
 use super::utils::truncate_in_place;
+use crate::session::BackendEvent;
 use crate::tooling::tools::BashArgs;
 use crate::tooling::{ToolDefinition, ToolPermission};
+use uuid::Uuid;
 
 /// Result of bash tool execution, including whether RTK rewrote the command.
 #[derive(Debug)]
@@ -36,6 +40,8 @@ pub fn execute_tool_call(
     call: &crate::session::ToolCall,
     max_output_bytes: usize,
     rtk_enabled: bool,
+    session_id: Uuid,
+    event_tx: Option<UnboundedSender<BackendEvent>>,
 ) -> Result<BashExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
@@ -49,6 +55,8 @@ pub fn execute_tool_call(
         rtk_enabled,
         None,
         timeout,
+        event_tx,
+        session_id,
     )
 }
 
@@ -58,6 +66,8 @@ pub fn execute_tool_call_with_cancel(
     max_output_bytes: usize,
     rtk_enabled: bool,
     cancelled: Arc<std::sync::atomic::AtomicBool>,
+    session_id: Uuid,
+    event_tx: Option<UnboundedSender<BackendEvent>>,
 ) -> Result<BashExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
@@ -71,6 +81,8 @@ pub fn execute_tool_call_with_cancel(
         rtk_enabled,
         Some(cancelled),
         timeout,
+        event_tx,
+        session_id,
     )
 }
 
@@ -81,6 +93,8 @@ fn run_shell_inner(
     rtk_enabled: bool,
     cancelled: Option<Arc<AtomicBool>>,
     timeout_ms: u64,
+    event_tx: Option<UnboundedSender<BackendEvent>>,
+    session_id: Uuid,
 ) -> Result<BashExecutionResult> {
     // Try to get RTK rewritten command if RTK is enabled
     let (actual_command, rtk_rewritten) = if rtk_enabled {
@@ -109,12 +123,38 @@ fn run_shell_inner(
             .with_context(|| format!("failed to run command '{actual_command}'"))?
     };
 
-    let mut stdout = process.stdout.take();
     let mut stderr = process.stderr.take();
-
     let start_time = std::time::Instant::now();
     let timeout = Duration::from_millis(timeout_ms);
 
+    // ─── Stream stdout chunk-by-chunk via a reader thread ──────────────
+    // We spawn a reader thread so the main loop can still check for
+    // cancellation / timeout while output trickles in slowly.
+    // Raw bytes are accumulated and converted to string at the end to
+    // avoid corrupting multi-byte UTF-8 sequences across chunks.
+    let (chunk_tx, chunk_rx) = mpsc::channel::<Vec<u8>>();
+    let mut raw_bytes: Vec<u8> = Vec::new();
+    let mut output_buf = String::new();
+
+    if let Some(stdout_handle) = process.stdout.take() {
+        thread::spawn(move || {
+            let mut reader = stdout_handle;
+            let mut buf = [0u8; 8192];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break, // EOF
+                    Ok(n) => {
+                        if chunk_tx.send(buf[..n].to_vec()).is_err() {
+                            break; // receiver dropped
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+    }
+
+    // Main loop: check cancel/timeout, read chunks from the reader thread
     loop {
         if cancelled
             .as_ref()
@@ -137,38 +177,88 @@ fn run_shell_inner(
             ));
         }
 
-        if let Some(status) = process
-            .try_wait()
-            .with_context(|| format!("failed while waiting for command '{command}' to finish"))?
-        {
-            let mut combined = String::new();
+        match chunk_rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(chunk) => {
+                raw_bytes.extend_from_slice(&chunk);
 
-            if let Some(mut handle) = stdout.take() {
-                let _ = handle.read_to_string(&mut combined);
-            }
+                // Convert accumulated bytes to string for display.
+                // Using from_utf8_lossy on the whole buffer is safe across chunk
+                // boundaries — any leftover partial UTF-8 from a previous chunk
+                // is now complete in this chunk.
+                let output_str = String::from_utf8_lossy(&raw_bytes);
+                output_buf = output_str.into_owned();
 
-            if let Some(mut handle) = stderr.take() {
-                let mut error_output = String::new();
-                let _ = handle.read_to_string(&mut error_output);
-                if !error_output.is_empty() {
-                    if !combined.is_empty() {
-                        combined.push('\n');
+                // If the string was truncated in a previous iteration, align
+                // raw_bytes to match so we don't accumulate forever.
+                if raw_bytes.len() > max_output_bytes {
+                    // Find the byte boundary corresponding to max_output_bytes chars
+                    let truncated_str: String = output_buf.chars().take(max_output_bytes).collect();
+                    let byte_len = truncated_str.len();
+                    raw_bytes.truncate(byte_len);
+                    output_buf = truncated_str;
+                    if raw_bytes.len() > max_output_bytes {
+                        // Safety: ensure raw_bytes doesn't exceed max
+                        raw_bytes.truncate(max_output_bytes);
+                        let safe = String::from_utf8_lossy(&raw_bytes);
+                        output_buf = safe.into_owned();
                     }
-                    combined.push_str(&error_output);
+                } else {
+                    truncate_in_place(&mut output_buf, max_output_bytes);
+                    // Sync raw_bytes to truncated string length
+                    raw_bytes.truncate(output_buf.len());
+                }
+
+                // Send progress event
+                if let Some(ref tx) = event_tx {
+                    let _ = tx.send(BackendEvent::ShellOutput {
+                        session_id,
+                        content: output_buf.clone(),
+                        finished: false,
+                        exit_code: None,
+                    });
                 }
             }
-
-            truncate_in_place(&mut combined, max_output_bytes);
-
-            let status = status.code().unwrap_or_default();
-            return Ok(BashExecutionResult {
-                output: format!("[exit {status}]\n{combined}"),
-                rtk_rewritten,
-            });
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break, // reader thread finished
         }
-
-        thread::sleep(Duration::from_millis(50));
     }
+
+    // ─── Process finished ──────────────────────────────────────────────
+    let status = process
+        .wait()
+        .context("failed to wait for shell command")?;
+    let exit_code = status.code();
+
+    // Merge stderr output
+    let mut combined = output_buf;
+    if let Some(mut handle) = stderr.take() {
+        let mut error_output = String::new();
+        let _ = handle.read_to_string(&mut error_output);
+        if !error_output.is_empty() {
+            if !combined.is_empty() {
+                combined.push('\n');
+            }
+            combined.push_str(&error_output);
+        }
+    }
+
+    truncate_in_place(&mut combined, max_output_bytes);
+
+    // Send final event with exit code
+    if let Some(ref tx) = event_tx {
+        let _ = tx.send(BackendEvent::ShellOutput {
+            session_id,
+            content: combined.clone(),
+            finished: true,
+            exit_code,
+        });
+    }
+
+    let status_code = exit_code.unwrap_or_default();
+    Ok(BashExecutionResult {
+        output: format!("[exit {status_code}]\n{combined}"),
+        rtk_rewritten,
+    })
 }
 
 /// Result of RTK rewrite operation.

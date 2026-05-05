@@ -65,6 +65,13 @@ pub enum AppEvent {
     },
     /// Request was aborted
     Aborted { session_id: Uuid, request_id: u64 },
+    /// Shell command output (streaming)
+    ShellOutput {
+        session_id: Uuid,
+        content: String,
+        finished: bool,
+        exit_code: Option<i32>,
+    },
     /// Messages were updated (e.g., after revert)
     MessagesUpdated { session_id: Uuid },
     /// Error occurred

@@ -558,6 +558,17 @@ pub async fn send_message(
                         tokens_per_second,
                     })
                 }
+                BackendEvent::ShellOutput {
+                    session_id,
+                    content,
+                    finished,
+                    exit_code,
+                } => Some(AppEvent::ShellOutput {
+                    session_id,
+                    content,
+                    finished,
+                    exit_code,
+                }),
                 _ => None,
             };
 

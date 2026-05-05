@@ -898,6 +898,14 @@ impl App {
         let max_output_bytes = self.tools.max_output_bytes();
         let rtk_enabled = self.tools.rtk_enabled();
 
+        // Send initial ShellOutput to create a streaming placeholder in the UI
+        let _ = tx.send(crate::session::BackendEvent::ShellOutput {
+            session_id,
+            content: String::new(),
+            finished: false,
+            exit_code: None,
+        });
+
         runtime.spawn_blocking(move || {
             let result = execute_shell_tool_call(
                 &workspace_root,
@@ -905,6 +913,8 @@ impl App {
                 max_output_bytes,
                 rtk_enabled,
                 cancel_requested,
+                session_id,
+                Some(tx.clone()),
             )
             .unwrap_or_else(|error| ToolExecutionResult::new(format!("Tool failed: {error}")));
 

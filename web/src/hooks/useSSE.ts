@@ -148,6 +148,48 @@ export function useSSE(sessionId: string | null) {
       });
     };
 
+    const handleShellOutput = (event: AppEvent) => {
+      if (event.type !== "shell_output") return;
+      const { content, finished, exit_code } = event;
+
+      updateStreamingRound((prev) => {
+        if (!prev) return prev;
+
+        // Find all bash tool calls in the round and update their streaming output
+        const toolCallMap = { ...prev.toolCallMap };
+        let changed = false;
+
+        for (const [id, entry] of Object.entries(toolCallMap)) {
+          if (entry.name === "bash") {
+            // Parse exit code from content if present (format: "[exit N]\n...")
+            let exitCode: number | null = exit_code ?? null;
+            let cleanContent = content;
+
+            // If the backend already formatted with [exit N], extract it
+            const exitMatch = content.match(/^\[exit\s*(-?\d+)\]\n/);
+            if (exitMatch) {
+              exitCode = parseInt(exitMatch[1], 10);
+              cleanContent = content.slice(exitMatch[0].length);
+            }
+
+            toolCallMap[id] = {
+              ...entry,
+              result: {
+                output: cleanContent,
+                exitCode,
+                isError: exitCode !== null && exitCode !== 0,
+              },
+              resultComplete: finished,
+              argumentsComplete: true,
+            };
+            changed = true;
+          }
+        }
+
+        return changed ? { ...prev, toolCallMap } : prev;
+      });
+    };
+
     const handleMessageChunk = (event: AppEvent) => {
       if (event.type !== "message_chunk") return;
 
@@ -327,6 +369,7 @@ export function useSSE(sessionId: string | null) {
     // Register SSE listeners
     sseClient.on("tool.call", handleToolCall);
     sseClient.on("tool.result", handleToolResult);
+    sseClient.on("shell.output", handleShellOutput);
     sseClient.on("message.chunk", handleMessageChunk);
     sseClient.on("reasoning.chunk", handleReasoningChunk);
     sseClient.on("message.complete", handleMessageComplete);
@@ -342,6 +385,7 @@ export function useSSE(sessionId: string | null) {
     return () => {
       sseClient.off("tool.call", handleToolCall);
       sseClient.off("tool.result", handleToolResult);
+      sseClient.off("shell.output", handleShellOutput);
       sseClient.off("message.chunk", handleMessageChunk);
       sseClient.off("reasoning.chunk", handleReasoningChunk);
       sseClient.off("message.complete", handleMessageComplete);
