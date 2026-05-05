@@ -1,5 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
+import remarkGfm from "remark-gfm";
 import type { ComponentProps } from "react";
 
 interface Props {
@@ -26,6 +27,7 @@ export function MarkdownRenderer({ content }: Props) {
   return (
     <div className="markdown-body prose prose-sm dark:prose-invert max-w-none">
       <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
         components={{
           a: CustomLink,
