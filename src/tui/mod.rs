@@ -42,7 +42,6 @@ pub use render::render_chat;
 pub use render::render_dialog;
 pub use core::run;
 pub use core::state;
-pub use core::subagent;
 pub use core::undo;
 pub use ui::balance_panel;
 pub use ui::connect;
@@ -829,12 +828,6 @@ impl App {
                     // Also clean up running_subagent_executions for task tools
                     self.running_subagent_executions
                         .retain(|e| e.request_id != request_id);
-
-                    // In permission channel mode, the agent runtime handles loop
-                    // continuation automatically.  Don't call the old flow.
-                    if self.pending_permission_rx.is_none() {
-                        self.try_start_parallel_execution(runtime)?;
-                    }
                 }
             }
             BackendEvent::SubagentStatus {

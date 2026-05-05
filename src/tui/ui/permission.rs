@@ -4,10 +4,9 @@ use std::sync::{Arc, atomic::AtomicBool};
 use tokio::runtime::Runtime;
 
 use crate::agent::runtime::ApprovedTool;
-use crate::agent::{AgentDefinition, AgentType};
 use crate::prompts::SessionMode;
 use crate::session::{ToolCall, ToolExecutionResult};
-use crate::tooling::{QuestionArgs, TaskArgs, canonical_tool_name, execute_shell_tool_call};
+use crate::tooling::{QuestionArgs, canonical_tool_name};
 
 use super::App;
 
@@ -223,7 +222,6 @@ impl App {
             return Ok(());
         }
 
-        let is_permission_channel = self.pending_permission_response.is_some();
         let mut rejected: Vec<(ToolCall, ToolExecutionResult)> = Vec::new();
 
         let mut question_opened = false;
@@ -251,11 +249,7 @@ impl App {
                     tool_call.name,
                     effective_mode.as_str()
                 );
-                if is_permission_channel {
-                    rejected.push((tool_call, ToolExecutionResult::new(output)));
-                } else {
-                    self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
-                }
+                rejected.push((tool_call, ToolExecutionResult::new(output)));
                 self.advance_pending_tool_execution();
                 continue;
             }
@@ -280,11 +274,7 @@ impl App {
                         "Tool '{}' was denied by remembered permission",
                         permission_label
                     );
-                    if is_permission_channel {
-                        rejected.push((tool_call, ToolExecutionResult::new(output)));
-                    } else {
-                        self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
-                    }
+                    rejected.push((tool_call, ToolExecutionResult::new(output)));
                     self.advance_pending_tool_execution();
                     continue;
                 }
@@ -292,11 +282,7 @@ impl App {
 
             let Some(definition) = self.tools.definition_for(&tool_call.name) else {
                 let output = format!("Tool '{}' is unknown", tool_call.name);
-                if is_permission_channel {
-                    rejected.push((tool_call, ToolExecutionResult::new(output)));
-                } else {
-                    self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
-                }
+                rejected.push((tool_call, ToolExecutionResult::new(output)));
                 self.advance_pending_tool_execution();
                 continue;
             };
@@ -318,56 +304,20 @@ impl App {
                             "[User denied access] The path '{}' is outside the workspace.",
                             path_str
                         );
-                        if is_permission_channel {
-                            rejected.push((tool_call, ToolExecutionResult::new(output)));
-                        } else {
-                            self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
-                        }
+                        rejected.push((tool_call, ToolExecutionResult::new(output)));
                         self.advance_pending_tool_execution();
                         continue;
                     }
                     // Previously allowed — execute with allow_outside=true
-                    if is_permission_channel {
-                        // In channel mode, don't execute synchronously.
-                        // The runtime will execute it with allow_outside tracked
-                        // via workspace_boundary_approved.
-                        self.workspace_boundary_approved
-                            .insert(tool_call.id.clone(), true);
-                        self.pending_tool_execution
-                            .as_mut()
-                            .unwrap()
-                            .add_ready(tool_call);
-                        self.advance_pending_tool_execution();
-                        continue;
-                    }
-                    if Self::is_readonly_tool(&tool_call.name) {
-                        // Record boundary approval for async dispatch
-                        self.workspace_boundary_approved
-                            .insert(tool_call.id.clone(), true);
-                        self.pending_tool_execution
-                            .as_mut()
-                            .unwrap()
-                            .add_ready(tool_call);
-                        self.advance_pending_tool_execution();
-                        continue;
-                    }
-                    let handle = self.tools.execute_call_spawned(
-                        runtime.handle().clone(),
-                        self.store.clone(),
-                        self.conversation.session_id,
-                        tool_call.clone(),
-                        self.mode,
-                        true,
-                    );
-                    let mut result = runtime.block_on(handle).unwrap_or_else(|join_err| {
-                        ToolExecutionResult::new(format!("Tool failed: {join_err}"))
-                    });
-                    if !result.output.starts_with("Tool failed:") {
-                        result
-                            .output
-                            .push_str("\n\n[User approved access to path outside the workspace]");
-                    }
-                    self.record_tool_result(tool_call, result)?;
+                    // In channel mode, don't execute synchronously.
+                    // The runtime will execute it with allow_outside tracked
+                    // via workspace_boundary_approved.
+                    self.workspace_boundary_approved
+                        .insert(tool_call.id.clone(), true);
+                    self.pending_tool_execution
+                        .as_mut()
+                        .unwrap()
+                        .add_ready(tool_call);
                     self.advance_pending_tool_execution();
                     continue;
                 } else {
@@ -394,11 +344,7 @@ impl App {
                     Err(error) => {
                         let output =
                             format!("Tool failed: failed to decode question arguments: {error}");
-                        if is_permission_channel {
-                            rejected.push((tool_call, ToolExecutionResult::new(output)));
-                        } else {
-                            self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
-                        }
+                        rejected.push((tool_call, ToolExecutionResult::new(output)));
                         self.advance_pending_tool_execution();
                         continue;
                     }
@@ -407,11 +353,7 @@ impl App {
                 if args.questions.is_empty() {
                     let output =
                         "Tool failed: question tool requires at least one question".to_string();
-                    if is_permission_channel {
-                        rejected.push((tool_call, ToolExecutionResult::new(output)));
-                    } else {
-                        self.record_tool_result(tool_call, ToolExecutionResult::new(output))?;
-                    }
+                    rejected.push((tool_call, ToolExecutionResult::new(output)));
                     self.advance_pending_tool_execution();
                     continue;
                 }
@@ -451,10 +393,7 @@ impl App {
             .unwrap_or_default();
 
         if !ready_calls.is_empty() {
-            if is_permission_channel {
-                return self.send_permission_approval(ready_calls, rejected, runtime);
-            }
-            return self.start_parallel_execution(ready_calls, runtime);
+            return self.send_permission_approval(ready_calls, rejected, runtime);
         }
 
         if question_opened {
@@ -471,22 +410,8 @@ impl App {
                 self.running_subagent_executions.len()
             );
             self.pending_tool_execution = None;
-            if is_permission_channel {
-                // All tools rejected — send empty approval to continue the loop
-                return self.send_permission_approval(ready_calls, rejected, runtime);
-            }
-            if self.running_subagent_executions.is_empty() {
-                // Capture an intermediate snapshot after tool execution and before the
-                // next LLM step, enabling per-step patch computation at round end.
-                self.capture_step_snapshot(runtime);
-                crate::log_info!("process_pending_tool_execution: old flow — no permission channel");
-                self.pending_request = false;
-            } else {
-                self.last_notice = Some(format!(
-                    "Waiting for {} subagent(s)...",
-                    self.running_subagent_executions.len()
-                ));
-            }
+            // All tools rejected — send empty approval to continue the loop
+            return self.send_permission_approval(ready_calls, rejected, runtime);
         } else {
             crate::log_info!(
                 "process_pending_tool_execution: loop ended but not finished, pending_tool_execution={}, running_subagent_executions={}",
@@ -565,22 +490,23 @@ impl App {
                 if approval.tool_call.name == "task"
                     && let Ok(args) = serde_json::from_str::<crate::tooling::TaskArgs>(
                         &approval.tool_call.arguments,
-                    ) {
-                        let child_session_id = approval.child_session_id.unwrap_or_else(uuid::Uuid::new_v4);
-                        let subagent_type_str = args.subagent_type.unwrap_or_default();
-                        let description = args.description.trim().to_string();
-                        self.running_subagent_executions.push(
-                            RunningSubagentExecution::new(
-                                self.active_request_id,
-                                self.conversation.session_id,
-                                approval.tool_call.clone(),
-                                child_session_id,
-                                description,
-                                subagent_type_str,
-                                Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                            ),
-                        );
-                    }
+                    )
+                {
+                    let child_session_id =
+                        approval.child_session_id.unwrap_or_else(uuid::Uuid::new_v4);
+                    let subagent_type_str = args.subagent_type.unwrap_or_default();
+                    let description = args.description.trim().to_string();
+                    self.running_subagent_executions
+                        .push(RunningSubagentExecution::new(
+                            self.active_request_id,
+                            self.conversation.session_id,
+                            approval.tool_call.clone(),
+                            child_session_id,
+                            description,
+                            subagent_type_str,
+                            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                        ));
+                }
             }
         }
 
@@ -631,471 +557,11 @@ impl App {
         self.process_pending_tool_execution(runtime)
     }
 
-    #[allow(dead_code)]
-    fn execute_pending_tool_call(
-        &mut self,
-        tool_call: ToolCall,
-        runtime: &Runtime,
-    ) -> Result<bool> {
-        crate::log_info!(
-            "execute_pending_tool_call: {} id={}",
-            tool_call.name,
-            tool_call.id
-        );
-        if tool_call.name == "task" {
-            if let Err(error) = self.start_subagent_task_execution(tool_call.clone(), runtime) {
-                crate::log_error!("start_subagent_task_execution failed: {}", error);
-                self.record_tool_result(
-                    tool_call,
-                    ToolExecutionResult::new(format!("Tool failed: {error}")),
-                )?;
-                self.advance_pending_tool_execution();
-                return Ok(false);
-            }
-            crate::log_info!(
-                "execute_pending_tool_call: task started, advancing and returning false"
-            );
-            self.advance_pending_tool_execution();
-            return Ok(false);
-        }
-
-        if tool_call.name == "question" {
-            let args = match serde_json::from_str::<QuestionArgs>(&tool_call.arguments) {
-                Ok(args) => args,
-                Err(error) => {
-                    self.record_tool_result(
-                        tool_call,
-                        ToolExecutionResult::new(format!(
-                            "Tool failed: failed to decode question arguments: {error}"
-                        )),
-                    )?;
-                    self.advance_pending_tool_execution();
-                    return Ok(false);
-                }
-            };
-
-            if args.questions.is_empty() {
-                self.record_tool_result(
-                    tool_call,
-                    ToolExecutionResult::new(
-                        "Tool failed: question tool requires at least one question",
-                    ),
-                )?;
-                self.advance_pending_tool_execution();
-                return Ok(false);
-            }
-
-            self.begin_question_dialog(tool_call, args)?;
-            return Ok(true);
-        }
-
-        if self.should_run_shell_async(&tool_call) {
-            self.start_shell_tool_execution(tool_call, runtime)?;
-            return Ok(true);
-        }
-
-        // Execute on blocking thread with catch_unwind protection,
-        // block synchronously for the result via runtime.block_on.
-        let handle = self.tools.execute_call_spawned(
-            runtime.handle().clone(),
-            self.store.clone(),
-            self.conversation.session_id,
-            tool_call.clone(),
-            self.mode,
-            false, // allow_outside: normal execution doesn't allow outside workspace
-        );
-        let result = runtime.block_on(handle).unwrap_or_else(|join_err| {
-            ToolExecutionResult::new(format!("Tool failed: {join_err}"))
-        });
-        self.record_tool_result(tool_call, result)?;
-        self.advance_pending_tool_execution();
-        Ok(false)
-    }
-
-    fn start_subagent_task_execution(
-        &mut self,
-        tool_call: ToolCall,
-        runtime: &Runtime,
-    ) -> Result<()> {
-        let args = serde_json::from_str::<TaskArgs>(&tool_call.arguments)?;
-        let description = args.description.trim().to_string();
-        let prompt = args.prompt.trim().to_string();
-
-        if description.is_empty() {
-            anyhow::bail!("task description cannot be empty");
-        }
-        if prompt.is_empty() {
-            anyhow::bail!("task prompt cannot be empty");
-        }
-
-        let subagent_type_str = args
-            .subagent_type
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "subagent_type is required: specify one of explorer, librarian, oracle, designer, fixer"
-                )
-            })?;
-
-        // Resolve agent type and create the agent definition
-        let agent_type = AgentType::parse(subagent_type_str).ok_or_else(|| {
-            anyhow::anyhow!(
-                "unknown subagent type '{subagent_type_str}': expected one of explorer, librarian, oracle, designer, fixer"
-            )
-        })?;
-        let agent_type_name = agent_type.display_name().to_string();
-        let agent_definition = AgentDefinition::new(agent_type);
-
-        // Resolve model override for this agent type from config
-        let model = self
-            .config
-            .resolve_agent_active_model(&self.auth, &agent_type_name)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| self.active_model.clone());
-
-        let request_id = self.active_request_id;
-        let parent_session_id = self.conversation.session_id;
-        let child_session_id = uuid::Uuid::new_v4();
-        crate::log_info!(
-            "start_subagent_task_execution: request_id={}, parent_session_id={}, child_session_id={}, tool_call_id={}, agent_type={}",
-            request_id,
-            parent_session_id,
-            child_session_id,
-            tool_call.id,
-            agent_type.display_name()
-        );
-        let cancel_requested = Arc::new(AtomicBool::new(false));
-        self.running_subagent_executions
-            .push(RunningSubagentExecution::new(
-                request_id,
-                parent_session_id,
-                tool_call.clone(),
-                child_session_id,
-                description.clone(),
-                agent_type_name,
-                cancel_requested.clone(),
-            ));
-        self.subagent_task_map
-            .insert(tool_call.id.clone(), child_session_id);
-        self.last_notice = Some(format!(
-            "Running {} subagent(s)...",
-            self.running_subagent_executions.len()
-        ));
-
-        let store_path = self.store.path().to_path_buf();
-        let runtime_handle = runtime.handle().clone();
-        let tx = self.backend_tx.clone();
-        let llm = self.llm.clone();
-        let tools = self.tools.clone();
-        let workspace_root = self.workspace_root.clone();
-        let task_call = tool_call.clone();
-
-        runtime.spawn(async move {
-            crate::log_info!(
-                "subagent task spawned: request_id={}, child_session_id={}, agent_type={}",
-                request_id,
-                child_session_id,
-                agent_definition.agent_type.display_name()
-            );
-            let context = crate::tui::subagent::SubagentTaskContext {
-                parent_request_id: request_id,
-                parent_session_id,
-                child_session_id,
-                description,
-                prompt,
-                agent_definition,
-                llm,
-                tools,
-                model,
-                workspace_root,
-                store_path,
-                tx: tx.clone(),
-                cancel_requested,
-                runtime_handle,
-            };
-
-            let output = match crate::tui::subagent::run_subagent_task(context).await {
-                Ok(output) => {
-                    crate::log_info!(
-                        "subagent task succeeded: request_id={}, child_session_id={}, output_len={}",
-                        request_id,
-                        child_session_id,
-                        output.len()
-                    );
-                    output
-                }
-                Err(error) => {
-                    crate::log_error!(
-                        "subagent task failed: request_id={}, child_session_id={}, error={}",
-                        request_id,
-                        child_session_id,
-                        error
-                    );
-                    format!("Subagent failed: {error}")
-                }
-            };
-
-            crate::log_info!(
-                "sending SubagentCompleted: request_id={}, child_session_id={}",
-                request_id,
-                child_session_id
-            );
-            let _ = tx.send(crate::session::BackendEvent::SubagentCompleted {
-                session_id: parent_session_id,
-                request_id,
-                tool_call: task_call,
-                child_session_id,
-                result: ToolExecutionResult::new(output),
-            });
-        });
-
-        Ok(())
-    }
-
     pub(crate) fn is_readonly_tool(name: &str) -> bool {
         matches!(
             canonical_tool_name(name),
             Some("read" | "list" | "glob" | "grep" | "websearch" | "webfetch")
         )
-    }
-
-    fn should_run_tool_async(&self, tool_call: &ToolCall) -> bool {
-        self.tools
-            .definition_for(&tool_call.name)
-            .is_some_and(|def| {
-                def.name == "bash"
-                    || Self::is_readonly_tool(&def.name)
-                    || matches!(
-                        def.permission,
-                        crate::tooling::ToolPermission::Read
-                            | crate::tooling::ToolPermission::Search
-                    )
-            })
-    }
-
-    fn should_run_shell_async(&self, tool_call: &ToolCall) -> bool {
-        self.tools
-            .definition_for(&tool_call.name)
-            .is_some_and(|definition| definition.name == "bash")
-    }
-
-    fn start_shell_tool_execution(&mut self, tool_call: ToolCall, runtime: &Runtime) -> Result<()> {
-        let session_id = self.conversation.session_id;
-        let request_id = self.active_request_id;
-        let cancel_requested = Arc::new(AtomicBool::new(false));
-        self.running_tool_executions.push(RunningToolExecution::new(
-            request_id,
-            tool_call.clone(),
-            cancel_requested.clone(),
-        ));
-        self.last_notice = Some(format!("Running {}...", tool_call.name));
-
-        let tx = self.backend_tx.clone();
-        let workspace_root = self.tools.workspace_root().to_path_buf();
-        let max_output_bytes = self.tools.max_output_bytes();
-        let rtk_enabled = self.tools.rtk_enabled();
-
-        // Send initial ShellOutput to create a streaming placeholder in the UI
-        let _ = tx.send(crate::session::BackendEvent::ShellOutput {
-            session_id,
-            content: String::new(),
-            finished: false,
-            exit_code: None,
-        });
-
-        runtime.spawn_blocking(move || {
-            let result = execute_shell_tool_call(
-                &workspace_root,
-                &tool_call,
-                max_output_bytes,
-                rtk_enabled,
-                cancel_requested,
-                session_id,
-                Some(tx.clone()),
-            )
-            .unwrap_or_else(|error| ToolExecutionResult::new(format!("Tool failed: {error}")));
-
-            let _ = tx.send(crate::session::BackendEvent::ToolCompleted {
-                session_id,
-                request_id,
-                tool_call,
-                result,
-            });
-        });
-
-        Ok(())
-    }
-
-    fn start_readonly_tool_execution(
-        &mut self,
-        tool_call: ToolCall,
-        runtime: &Runtime,
-    ) -> Result<()> {
-        let session_id = self.conversation.session_id;
-        let request_id = self.active_request_id;
-        let allow_outside = self
-            .workspace_boundary_approved
-            .remove(&tool_call.id)
-            .unwrap_or(false);
-        let cancel_requested = Arc::new(AtomicBool::new(false));
-        self.running_tool_executions.push(RunningToolExecution::new(
-            request_id,
-            tool_call.clone(),
-            cancel_requested.clone(),
-        ));
-        self.last_notice = Some(format!("Running {}...", tool_call.name));
-
-        let tx = self.backend_tx.clone();
-        let tools = self.tools.clone();
-        let store = self.store.clone();
-        let mode = self.mode;
-
-        // Use execute_call_spawned for catch_unwind protection and
-        // offloading to the blocking thread pool.
-        let handle = tools.execute_call_spawned(
-            runtime.handle().clone(),
-            store,
-            session_id,
-            tool_call.clone(),
-            mode,
-            allow_outside,
-        );
-
-        runtime.spawn(async move {
-            let result = handle.await.unwrap_or_else(|join_err| {
-                ToolExecutionResult::new(format!("Tool failed: {join_err}"))
-            });
-            let _ = tx.send(crate::session::BackendEvent::ToolCompleted {
-                session_id,
-                request_id,
-                tool_call,
-                result,
-            });
-        });
-
-        Ok(())
-    }
-
-    pub(crate) fn start_parallel_execution(
-        &mut self,
-        tool_calls: Vec<ToolCall>,
-        runtime: &Runtime,
-    ) -> Result<()> {
-        let count = tool_calls.len();
-        crate::log_info!("start_parallel_execution: {} tools", count);
-
-        if count == 1 {
-            self.last_notice = Some(format!("Running {}...", tool_calls[0].name));
-        } else {
-            let tool_names: Vec<_> = tool_calls.iter().map(|t| t.name.as_str()).collect();
-            self.last_notice = Some(format!(
-                "Running {} tools ({})...",
-                count,
-                tool_names.join(", ")
-            ));
-        }
-
-        // Phase 1: Dispatch async tools (bash, read-only, subagent) concurrently
-        // These start immediately via spawn_blocking and report completion via events.
-        for tool_call in &tool_calls {
-            match tool_call.name.as_str() {
-                "task" => {
-                    if let Err(error) =
-                        self.start_subagent_task_execution(tool_call.clone(), runtime)
-                    {
-                        crate::log_error!("start_subagent_task_execution failed: {}", error);
-                        self.record_tool_result(
-                            tool_call.clone(),
-                            ToolExecutionResult::new(format!("Tool failed: {error}")),
-                        )?;
-                    }
-                }
-                "question" => {
-                    let parsed: Result<QuestionArgs, _> =
-                        serde_json::from_str(&tool_call.arguments);
-                    match parsed {
-                        Ok(args) if !args.questions.is_empty() => {
-                            self.begin_question_dialog(tool_call.clone(), args)?;
-                        }
-                        _ => {
-                            self.record_tool_result(
-                                tool_call.clone(),
-                                ToolExecutionResult::new(
-                                    "Tool failed: failed to decode question arguments or empty questions",
-                                ),
-                            )?;
-                        }
-                    };
-                }
-                _ => {
-                    if self.should_run_tool_async(tool_call) {
-                        if tool_call.name == "bash" {
-                            self.start_shell_tool_execution(tool_call.clone(), runtime)?;
-                        } else {
-                            self.start_readonly_tool_execution(tool_call.clone(), runtime)?;
-                        }
-                    }
-                    // Sync tools handled in Phase 2 below
-                }
-            }
-        }
-
-        // Phase 2: Execute may-write tools synchronously, in order.
-        // These complete inline before the next turn starts.
-        for tool_call in tool_calls {
-            match tool_call.name.as_str() {
-                "task" | "question" => {
-                    // Already handled in Phase 1
-                }
-                _ => {
-                    if !self.should_run_tool_async(&tool_call) {
-                        // Execute on blocking thread with catch_unwind protection,
-                        // block synchronously for the result via runtime.block_on.
-                        let handle = self.tools.execute_call_spawned(
-                            runtime.handle().clone(),
-                            self.store.clone(),
-                            self.conversation.session_id,
-                            tool_call.clone(),
-                            self.mode,
-                            false, // allow_outside: normal execution doesn't allow outside workspace
-                        );
-                        let result = runtime.block_on(handle).unwrap_or_else(|join_err| {
-                            ToolExecutionResult::new(format!("Tool failed: {join_err}"))
-                        });
-                        self.record_tool_result(tool_call, result)?;
-                    }
-                }
-            }
-        }
-
-        if self.running_tool_executions.is_empty()
-            && self
-                .pending_tool_execution
-                .as_ref()
-                .is_some_and(|p| p.is_finished())
-        {
-            self.pending_tool_execution = None;
-            if self.running_subagent_executions.is_empty() {
-                // Capture step snapshot before next LLM step (start_parallel_execution path)
-                self.capture_step_snapshot(runtime);
-                self.pending_request = false;
-            } else {
-                self.last_notice = Some(format!(
-                    "Waiting for {} subagent(s)...",
-                    self.running_subagent_executions.len()
-                ));
-            }
-        }
-
-        // Clean up any stale workspace_boundary_approved entries (should already be consumed)
-        if !self.workspace_boundary_approved.is_empty() {
-            self.workspace_boundary_approved.clear();
-        }
-
-        Ok(())
     }
 
     pub(crate) fn record_tool_result(
@@ -1167,27 +633,5 @@ impl App {
             execution.total(),
             execution.mode(),
         ))
-    }
-
-    pub(crate) fn try_start_parallel_execution(&mut self, runtime: &Runtime) -> Result<()> {
-        if self.running_tool_executions.is_empty()
-            && self
-                .pending_tool_execution
-                .as_ref()
-                .is_some_and(|p| p.is_finished())
-        {
-            self.pending_tool_execution = None;
-            if self.running_subagent_executions.is_empty() {
-                // Capture step snapshot before next LLM step (try_start_parallel_execution path)
-                self.capture_step_snapshot(runtime);
-                self.pending_request = false;
-            } else {
-                self.last_notice = Some(format!(
-                    "Waiting for {} subagent(s)...",
-                    self.running_subagent_executions.len()
-                ));
-            }
-        }
-        Ok(())
     }
 }
