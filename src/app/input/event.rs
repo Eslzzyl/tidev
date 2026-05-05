@@ -713,6 +713,26 @@ impl App {
         self.active_request_id = self.active_request_id.wrapping_add(1);
         self.abort_confirmation_deadline = None;
         self.pending_request = false;
+
+        // Cancel the agent loop so it stops at its next check point.
+        if let Some(token) = self.request_cancel_token.take() {
+            token.cancel();
+        }
+
+        // Drop the permission channel sender so the agent loop unblocks
+        // if it's waiting for a permission approval response.
+        self.pending_permission_response = None;
+
+        // Also drop the permission channel receiver.  Any queued
+        // PendingToolApproval in the channel is dropped along with its
+        // oneshot sender, causing resp_rx.await in the agent loop to
+        // return Err and exit.
+        self.pending_permission_rx = None;
+
+        // Clear the display queue.  Messages in the runtime queue
+        // (agent.queued_messages) survive — the next spawned agent
+        // loop picks them up after its first turn.
+        self.pending_prompt_queue.clear();
         self.pending_tool_execution = None;
         self.permission_dialog = None;
         self.question_dialog = None;

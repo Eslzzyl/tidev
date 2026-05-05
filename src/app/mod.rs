@@ -23,6 +23,7 @@ use tokio::{
     runtime::Runtime,
     sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
 };
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 mod commands;
@@ -156,6 +157,10 @@ struct App {
     /// Kept for UI rendering — actual queueing goes through AgentRuntime.
     pending_prompt_queue: std::collections::VecDeque<crate::app::runtime::state::QueuedPrompt>,
     active_request_id: u64,
+    /// Cancel token for the current agent loop. Cancelled when the user
+    /// double-presses Esc, causing the agent loop to stop at its next
+    /// cancellation check point.
+    request_cancel_token: Option<CancellationToken>,
     abort_confirmation_deadline: Option<Instant>,
     last_notice: Option<String>,
     toast: Option<(String, Instant)>,
@@ -722,6 +727,11 @@ impl App {
                 self.cancel_running_subagents();
                 self.abort_confirmation_deadline = None;
                 self.retrying_hint = None;
+                // Clean up cancel token and permission channel so the agent
+                // loop can exit promptly.
+                self.request_cancel_token.take();
+                self.pending_permission_response = None;
+                self.pending_permission_rx = None;
 
                 self.notifications
                     .notify(&format!("Request failed: {}", error));
@@ -1121,6 +1131,17 @@ impl App {
                     request_id,
                     self.active_request_id
                 );
+
+                // Ignore stale TurnStarting from a cancelled/aborted agent
+                // loop.  If no cancel token exists, no agent loop is
+                // running to serve this turn.
+                if self.request_cancel_token.is_none() {
+                    crate::log_info!(
+                        "TurnStarting ignored: no active cancel token (request was aborted)"
+                    );
+                    return Ok(());
+                }
+
                 self.active_request_id = request_id;
 
                 // If the previous turn finished without tool calls, this
@@ -1351,6 +1372,12 @@ impl App {
         self.pending_request = true;
         self.abort_confirmation_deadline = None;
         self.active_request_id = self.active_request_id.wrapping_add(1);
+        // Cancel any existing agent loop before starting a new one
+        if let Some(token) = self.request_cancel_token.take() {
+            token.cancel();
+        }
+        let cancel_token = CancellationToken::new();
+        self.request_cancel_token = Some(cancel_token.clone());
         // Clear display queue — runtime will pick up queued messages
         self.pending_prompt_queue.clear();
         let request_id = self.active_request_id;
@@ -1404,7 +1431,7 @@ impl App {
                     mode,
                     thinking_level,
                     tx,
-                    None, // cancel_token
+                    Some(cancel_token),
                     permission_tx,
                 )
                 .await

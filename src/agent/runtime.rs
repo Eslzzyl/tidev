@@ -1110,6 +1110,14 @@ impl AgentRuntime {
                     // newly persisted user message.
                     request_id = rand::random::<u64>();
 
+                    // Check cancellation before notifying the frontend,
+                    // to avoid stale TurnStarting events after abort.
+                    if let Some(ref ct) = cancel_token
+                        && ct.is_cancelled() {
+                            crate::log_info!("run_agent_loop: cancelled before TurnStarting (queued)");
+                            return Ok(());
+                    }
+
                     // Notify frontend about the new turn so it can create a
                     // streaming message and update its active_request_id.
                     let _ = event_tx.send(BackendEvent::TurnStarting {
@@ -1276,13 +1284,20 @@ impl AgentRuntime {
             // 8. Continue loop with new request ID for next turn
             request_id = rand::random::<u64>();
 
-            // Notify frontend about the next turn so it can create a
+            // Check cancellation before notifying the frontend,
+            // to avoid stale TurnStarting events after abort.
+            if let Some(ref ct) = cancel_token
+                && ct.is_cancelled() {
+                    crate::log_info!("run_agent_loop: cancelled before TurnStarting");
+                    return Ok(());
+            }
+
+            // Notify frontend about the new turn so it can create a
             // streaming message and update its active_request_id.
             let _ = event_tx.send(BackendEvent::TurnStarting {
                 session_id,
                 request_id,
-            });
-        }
+            });        }
     }
 
     /// Run the full agent loop.

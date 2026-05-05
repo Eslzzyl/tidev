@@ -140,6 +140,7 @@ impl App {
             pending_prompt_queue: std::collections::VecDeque::new(),
             pending_request: false,
             active_request_id: 0,
+            request_cancel_token: None,
             abort_confirmation_deadline: None,
             last_notice,
             toast: None,
@@ -780,8 +781,8 @@ impl App {
                 }
                 if let Some(summary) = summary.as_ref() {
                     let mut updated_existing = false;
-                    if manual {
-                        if let Some(last_msg) = self.conversation.messages.last_mut()
+                    if manual
+                        && let Some(last_msg) = self.conversation.messages.last_mut()
                             && last_msg.streaming
                             && last_msg.role == crate::session::MessageRole::System
                         {
@@ -800,7 +801,6 @@ impl App {
                                 crate::log_warn!("failed to persist compaction message: {}", error);
                             }
                         }
-                    }
                     if !updated_existing {
                         let compaction_message =
                             crate::session::Message::compaction(summary.clone());

@@ -562,8 +562,8 @@ impl App {
                 // If this is a task/subagent tool, also track it as a
                 // RunningSubagentExecution so the runtime's SubagentStatus
                 // events can update the subagent card in the UI.
-                if approval.tool_call.name == "task" {
-                    if let Ok(args) = serde_json::from_str::<crate::tooling::TaskArgs>(
+                if approval.tool_call.name == "task"
+                    && let Ok(args) = serde_json::from_str::<crate::tooling::TaskArgs>(
                         &approval.tool_call.arguments,
                     ) {
                         let child_session_id = approval.child_session_id.unwrap_or_else(uuid::Uuid::new_v4);
@@ -581,7 +581,6 @@ impl App {
                             ),
                         );
                     }
-                }
             }
         }
 
