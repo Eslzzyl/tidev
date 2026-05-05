@@ -39,6 +39,7 @@ reqwest = { version = "0.13.3", default-features = false, features = [
     "json",
     "stream",
     "rustls",
+    "gzip",
 ] }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 rusqlite = { version = "0.39.0", features = ["bundled"] }
@@ -51,7 +52,7 @@ two-face = { version = "0.5.1", default-features = false, features = [
     "syntect-default-onig",
 ] }
 textwrap = "0.16.2"
-tokio = { version = "=1.52.1", features = [
+tokio = { version = "=1.52.2", features = [
     "rt-multi-thread",
     "macros",
     "sync",
@@ -92,7 +93,7 @@ async-stream = "0.3.6"
 rust-embed = { version = "8.11", features = ["axum"] }
 
 [dev-dependencies]
-tempfile = "3.23"
+tempfile = "3.27"
 
 [profile.dev]
 incremental = true # Compile your binary in smaller steps.
