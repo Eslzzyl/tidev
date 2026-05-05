@@ -400,7 +400,28 @@ impl AgentRuntime {
                     turn: finished_turn,
                     ..
                 } => {
+                    // Preserve token data accumulated from UsageStats event.
+                    // finalize_turn() in LLM providers creates the finished_turn
+                    // with ..Default::default(), so token fields would be None.
+                    let saved_tokens = (
+                        turn.input_tokens,
+                        turn.output_tokens,
+                        turn.total_tokens,
+                        turn.cache_read_tokens,
+                        turn.cache_write_tokens,
+                        turn.model_id.clone(),
+                        turn.tokens_per_second,
+                    );
                     turn = finished_turn;
+                    if turn.input_tokens.is_none() {
+                        turn.input_tokens = saved_tokens.0;
+                        turn.output_tokens = saved_tokens.1;
+                        turn.total_tokens = saved_tokens.2;
+                        turn.cache_read_tokens = saved_tokens.3;
+                        turn.cache_write_tokens = saved_tokens.4;
+                        turn.model_id = saved_tokens.5;
+                        turn.tokens_per_second = saved_tokens.6;
+                    }
                     break;
                 }
                 BackendEvent::Failed { error, .. } => {
