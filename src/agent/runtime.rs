@@ -1668,7 +1668,7 @@ mod tests {
         ];
         let result = agent.build_request_messages(&msgs, &cm, SessionMode::Build);
         assert!(result[0].content.contains("Previous context was about Rust"));
-        assert_eq!(result[0].role, MessageRole::System);
+        assert_eq!(result[0].role, MessageRole::User);
     }
 
     #[test]
