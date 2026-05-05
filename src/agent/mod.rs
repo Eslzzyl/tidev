@@ -84,8 +84,10 @@ impl AgentType {
         match self {
             // General can use everything.
             Self::General => None,
-            // Explorer: read-only search tools.
-            Self::Explorer => Some(&["read", "list", "glob", "grep", "websearch", "webfetch"]),
+            // Explorer: read-only search tools + bash for fast searching (no write commands).
+            Self::Explorer => Some(&[
+                "read", "list", "glob", "grep", "bash", "websearch", "webfetch",
+            ]),
             // Librarian: research tools (no code modification).
             Self::Librarian => Some(&[
                 "read",
@@ -226,6 +228,7 @@ mod tests {
         assert!(def.allowed_tools.is_some());
         let tools = def.allowed_tools.as_ref().unwrap();
         assert!(tools.contains(&"grep".to_string()));
+        assert!(tools.contains(&"bash".to_string()));
         assert!(!tools.contains(&"write".to_string()));
     }
 }

@@ -58,7 +58,9 @@ fn explorer_prompt() -> String {
          - **grep**: Text/regex patterns (strings, comments, variable names)\n\
          - **glob**: File discovery (find by name/extension)\n\
          - **read**: Read file contents for detailed inspection\n\
-         - **list**: List directory contents\n\n\
+         - **list**: List directory contents\n\
+         - **bash**: Run shell commands for file search (find, git log, etc.), \
+            but NEVER use commands that write, modify, create, or delete files.\n\n\
          ## Behaviour\n\
          - Be fast and thorough.\n\
          - Fire multiple searches in parallel if needed.\n\
@@ -73,7 +75,10 @@ fn explorer_prompt() -> String {
          </answer>\n\
          </results>\n\n\
          ## Constraints\n\
-         - READ-ONLY: Search and report, don't modify.\n\
+         - READ-ONLY: You must NEVER write, modify, create, or delete any files. \
+            Search and report only.\n\
+         - When using bash, only run read-only commands (find, grep, cat, git log, ls, etc.). \
+            Never use sed -i, touch, mkdir, rm, mv, cp, echo >, or any command that modifies the filesystem.\n\
          - Be exhaustive but concise.\n\
          - Include line numbers when relevant.",
         base_instruction()
