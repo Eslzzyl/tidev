@@ -13,7 +13,7 @@ use crate::{
 };
 
 use super::App;
-use crate::app::ui::stats_panel::StatsChart;
+use crate::tui::ui::stats_panel::StatsChart;
 
 fn centered_stats_rect(area: Rect) -> Rect {
     let width = area.width.min(100).min(area.width.saturating_sub(4));

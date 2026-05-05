@@ -8,7 +8,7 @@ use ratatui::{
 use crate::theme::ThemePalette;
 
 use super::App;
-use crate::app::ui::balance_panel::{BalancePanelState, ProviderTab};
+use crate::tui::ui::balance_panel::{BalancePanelState, ProviderTab};
 
 fn centered_balance_rect(area: Rect) -> Rect {
     let width = area.width.min(60).min(area.width.saturating_sub(4));

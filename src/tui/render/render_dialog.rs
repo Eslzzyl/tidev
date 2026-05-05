@@ -1,18 +1,18 @@
 use crate::{
-    app::mcp_panel::McpPanelState,
-    app::mcp_panel::McpServerEditorState,
-    app::memory_panel::{MemoryPanelMode, MemoryPanelState},
-    app::message_panel::MessagePanelState,
-    app::model_panel::{ModelPanelItem, ModelPanelState},
-    app::permission::PermissionDialogState,
-    app::question::QuestionDialogState,
-    app::session_panel::{SessionPanelDialog, SessionPanelState, SessionViewMode},
-    app::settings_panel::SettingsPanelState,
-    app::theme_panel::ThemePanelState,
-    app::ui::agents_panel::AgentsPanelState,
-    app::ui::rename::RenameSessionDialogState,
-    app::ui::skills_panel::SkillsPanelState,
-    app::ui::workspace_boundary::WorkspaceBoundaryDialogState,
+    tui::mcp_panel::McpPanelState,
+    tui::mcp_panel::McpServerEditorState,
+    tui::memory_panel::{MemoryPanelMode, MemoryPanelState},
+    tui::message_panel::MessagePanelState,
+    tui::model_panel::{ModelPanelItem, ModelPanelState},
+    tui::permission::PermissionDialogState,
+    tui::question::QuestionDialogState,
+    tui::session_panel::{SessionPanelDialog, SessionPanelState, SessionViewMode},
+    tui::settings_panel::SettingsPanelState,
+    tui::theme_panel::ThemePanelState,
+    tui::ui::agents_panel::AgentsPanelState,
+    tui::ui::rename::RenameSessionDialogState,
+    tui::ui::skills_panel::SkillsPanelState,
+    tui::ui::workspace_boundary::WorkspaceBoundaryDialogState,
     config::ProviderSource,
     provider_setup::{ConnectDialog, EditProviderStep, NewProviderStep},
 };
@@ -973,7 +973,7 @@ impl App {
         area: Rect,
         panel: &SettingsPanelState,
     ) {
-        use crate::app::ui::settings_panel::SettingType;
+        use crate::tui::ui::settings_panel::SettingType;
         let current_palette = self.palette();
         let overlay = centered_rect(60, 12, area);
 
@@ -1061,7 +1061,7 @@ impl App {
             SessionViewMode::AllSessions => "All Sessions",
         };
         let title_text =
-            if panel.operation_mode == crate::app::session_panel::OperationMode::MultiSelect {
+            if panel.operation_mode == crate::tui::session_panel::OperationMode::MultiSelect {
                 format!(
                     " Sessions: {} ({} selected) ",
                     view_mode_text,
@@ -1111,7 +1111,7 @@ impl App {
         let matches = panel.matching_indices(&query);
 
         let is_multi_select =
-            panel.operation_mode == crate::app::session_panel::OperationMode::MultiSelect;
+            panel.operation_mode == crate::tui::session_panel::OperationMode::MultiSelect;
 
         if matches.is_empty() {
             frame.render_widget(
@@ -1252,7 +1252,7 @@ impl App {
         }
 
         let help_text = if panel.operation_mode
-            == crate::app::session_panel::OperationMode::MultiSelect
+            == crate::tui::session_panel::OperationMode::MultiSelect
         {
             "Enter/D: switch/delete · Space: select · Ctrl+A: exit multi-select · Tab: switch view · C: cleanup · E: export"
         } else {

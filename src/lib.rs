@@ -1,5 +1,5 @@
 pub mod agent;
-pub mod app;
+pub mod tui;
 pub mod balance;
 pub mod config;
 pub mod context;
@@ -56,7 +56,7 @@ enum Command {
 }
 pub fn run() -> anyhow::Result<()> {
     match Cli::parse().command {
-        None => app::run(),
+        None => tui::run(),
         Some(Command::Gateway) => gateway::run(),
         Some(Command::Web {
             host,

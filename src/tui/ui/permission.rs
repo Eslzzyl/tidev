@@ -303,7 +303,7 @@ impl App {
 
             // Check for workspace boundary violations before proceeding
             if let Some(violation_path) =
-                crate::app::ui::workspace_boundary::extract_boundary_violation_path(
+                crate::tui::ui::workspace_boundary::extract_boundary_violation_path(
                     &self.workspace_root,
                     &tool_call,
                 )
@@ -373,9 +373,9 @@ impl App {
                 } else {
                     // No stored permission - show dialog
                     self.workspace_boundary_dialog = Some(
-                        crate::app::ui::workspace_boundary::WorkspaceBoundaryDialogState {
+                        crate::tui::ui::workspace_boundary::WorkspaceBoundaryDialogState {
                             pending:
-                                crate::app::ui::workspace_boundary::PendingWorkspaceBoundaryCheck {
+                                crate::tui::ui::workspace_boundary::PendingWorkspaceBoundaryCheck {
                                     tool_call: tool_call.clone(),
                                     requested_path: violation_path,
                                     workspace_root: self.workspace_root.clone(),
@@ -800,7 +800,7 @@ impl App {
                 child_session_id,
                 agent_definition.agent_type.display_name()
             );
-            let context = crate::app::subagent::SubagentTaskContext {
+            let context = crate::tui::subagent::SubagentTaskContext {
                 parent_request_id: request_id,
                 parent_session_id,
                 child_session_id,
@@ -817,7 +817,7 @@ impl App {
                 runtime_handle,
             };
 
-            let output = match crate::app::subagent::run_subagent_task(context).await {
+            let output = match crate::tui::subagent::run_subagent_task(context).await {
                 Ok(output) => {
                     crate::log_info!(
                         "subagent task succeeded: request_id={}, child_session_id={}, output_len={}",

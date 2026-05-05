@@ -31,7 +31,7 @@ const TOOL_OUTPUT_PREVIEW_LINES: usize = 5;
 const TOOL_OUTPUT_EXPANDED_MAX_LINES: usize = 100;
 const MAX_VISIBLE_QUEUED_PROMPTS: usize = 4;
 
-use crate::app::runtime::state::SelectableRegionRange;
+use crate::tui::core::state::SelectableRegionRange;
 
 #[derive(Clone, Debug)]
 struct ToolResultCardRange {

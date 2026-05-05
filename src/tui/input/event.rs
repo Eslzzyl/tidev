@@ -2096,7 +2096,7 @@ impl App {
         // Build tabs: General first, then each agent type
         let mut tabs = Vec::new();
         // General tab — main session model
-        tabs.push(crate::app::model_panel::ModelPanelTab::new(
+        tabs.push(crate::tui::model_panel::ModelPanelTab::new(
             "general",
             "General",
             &self.active_model.label(),
@@ -2108,7 +2108,7 @@ impl App {
             }
             let ty = agent_type.display_name();
             let label = self.config.agent_model_display(ty);
-            tabs.push(crate::app::model_panel::ModelPanelTab::new(
+            tabs.push(crate::tui::model_panel::ModelPanelTab::new(
                 ty,
                 agent_type.display_name(),
                 &label,
@@ -2176,7 +2176,7 @@ impl App {
             .visible_messages()
             .iter()
             .filter(|message| matches!(message.role, MessageRole::User))
-            .map(|message| crate::app::message_panel::MessagePanelMessage {
+            .map(|message| crate::tui::message_panel::MessagePanelMessage {
                 message_id: message.id,
                 content: message.content.clone(),
                 created_at: message.created_at,
@@ -2240,7 +2240,7 @@ impl App {
                         .unwrap_or(1);
 
                     self.fork_confirm_dialog =
-                        Some(crate::app::ui::fork_confirm::ForkConfirmDialogState::new(
+                        Some(crate::tui::ui::fork_confirm::ForkConfirmDialogState::new(
                             message.message_id,
                             message_count,
                         ));
@@ -2250,7 +2250,7 @@ impl App {
                 let query = self.composer.text().to_string();
                 if let Some(message) = panel.selected_message(&query) {
                     self.undo_confirm_dialog =
-                        Some(crate::app::ui::undo_confirm::UndoConfirmDialogState::new(
+                        Some(crate::tui::ui::undo_confirm::UndoConfirmDialogState::new(
                             message.message_id,
                             message.content.clone(),
                         ));
@@ -2703,8 +2703,8 @@ impl App {
                     panel.next_provider();
                     // Query balance for the new provider
                     let provider_id = match panel.selected_provider {
-                        crate::app::ui::balance_panel::ProviderTab::DeepSeek => "deepseek",
-                        crate::app::ui::balance_panel::ProviderTab::SiliconFlow => "siliconflow-cn",
+                        crate::tui::ui::balance_panel::ProviderTab::DeepSeek => "deepseek",
+                        crate::tui::ui::balance_panel::ProviderTab::SiliconFlow => "siliconflow-cn",
                     };
                     if let Some(api_key) = self.auth.api_key(provider_id).map(|s| s.to_string()) {
                         panel.set_loading(true);
@@ -2716,7 +2716,7 @@ impl App {
 
                         runtime.spawn(async move {
                             match selected_provider {
-                                crate::app::ui::balance_panel::ProviderTab::DeepSeek => {
+                                crate::tui::ui::balance_panel::ProviderTab::DeepSeek => {
                                     match crate::balance::query_deepseek_balance(
                                         &http,
                                         &api_key_clone,
@@ -2739,7 +2739,7 @@ impl App {
                                         }
                                     }
                                 }
-                                crate::app::ui::balance_panel::ProviderTab::SiliconFlow => {
+                                crate::tui::ui::balance_panel::ProviderTab::SiliconFlow => {
                                     match crate::balance::query_siliconflow_balance(
                                         &http,
                                         &api_key_clone,
@@ -2766,10 +2766,10 @@ impl App {
                         });
                     } else {
                         let error_msg = match panel.selected_provider {
-                            crate::app::ui::balance_panel::ProviderTab::DeepSeek => {
+                            crate::tui::ui::balance_panel::ProviderTab::DeepSeek => {
                                 "DeepSeek API key not configured"
                             }
-                            crate::app::ui::balance_panel::ProviderTab::SiliconFlow => {
+                            crate::tui::ui::balance_panel::ProviderTab::SiliconFlow => {
                                 "SiliconFlow API key not configured"
                             }
                         };
@@ -2784,8 +2784,8 @@ impl App {
                     panel.prev_provider();
                     // Query balance for the new provider
                     let provider_id = match panel.selected_provider {
-                        crate::app::ui::balance_panel::ProviderTab::DeepSeek => "deepseek",
-                        crate::app::ui::balance_panel::ProviderTab::SiliconFlow => "siliconflow-cn",
+                        crate::tui::ui::balance_panel::ProviderTab::DeepSeek => "deepseek",
+                        crate::tui::ui::balance_panel::ProviderTab::SiliconFlow => "siliconflow-cn",
                     };
                     if let Some(api_key) = self.auth.api_key(provider_id).map(|s| s.to_string()) {
                         panel.set_loading(true);
@@ -2797,7 +2797,7 @@ impl App {
 
                         runtime.spawn(async move {
                             match selected_provider {
-                                crate::app::ui::balance_panel::ProviderTab::DeepSeek => {
+                                crate::tui::ui::balance_panel::ProviderTab::DeepSeek => {
                                     match crate::balance::query_deepseek_balance(
                                         &http,
                                         &api_key_clone,
@@ -2820,7 +2820,7 @@ impl App {
                                         }
                                     }
                                 }
-                                crate::app::ui::balance_panel::ProviderTab::SiliconFlow => {
+                                crate::tui::ui::balance_panel::ProviderTab::SiliconFlow => {
                                     match crate::balance::query_siliconflow_balance(
                                         &http,
                                         &api_key_clone,
@@ -2847,10 +2847,10 @@ impl App {
                         });
                     } else {
                         let error_msg = match panel.selected_provider {
-                            crate::app::ui::balance_panel::ProviderTab::DeepSeek => {
+                            crate::tui::ui::balance_panel::ProviderTab::DeepSeek => {
                                 "DeepSeek API key not configured"
                             }
-                            crate::app::ui::balance_panel::ProviderTab::SiliconFlow => {
+                            crate::tui::ui::balance_panel::ProviderTab::SiliconFlow => {
                                 "SiliconFlow API key not configured"
                             }
                         };
@@ -2870,7 +2870,7 @@ impl App {
                 self.refresh_stats_panel();
             }
         } else {
-            let mut panel = crate::app::ui::stats_panel::StatsPanelState::new();
+            let mut panel = crate::tui::ui::stats_panel::StatsPanelState::new();
             panel.active = true;
             self.stats_panel = Some(panel);
             self.refresh_stats_panel();
@@ -2907,15 +2907,15 @@ impl App {
         self.settings_panel = None;
         self.agents_panel = None;
 
-        let mut panel = crate::app::ui::balance_panel::BalancePanelState::new();
+        let mut panel = crate::tui::ui::balance_panel::BalancePanelState::new();
         let selected_provider = panel.selected_provider;
         panel.open();
         *self.balance_panel.lock().unwrap() = Some(panel);
 
         // Query balance based on selected provider
         let provider_id = match selected_provider {
-            crate::app::ui::balance_panel::ProviderTab::DeepSeek => "deepseek",
-            crate::app::ui::balance_panel::ProviderTab::SiliconFlow => "siliconflow-cn",
+            crate::tui::ui::balance_panel::ProviderTab::DeepSeek => "deepseek",
+            crate::tui::ui::balance_panel::ProviderTab::SiliconFlow => "siliconflow-cn",
         };
 
         if let Some(api_key) = self.auth.api_key(provider_id).map(|s| s.to_string()) {
@@ -2933,7 +2933,7 @@ impl App {
 
             runtime.spawn(async move {
                 match selected_provider {
-                    crate::app::ui::balance_panel::ProviderTab::DeepSeek => {
+                    crate::tui::ui::balance_panel::ProviderTab::DeepSeek => {
                         match crate::balance::query_deepseek_balance(&http, &api_key_clone).await {
                             Ok(balance) => {
                                 if let Ok(mut guard) = panel_ptr_clone.lock()
@@ -2951,7 +2951,7 @@ impl App {
                             }
                         }
                     }
-                    crate::app::ui::balance_panel::ProviderTab::SiliconFlow => {
+                    crate::tui::ui::balance_panel::ProviderTab::SiliconFlow => {
                         match crate::balance::query_siliconflow_balance(&http, &api_key_clone).await
                         {
                             Ok(balance) => {
@@ -2975,10 +2975,10 @@ impl App {
         } else {
             // Set error state
             let error_msg = match selected_provider {
-                crate::app::ui::balance_panel::ProviderTab::DeepSeek => {
+                crate::tui::ui::balance_panel::ProviderTab::DeepSeek => {
                     "DeepSeek API key not configured"
                 }
-                crate::app::ui::balance_panel::ProviderTab::SiliconFlow => {
+                crate::tui::ui::balance_panel::ProviderTab::SiliconFlow => {
                     "SiliconFlow API key not configured"
                 }
             };
@@ -3008,8 +3008,8 @@ impl App {
 
         // Determine provider based on selected tab
         let provider_id = match panel.selected_provider {
-            crate::app::ui::balance_panel::ProviderTab::DeepSeek => "deepseek",
-            crate::app::ui::balance_panel::ProviderTab::SiliconFlow => "siliconflow-cn",
+            crate::tui::ui::balance_panel::ProviderTab::DeepSeek => "deepseek",
+            crate::tui::ui::balance_panel::ProviderTab::SiliconFlow => "siliconflow-cn",
         };
 
         if let Some(api_key) = self.auth.api_key(provider_id).map(|s| s.to_string()) {
@@ -3023,7 +3023,7 @@ impl App {
 
             runtime.spawn(async move {
                 match selected_provider {
-                    crate::app::ui::balance_panel::ProviderTab::DeepSeek => {
+                    crate::tui::ui::balance_panel::ProviderTab::DeepSeek => {
                         match crate::balance::query_deepseek_balance(&http, &api_key_clone).await {
                             Ok(balance) => {
                                 if let Ok(mut guard) = panel_ptr_clone.lock()
@@ -3041,7 +3041,7 @@ impl App {
                             }
                         }
                     }
-                    crate::app::ui::balance_panel::ProviderTab::SiliconFlow => {
+                    crate::tui::ui::balance_panel::ProviderTab::SiliconFlow => {
                         match crate::balance::query_siliconflow_balance(&http, &api_key_clone).await
                         {
                             Ok(balance) => {
@@ -3064,10 +3064,10 @@ impl App {
             });
         } else {
             let error_msg = match panel.selected_provider {
-                crate::app::ui::balance_panel::ProviderTab::DeepSeek => {
+                crate::tui::ui::balance_panel::ProviderTab::DeepSeek => {
                     "DeepSeek API key not configured"
                 }
-                crate::app::ui::balance_panel::ProviderTab::SiliconFlow => {
+                crate::tui::ui::balance_panel::ProviderTab::SiliconFlow => {
                     "SiliconFlow API key not configured"
                 }
             };
@@ -3080,7 +3080,7 @@ impl App {
 /// `(provider_id, model_id)` for use with `reset_selection`.
 /// Returns owned strings to avoid borrow conflicts with the panel.
 fn agent_tab_active_model(
-    panel: &crate::app::model_panel::ModelPanelState,
+    panel: &crate::tui::model_panel::ModelPanelState,
     default: &crate::config::ActiveModel,
 ) -> Option<(String, String)> {
     let tab = panel.current_tab()?;

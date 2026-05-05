@@ -19,12 +19,12 @@ use super::question::QuestionDialogState;
 use super::session_panel::SessionPanelState;
 use super::theme_panel::ThemePanelState;
 use super::ui::workspace_boundary::WorkspaceBoundaryDialogState;
-use crate::app::ui::agents_panel::AgentsPanelState;
-use crate::app::ui::rename::RenameSessionDialogState;
-use crate::app::ui::skills_panel::SkillsPanelState;
+use crate::tui::ui::agents_panel::AgentsPanelState;
+use crate::tui::ui::rename::RenameSessionDialogState;
+use crate::tui::ui::skills_panel::SkillsPanelState;
 use crate::{
-    app::commands::CommandPaletteState,
-    app::input::Composer,
+    tui::commands::CommandPaletteState,
+    tui::input::Composer,
     config::ActiveModel,
     config::reasoning::ThinkingLevelType,
     context::ContextManager,
@@ -211,7 +211,7 @@ pub(crate) struct UiStateSnapshot {
     pub(crate) model_panel: Option<ModelPanelState>,
     pub(crate) message_panel: Option<MessagePanelState>,
     pub(crate) session_panel: Option<SessionPanelState>,
-    pub(crate) memory_panel: Option<crate::app::memory_panel::MemoryPanelState>,
+    pub(crate) memory_panel: Option<crate::tui::memory_panel::MemoryPanelState>,
     pub(crate) rename_dialog: Option<RenameSessionDialogState>,
     pub(crate) mcp_panel: Option<McpPanelState>,
     pub(crate) agents_panel: Option<AgentsPanelState>,

@@ -1,4 +1,4 @@
-use crate::app::runtime::state::SelectableRegionRange;
+use crate::tui::core::state::SelectableRegionRange;
 use crate::markdown_render::{WrapOptions, adaptive_wrap_lines, highlight_code_to_lines_for_path};
 use crate::theme::{ThemeName, ThemePalette};
 use diffy::{Line as DiffLine, Patch};

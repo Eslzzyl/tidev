@@ -29,7 +29,7 @@ use uuid::Uuid;
 mod commands;
 mod input;
 mod render;
-mod runtime;
+mod core;
 mod ui;
 
 pub use commands::{CommandAction, CommandPaletteState, CommandRegistry};
@@ -40,10 +40,10 @@ pub use input::mouse_selection;
 pub use render::diff_render;
 pub use render::render_chat;
 pub use render::render_dialog;
-pub use runtime::run;
-pub use runtime::state;
-pub use runtime::subagent;
-pub use runtime::undo;
+pub use core::run;
+pub use core::state;
+pub use core::subagent;
+pub use core::undo;
 pub use ui::balance_panel;
 pub use ui::connect;
 pub use ui::mcp_panel;
@@ -58,27 +58,27 @@ pub use ui::settings_panel;
 pub use ui::stats_panel;
 pub use ui::theme_panel;
 
-use runtime::state::*;
+use core::state::*;
 
 use crate::{
     agent::runtime::{AgentRuntime, PendingToolApproval},
-    app::at_mention::{AtMentionKind, AtMentionState},
-    app::input::SnippetState,
-    app::input::shell_completion::ShellCompletionState,
-    app::mcp_panel::McpPanelState,
-    app::memory_panel::MemoryPanelState,
-    app::message_panel::MessagePanelState,
-    app::model_panel::ModelPanelState,
-    app::mouse_selection::{ClipboardLease, MouseSelectionState},
-    app::permission::{
+    tui::at_mention::{AtMentionKind, AtMentionState},
+    tui::input::SnippetState,
+    tui::input::shell_completion::ShellCompletionState,
+    tui::mcp_panel::McpPanelState,
+    tui::memory_panel::MemoryPanelState,
+    tui::message_panel::MessagePanelState,
+    tui::model_panel::ModelPanelState,
+    tui::mouse_selection::{ClipboardLease, MouseSelectionState},
+    tui::permission::{
         PendingToolExecution, PermissionDialogState, RunningSubagentExecution, RunningToolExecution,
     },
-    app::question::QuestionDialogState,
-    app::session_panel::SessionPanelState,
-    app::settings_panel::SettingsPanelState,
-    app::theme_panel::ThemePanelState,
-    app::ui::rename::RenameSessionDialogState,
-    app::ui::workspace_boundary::WorkspaceBoundaryDialogState,
+    tui::question::QuestionDialogState,
+    tui::session_panel::SessionPanelState,
+    tui::settings_panel::SettingsPanelState,
+    tui::theme_panel::ThemePanelState,
+    tui::ui::rename::RenameSessionDialogState,
+    tui::ui::workspace_boundary::WorkspaceBoundaryDialogState,
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
     context::ContextManager,
     llm::LlmClient,
@@ -155,7 +155,7 @@ struct App {
     pending_request: bool,
     /// Display-only queue of messages waiting to be processed by the agent loop.
     /// Kept for UI rendering — actual queueing goes through AgentRuntime.
-    pending_prompt_queue: std::collections::VecDeque<crate::app::runtime::state::QueuedPrompt>,
+    pending_prompt_queue: std::collections::VecDeque<crate::tui::core::state::QueuedPrompt>,
     active_request_id: u64,
     /// Cancel token for the current agent loop. Cancelled when the user
     /// double-presses Esc, causing the agent loop to stop at its next
@@ -1341,7 +1341,7 @@ impl App {
 
         // Add to display queue for UI rendering
         self.pending_prompt_queue
-            .push_back(crate::app::runtime::state::QueuedPrompt::new(
+            .push_back(crate::tui::core::state::QueuedPrompt::new(
                 prompt,
                 attachments,
                 Some(mode),
