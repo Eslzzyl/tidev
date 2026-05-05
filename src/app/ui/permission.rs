@@ -720,12 +720,6 @@ impl App {
         let args = serde_json::from_str::<TaskArgs>(&tool_call.arguments)?;
         let description = args.description.trim().to_string();
         let prompt = args.prompt.trim().to_string();
-        let subagent_type_str = args
-            .subagent_type
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("fixer");
 
         if description.is_empty() {
             anyhow::bail!("task description cannot be empty");
@@ -733,6 +727,17 @@ impl App {
         if prompt.is_empty() {
             anyhow::bail!("task prompt cannot be empty");
         }
+
+        let subagent_type_str = args
+            .subagent_type
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "subagent_type is required: specify one of explorer, librarian, oracle, designer, fixer"
+                )
+            })?;
 
         // Resolve agent type and create the agent definition
         let agent_type = AgentType::parse(subagent_type_str).ok_or_else(|| {

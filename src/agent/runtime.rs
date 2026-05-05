@@ -721,12 +721,18 @@ impl AgentRuntime {
         let args = serde_json::from_str::<TaskArgs>(&tool_call.arguments)?;
         let description = args.description.trim().to_string();
         let prompt = args.prompt.trim().to_string();
-        let subagent_type = args.subagent_type.unwrap_or_default();
-        let agent_type = AgentType::parse(&subagent_type).ok_or_else(|| {
-            anyhow::anyhow!(
-                "unknown subagent type '{subagent_type}': expected one of explorer, librarian, oracle, designer, fixer"
-            )
-        })?;
+        let subagent_type = args.subagent_type.as_deref().unwrap_or_default();
+        let agent_type = if subagent_type.is_empty() {
+            anyhow::bail!(
+                "subagent_type is required: specify one of explorer, librarian, oracle, designer, fixer"
+            );
+        } else {
+            AgentType::parse(subagent_type).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "unknown subagent type '{subagent_type}': expected one of explorer, librarian, oracle, designer, fixer"
+                )
+            })?
+        };
         let agent_def = AgentDefinition::new(agent_type);
 
         let child_session_id = child_session_id.unwrap_or_else(uuid::Uuid::new_v4);
@@ -1777,8 +1783,8 @@ mod tests {
             (r#"{"description":"x","prompt":"y","subagent_type":"oracle"}"#, true),
             (r#"{"description":"x","prompt":"y","subagent_type":"designer"}"#, false),
             (r#"{"description":"x","prompt":"y","subagent_type":"fixer"}"#, false),
-            (r#"{"description":"x","prompt":"y","subagent_type":"general"}"#, false), // general is not a valid sub-agent type
-            (r#"{"description":"x","prompt":"y"}"#, false), // no subagent_type → defaults to fixer
+            (r#"{"description":"x","prompt":"y","subagent_type":"general"}"#, false), // general is not a valid sub-agent type → parse returns None
+            (r#"{"description":"x","prompt":"y"}"#, false), // no subagent_type → and_then returns None
         ];
 
         for (json_str, expected_read_only) in test_cases {
