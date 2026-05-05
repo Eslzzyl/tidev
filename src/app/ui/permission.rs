@@ -725,7 +725,7 @@ impl App {
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .unwrap_or("general");
+            .unwrap_or("fixer");
 
         if description.is_empty() {
             anyhow::bail!("task description cannot be empty");
@@ -735,7 +735,11 @@ impl App {
         }
 
         // Resolve agent type and create the agent definition
-        let agent_type = AgentType::parse(subagent_type_str).unwrap_or(AgentType::General);
+        let agent_type = AgentType::parse(subagent_type_str).ok_or_else(|| {
+            anyhow::anyhow!(
+                "unknown subagent type '{subagent_type_str}': expected one of explorer, librarian, oracle, designer, fixer"
+            )
+        })?;
         let agent_type_name = agent_type.display_name().to_string();
         let agent_definition = AgentDefinition::new(agent_type);
 

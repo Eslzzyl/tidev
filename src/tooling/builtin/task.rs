@@ -14,7 +14,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
         "task",
         "Run a subagent task. Use `subagent_type` to delegate to a specialist: \
          explorer (code search), librarian (docs), oracle (strategy), \
-         designer (UI/UX), fixer (implementation). Default: general.",
+         designer (UI/UX), fixer (implementation). Default: fixer.",
         ToolPermission::Session,
     )]
 }
@@ -40,7 +40,7 @@ pub fn execute_tool_call(
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty())
-        .unwrap_or("general");
+        .unwrap_or("fixer");
 
     if description.is_empty() {
         bail!("task description cannot be empty");
@@ -49,7 +49,10 @@ pub fn execute_tool_call(
         bail!("task prompt cannot be empty");
     }
 
-    let agent_type = AgentType::parse(subagent_type_str).unwrap_or(AgentType::General);
+    let agent_type = AgentType::parse(subagent_type_str)
+        .ok_or_else(|| anyhow::anyhow!(
+            "unknown subagent type '{subagent_type_str}': expected one of explorer, librarian, oracle, designer, fixer"
+        ))?;
 
     // In plan mode, reject delegation to fixer subagents (they perform writes)
     if mode == SessionMode::Plan && agent_type == AgentType::Fixer {

@@ -722,7 +722,11 @@ impl AgentRuntime {
         let description = args.description.trim().to_string();
         let prompt = args.prompt.trim().to_string();
         let subagent_type = args.subagent_type.unwrap_or_default();
-        let agent_type = AgentType::parse(&subagent_type).unwrap_or(AgentType::General);
+        let agent_type = AgentType::parse(&subagent_type).ok_or_else(|| {
+            anyhow::anyhow!(
+                "unknown subagent type '{subagent_type}': expected one of explorer, librarian, oracle, designer, fixer"
+            )
+        })?;
         let agent_def = AgentDefinition::new(agent_type);
 
         let child_session_id = child_session_id.unwrap_or_else(uuid::Uuid::new_v4);
@@ -1757,7 +1761,7 @@ mod tests {
         assert_eq!(parse("oracle"), Some(AgentType::Oracle));
         assert_eq!(parse("designer"), Some(AgentType::Designer));
         assert_eq!(parse("fixer"), Some(AgentType::Fixer));
-        assert_eq!(parse("general"), Some(AgentType::General));
+        assert_eq!(parse("general"), None);
         assert_eq!(parse("unknown"), None);
         assert_eq!(parse(""), None);
     }
@@ -1773,8 +1777,8 @@ mod tests {
             (r#"{"description":"x","prompt":"y","subagent_type":"oracle"}"#, true),
             (r#"{"description":"x","prompt":"y","subagent_type":"designer"}"#, false),
             (r#"{"description":"x","prompt":"y","subagent_type":"fixer"}"#, false),
-            (r#"{"description":"x","prompt":"y","subagent_type":"general"}"#, false),
-            (r#"{"description":"x","prompt":"y"}"#, false), // no subagent_type → defaults to general
+            (r#"{"description":"x","prompt":"y","subagent_type":"general"}"#, false), // general is not a valid sub-agent type
+            (r#"{"description":"x","prompt":"y"}"#, false), // no subagent_type → defaults to fixer
         ];
 
         for (json_str, expected_read_only) in test_cases {

@@ -140,7 +140,6 @@ impl AgentType {
         let s = s.trim().to_ascii_lowercase();
         let s = s.strip_prefix('@').unwrap_or(&s);
         match s {
-            "general" => Some(Self::General),
             "explorer" => Some(Self::Explorer),
             "librarian" => Some(Self::Librarian),
             "oracle" => Some(Self::Oracle),
@@ -205,6 +204,7 @@ mod tests {
         assert_eq!(AgentType::parse("explorer"), Some(AgentType::Explorer));
         assert_eq!(AgentType::parse("@explorer"), Some(AgentType::Explorer));
         assert_eq!(AgentType::parse("EXPLORER"), Some(AgentType::Explorer));
+        assert_eq!(AgentType::parse("general"), None);
         assert_eq!(AgentType::parse("unknown"), None);
     }
 
