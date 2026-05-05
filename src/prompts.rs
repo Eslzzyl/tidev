@@ -118,10 +118,6 @@ pub fn build_switch_reminder() -> String {
     "<system-reminder>\nYour operational mode has changed from plan to build.\nYou are no longer in read-only mode.\nYou are permitted to make file changes, run shell commands, and utilize your arsenal of tools as needed.\n</system-reminder>".to_string()
 }
 
-pub fn compression_system_prompt() -> &'static str {
-    "You summarize coding context for continuation.\n- Preserve the goal, decisions, file paths, constraints, tool results, and open tasks.\n- Use short sections such as Goal, Decisions, Files, Tool Results, Open Tasks, and Constraints.\n- Keep the summary dense and factual.\n- Do not add filler, encouragement, or apologies.\n- Prefer bullets over prose."
-}
-
 pub fn init_command() -> &'static str {
     r#"Create or update `AGENTS.md` for this repository.
 

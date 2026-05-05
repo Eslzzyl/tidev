@@ -982,6 +982,7 @@ pub async fn compact_session(
     let store = state.store.clone();
     let llm = state.llm_client.clone();
     let event_bus = state.event_bus.clone();
+    let tools = state.agent.tool_definitions();
 
     // Spawn compaction in background
     tokio::spawn(async move {
@@ -991,7 +992,7 @@ pub async fn compact_session(
         );
 
         let result = context_manager
-            .compact(&llm, &active_model, &conversation, true, None)
+            .compact(&llm, &active_model, &conversation, true, None, &tools)
             .await;
 
         match result {

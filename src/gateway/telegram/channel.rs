@@ -1462,6 +1462,7 @@ impl TelegramChannel {
         let session_id_for_compact = session_id;
         let active_model_for_compact = active_model.clone();
         let conversation_for_compact = conversation.clone();
+        let tools = self.tools.all_definitions();
 
         // Spawn compaction task
         tokio::spawn(async move {
@@ -1474,6 +1475,7 @@ impl TelegramChannel {
                     &conversation_for_compact,
                     true,
                     None,
+                    &tools,
                 )
                 .await;
 

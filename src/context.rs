@@ -5,8 +5,10 @@ use anyhow::Result;
 use crate::{
     config::ActiveModel,
     llm::LlmClient,
-    prompts::{self, SessionMode, compression_system_prompt},
-    session::{Conversation, Message, MessageAttachment, MessageRole, ToolExecutionResult, tool_output_preview},
+    prompts,
+    prompts::SessionMode,
+    session::{Conversation, Message, MessageAttachment, MessageRole, ToolExecutionResult},
+    tooling::ToolDefinition,
 };
 
 #[derive(Clone, Debug)]
@@ -135,8 +137,8 @@ impl ContextManager {
 
         if let Some(summary) = &self.summary {
             messages.push(Message::new(
-                MessageRole::System,
-                format!("Context summary for continuation:\n{summary}"),
+                MessageRole::User,
+                format!("Earlier conversation summary:\n{summary}"),
             ));
         }
 
@@ -261,12 +263,13 @@ impl ContextManager {
             u64,
             tokio::sync::mpsc::UnboundedSender<crate::session::BackendEvent>,
         )>,
+        tools: &[ToolDefinition],
     ) -> Result<bool> {
         if !self.needs_compaction(conversation, model) && !manual {
             return Ok(false);
         }
 
-        self.compact(llm, model, conversation, manual, stream_ctx)
+        self.compact(llm, model, conversation, manual, stream_ctx, tools)
             .await
     }
 
@@ -280,6 +283,7 @@ impl ContextManager {
             u64,
             tokio::sync::mpsc::UnboundedSender<crate::session::BackendEvent>,
         )>,
+        tools: &[ToolDefinition],
     ) -> Result<bool> {
         let messages = conversation.visible_messages();
         if messages.is_empty() {
@@ -309,17 +313,28 @@ impl ContextManager {
         }
 
         let compressed_chunk = &messages[..split_index];
-        let prompt = self.build_compression_prompt(compressed_chunk);
 
-        let system_msg = Message::new(MessageRole::System, self.compression_system_prompt());
-        let user_msg = Message::new(MessageRole::User, prompt);
+        // Build compaction request using the actual conversation messages
+        // plus a User instruction appended at the end.
+        // This keeps the system prompt (model.system_prompt) at position 0 unchanged,
+        // and the conversation messages match previous normal requests byte-for-byte.
+        // The only new content is the final User instruction, maximizing prefix cache hits.
+        let summary_instruction =
+            "Please provide a detailed summary of the conversation history above, \
+             preserving all goals, decisions, file paths, code changes, tool results, \
+             and open tasks. Keep the summary dense and factual. Use short sections such \
+             as Goal, Decisions, Files, Tool Results, Open Tasks, and Constraints. \
+             Prefer bullets over prose.";
+        let mut compact_msgs = compressed_chunk.to_vec();
+        compact_msgs.push(Message::new(MessageRole::User, summary_instruction));
 
         let summary = if let Some((request_id, ui_tx)) = stream_ctx {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
             let llm_clone = llm.clone();
             let model_clone = model.clone();
-            let msgs = vec![system_msg.clone(), user_msg.clone()];
+            let msgs = compact_msgs;
             let session_id = conversation.session_id;
+            let tools_vec = tools.to_vec();
 
             tokio::spawn(async move {
                 let thinking_level = model_clone.thinking_level.clone();
@@ -329,7 +344,7 @@ impl ContextManager {
                         request_id,
                         model_clone,
                         msgs,
-                        vec![],
+                        tools_vec,
                         tx,
                         thinking_level,
                     )
@@ -358,7 +373,7 @@ impl ContextManager {
             }
             text
         } else {
-            llm.complete_with_messages(model.clone(), vec![system_msg, user_msg])
+            llm.complete_with_messages(model.clone(), compact_msgs, tools.to_vec())
                 .await
                 .unwrap_or_else(|error| self.fallback_summary(compressed_chunk, &error.to_string()))
         };
@@ -409,65 +424,6 @@ impl ContextManager {
         }
 
         aligned_index
-    }
-
-    fn build_compression_prompt(&self, messages: &[Message]) -> String {
-        let mut prompt = String::from(
-            "Provide a detailed continuation summary for this coding conversation.\n\n",
-        );
-
-        if let Some(summary) = &self.summary {
-            prompt.push_str("Existing summary:\n");
-            prompt.push_str(summary);
-            prompt.push_str("\n\n");
-        }
-
-        prompt.push_str("Messages to compress:\n");
-        for message in messages {
-            let attachment_summary = message
-                .attachments
-                .iter()
-                .map(|attachment| attachment.summary())
-                .collect::<Vec<_>>()
-                .join(" ");
-            let content = if matches!(message.role, MessageRole::Tool) {
-                tool_output_preview(message.tool_name.as_deref(), &message.content)
-            } else {
-                truncate(&message.content, 1_500)
-            };
-            prompt.push_str(&format!("- {}: {}\n", message.role.label(), content));
-
-            if !attachment_summary.trim().is_empty() {
-                prompt.push_str(&format!(
-                    "  attachments: {}\n",
-                    truncate(&attachment_summary, 240)
-                ));
-            }
-
-            if !message.reasoning.trim().is_empty() {
-                prompt.push_str(&format!(
-                    "  thinking: {}\n",
-                    truncate(&message.reasoning, 240)
-                ));
-            }
-
-            for tool_call in &message.tool_calls {
-                prompt.push_str(&format!(
-                    "  tool call: {} {}\n",
-                    tool_call.name,
-                    truncate(&tool_call.arguments, 240)
-                ));
-            }
-        }
-
-        prompt.push_str(
-            "\nFocus on: goals, decisions, file paths, code changes, active tasks, tool results, constraints, and anything needed to continue the work without re-reading prior context.",
-        );
-        prompt
-    }
-
-    fn compression_system_prompt(&self) -> String {
-        compression_system_prompt().to_string()
     }
 
     fn fallback_summary(&self, messages: &[Message], error: &str) -> String {

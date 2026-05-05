@@ -677,8 +677,9 @@ impl App {
             return;
         }
 
-        let Some((conversation, mut context_manager, model)) =
-            (if self.conversation.session_id == session_id {
+        let is_active = self.conversation.session_id == session_id;
+        let Some((conversation, mut context_manager, mut model)) =
+            (if is_active {
                 Some((
                     self.conversation.clone(),
                     self.context_manager.clone(),
@@ -697,10 +698,22 @@ impl App {
             return;
         };
 
+        // Compose the system prompt the same way the agent loop does,
+        // so the compaction request shares the same prefix as normal
+        // requests and maximises prefix cache hits.
+        if is_active {
+            let mode = self.mode;
+            let (system_prompt, _) = self.agent.compose_system_prompt(&model.system_prompt, mode);
+            model.system_prompt = system_prompt;
+        }
+        // For cached sessions we don't have the mode readily available;
+        // this is a rare case (background session compaction).
+
         self.compacting_sessions.insert(session_id);
         let llm = self.llm.clone();
         let tx = self.backend_tx.clone();
         let manual = stream_request_id.is_some();
+        let tools = self.tools.all_definitions();
 
         runtime.spawn(async move {
             let result = if let Some(request_id) = stream_request_id {
@@ -711,11 +724,12 @@ impl App {
                         &conversation,
                         true,
                         Some((request_id, tx.clone())),
+                        &tools,
                     )
                     .await
             } else {
                 context_manager
-                    .compact_if_needed(&llm, &model, &conversation, false, None)
+                    .compact_if_needed(&llm, &model, &conversation, false, None, &tools)
                     .await
             };
 
@@ -764,25 +778,27 @@ impl App {
                 ) {
                     crate::log_warn!("failed to persist compacted context state: {}", error);
                 }
-                if manual && let Some(summary) = summary.as_ref() {
+                if let Some(summary) = summary.as_ref() {
                     let mut updated_existing = false;
-                    if let Some(last_msg) = self.conversation.messages.last_mut()
-                        && last_msg.streaming
-                        && last_msg.role == crate::session::MessageRole::System
-                    {
-                        last_msg.streaming = false;
-                        last_msg.content = format!(
-                            "{}\n\n{}",
-                            crate::session::COMPACTION_MESSAGE_LABEL,
-                            summary
-                        );
-                        updated_existing = true;
-
-                        if let Err(error) = self
-                            .store
-                            .append_message(self.conversation.session_id, last_msg)
+                    if manual {
+                        if let Some(last_msg) = self.conversation.messages.last_mut()
+                            && last_msg.streaming
+                            && last_msg.role == crate::session::MessageRole::System
                         {
-                            crate::log_warn!("failed to persist compaction message: {}", error);
+                            last_msg.streaming = false;
+                            last_msg.content = format!(
+                                "{}\n\n{}",
+                                crate::session::COMPACTION_MESSAGE_LABEL,
+                                summary
+                            );
+                            updated_existing = true;
+
+                            if let Err(error) = self
+                                .store
+                                .append_message(self.conversation.session_id, last_msg)
+                            {
+                                crate::log_warn!("failed to persist compaction message: {}", error);
+                            }
                         }
                     }
                     if !updated_existing {

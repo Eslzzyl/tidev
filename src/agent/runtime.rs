@@ -1111,7 +1111,7 @@ impl AgentRuntime {
                     request_id = rand::random::<u64>();
                     continue;
                 }
-                self.maybe_compact(session_id, &model, context_manager, &event_tx).await;
+                self.maybe_compact(session_id, &model, context_manager, mode, &event_tx).await;
                 return Ok(());
             }
 
@@ -1345,10 +1345,11 @@ impl AgentRuntime {
     /// runs it if so, and persists the updated context state back to DB.
     /// Errors are logged but not propagated (compaction is best-effort).
     async fn maybe_compact(
-        &self,
+        &mut self,
         session_id: uuid::Uuid,
         model: &ActiveModel,
         context_manager: &mut ContextManager,
+        mode: SessionMode,
         event_tx: &UnboundedSender<BackendEvent>,
     ) {
         let conversation = match self.load_conversation(session_id).await {
@@ -1360,13 +1361,21 @@ impl AgentRuntime {
             return;
         }
 
+        // Compose the system prompt the same way the agent loop does for
+        // normal turns, so the API request shares the same prefix and
+        // maximises prefix cache hits.
+        let (system_prompt, _sources) = self.compose_system_prompt(&model.system_prompt, mode);
+        let mut compact_model = model.clone();
+        compact_model.system_prompt = system_prompt;
+
         match context_manager
             .compact(
                 &self.llm_client,
-                model,
+                &compact_model,
                 &conversation,
                 false,
                 None,
+                &self.tool_definitions(),
             )
             .await
         {

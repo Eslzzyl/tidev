@@ -73,8 +73,9 @@ impl LlmClient {
         &self,
         model: ActiveModel,
         messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
     ) -> Result<String> {
-        let result = self.complete_with_retry(model, messages).await;
+        let result = self.complete_with_retry(model, messages, tools).await;
 
         result.context("LLM completion failed after retries")
     }
@@ -138,17 +139,18 @@ impl LlmClient {
         &self,
         model: ActiveModel,
         messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
     ) -> Result<String> {
         for attempt in 1..=MAX_RETRIES {
             let result = match model.api_type {
                 ApiType::Anthropic => {
-                    anthropic::complete_anthropic(&self.http, model.clone(), messages.clone()).await
+                    anthropic::complete_anthropic(&self.http, model.clone(), messages.clone(), tools.clone()).await
                 }
                 ApiType::OpenAiChatCompletions => {
-                    openai::complete_openai(&self.http, model.clone(), messages.clone()).await
+                    openai::complete_openai(&self.http, model.clone(), messages.clone(), tools.clone()).await
                 }
                 ApiType::OpenAiResponses => {
-                    responses::complete_responses(&self.http, model.clone(), messages.clone()).await
+                    responses::complete_responses(&self.http, model.clone(), messages.clone(), tools.clone()).await
                 }
             };
 

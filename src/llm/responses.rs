@@ -491,13 +491,14 @@ pub(super) async fn complete_responses(
     http: &Client,
     model: ActiveModel,
     messages: Vec<Message>,
+    tools: Vec<ToolDefinition>,
 ) -> Result<String> {
     let api_key = model
         .api_key
         .clone()
         .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
 
-    let request = build_responses_request(&model, messages, false, &[])?;
+    let request = build_responses_request(&model, messages, false, &tools)?;
     let request_body_size = serde_json::to_string(&request)
         .map(|s| s.len())
         .unwrap_or(0);
@@ -596,31 +597,14 @@ fn build_responses_request(
     stream: bool,
     tools: &[ToolDefinition],
 ) -> Result<ResponsesRequest> {
-    // Extract context summary from System messages (from context compaction)
-    let context_summary: Option<String> = messages
-        .iter()
-        .filter(|message| !message.streaming)
-        .filter(|message| message.role == MessageRole::System)
-        .map(message_text_with_file_references)
-        .next();
-
-    // Build combined system prompt: model.system_prompt + context summary
-    let combined_system_prompt = match (
-        model.system_prompt.trim().is_empty(),
-        context_summary.as_ref().map(|s| s.trim().is_empty()),
-    ) {
-        (false, Some(false)) => Some(format!(
-            "{}\n\n{}",
-            model.system_prompt.trim(),
-            context_summary.as_ref().unwrap().trim()
-        )),
-        (false, _) => Some(model.system_prompt.clone()),
-        (true, Some(false)) => context_summary,
-        (true, _) => None,
+    // System prompt comes from the model config directly.
+    // No context summary merging needed — compaction summaries are now
+    // User messages inserted at the compression boundary, not System messages.
+    let instructions = if model.system_prompt.trim().is_empty() {
+        None
+    } else {
+        Some(model.system_prompt.clone())
     };
-
-    // Instructions come from system prompt
-    let instructions = combined_system_prompt.filter(|s| !s.trim().is_empty());
 
     // Build conversation history as a string (this backend only supports string input)
     let mut conversation_parts: Vec<String> = Vec::new();
@@ -1629,6 +1613,7 @@ mod tests {
             thinking_level: crate::config::reasoning::ThinkingLevelType::None,
         };
 
+        // System messages in the list are now skipped; only model.system_prompt is used
         let messages = vec![
             Message::new(MessageRole::System, "Context summary"),
             Message::new(MessageRole::User, "Hello"),
@@ -1639,7 +1624,7 @@ mod tests {
         assert!(request.instructions.is_some());
         let instructions = request.instructions.unwrap();
         assert!(instructions.contains("Base system prompt"));
-        assert!(instructions.contains("Context summary"));
+        assert!(!instructions.contains("Context summary"), "System messages should no longer be merged into instructions");
     }
 
     #[test]

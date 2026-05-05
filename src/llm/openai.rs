@@ -240,12 +240,13 @@ pub(super) async fn complete_openai(
     http: &Client,
     model: ActiveModel,
     messages: Vec<Message>,
+    tools: Vec<ToolDefinition>,
 ) -> Result<String> {
     let api_key = model
         .api_key
         .clone()
         .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
-    let request = build_openai_request(&model, messages, false, &[], model.thinking_level.clone())?;
+    let request = build_openai_request(&model, messages, false, &tools, model.thinking_level.clone())?;
     let request_body_size = serde_json::to_string(&request)
         .map(|s| s.len())
         .unwrap_or(0);
@@ -311,51 +312,11 @@ fn build_openai_request(
 ) -> Result<ChatCompletionRequest> {
     let mut request_messages = Vec::new();
 
-    // Extract context summary from System messages (from context compaction)
-    // The System message, if present, contains the compression summary and should be
-    // combined with the model's system prompt into a single system message.
-    let context_summary: Option<String> = messages
-        .iter()
-        .filter(|message| !message.streaming)
-        .filter(|message| message.role == MessageRole::System)
-        .map(message_text_with_file_references)
-        .next();
-
-    let _has_context_summary = context_summary.is_some();
-
-    // Build combined system prompt: model.system_prompt + context summary
-    // This ensures there is only one system message at the beginning, as required by
-    // most LLM APIs (e.g., SiliconFlow requires "System message must be at the beginning")
-    let combined_system_prompt = match (
-        model.system_prompt.trim().is_empty(),
-        context_summary.as_ref().map(|s| s.trim().is_empty()),
-    ) {
-        (false, Some(false)) => {
-            // Both present and non-empty: combine them
-            Some(format!(
-                "{}\n\n{}",
-                model.system_prompt.trim(),
-                context_summary.as_ref().unwrap().trim()
-            ))
-        }
-        (false, _) => {
-            // Only model.system_prompt present
-            Some(model.system_prompt.clone())
-        }
-        (true, Some(false)) => {
-            // Only context_summary present
-            context_summary
-        }
-        (true, _) => {
-            // Neither present
-            None
-        }
-    };
-
-    if let Some(prompt) = combined_system_prompt
-        && !prompt.trim().is_empty()
-    {
-        request_messages.push(ChatMessagePayload::system(prompt));
+    // System prompt comes from the model config directly.
+    // No context summary merging needed — compaction summaries are now
+    // User messages inserted at the compression boundary, not System messages.
+    if !model.system_prompt.trim().is_empty() {
+        request_messages.push(ChatMessagePayload::system(model.system_prompt.clone()));
     }
 
     // Process only User/Assistant/Tool messages (System messages already handled above)
@@ -402,27 +363,7 @@ fn build_openai_request(
         Some(tools.iter().map(ChatToolSpec::from).collect())
     };
 
-    // let input_roles: Vec<_> = messages
-    //     .iter()
-    //     .filter(|message| !message.streaming)
-    //     .map(|message| message.role.label())
-    //     .collect();
-    // let final_roles: Vec<_> = request_messages
-    //     .iter()
-    //     .map(|msg| msg.role.as_str())
-    //     .collect();
-
-    // log_debug!(
-    //     "build_openai_request: model.system_prompt_present={} context_summary_present={} input_count={} input_roles={:?} final_roles={:?}",
-    //     !model.system_prompt.trim().is_empty(),
-    //     has_context_summary,
-    //     input_roles.len(),
-    //     input_roles,
-    //     final_roles,
-    // );
-
-    Ok(ChatCompletionRequest {
-        model: model.request_model_id.clone(),
+    Ok(ChatCompletionRequest {        model: model.request_model_id.clone(),
         messages: request_messages,
         temperature: Some(model.temperature),
         max_tokens: Some(model.max_output_tokens as u32),
@@ -611,7 +552,8 @@ mod tests {
             thinking_level: crate::config::reasoning::ThinkingLevelType::None,
         };
 
-        // System message in messages represents context compaction summary
+        // System messages in the message list are now skipped (role match arm is empty).
+        // Only model.system_prompt is used as the system message.
         let messages = vec![
             Message::new(MessageRole::User, "Hello"),
             Message::new(MessageRole::System, "Context summary"),
@@ -628,14 +570,14 @@ mod tests {
             .collect();
 
         // Should have exactly one system message at the beginning
-        // The system prompt and context summary are combined into one
         assert_eq!(roles, vec!["system", "user", "assistant"]);
 
-        // Verify the system message content is combined
+        // Verify the system message content uses only model.system_prompt,
+        // without merging the System message from the conversation
         let system_content = request.messages[0].content.as_ref().unwrap();
         let system_text = system_content.as_str().unwrap();
         assert!(system_text.contains("base system prompt"));
-        assert!(system_text.contains("Context summary"));
+        assert!(!system_text.contains("Context summary"), "System messages from conversation should no longer be merged into system prompt");
     }
 
     #[test]

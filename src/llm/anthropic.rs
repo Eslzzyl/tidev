@@ -238,12 +238,13 @@ pub(super) async fn complete_anthropic(
     http: &Client,
     model: ActiveModel,
     messages: Vec<Message>,
+    tools: Vec<ToolDefinition>,
 ) -> Result<String> {
     let api_key = model
         .api_key
         .clone()
         .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
-    let request = build_anthropic_request(&model, messages, &[])?;
+    let request = build_anthropic_request(&model, messages, &tools)?;
     let request_body_size = serde_json::to_string(&request)
         .map(|s| s.len())
         .unwrap_or(0);
@@ -314,41 +315,13 @@ fn build_anthropic_request(
     messages: Vec<Message>,
     tools: &[ToolDefinition],
 ) -> Result<AnthropicRequest> {
-    // Extract context summary from System messages (from context compaction)
-    // The System message, if present, contains the compression summary and should be
-    // combined with the model's system prompt into a single system prompt.
-    let context_summary: Option<String> = messages
-        .iter()
-        .filter(|message| !message.streaming)
-        .filter(|message| message.role == MessageRole::System)
-        .map(message_text_with_file_references)
-        .next();
-
-    // Build combined system prompt: model.system_prompt + context summary
-    let system_prompt = match (
-        model.system_prompt.trim().is_empty(),
-        context_summary.as_ref().map(|s| s.trim().is_empty()),
-    ) {
-        (false, Some(false)) => {
-            // Both present and non-empty: combine them
-            Some(format!(
-                "{}\n\n{}",
-                model.system_prompt.trim(),
-                context_summary.as_ref().unwrap().trim()
-            ))
-        }
-        (false, _) => {
-            // Only model.system_prompt present
-            Some(model.system_prompt.clone())
-        }
-        (true, Some(false)) => {
-            // Only context_summary present
-            context_summary
-        }
-        (true, _) => {
-            // Neither present
-            None
-        }
+    // System prompt comes from the model config directly.
+    // No context summary merging needed — compaction summaries are now
+    // User messages inserted at the compression boundary, not System messages.
+    let system_prompt = if model.system_prompt.trim().is_empty() {
+        None
+    } else {
+        Some(model.system_prompt.clone())
     };
 
     let mut anthropic_messages = Vec::new();
