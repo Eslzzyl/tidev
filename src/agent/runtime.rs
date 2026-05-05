@@ -258,6 +258,29 @@ impl AgentRuntime {
                     if message.content.is_empty() && message.tool_calls.is_empty() {
                         continue;
                     }
+                    // Inject synthetic failures for any orphaned tool calls
+                    // from a *previous* assistant message before adding this
+                    // new one.  This handles the case where two consecutive
+                    // assistant messages both carry tool_calls — without this,
+                    // the earlier orphan would be lost when pending_tool_calls
+                    // is overwritten below.
+                    if !message.tool_calls.is_empty() && !pending_tool_calls.is_empty() {
+                        for (tool_call_id, tool_name) in pending_tool_calls.drain() {
+                            crate::log_warn!(
+                                "build_request_messages: injecting synthetic failure for orphaned \
+                                 tool call id={} name={} before next assistant tool_calls",
+                                tool_call_id,
+                                tool_name,
+                            );
+                            result.push(Message::tool_result(
+                                tool_call_id,
+                                tool_name,
+                                ToolExecutionResult::new(
+                                    "Tool call failed: execution was interrupted or did not complete",
+                                ),
+                            ));
+                        }
+                    }
                     if let Some(m) = message.mode {
                         was_plan_mode = m == SessionMode::Plan;
                     } else if message.content.contains("PLAN MODE")
@@ -1114,6 +1137,19 @@ impl AgentRuntime {
                 )
                 .await?;
 
+            // Check cancellation before persisting — if the user interrupted
+            // this turn (e.g. by sending a new message), discard the assistant
+            // output rather than saving an orphaned tool_calls entry.
+            if let Some(ref ct) = cancel_token
+                && ct.is_cancelled() {
+                    crate::log_info!(
+                        "run_agent_loop: cancelled after turn, discarding assistant message"
+                    );
+                    // The old agent loop is done; a new one has been spawned
+                    // with the interrupting message.  Don't persist anything.
+                    return Ok(());
+            }
+
             // 5. Persist assistant message (Finished was already emitted)
             self.persist_assistant_message(session_id, &turn).await?;
 
@@ -1741,6 +1777,52 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].content, "hello");
         assert_eq!(result[1].content, "real reply");
+    }
+
+    #[test]
+    fn build_request_messages_consecutive_assistant_tool_calls() {
+        let (agent, _tmp) = agent_runtime();
+
+        // Scenario: two consecutive assistant messages both have tool_calls
+        // but only the second one gets a tool response (orphan from first).
+        let mut assistant_a = Message::new(MessageRole::Assistant, "");
+        assistant_a.tool_calls = vec![ToolCall {
+            id: "orphan-1".to_string(),
+            name: "grep".to_string(),
+            arguments: "{}".to_string(),
+        }];
+        let mut assistant_b = Message::new(MessageRole::Assistant, "");
+        assistant_b.tool_calls = vec![ToolCall {
+            id: "valid-2".to_string(),
+            name: "read".to_string(),
+            arguments: "{}".to_string(),
+        }];
+        let tool_response = Message::tool_result("valid-2", "read", ToolExecutionResult::new("ok"));
+        let msgs = vec![
+            Message::new(MessageRole::User, "first tool"),
+            assistant_a,
+            assistant_b,
+            tool_response,
+            Message::new(MessageRole::User, "continue?"),
+        ];
+
+        let result = agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        let roles: Vec<_> = result.iter().map(|m| m.role.clone()).collect();
+
+        // The orphan from assistant_a should get a synthetic failure injected
+        // before assistant_b, so the provider doesn't see a dangling tool_calls.
+        assert_eq!(roles, vec![
+            MessageRole::User,
+            MessageRole::Assistant,
+            MessageRole::Tool,        // synthetic failure for orphan-1
+            MessageRole::Assistant,
+            MessageRole::Tool,        // real response for valid-2
+            MessageRole::User,
+        ]);
+        let synthetic = &result[2];
+        assert_eq!(synthetic.role, MessageRole::Tool);
+        assert_eq!(synthetic.tool_call_id.as_deref(), Some("orphan-1"));
+        assert!(synthetic.content.contains("interrupted"));
     }
 
     // ─── Agent type tests ────────────────────────────────────────────
