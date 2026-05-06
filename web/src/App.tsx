@@ -1,13 +1,16 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSessionStore } from "./stores/useSessionStore";
-import { useUIStore, getEffectiveTheme } from "./stores/useUIStore";
+import { useUIStore, getEffectiveTheme, type MainTab } from "./stores/useUIStore";
 import { api } from "./api/client";
 import { Settings } from "./components/Settings";
 import { WelcomePage } from "./components/WelcomePage";
 import { LeftSidebar } from "./components/layout/LeftSidebar";
 import { RightSidebar } from "./components/layout/RightSidebar";
 import { ResizeHandle } from "./components/layout/ResizeHandle";
+import { Header } from "./components/layout/Header";
 import { ChatPanel } from "./components/chat/ChatPanel";
+import { FilesView } from "./components/views/FilesView";
+import { SettingsView } from "./components/views/SettingsView";
 
 function App() {
   const [isLoading, setIsLoading] = useState(true);
@@ -25,6 +28,9 @@ function App() {
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
   const isDraftSession = useSessionStore((s) => s.isDraftSession);
   const theme = useUIStore((s) => s.theme);
+  const activeTab = useUIStore((s) => s.activeTab);
+  const setActiveTab = useUIStore((s) => s.setActiveTab);
+  const navigateToChat = useUIStore((s) => s.navigateToChat);
   const leftSidebarWidth = useUIStore((s) => s.leftSidebarWidth);
   const rightSidebarWidth = useUIStore((s) => s.rightSidebarWidth);
   const rightSidebarOpen = useUIStore((s) => s.rightSidebarOpen);
@@ -59,6 +65,31 @@ function App() {
     mediaQuery.addEventListener("change", handleChange);
     return () => mediaQuery.removeEventListener("change", handleChange);
   }, [theme]);
+
+  // Sync URL hash with active tab
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace(/^#/, "");
+      const parts = hash.split("/").filter(Boolean);
+      const tab = parts[0] as MainTab | undefined;
+      if (tab && ["chat", "files", "settings"].includes(tab)) {
+        setActiveTab(tab);
+      }
+    };
+    window.addEventListener("hashchange", handleHashChange);
+    // Initial sync from URL
+    handleHashChange();
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, [setActiveTab]);
+
+  // Update URL hash when activeTab changes
+  useEffect(() => {
+    const hash = window.location.hash.replace(/^#/, "");
+    const currentTab = hash.split("/")[0];
+    if (currentTab !== activeTab) {
+      window.location.hash = activeTab;
+    }
+  }, [activeTab]);
 
   // Load initial data
   useEffect(() => {
@@ -177,17 +208,25 @@ function App() {
     );
   }
 
-  // Show welcome page when no session is selected
-  const showWelcomePage = !currentSessionId && !isDraftSession;
+  // Show welcome page when no session is selected (only in chat tab)
+  const showWelcomePage = activeTab === "chat" && !currentSessionId && !isDraftSession;
+  // Show left sidebar only in chat tab when there's a session
+  const showSidebars = activeTab === "chat" && !showWelcomePage;
+  // Right sidebar visibility: only in chat and only when explicitly opened
+  const showRightSidebar = showSidebars && rightSidebarOpen;
 
   return (
     <>
       <Settings />
 
-      <div className="h-[100dvh] w-full bg-white dark:bg-neutral-950">
-        <div className="flex h-full">
-          {/* Left Sidebar - hidden on welcome page */}
-          {!showWelcomePage && (
+      <div className="flex h-[100dvh] flex-col bg-white dark:bg-neutral-950">
+        {/* Header navigation - always visible */}
+        <Header />
+
+        {/* Main content area */}
+        <div className="flex flex-1 min-h-0">
+          {/* Left Sidebar - only in chat view with active session */}
+          {showSidebars && (
             <>
               <aside
                 className={`fixed inset-y-0 left-0 z-50 transform border-r border-neutral-200 bg-white transition-transform duration-200 ease-in-out md:relative md:translate-x-0 dark:border-neutral-800 dark:bg-neutral-950 ${
@@ -215,13 +254,15 @@ function App() {
             </>
           )}
 
-          {/* Main content */}
+          {/* Main content - switches based on active tab */}
           <main className="relative flex-1 min-w-0">
-            {showWelcomePage ? <WelcomePage /> : <ChatPanel />}
+            {activeTab === "chat" && (showWelcomePage ? <WelcomePage /> : <ChatPanel />)}
+            {activeTab === "files" && <FilesView />}
+            {activeTab === "settings" && <SettingsView />}
           </main>
 
-          {/* Right Sidebar - hidden on welcome page */}
-          {!showWelcomePage && rightSidebarOpen && (
+          {/* Right Sidebar - only in chat view */}
+          {showRightSidebar && (
             <>
               <ResizeHandle
                 onResizeStart={handleRightResizeStart}
@@ -237,8 +278,8 @@ function App() {
             </>
           )}
 
-          {/* Mobile Right Sidebar - hidden on welcome page */}
-          {!showWelcomePage && (
+          {/* Mobile Right Sidebar */}
+          {showSidebars && (
             <aside
               className={`fixed inset-y-0 right-0 z-50 transform border-l border-neutral-200 bg-white transition-transform duration-200 ease-in-out md:hidden dark:border-neutral-800 dark:bg-neutral-950 ${
                 mobileRightSidebarOpen ? "translate-x-0" : "translate-x-full"
@@ -249,8 +290,8 @@ function App() {
             </aside>
           )}
 
-          {/* Mobile overlay for right sidebar - hidden on welcome page */}
-          {!showWelcomePage && mobileRightSidebarOpen && (
+          {/* Mobile overlay for right sidebar */}
+          {showSidebars && mobileRightSidebarOpen && (
             <button
               onClick={closeMobileRightSidebar}
               className="fixed inset-0 z-40 bg-black/50 md:hidden"

@@ -1,6 +1,7 @@
 pub mod config;
 pub mod events;
 pub mod files;
+pub mod fs;
 pub mod messages;
 pub mod models;
 pub mod providers;
@@ -72,6 +73,9 @@ pub fn api_routes() -> Router<AppState> {
         .route("/skills", get(skills::list_skills))
         // Files (for @-mention)
         .route("/files/search", get(files::search_files))
+        // Filesystem browser
+        .route("/fs/list", get(fs::list_directory))
+        .route("/fs/read", get(fs::read_file))
         // CORS
         .layer(CorsLayer::permissive())
 }

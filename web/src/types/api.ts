@@ -188,3 +188,26 @@ export interface CreateProviderRequest {
   api_key: string;
   models: CreateModelRequest[];
 }
+
+// File system types
+export interface DirectoryEntry {
+  name: string;
+  path: string;
+  is_directory: boolean;
+  is_symlink: boolean;
+  size: number | null;
+  modified: string | null;
+}
+
+export interface ListDirResponse {
+  directory: string;
+  entries: DirectoryEntry[];
+}
+
+export interface ReadFileResponse {
+  content: string;
+  path: string;
+  language: string | null;
+  line_count: number;
+  size: number;
+}

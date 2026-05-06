@@ -6,17 +6,19 @@
 
 ## 当前 TiDev Web 前端现状
 
-| 维度 | 现状 |
-|------|------|
+| 维度 | 状态 (2026-05-06 更新) |
+|------|------------------------|
 | **框架** | React 19 + Vite + Tailwind CSS 4 + Zustand |
+| **路由与导航** | ✅ **已完成**: Hash 路由 (#chat/#files/#settings), Header 导航栏, 视图注册系统 |
 | **聊天** | 基础 SSE 流式聊天，消息轮次渲染，Markdown + tool call + diff 渲染 |
-| **会话管理** | 左侧边栏列表，新建/删除/切换，基础信息展示 |
-| **设置** | 极简：仅主题切换（light/dark/system） |
+| **文件浏览器** | ✅ **已完成**: 目录树(递归展开/折叠)、文件搜索、代码查看器(语法高亮)、文件读取 API |
+| **Markdown 渲染** | ✅ **已完成**: KaTeX 数学公式、Mermaid 图表、代码块增强(语言标签/复制/下载)、图片内联渲染 |
+| **Diff 预览** | ✅ **已完成**: 并排/统一模式、语法高亮、文件级折叠/展开、大文件降级渲染 |
+| **会话管理** | ✅ **已完成**: 搜索/过滤、内联重命名(双击)、状态指示器(流式动画) |
+| **设置** | 极简：仅主题切换（light/dark/system），**已迁移为完整页面视图** |
 | **右侧边栏** | Token 用量统计、待办清单、diff 文件列表 |
-| **文件系统** | 无独立文件浏览器 |
 | **Git** | 无 |
 | **终端** | 无 |
-| **路由** | 无多视图路由 |
 
 ---
 
@@ -24,87 +26,72 @@
 
 这些功能填补了 tidev 最明显的空白，用户每天都会使用。
 
-### 1. 多视图路由与导航
+### 1. 多视图路由与导航 ✅ 已完成
 
 **参考**: OpenChamber `useRouter.ts`, `MainLayout.tsx`, `Header.tsx`
 
-**现状**: TiDev 只有单页面聊天视图，通过 WelcomePage / ChatPanel 区分。无全局路由系统。
+**实现**:
+- **Hash 路由系统**: `web/src/lib/router.ts` — 解析 `#chat`, `#files`, `#settings` URL hash
+- **Header 导航栏**: `web/src/components/layout/Header.tsx` — 顶部恒驻导航栏，包含视图切换标签页
+- **视图注册**: `App.tsx` 根据 `activeTab` 状态渲染 ChatPanel / FilesView / SettingsView
+- **URL 双向同步**: hash change 事件 ↔ zustand store 状态
+- **设置面板迁移**: 从 modal 迁移为完整 SettingsView 页面视图
 
-**建议引入**:
-- **视图注册系统**: 以标签页/侧边栏导航切换聊天(Chat)、文件(Files)、Git、终端(Terminal)、设置(Settings)等视图
-- **Header 导航栏**: 顶部恒驻导航栏，包含视图切换、项目名称、当前连接状态
-- **URL hash/query 路由**: 支持 `#chat/session-id`、`#settings`、`#files` 等 URL 路由，支持浏览器前进/后退
+**文件**: `web/src/lib/router.ts`, `web/src/stores/useUIStore.ts`, `web/src/components/layout/Header.tsx`, `web/src/components/views/SettingsView.tsx`
 
-**价值**: 高。为所有后续功能提供导航基础设施。
+### 2. 文件浏览器 (FilesView) ✅ 已完成
 
-### 2. 文件浏览器 (FilesView)
+**参考**: OpenChamber `views/FilesView.tsx`, `SidebarFilesTree.tsx`, `fileStore.ts`
 
-**参考**: OpenChamber `views/FilesView.tsx` (3356 行), `components/layout/SidebarFilesTree.tsx`, `stores/fileStore.ts`, `components/icons/`
+**实现**:
+- **后端 API**: `GET /api/fs/list?path=` (目录列表), `GET /api/fs/read?path=` (文件读取) — 带安全路径解析
+- **文件树**: `web/src/components/views/FileTree.tsx` — 递归展开/折叠目录树，文件类型图标
+- **代码查看器**: `web/src/components/views/CodeViewer.tsx` — 语言检测、语法高亮、文件头、复制/关闭
+- **文件搜索**: 集成已有 `/api/files/search` 端点
+- **文件 Store**: `web/src/stores/useFileStore.ts` — 树形数据管理、加载状态
 
-**现状**: TiDev 完全不支持文件浏览。用户无法浏览工作区文件结构。
+**文件**: `src/web/routes/fs.rs`, `src/web/routes/mod.rs`, `src/web/error.rs`, `web/src/stores/useFileStore.ts`, `web/src/components/views/FilesView.tsx`, `web/src/components/views/FileTree.tsx`, `web/src/components/views/CodeViewer.tsx`
 
-**建议引入**:
-- **目录树**: 左侧面板可展开/折叠的文件树，带文件类型图标
-- **代码编辑器**: 集成 CodeMirror 或类似编辑器（语法高亮、行号、主题）
-- **文件操作**: 创建/重命名/删除文件和目录
-- **Git 状态标识**: 文件旁显示 git 状态标记（新增/修改/删除）
-- **多标签页**: 多个文件可同时在标签页中打开
-- **右键菜单**: 文件/文件夹的上下文操作菜单
-- **搜索功能**: 工作区文件搜索
-
-**价值**: 极高。AI 编码助手用户频繁需要查看和编辑文件。
-
-### 3. Markdown / 消息渲染增强
+### 3. Markdown / 消息渲染增强 ✅ 已完成
 
 **参考**: OpenChamber `chat/MarkdownRendererImpl.tsx`, `chat/message/parts/*`
 
-**现状**: TiDev 使用基础的 `react-markdown` + `rehype-highlight`。功能有限。
+**实现**:
+- **KaTeX 数学公式**: 集成 `remark-math` + `rehype-katex`
+- **Mermaid 图表**: 动态加载 Mermaid 库，支持所有图表类型，失败降级 + 重试
+- **代码块增强**: 语言标签显示、复制按钮、下载按钮
+- **图片内联渲染**: 自定义 img 组件，点击展开/收缩，带加载动画
+- **推理过程折叠**: `ThinkingBlock` 增加实时计时器（显示消耗秒数）
+- **组件化**: `CodeBlock` 和 `Mermaid` 作为独立子组件
 
-**建议引入**:
-- **LaTeX / KaTeX 数学公式渲染**
-- **Mermaid 图表渲染**
-- **表格增强**: 可排序列、CSV/TSV 复制、下载
-- **大型代码块虚拟化**: 超过阈值时使用虚拟滚动
-- **推理过程折叠 (ReasoningPart)**: 可折叠的"thinking"块，带实时计时器
-- **代码块增强**: 语言标签、复制按钮、下载按钮、HTML 预览切换
-- **流式渲染性能优化**: 流式过程中的节流渲染、延迟语法高亮
-- **图像内联渲染**
+**文件**: `web/src/components/renderers/MarkdownRenderer.tsx`, `web/src/components/renderers/ThinkingBlock.tsx`
 
-**价值**: 高。直接影响用户阅读 AI 回复的体验。
+### 4. Diff 预览增强 ✅ 已完成
 
-### 4. Diff 预览增强
+**参考**: OpenChamber `views/DiffView.tsx`, `PierreDiffViewer.tsx`, `chat/DiffPreview.tsx`
 
-**参考**: OpenChamber `views/DiffView.tsx`, `views/PierreDiffViewer.tsx`, `chat/DiffPreview.tsx`
+**实现**:
+- **并排模式**: 宽度超过 768px 时并排显示新旧代码
+- **文件级折叠**: `CollapsibleDiffFile` 组件 — 带文件头、展开/折叠
+- **批量控制**: `DiffCollapseProvider` — 展开/折叠所有文件
+- **语法高亮**: 使用 highlight.js 对 diff 代码进行语法着色
+- **大文件降级**: 超过 100 行时禁用逐行语法高亮
+- **统一/内联模式**: 窄屏时自动切换为 inline 布局
 
-**现状**: TiDev 有基础 diff 渲染（`DiffRenderer.tsx`），支持 unified 模式。
+**文件**: `web/src/components/renderers/DiffRenderer.tsx`
 
-**建议引入**:
-- **并排 (Side-by-side) 模式**: 超过一定宽度时并排显示新旧代码
-- **文件级折叠**: 每个 diff 文件可展开/折叠
-- **语法高亮**: diff 中的代码语法高亮
-- **行级注释**: 可在 diff 行上添加注释
-- **展开/折叠所有**: 批量控制
-- **大文件降级**: 内容超过阈值时降低高亮质量或懒加载
-- **内联 (Inline) diff**: 在聊天消息中渲染紧凑型 diff
+### 5. 会话管理增强 ✅ 已完成
 
-**价值**: 高。用户审查 AI 修改的核心交互。
+**参考**: OpenChamber `session/SessionSidebar.tsx`
 
-### 5. 会话管理增强
+**实现**:
+- **会话搜索/过滤**: 按标题实时过滤，搜索输入框
+- **内联重命名**: 双击会话标题进入编辑模式，Enter 确认，Escape 取消
+- **会话状态指示器**: 当前活动会话 + 流式进行中时显示 ping 动画
+- **操作按钮**: hover 时显示重命名和删除按钮
+- **保留已有特性**: 新建/删除/切换、草稿会话
 
-**参考**: OpenChamber `session/SessionSidebar.tsx` (1818 行)
-
-**现状**: TiDev 有基础会话列表，仅支持新建/删除/切换。
-
-**建议引入**:
-- **会话搜索/过滤**: 按标题、日期、项目搜索会话
-- **会话分组**: 按项目/目录分组显示
-- **会话重命名**: 双击重命名
-- **会话状态指示器**: 显示流式/等待/错误/完成等实时状态
-- **草稿会话**: 未发送消息的草稿状态
-- **与会话文件夹**: 自定义文件夹组织会话，拖拽排序
-- **归档/删除**: 带确认的归档和删除
-
-**价值**: 高。用户每天频繁操作会话。
+**文件**: `web/src/components/layout/LeftSidebar.tsx`
 
 ---
 
@@ -358,14 +345,14 @@
 
 ## 总体建议
 
-### 第一阶段 (近期，高 Impact/Effort 比)
-1. **多视图路由** — 基础设施，一切的基础
-2. **文件浏览器** — AI 编码核心体验
-3. **Markdown 渲染增强** — 直接提升体验
-4. **Diff 预览增强** — 代码审查核心
-5. **会话管理增强** — 日常使用优化
+### 第一阶段 (已完成 — 2026-05-06)
+1. ✅ **多视图路由** — 基础设施，一切的基础
+2. ✅ **文件浏览器** — AI 编码核心体验
+3. ✅ **Markdown 渲染增强** — 直接提升体验
+4. ✅ **Diff 预览增强** — 代码审查核心
+5. ✅ **会话管理增强** — 日常使用优化
 
-### 第二阶段 (中期)
+### 第二阶段 (当前目标)
 6. **Git 集成** — 显著的效率提升
 7. **终端集成** — 独立操作能力
 8. **权限请求 UI** — 安全体验
@@ -377,4 +364,231 @@
 
 ---
 
-*文档生成日期: 2026-05-05*
+## OpenChamber 代码编辑/浏览架构深度分析
+
+本附录基于对 OpenChamber `packages/ui/src/` 的实际源码调研，详细分析其代码编辑和浏览的实现方案，供后续优化 tidev 代码浏览功能时参考。
+
+### 核心组件结构
+
+OpenChamber 的代码浏览/编辑由三个核心组件构成，分工明确：
+
+| 组件 | 位置 | 代码量 | 职责 |
+|------|------|--------|------|
+| `CodeMirrorEditor` | `components/ui/CodeMirrorEditor.tsx` | 418 行 | 核心编辑器，封装 CodeMirror 6 |
+| `FilesView` | `components/views/FilesView.tsx` | **3356 行** | 文件查看器（最大组件） |
+| `SidebarFilesTree` | `components/layout/SidebarFilesTree.tsx` | 968 行 | 侧边栏文件树 |
+
+辅助文件：
+
+| 文件 | 职责 |
+|------|------|
+| `lib/codemirror/languageByExtension.ts` (175 行) | 扩展名→CodeMirror 语言映射（同步 + 异步动态加载） |
+| `lib/codemirror/flexokiTheme.ts` (550 行) | CodeMirror 6 完整自定义主题 |
+| `stores/useFilesViewTabsStore.ts` | 标签页状态管理（按 workspace root 分组，持久化） |
+| `stores/useFileSearchStore.ts` | 文件搜索缓存 |
+| `components/ui/GoToLineDialog.tsx` | 跳转到行对话框 |
+| `components/comments/CodeMirrorCommentWidgets.tsx` | 内联评论的 CodeMirror widget |
+
+### 代码编辑器：CodeMirror 6
+
+OpenChamber **只使用 CodeMirror 6**，未集成 Monaco Editor。
+
+#### CodeMirrorEditor 组件设计
+
+**Props 接口：**
+```typescript
+type CodeMirrorEditorProps = {
+  value: string;
+  onChange: (value: string) => void;
+  extensions?: Extension[];
+  className?: string;
+  readOnly?: boolean;
+  lineNumbersConfig?: ...;
+  highlightLines?: { start: number; end: number };
+  blockWidgets?: BlockWidgetDef[];
+  onViewReady?: (view: EditorView) => void;
+  onViewDestroy?: () => void;
+  enableSearch?: boolean;
+  searchOpen?: boolean;
+  onSearchOpenChange?: (open: boolean) => void;
+};
+```
+
+**关键设计模式：**
+- **Compartment 模式**: 使用 CodeMirror 的 `Compartment` 动态开关/配置功能：
+  - `lineNumbersCompartment` — 行号显示配置
+  - `editableCompartment` — 只读/编辑切换
+  - `externalExtensionsCompartment` — 外部传入的扩展
+  - `highlightLinesCompartment` — 行高亮范围
+  - `blockWidgetsCompartment` — 块级 Widget
+  - `searchCompartment` — 搜索面板
+- **Block Widget 系统**: 通过 `WidgetType` 和 `createPortal` 在 CodeMirror 中渲染 React 组件（用于内联评论）
+- **搜索面板**: 使用 CodeMirror 内置搜索，打补丁改为图标按钮
+
+#### 语言检测
+
+双重系统：
+- **`languageByExtension(filePath)`** (同步) — 静态导入常用语言：JS/TS, JSON, CSS, HTML, Markdown, Python, Shell
+- **`loadLanguageByExtension(filePath)`** (异步) — 动态加载不常用语言：C++, Go, Rust, SQL, XML, YAML, Elixir
+
+#### 主题系统
+
+`flexokiTheme.ts` 从应用主题动态生成 CodeMirror 主题：
+- `EditorView.theme({...})` — CSS 级主题（字体、颜色、间距、光标、选区等）
+- `HighlightStyle.define(...)` — 通过 Lezer tags 定义语法高亮颜色
+- 将应用 `theme.colors.syntax` 映射到 CM6 CSS 类（`.cm-keyword`, `.cm-string`, `.cm-comment` 等）
+
+### 外部依赖
+
+OpenChamber 重度依赖 CodeMirror 6 生态，共 **18 个 `@codemirror/*` 包** + `@lezer/highlight` + `codemirror-lang-elixir`：
+
+| 类别 | 包 | 用途 |
+|------|-----|------|
+| **核心** | `@codemirror/view` (6.39.13 pinned), `@codemirror/state` (^6.5.4), `@codemirror/language` (6.12.2 pinned) | 编辑器框架 |
+| **功能** | `@codemirror/commands`, `@codemirror/autocomplete`, `@codemirror/search`, `@codemirror/lint` | 命令/补全/搜索/检查 |
+| **语言** | `@codemirror/lang-javascript`, `-python`, `-rust`, `-go`, `-cpp`, `-css`, `-html`, `-json`, `-markdown`, `-sql`, `-xml`, `-yaml` | 12 种语言支持 |
+| **扩展** | `@codemirror/language-data`, `@codemirror/legacy-modes` | 动态加载更多语言 |
+| **额外** | `codemirror-lang-elixir` | Elixir 语言支持 |
+
+此外，diff 渲染使用 `@pierre/diffs` (1.1.0-beta.13)，在只读模式中提供 Shiki 语法高亮。
+
+### 文件树 (SidebarFilesTree)
+
+**数据结构：**
+```typescript
+type FileNode = {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  extension?: string;
+  relativePath?: string;
+};
+```
+
+**关键实现细节：**
+- **数据源**: 通过 `opencodeClient.listDirectory()` 调用 OpenCode 服务端 API 获取目录列表
+- **排序**: 目录优先，然后按名称字母序（`sortNodes`）
+- **状态**: `useFilesViewTabsStore` 管理展开/折叠状态（按路径 key）
+- **懒加载**: 目录展开时按需加载；`loadedDirsRef` 跟踪已加载的目录避免重复请求
+- **Git 集成**: 通过 `useGitStatus` 显示文件状态徽章（M=修改, A=新增, D=删除, ?=未跟踪）
+- **上下文菜单**: 右键菜单支持：打开文件、在文件管理器中显示、复制路径、复制内容、新建文件/文件夹、重命名、删除
+- **对话框操作**: 新建/重命名/删除通过 runtime API 调用 + toast 通知
+- **文件类型图标**: 使用 `<FileTypeIcon>` 组件（不是直接使用 remixicon）
+
+### 文件查看器 (FilesView) — 3356 行
+
+这是 OpenChamber **最大的组件**，承担了多种职责。
+
+**标签管理 (useFilesViewTabsStore)：**
+- 按 workspace root 分组：`byRoot: Record<string, RootTabsState>`
+- 每个 root 存储：`openPaths: string[]`, `selectedPath`, `expandedPaths`, `touchedAt`
+- 限制最多 20 个 workspace roots
+- 路径归一化处理跨平台路径（Windows UNC, 驱动器号, Unix 路径）
+- **持久化** 通过 zustand persist middleware
+
+**标签栏渲染：**
+- 从 `openPaths` 渲染标签
+- 每个标签显示：`FileTypeIcon` + 文件名 + 关闭按钮
+- 激活的文件高亮
+- 标签栏水平滚动
+
+**文件渲染模式（FilesView 内部的多态渲染）：**
+
+| 模式 | 检测条件 | 渲染方式 |
+|------|---------|---------|
+| 加载中 | content === null | Spinner |
+| 错误 | error set | 红色错误消息 |
+| 图片 | `.png/.jpg/.gif/.svg` 等 | `<img>` 标签 |
+| Markdown | `.md` | `<SimpleMarkdownRenderer>` + 预览/编辑切换按钮 |
+| HTML | `.html` | `<iframe sandbox>` 预览 + CodeMirror 编辑 |
+| JSON | `.json` | `<JsonTreeView>` 结构化树形展示 |
+| Shiki 高亮 | 只读模式 | `@pierre/diffs` 的 `renderShikiFileView` |
+| **CodeMirror** | 默认（文本文件） | `CodeMirrorEditor` 组件 |
+
+**工具栏：**
+浮动工具栏（hover 显示）：编辑/预览切换、自动换行、跳转到行、全屏、复制、系统应用打开等。
+
+**快捷键：**
+- `Ctrl/Cmd+S` → 保存文件
+- `Ctrl/Cmd+F` → 打开搜索
+
+### 当前 tidev 与 OpenChamber 对比
+
+| 维度 | tidev 当前 (CodeViewer) | OpenChamber (CodeMirror) |
+|------|-------|-------------|
+| **编辑器引擎** | 自制 span 着色 | CodeMirror 6（完整 IDE 框架） |
+| **语法高亮** | 自制正则规则（9 种语言） | Lezer 解析器（精准 AST，覆盖 15+ 语言） |
+| **文件编辑** | ❌ 只读 | ✅ 读写，Ctrl+S 保存 |
+| **多标签页** | ❌ 单文件 | ✅ 多标签，标签栏，持久化 |
+| **右键菜单** | ❌ | ✅ 创建/重命名/删除/复制 |
+| **Git 状态** | ❌ | ✅ M/A/D/? 徽章 |
+| **图片预览** | ❌ | ✅ 内联渲染 |
+| **Markdown 预览** | ❌ | ✅ 预览/编辑切换 |
+| **JSON 树视图** | ❌ | ✅ 结构化浏览 |
+| **文件搜索** | 基本（300ms debounce） | 缓存 + debounce + 类型过滤 |
+| **块级 Widget** | ❌ | ✅ 支持 React 组件嵌入（评论） |
+| **行高亮** | ❌ | ✅ 指定范围高亮 |
+| **搜索面板** | ❌ | ✅ CodeMirror 内置搜索 |
+| **跳转到行** | ❌ | ✅ GoToLineDialog |
+| **主题** | Tailwind prose | 完整的 CodeMirror 主题（550 行） |
+
+### 优化建议（分优先级）
+
+#### P1 — 当前差距最大的功能缺口
+
+1. **多标签页支持**
+   - 修改 `useFileStore` 增加 `openPaths: string[]` + `selectedPath`
+   - 创建标签栏组件（水平滚动、激活高亮、关闭按钮）
+   - 不需要 CodeMirror，当前 CodeViewer 可继续使用
+   - 后端需要: 无需改动（已有 `/api/fs/read`）
+
+2. **文件编辑 + 保存**
+   - 后端: 新增 `POST /api/fs/write` 端点（接收路径+内容）
+   - 前端: CodeViewer 添加编辑模式切换（`contentEditable` 或 `<textarea>`）
+   - 快捷键: `Ctrl+S` 保存
+   - 复杂度: 小，但需要处理脏状态提示
+
+3. **文件操作（创建/重命名/删除）**
+   - 后端: 新增 `POST /api/fs/create`（文件/目录）、`POST /api/fs/rename`、`DELETE /api/fs/remove`
+   - 前端: 文件树添加右键菜单 + 创建按钮
+   - 复杂度: 中
+
+#### P2 — 用户体验优化
+
+4. **Git 状态徽章**
+   - 后端: 新增 `GET /api/git/status` 端点
+   - 前端: FileTree 节点旁显示 M/A/D/? 标识
+   - 复杂度: 中（需添加 git 集成）
+
+5. **图片/ Markdown/ JSON 预览**
+   - 按文件扩展名自动切换渲染模式
+   - 图片: `<img>` 标签内联展示
+   - Markdown: 使用已有的 `MarkdownRenderer` 组件
+   - JSON: 简单格式化 + `<pre>` 展示
+   - 复杂度: 小
+
+#### P3 — 编辑器升级
+
+6. **接入 CodeMirror 6**
+   - 替换自制的 `CodeViewer.tsx`
+   - 获得真正的语法高亮、搜索、行号、折叠
+   - 按需引入语言包，先用最常用的 5-6 种（JS/TS, Python, Rust, JSON, Markdown）
+   - 避免一次性引入全部 18 个包（约 500KB+）
+   - 自定义主题适配 tidev 的 light/dark 主题
+   - 复杂度: 大
+
+### 不建议直接照搬的设计
+
+1. **FilesView 的 3356 行单体组件** — 承担了标签栏、工具栏、7 种渲染模式、注释系统等太多职责。tidev 应该拆分为更小的组件：`FileTabs`, `FileToolbar`, `FilePreview`, `CodeEditor` 等。
+
+2. **全部 18 个 codemirror 包** — 完整引入会增加约 500KB+ bundle 体积。tidev 可以按需引入，先用 `@codemirror/lang-javascript`、`-python`、`-rust` 等最常用的几种，其他用 `@codemirror/language-data` 动态加载。
+
+3. **内联评论系统** — CodeMirror 的 Block Widget + `createPortal` 实现很精巧但复杂度高。tidev 在早期不需要这个功能。
+
+### 结论
+
+当前 tidev 的代码浏览（自制 CodeViewer + 简单语法高亮）对于"浏览 AI 修改的文件"这一核心场景基本可用，但差距明显：
+
+- **短期优化路径**: 加多标签页 + 编辑功能 + 文件操作（P1，无需新依赖）
+- **中期优化路径**: 加 Git 状态 + 多格式预览（P2，需后端支持）
+- **长期优化路径**: 引入 CodeMirror 6 替换自制 CodeViewer（P3，重大改动但收益最高）

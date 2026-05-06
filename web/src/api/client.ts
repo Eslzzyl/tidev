@@ -20,6 +20,9 @@ import type {
   SetDefaultModelRequest,
   SetDefaultModelResponse,
   GetDefaultModelResponse,
+  DirectoryEntry,
+  ListDirResponse,
+  ReadFileResponse,
 } from "../types/api";
 
 const API_BASE = "/api";
@@ -201,4 +204,15 @@ export const api = {
     }).then((r) => {
       if (!r.ok) throw new Error(`Failed to delete provider: ${r.status}`);
     }),
+
+  // Filesystem
+  listDirectory: (path?: string) => {
+    const params = path ? `?path=${encodeURIComponent(path)}` : "";
+    return fetchJson<ListDirResponse>(`${API_BASE}/fs/list${params}`);
+  },
+
+  readFile: (path: string) =>
+    fetchJson<ReadFileResponse>(
+      `${API_BASE}/fs/read?path=${encodeURIComponent(path)}`,
+    ),
 };

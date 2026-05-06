@@ -1,5 +1,7 @@
 import { create } from "zustand";
+import type { MainTab } from "../lib/router";
 
+export type { MainTab } from "../lib/router";
 export type Theme = "light" | "dark" | "system";
 
 export interface UIState {
@@ -15,6 +17,7 @@ export interface UIState {
   connectionStatus: "connected" | "disconnected" | "connecting";
   leftSidebarWidth: number;
   rightSidebarWidth: number;
+  activeTab: MainTab;
 }
 
 export interface UIActions {
@@ -37,6 +40,10 @@ export interface UIActions {
   setLoading: (isLoading: boolean) => void;
   setStreaming: (isStreaming: boolean) => void;
   setConnectionStatus: (status: UIState["connectionStatus"]) => void;
+  setActiveTab: (tab: MainTab) => void;
+  navigateToChat: (sessionId?: string) => void;
+  navigateToFiles: () => void;
+  navigateToSettings: () => void;
 }
 
 const DEFAULT_LEFT_SIDEBAR_WIDTH = 256;
@@ -56,6 +63,7 @@ function loadLocalStorage() {
   const savedTheme = localStorage.getItem("theme") as Theme | null;
   const savedRightSidebarOpen =
     localStorage.getItem("rightSidebarOpen") !== "false";
+  const savedActiveTab = localStorage.getItem("activeTab") as MainTab | null;
 
   return {
     leftSidebarWidth: isNaN(savedLeftWidth)
@@ -66,6 +74,7 @@ function loadLocalStorage() {
       : savedRightWidth,
     theme: (savedTheme || "system") as Theme,
     rightSidebarOpen: savedRightSidebarOpen,
+    activeTab: (savedActiveTab || "chat") as MainTab,
   };
 }
 
@@ -84,6 +93,7 @@ const initialState: UIState = {
   connectionStatus: "disconnected",
   leftSidebarWidth: persisted.leftSidebarWidth,
   rightSidebarWidth: persisted.rightSidebarWidth,
+  activeTab: persisted.activeTab,
 };
 
 function clampSidebarWidth(width: number): number {
@@ -145,6 +155,26 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   setLoading: (isLoading) => set({ isLoading }),
   setStreaming: (isStreaming) => set({ isStreaming }),
   setConnectionStatus: (status) => set({ connectionStatus: status }),
+
+  setActiveTab: (tab) => {
+    localStorage.setItem("activeTab", tab);
+    set({ activeTab: tab });
+  },
+
+  navigateToChat: (sessionId) => {
+    set({ activeTab: "chat" });
+    localStorage.setItem("activeTab", "chat");
+  },
+
+  navigateToFiles: () => {
+    set({ activeTab: "files" });
+    localStorage.setItem("activeTab", "files");
+  },
+
+  navigateToSettings: () => {
+    set({ activeTab: "settings" });
+    localStorage.setItem("activeTab", "settings");
+  },
 }));
 
 /**

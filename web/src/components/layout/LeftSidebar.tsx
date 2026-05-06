@@ -1,5 +1,5 @@
-import { useCallback } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { useCallback, useState, useRef, useEffect } from "react";
+import { Plus, Trash2, Search, MoreHorizontal, Pencil } from "lucide-react";
 import { useSessionStore } from "../../stores/useSessionStore";
 import { useUIStore } from "../../stores/useUIStore";
 import { api } from "../../api/client";
@@ -11,6 +11,7 @@ export function LeftSidebar() {
   const isDraftSession = useSessionStore((s) => s.isDraftSession);
   const draftTitle = useSessionStore((s) => s.draftTitle);
   const isLoading = useSessionStore((s) => s.isLoading);
+  const isStreaming = useUIStore((s) => s.isStreaming);
 
   const startDraftSession = useSessionStore((s) => s.startDraftSession);
   const setCurrentSession = useSessionStore((s) => s.setCurrentSession);
@@ -21,6 +22,25 @@ export function LeftSidebar() {
   const closeMobileMenu = useUIStore((s) => s.closeMobileMenu);
 
   const goToWelcome = useSessionStore((s) => s.goToWelcome);
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  // Focus rename input when renaming starts
+  useEffect(() => {
+    if (renamingId && renameInputRef.current) {
+      renameInputRef.current.focus();
+      renameInputRef.current.select();
+    }
+  }, [renamingId]);
+
+  const filteredSessions = searchQuery.trim()
+    ? sessions.filter((s) =>
+        s.title.toLowerCase().includes(searchQuery.toLowerCase()),
+      )
+    : sessions;
 
   const handleNewSession = useCallback(() => {
     goToWelcome();
@@ -63,6 +83,48 @@ export function LeftSidebar() {
     [removeSession, setError],
   );
 
+  const handleStartRename = useCallback(
+    (sessionId: string, currentTitle: string) => {
+      setRenamingId(sessionId);
+      setRenameValue(currentTitle);
+    },
+    [],
+  );
+
+  const handleConfirmRename = useCallback(
+    async (sessionId: string) => {
+      const trimmed = renameValue.trim();
+      if (!trimmed) {
+        setRenamingId(null);
+        return;
+      }
+      try {
+        await api.renameSession(sessionId, trimmed);
+        // Refresh sessions list
+        const { sessions } = await api.listSessions();
+        useSessionStore.getState().setSessions(sessions);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Failed to rename session",
+        );
+      } finally {
+        setRenamingId(null);
+      }
+    },
+    [renameValue, setError],
+  );
+
+  const handleRenameKeyDown = useCallback(
+    (e: React.KeyboardEvent, sessionId: string) => {
+      if (e.key === "Enter") {
+        handleConfirmRename(sessionId);
+      } else if (e.key === "Escape") {
+        setRenamingId(null);
+      }
+    },
+    [handleConfirmRename],
+  );
+
   return (
     <div className="flex h-full flex-col bg-neutral-50 dark:bg-neutral-900">
       {/* Header */}
@@ -80,11 +142,25 @@ export function LeftSidebar() {
         </button>
       </div>
 
+      {/* Search */}
+      <div className="border-b border-neutral-200 px-3 py-2 dark:border-neutral-800">
+        <div className="relative">
+          <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-400" />
+          <input
+            type="text"
+            placeholder="Search sessions..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full rounded border border-neutral-200 bg-white py-1.5 pl-7 pr-2 text-xs outline-none focus:border-neutral-400 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100 dark:focus:border-neutral-500"
+          />
+        </div>
+      </div>
+
       {/* Session List */}
       <div className="flex-1 overflow-y-auto">
         {isDraftSession && (
           <div className="border-b border-neutral-200 dark:border-neutral-800">
-            <button className="flex w-full items-center bg-blue-50 px-4 py-3 text-left dark:bg-blue-950/30">
+            <div className="flex w-full items-center bg-blue-50 px-4 py-3 text-left dark:bg-blue-950/30">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-blue-900 dark:text-blue-100">
                   {draftTitle}
@@ -93,45 +169,107 @@ export function LeftSidebar() {
                   Draft • Type to create
                 </p>
               </div>
-            </button>
+            </div>
           </div>
         )}
 
-        {sessions.length === 0 && !isDraftSession ? (
+        {filteredSessions.length === 0 && !isDraftSession ? (
           <div className="p-4 text-center text-sm text-neutral-500 dark:text-neutral-400">
-            No sessions yet
+            {searchQuery.trim()
+              ? "No sessions match your search"
+              : "No sessions yet"}
           </div>
         ) : (
           <ul className="divide-y divide-neutral-100 dark:divide-neutral-800">
-            {sessions.map((session) => (
-              <li key={session.session_id} className="group relative">
-                <button
-                  onClick={() => handleSelectSession(session.session_id)}
-                  className={`flex w-full items-center px-4 py-3 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
-                    currentSessionId === session.session_id
-                      ? "bg-neutral-100 dark:bg-neutral-800"
-                      : ""
-                  }`}
-                >
-                  <div className="min-w-0 flex-1 pr-8">
-                    <p className="truncate text-sm font-medium text-neutral-900 dark:text-neutral-100">
-                      {session.title}
-                    </p>
-                    <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
-                      {session.model_display_name} •{" "}
-                      {formatSessionDate(session.updated_at)}
-                    </p>
-                  </div>
-                </button>
-                <button
-                  onClick={() => handleDeleteSession(session.session_id)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-1 text-neutral-400 opacity-0 hover:text-red-600 group-hover:opacity-100 dark:text-neutral-500 dark:hover:text-red-400"
-                  aria-label="Delete session"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </li>
-            ))}
+            {filteredSessions.map((session) => {
+              const isActive = currentSessionId === session.session_id;
+              const isRenaming = renamingId === session.session_id;
+
+              return (
+                <li key={session.session_id} className="group relative">
+                  {isRenaming ? (
+                    <div className="flex items-center px-4 py-2">
+                      <input
+                        ref={renameInputRef}
+                        type="text"
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) =>
+                          handleRenameKeyDown(e, session.session_id)
+                        }
+                        onBlur={() => handleConfirmRename(session.session_id)}
+                        className="w-full rounded border border-blue-400 bg-white px-2 py-1 text-sm outline-none dark:border-blue-500 dark:bg-neutral-800 dark:text-neutral-100"
+                      />
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleSelectSession(session.session_id)}
+                      onDoubleClick={() =>
+                        handleStartRename(
+                          session.session_id,
+                          session.title,
+                        )
+                      }
+                      className={`flex w-full items-center px-4 py-3 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
+                        isActive
+                          ? "bg-neutral-100 dark:bg-neutral-800"
+                          : ""
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1 pr-8">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-sm font-medium text-neutral-900 dark:text-neutral-100">
+                            {session.title}
+                          </p>
+                          {/* Status indicator */}
+                          {isActive && isStreaming && (
+                            <span className="shrink-0">
+                              <span className="relative flex h-2 w-2">
+                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
+                                <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
+                              </span>
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+                          {session.model_display_name} •{" "}
+                          {formatSessionDate(session.updated_at)}
+                        </p>
+                      </div>
+                    </button>
+                  )}
+
+                  {/* Action buttons */}
+                  {!isRenaming && (
+                    <div className="absolute right-3 top-1/2 flex -translate-y-1/2 gap-0.5 opacity-0 group-hover:opacity-100">
+                      <button
+                        onClick={() =>
+                          handleStartRename(
+                            session.session_id,
+                            session.title,
+                          )
+                        }
+                        className="rounded p-1 text-neutral-400 hover:text-blue-600 dark:text-neutral-500 dark:hover:text-blue-400"
+                        aria-label="Rename session"
+                        title="Rename"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() =>
+                          handleDeleteSession(session.session_id)
+                        }
+                        className="rounded p-1 text-neutral-400 hover:text-red-600 dark:text-neutral-500 dark:hover:text-red-400"
+                        aria-label="Delete session"
+                        title="Delete"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
