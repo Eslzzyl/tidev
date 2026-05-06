@@ -188,7 +188,7 @@ pub(crate) struct CachedSessionRuntime {
     pub(crate) pending_prompt_queue: std::collections::VecDeque<QueuedPrompt>,
     pub(crate) active_request_id: u64,
     pub(crate) abort_confirmation_deadline: Option<Instant>,
-    pub(crate) retrying_hint: Option<(u32, u32, String, Option<u32>)>,
+    pub(crate) retrying_hint: Option<(u32, u32, String, Instant)>,
     pub(crate) message_scroll_offset: usize,
     pub(crate) message_follow_tail: bool,
     pub(crate) message_viewport_lines: usize,

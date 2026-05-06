@@ -539,8 +539,7 @@ impl App {
     pub(super) fn render_retrying_hint(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let palette = self.palette();
 
-        let Some((attempt, max_attempts, reason, retry_after_secs)) = self.retrying_hint.as_ref()
-        else {
+        let Some((attempt, max_attempts, reason, deadline)) = self.retrying_hint.as_ref() else {
             // Clear any existing content
             frame.render_widget(
                 Paragraph::new("").style(Style::default().fg(palette.text)),
@@ -549,10 +548,14 @@ impl App {
             return;
         };
 
-        let retry_after_str = retry_after_secs
-            .map(|s| format!("Retrying in {s}s"))
-            .unwrap_or_else(|| "Retrying...".to_string());
+        let now = Instant::now();
+        let remaining = if *deadline > now {
+            deadline.duration_since(now).as_secs()
+        } else {
+            0
+        };
 
+        let retry_after_str = format!("Retrying in {remaining}s");
         let hint_text = format!(
             "Retrying ({}/{}): {} · {}",
             attempt, max_attempts, reason, retry_after_str

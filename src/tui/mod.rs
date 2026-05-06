@@ -167,7 +167,7 @@ struct App {
     last_notice: Option<String>,
     toast: Option<(String, Instant)>,
     mouse_selection: MouseSelectionState,
-    retrying_hint: Option<(u32, u32, String, Option<u32>)>,
+    retrying_hint: Option<(u32, u32, String, Instant)>,
     message_scroll_offset: usize,
     message_follow_tail: bool,
     message_viewport_lines: usize,
@@ -635,6 +635,9 @@ impl App {
                     return Ok(());
                 }
 
+                // Clear retry hint — a successful retry resumes streaming
+                self.retrying_hint = None;
+
                 if let Some(message) = self.conversation.messages.last_mut()
                     && message.streaming
                     && (matches!(message.role, MessageRole::Assistant)
@@ -656,6 +659,9 @@ impl App {
                     return Ok(());
                 }
 
+                // Clear retry hint — a successful retry resumes reasoning
+                self.retrying_hint = None;
+
                 if let Some(message) = self.conversation.messages.last_mut()
                     && message.streaming
                     && matches!(message.role, MessageRole::Assistant)
@@ -674,6 +680,9 @@ impl App {
                 if !self.is_active_request(request_id) {
                     return Ok(());
                 }
+
+                // Clear retry hint — a successful retry resumes tool calls
+                self.retrying_hint = None;
 
                 if let Some(message) = self.conversation.messages.last_mut()
                     && message.streaming
@@ -708,7 +717,9 @@ impl App {
                     return Ok(());
                 }
 
-                self.retrying_hint = Some((attempt, max_attempts, reason, retry_after_secs));
+                let deadline = Instant::now()
+                    + Duration::from_secs(retry_after_secs.unwrap_or(0) as u64);
+                self.retrying_hint = Some((attempt, max_attempts, reason, deadline));
             }
             BackendEvent::Failed {
                 session_id: _,
