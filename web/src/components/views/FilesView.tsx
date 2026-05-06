@@ -1,9 +1,10 @@
-import { Search, FolderTree, RotateCw } from "lucide-react";
+import { Search, FolderTree, RotateCw, Plus, File, Folder } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { FileTree } from "./FileTree";
 import { CodeViewer } from "./CodeViewer";
 import { useFileStore } from "../../stores/useFileStore";
 import { api } from "../../api/client";
+import { CreateItemDialog } from "../ui/CreateItemDialog";
 
 export function FilesView() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -11,9 +12,14 @@ export function FilesView() {
     { path: string; display: string }[]
   >([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [showCreateMenu, setShowCreateMenu] = useState(false);
+  const [createType, setCreateType] = useState<"file" | "directory" | null>(
+    null,
+  );
   const rootLoaded = useFileStore((s) => s.rootLoaded);
   const loadRoot = useFileStore((s) => s.loadRoot);
   const rootLoading = useFileStore((s) => s.rootLoading);
+  const createFile = useFileStore((s) => s.createFile);
 
   // Load root on mount
   useEffect(() => {
@@ -52,6 +58,12 @@ export function FilesView() {
   const handleRefresh = useCallback(() => {
     loadRoot();
   }, [loadRoot]);
+
+  const handleCreateSubmit = (name: string) => {
+    if (!createType) return;
+    createFile(name, createType).catch(() => {});
+    setCreateType(null);
+  };
 
   return (
     <div className="flex h-full">
@@ -96,9 +108,29 @@ export function FilesView() {
           )}
         </div>
 
-        {/* Footer */}
+        {/* Footer with new file/dir buttons */}
         <div className="flex items-center justify-between border-t border-neutral-200 px-2 py-1.5 dark:border-neutral-800">
-          <span className="text-[10px] text-neutral-400">Files</span>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-neutral-400">Files</span>
+            {/* New file button */}
+            <button
+              onClick={() => setCreateType("file")}
+              className="rounded p-1 text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              aria-label="New file"
+              title="New file"
+            >
+              <File className="h-3 w-3" />
+            </button>
+            {/* New directory button */}
+            <button
+              onClick={() => setCreateType("directory")}
+              className="rounded p-1 text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              aria-label="New directory"
+              title="New directory"
+            >
+              <Folder className="h-3 w-3" />
+            </button>
+          </div>
           <button
             onClick={handleRefresh}
             className="rounded p-1 text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
@@ -114,6 +146,16 @@ export function FilesView() {
       <div className="flex-1 overflow-hidden">
         <CodeViewer />
       </div>
+
+      {/* Create dialog */}
+      {createType && (
+        <CreateItemDialog
+          parentPath=""
+          type={createType}
+          onSubmit={handleCreateSubmit}
+          onClose={() => setCreateType(null)}
+        />
+      )}
     </div>
   );
 }

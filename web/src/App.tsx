@@ -13,6 +13,7 @@ import { FilesView } from "./components/views/FilesView";
 import { SettingsView } from "./components/views/SettingsView";
 import { TerminalView } from "./components/views/TerminalView";
 import { GitView } from "./components/views/GitView";
+import { ToastContainer } from "./components/ui/ToastContainer";
 
 function App() {
   const [isLoading, setIsLoading] = useState(true);
@@ -308,6 +309,7 @@ function App() {
           )}
         </div>
       </div>
+      <ToastContainer />
     </>
   );
 }

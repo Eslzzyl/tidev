@@ -24,6 +24,11 @@ import type {
   ListDirResponse,
   ReadFileResponse,
   WriteFileResponse,
+  CreateItemRequest,
+  CreateItemResponse,
+  RenameItemRequest,
+  RenameItemResponse,
+  RemoveItemResponse,
   GitStatusResponse,
   GitBranchResponse,
   GitLogResponse,
@@ -225,6 +230,24 @@ export const api = {
     fetchJson<WriteFileResponse>(`${API_BASE}/fs/write`, {
       method: "POST",
       body: JSON.stringify({ path, content }),
+    }),
+
+  createItem: (path: string, type: "file" | "directory") =>
+    fetchJson<CreateItemResponse>(`${API_BASE}/fs/create`, {
+      method: "POST",
+      body: JSON.stringify({ path, type }),
+    }),
+
+  renameItem: (path: string, newPath: string) =>
+    fetchJson<RenameItemResponse>(`${API_BASE}/fs/rename`, {
+      method: "POST",
+      body: JSON.stringify({ path, new_path: newPath }),
+    }),
+
+  removeItem: (path: string) =>
+    fetchJson<RemoveItemResponse>(`${API_BASE}/fs/remove`, {
+      method: "DELETE",
+      body: JSON.stringify({ path }),
     }),
 
   // Terminal

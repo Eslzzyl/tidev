@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { DirectoryEntry } from "../types/api";
 import { api } from "../api/client";
+import { toast } from "./useToastStore";
 
 export interface TreeNode {
   name: string;
@@ -41,6 +42,14 @@ export interface FileStore {
   updateFileContent: (content: string) => void;
   /** Save the currently open file */
   saveFile: () => Promise<void>;
+  /** Create a new file or directory */
+  createFile: (path: string, type: "file" | "directory") => Promise<void>;
+  /** Rename/move a file or directory */
+  renameFile: (path: string, newPath: string) => Promise<void>;
+  /** Delete a file or empty directory */
+  deleteFile: (path: string) => Promise<void>;
+  /** Refresh the file tree root */
+  refreshTree: () => Promise<void>;
 }
 
 function buildTreeNodes(entries: DirectoryEntry[]): TreeNode[] {
@@ -184,6 +193,81 @@ export const useFileStore = create<FileStore>((set, get) => ({
       set({ isSaving: false });
       console.error("Failed to save file:", err);
       throw err;
+    }
+  },
+
+  createFile: async (path, type) => {
+    try {
+      await api.createItem(path, type);
+      toast.success(
+        type === "file" ? `File created: ${path}` : `Directory created: ${path}`,
+      );
+      // Refresh to show new item
+      get().refreshTree();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      toast.error(`Failed to create: ${msg}`);
+      throw err;
+    }
+  },
+
+  renameFile: async (path, newPath) => {
+    try {
+      await api.renameItem(path, newPath);
+      toast.success(`Renamed to: ${newPath}`);
+      // If the renamed file was open, close it (path changed)
+      const state = get();
+      if (state.openFilePath === path) {
+        set({
+          openFilePath: null,
+          openFileContent: null,
+          openFileLanguage: null,
+          isDirty: false,
+          originalContent: null,
+        });
+      }
+      get().refreshTree();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      toast.error(`Failed to rename: ${msg}`);
+      throw err;
+    }
+  },
+
+  deleteFile: async (path) => {
+    try {
+      await api.removeItem(path);
+      toast.success(`Deleted: ${path}`);
+      // Close if the deleted file was open
+      const state = get();
+      if (state.openFilePath === path) {
+        set({
+          openFilePath: null,
+          openFileContent: null,
+          openFileLanguage: null,
+          isDirty: false,
+          originalContent: null,
+        });
+      }
+      get().refreshTree();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      toast.error(`Failed to delete: ${msg}`);
+      throw err;
+    }
+  },
+
+  refreshTree: async () => {
+    try {
+      const result = await api.listDirectory("");
+      set({
+        rootChildren: buildTreeNodes(result.entries),
+        rootLoaded: true,
+        rootPath: result.directory,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      set({ error: msg });
     }
   },
 }));

@@ -256,3 +256,27 @@ export interface WriteFileResponse {
   path: string;
   size: number;
 }
+
+export interface CreateItemRequest {
+  path: string;
+  type: "file" | "directory";
+}
+
+export interface CreateItemResponse {
+  path: string;
+  type: "file" | "directory";
+}
+
+export interface RenameItemRequest {
+  path: string;
+  new_path: string;
+}
+
+export interface RenameItemResponse {
+  path: string;
+  new_path: string;
+}
+
+export interface RemoveItemResponse {
+  path: string;
+}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ChevronRight,
   ChevronDown,
@@ -10,8 +10,14 @@ import {
   Code,
   Image,
   Terminal,
+  Plus,
+  Copy,
 } from "lucide-react";
 import { useFileStore, type TreeNode } from "../../stores/useFileStore";
+import { ContextMenu, type ContextMenuItem } from "../ui/ContextMenu";
+import { CreateItemDialog } from "../ui/CreateItemDialog";
+import { RenameDialog } from "../ui/RenameDialog";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 
 const fileIcons: Record<string, React.ReactNode> = {
   rs: <Code className="h-4 w-4 text-orange-500" />,
@@ -38,10 +44,17 @@ const fileIcons: Record<string, React.ReactNode> = {
 };
 
 function getFileIcon(name: string, isDirectory: boolean): React.ReactNode {
-  if (isDirectory) return null; // handled by parent
+  if (isDirectory) return null;
   const ext = name.includes(".") ? name.split(".").pop()?.toLowerCase() || "" : "";
   return fileIcons[ext] || <File className="h-4 w-4 text-neutral-400" />;
 }
+
+// Dialog state
+type DialogState =
+  | { type: "create"; parentPath: string; itemType: "file" | "directory" }
+  | { type: "rename"; nodePath: string; nodeName: string }
+  | { type: "delete"; nodePath: string; nodeName: string; isDir: boolean }
+  | null;
 
 export function FileTree() {
   const rootChildren = useFileStore((s) => s.rootChildren);
@@ -53,6 +66,17 @@ export function FileTree() {
   const selectFile = useFileStore((s) => s.selectFile);
   const openFile = useFileStore((s) => s.openFile);
   const toggleExpand = useFileStore((s) => s.toggleExpand);
+  const createFile = useFileStore((s) => s.createFile);
+  const renameFile = useFileStore((s) => s.renameFile);
+  const deleteFile = useFileStore((s) => s.deleteFile);
+  const refreshTree = useFileStore((s) => s.refreshTree);
+
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    node: TreeNode | null;
+  } | null>(null);
+  const [dialog, setDialog] = useState<DialogState>(null);
 
   useEffect(() => {
     if (!rootLoaded && !rootLoading) {
@@ -71,6 +95,97 @@ export function FileTree() {
     },
     [toggleExpand, selectFile, openFile],
   );
+
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent, node: TreeNode) => {
+      e.preventDefault();
+      setContextMenu({ x: e.clientX, y: e.clientY, node });
+    },
+    [],
+  );
+
+  const buildContextMenuItems = (node: TreeNode): ContextMenuItem[] => {
+    const items: ContextMenuItem[] = [];
+
+    items.push({
+      label: "Copy Path",
+      icon: <Copy className="h-3.5 w-3.5" />,
+      onClick: () => {
+        navigator.clipboard.writeText(node.path);
+      },
+    });
+
+    items.push({
+      label: "New File",
+      icon: <File className="h-3.5 w-3.5" />,
+      onClick: () => {
+        const parentPath = node.isDirectory ? node.path : getParentPath(node.path);
+        setDialog({ type: "create", parentPath, itemType: "file" });
+      },
+    });
+
+    items.push({
+      label: "New Directory",
+      icon: <Folder className="h-3.5 w-3.5" />,
+      onClick: () => {
+        const parentPath = node.isDirectory ? node.path : getParentPath(node.path);
+        setDialog({ type: "create", parentPath, itemType: "directory" });
+      },
+    });
+
+    items.push({
+      label: "Rename",
+      onClick: () => {
+        setDialog({
+          type: "rename",
+          nodePath: node.path,
+          nodeName: node.name,
+        });
+      },
+    });
+
+    items.push({
+      label: "Delete",
+      danger: true,
+      onClick: () => {
+        setDialog({
+          type: "delete",
+          nodePath: node.path,
+          nodeName: node.name,
+          isDir: node.isDirectory,
+        });
+      },
+    });
+
+    return items;
+  };
+
+  const handleCreateSubmit = (name: string) => {
+    if (!dialog || dialog.type !== "create") return;
+    const fullPath = dialog.parentPath
+      ? `${dialog.parentPath}/${name}`
+      : name;
+    createFile(fullPath, dialog.itemType).catch(() => {});
+    setDialog(null);
+  };
+
+  const handleRenameSubmit = (newName: string) => {
+    if (!dialog || dialog.type !== "rename") return;
+    const parentPath = getParentPath(dialog.nodePath);
+    const newPath = parentPath ? `${parentPath}/${newName}` : newName;
+    renameFile(dialog.nodePath, newPath).catch(() => {});
+    setDialog(null);
+  };
+
+  const handleDeleteConfirm = () => {
+    if (!dialog || dialog.type !== "delete") return;
+    deleteFile(dialog.nodePath).catch(() => {});
+    setDialog(null);
+  };
+
+  const handleRootCreate = (type: "file" | "directory") => {
+    setDialog({ type: "create", parentPath: "", itemType: type });
+  };
 
   if (rootLoading && !rootLoaded) {
     return (
@@ -103,18 +218,64 @@ export function FileTree() {
   }
 
   return (
-    <div className="select-none text-sm">
-      {rootChildren.map((node) => (
-        <TreeNodeItem
-          key={node.path}
-          node={node}
-          depth={0}
-          selectedPath={selectedPath}
-          onNodeClick={handleNodeClick}
-          onToggleExpand={toggleExpand}
+    <>
+      <div className="select-none text-sm" onContextMenu={(e) => e.preventDefault()}>
+        {rootChildren.map((node) => (
+          <TreeNodeItem
+            key={node.path}
+            node={node}
+            depth={0}
+            selectedPath={selectedPath}
+            onNodeClick={handleNodeClick}
+            onToggleExpand={toggleExpand}
+            onContextMenu={handleContextMenu}
+          />
+        ))}
+      </div>
+
+      {/* Context menu */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={buildContextMenuItems(contextMenu.node!)}
+          onClose={() => setContextMenu(null)}
         />
-      ))}
-    </div>
+      )}
+
+      {/* Create dialog */}
+      {dialog?.type === "create" && (
+        <CreateItemDialog
+          parentPath={dialog.parentPath}
+          type={dialog.itemType}
+          onSubmit={handleCreateSubmit}
+          onClose={() => setDialog(null)}
+        />
+      )}
+
+      {/* Rename dialog */}
+      {dialog?.type === "rename" && (
+        <RenameDialog
+          currentName={dialog.nodeName}
+          onSubmit={handleRenameSubmit}
+          onClose={() => setDialog(null)}
+        />
+      )}
+
+      {/* Delete confirm dialog */}
+      {dialog?.type === "delete" && (
+        <ConfirmDialog
+          title="Delete"
+          message={`Are you sure you want to delete "${dialog.nodeName}"?${
+            dialog.isDir ? " The directory must be empty." : ""
+          }`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => setDialog(null)}
+        />
+      )}
+    </>
   );
 }
 
@@ -124,6 +285,7 @@ interface TreeNodeItemProps {
   selectedPath: string | null;
   onNodeClick: (node: TreeNode) => void;
   onToggleExpand: (path: string) => Promise<void>;
+  onContextMenu: (e: React.MouseEvent, node: TreeNode) => void;
 }
 
 function TreeNodeItem({
@@ -132,6 +294,7 @@ function TreeNodeItem({
   selectedPath,
   onNodeClick,
   onToggleExpand,
+  onContextMenu,
 }: TreeNodeItemProps) {
   const isSelected = selectedPath === node.path;
 
@@ -139,6 +302,7 @@ function TreeNodeItem({
     <div>
       <button
         onClick={() => onNodeClick(node)}
+        onContextMenu={(e) => onContextMenu(e, node)}
         className={`flex w-full items-center gap-1 px-2 py-1 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
           isSelected
             ? "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
@@ -183,6 +347,7 @@ function TreeNodeItem({
                 selectedPath={selectedPath}
                 onNodeClick={onNodeClick}
                 onToggleExpand={onToggleExpand}
+                onContextMenu={onContextMenu}
               />
             ))
           ) : (
@@ -197,4 +362,9 @@ function TreeNodeItem({
       )}
     </div>
   );
+}
+
+function getParentPath(path: string): string {
+  const idx = path.lastIndexOf("/");
+  return idx >= 0 ? path.substring(0, idx) : "";
 }

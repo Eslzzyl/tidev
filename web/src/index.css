@@ -435,3 +435,15 @@ body {
 .dark .markdown-body hr {
   border-color: #525252;
 }
+
+/* Toast slide-in animation */
+@keyframes toast-slide-in {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
