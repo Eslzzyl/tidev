@@ -59,64 +59,41 @@ pub(crate) enum BoundaryDecision {
 }
 
 /// Extract paths from tool call arguments that might be outside the workspace.
-/// Returns the first path that would violate workspace boundaries, or None if all paths are valid.
+/// Returns the first resolved (normalized) path that would violate workspace
+/// boundaries, or None if all paths are valid. The returned path is the
+/// resolved absolute path, so it can be used as a consistent key for
+/// permission lookups regardless of the path representation used by the tool.
 pub(crate) fn extract_boundary_violation_path(
     workspace_root: &std::path::Path,
     tool_call: &ToolCall,
 ) -> Option<PathBuf> {
     let args: serde_json::Value = serde_json::from_str(&tool_call.arguments).ok()?;
 
-    // List of tools that have path arguments
     let canonical_name = crate::tooling::canonical_tool_name(&tool_call.name)?;
 
-    match canonical_name {
-        "read" | "write" | "edit" | "list" | "glob" => {
-            if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
-                let path_buf = std::path::Path::new(path);
-                if crate::tooling::builtin::utils::is_path_outside_workspace(
-                    workspace_root,
-                    path_buf,
-                ) {
-                    return Some(path_buf.to_path_buf());
-                }
-            }
+    let path_buf: PathBuf = match canonical_name {
+        "read" | "write" | "edit" | "list" | "glob" | "grep" => {
+            let path_str = args.get("path")?.as_str()?;
+            PathBuf::from(path_str)
         }
         "apply_patch" => {
-            // For apply_patch, we need to extract the file path from the patch
-            if let Some(patch) = args.get("patch").and_then(|v| v.as_str())
-                && let Some(file_path) = crate::tooling::extract_file_path_from_patch(patch)
-            {
-                let path_buf = std::path::Path::new(&file_path);
-                if crate::tooling::builtin::utils::is_path_outside_workspace(
-                    workspace_root,
-                    path_buf,
-                ) {
-                    return Some(path_buf.to_path_buf());
-                }
-            }
+            let patch = args.get("patch")?.as_str()?;
+            PathBuf::from(crate::tooling::extract_file_path_from_patch(patch)?)
         }
-        "grep" => {
-            if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
-                let path_buf = std::path::Path::new(path);
-                if crate::tooling::builtin::utils::is_path_outside_workspace(
-                    workspace_root,
-                    path_buf,
-                ) {
-                    return Some(path_buf.to_path_buf());
-                }
-            }
-        }
-        "bash" => {
-            // For bash, we don't check here - the RTK system handles security
-            return None;
-        }
-        _ => {
-            // For other tools (including MCP tools), we don't check paths
-            return None;
-        }
+        "bash" => return None,
+        _ => return None,
+    };
+
+    if !crate::tooling::builtin::utils::is_path_outside_workspace(workspace_root, &path_buf) {
+        return None;
     }
 
-    None
+    // Return the resolved path for consistent permission key.
+    // Fall back to the raw path if resolution fails.
+    Some(
+        crate::tooling::builtin::utils::resolve_path_unchecked(workspace_root, &path_buf)
+            .unwrap_or(path_buf),
+    )
 }
 
 impl App {

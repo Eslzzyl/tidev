@@ -452,6 +452,7 @@ impl App {
                 tool_call: tc,
                 rejection: Some(result),
                 child_session_id: None,
+                allow_outside: false,
             })
             .collect();
         for tc in ready_calls.drain(..) {
@@ -460,10 +461,15 @@ impl App {
             } else {
                 None
             };
+            let allow_outside = self
+                .workspace_boundary_approved
+                .remove(&tc.id)
+                .unwrap_or(false);
             approvals.push(ApprovedTool {
                 tool_call: tc,
                 rejection: None,
                 child_session_id,
+                allow_outside,
             });
         }
 

@@ -70,6 +70,9 @@ pub struct ApprovedTool {
     /// When set, the runtime will use this ID instead of generating a random one,
     /// allowing the TUI to track and navigate to the child session accurately.
     pub child_session_id: Option<uuid::Uuid>,
+    /// Whether this tool call is allowed to access paths outside the workspace.
+    /// Set by the TUI frontend when the user approves a workspace boundary violation.
+    pub allow_outside: bool,
 }
 
 /// Request sent by `run_agent_loop` to the frontend for tool call approval.
@@ -484,7 +487,7 @@ impl AgentRuntime {
         &mut self,
         session_id: uuid::Uuid,
         request_id: u64,
-        tool_calls: &[ToolCall],
+        tool_calls: &[(ToolCall, bool)], // (tool_call, allow_outside)
         mode: SessionMode,
         event_tx: &UnboundedSender<BackendEvent>,
         _parent_model: &crate::config::ActiveModel,
@@ -496,8 +499,8 @@ impl AgentRuntime {
         // ─── Phase 0: Mode-based + confirmation filtering ────────────
         // Reject tools that are not allowed in the current mode, or that
         // need confirmation when auto_approve is off.
-        let mut filtered: Vec<&ToolCall> = Vec::with_capacity(tool_calls.len());
-        for call in tool_calls {
+        let mut filtered: Vec<(&ToolCall, bool)> = Vec::with_capacity(tool_calls.len());
+        for (call, allow_outside) in tool_calls {
             if !self.tools.can_execute(&call.name, mode) {
                 crate::log_info!(
                     "execute_tool_calls: rejecting '{}' — not allowed in {:?} mode",
@@ -532,7 +535,7 @@ impl AgentRuntime {
                 continue;
             }
 
-            filtered.push(call);
+            filtered.push((call, *allow_outside));
         }
 
         // All tools filtered out — return early
@@ -541,13 +544,13 @@ impl AgentRuntime {
         }
 
         // Separate tool calls by execution strategy.
-        let mut read_only: Vec<&ToolCall> = Vec::new();
-        let mut write: Vec<&ToolCall> = Vec::new();
-        for call in &filtered {
+        let mut read_only: Vec<(&ToolCall, bool)> = Vec::new();
+        let mut write: Vec<(&ToolCall, bool)> = Vec::new();
+        for (call, allow) in &filtered {
             if self.tools.is_read_only_call(call) {
-                read_only.push(call);
+                read_only.push((call, *allow));
             } else {
-                write.push(call);
+                write.push((call, *allow));
             }
         }
 
@@ -563,14 +566,14 @@ impl AgentRuntime {
 
             let mut handles: Vec<(ToolCall, tokio::task::JoinHandle<ToolExecutionResult>)> =
                 Vec::with_capacity(read_only.len());
-            for (tool_call, store) in read_only.into_iter().zip(stores) {
+            for ((tool_call, allow_outside), store) in read_only.into_iter().zip(stores) {
                 let handle = self.tools.execute_call_spawned(
                     runtime.clone(),
                     store,
                     session_id,
                     tool_call.clone(),
                     mode,
-                    false,
+                    allow_outside,
                 );
                 handles.push((tool_call.clone(), handle));
             }
@@ -587,7 +590,7 @@ impl AgentRuntime {
         }
 
         // ─── Phase 2: Write tools serially ──────────────────────────────
-        for tool_call in write {
+        for (tool_call, allow_outside) in write {
             let store = {
                 let s = self.store.lock().await;
                 s.clone()
@@ -604,7 +607,7 @@ impl AgentRuntime {
                     session_id,
                     tool_call.clone(),
                     mode,
-                    false,
+                    allow_outside,
                     event_tx.clone(),
                 )
             } else {
@@ -614,7 +617,7 @@ impl AgentRuntime {
                     session_id,
                     tool_call.clone(),
                     mode,
-                    false,
+                    allow_outside,
                 )
             };
             let result = handle.await.unwrap_or_else(|join_err| {
@@ -1029,11 +1032,12 @@ impl AgentRuntime {
                 let summary = format!("Tool: {canonical}");
                 send_status(event_tx, summary, Some(tool_call.clone()), None, None);
 
+                let call_with_allow = [(tool_call.clone(), false)];
                 let result = self
                     .execute_tool_calls(
                         child_session_id,
                         request_sequence,
-                        std::slice::from_ref(tool_call),
+                        &call_with_allow,
                         SessionMode::Build,
                         event_tx,
                         &child_model,
@@ -1245,7 +1249,7 @@ impl AgentRuntime {
             // needs_confirmation) is handled inside execute_tool_calls below.
 
             let mut task_calls: Vec<(ToolCall, Option<uuid::Uuid>)> = Vec::new();
-            let mut other_calls: Vec<ToolCall> = Vec::new();
+            let mut other_calls: Vec<(ToolCall, bool)> = Vec::new();
 
             if let Some(ref perm_tx) = permission_tx {
                 let (resp_tx, resp_rx) = oneshot::channel();
@@ -1270,7 +1274,7 @@ impl AgentRuntime {
                             } else if approved.tool_call.name == "task" {
                                 task_calls.push((approved.tool_call, approved.child_session_id));
                             } else {
-                                other_calls.push(approved.tool_call);
+                                other_calls.push((approved.tool_call, approved.allow_outside));
                             }
                         }
                     }
@@ -1287,7 +1291,7 @@ impl AgentRuntime {
                     if tc.name == "task" {
                         task_calls.push((tc, None));
                     } else {
-                        other_calls.push(tc);
+                        other_calls.push((tc, false));
                     }
                 }
             }
@@ -1994,16 +1998,16 @@ mod tests {
 
         // A write tool (edit) and a read-only tool (list) in plan mode
         let tool_calls = vec![
-            ToolCall {
+            (ToolCall {
                 id: "tc-1".to_string(),
                 name: "edit".to_string(),
                 arguments: r#"{"path":"/nonexistent","old_text":"a","new_text":"b"}"#.to_string(),
-            },
-            ToolCall {
+            }, false),
+            (ToolCall {
                 id: "tc-2".to_string(),
                 name: "list".to_string(),
                 arguments: r#"{"path":"."}"#.to_string(),
-            },
+            }, false),
         ];
 
         let results = agent
@@ -2058,11 +2062,11 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let tool_calls = vec![ToolCall {
+        let tool_calls = vec![(ToolCall {
             id: "tc-1".to_string(),
             name: "list".to_string(),
             arguments: r#"{"path":"."}"#.to_string(),
-        }];
+        }, false)];
 
         let results = agent
             .execute_tool_calls(
@@ -2103,11 +2107,11 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let tool_calls = vec![ToolCall {
+        let tool_calls = vec![(ToolCall {
             id: "tc-persist".to_string(),
             name: "list".to_string(),
             arguments: r#"{"path":"."}"#.to_string(),
-        }];
+        }, false)];
 
         agent
             .execute_tool_calls(
@@ -2160,11 +2164,11 @@ mod tests {
         // and the default PermissionConfig might not mark bash as needing confirmation.
         // Let's use a tool that's guaranteed to need confirmation, or just verify
         // that a basic tool still works.
-        let tool_calls = vec![ToolCall {
+        let tool_calls = vec![(ToolCall {
             id: "tc-bash".to_string(),
             name: "bash".to_string(),
             arguments: r#"{"command":"echo hello"}"#.to_string(),
-        }];
+        }, false)];
 
         // Execute in Build mode — bash may need confirmation
         let results = agent
