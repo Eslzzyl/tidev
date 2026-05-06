@@ -12,10 +12,9 @@
 //! - `POST   /api/git/stash/pop`       — Pop stash
 
 use axum::{
-    Router,
+    Json, Router,
     extract::{Path, Query, State},
     routing::{delete, get, post},
-    Json,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -50,8 +49,7 @@ fn run_git(args: &[&str], cwd: &PathBuf) -> Result<String, String> {
         .map_err(|e| format!("Failed to run git: {e}"))?;
 
     if output.status.success() {
-        String::from_utf8(output.stdout)
-            .map_err(|e| format!("Invalid UTF-8: {e}"))
+        String::from_utf8(output.stdout).map_err(|e| format!("Invalid UTF-8: {e}"))
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
         Err(stderr.trim().to_string())
@@ -166,11 +164,8 @@ async fn git_status(
     };
 
     // Get status
-    let status_output = run_git(
-        &["status", "--porcelain", "-u"],
-        &cwd,
-    )
-    .map_err(crate::web::error::AppError::Internal)?;
+    let status_output = run_git(&["status", "--porcelain", "-u"], &cwd)
+        .map_err(crate::web::error::AppError::Internal)?;
 
     let files: Vec<StatusFile> = status_output
         .lines()
@@ -210,8 +205,15 @@ async fn git_branches(
         .map_err(crate::web::error::AppError::Internal)?;
     let current = current.trim().to_string();
 
-    let output = run_git(&["branch", "--all", "--format=%(refname:short)|%(upstream:short)"], &cwd)
-        .map_err(crate::web::error::AppError::Internal)?;
+    let output = run_git(
+        &[
+            "branch",
+            "--all",
+            "--format=%(refname:short)|%(upstream:short)",
+        ],
+        &cwd,
+    )
+    .map_err(crate::web::error::AppError::Internal)?;
 
     let branches: Vec<BranchItem> = output
         .lines()
@@ -219,7 +221,10 @@ async fn git_branches(
         .map(|line| {
             let parts: Vec<&str> = line.split('|').collect();
             let name = parts[0].to_string();
-            let remote = parts.get(1).filter(|s| !s.is_empty()).map(|s| s.to_string());
+            let remote = parts
+                .get(1)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
             let is_current = name == current || name.strip_prefix("* ").unwrap_or(&name) == current;
             BranchItem {
                 name: name.trim_start_matches("* ").to_string(),
@@ -238,14 +243,13 @@ async fn git_log(
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<GitLogResponse>, crate::web::error::AppError> {
     let cwd = workspace(&state).clone();
-    let count = params.get("count").and_then(|c| c.parse().ok()).unwrap_or(20);
+    let count = params
+        .get("count")
+        .and_then(|c| c.parse().ok())
+        .unwrap_or(20);
 
     let output = run_git(
-        &[
-            "log",
-            &format!("-{}", count),
-            "--format=%H|%an|%ai|%s",
-        ],
+        &["log", &format!("-{}", count), "--format=%H|%an|%ai|%s"],
         &cwd,
     )
     .map_err(crate::web::error::AppError::Internal)?;
@@ -278,8 +282,7 @@ async fn git_commit(
 ) -> Result<Json<MessageResponse>, crate::web::error::AppError> {
     let cwd = workspace(&state).clone();
 
-    run_git(&["add", "-A"], &cwd)
-        .map_err(crate::web::error::AppError::Internal)?;
+    run_git(&["add", "-A"], &cwd).map_err(crate::web::error::AppError::Internal)?;
 
     run_git(&["commit", "-m", &req.message], &cwd)
         .map_err(crate::web::error::AppError::Internal)?;
@@ -297,12 +300,10 @@ async fn git_branch_create(
 ) -> Result<Json<MessageResponse>, crate::web::error::AppError> {
     let cwd = workspace(&state).clone();
 
-    run_git(&["branch", &req.name], &cwd)
-        .map_err(crate::web::error::AppError::Internal)?;
+    run_git(&["branch", &req.name], &cwd).map_err(crate::web::error::AppError::Internal)?;
 
     if req.checkout {
-        run_git(&["checkout", &req.name], &cwd)
-            .map_err(crate::web::error::AppError::Internal)?;
+        run_git(&["checkout", &req.name], &cwd).map_err(crate::web::error::AppError::Internal)?;
     }
 
     Ok(Json(MessageResponse {
@@ -318,8 +319,7 @@ async fn git_branch_delete(
 ) -> Result<Json<MessageResponse>, crate::web::error::AppError> {
     let cwd = workspace(&state).clone();
 
-    run_git(&["branch", "-D", &name], &cwd)
-        .map_err(crate::web::error::AppError::Internal)?;
+    run_git(&["branch", "-D", &name], &cwd).map_err(crate::web::error::AppError::Internal)?;
 
     Ok(Json(MessageResponse {
         success: true,
@@ -343,8 +343,7 @@ async fn git_push(
     args.push(remote);
     args.push(branch);
 
-    run_git(&args, &cwd)
-        .map_err(crate::web::error::AppError::Internal)?;
+    run_git(&args, &cwd).map_err(crate::web::error::AppError::Internal)?;
 
     Ok(Json(MessageResponse {
         success: true,
@@ -361,8 +360,7 @@ async fn git_pull(
     let remote = req.remote.as_deref().unwrap_or("origin");
     let branch = req.branch.as_deref().unwrap_or("HEAD");
 
-    run_git(&["pull", remote, branch], &cwd)
-        .map_err(crate::web::error::AppError::Internal)?;
+    run_git(&["pull", remote, branch], &cwd).map_err(crate::web::error::AppError::Internal)?;
 
     Ok(Json(MessageResponse {
         success: true,
@@ -381,8 +379,7 @@ async fn git_stash(
         run_git(&["stash", "push", "-m", msg], &cwd)
             .map_err(crate::web::error::AppError::Internal)?;
     } else {
-        run_git(&["stash", "push"], &cwd)
-            .map_err(crate::web::error::AppError::Internal)?;
+        run_git(&["stash", "push"], &cwd).map_err(crate::web::error::AppError::Internal)?;
     }
 
     Ok(Json(MessageResponse {
@@ -397,8 +394,7 @@ async fn git_stash_pop(
 ) -> Result<Json<MessageResponse>, crate::web::error::AppError> {
     let cwd = workspace(&state).clone();
 
-    run_git(&["stash", "pop"], &cwd)
-        .map_err(crate::web::error::AppError::Internal)?;
+    run_git(&["stash", "pop"], &cwd).map_err(crate::web::error::AppError::Internal)?;
 
     Ok(Json(MessageResponse {
         success: true,

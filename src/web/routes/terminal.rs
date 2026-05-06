@@ -10,17 +10,16 @@
 use std::convert::Infallible;
 
 use axum::{
-    Router,
+    Json, Router,
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         Path, Query, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::{
-        sse::{Event, Sse},
         IntoResponse,
+        sse::{Event, Sse},
     },
     routing::{delete, get, post},
-    Json,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -52,7 +51,6 @@ struct StartRequest {
     cols: Option<u16>,
     rows: Option<u16>,
 }
-
 
 #[derive(Deserialize)]
 struct InputRequest {
@@ -113,9 +111,7 @@ async fn terminal_input(
     Json(req): Json<InputRequest>,
 ) -> Result<(), crate::web::error::AppError> {
     let session_id = Uuid::parse_str(&req.session_id)
-        .map_err(|e| {
-            crate::web::error::AppError::BadRequest(format!("Invalid session_id: {e}"))
-        })?;
+        .map_err(|e| crate::web::error::AppError::BadRequest(format!("Invalid session_id: {e}")))?;
 
     state
         .terminal_manager
@@ -131,9 +127,7 @@ async fn terminal_resize(
     Json(req): Json<ResizeRequest>,
 ) -> Result<(), crate::web::error::AppError> {
     let session_id = Uuid::parse_str(&req.session_id)
-        .map_err(|e| {
-            crate::web::error::AppError::BadRequest(format!("Invalid session_id: {e}"))
-        })?;
+        .map_err(|e| crate::web::error::AppError::BadRequest(format!("Invalid session_id: {e}")))?;
 
     state
         .terminal_manager
@@ -149,10 +143,12 @@ async fn terminal_resize(
 async fn terminal_events(
     State(state): State<AppState>,
     Query(query): Query<EventsQuery>,
-) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, crate::web::error::AppError> {
-    let session_id = Uuid::parse_str(&query.session_id).map_err(|e| {
-        crate::web::error::AppError::BadRequest(format!("Invalid session_id: {e}"))
-    })?;
+) -> Result<
+    Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>,
+    crate::web::error::AppError,
+> {
+    let session_id = Uuid::parse_str(&query.session_id)
+        .map_err(|e| crate::web::error::AppError::BadRequest(format!("Invalid session_id: {e}")))?;
 
     let cancel_token = state.cancel_token.clone();
     let mut rx = state.terminal_tx.subscribe();
@@ -164,9 +160,7 @@ async fn terminal_events(
         Vec::new()
     } else {
         let text = String::from_utf8_lossy(&buf).to_string();
-        vec![Ok(Event::default()
-            .event("terminal.output")
-            .data(text))]
+        vec![Ok(Event::default().event("terminal.output").data(text))]
     };
 
     let stream = async_stream::stream! {
@@ -237,12 +231,7 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {
 
     // Wait for the bind message to get the session_id.
     let session_id = loop {
-        let msg = match tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            ws.recv(),
-        )
-        .await
-        {
+        let msg = match tokio::time::timeout(std::time::Duration::from_secs(10), ws.recv()).await {
             Ok(Some(Ok(msg))) => msg,
             Ok(Some(Err(e))) => {
                 crate::log_error!("terminal WS recv error before bind: {e}");
@@ -280,9 +269,7 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {
         }
 
         // Send OK
-        let _ = ws
-            .send(Message::Text("\x01{\"type\":\"ok\"}".into()))
-            .await;
+        let _ = ws.send(Message::Text("\x01{\"type\":\"ok\"}".into())).await;
         break sid;
     };
 
@@ -382,18 +369,19 @@ async fn handle_ws_message(
             // Check for control frames (starting with 0x01 byte)
             if data.first() == Some(&CONTROL_TAG) {
                 if let Ok(rest) = std::str::from_utf8(&data[1..])
-                    && let Ok(ctrl) = serde_json::from_str::<WsClientMessage>(rest) {
-                        match ctrl {
-                            WsClientMessage::Resize { cols, rows } => {
-                                let _ = terminal_manager.resize(session_id, cols, rows).await;
-                            }
-                            WsClientMessage::Bind { .. } => {
-                                let _ = output_tx
-                                    .send(Message::Text("\x01{\"type\":\"ok\"}".into()))
-                                    .await;
-                            }
+                    && let Ok(ctrl) = serde_json::from_str::<WsClientMessage>(rest)
+                {
+                    match ctrl {
+                        WsClientMessage::Resize { cols, rows } => {
+                            let _ = terminal_manager.resize(session_id, cols, rows).await;
+                        }
+                        WsClientMessage::Bind { .. } => {
+                            let _ = output_tx
+                                .send(Message::Text("\x01{\"type\":\"ok\"}".into()))
+                                .await;
                         }
                     }
+                }
                 return;
             }
 
@@ -406,18 +394,19 @@ async fn handle_ws_message(
             // Check for control frames (starting with 0x01 byte)
             if data.first() == Some(&CONTROL_TAG) {
                 if let Ok(rest) = std::str::from_utf8(&data[1..])
-                    && let Ok(ctrl) = serde_json::from_str::<WsClientMessage>(rest) {
-                        match ctrl {
-                            WsClientMessage::Resize { cols, rows } => {
-                                let _ = terminal_manager.resize(session_id, cols, rows).await;
-                            }
-                            WsClientMessage::Bind { .. } => {
-                                let _ = output_tx
-                                    .send(Message::Text("\x01{\"type\":\"ok\"}".into()))
-                                    .await;
-                            }
+                    && let Ok(ctrl) = serde_json::from_str::<WsClientMessage>(rest)
+                {
+                    match ctrl {
+                        WsClientMessage::Resize { cols, rows } => {
+                            let _ = terminal_manager.resize(session_id, cols, rows).await;
+                        }
+                        WsClientMessage::Bind { .. } => {
+                            let _ = output_tx
+                                .send(Message::Text("\x01{\"type\":\"ok\"}".into()))
+                                .await;
                         }
                     }
+                }
                 return;
             }
 
@@ -426,9 +415,7 @@ async fn handle_ws_message(
         }
         Message::Close(_) => {}
         Message::Ping(data) => {
-            let _ = output_tx
-                .send(Message::Pong(data.clone()))
-                .await;
+            let _ = output_tx.send(Message::Pong(data.clone())).await;
         }
         Message::Pong(_) => {}
     }

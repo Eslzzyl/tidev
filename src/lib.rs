@@ -25,8 +25,8 @@ pub mod tui;
 pub mod utils;
 pub mod web;
 
-use clap::Parser;
 use anyhow::Context;
+use clap::Parser;
 
 #[derive(Parser, Debug)]
 #[command(name = "tidev", version, about = "TiDev")]
@@ -91,7 +91,9 @@ pub fn run() -> anyhow::Result<()> {
             output,
         }) => {
             if session.is_empty() && !all {
-                anyhow::bail!("Please specify at least one --session UUID or --all to export all sessions");
+                anyhow::bail!(
+                    "Please specify at least one --session UUID or --all to export all sessions"
+                );
             }
             let paths = crate::config::ConfigPaths::discover()?;
             let store = storage::SessionStore::open(paths.database_file)?;
@@ -117,7 +119,11 @@ pub fn run() -> anyhow::Result<()> {
             }
 
             store.export_to_sqlite(&session_ids, &output)?;
-            eprintln!("Exported {} session(s) to {}", session_ids.len(), output.display());
+            eprintln!(
+                "Exported {} session(s) to {}",
+                session_ids.len(),
+                output.display()
+            );
             Ok(())
         }
     }

@@ -103,9 +103,9 @@ pub async fn list_directory(
     let directory = target.to_string_lossy().to_string();
 
     let mut entries = Vec::new();
-    let mut read_dir = fs::read_dir(&target).await.map_err(|e| {
-        AppError::NotFound(format!("Directory not found: {}", e))
-    })?;
+    let mut read_dir = fs::read_dir(&target)
+        .await
+        .map_err(|e| AppError::NotFound(format!("Directory not found: {}", e)))?;
 
     while let Ok(Some(entry)) = read_dir.next_entry().await {
         let name = entry.file_name().to_string_lossy().to_string();
@@ -113,7 +113,9 @@ pub async fn list_directory(
         if name.starts_with('.') {
             continue;
         }
-        let rel_path = entry.path().strip_prefix(&state.workspace_root)
+        let rel_path = entry
+            .path()
+            .strip_prefix(&state.workspace_root)
             .unwrap_or(&entry.path())
             .to_string_lossy()
             .to_string();
@@ -123,10 +125,14 @@ pub async fn list_directory(
             name,
             path: rel_path,
             is_directory: entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false),
-            is_symlink: entry.file_type().await.map(|t| t.is_symlink()).unwrap_or(false),
-            size: metadata.as_ref().and_then(|m| {
-                if m.is_file() { Some(m.len()) } else { None }
-            }),
+            is_symlink: entry
+                .file_type()
+                .await
+                .map(|t| t.is_symlink())
+                .unwrap_or(false),
+            size: metadata
+                .as_ref()
+                .and_then(|m| if m.is_file() { Some(m.len()) } else { None }),
             modified: metadata.and_then(|m| {
                 m.modified().ok().map(|t| {
                     let dt: chrono::DateTime<chrono::Local> = t.into();
@@ -162,14 +168,12 @@ pub async fn read_file(
         ));
     }
 
-    let metadata = fs::metadata(&target).await.map_err(|e| {
-        AppError::NotFound(format!("File not found: {}", e))
-    })?;
+    let metadata = fs::metadata(&target)
+        .await
+        .map_err(|e| AppError::NotFound(format!("File not found: {}", e)))?;
 
     if !metadata.is_file() {
-        return Err(AppError::BadRequest(
-            "Path is not a file".to_string(),
-        ));
+        return Err(AppError::BadRequest("Path is not a file".to_string()));
     }
 
     // Limit file size to 1MB for safety
@@ -179,9 +183,9 @@ pub async fn read_file(
         ));
     }
 
-    let content = fs::read_to_string(&target).await.map_err(|e| {
-        AppError::BadRequest(format!("Cannot read file: {}", e))
-    })?;
+    let content = fs::read_to_string(&target)
+        .await
+        .map_err(|e| AppError::BadRequest(format!("Cannot read file: {}", e)))?;
 
     let line_count = content.lines().count();
     let language = detect_language(&params.path);
@@ -217,13 +221,13 @@ pub async fn write_file(
     }
 
     // Write the file
-    fs::write(&target, &params.content).await.map_err(|e| {
-        AppError::BadRequest(format!("Failed to write file: {}", e))
-    })?;
+    fs::write(&target, &params.content)
+        .await
+        .map_err(|e| AppError::BadRequest(format!("Failed to write file: {}", e)))?;
 
-    let metadata = fs::metadata(&target).await.map_err(|e| {
-        AppError::NotFound(format!("File not found after write: {}", e))
-    })?;
+    let metadata = fs::metadata(&target)
+        .await
+        .map_err(|e| AppError::NotFound(format!("File not found after write: {}", e)))?;
 
     Ok(Json(WriteFileResponse {
         path: params.path,
@@ -257,17 +261,17 @@ pub async fn create_item(
             if target.exists() {
                 return Err(AppError::BadRequest("File already exists".to_string()));
             }
-            fs::write(&target, "").await.map_err(|e| {
-                AppError::BadRequest(format!("Failed to create file: {}", e))
-            })?;
+            fs::write(&target, "")
+                .await
+                .map_err(|e| AppError::BadRequest(format!("Failed to create file: {}", e)))?;
         }
         "directory" | "dir" => {
             if target.exists() {
                 return Err(AppError::BadRequest("Directory already exists".to_string()));
             }
-            fs::create_dir(&target).await.map_err(|e| {
-                AppError::BadRequest(format!("Failed to create directory: {}", e))
-            })?;
+            fs::create_dir(&target)
+                .await
+                .map_err(|e| AppError::BadRequest(format!("Failed to create directory: {}", e)))?;
         }
         _ => {
             return Err(AppError::BadRequest(format!(
@@ -317,9 +321,9 @@ pub async fn rename_item(
         })?;
     }
 
-    fs::rename(&source, &target).await.map_err(|e| {
-        AppError::BadRequest(format!("Failed to rename: {}", e))
-    })?;
+    fs::rename(&source, &target)
+        .await
+        .map_err(|e| AppError::BadRequest(format!("Failed to rename: {}", e)))?;
 
     Ok(Json(RenameItemResponse {
         path: params.path,
@@ -345,19 +349,22 @@ pub async fn remove_item(
         return Err(AppError::NotFound("Path not found".to_string()));
     }
 
-    let metadata = fs::metadata(&target).await.map_err(|e| {
-        AppError::BadRequest(format!("Cannot access path: {}", e))
-    })?;
+    let metadata = fs::metadata(&target)
+        .await
+        .map_err(|e| AppError::BadRequest(format!("Cannot access path: {}", e)))?;
 
     if metadata.is_dir() {
         // Remove empty directory
         fs::remove_dir(&target).await.map_err(|e| {
-            AppError::BadRequest(format!("Failed to remove directory (may not be empty): {}", e))
+            AppError::BadRequest(format!(
+                "Failed to remove directory (may not be empty): {}",
+                e
+            ))
         })?;
     } else {
-        fs::remove_file(&target).await.map_err(|e| {
-            AppError::BadRequest(format!("Failed to remove file: {}", e))
-        })?;
+        fs::remove_file(&target)
+            .await
+            .map_err(|e| AppError::BadRequest(format!("Failed to remove file: {}", e)))?;
     }
 
     Ok(Json(RemoveItemResponse { path: params.path }))
@@ -388,9 +395,9 @@ pub async fn read_file_base64(
         ));
     }
 
-    let metadata = fs::metadata(&target).await.map_err(|e| {
-        AppError::NotFound(format!("File not found: {}", e))
-    })?;
+    let metadata = fs::metadata(&target)
+        .await
+        .map_err(|e| AppError::NotFound(format!("File not found: {}", e)))?;
 
     if !metadata.is_file() {
         return Err(AppError::BadRequest("Path is not a file".to_string()));
@@ -401,9 +408,9 @@ pub async fn read_file_base64(
         return Err(AppError::BadRequest("File too large (>10MB)".to_string()));
     }
 
-    let bytes = fs::read(&target).await.map_err(|e| {
-        AppError::BadRequest(format!("Cannot read file: {}", e))
-    })?;
+    let bytes = fs::read(&target)
+        .await
+        .map_err(|e| AppError::BadRequest(format!("Cannot read file: {}", e)))?;
 
     let ext = Path::new(&params.path)
         .extension()
@@ -422,10 +429,7 @@ pub async fn read_file_base64(
         _ => "application/octet-stream",
     };
 
-    let data = base64::Engine::encode(
-        &base64::engine::general_purpose::STANDARD,
-        &bytes,
-    );
+    let data = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
 
     Ok(Json(ReadBase64Response {
         path: params.path,
@@ -445,9 +449,9 @@ fn resolve_path(workspace_root: &Path, requested: &str) -> WebResult<PathBuf> {
     };
 
     // Canonicalize to resolve any ".." components
-    let canonical = base.canonicalize().map_err(|e| {
-        AppError::NotFound(format!("Path not found: {}", e))
-    })?;
+    let canonical = base
+        .canonicalize()
+        .map_err(|e| AppError::NotFound(format!("Path not found: {}", e)))?;
 
     // Verify it's still under workspace root
     if !canonical.starts_with(workspace_root) {
@@ -461,21 +465,18 @@ fn resolve_path(workspace_root: &Path, requested: &str) -> WebResult<PathBuf> {
 
 /// Resolve a path for creation (path does not need to exist yet).
 /// Canonicalizes the parent directory to verify it's within workspace.
-fn resolve_path_for_create(
-    workspace_root: &Path,
-    requested: &str,
-) -> WebResult<PathBuf> {
+fn resolve_path_for_create(workspace_root: &Path, requested: &str) -> WebResult<PathBuf> {
     let clean = requested.trim_start_matches('/');
     let target = workspace_root.join(clean);
 
     // Canonicalize the parent directory to resolve ".." components
-    let parent = target.parent().ok_or_else(|| {
-        AppError::BadRequest("Invalid path".to_string())
-    })?;
+    let parent = target
+        .parent()
+        .ok_or_else(|| AppError::BadRequest("Invalid path".to_string()))?;
 
-    let canonical_parent = parent.canonicalize().map_err(|e| {
-        AppError::NotFound(format!("Parent directory not found: {}", e))
-    })?;
+    let canonical_parent = parent
+        .canonicalize()
+        .map_err(|e| AppError::NotFound(format!("Parent directory not found: {}", e)))?;
 
     // Verify parent is within workspace
     if !canonical_parent.starts_with(workspace_root) {
@@ -485,9 +486,9 @@ fn resolve_path_for_create(
     }
 
     // Reconstruct the target path from canonical parent + filename
-    let file_name = target.file_name().ok_or_else(|| {
-        AppError::BadRequest("Invalid path".to_string())
-    })?;
+    let file_name = target
+        .file_name()
+        .ok_or_else(|| AppError::BadRequest("Invalid path".to_string()))?;
 
     Ok(canonical_parent.join(file_name))
 }

@@ -1,7 +1,7 @@
 use ignore::WalkBuilder;
 use notify::{
-    event::ModifyKind, Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode,
-    Watcher,
+    Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
+    event::ModifyKind,
 };
 use rayon::prelude::*;
 use std::collections::HashMap;

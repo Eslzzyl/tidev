@@ -135,8 +135,8 @@ impl RawMessageRow {
     /// Decompress `content`/`reasoning`, parse JSON fields, build `Message`.
     fn into_message(self) -> Result<Message> {
         use crate::config::reasoning::ThinkingLevelType;
-        use crate::session::ToolMetadata;
         use crate::prompts::SessionMode;
+        use crate::session::ToolMetadata;
 
         let content = decompress_text(&self.content);
         let reasoning = match self.reasoning {
@@ -145,15 +145,10 @@ impl RawMessageRow {
         };
         let attachments: Vec<crate::session::MessageAttachment> =
             serde_json::from_str(&self.attachments).unwrap_or_default();
-        let tool_calls: Vec<ToolCall> =
-            serde_json::from_str(&self.tool_calls).unwrap_or_default();
-        let metadata: ToolMetadata =
-            serde_json::from_str(&self.metadata).unwrap_or_default();
-        let mode: Option<SessionMode> =
-            self.mode.and_then(|m| serde_json::from_str(&m).ok());
-        let completed_at = self
-            .completed_at
-            .and_then(|s| parse_datetime(&s).ok());
+        let tool_calls: Vec<ToolCall> = serde_json::from_str(&self.tool_calls).unwrap_or_default();
+        let metadata: ToolMetadata = serde_json::from_str(&self.metadata).unwrap_or_default();
+        let mode: Option<SessionMode> = self.mode.and_then(|m| serde_json::from_str(&m).ok());
+        let completed_at = self.completed_at.and_then(|s| parse_datetime(&s).ok());
         let thinking_level = self
             .thinking_level
             .filter(|s| !s.is_empty())
@@ -219,10 +214,10 @@ impl SessionStore {
         write_conn.pragma_update(None, "journal_mode", "WAL")?;
         write_conn.busy_timeout(Duration::from_secs(5))?;
         // Performance pragmas
-        write_conn.pragma_update(None, "mmap_size", "268435456")?;    // 256MB
-        write_conn.pragma_update(None, "cache_size", "-64000")?;       // 64MB
-        write_conn.pragma_update(None, "synchronous", "NORMAL")?;      // WAL-safe
-        write_conn.pragma_update(None, "temp_store", "MEMORY")?;       // in-memory temp
+        write_conn.pragma_update(None, "mmap_size", "268435456")?; // 256MB
+        write_conn.pragma_update(None, "cache_size", "-64000")?; // 64MB
+        write_conn.pragma_update(None, "synchronous", "NORMAL")?; // WAL-safe
+        write_conn.pragma_update(None, "temp_store", "MEMORY")?; // in-memory temp
 
         // Register zstd_decode(blob) → text for CLI debugging
         write_conn.create_scalar_function(
@@ -760,9 +755,7 @@ impl SessionStore {
         let output = statement
             .query_row(
                 params![session_id.to_string(), message_id.to_string()],
-                |row| {
-                    read_blob_maybe_text(row, 0)
-                },
+                |row| read_blob_maybe_text(row, 0),
             )
             .optional()?;
 
@@ -1525,14 +1518,14 @@ impl SessionStore {
             })?;
         }
 
-        let export_conn = Connection::open(output_path)
-            .with_context(|| format!("failed to create export database {}", output_path.display()))?;
+        let export_conn = Connection::open(output_path).with_context(|| {
+            format!("failed to create export database {}", output_path.display())
+        })?;
         export_conn.execute_batch("PRAGMA foreign_keys = OFF")?;
         export_conn.execute_batch(EXPORT_SCHEMA_SQL)?;
 
         // ── Session ID helpers ────────────────────────────────────────────
-        let session_id_strs: Vec<String> =
-            session_ids.iter().map(|id| id.to_string()).collect();
+        let session_id_strs: Vec<String> = session_ids.iter().map(|id| id.to_string()).collect();
 
         let tx = export_conn.unchecked_transaction()?;
         // 1. meta ── copy all rows
@@ -1582,19 +1575,18 @@ impl SessionStore {
 
         // 3. session_workspaces
         {
-            let mut stmt = self
-                .read_conn
-                .prepare("SELECT session_id, workspace_root FROM session_workspaces WHERE session_id = ?1")?;
+            let mut stmt = self.read_conn.prepare(
+                "SELECT session_id, workspace_root FROM session_workspaces WHERE session_id = ?1",
+            )?;
             let mut insert = tx.prepare(
                 "INSERT OR REPLACE INTO session_workspaces (session_id, workspace_root) VALUES (?1, ?2)",
             )?;
             for sid in &session_id_strs {
-                let row = stmt.query_row(params![sid], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                    ))
-                }).optional()?;
+                let row = stmt
+                    .query_row(params![sid], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })
+                    .optional()?;
                 if let Some((sid, root)) = row {
                     insert.execute(params![sid, root])?;
                 }
@@ -1603,18 +1595,15 @@ impl SessionStore {
 
         // 4. session_instruction_sources
         {
-            let mut stmt = self
-                .read_conn
-                .prepare("SELECT session_id, source FROM session_instruction_sources WHERE session_id = ?1")?;
+            let mut stmt = self.read_conn.prepare(
+                "SELECT session_id, source FROM session_instruction_sources WHERE session_id = ?1",
+            )?;
             let mut insert = tx.prepare(
                 "INSERT OR REPLACE INTO session_instruction_sources (session_id, source) VALUES (?1, ?2)",
             )?;
             for sid in &session_id_strs {
                 let rows = stmt.query_map(params![sid], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                    ))
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                 })?;
                 for row in rows {
                     let (sid, source) = row?;
@@ -1632,14 +1621,16 @@ impl SessionStore {
                 "INSERT OR REPLACE INTO session_reverts (session_id, message_id, redo_snapshot, created_at) VALUES (?1, ?2, ?3, ?4)",
             )?;
             for sid in &session_id_strs {
-                let row = stmt.query_row(params![sid], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, String>(3)?,
-                    ))
-                }).optional()?;
+                let row = stmt
+                    .query_row(params![sid], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, String>(3)?,
+                        ))
+                    })
+                    .optional()?;
                 if let Some((sid, msg_id, redo, created)) = row {
                     insert.execute(params![sid, msg_id, redo, created])?;
                 }
@@ -1660,15 +1651,22 @@ impl SessionStore {
                         .context("failed to serialize attachments")?;
                     let metadata = serde_json::to_string(&msg.metadata)
                         .context("failed to serialize metadata")?;
-                    let mode = msg.mode.as_ref().map(|m| serde_json::to_string(&m).unwrap_or_default());
+                    let mode = msg
+                        .mode
+                        .as_ref()
+                        .map(|m| serde_json::to_string(&m).unwrap_or_default());
                     let thinking_level = msg.thinking_level.as_ref().map(|t| t.to_string());
                     insert.execute(params![
                         msg.id.to_string(),
                         sid.to_string(),
                         msg.role.db_value(),
-                        msg.content,           // plain text, already decompressed
+                        msg.content, // plain text, already decompressed
                         attachments,
-                        if msg.reasoning.is_empty() { None } else { Some(&msg.reasoning) },
+                        if msg.reasoning.is_empty() {
+                            None
+                        } else {
+                            Some(&msg.reasoning)
+                        },
                         tool_calls,
                         msg.tool_call_id,
                         msg.tool_name,
@@ -1711,7 +1709,15 @@ impl SessionStore {
                     let input_json: String = row.get(4)?;
                     let output_text = read_blob_maybe_text(row, 5)?;
                     let created_at: String = row.get(6)?;
-                    Ok((id, session_id, message_id, tool_name, input_json, output_text, created_at))
+                    Ok((
+                        id,
+                        session_id,
+                        message_id,
+                        tool_name,
+                        input_json,
+                        output_text,
+                        created_at,
+                    ))
                 })?;
                 for row in rows {
                     let (id, sid2, msg_id, tname, input, output, created) = row?;
@@ -1850,7 +1856,9 @@ impl SessionStore {
             )?;
             for row in rows {
                 let (id, wr, mt, title, content, tags, src_sid, ca, ua, uc, active) = row?;
-                insert.execute(params![id, wr, mt, title, content, tags, src_sid, ca, ua, uc, active])?;
+                insert.execute(params![
+                    id, wr, mt, title, content, tags, src_sid, ca, ua, uc, active
+                ])?;
             }
         }
 

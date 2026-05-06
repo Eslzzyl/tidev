@@ -193,10 +193,7 @@ impl TerminalManager {
     }
 
     /// Internal helper: close one session. Lock is held by the caller.
-    async fn close_session_inner(
-        sessions: &mut HashMap<Uuid, TerminalSession>,
-        session_id: Uuid,
-    ) {
+    async fn close_session_inner(sessions: &mut HashMap<Uuid, TerminalSession>, session_id: Uuid) {
         if let Some(mut session) = sessions.remove(&session_id) {
             // 1. Drop the writer first. This sends EOT to the slave,
             //    prompting the shell to exit gracefully.

@@ -1998,16 +1998,23 @@ mod tests {
 
         // A write tool (edit) and a read-only tool (list) in plan mode
         let tool_calls = vec![
-            (ToolCall {
-                id: "tc-1".to_string(),
-                name: "edit".to_string(),
-                arguments: r#"{"path":"/nonexistent","old_text":"a","new_text":"b"}"#.to_string(),
-            }, false),
-            (ToolCall {
-                id: "tc-2".to_string(),
-                name: "list".to_string(),
-                arguments: r#"{"path":"."}"#.to_string(),
-            }, false),
+            (
+                ToolCall {
+                    id: "tc-1".to_string(),
+                    name: "edit".to_string(),
+                    arguments: r#"{"path":"/nonexistent","old_text":"a","new_text":"b"}"#
+                        .to_string(),
+                },
+                false,
+            ),
+            (
+                ToolCall {
+                    id: "tc-2".to_string(),
+                    name: "list".to_string(),
+                    arguments: r#"{"path":"."}"#.to_string(),
+                },
+                false,
+            ),
         ];
 
         let results = agent
@@ -2062,11 +2069,14 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let tool_calls = vec![(ToolCall {
-            id: "tc-1".to_string(),
-            name: "list".to_string(),
-            arguments: r#"{"path":"."}"#.to_string(),
-        }, false)];
+        let tool_calls = vec![(
+            ToolCall {
+                id: "tc-1".to_string(),
+                name: "list".to_string(),
+                arguments: r#"{"path":"."}"#.to_string(),
+            },
+            false,
+        )];
 
         let results = agent
             .execute_tool_calls(
@@ -2107,11 +2117,14 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let tool_calls = vec![(ToolCall {
-            id: "tc-persist".to_string(),
-            name: "list".to_string(),
-            arguments: r#"{"path":"."}"#.to_string(),
-        }, false)];
+        let tool_calls = vec![(
+            ToolCall {
+                id: "tc-persist".to_string(),
+                name: "list".to_string(),
+                arguments: r#"{"path":"."}"#.to_string(),
+            },
+            false,
+        )];
 
         agent
             .execute_tool_calls(
@@ -2164,11 +2177,14 @@ mod tests {
         // and the default PermissionConfig might not mark bash as needing confirmation.
         // Let's use a tool that's guaranteed to need confirmation, or just verify
         // that a basic tool still works.
-        let tool_calls = vec![(ToolCall {
-            id: "tc-bash".to_string(),
-            name: "bash".to_string(),
-            arguments: r#"{"command":"echo hello"}"#.to_string(),
-        }, false)];
+        let tool_calls = vec![(
+            ToolCall {
+                id: "tc-bash".to_string(),
+                name: "bash".to_string(),
+                arguments: r#"{"command":"echo hello"}"#.to_string(),
+            },
+            false,
+        )];
 
         // Execute in Build mode — bash may need confirmation
         let results = agent

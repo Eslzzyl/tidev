@@ -948,8 +948,7 @@ impl App {
             (chunks[0], Some(chunks[2]))
         } else if content_area.width > 1 {
             let chunks =
-                Layout::horizontal([Constraint::Min(1), Constraint::Length(1)])
-                    .split(content_area);
+                Layout::horizontal([Constraint::Min(1), Constraint::Length(1)]).split(content_area);
             (chunks[0], Some(chunks[1]))
         } else {
             (content_area, None)
@@ -2741,9 +2740,8 @@ impl App {
             .split(list_content_area);
             (chunks[0], Some(chunks[2]))
         } else if list_content_area.width > 1 {
-            let chunks =
-                Layout::horizontal([Constraint::Min(1), Constraint::Length(1)])
-                    .split(list_content_area);
+            let chunks = Layout::horizontal([Constraint::Min(1), Constraint::Length(1)])
+                .split(list_content_area);
             (chunks[0], Some(chunks[1]))
         } else {
             (list_content_area, None)
@@ -2837,23 +2835,21 @@ impl App {
         );
 
         // Split preview area into content + scrollbar
-        let (preview_content_area, preview_scrollbar_area) =
-            if preview_content_area.width > 2 {
-                let chunks = Layout::horizontal([
-                    Constraint::Min(1),
-                    Constraint::Length(1),
-                    Constraint::Length(1),
-                ])
+        let (preview_content_area, preview_scrollbar_area) = if preview_content_area.width > 2 {
+            let chunks = Layout::horizontal([
+                Constraint::Min(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+            ])
+            .split(preview_content_area);
+            (chunks[0], Some(chunks[2]))
+        } else if preview_content_area.width > 1 {
+            let chunks = Layout::horizontal([Constraint::Min(1), Constraint::Length(1)])
                 .split(preview_content_area);
-                (chunks[0], Some(chunks[2]))
-            } else if preview_content_area.width > 1 {
-                let chunks =
-                    Layout::horizontal([Constraint::Min(1), Constraint::Length(1)])
-                        .split(preview_content_area);
-                (chunks[0], Some(chunks[1]))
-            } else {
-                (preview_content_area, None)
-            };
+            (chunks[0], Some(chunks[1]))
+        } else {
+            (preview_content_area, None)
+        };
 
         if let Some(skill) = panel.selected_skill() {
             // Get rendered skill content from catalog

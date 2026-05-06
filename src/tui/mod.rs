@@ -717,8 +717,8 @@ impl App {
                     return Ok(());
                 }
 
-                let deadline = Instant::now()
-                    + Duration::from_secs(retry_after_secs.unwrap_or(0) as u64);
+                let deadline =
+                    Instant::now() + Duration::from_secs(retry_after_secs.unwrap_or(0) as u64);
                 self.retrying_hint = Some((attempt, max_attempts, reason, deadline));
             }
             BackendEvent::Failed {
@@ -861,7 +861,7 @@ impl App {
                             // each get their own status updates instead of all going
                             // to the first matching execution.
                             execution.request_id == request_id
-                            && execution.child_session_id == child_session_id
+                                && execution.child_session_id == child_session_id
                         })
                 {
                     execution.status = SubagentStatus::from_status_text(&status_text);
