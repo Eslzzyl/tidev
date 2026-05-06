@@ -17,6 +17,7 @@ use axum::{
     Router,
     routing::{delete, get, post},
 };
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 
 use super::state::AppState;
@@ -101,5 +102,6 @@ pub fn create_router(state: AppState, static_config: StaticConfig) -> Router {
     Router::new()
         .nest("/api", api)
         .merge(static_files)
+        .layer(CompressionLayer::new())
         .with_state(state)
 }
