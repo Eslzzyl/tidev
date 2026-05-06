@@ -367,6 +367,12 @@ impl Composer {
             self.history_cursor = None;
             true
         } else {
+            // Clear any stale zero-width selection anchor (e.g. from a mouse
+            // click without drag).  If we don't clear it here, the next
+            // `insert_char` will move the cursor past the anchor and make it
+            // look like a real selection — causing the *next* character to
+            // silently delete the one we just inserted.
+            self.selection_anchor = None;
             false
         }
     }
@@ -432,14 +438,25 @@ impl Composer {
             return;
         }
 
-        if self.cursor == 0 {
+        let cursor = self.cursor.min(self.text.len());
+        if cursor == 0 {
             return;
         }
 
-        let mut boundary = self.cursor;
+        let mut boundary = cursor;
         while boundary > 0 {
             let previous = self.previous_char_boundary(boundary);
-            let ch = self.text[previous..boundary].chars().next().unwrap();
+            // `previous` is always ≤ boundary; when text is non-empty and
+            // boundary > 0 there is guaranteed to be at least one character
+            // in `previous..boundary`, but we guard defensively anyway.
+            if previous >= boundary {
+                boundary = previous;
+                break;
+            }
+            let ch = match self.text[previous..boundary].chars().next() {
+                Some(c) => c,
+                None => break,
+            };
             if !ch.is_whitespace() {
                 break;
             }
@@ -448,14 +465,23 @@ impl Composer {
 
         while boundary > 0 {
             let previous = self.previous_char_boundary(boundary);
-            let ch = self.text[previous..boundary].chars().next().unwrap();
+            if previous >= boundary {
+                boundary = previous;
+                break;
+            }
+            let ch = match self.text[previous..boundary].chars().next() {
+                Some(c) => c,
+                None => break,
+            };
             if ch.is_whitespace() {
                 break;
             }
             boundary = previous;
         }
 
-        self.text.drain(boundary..self.cursor);
+        // Guard against boundary exceeding text length (defensive)
+        let boundary = boundary.min(self.text.len());
+        self.text.drain(boundary..cursor);
         self.cursor = boundary;
         self.preferred_column = None;
         self.visual_line_hint = None;
