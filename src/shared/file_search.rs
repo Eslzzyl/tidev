@@ -1,7 +1,7 @@
 use ignore::WalkBuilder;
 use notify::{
-    Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
-    event::ModifyKind,
+    event::ModifyKind, Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode,
+    Watcher,
 };
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -441,6 +441,12 @@ where
             continue;
         }
 
+        // Skip .git/ internal entries — never useful as suggestions
+        let rel_str = rel.to_string_lossy();
+        if rel_str == ".git" || rel_str.starts_with(".git/") {
+            continue;
+        }
+
         let Some(indexed_entry) = build_indexed_entry(rel, path, file_type.is_dir()) else {
             continue;
         };
@@ -485,6 +491,12 @@ fn scan_directory_entries(workspace_root: &Path, dir: &str) -> Vec<IndexedEntry>
                 .next()
                 .is_some_and(|c| c == '.')
         }) {
+            continue;
+        }
+
+        // Skip .git/ internal entries
+        let rel_str = rel.to_string_lossy();
+        if rel_str == ".git" || rel_str.starts_with(".git/") {
             continue;
         }
 
@@ -538,6 +550,16 @@ fn rank_entries(indexed_entries: &[IndexedEntry], query: &str) -> Vec<FileSugges
         suggestions.sort_by(|left, right| {
             kind_rank(left.kind)
                 .cmp(&kind_rank(right.kind))
+                .then_with(|| {
+                    // Shallower entries first (root-level prioritized)
+                    let depth_left = left.path.bytes().filter(|b| *b == b'/').count();
+                    let depth_right = right.path.bytes().filter(|b| *b == b'/').count();
+                    depth_left.cmp(&depth_right)
+                })
+                .then_with(|| {
+                    // Non-dotfile names first within the same depth
+                    is_dotfile_path(&left.path).cmp(&is_dotfile_path(&right.path))
+                })
                 .then_with(|| left.display.cmp(&right.display))
         });
         suggestions.truncate(MAX_SUGGESTIONS);
@@ -555,6 +577,12 @@ fn rank_entries(indexed_entries: &[IndexedEntry], query: &str) -> Vec<FileSugges
             right_score
                 .cmp(left_score)
                 .then_with(|| kind_rank(left.kind).cmp(&kind_rank(right.kind)))
+                .then_with(|| {
+                    // Non-dotfile names first when scores and kinds are equal
+                    left.lowercase_name
+                        .starts_with('.')
+                        .cmp(&right.lowercase_name.starts_with('.'))
+                })
                 .then_with(|| left.display.cmp(&right.display))
         });
         ranked.truncate(MAX_SUGGESTIONS);
@@ -640,11 +668,18 @@ fn score_entry(entry: &IndexedEntry, query: &str) -> Option<MatchCandidate> {
     let depth = entry.path.bytes().filter(|byte| *byte == b'/').count() as u32;
     let depth_penalty = depth * 6;
     let root_bonus = if depth == 0 { 50 } else { 0 };
+    // Penalty for hidden files/dirs (starting with '.') so non-dotfiles rank higher
+    let dotfile_penalty = if entry.lowercase_name.starts_with('.') {
+        60
+    } else {
+        0
+    };
 
     best.map(|mut candidate| {
         candidate.score = candidate
             .score
             .saturating_sub(depth_penalty)
+            .saturating_sub(dotfile_penalty)
             .saturating_add(kind_bonus)
             .saturating_add(root_bonus);
         candidate
@@ -789,6 +824,12 @@ fn kind_rank(kind: FileEntryKind) -> usize {
         FileEntryKind::Image => 1,
         FileEntryKind::File => 2,
     }
+}
+
+/// Returns true if the basename (last component) of a relative path starts with '.'
+fn is_dotfile_path(path: &str) -> bool {
+    let basename = path.rsplit_once('/').map(|(_, name)| name).unwrap_or(path);
+    basename.starts_with('.')
 }
 
 fn is_image_path(path: &Path) -> bool {
