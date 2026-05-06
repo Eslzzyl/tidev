@@ -6,6 +6,54 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
+
+/// Render a vertical scrollbar (1 column wide) into the given area.
+/// Draws a track (░) with a thumb (█) proportional to the visible fraction.
+/// `content_height` is the total number of lines in the scrollable content.
+pub(crate) fn render_scrollbar(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    scroll: usize,
+    content_height: usize,
+    palette: ThemePalette,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let track_style = Style::default().bg(palette.background).fg(palette.border);
+    let thumb_style = Style::default().bg(palette.background).fg(palette.accent);
+    let height = area.height as usize;
+    let mut lines = Vec::with_capacity(height);
+
+    if content_height <= height || height == 0 {
+        for _ in 0..height {
+            lines.push(Line::from(vec![Span::styled(" ", track_style)]));
+        }
+    } else {
+        let max_scroll = content_height.saturating_sub(height);
+        let thumb_height = ((height * height) / content_height.max(1))
+            .clamp(1, height)
+            .max(1);
+        let track_span = height.saturating_sub(thumb_height);
+        let thumb_top = if track_span == 0 {
+            0
+        } else {
+            ((scroll as f32 / max_scroll as f32) * track_span as f32).round() as usize
+        };
+
+        for row in 0..height {
+            let is_thumb = row >= thumb_top && row < thumb_top + thumb_height;
+            let style = if is_thumb { thumb_style } else { track_style };
+            let glyph = if is_thumb { "█" } else { "░" };
+            lines.push(Line::from(vec![Span::styled(glyph, style)]));
+        }
+    }
+
+    let paragraph =
+        Paragraph::new(Text::from(lines)).style(Style::default().bg(palette.background));
+    frame.render_widget(paragraph, area);
+}
 use std::time::Instant;
 use unicode_width::UnicodeWidthStr;
 

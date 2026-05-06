@@ -936,9 +936,30 @@ impl App {
             sections[1],
         );
 
-        // Agent rows
+        // Content area with scrollbar
+        let content_area = sections[2];
+        let (content_area, scrollbar_area) = if content_area.width > 2 {
+            let chunks = Layout::horizontal([
+                Constraint::Min(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+            ])
+            .split(content_area);
+            (chunks[0], Some(chunks[2]))
+        } else if content_area.width > 1 {
+            let chunks =
+                Layout::horizontal([Constraint::Min(1), Constraint::Length(1)])
+                    .split(content_area);
+            (chunks[0], Some(chunks[1]))
+        } else {
+            (content_area, None)
+        };
+
+        // Agent rows with scroll offset
         let mut lines: Vec<Line<'_>> = Vec::new();
-        for agent in &panel.agents {
+        let scroll = panel.scroll_offset;
+        let visible_height = content_area.height as usize;
+        for agent in panel.agents.iter().skip(scroll).take(visible_height) {
             let tag = if agent.read_only { " [read-only]" } else { "" };
             lines.push(Line::from(vec![
                 Span::styled(
@@ -954,17 +975,36 @@ impl App {
             ]));
         }
 
-        // Footer hint
-        lines.push(Line::raw(""));
-        lines.push(Line::from(Span::styled(
-            "  Press Esc or q to close",
-            Style::default().fg(palette.muted),
-        )));
+        // If there's room, show a footer hint after the content
+        let remaining = visible_height.saturating_sub(lines.len());
+        if remaining >= 2 {
+            lines.push(Line::raw(""));
+            lines.push(Line::from(Span::styled(
+                "  ↑/↓ scroll · Esc/q close",
+                Style::default().fg(palette.muted),
+            )));
+        }
+
+        // Fill remaining space with empty lines
+        while lines.len() < visible_height {
+            lines.push(Line::from(""));
+        }
 
         frame.render_widget(
             Paragraph::new(lines).style(Style::default().bg(palette.panel)),
-            sections[2],
+            content_area,
         );
+
+        // Render scrollbar
+        if let Some(sb_area) = scrollbar_area {
+            render_scrollbar(
+                frame,
+                sb_area,
+                panel.scroll_offset,
+                panel.agents.len() + 2, // agents + footer
+                palette,
+            );
+        }
     }
 
     pub(super) fn render_settings_panel(
@@ -2681,7 +2721,7 @@ impl App {
             Rect::new(list_area.x, divider_y, list_area.width, 1),
         );
 
-        // Skill list
+        // Skill list with scrollbar
         let list_start_y = divider_y + 1;
         let list_content_height = list_area.height.saturating_sub(header_height + 1);
         let list_content_area = Rect::new(
@@ -2690,6 +2730,24 @@ impl App {
             list_area.width,
             list_content_height,
         );
+
+        // Split list area into content + scrollbar
+        let (list_content_area, list_scrollbar_area) = if list_content_area.width > 2 {
+            let chunks = Layout::horizontal([
+                Constraint::Min(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+            ])
+            .split(list_content_area);
+            (chunks[0], Some(chunks[2]))
+        } else if list_content_area.width > 1 {
+            let chunks =
+                Layout::horizontal([Constraint::Min(1), Constraint::Length(1)])
+                    .split(list_content_area);
+            (chunks[0], Some(chunks[1]))
+        } else {
+            (list_content_area, None)
+        };
 
         let mut list_lines: Vec<Line<'_>> = Vec::new();
         let visible_start = panel.list_scroll;
@@ -2733,6 +2791,17 @@ impl App {
             list_content_area,
         );
 
+        // Render list scrollbar
+        if let Some(sb_area) = list_scrollbar_area {
+            render_scrollbar(
+                frame,
+                sb_area,
+                panel.list_scroll,
+                panel.filtered_indices.len(),
+                palette,
+            );
+        }
+
         // --- Right Pane: Preview ---
         // Header
         let preview_header = vec![Line::from(vec![Span::styled(
@@ -2757,7 +2826,7 @@ impl App {
             Rect::new(preview_area.x, preview_divider_y, preview_area.width, 1),
         );
 
-        // Preview content
+        // Preview content with scrollbar
         let preview_content_y = preview_divider_y + 1;
         let preview_content_height = preview_area.height.saturating_sub(2);
         let preview_content_area = Rect::new(
@@ -2766,6 +2835,25 @@ impl App {
             preview_area.width,
             preview_content_height,
         );
+
+        // Split preview area into content + scrollbar
+        let (preview_content_area, preview_scrollbar_area) =
+            if preview_content_area.width > 2 {
+                let chunks = Layout::horizontal([
+                    Constraint::Min(1),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                ])
+                .split(preview_content_area);
+                (chunks[0], Some(chunks[2]))
+            } else if preview_content_area.width > 1 {
+                let chunks =
+                    Layout::horizontal([Constraint::Min(1), Constraint::Length(1)])
+                        .split(preview_content_area);
+                (chunks[0], Some(chunks[1]))
+            } else {
+                (preview_content_area, None)
+            };
 
         if let Some(skill) = panel.selected_skill() {
             // Get rendered skill content from catalog
@@ -2779,6 +2867,7 @@ impl App {
             let content_width = preview_content_area.width.saturating_sub(2) as usize;
             let rendered =
                 render_markdown_text_with_width_and_cwd(&content, Some(content_width), None);
+            let total_preview_lines = rendered.lines.len();
 
             // Apply scroll offset
             let scroll = panel.preview_scroll;
@@ -2792,6 +2881,22 @@ impl App {
                 Paragraph::new(visible_lines).style(Style::default().bg(palette.panel)),
                 preview_content_area,
             );
+
+            // Render preview scrollbar
+            if let Some(sb_area) = preview_scrollbar_area {
+                render_scrollbar(
+                    frame,
+                    sb_area,
+                    panel.preview_scroll,
+                    total_preview_lines,
+                    palette,
+                );
+            }
+        } else {
+            // No skill selected, just render scrollbar track if area exists
+            if let Some(sb_area) = preview_scrollbar_area {
+                render_scrollbar(frame, sb_area, 0, 0, palette);
+            }
         }
 
         // --- Footer hints ---

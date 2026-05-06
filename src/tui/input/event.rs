@@ -865,10 +865,22 @@ impl App {
     }
 
     pub(crate) fn handle_agents_panel_key(&mut self, key: KeyEvent) -> Result<()> {
-        if self.agents_panel.is_some() {
+        if let Some(panel) = &mut self.agents_panel {
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => {
                     self.agents_panel = None;
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    panel.scroll_up(1);
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    panel.scroll_down(1);
+                }
+                KeyCode::PageUp => {
+                    panel.scroll_up(10);
+                }
+                KeyCode::PageDown => {
+                    panel.scroll_down(10);
                 }
                 _ => {}
             }

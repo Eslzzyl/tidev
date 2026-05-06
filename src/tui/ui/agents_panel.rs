@@ -14,6 +14,7 @@ pub struct AgentInfo {
 #[derive(Clone, Debug)]
 pub struct AgentsPanelState {
     pub agents: Vec<AgentInfo>,
+    pub scroll_offset: usize,
 }
 
 impl AgentsPanelState {
@@ -36,6 +37,17 @@ impl AgentsPanelState {
             })
             .collect();
 
-        Self { agents }
+        Self {
+            agents,
+            scroll_offset: 0,
+        }
+    }
+
+    pub fn scroll_up(&mut self, lines: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(lines);
+    }
+
+    pub fn scroll_down(&mut self, lines: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_add(lines);
     }
 }
