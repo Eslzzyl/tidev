@@ -26,6 +26,7 @@ pub mod utils;
 pub mod web;
 
 use clap::Parser;
+use anyhow::Context;
 
 #[derive(Parser, Debug)]
 #[command(name = "tidev", version, about = "TiDev")]
@@ -53,6 +54,18 @@ enum Command {
         #[arg(short, long)]
         workspace: Option<std::path::PathBuf>,
     },
+    /// Export session(s) to a plain SQLite database (without zstd compression)
+    Export {
+        /// Session UUID(s) to export (repeat the flag for multiple sessions)
+        #[arg(short, long)]
+        session: Vec<String>,
+        /// Export all sessions
+        #[arg(short, long)]
+        all: bool,
+        /// Output SQLite database file path
+        #[arg(short, long, default_value = "./export.sqlite")]
+        output: std::path::PathBuf,
+    },
 }
 pub fn run() -> anyhow::Result<()> {
     match Cli::parse().command {
@@ -71,6 +84,41 @@ pub fn run() -> anyhow::Result<()> {
                 dev_fs,
                 workspace_root: workspace,
             }))
+        }
+        Some(Command::Export {
+            session,
+            all,
+            output,
+        }) => {
+            if session.is_empty() && !all {
+                anyhow::bail!("Please specify at least one --session UUID or --all to export all sessions");
+            }
+            let paths = crate::config::ConfigPaths::discover()?;
+            let store = storage::SessionStore::open(paths.database_file)?;
+
+            let session_ids: Vec<uuid::Uuid> = if all {
+                store
+                    .load_all_sessions()?
+                    .into_iter()
+                    .map(|s| s.session_id)
+                    .collect()
+            } else {
+                session
+                    .into_iter()
+                    .map(|s| {
+                        uuid::Uuid::parse_str(&s)
+                            .with_context(|| format!("invalid session UUID: {s}"))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+            };
+
+            if session_ids.is_empty() {
+                anyhow::bail!("No sessions to export");
+            }
+
+            store.export_to_sqlite(&session_ids, &output)?;
+            eprintln!("Exported {} session(s) to {}", session_ids.len(), output.display());
+            Ok(())
         }
     }
 }
