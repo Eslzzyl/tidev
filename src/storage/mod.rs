@@ -19,6 +19,8 @@ use crate::{
     tooling::TodoItem,
 };
 
+use rayon::prelude::*;
+
 use self::compression::{compress_text, decompress_text};
 use schema::{EXPORT_SCHEMA_SQL, SCHEMA_SQL, SCHEMA_VERSION, SESSION_SELECT_COLUMNS};
 pub struct SessionStore {
@@ -65,6 +67,139 @@ pub struct WorkspaceSessionCount {
 pub struct SessionTokenStats {
     pub input_tokens: u32,
     pub output_tokens: u32,
+}
+
+/// Raw row data from `messages` table, before decompression/parsing.
+///
+/// Used inside `load_messages` to decouple SQLite row iteration from
+/// the (potentially parallel) decompression and JSON-deserialization step.
+struct RawMessageRow {
+    id: String,
+    role: String,
+    content: Vec<u8>,
+    attachments: String,
+    reasoning: Option<Vec<u8>>,
+    tool_calls: String,
+    tool_call_id: Option<String>,
+    tool_name: Option<String>,
+    metadata: String,
+    created_at: String,
+    completed_at: Option<String>,
+    streaming: bool,
+    input_tokens: Option<u32>,
+    output_tokens: Option<u32>,
+    total_tokens: Option<u32>,
+    cache_read_tokens: Option<u32>,
+    cache_write_tokens: Option<u32>,
+    model_id: Option<String>,
+    tokens_per_second: Option<f32>,
+    snapshot_hash: Option<String>,
+    patch_files: Option<String>,
+    file_diffs: Option<String>,
+    mode: Option<String>,
+    rtk_rewritten: bool,
+    thinking_level: Option<String>,
+}
+
+impl RawMessageRow {
+    fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get(0)?,
+            role: row.get(1)?,
+            content: row.get(2)?,
+            attachments: row.get(3)?,
+            reasoning: row.get(4)?,
+            tool_calls: row.get(5)?,
+            tool_call_id: row.get(6)?,
+            tool_name: row.get(7)?,
+            metadata: row.get(8)?,
+            created_at: row.get(9)?,
+            completed_at: row.get(10)?,
+            streaming: row.get::<_, i64>(11)? != 0,
+            input_tokens: row.get(12)?,
+            output_tokens: row.get(13)?,
+            total_tokens: row.get(14)?,
+            cache_read_tokens: row.get(15)?,
+            cache_write_tokens: row.get(16)?,
+            model_id: row.get(17)?,
+            tokens_per_second: row.get(18)?,
+            snapshot_hash: row.get(19)?,
+            patch_files: row.get(20)?,
+            file_diffs: row.get(21)?,
+            mode: row.get(22)?,
+            rtk_rewritten: row.get::<_, i64>(23)? != 0,
+            thinking_level: row.get(24)?,
+        })
+    }
+
+    /// Decompress `content`/`reasoning`, parse JSON fields, build `Message`.
+    fn into_message(self) -> Result<Message> {
+        use crate::config::reasoning::ThinkingLevelType;
+        use crate::session::ToolMetadata;
+        use crate::prompts::SessionMode;
+
+        let content = decompress_text(&self.content);
+        let reasoning = match self.reasoning {
+            Some(b) => decompress_text(&b),
+            None => String::new(),
+        };
+        let attachments: Vec<crate::session::MessageAttachment> =
+            serde_json::from_str(&self.attachments).unwrap_or_default();
+        let tool_calls: Vec<ToolCall> =
+            serde_json::from_str(&self.tool_calls).unwrap_or_default();
+        let metadata: ToolMetadata =
+            serde_json::from_str(&self.metadata).unwrap_or_default();
+        let mode: Option<SessionMode> =
+            self.mode.and_then(|m| serde_json::from_str(&m).ok());
+        let completed_at = self
+            .completed_at
+            .and_then(|s| parse_datetime(&s).ok());
+        let thinking_level = self
+            .thinking_level
+            .filter(|s| !s.is_empty())
+            .map(|s| ThinkingLevelType::from_string(&s));
+
+        let mut message = Message::persisted(
+            Uuid::parse_str(&self.id).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })?,
+            MessageRole::from_db_value(&self.role),
+            content,
+            parse_datetime(&self.created_at).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    8,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })?,
+            self.streaming,
+        );
+        message.attachments = attachments;
+        message.reasoning = reasoning;
+        message.tool_calls = tool_calls;
+        message.tool_call_id = self.tool_call_id;
+        message.tool_name = self.tool_name;
+        message.metadata = metadata;
+        message.completed_at = completed_at;
+        message.input_tokens = self.input_tokens;
+        message.output_tokens = self.output_tokens;
+        message.total_tokens = self.total_tokens;
+        message.cache_read_tokens = self.cache_read_tokens;
+        message.cache_write_tokens = self.cache_write_tokens;
+        message.model_id = self.model_id;
+        message.tokens_per_second = self.tokens_per_second;
+        message.snapshot_hash = self.snapshot_hash;
+        message.patch_files = self.patch_files;
+        message.file_diffs = self.file_diffs;
+        message.mode = mode;
+        message.rtk_rewritten = self.rtk_rewritten;
+        message.thinking_level = thinking_level;
+        Ok(message)
+    }
 }
 
 impl SessionStore {
@@ -904,83 +1039,25 @@ impl SessionStore {
             "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
         )?;
 
-        let rows = statement.query_map(params![session_id.to_string()], |row| {
-            let id = row.get::<_, String>(0)?;
-            let role = row.get::<_, String>(1)?;
-            let content = read_blob_maybe_text(row, 2)?;
-            let attachments = row.get::<_, String>(3)?;
-            let reasoning = read_blob_maybe_text_opt(row, 4)?.unwrap_or_default();
-            let tool_calls = row.get::<_, String>(5)?;
-            let tool_call_id = row.get::<_, Option<String>>(6)?;
-            let tool_name = row.get::<_, Option<String>>(7)?;
-            let metadata = row.get::<_, String>(8)?;
-            let created_at = row.get::<_, String>(9)?;
-            let completed_at = row.get::<_, Option<String>>(10)?;
-            let streaming = row.get::<_, i64>(11)? != 0;
-            let input_tokens = row.get::<_, Option<u32>>(12)?;
-            let output_tokens = row.get::<_, Option<u32>>(13)?;
-            let total_tokens = row.get::<_, Option<u32>>(14)?;
-            let cache_read_tokens = row.get::<_, Option<u32>>(15)?;
-            let cache_write_tokens = row.get::<_, Option<u32>>(16)?;
-            let model_id = row.get::<_, Option<String>>(17)?;
-            let tokens_per_second = row.get::<_, Option<f32>>(18)?;
-            let snapshot_hash = row.get::<_, Option<String>>(19)?;
-            let patch_files = row.get::<_, Option<String>>(20)?;
-            let file_diffs = row.get::<_, Option<String>>(21)?;
-            let mode = row.get::<_, Option<String>>(22)?;
-            let rtk_rewritten = row.get::<_, i64>(23)? != 0;
-            let thinking_level = row.get::<_, Option<String>>(24)?;
-
-            let attachments = serde_json::from_str(&attachments).unwrap_or_default();
-            let tool_calls: Vec<ToolCall> = serde_json::from_str(&tool_calls).unwrap_or_default();
-            let metadata: crate::session::ToolMetadata =
-                serde_json::from_str(&metadata).unwrap_or_default();
-            let mode: Option<crate::prompts::SessionMode> =
-                mode.and_then(|m| serde_json::from_str(&m).ok());
-            let completed_at = completed_at.and_then(|s| parse_datetime(&s).ok());
-            let thinking_level = thinking_level
-                .filter(|s| !s.is_empty())
-                .map(|s| crate::config::reasoning::ThinkingLevelType::from_string(&s));
-
-            let mut message = Message::persisted(
-                Uuid::parse_str(&id).map_err(|error| {
-                    rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
-                })?,
-                MessageRole::from_db_value(&role),
-                content,
-                parse_datetime(&created_at).map_err(|error| {
-                    rusqlite::Error::FromSqlConversionFailure(8, Type::Text, Box::new(error))
-                })?,
-                streaming,
-            );
-            message.attachments = attachments;
-            message.reasoning = reasoning;
-            message.tool_calls = tool_calls;
-            message.tool_call_id = tool_call_id;
-            message.tool_name = tool_name;
-            message.metadata = metadata;
-            message.completed_at = completed_at;
-            message.input_tokens = input_tokens;
-            message.output_tokens = output_tokens;
-            message.total_tokens = total_tokens;
-            message.cache_read_tokens = cache_read_tokens;
-            message.cache_write_tokens = cache_write_tokens;
-            message.model_id = model_id;
-            message.tokens_per_second = tokens_per_second;
-            message.snapshot_hash = snapshot_hash;
-            message.patch_files = patch_files;
-            message.file_diffs = file_diffs;
-            message.mode = mode;
-            message.rtk_rewritten = rtk_rewritten;
-            message.thinking_level = thinking_level;
-
-            Ok(message)
-        })?;
-
-        let mut messages = Vec::new();
-        for message in rows {
-            messages.push(message?);
+        // Phase 1: collect raw rows (no decompression, no JSON parsing)
+        let rows = statement.query_map(params![session_id.to_string()], RawMessageRow::from_row)?;
+        let mut raw_rows: Vec<RawMessageRow> = Vec::new();
+        for row in rows {
+            raw_rows.push(row?);
         }
+
+        // Phase 2: decompress + parse in parallel (if enough rows)
+        let messages: Vec<Message> = if raw_rows.len() >= 16 {
+            raw_rows
+                .into_par_iter()
+                .map(|r| r.into_message())
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            raw_rows
+                .into_iter()
+                .map(|r| r.into_message())
+                .collect::<Result<Vec<_>>>()?
+        };
 
         Ok(messages)
     }
@@ -1920,19 +1997,6 @@ fn read_blob_maybe_text(row: &rusqlite::Row, idx: usize) -> rusqlite::Result<Str
         Err(_) => {
             // Fallback for old databases where the column is TEXT
             let text: String = row.get(idx)?;
-            Ok(text)
-        }
-    }
-}
-
-/// Helper: read an optional column that may be BLOB or TEXT (or NULL).
-fn read_blob_maybe_text_opt(row: &rusqlite::Row, idx: usize) -> rusqlite::Result<Option<String>> {
-    match row.get::<_, Option<Vec<u8>>>(idx) {
-        Ok(Some(bytes)) => Ok(Some(decompress_text(&bytes))),
-        Ok(None) => Ok(None),
-        Err(_) => {
-            // Fallback for old databases where the column is TEXT
-            let text: Option<String> = row.get(idx)?;
             Ok(text)
         }
     }
