@@ -1,4 +1,14 @@
-import { X, Sun, Moon, Monitor, ArrowLeft, Type, Columns, Layout as LayoutIcon, Keyboard } from "lucide-react";
+import {
+  X,
+  Sun,
+  Moon,
+  Monitor,
+  ArrowLeft,
+  Type,
+  Columns,
+  Layout as LayoutIcon,
+  Keyboard,
+} from "lucide-react";
 import {
   useUIStore,
   getEffectiveTheme,
@@ -117,7 +127,9 @@ export function SettingsView() {
             <input
               type="text"
               value={settings.monoFontFamily}
-              onChange={(e) => updateSettings({ monoFontFamily: e.target.value })}
+              onChange={(e) =>
+                updateSettings({ monoFontFamily: e.target.value })
+              }
               className="w-full rounded border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100"
               placeholder="JetBrains Mono, Fira Code, monospace"
             />
@@ -137,7 +149,9 @@ export function SettingsView() {
                 max={20}
                 step={1}
                 value={settings.fontSize}
-                onChange={(e) => updateSettings({ fontSize: parseInt(e.target.value) })}
+                onChange={(e) =>
+                  updateSettings({ fontSize: parseInt(e.target.value) })
+                }
                 className="flex-1 accent-neutral-900 dark:accent-neutral-100"
               />
               <span className="min-w-[2rem] text-right text-sm tabular-nums text-neutral-700 dark:text-neutral-300">
@@ -185,9 +199,7 @@ export function SettingsView() {
             <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
               Side by Side
             </span>
-            <span className="text-xs text-neutral-500">
-              Old | New
-            </span>
+            <span className="text-xs text-neutral-500">Old | New</span>
           </button>
           <button
             onClick={() => updateSettings({ diffLayout: "inline" })}
@@ -201,9 +213,7 @@ export function SettingsView() {
             <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
               Inline
             </span>
-            <span className="text-xs text-neutral-500">
-              Unified view
-            </span>
+            <span className="text-xs text-neutral-500">Unified view</span>
           </button>
         </div>
       </section>
@@ -230,7 +240,9 @@ export function SettingsView() {
             <button
               role="switch"
               aria-checked={settings.enterToSend}
-              onClick={() => updateSettings({ enterToSend: !settings.enterToSend })}
+              onClick={() =>
+                updateSettings({ enterToSend: !settings.enterToSend })
+              }
               className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
                 settings.enterToSend
                   ? "bg-neutral-900 dark:bg-neutral-100"
@@ -303,12 +315,18 @@ function ConnectionStatus() {
       <span className="text-sm text-neutral-600 dark:text-neutral-400">
         Server
       </span>
-      <span className={`flex items-center gap-1.5 text-sm font-medium ${config.color}`}>
-        <span className={`h-2 w-2 rounded-full ${
-          connectionStatus === "connected" ? "bg-green-500" :
-          connectionStatus === "connecting" ? "bg-yellow-500" :
-          "bg-red-500"
-        }`} />
+      <span
+        className={`flex items-center gap-1.5 text-sm font-medium ${config.color}`}
+      >
+        <span
+          className={`h-2 w-2 rounded-full ${
+            connectionStatus === "connected"
+              ? "bg-green-500"
+              : connectionStatus === "connecting"
+                ? "bg-yellow-500"
+                : "bg-red-500"
+          }`}
+        />
         {config.label}
       </span>
     </div>

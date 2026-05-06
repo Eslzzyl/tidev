@@ -205,15 +205,10 @@ export function LeftSidebar() {
                     <button
                       onClick={() => handleSelectSession(session.session_id)}
                       onDoubleClick={() =>
-                        handleStartRename(
-                          session.session_id,
-                          session.title,
-                        )
+                        handleStartRename(session.session_id, session.title)
                       }
                       className={`flex w-full items-center px-4 py-3 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
-                        isActive
-                          ? "bg-neutral-100 dark:bg-neutral-800"
-                          : ""
+                        isActive ? "bg-neutral-100 dark:bg-neutral-800" : ""
                       }`}
                     >
                       <div className="min-w-0 flex-1 pr-8">
@@ -244,10 +239,7 @@ export function LeftSidebar() {
                     <div className="absolute right-3 top-1/2 flex -translate-y-1/2 gap-0.5 opacity-0 group-hover:opacity-100">
                       <button
                         onClick={() =>
-                          handleStartRename(
-                            session.session_id,
-                            session.title,
-                          )
+                          handleStartRename(session.session_id, session.title)
                         }
                         className="rounded p-1 text-neutral-400 hover:text-blue-600 dark:text-neutral-500 dark:hover:text-blue-400"
                         aria-label="Rename session"
@@ -256,9 +248,7 @@ export function LeftSidebar() {
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
                       <button
-                        onClick={() =>
-                          handleDeleteSession(session.session_id)
-                        }
+                        onClick={() => handleDeleteSession(session.session_id)}
                         className="rounded p-1 text-neutral-400 hover:text-red-600 dark:text-neutral-500 dark:hover:text-red-400"
                         aria-label="Delete session"
                         title="Delete"

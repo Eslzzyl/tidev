@@ -41,10 +41,16 @@ export function useSSE(sessionId: string | null) {
         .reverse()
         .find((m) => m.role === "user");
       if (!lastUserMsg) {
-        console.log("[SSE] createStreamingRound: no user message found, messages:", messages.length);
+        console.log(
+          "[SSE] createStreamingRound: no user message found, messages:",
+          messages.length,
+        );
         return null;
       }
-      console.log("[SSE] createStreamingRound: found user msg id:", lastUserMsg.id.substring(0,20));
+      console.log(
+        "[SSE] createStreamingRound: found user msg id:",
+        lastUserMsg.id.substring(0, 20),
+      );
 
       return {
         id: `streaming-${lastUserMsg.id}`,
@@ -218,10 +224,16 @@ export function useSSE(sessionId: string | null) {
           .reverse()
           .find((m) => m.role === "user");
         if (!lastUserMsg) {
-          console.log("[SSE] handleMessageChunk: no user msg found in store, messages:", messages.length);
+          console.log(
+            "[SSE] handleMessageChunk: no user msg found in store, messages:",
+            messages.length,
+          );
           return null;
         }
-        console.log("[SSE] handleMessageChunk: creating streaming round with user msg:", lastUserMsg.id.substring(0,20));
+        console.log(
+          "[SSE] handleMessageChunk: creating streaming round with user msg:",
+          lastUserMsg.id.substring(0, 20),
+        );
 
         return {
           id: `streaming-${lastUserMsg.id}`,
@@ -261,10 +273,16 @@ export function useSSE(sessionId: string | null) {
           .reverse()
           .find((m) => m.role === "user");
         if (!lastUserMsg) {
-          console.log("[SSE] handleReasoningChunk: no user msg found, messages:", messages.length);
+          console.log(
+            "[SSE] handleReasoningChunk: no user msg found, messages:",
+            messages.length,
+          );
           return null;
         }
-        console.log("[SSE] handleReasoningChunk: creating streaming round, user msg:", lastUserMsg.id.substring(0,20));
+        console.log(
+          "[SSE] handleReasoningChunk: creating streaming round, user msg:",
+          lastUserMsg.id.substring(0, 20),
+        );
 
         return {
           id: `streaming-${lastUserMsg.id}`,
@@ -272,11 +290,15 @@ export function useSSE(sessionId: string | null) {
           segments: [{ type: "reasoning", content: event.content }],
           toolCallMap: {},
           status: "streaming",
-        };      });
+        };
+      });
     };
 
     const handleMessageComplete = () => {
-      console.log("[SSE] message.complete fired, currentSessionId:", currentSessionId);
+      console.log(
+        "[SSE] message.complete fired, currentSessionId:",
+        currentSessionId,
+      );
       setStreaming(false);
 
       // The backend persists the assistant to the database before sending
@@ -310,7 +332,12 @@ export function useSSE(sessionId: string | null) {
           completed_at: new Date().toISOString(),
         };
 
-        console.log("[SSE] constructing assistant from stream, text:", textContent.length, "chars, toolCalls:", toolCalls.length);
+        console.log(
+          "[SSE] constructing assistant from stream, text:",
+          textContent.length,
+          "chars, toolCalls:",
+          toolCalls.length,
+        );
 
         // Fetch messages from the API (backend now persists the assistant
         // before sending message.complete, so apiMessages includes all
@@ -325,7 +352,12 @@ export function useSSE(sessionId: string | null) {
           } else {
             msgs.push(assistantMsg);
           }
-          console.log("[SSE] merging API msgs (", apiMessages.length, ") with constructed assistant, total:", msgs.length);
+          console.log(
+            "[SSE] merging API msgs (",
+            apiMessages.length,
+            ") with constructed assistant, total:",
+            msgs.length,
+          );
           setMessages(msgs);
           useSessionStore.getState().setCurrentUsageStats(null);
         });
@@ -335,7 +367,7 @@ export function useSSE(sessionId: string | null) {
 
       streamingRef.current = null;
       setStreamingRound(null);
-    };   
+    };
 
     const handleErrorEvent = (event: AppEvent) => {
       if (event.type === "error") {

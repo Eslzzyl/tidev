@@ -117,7 +117,8 @@ export function WelcomePage() {
         } = { content: payload.inputValue };
 
         if (payload.mode) requestBody.mode = payload.mode;
-        if (payload.thinkingLevel) requestBody.thinking_level = payload.thinkingLevel;
+        if (payload.thinkingLevel)
+          requestBody.thinking_level = payload.thinkingLevel;
         if (payload.modelId) requestBody.model_id = payload.modelId;
         if (payload.providerId) requestBody.provider_id = payload.providerId;
 
@@ -133,14 +134,36 @@ export function WelcomePage() {
         // fetched the full [user, assistant] messages from the API, our
         // subsequent setMessages() would overwrite them with stale data.
         const pendingId = `pending-${Date.now()}`;
-        console.log("[WelcomePage] addMessage before:", JSON.stringify(useSessionStore.getState().messages.map(m => ({id: m.id, role: m.role, content: m.content.substring(0,20)}))));
+        console.log(
+          "[WelcomePage] addMessage before:",
+          JSON.stringify(
+            useSessionStore
+              .getState()
+              .messages.map((m) => ({
+                id: m.id,
+                role: m.role,
+                content: m.content.substring(0, 20),
+              })),
+          ),
+        );
         useSessionStore.getState().addMessage({
           id: pendingId,
           role: "user",
           content: payload.inputValue,
           created_at: new Date().toISOString(),
         });
-        console.log("[WelcomePage] addMessage after:", JSON.stringify(useSessionStore.getState().messages.map(m => ({id: m.id, role: m.role, content: m.content.substring(0,20)}))));
+        console.log(
+          "[WelcomePage] addMessage after:",
+          JSON.stringify(
+            useSessionStore
+              .getState()
+              .messages.map((m) => ({
+                id: m.id,
+                role: m.role,
+                content: m.content.substring(0, 20),
+              })),
+          ),
+        );
 
         // Refresh sessions list
         const { sessions: updatedSessions } = await api.listSessions();
@@ -152,13 +175,22 @@ export function WelcomePage() {
         );
       }
     },
-    [workspaceRoot, setCurrentSession, setMessages, setSessions, setError, setStreaming],
+    [
+      workspaceRoot,
+      setCurrentSession,
+      setMessages,
+      setSessions,
+      setError,
+      setStreaming,
+    ],
   );
 
   const handleStop = useCallback(async () => {
     if (currentSessionId && currentRequestId) {
       try {
-        await api.abortRequest(currentSessionId, { request_id: currentRequestId });
+        await api.abortRequest(currentSessionId, {
+          request_id: currentRequestId,
+        });
       } catch {
         // Ignore abort errors
       }

@@ -11,11 +11,7 @@ export function SystemMessageBlock({ message }: Props) {
   const isCompaction = message.content.startsWith(COMPACTION_LABEL);
 
   if (isCompaction) {
-    const summary = message.content
-      .split("\n\n")
-      .slice(1)
-      .join("\n\n")
-      .trim();
+    const summary = message.content.split("\n\n").slice(1).join("\n\n").trim();
 
     return (
       <div className="px-4 py-2">

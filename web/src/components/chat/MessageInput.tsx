@@ -153,9 +153,14 @@ export function MessageInput({
         // Prefer the session's current model, otherwise default to first model
         const sessionModelId = currentSession?.model_id;
         const sessionProviderId = currentSession?.provider_id;
-        const sessionModel = sessionModelId && sessionProviderId
-          ? modelList.find((m) => m.id === sessionModelId && m.provider_id === sessionProviderId)
-          : null;
+        const sessionModel =
+          sessionModelId && sessionProviderId
+            ? modelList.find(
+                (m) =>
+                  m.id === sessionModelId &&
+                  m.provider_id === sessionProviderId,
+              )
+            : null;
 
         if (sessionModel) {
           setSelectedModelId(sessionModel.id);

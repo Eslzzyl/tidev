@@ -247,7 +247,9 @@ export function GitView() {
             className="rounded p-1.5 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700"
             title="Refresh"
           >
-            <RotateCcw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+            <RotateCcw
+              className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
+            />
           </button>
         </div>
       </div>
@@ -274,7 +276,9 @@ export function GitView() {
       {commitResult && (
         <div
           className={`px-4 py-1.5 text-xs ${
-            commitResult.startsWith("Error") || commitResult.startsWith("Push error") || commitResult.startsWith("Pull error")
+            commitResult.startsWith("Error") ||
+            commitResult.startsWith("Push error") ||
+            commitResult.startsWith("Pull error")
               ? "bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400"
               : "bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-400"
           }`}
@@ -403,10 +407,20 @@ function ChangesPanel({
 
       {/* File lists */}
       {staged.length > 0 && (
-        <FileList title="Staged" files={staged} icon={fileIcon} statusLabel={statusLabel} />
+        <FileList
+          title="Staged"
+          files={staged}
+          icon={fileIcon}
+          statusLabel={statusLabel}
+        />
       )}
       {unstaged.length > 0 && (
-        <FileList title="Changes" files={unstaged} icon={fileIcon} statusLabel={statusLabel} />
+        <FileList
+          title="Changes"
+          files={unstaged}
+          icon={fileIcon}
+          statusLabel={statusLabel}
+        />
       )}
       {(!status || status.files.length === 0) && (
         <div className="py-8 text-center text-sm text-neutral-500">
@@ -521,7 +535,9 @@ function BranchesPanel({
   // Sort: current branch first, rest alphabetically
   const sorted = [
     ...branches.branches.filter((b) => b.current),
-    ...branches.branches.filter((b) => !b.current).sort((a, b) => a.name.localeCompare(b.name)),
+    ...branches.branches
+      .filter((b) => !b.current)
+      .sort((a, b) => a.name.localeCompare(b.name)),
   ];
 
   return (

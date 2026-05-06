@@ -97,10 +97,19 @@ function loadLocalStorage() {
     rightSidebarOpen: savedRightSidebarOpen,
     activeTab: (savedActiveTab || "chat") as MainTab,
     settings: {
-      fontFamily: loadSetting("settings.fontFamily", "Inter, system-ui, sans-serif"),
-      monoFontFamily: loadSetting("settings.monoFontFamily", "JetBrains Mono, Fira Code, monospace"),
+      fontFamily: loadSetting(
+        "settings.fontFamily",
+        "Inter, system-ui, sans-serif",
+      ),
+      monoFontFamily: loadSetting(
+        "settings.monoFontFamily",
+        "JetBrains Mono, Fira Code, monospace",
+      ),
       fontSize: loadSetting("settings.fontSize", 14),
-      diffLayout: loadSetting<"inline" | "side-by-side">("settings.diffLayout", "side-by-side"),
+      diffLayout: loadSetting<"inline" | "side-by-side">(
+        "settings.diffLayout",
+        "side-by-side",
+      ),
       enterToSend: loadSetting("settings.enterToSend", true),
     },
   };

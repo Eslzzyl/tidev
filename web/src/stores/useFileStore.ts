@@ -208,7 +208,8 @@ export const useFileStore = create<FileStore>((set, get) => ({
     set({
       openFiles: newFiles,
       activeFilePath: nextActive,
-      selectedPath: nextActive || state.selectedPath === path ? null : state.selectedPath,
+      selectedPath:
+        nextActive || state.selectedPath === path ? null : state.selectedPath,
     });
   },
 
@@ -255,7 +256,9 @@ export const useFileStore = create<FileStore>((set, get) => ({
     try {
       await api.createItem(path, type);
       toast.success(
-        type === "file" ? `File created: ${path}` : `Directory created: ${path}`,
+        type === "file"
+          ? `File created: ${path}`
+          : `Directory created: ${path}`,
       );
       get().refreshTree();
     } catch (err) {
@@ -276,14 +279,11 @@ export const useFileStore = create<FileStore>((set, get) => ({
       if (wasOpen) {
         set((s) => ({
           openFiles: s.openFiles.map((f) =>
-            f.path === path
-              ? { ...f, path: newPath }
-              : f,
+            f.path === path ? { ...f, path: newPath } : f,
           ),
           activeFilePath:
             s.activeFilePath === path ? newPath : s.activeFilePath,
-          selectedPath:
-            s.selectedPath === path ? newPath : s.selectedPath,
+          selectedPath: s.selectedPath === path ? newPath : s.selectedPath,
         }));
       }
 

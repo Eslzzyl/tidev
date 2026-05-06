@@ -15,7 +15,10 @@ import {
   GitBranch,
 } from "lucide-react";
 import { useFileStore, type TreeNode } from "../../stores/useFileStore";
-import { useGitFileStore, type GitDisplayStatus } from "../../stores/useGitFileStore";
+import {
+  useGitFileStore,
+  type GitDisplayStatus,
+} from "../../stores/useGitFileStore";
 import { ContextMenu, type ContextMenuItem } from "../ui/ContextMenu";
 import { CreateItemDialog } from "../ui/CreateItemDialog";
 import { RenameDialog } from "../ui/RenameDialog";
@@ -48,7 +51,9 @@ const fileIcons: Record<string, React.ReactNode> = {
 
 function getFileIcon(name: string, isDirectory: boolean): React.ReactNode {
   if (isDirectory) return null;
-  const ext = name.includes(".") ? name.split(".").pop()?.toLowerCase() || "" : "";
+  const ext = name.includes(".")
+    ? name.split(".").pop()?.toLowerCase() || ""
+    : "";
   return fileIcons[ext] || <File className="h-4 w-4 text-neutral-400" />;
 }
 
@@ -164,7 +169,9 @@ export function FileTree() {
       label: "New File",
       icon: <File className="h-3.5 w-3.5" />,
       onClick: () => {
-        const parentPath = node.isDirectory ? node.path : getParentPath(node.path);
+        const parentPath = node.isDirectory
+          ? node.path
+          : getParentPath(node.path);
         setDialog({ type: "create", parentPath, itemType: "file" });
       },
     });
@@ -173,7 +180,9 @@ export function FileTree() {
       label: "New Directory",
       icon: <Folder className="h-3.5 w-3.5" />,
       onClick: () => {
-        const parentPath = node.isDirectory ? node.path : getParentPath(node.path);
+        const parentPath = node.isDirectory
+          ? node.path
+          : getParentPath(node.path);
         setDialog({ type: "create", parentPath, itemType: "directory" });
       },
     });
@@ -207,9 +216,7 @@ export function FileTree() {
 
   const handleCreateSubmit = (name: string) => {
     if (!dialog || dialog.type !== "create") return;
-    const fullPath = dialog.parentPath
-      ? `${dialog.parentPath}/${name}`
-      : name;
+    const fullPath = dialog.parentPath ? `${dialog.parentPath}/${name}` : name;
     createFile(fullPath, dialog.itemType).catch(() => {});
     setDialog(null);
   };
@@ -264,7 +271,10 @@ export function FileTree() {
 
   return (
     <>
-      <div className="select-none text-sm" onContextMenu={(e) => e.preventDefault()}>
+      <div
+        className="select-none text-sm"
+        onContextMenu={(e) => e.preventDefault()}
+      >
         {rootChildren.map((node) => (
           <TreeNodeItem
             key={node.path}
@@ -276,9 +286,15 @@ export function FileTree() {
             onContextMenu={handleContextMenu}
             gitDisplayMap={gitStatusMap}
             dragOverPath={dragOverPath}
-            onDragStart={(n) => { dragNodeRef.current = n; }}
-            onDragOver={(path) => { setDragOverPath(path); }}
-            onDragLeave={() => { setDragOverPath(null); }}
+            onDragStart={(n) => {
+              dragNodeRef.current = n;
+            }}
+            onDragOver={(path) => {
+              setDragOverPath(path);
+            }}
+            onDragLeave={() => {
+              setDragOverPath(null);
+            }}
             onDrop={(targetPath) => {
               const source = dragNodeRef.current;
               setDragOverPath(null);

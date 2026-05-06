@@ -45,9 +45,7 @@ export const usePermissionStore = create<PermissionState & PermissionActions>(
 
     removePermission: (id) =>
       set((state) => ({
-        pendingPermissions: state.pendingPermissions.filter(
-          (p) => p.id !== id,
-        ),
+        pendingPermissions: state.pendingPermissions.filter((p) => p.id !== id),
       })),
 
     clearSessionPermissions: (sessionId) =>

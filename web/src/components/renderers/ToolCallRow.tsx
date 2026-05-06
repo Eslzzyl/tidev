@@ -326,9 +326,13 @@ export function ToolCallRow({ entry }: Props) {
 
   // Check if output is JSON and should use tree view
   const output = entry.result?.output?.trim() || "";
-  const parsedJson = !isBash(entry.name) && !isWriteTool(entry.name) && output && looksLikeJson(output)
-    ? tryParseJson(output)
-    : null;
+  const parsedJson =
+    !isBash(entry.name) &&
+    !isWriteTool(entry.name) &&
+    output &&
+    looksLikeJson(output)
+      ? tryParseJson(output)
+      : null;
 
   const isRunning = !entry.resultComplete && entry.argumentsComplete;
   const showDuration = entry.resultComplete && elapsedMs > 0;
@@ -433,35 +437,37 @@ export function ToolCallRow({ entry }: Props) {
             )}
 
             {/* Other read-only tools: render as markdown or JSON tree */}
-            {isReadOnlyTool(entry.name) && entry.name !== "read" && (
-              parsedJson ? (
+            {isReadOnlyTool(entry.name) &&
+              entry.name !== "read" &&
+              (parsedJson ? (
                 <JsonTreeView data={parsedJson} initialExpanded={true} />
               ) : (
                 <MarkdownRenderer content={entry.result.output} />
-              )
-            )}
+              ))}
 
             {/* websearch/webfetch: show JSON tree if applicable */}
-            {isWebTool(entry.name) && (
-              parsedJson ? (
-                <JsonTreeView data={parsedJson} initialExpanded={true} maxDepth={5} />
+            {isWebTool(entry.name) &&
+              (parsedJson ? (
+                <JsonTreeView
+                  data={parsedJson}
+                  initialExpanded={true}
+                  maxDepth={5}
+                />
               ) : (
                 <MarkdownRenderer content={entry.result.output} />
-              )
-            )}
+              ))}
 
             {/* Default: render as markdown or JSON tree */}
             {!isReadOnlyTool(entry.name) &&
               !isBash(entry.name) &&
               !isWriteTool(entry.name) &&
               !isTodo(entry.name) &&
-              !isWebTool(entry.name) && (
-                parsedJson ? (
-                  <JsonTreeView data={parsedJson} initialExpanded={true} />
-                ) : (
-                  <MarkdownRenderer content={entry.result.output} />
-                )
-              )}
+              !isWebTool(entry.name) &&
+              (parsedJson ? (
+                <JsonTreeView data={parsedJson} initialExpanded={true} />
+              ) : (
+                <MarkdownRenderer content={entry.result.output} />
+              ))}
           </div>
 
           {/* Exit code for bash commands */}

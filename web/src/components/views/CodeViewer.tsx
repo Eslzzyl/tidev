@@ -1,21 +1,76 @@
-import { X, FileText, Copy, Check, Pencil, Save, Eye, Loader2, Code } from "lucide-react";
+import {
+  X,
+  FileText,
+  Copy,
+  Check,
+  Pencil,
+  Save,
+  Eye,
+  Loader2,
+  Code,
+} from "lucide-react";
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useFileStore } from "../../stores/useFileStore";
 import { useUIStore, getEffectiveTheme } from "../../stores/useUIStore";
-import { CodeMirrorEditor, type CodeMirrorEditorHandle } from "../ui/CodeMirrorEditor";
+import {
+  CodeMirrorEditor,
+  type CodeMirrorEditorHandle,
+} from "../ui/CodeMirrorEditor";
 import { JsonTreeView } from "../ui/JsonTreeView";
 import { GoToLineDialog } from "../ui/GoToLineDialog";
 import { FileTabs } from "./FileTabs";
 import { ImagePreview } from "./ImagePreview";
 import { MarkdownPreview } from "./MarkdownPreview";
 
-const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "bmp"]);
+const IMAGE_EXTS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "svg",
+  "webp",
+  "ico",
+  "bmp",
+]);
 const MARKDOWN_EXTS = new Set(["md", "markdown", "mdx"]);
 const CODE_EXTS = new Set([
-  "rs", "ts", "tsx", "js", "jsx", "mjs", "py", "go", "java", "rb",
-  "c", "h", "cpp", "hpp", "cc", "cxx", "cs", "css", "scss", "less",
-  "html", "htm", "json", "yaml", "yml", "toml", "sql", "sh", "bash",
-  "zsh", "xml", "svg", "vue", "svelte", "astro", "tex", "dockerfile",
+  "rs",
+  "ts",
+  "tsx",
+  "js",
+  "jsx",
+  "mjs",
+  "py",
+  "go",
+  "java",
+  "rb",
+  "c",
+  "h",
+  "cpp",
+  "hpp",
+  "cc",
+  "cxx",
+  "cs",
+  "css",
+  "scss",
+  "less",
+  "html",
+  "htm",
+  "json",
+  "yaml",
+  "yml",
+  "toml",
+  "sql",
+  "sh",
+  "bash",
+  "zsh",
+  "xml",
+  "svg",
+  "vue",
+  "svelte",
+  "astro",
+  "tex",
+  "dockerfile",
 ]);
 
 function getFileExt(path: string): string {
@@ -229,9 +284,7 @@ export function CodeViewer() {
                 }`}
                 aria-label={isEditing ? "Preview mode" : "Edit mode"}
                 title={
-                  isEditing
-                    ? "Switch to preview"
-                    : "Switch to edit source"
+                  isEditing ? "Switch to preview" : "Switch to edit source"
                 }
               >
                 {isEditing ? (
@@ -252,7 +305,9 @@ export function CodeViewer() {
                     : "text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
                 }`}
                 aria-label={isEditing ? "View mode" : "Edit mode"}
-                title={isEditing ? "Switch to view mode" : "Switch to edit mode"}
+                title={
+                  isEditing ? "Switch to view mode" : "Switch to edit mode"
+                }
               >
                 {isEditing ? (
                   <Eye className="h-3.5 w-3.5" />

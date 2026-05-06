@@ -289,12 +289,14 @@ export function useSmartInput(
       updateThinkingLevels(model.id);
 
       // Save as default model in config
-      api.setDefaultModel({
-        provider_id: model.provider_id,
-        model_id: model.id,
-      }).catch(() => {
-        // Silently fail - non-critical operation
-      });
+      api
+        .setDefaultModel({
+          provider_id: model.provider_id,
+          model_id: model.id,
+        })
+        .catch(() => {
+          // Silently fail - non-critical operation
+        });
 
       onModelChange?.(model);
     },

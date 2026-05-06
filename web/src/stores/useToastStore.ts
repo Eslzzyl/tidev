@@ -47,8 +47,7 @@ export const toast = {
     useToastStore.getState().addToast(message, "success"),
   error: (message: string) =>
     useToastStore.getState().addToast(message, "error", 5000),
-  info: (message: string) =>
-    useToastStore.getState().addToast(message, "info"),
+  info: (message: string) => useToastStore.getState().addToast(message, "info"),
   warning: (message: string) =>
     useToastStore.getState().addToast(message, "warning", 4000),
 };

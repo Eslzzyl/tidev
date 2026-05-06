@@ -9,7 +9,10 @@ import {
   Globe,
   Wrench,
 } from "lucide-react";
-import { usePermissionStore, type PendingPermission } from "../../stores/usePermissionStore";
+import {
+  usePermissionStore,
+  type PendingPermission,
+} from "../../stores/usePermissionStore";
 
 interface PermissionCardProps {
   permission: PendingPermission;
@@ -47,7 +50,11 @@ function formatArguments(args: string): string {
       if (cmd) return String(cmd);
       // Otherwise format as compact JSON
       const entries = Object.entries(parsed).slice(0, 3);
-      const str = entries.map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`).join(", ");
+      const str = entries
+        .map(
+          ([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`,
+        )
+        .join(", ");
       return entries.length < Object.keys(parsed).length ? `${str}...` : str;
     }
     return args;
@@ -59,14 +66,18 @@ function formatArguments(args: string): string {
 function getDisplayName(toolName: string): string {
   const name = toolName.toLowerCase();
   if (["write", "file_write"].includes(name)) return "Write File";
-  if (["edit", "str_replace", "str_replace_based_edit_tool"].includes(name)) return "Edit File";
+  if (["edit", "str_replace", "str_replace_based_edit_tool"].includes(name))
+    return "Edit File";
   if (["apply_patch"].includes(name)) return "Apply Patch";
   if (["bash", "shell", "cmd", "terminal"].includes(name)) return "Bash";
   if (["webfetch", "fetch", "websearch"].includes(name)) return "Web Request";
   return toolName;
 }
 
-export function PermissionCard({ permission, onResponse }: PermissionCardProps) {
+export function PermissionCard({
+  permission,
+  onResponse,
+}: PermissionCardProps) {
   const [isResponding, setIsResponding] = useState(false);
   const removePermission = usePermissionStore((s) => s.removePermission);
   const setAutoAccept = usePermissionStore((s) => s.setAutoAccept);

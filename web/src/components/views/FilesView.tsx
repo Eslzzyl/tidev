@@ -159,10 +159,7 @@ export function FilesView() {
       const diff = clientX - resizeStartRef.current.x;
       const newWidth = Math.max(
         MIN_FILETREE_WIDTH,
-        Math.min(
-          MAX_FILETREE_WIDTH,
-          resizeStartRef.current.width + diff,
-        ),
+        Math.min(MAX_FILETREE_WIDTH, resizeStartRef.current.width + diff),
       );
       setFileTreeWidth(newWidth);
     };
@@ -206,7 +203,10 @@ export function FilesView() {
         <button
           onClick={toggleFileTree}
           className="flex items-center justify-center border-r border-neutral-200 bg-white hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950 dark:hover:bg-neutral-900"
-          style={{ width: COLLAPSED_STRIP_WIDTH, minWidth: COLLAPSED_STRIP_WIDTH }}
+          style={{
+            width: COLLAPSED_STRIP_WIDTH,
+            minWidth: COLLAPSED_STRIP_WIDTH,
+          }}
           aria-label="Open file browser"
           title="Open file browser"
         >
@@ -225,7 +225,11 @@ export function FilesView() {
             ? "fixed inset-y-0 left-0 z-50 shadow-xl"
             : "relative"
         }`}
-        style={fileTreeOpen ? { width: fileTreeWidth, minWidth: MIN_FILETREE_WIDTH } : undefined}
+        style={
+          fileTreeOpen
+            ? { width: fileTreeWidth, minWidth: MIN_FILETREE_WIDTH }
+            : undefined
+        }
       >
         {/* Header with collapse button */}
         <div className="flex items-center justify-between border-b border-neutral-200 px-2 py-1.5 dark:border-neutral-800">

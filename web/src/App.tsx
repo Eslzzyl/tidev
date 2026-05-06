@@ -1,6 +1,10 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { useSessionStore } from "./stores/useSessionStore";
-import { useUIStore, getEffectiveTheme, type MainTab } from "./stores/useUIStore";
+import {
+  useUIStore,
+  getEffectiveTheme,
+  type MainTab,
+} from "./stores/useUIStore";
 import { api } from "./api/client";
 import { Settings } from "./components/Settings";
 import { WelcomePage } from "./components/WelcomePage";
@@ -12,10 +16,24 @@ import { ChatPanel } from "./components/chat/ChatPanel";
 import { ToastContainer } from "./components/ui/ToastContainer";
 
 // Lazy-loaded views — each will be loaded on first render of that tab
-const FilesView = lazy(() => import("./components/views/FilesView").then((m) => ({ default: m.FilesView })));
-const SettingsView = lazy(() => import("./components/views/SettingsView").then((m) => ({ default: m.SettingsView })));
-const TerminalView = lazy(() => import("./components/views/TerminalView").then((m) => ({ default: m.TerminalView })));
-const GitView = lazy(() => import("./components/views/GitView").then((m) => ({ default: m.GitView })));
+const FilesView = lazy(() =>
+  import("./components/views/FilesView").then((m) => ({
+    default: m.FilesView,
+  })),
+);
+const SettingsView = lazy(() =>
+  import("./components/views/SettingsView").then((m) => ({
+    default: m.SettingsView,
+  })),
+);
+const TerminalView = lazy(() =>
+  import("./components/views/TerminalView").then((m) => ({
+    default: m.TerminalView,
+  })),
+);
+const GitView = lazy(() =>
+  import("./components/views/GitView").then((m) => ({ default: m.GitView })),
+);
 
 function App() {
   const [isLoading, setIsLoading] = useState(true);
@@ -61,9 +79,7 @@ function App() {
     document.body.style.backgroundColor = bgColor;
 
     // Update theme-color meta tag (fallback for Chrome Android, etc.)
-    const themeColorMeta = document.querySelector(
-      'meta[name="theme-color"]',
-    );
+    const themeColorMeta = document.querySelector('meta[name="theme-color"]');
     if (themeColorMeta) {
       themeColorMeta.setAttribute("content", bgColor);
     }
@@ -234,7 +250,8 @@ function App() {
   }
 
   // Show welcome page when no session is selected (only in chat tab)
-  const showWelcomePage = activeTab === "chat" && !currentSessionId && !isDraftSession;
+  const showWelcomePage =
+    activeTab === "chat" && !currentSessionId && !isDraftSession;
   // Show left sidebar only in chat tab when there's a session
   const showSidebars = activeTab === "chat" && !showWelcomePage;
   // Right sidebar visibility: only in chat and only when explicitly opened
@@ -281,8 +298,15 @@ function App() {
 
           {/* Main content - switches based on active tab */}
           <main className="relative flex-1 min-w-0">
-            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-neutral-400">Loading…</div>}>
-              {activeTab === "chat" && (showWelcomePage ? <WelcomePage /> : <ChatPanel />)}
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center text-sm text-neutral-400">
+                  Loading…
+                </div>
+              }
+            >
+              {activeTab === "chat" &&
+                (showWelcomePage ? <WelcomePage /> : <ChatPanel />)}
               {activeTab === "files" && <FilesView />}
               {activeTab === "terminal" && (
                 <div className="flex h-full flex-col overflow-hidden">

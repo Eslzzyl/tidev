@@ -1,4 +1,12 @@
-import { MessageSquare, FolderTree, Settings, Terminal, GitBranch, Menu, PanelRightClose } from "lucide-react";
+import {
+  MessageSquare,
+  FolderTree,
+  Settings,
+  Terminal,
+  GitBranch,
+  Menu,
+  PanelRightClose,
+} from "lucide-react";
 import { useUIStore, type MainTab } from "../../stores/useUIStore";
 import { useSessionStore } from "../../stores/useSessionStore";
 

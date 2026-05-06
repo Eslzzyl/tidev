@@ -175,7 +175,8 @@ export const api = {
   getInitPrompt: () => fetchJson<{ prompt: string }>(`${API_BASE}/init`),
 
   // Config
-  getDefaultModel: () => fetchJson<GetDefaultModelResponse>(`${API_BASE}/config/default-model`),
+  getDefaultModel: () =>
+    fetchJson<GetDefaultModelResponse>(`${API_BASE}/config/default-model`),
   setDefaultModel: (data: SetDefaultModelRequest) =>
     fetchJson<SetDefaultModelResponse>(`${API_BASE}/config/default-model`, {
       method: "POST",
@@ -281,11 +282,9 @@ export const api = {
     fetch(`${API_BASE}/terminal/${sessionId}`, { method: "DELETE" }),
 
   // Git
-  gitStatus: () =>
-    fetchJson<GitStatusResponse>(`${API_BASE}/git/status`),
+  gitStatus: () => fetchJson<GitStatusResponse>(`${API_BASE}/git/status`),
 
-  gitBranches: () =>
-    fetchJson<GitBranchResponse>(`${API_BASE}/git/branches`),
+  gitBranches: () => fetchJson<GitBranchResponse>(`${API_BASE}/git/branches`),
 
   gitLog: (count = 20) =>
     fetchJson<GitLogResponse>(`${API_BASE}/git/history?count=${count}`),
@@ -303,9 +302,12 @@ export const api = {
     }),
 
   gitBranchDelete: (name: string) =>
-    fetchJson<GitMessageResponse>(`${API_BASE}/git/branch/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-    }),
+    fetchJson<GitMessageResponse>(
+      `${API_BASE}/git/branch/${encodeURIComponent(name)}`,
+      {
+        method: "DELETE",
+      },
+    ),
 
   gitPush: (remote?: string, branch?: string, force?: boolean) =>
     fetchJson<GitMessageResponse>(`${API_BASE}/git/push`, {

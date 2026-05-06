@@ -1,5 +1,10 @@
 import type { Message } from "../types/api";
-import type { Round, ToolCallEntry, RoundSegment, SystemMessageBlock } from "../types/round";
+import type {
+  Round,
+  ToolCallEntry,
+  RoundSegment,
+  SystemMessageBlock,
+} from "../types/round";
 
 /**
  * Build a list of Rounds and SystemMessageBlocks from a flat list of Messages.

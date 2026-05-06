@@ -77,11 +77,15 @@ function TreeNode({ keyName, value, depth, maxDepth, isLast }: TreeNodeProps) {
           )}
           {keyName !== null && (
             <>
-              <span className="text-neutral-500">&ldquo;{keyName}&rdquo;: </span>
+              <span className="text-neutral-500">
+                &ldquo;{keyName}&rdquo;:{" "}
+              </span>
             </>
           )}
           <span className="text-neutral-500">
-            {isExpanded ? "" : `${bracket[0]} ${entries.length} ${type === "object" ? "keys" : "items"} ${bracket[1]}`}
+            {isExpanded
+              ? ""
+              : `${bracket[0]} ${entries.length} ${type === "object" ? "keys" : "items"} ${bracket[1]}`}
           </span>
         </button>
         {isExpanded && !empty && (
@@ -110,24 +114,24 @@ function TreeNode({ keyName, value, depth, maxDepth, isLast }: TreeNodeProps) {
         {keyName !== null && (
           <span className="text-neutral-500">&ldquo;{keyName}&rdquo;: </span>
         )}
-        <span className={getValueColor(type)}>
-          {formatValue(value, type)}
-        </span>
+        <span className={getValueColor(type)}>{formatValue(value, type)}</span>
       </span>
     </div>
   );
 }
 
-export function JsonTreeView({ data, initialExpanded = false, maxDepth = 3 }: JsonTreeViewProps) {
+export function JsonTreeView({
+  data,
+  initialExpanded = false,
+  maxDepth = 3,
+}: JsonTreeViewProps) {
   const [isExpanded, setIsExpanded] = useState(initialExpanded);
 
   if (!data || typeof data !== "object") {
     const type = getType(data);
     return (
       <div className="font-mono text-xs leading-5">
-        <span className={getValueColor(type)}>
-          {formatValue(data, type)}
-        </span>
+        <span className={getValueColor(type)}>{formatValue(data, type)}</span>
       </div>
     );
   }
@@ -150,7 +154,8 @@ export function JsonTreeView({ data, initialExpanded = false, maxDepth = 3 }: Js
         ) : (
           <ChevronRight className="h-3 w-3" />
         )}
-        {type === "object" ? "JSON" : "Array"} ({entries.length} {type === "object" ? "keys" : "items"})
+        {type === "object" ? "JSON" : "Array"} ({entries.length}{" "}
+        {type === "object" ? "keys" : "items"})
       </button>
       {isExpanded && (
         <div className="mt-1 font-mono text-xs leading-5">

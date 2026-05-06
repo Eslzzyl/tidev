@@ -9,7 +9,9 @@ type AsyncLangLoader = () => Promise<LanguageSupport>;
 const asyncLanguages: Record<string, AsyncLangLoader> = {
   js: () => import("@codemirror/lang-javascript").then((m) => m.javascript()),
   jsx: () =>
-    import("@codemirror/lang-javascript").then((m) => m.javascript({ jsx: true })),
+    import("@codemirror/lang-javascript").then((m) =>
+      m.javascript({ jsx: true }),
+    ),
   mjs: () => import("@codemirror/lang-javascript").then((m) => m.javascript()),
   ts: () =>
     import("@codemirror/lang-javascript").then((m) =>

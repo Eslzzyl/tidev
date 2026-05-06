@@ -1,6 +1,18 @@
-import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
 import { EditorState, Compartment, type Extension } from "@codemirror/state";
-import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from "@codemirror/view";
+import {
+  EditorView,
+  keymap,
+  lineNumbers,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+} from "@codemirror/view";
 import { defaultKeymap, indentWithTab } from "@codemirror/commands";
 import { closeBrackets } from "@codemirror/autocomplete";
 import { bracketMatching, foldGutter } from "@codemirror/language";
@@ -42,17 +54,23 @@ export interface CodeMirrorEditorHandle {
  * A CodeMirror 6 editor component for React 19.
  * Exposes goToLine, getLineCount, getCurrentLine via ref.
  */
-export const CodeMirrorEditor = forwardRef<CodeMirrorEditorHandle, CodeMirrorEditorProps>(function CodeMirrorEditor({
-  value,
-  onChange,
-  filePath,
-  readOnly = true,
-  extensions: externalExtensions = [],
-  className = "",
-  dark = false,
-  onViewReady,
-  onViewDestroy,
-}, ref) {
+export const CodeMirrorEditor = forwardRef<
+  CodeMirrorEditorHandle,
+  CodeMirrorEditorProps
+>(function CodeMirrorEditor(
+  {
+    value,
+    onChange,
+    filePath,
+    readOnly = true,
+    extensions: externalExtensions = [],
+    className = "",
+    dark = false,
+    onViewReady,
+    onViewDestroy,
+  },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const [isReady, setIsReady] = useState(false);
@@ -112,11 +130,7 @@ export const CodeMirrorEditor = forwardRef<CodeMirrorEditorHandle, CodeMirrorEdi
         // Highlight selection matches
         highlightSelectionMatches(),
         // Keymaps
-        keymap.of([
-          ...defaultKeymap,
-          ...searchKeymap,
-          indentWithTab,
-        ]),
+        keymap.of([...defaultKeymap, ...searchKeymap, indentWithTab]),
         // Theme (dynamic)
         themeCompartment.current.of(createCodeMirrorTheme(dark)),
         // Language (dynamic)
@@ -205,9 +219,8 @@ export const CodeMirrorEditor = forwardRef<CodeMirrorEditorHandle, CodeMirrorEdi
   useEffect(() => {
     if (viewRef.current) {
       viewRef.current.dispatch({
-        effects: externalExtensionsCompartment.current.reconfigure(
-          externalExtensions,
-        ),
+        effects:
+          externalExtensionsCompartment.current.reconfigure(externalExtensions),
       });
     }
   }, [externalExtensions]);
@@ -227,9 +240,7 @@ export const CodeMirrorEditor = forwardRef<CodeMirrorEditorHandle, CodeMirrorEdi
 
       if (!cancelled && viewRef.current) {
         viewRef.current.dispatch({
-          effects: languageCompartment.current.reconfigure(
-            lang ? [lang] : [],
-          ),
+          effects: languageCompartment.current.reconfigure(lang ? [lang] : []),
         });
       }
     }

@@ -63,7 +63,11 @@ function CustomImage(props: React.ComponentPropsWithoutRef<"img">) {
           loading="lazy"
         />
         <span className="absolute right-1 top-1 rounded bg-black/50 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100">
-          {expanded ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+          {expanded ? (
+            <Minimize2 className="h-3 w-3" />
+          ) : (
+            <Maximize2 className="h-3 w-3" />
+          )}
         </span>
       </button>
     </span>
@@ -112,7 +116,11 @@ function CodeBlock({
             className="rounded p-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
             title="Copy code"
           >
-            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? (
+              <Check className="h-3.5 w-3.5" />
+            ) : (
+              <Copy className="h-3.5 w-3.5" />
+            )}
           </button>
           <button
             onClick={handleDownload}
@@ -164,7 +172,9 @@ function Mermaid({ chart }: { chart: string }) {
     }
 
     render();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [chart, key]);
 
   if (error) {

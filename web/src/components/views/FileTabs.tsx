@@ -8,7 +8,12 @@ interface FileTabsProps {
   onClose: (path: string, e: React.MouseEvent) => void;
 }
 
-export function FileTabs({ files, activePath, onSelect, onClose }: FileTabsProps) {
+export function FileTabs({
+  files,
+  activePath,
+  onSelect,
+  onClose,
+}: FileTabsProps) {
   if (files.length === 0) return null;
 
   return (

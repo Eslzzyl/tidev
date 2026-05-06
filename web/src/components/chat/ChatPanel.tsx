@@ -8,7 +8,10 @@ import { api } from "../../api/client";
 import { buildRounds } from "../../utils/round";
 import { MessageRound } from "./MessageRound";
 import { SystemMessageBlock } from "../renderers/SystemMessageBlock";
-import type { Round, SystemMessageBlock as SystemMessageBlockType } from "../../types/round";
+import type {
+  Round,
+  SystemMessageBlock as SystemMessageBlockType,
+} from "../../types/round";
 import { MessageInput } from "./MessageInput";
 import { MessageDialog } from "./MessageDialog";
 import { RenameDialog } from "./RenameDialog";
@@ -38,27 +41,47 @@ export function ChatPanel() {
   const allRounds = useMemo(() => {
     const rounds: (Round | SystemMessageBlockType)[] = [...completedRounds];
     if (streamingRound) {
-      console.log("[ChatPanel] streamingRound present, completedRounds:", completedRounds.length,
-        "streamingRound.userMessage.id:", streamingRound.userMessage.id.substring(0,20),
-        "streamingRound.status:", streamingRound.status,
-        "streamingRound.segments:", streamingRound.segments.length);
+      console.log(
+        "[ChatPanel] streamingRound present, completedRounds:",
+        completedRounds.length,
+        "streamingRound.userMessage.id:",
+        streamingRound.userMessage.id.substring(0, 20),
+        "streamingRound.status:",
+        streamingRound.status,
+        "streamingRound.segments:",
+        streamingRound.segments.length,
+      );
       // When streaming, the streaming round contains a reference to the user
       // message that is already present in completedRounds (derived from the
       // messages store). Remove any completed round that references the same
       // user message to avoid duplicate user message rendering.
       const filtered = rounds.filter((r) => {
         if ("userMessage" in r) {
-          const keep = (r as Round).userMessage.id !== streamingRound.userMessage.id;
-          if (!keep) console.log("[ChatPanel] filtering out completed round", (r as Round).id);
+          const keep =
+            (r as Round).userMessage.id !== streamingRound.userMessage.id;
+          if (!keep)
+            console.log(
+              "[ChatPanel] filtering out completed round",
+              (r as Round).id,
+            );
           return keep;
         }
         return true;
       });
-      console.log("[ChatPanel] allRounds count:", filtered.length + 1, "(filtered:", filtered.length, "+ streaming: 1)");
+      console.log(
+        "[ChatPanel] allRounds count:",
+        filtered.length + 1,
+        "(filtered:",
+        filtered.length,
+        "+ streaming: 1)",
+      );
       filtered.push(streamingRound);
       return filtered;
     }
-    console.log("[ChatPanel] no streamingRound, completedRounds:", completedRounds.length);
+    console.log(
+      "[ChatPanel] no streamingRound, completedRounds:",
+      completedRounds.length,
+    );
     return rounds;
   }, [completedRounds, streamingRound]);
 
@@ -373,9 +396,7 @@ export function ChatPanel() {
       </div>
 
       {/* Permission Request Cards */}
-      {currentSessionId && (
-        <PermissionArea sessionId={currentSessionId} />
-      )}
+      {currentSessionId && <PermissionArea sessionId={currentSessionId} />}
 
       {/* Input Area */}
       <MessageInput
@@ -449,7 +470,10 @@ function PermissionArea({ sessionId }: { sessionId: string }) {
 
   if (sessionPermissions.length === 0) return null;
 
-  const handleResponse = (permissionId: string, response: "once" | "always" | "deny") => {
+  const handleResponse = (
+    permissionId: string,
+    response: "once" | "always" | "deny",
+  ) => {
     // For now, tools needing permission are auto-rejected by the backend.
     // This handler will send the response to the backend once the
     // permission response endpoint is implemented.

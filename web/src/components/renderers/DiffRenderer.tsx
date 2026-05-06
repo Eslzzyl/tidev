@@ -1,4 +1,12 @@
-import { useState, useRef, useEffect, useMemo, createContext, useContext, useCallback } from "react";
+import {
+  useState,
+  useRef,
+  useEffect,
+  useMemo,
+  createContext,
+  useContext,
+  useCallback,
+} from "react";
 import { ChevronDown, ChevronRight, Expand, Minus } from "lucide-react";
 
 interface Props {
@@ -112,7 +120,12 @@ function parseDiffAligned(diffText: string): AlignedHunk[] {
     const line = lines[i];
 
     // Skip headers
-    if (line.startsWith("Index:") || line.startsWith("===") || line.startsWith("---") || line.startsWith("+++")) {
+    if (
+      line.startsWith("Index:") ||
+      line.startsWith("===") ||
+      line.startsWith("---") ||
+      line.startsWith("+++")
+    ) {
       i++;
       continue;
     }
@@ -129,16 +142,36 @@ function parseDiffAligned(diffText: string): AlignedHunk[] {
       let newLineNum = newStart;
       let j = i + 1;
 
-      while (j < lines.length && !lines[j].startsWith("@@") && !lines[j].startsWith("Index:") && !lines[j].startsWith("===")) {
+      while (
+        j < lines.length &&
+        !lines[j].startsWith("@@") &&
+        !lines[j].startsWith("Index:") &&
+        !lines[j].startsWith("===")
+      ) {
         const cl = lines[j];
         if (cl.startsWith("+")) {
-          changes.push({ type: "add", content: cl.slice(1), oldLine: null, newLine: newLineNum });
+          changes.push({
+            type: "add",
+            content: cl.slice(1),
+            oldLine: null,
+            newLine: newLineNum,
+          });
           newLineNum++;
         } else if (cl.startsWith("-")) {
-          changes.push({ type: "del", content: cl.slice(1), oldLine: oldLineNum, newLine: null });
+          changes.push({
+            type: "del",
+            content: cl.slice(1),
+            oldLine: oldLineNum,
+            newLine: null,
+          });
           oldLineNum++;
         } else if (cl.startsWith(" ")) {
-          changes.push({ type: "context", content: cl.slice(1), oldLine: oldLineNum, newLine: newLineNum });
+          changes.push({
+            type: "context",
+            content: cl.slice(1),
+            oldLine: oldLineNum,
+            newLine: newLineNum,
+          });
           oldLineNum++;
           newLineNum++;
         }
@@ -148,17 +181,41 @@ function parseDiffAligned(diffText: string): AlignedHunk[] {
 
       // --- Content-based alignment ---
       // Split into left side (context + del) and right side (context + add)
-      const leftSide: { type: "context" | "del"; lineNum: number; content: string }[] = [];
-      const rightSide: { type: "context" | "add"; lineNum: number; content: string }[] = [];
+      const leftSide: {
+        type: "context" | "del";
+        lineNum: number;
+        content: string;
+      }[] = [];
+      const rightSide: {
+        type: "context" | "add";
+        lineNum: number;
+        content: string;
+      }[] = [];
 
       for (const ch of changes) {
         if (ch.type === "context") {
-          leftSide.push({ type: "context", lineNum: ch.oldLine!, content: ch.content });
-          rightSide.push({ type: "context", lineNum: ch.newLine!, content: ch.content });
+          leftSide.push({
+            type: "context",
+            lineNum: ch.oldLine!,
+            content: ch.content,
+          });
+          rightSide.push({
+            type: "context",
+            lineNum: ch.newLine!,
+            content: ch.content,
+          });
         } else if (ch.type === "del") {
-          leftSide.push({ type: "del", lineNum: ch.oldLine!, content: ch.content });
+          leftSide.push({
+            type: "del",
+            lineNum: ch.oldLine!,
+            content: ch.content,
+          });
         } else if (ch.type === "add") {
-          rightSide.push({ type: "add", lineNum: ch.newLine!, content: ch.content });
+          rightSide.push({
+            type: "add",
+            lineNum: ch.newLine!,
+            content: ch.content,
+          });
         }
       }
 
@@ -187,33 +244,62 @@ function parseDiffAligned(diffText: string): AlignedHunk[] {
       let alignIdx = 0;
 
       while (leftIdx < leftSide.length || rightIdx < rightSide.length) {
-        const nextAlign = alignIdx < alignmentPoints.length ? alignmentPoints[alignIdx] : null;
+        const nextAlign =
+          alignIdx < alignmentPoints.length ? alignmentPoints[alignIdx] : null;
 
-        if (nextAlign && leftIdx === nextAlign.leftIdx && rightIdx === nextAlign.rightIdx) {
+        if (
+          nextAlign &&
+          leftIdx === nextAlign.leftIdx &&
+          rightIdx === nextAlign.rightIdx
+        ) {
           // Alignment point: both sides have this context line
           rows.push({
-            left: { type: "context", content: leftSide[leftIdx].content, lineNum: leftSide[leftIdx].lineNum },
-            right: { type: "context", content: rightSide[rightIdx].content, lineNum: rightSide[rightIdx].lineNum },
+            left: {
+              type: "context",
+              content: leftSide[leftIdx].content,
+              lineNum: leftSide[leftIdx].lineNum,
+            },
+            right: {
+              type: "context",
+              content: rightSide[rightIdx].content,
+              lineNum: rightSide[rightIdx].lineNum,
+            },
           });
           leftIdx++;
           rightIdx++;
           alignIdx++;
         } else {
-          const needLeft = leftIdx < leftSide.length && (!nextAlign || leftIdx < nextAlign.leftIdx);
-          const needRight = rightIdx < rightSide.length && (!nextAlign || rightIdx < nextAlign.rightIdx);
+          const needLeft =
+            leftIdx < leftSide.length &&
+            (!nextAlign || leftIdx < nextAlign.leftIdx);
+          const needRight =
+            rightIdx < rightSide.length &&
+            (!nextAlign || rightIdx < nextAlign.rightIdx);
 
           if (needLeft && needRight) {
             // Both sides have content before next alignment — pair them 1:1
             rows.push({
-              left: { type: leftSide[leftIdx].type, content: leftSide[leftIdx].content, lineNum: leftSide[leftIdx].lineNum },
-              right: { type: rightSide[rightIdx].type, content: rightSide[rightIdx].content, lineNum: rightSide[rightIdx].lineNum },
+              left: {
+                type: leftSide[leftIdx].type,
+                content: leftSide[leftIdx].content,
+                lineNum: leftSide[leftIdx].lineNum,
+              },
+              right: {
+                type: rightSide[rightIdx].type,
+                content: rightSide[rightIdx].content,
+                lineNum: rightSide[rightIdx].lineNum,
+              },
             });
             leftIdx++;
             rightIdx++;
           } else if (needLeft) {
             // Only left has content — empty right
             rows.push({
-              left: { type: leftSide[leftIdx].type, content: leftSide[leftIdx].content, lineNum: leftSide[leftIdx].lineNum },
+              left: {
+                type: leftSide[leftIdx].type,
+                content: leftSide[leftIdx].content,
+                lineNum: leftSide[leftIdx].lineNum,
+              },
               right: { type: "empty", content: "", lineNum: null },
             });
             leftIdx++;
@@ -221,7 +307,11 @@ function parseDiffAligned(diffText: string): AlignedHunk[] {
             // Only right has content — empty left
             rows.push({
               left: { type: "empty", content: "", lineNum: null },
-              right: { type: rightSide[rightIdx].type, content: rightSide[rightIdx].content, lineNum: rightSide[rightIdx].lineNum },
+              right: {
+                type: rightSide[rightIdx].type,
+                content: rightSide[rightIdx].content,
+                lineNum: rightSide[rightIdx].lineNum,
+              },
             });
             rightIdx++;
           } else {
@@ -264,7 +354,10 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
     (line: string, lang: string, fullHighlight: boolean): string => {
       if (!lang || !fullHighlight || !hljs) return escapeHtml(line);
       try {
-        const result = hljs.highlight(line, { language: lang, ignoreIllegals: true });
+        const result = hljs.highlight(line, {
+          language: lang,
+          ignoreIllegals: true,
+        });
         return result.value;
       } catch {
         return escapeHtml(line);
@@ -274,7 +367,8 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
   );
 
   useEffect(() => {
-    const checkWidth = () => setIsWide(window.innerWidth >= WIDE_LAYOUT_THRESHOLD);
+    const checkWidth = () =>
+      setIsWide(window.innerWidth >= WIDE_LAYOUT_THRESHOLD);
     window.addEventListener("resize", checkWidth);
     return () => window.removeEventListener("resize", checkWidth);
   }, []);
@@ -291,7 +385,9 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
           <span className="w-8 shrink-0 select-none text-right text-neutral-400">
             {row.left.lineNum}
           </span>
-          <span className="w-4 shrink-0 select-none text-center text-neutral-400"> </span>
+          <span className="w-4 shrink-0 select-none text-center text-neutral-400">
+            {" "}
+          </span>
           <span className="flex-1 whitespace-pre-wrap break-all pl-1 text-neutral-800 dark:text-neutral-200">
             {highlightLine(row.left.content, language, useFullHighlight)}
           </span>
@@ -305,7 +401,9 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
           <span className="w-8 shrink-0 select-none text-right text-neutral-400">
             {row.left.lineNum}
           </span>
-          <span className="w-4 shrink-0 select-none text-center text-red-500">-</span>
+          <span className="w-4 shrink-0 select-none text-center text-red-500">
+            -
+          </span>
           <span className="flex-1 whitespace-pre-wrap break-all pl-1 text-neutral-800 dark:text-neutral-200">
             {highlightLine(row.left.content, language, useFullHighlight)}
           </span>
@@ -319,7 +417,9 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
           <span className="w-8 shrink-0 select-none text-right text-neutral-400">
             {row.right.lineNum}
           </span>
-          <span className="w-4 shrink-0 select-none text-center text-green-600">+</span>
+          <span className="w-4 shrink-0 select-none text-center text-green-600">
+            +
+          </span>
           <span className="flex-1 whitespace-pre-wrap break-all pl-1 text-neutral-800 dark:text-neutral-200">
             {highlightLine(row.right.content, language, useFullHighlight)}
           </span>
@@ -333,22 +433,29 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
   const renderTwoColumn = (rows: AlignedRow[]) => (
     <div>
       {rows.map((row, idx) => (
-        <div key={idx} className="flex border-b border-neutral-100 last:border-b-0 dark:border-neutral-800">
+        <div
+          key={idx}
+          className="flex border-b border-neutral-100 last:border-b-0 dark:border-neutral-800"
+        >
           {/* Left side (old) */}
           <div
             className={`flex min-h-[22px] flex-1 min-w-0 font-mono text-xs leading-[22px] border-r border-neutral-200 dark:border-neutral-700 ${
-              row.left.type === "del"
-                ? "bg-red-50 dark:bg-red-950/40"
-                : ""
+              row.left.type === "del" ? "bg-red-50 dark:bg-red-950/40" : ""
             }`}
           >
             <span className="w-8 shrink-0 select-none text-right text-neutral-400">
               {row.left.lineNum ?? ""}
             </span>
-            <span className={`w-4 shrink-0 select-none text-center ${
-              row.left.type === "del" ? "text-red-500" : "text-neutral-400"
-            }`}>
-              {row.left.type === "del" ? "-" : row.left.type === "empty" ? "" : " "}
+            <span
+              className={`w-4 shrink-0 select-none text-center ${
+                row.left.type === "del" ? "text-red-500" : "text-neutral-400"
+              }`}
+            >
+              {row.left.type === "del"
+                ? "-"
+                : row.left.type === "empty"
+                  ? ""
+                  : " "}
             </span>
             <span className="flex-1 whitespace-pre-wrap break-all pl-1 text-neutral-800 dark:text-neutral-200">
               {highlightLine(row.left.content, language, useFullHighlight)}
@@ -358,18 +465,22 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
           {/* Right side (new) */}
           <div
             className={`flex min-h-[22px] flex-1 min-w-0 font-mono text-xs leading-[22px] ${
-              row.right.type === "add"
-                ? "bg-green-50 dark:bg-green-950/40"
-                : ""
+              row.right.type === "add" ? "bg-green-50 dark:bg-green-950/40" : ""
             }`}
           >
             <span className="w-8 shrink-0 select-none text-right text-neutral-400">
               {row.right.lineNum ?? ""}
             </span>
-            <span className={`w-4 shrink-0 select-none text-center ${
-              row.right.type === "add" ? "text-green-600" : "text-neutral-400"
-            }`}>
-              {row.right.type === "add" ? "+" : row.right.type === "empty" ? "" : " "}
+            <span
+              className={`w-4 shrink-0 select-none text-center ${
+                row.right.type === "add" ? "text-green-600" : "text-neutral-400"
+              }`}
+            >
+              {row.right.type === "add"
+                ? "+"
+                : row.right.type === "empty"
+                  ? ""
+                  : " "}
             </span>
             <span className="flex-1 whitespace-pre-wrap break-all pl-1 text-neutral-800 dark:text-neutral-200">
               {highlightLine(row.right.content, language, useFullHighlight)}
@@ -451,9 +562,7 @@ export function CollapsibleDiffFile({
       </button>
 
       {/* Diff content */}
-      {isExpanded && (
-        <DiffRenderer diff={diff} filepath={filepath} compact />
-      )}
+      {isExpanded && <DiffRenderer diff={diff} filepath={filepath} compact />}
     </div>
   );
 }
@@ -476,11 +585,15 @@ export function useDiffCollapseContext() {
 /**
  * Provider that manages "expand/collapse all" for multiple diff files.
  */
-export function DiffCollapseProvider({ children }: { children: React.ReactNode }) {
+export function DiffCollapseProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const [allExpanded, setAllExpanded] = useState<boolean | null>(null);
 
   const toggleAll = useCallback(() => {
-    setAllExpanded((prev) => prev === null ? false : !prev);
+    setAllExpanded((prev) => (prev === null ? false : !prev));
   }, []);
 
   return (
@@ -495,9 +608,13 @@ export function DiffCollapseProvider({ children }: { children: React.ReactNode }
             className="flex items-center gap-1 rounded px-2 py-1 text-[10px] text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
           >
             {allExpanded === false ? (
-              <><Expand className="h-3 w-3" /> Expand all</>
+              <>
+                <Expand className="h-3 w-3" /> Expand all
+              </>
             ) : (
-              <><Minus className="h-3 w-3" /> Collapse all</>
+              <>
+                <Minus className="h-3 w-3" /> Collapse all
+              </>
             )}
           </button>
         </div>

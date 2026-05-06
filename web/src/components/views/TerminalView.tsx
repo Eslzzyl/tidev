@@ -131,7 +131,11 @@ export function TerminalView() {
       {/* Terminal area */}
       <div className="relative flex-1 overflow-hidden">
         {activeTab ? (
-          <TerminalViewport key={activeTab.id} tab={activeTab} isDark={isDark} />
+          <TerminalViewport
+            key={activeTab.id}
+            tab={activeTab}
+            isDark={isDark}
+          />
         ) : (
           <div
             className={`flex h-full items-center justify-center text-sm ${isDark ? "text-neutral-500" : "text-neutral-400"}`}

@@ -12,12 +12,22 @@ export function createCodeMirrorTheme(dark: boolean) {
   const text = dark ? "#e0e0e0" : "#333333";
   const gutterText = dark ? "#6b6b8a" : "#999999";
   const cursor = dark ? "#c9c9ff" : "#333333";
-  const selection = dark ? "rgba(100, 100, 200, 0.3)" : "rgba(0, 100, 200, 0.15)";
-  const selectionMatch = dark ? "rgba(100, 100, 200, 0.2)" : "rgba(0, 100, 200, 0.1)";
-  const lineHighlight = dark ? "rgba(255, 255, 255, 0.04)" : "rgba(0, 0, 0, 0.04)";
-  const activeLineGutter = dark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.07)";
+  const selection = dark
+    ? "rgba(100, 100, 200, 0.3)"
+    : "rgba(0, 100, 200, 0.15)";
+  const selectionMatch = dark
+    ? "rgba(100, 100, 200, 0.2)"
+    : "rgba(0, 100, 200, 0.1)";
+  const lineHighlight = dark
+    ? "rgba(255, 255, 255, 0.04)"
+    : "rgba(0, 0, 0, 0.04)";
+  const activeLineGutter = dark
+    ? "rgba(255, 255, 255, 0.08)"
+    : "rgba(0, 0, 0, 0.07)";
   const border = dark ? "#2a2a3e" : "#e5e5e5";
-  const searchMatch = dark ? "rgba(200, 180, 80, 0.4)" : "rgba(255, 200, 0, 0.3)";
+  const searchMatch = dark
+    ? "rgba(200, 180, 80, 0.4)"
+    : "rgba(255, 200, 0, 0.3)";
   const searchSel = dark ? "rgba(200, 180, 80, 0.6)" : "rgba(255, 200, 0, 0.5)";
   const tooltipBg = dark ? "#2a2a3e" : "#ffffff";
   const tooltipBorder = dark ? "#3a3a4e" : "#dddddd";
@@ -137,15 +147,31 @@ export function createCodeMirrorTheme(dark: boolean) {
         { tag: t.definition(t.name), color: dark ? "#e5c07b" : "#953800" },
         { tag: t.operator, color: dark ? "#abb2bf" : "#0550ae" },
         { tag: t.propertyName, color: dark ? "#e06c75" : "#0550ae" },
-        { tag: t.comment, color: dark ? "#5c6370" : "#6e7781", fontStyle: "italic" },
+        {
+          tag: t.comment,
+          color: dark ? "#5c6370" : "#6e7781",
+          fontStyle: "italic",
+        },
         { tag: t.string, color: dark ? "#98c379" : "#0a3069" },
         { tag: t.number, color: dark ? "#d19a66" : "#0550ae" },
         { tag: t.regexp, color: dark ? "#98c379" : "#0a3069" },
         { tag: t.variableName, color: dark ? "#e06c75" : "#953800" },
         { tag: t.punctuation, color: dark ? "#abb2bf" : "#333333" },
-        { tag: t.heading, color: dark ? "#61afef" : "#0550ae", fontWeight: "bold" },
-        { tag: t.emphasis, color: dark ? "#e06c75" : "#333333", fontStyle: "italic" },
-        { tag: t.link, color: dark ? "#61afef" : "#0969da", textDecoration: "underline" },
+        {
+          tag: t.heading,
+          color: dark ? "#61afef" : "#0550ae",
+          fontWeight: "bold",
+        },
+        {
+          tag: t.emphasis,
+          color: dark ? "#e06c75" : "#333333",
+          fontStyle: "italic",
+        },
+        {
+          tag: t.link,
+          color: dark ? "#61afef" : "#0969da",
+          textDecoration: "underline",
+        },
         { tag: t.list, color: dark ? "#98c379" : "#0550ae" },
         { tag: t.typeName, color: dark ? "#e5c07b" : "#0550ae" },
         { tag: t.className, color: dark ? "#e5c07b" : "#0550ae" },
@@ -177,8 +203,16 @@ export function createCodeMirrorTheme(dark: boolean) {
         { tag: t.modifier, color: dark ? "#c678dd" : "#d73a49" },
         { tag: t.labelName, color: dark ? "#e06c75" : "#953800" },
         { tag: t.namespace, color: dark ? "#e5c07b" : "#0550ae" },
-        { tag: t.lineComment, color: dark ? "#5c6370" : "#6e7781", fontStyle: "italic" },
-        { tag: t.blockComment, color: dark ? "#5c6370" : "#6e7781", fontStyle: "italic" },
+        {
+          tag: t.lineComment,
+          color: dark ? "#5c6370" : "#6e7781",
+          fontStyle: "italic",
+        },
+        {
+          tag: t.blockComment,
+          color: dark ? "#5c6370" : "#6e7781",
+          fontStyle: "italic",
+        },
         { tag: t.url, color: dark ? "#61afef" : "#0969da" },
         { tag: t.invalid, color: dark ? "#e06c75" : "#82071e" },
         { tag: t.character, color: dark ? "#98c379" : "#0a3069" },
@@ -186,7 +220,11 @@ export function createCodeMirrorTheme(dark: boolean) {
         { tag: t.color, color: dark ? "#d19a66" : "#0550ae" },
         { tag: t.content, color: dark ? "#e0e0e0" : "#333333" },
         { tag: t.monospace, color: dark ? "#e0e0e0" : "#333333" },
-        { tag: t.strong, color: dark ? "#e0e0e0" : "#333333", fontWeight: "bold" },
+        {
+          tag: t.strong,
+          color: dark ? "#e0e0e0" : "#333333",
+          fontWeight: "bold",
+        },
         { tag: t.strikethrough, color: dark ? "#e0e0e0" : "#333333" },
         { tag: t.quote, color: dark ? "#98c379" : "#0a3069" },
         { tag: t.unit, color: dark ? "#d19a66" : "#0550ae" },

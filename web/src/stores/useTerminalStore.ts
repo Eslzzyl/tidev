@@ -56,7 +56,11 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       set((state) => ({
         tabs: state.tabs.map((t) =>
           t.id === tabId
-            ? { ...t, sessionId: result.session_id, lifecycle: "running" as const }
+            ? {
+                ...t,
+                sessionId: result.session_id,
+                lifecycle: "running" as const,
+              }
             : t,
         ),
       }));
@@ -107,9 +111,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   appendOutput: (sessionId, data) => {
     set((state) => ({
       tabs: state.tabs.map((t) =>
-        t.sessionId === sessionId
-          ? { ...t, buffer: t.buffer + data }
-          : t,
+        t.sessionId === sessionId ? { ...t, buffer: t.buffer + data } : t,
       ),
     }));
   },
@@ -117,9 +119,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   closeBySessionId: (sessionId) => {
     set((state) => ({
       tabs: state.tabs.map((t) =>
-        t.sessionId === sessionId
-          ? { ...t, lifecycle: "exited" as const }
-          : t,
+        t.sessionId === sessionId ? { ...t, lifecycle: "exited" as const } : t,
       ),
     }));
   },
