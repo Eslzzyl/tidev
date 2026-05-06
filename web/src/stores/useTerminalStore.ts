@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { v4 as uuidv4 } from "uuid";
 import { api } from "../api/client";
 
 export interface TerminalTab {
@@ -35,7 +36,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   ws: null,
 
   createTab: () => {
-    const id = crypto.randomUUID();
+    const id = uuidv4();
     const label = `Terminal ${get().tabs.length + 1}`;
 
     set((state) => ({
