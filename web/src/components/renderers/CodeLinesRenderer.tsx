@@ -1,5 +1,4 @@
-import { useMemo } from "react";
-import hljs from "highlight.js";
+import { useMemo, useState, useEffect, useCallback } from "react";
 
 interface CodeLine {
   lineNum: number;
@@ -105,17 +104,27 @@ function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;");
 }
 
-function highlightLine(line: string, language: string): string {
-  if (!language) return escapeHtml(line);
-  try {
-    const result = hljs.highlight(line, { language, ignoreIllegals: true });
-    return result.value;
-  } catch {
-    return escapeHtml(line);
-  }
-}
-
 export function CodeLinesRenderer({ output, filepath }: Props) {
+  const [hljs, setHljs] = useState<any>(null);
+
+  // Dynamically load highlight.js on first render
+  useEffect(() => {
+    import("highlight.js").then((mod) => setHljs(() => mod.default));
+  }, []);
+
+  const highlightLine = useCallback(
+    (line: string, language: string): string => {
+      if (!language || !hljs) return escapeHtml(line);
+      try {
+        const result = hljs.highlight(line, { language, ignoreIllegals: true });
+        return result.value;
+      } catch {
+        return escapeHtml(line);
+      }
+    },
+    [hljs],
+  );
+
   const fp = useMemo(() => filepath || extractPath(output), [output, filepath]);
   const codeLines = useMemo(() => parseContentLines(output), [output]);
   const language = useMemo(() => (fp ? detectLanguage(fp) : ""), [fp]);

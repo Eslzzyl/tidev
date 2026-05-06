@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { useSessionStore } from "./stores/useSessionStore";
 import { useUIStore, getEffectiveTheme, type MainTab } from "./stores/useUIStore";
 import { api } from "./api/client";
@@ -9,11 +9,13 @@ import { RightSidebar } from "./components/layout/RightSidebar";
 import { ResizeHandle } from "./components/layout/ResizeHandle";
 import { Header } from "./components/layout/Header";
 import { ChatPanel } from "./components/chat/ChatPanel";
-import { FilesView } from "./components/views/FilesView";
-import { SettingsView } from "./components/views/SettingsView";
-import { TerminalView } from "./components/views/TerminalView";
-import { GitView } from "./components/views/GitView";
 import { ToastContainer } from "./components/ui/ToastContainer";
+
+// Lazy-loaded views — each will be loaded on first render of that tab
+const FilesView = lazy(() => import("./components/views/FilesView").then((m) => ({ default: m.FilesView })));
+const SettingsView = lazy(() => import("./components/views/SettingsView").then((m) => ({ default: m.SettingsView })));
+const TerminalView = lazy(() => import("./components/views/TerminalView").then((m) => ({ default: m.TerminalView })));
+const GitView = lazy(() => import("./components/views/GitView").then((m) => ({ default: m.GitView })));
 
 function App() {
   const [isLoading, setIsLoading] = useState(true);
@@ -259,15 +261,17 @@ function App() {
 
           {/* Main content - switches based on active tab */}
           <main className="relative flex-1 min-w-0">
-            {activeTab === "chat" && (showWelcomePage ? <WelcomePage /> : <ChatPanel />)}
-            {activeTab === "files" && <FilesView />}
-            {activeTab === "terminal" && (
-              <div className="flex h-full flex-col overflow-hidden">
-                <TerminalView />
-              </div>
-            )}
-            {activeTab === "git" && <GitView />}
-            {activeTab === "settings" && <SettingsView />}
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-neutral-400">Loading…</div>}>
+              {activeTab === "chat" && (showWelcomePage ? <WelcomePage /> : <ChatPanel />)}
+              {activeTab === "files" && <FilesView />}
+              {activeTab === "terminal" && (
+                <div className="flex h-full flex-col overflow-hidden">
+                  <TerminalView />
+                </div>
+              )}
+              {activeTab === "git" && <GitView />}
+              {activeTab === "settings" && <SettingsView />}
+            </Suspense>
           </main>
 
           {/* Right Sidebar - only in chat view */}

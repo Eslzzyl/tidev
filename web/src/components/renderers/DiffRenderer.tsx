@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useMemo, createContext, useContext, useCallback } from "react";
-import hljs from "highlight.js";
 import { ChevronDown, ChevronRight, Expand, Minus } from "lucide-react";
 
 interface Props {
@@ -94,16 +93,6 @@ function escapeHtml(text: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
-}
-
-function highlightLine(line: string, language: string, useFullHighlight: boolean): string {
-  if (!language || !useFullHighlight) return escapeHtml(line);
-  try {
-    const result = hljs.highlight(line, { language, ignoreIllegals: true });
-    return result.value;
-  } catch {
-    return escapeHtml(line);
-  }
 }
 
 /**
@@ -256,6 +245,12 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
   const [isWide, setIsWide] = useState(
     typeof window !== "undefined" && window.innerWidth >= WIDE_LAYOUT_THRESHOLD,
   );
+  const [hljs, setHljs] = useState<any>(null);
+
+  // Dynamically load highlight.js on first render
+  useEffect(() => {
+    import("highlight.js").then((mod) => setHljs(() => mod.default));
+  }, []);
 
   const language = useMemo(() => detectLanguage(filepath), [filepath]);
   const hunks = useMemo(() => parseDiffAligned(diff), [diff]);
@@ -264,6 +259,19 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
     [hunks],
   );
   const useFullHighlight = totalLines <= LARGE_FILE_THRESHOLD;
+
+  const highlightLine = useCallback(
+    (line: string, lang: string, fullHighlight: boolean): string => {
+      if (!lang || !fullHighlight || !hljs) return escapeHtml(line);
+      try {
+        const result = hljs.highlight(line, { language: lang, ignoreIllegals: true });
+        return result.value;
+      } catch {
+        return escapeHtml(line);
+      }
+    },
+    [hljs],
+  );
 
   useEffect(() => {
     const checkWidth = () => setIsWide(window.innerWidth >= WIDE_LAYOUT_THRESHOLD);
