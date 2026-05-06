@@ -165,7 +165,11 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     }
 
     // Start server
-    start_server(state, server_config).await?;
+    start_server(state.clone(), server_config).await?;
+
+    // Graceful shutdown complete; clean up terminal sessions.
+    crate::log_info!("Web server stopped, cleaning up terminal sessions...");
+    state.terminal_manager.shutdown().await;
 
     Ok(())
 }

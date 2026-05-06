@@ -6,7 +6,7 @@ import { useTerminalStore } from "../../stores/useTerminalStore";
 import { useUIStore, getEffectiveTheme } from "../../stores/useUIStore";
 import "@xterm/xterm/css/xterm.css";
 
-/** Dark terminal theme (matches xterm default-ish) */
+/** Dark terminal theme */
 const DARK_THEME = {
   background: "#000000",
   foreground: "#f0f0f0",
@@ -30,7 +30,7 @@ const DARK_THEME = {
   brightWhite: "#eeeeee",
 };
 
-/** Light terminal theme (light paper background, dark text) */
+/** Light terminal theme */
 const LIGHT_THEME = {
   background: "#fefefe",
   foreground: "#1a1a1a",
@@ -60,7 +60,6 @@ export function TerminalView() {
   const createTab = useTerminalStore((s) => s.createTab);
   const closeTab = useTerminalStore((s) => s.closeTab);
   const setActiveTab = useTerminalStore((s) => s.setActiveTab);
-  const sendInput = useTerminalStore((s) => s.sendInput);
   const theme = useUIStore((s) => s.theme);
   const isDark = getEffectiveTheme(theme) === "dark";
 
@@ -76,65 +75,74 @@ export function TerminalView() {
   return (
     <div className={`flex h-full flex-col ${isDark ? "bg-black" : "bg-white"}`}>
       {/* Tab bar */}
-      <div className={`flex items-center border-b ${isDark ? "border-neutral-800 bg-neutral-950" : "border-neutral-200 bg-neutral-100"}`}>
+      <div
+        className={`flex items-center border-b ${isDark ? "border-neutral-800 bg-neutral-950" : "border-neutral-200 bg-neutral-100"}`}
+      >
         <div className="flex flex-1 overflow-x-auto">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs transition-colors ${
+              className={`flex items-center gap-1 px-3 py-1.5 text-xs transition-colors ${
                 tab.id === activeTabId
                   ? isDark
-                    ? "border-b-2 border-neutral-100 bg-neutral-900 text-neutral-100"
-                    : "border-b-2 border-neutral-900 bg-white text-neutral-900"
+                    ? "border-b-2 border-blue-500 bg-neutral-900 text-white"
+                    : "border-b-2 border-blue-600 bg-white text-black"
                   : isDark
-                    ? "text-neutral-500 hover:bg-neutral-900 hover:text-neutral-300"
-                    : "text-neutral-500 hover:bg-neutral-200 hover:text-neutral-700"
+                    ? "text-neutral-400 hover:bg-neutral-900 hover:text-white"
+                    : "text-neutral-600 hover:bg-neutral-50 hover:text-black"
               }`}
             >
-              <span>{tab.label}</span>
               <span
-                onClick={(e) => {
-                  e.stopPropagation();
-                  closeTab(tab.id);
-                }}
-                className={`rounded p-0.5 ${isDark ? "hover:bg-neutral-700" : "hover:bg-neutral-300"}`}
-              >
-                <X className="h-3 w-3" />
-              </span>
+                className={`h-1.5 w-1.5 rounded-full ${
+                  tab.lifecycle === "running"
+                    ? "bg-green-500"
+                    : tab.lifecycle === "exited"
+                      ? "bg-red-500"
+                      : "bg-yellow-500"
+                }`}
+              />
+              <span className="truncate max-w-32">{tab.label}</span>
+              {tabs.length > 1 && (
+                <X
+                  size={12}
+                  className="ml-0.5 rounded hover:bg-neutral-700"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeTab(tab.id);
+                  }}
+                />
+              )}
             </button>
           ))}
         </div>
-
         <button
           onClick={() => createTab()}
-          className={`rounded p-1.5 ${isDark ? "text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300" : "text-neutral-500 hover:bg-neutral-200 hover:text-neutral-700"}`}
-          title="New terminal"
+          className={`mr-1 rounded p-1 transition-colors ${
+            isDark
+              ? "text-neutral-400 hover:bg-neutral-800 hover:text-white"
+              : "text-neutral-500 hover:bg-neutral-200 hover:text-black"
+          }`}
         >
-          <Plus className="h-4 w-4" />
+          <Plus size={14} />
         </button>
       </div>
 
-      {/* Terminal viewport */}
-      <div className={`flex-1 overflow-hidden ${isDark ? "bg-black" : "bg-white"}`}>
+      {/* Terminal area */}
+      <div className="relative flex-1 overflow-hidden">
         {activeTab ? (
-          <TerminalViewport
-            key={activeTab.id}
-            tab={activeTab}
-            isDark={isDark}
-            onInput={(data) => sendInput(activeTab.id, data)}
-          />
+          <TerminalViewport key={activeTab.id} tab={activeTab} isDark={isDark} />
         ) : (
-          <div className="flex h-full items-center justify-center text-neutral-500">
-            <p className="text-sm">No terminal session</p>
+          <div
+            className={`flex h-full items-center justify-center text-sm ${isDark ? "text-neutral-500" : "text-neutral-400"}`}
+          >
+            No terminal session
           </div>
         )}
       </div>
     </div>
   );
 }
-
-// ── Terminal viewport ──────────────────────────────────────────────────────
 
 interface TerminalViewportProps {
   tab: {
@@ -144,19 +152,31 @@ interface TerminalViewportProps {
     buffer: string;
   };
   isDark: boolean;
-  onInput: (data: string) => void;
 }
 
-function TerminalViewport({ tab, isDark, onInput }: TerminalViewportProps) {
+function TerminalViewport({ tab, isDark }: TerminalViewportProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const writtenLenRef = useRef(0); // bytes already written to xterm
+  const writtenLenRef = useRef(0);
+  const initStartedRef = useRef(false);
+  const sessionIdRef = useRef<string | null>(tab.sessionId);
+  const tabIdRef = useRef(tab.id);
 
-  // Initialize xterm.js and stream buffer to it in one unified effect
+  // Keep refs in sync with latest props
+  sessionIdRef.current = tab.sessionId;
+
+  const sendInput = useTerminalStore((s) => s.sendInput);
+  const sendResize = useTerminalStore((s) => s.sendResize);
+  const initSession = useTerminalStore((s) => s.initSession);
+
+  // Initialize xterm.js and optionally start a PTY session
   useEffect(() => {
     if (!terminalRef.current) return;
-    writtenLenRef.current = 0; // reset on (re)mount
+    // Prevent double initialization in StrictMode
+    if (xtermRef.current) return;
+
+    writtenLenRef.current = 0;
 
     const term = new Terminal({
       cursorBlink: true,
@@ -176,36 +196,59 @@ function TerminalViewport({ tab, isDark, onInput }: TerminalViewportProps) {
     term.open(terminalRef.current);
     xtermRef.current = term;
 
-    // Flush any buffer that arrived before xterm was ready
-    if (tab.buffer.length > 0) {
-      term.write(tab.buffer);
-      writtenLenRef.current = tab.buffer.length;
-    }
-
-    // Handle user input
+    // Handle user input: forward to the session via WebSocket (or HTTP fallback).
+    // Uses refs to always see the latest sessionId/tabId without re-registering.
     term.onData((data: string) => {
-      onInput(data);
+      const sid = sessionIdRef.current;
+      if (sid) {
+        sendInput(tabIdRef.current, data);
+      }
     });
 
-    // Fit terminal to container size
-    const fitTerminal = () => {
+    // Fit terminal to container and notify backend of actual size.
+    // If no session yet, start one with the measured dimensions.
+    const fitAndInit = () => {
       try {
         fitAddon.fit();
+        const cols = term.cols;
+        const rows = term.rows;
+
+        if (cols <= 0 || rows <= 0) return;
+
+        const sid = sessionIdRef.current;
+        if (!sid && !initStartedRef.current) {
+          // No session yet: start one with the correct size
+          initStartedRef.current = true;
+          initSession(tabIdRef.current, cols, rows);
+        } else if (sid) {
+          // Session exists: send resize if dimensions changed
+          sendResize(tabIdRef.current, cols, rows);
+        }
       } catch {
-        // Ignore fit errors during resize
+        // Fit errors are non-fatal
       }
     };
 
-    fitTerminal();
-    const resizeObserver = new ResizeObserver(() => fitTerminal());
+    // Wait a tick for layout to settle, then measure
+    const initTimer = setTimeout(fitAndInit, 50);
+
+    // Observe container for future resize
+    const resizeObserver = new ResizeObserver(() => {
+      fitAndInit();
+    });
     resizeObserver.observe(terminalRef.current);
 
     return () => {
+      clearTimeout(initTimer);
       resizeObserver.disconnect();
       term.dispose();
       xtermRef.current = null;
       fitAddonRef.current = null;
+      initStartedRef.current = false;
     };
+    // This effect intentionally runs once (mount-only).
+    // Store functions are stable; refs prevent stale closures.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Stream new buffer content to xterm when buffer grows
@@ -223,7 +266,7 @@ function TerminalViewport({ tab, isDark, onInput }: TerminalViewportProps) {
     }
   }, [tab.buffer]);
 
-  // Disable input when session is exited
+  // Show exit message when session ends
   useEffect(() => {
     const term = xtermRef.current;
     if (!term) return;

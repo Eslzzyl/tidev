@@ -221,9 +221,10 @@ export const api = {
     ),
 
   // Terminal
-  startTerminal: () =>
+  startTerminal: (cols?: number, rows?: number) =>
     fetchJson<{ session_id: string }>(`${API_BASE}/terminal/start`, {
       method: "POST",
+      body: JSON.stringify({ cols, rows }),
     }),
 
   terminalInput: (sessionId: string, data: string) =>
@@ -231,6 +232,13 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: sessionId, data }),
+    }),
+
+  terminalResize: (sessionId: string, cols: number, rows: number) =>
+    fetch(`${API_BASE}/terminal/resize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, cols, rows }),
     }),
 
   closeTerminal: (sessionId: string) =>

@@ -13,23 +13,28 @@ interface TerminalStore {
   tabs: TerminalTab[];
   activeTabId: string | null;
   eventSource: EventSource | null;
+  ws: WebSocket | null;
 
-  createTab: () => Promise<string>;
+  createTab: () => string;
+  initSession: (tabId: string, cols: number, rows: number) => Promise<void>;
   closeTab: (id: string) => Promise<void>;
   setActiveTab: (id: string | null) => void;
   appendOutput: (sessionId: string, data: string) => void;
   closeBySessionId: (sessionId: string) => void;
   sendInput: (tabId: string, data: string) => Promise<void>;
+  sendResize: (tabId: string, cols: number, rows: number) => Promise<void>;
   connectSSE: (sessionId: string, tabId: string) => void;
-  disconnectSSE: () => void;
+  connectWS: (sessionId: string, tabId: string) => void;
+  disconnect: () => void;
 }
 
 export const useTerminalStore = create<TerminalStore>((set, get) => ({
   tabs: [],
   activeTabId: null,
   eventSource: null,
+  ws: null,
 
-  createTab: async () => {
+  createTab: () => {
     const id = crypto.randomUUID();
     const label = `Terminal ${get().tabs.length + 1}`;
 
@@ -41,30 +46,35 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       activeTabId: id,
     }));
 
-    // Start terminal session
+    return id;
+  },
+
+  initSession: async (tabId, cols, rows) => {
     try {
-      const result = await api.startTerminal();
+      const result = await api.startTerminal(cols, rows);
       set((state) => ({
         tabs: state.tabs.map((t) =>
-          t.id === id
+          t.id === tabId
             ? { ...t, sessionId: result.session_id, lifecycle: "running" as const }
             : t,
         ),
       }));
 
-      // Connect SSE for this session
-      get().connectSSE(result.session_id, id);
+      // Connect via WebSocket (primary), fall back to SSE
+      get().connectWS(result.session_id, tabId);
     } catch (err) {
       set((state) => ({
         tabs: state.tabs.map((t) =>
-          t.id === id
-            ? { ...t, lifecycle: "exited" as const, buffer: t.buffer + "\r\nFailed to start terminal\r\n" }
+          t.id === tabId
+            ? {
+                ...t,
+                lifecycle: "exited" as const,
+                buffer: t.buffer + "\r\nFailed to start terminal\r\n",
+              }
             : t,
         ),
       }));
     }
-
-    return id;
   },
 
   closeTab: async (id: string) => {
@@ -117,6 +127,14 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab?.sessionId) return;
 
+    const ws = get().ws;
+    // Try WebSocket first
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(data);
+      return;
+    }
+
+    // Fallback to HTTP
     try {
       await api.terminalInput(tab.sessionId, data);
     } catch (err) {
@@ -124,8 +142,30 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     }
   },
 
+  sendResize: async (tabId, cols, rows) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab?.sessionId) return;
+
+    const ws = get().ws;
+    // Try WebSocket first (control frame)
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      const ctrl = new TextEncoder().encode(
+        `\x01${JSON.stringify({ type: "resize", cols, rows })}`,
+      );
+      ws.send(ctrl);
+      return;
+    }
+
+    // Fallback to HTTP
+    try {
+      await api.terminalResize(tab.sessionId, cols, rows);
+    } catch (err) {
+      console.error("Failed to resize terminal:", err);
+    }
+  },
+
   connectSSE: (sessionId, tabId) => {
-    get().disconnectSSE();
+    get().disconnect();
 
     const url = `${window.location.origin}/api/terminal/events?session_id=${sessionId}`;
     const es = new EventSource(url);
@@ -146,11 +186,76 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     set({ eventSource: es });
   },
 
-  disconnectSSE: () => {
+  connectWS: (sessionId, tabId) => {
+    get().disconnect();
+
+    // Try WebSocket
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/api/terminal/ws`;
+
+    try {
+      const ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        // Send bind control frame
+        const bindMsg = new TextEncoder().encode(
+          `\x01${JSON.stringify({ type: "bind", session_id: sessionId })}`,
+        );
+        ws.send(bindMsg);
+      };
+
+      ws.onmessage = (e) => {
+        const data = e.data as string;
+
+        // Check for control frames (0x01 prefix)
+        if (data.charCodeAt(0) === 0x01) {
+          try {
+            const ctrl = JSON.parse(data.slice(1));
+            if (ctrl.type === "close") {
+              get().closeBySessionId(sessionId);
+              get().disconnect();
+            }
+            // "ok" is ack, no action needed
+          } catch {
+            // Invalid control frame, ignore
+          }
+          return;
+        }
+
+        // Raw text = terminal output
+        get().appendOutput(sessionId, data);
+      };
+
+      ws.onerror = () => {
+        // WebSocket failed, fall back to SSE
+        get().disconnect();
+        get().connectSSE(sessionId, tabId);
+      };
+
+      ws.onclose = () => {
+        // If the tab is still running, we might need to reconnect.
+        // But since we manage lifecycle via terminal.close event,
+        // we don't auto-reconnect here.
+        set({ ws: null });
+      };
+
+      set({ ws });
+    } catch {
+      // WebSocket connection failed, fall back to SSE
+      get().connectSSE(sessionId, tabId);
+    }
+  },
+
+  disconnect: () => {
     const es = get().eventSource;
     if (es) {
       es.close();
       set({ eventSource: null });
+    }
+    const ws = get().ws;
+    if (ws) {
+      ws.close();
+      set({ ws: null });
     }
   },
 }));
