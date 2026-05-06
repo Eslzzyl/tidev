@@ -1,11 +1,13 @@
 import { Search, FolderTree, RotateCw, Plus, File, Folder, GitBranch } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { FileTree } from "./FileTree";
 import { CodeViewer } from "./CodeViewer";
 import { useFileStore } from "../../stores/useFileStore";
 import { useGitFileStore } from "../../stores/useGitFileStore";
 import { api } from "../../api/client";
 import { CreateItemDialog } from "../ui/CreateItemDialog";
+
+const SEARCH_CACHE_SIZE = 50;
 
 export function FilesView() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -24,6 +26,9 @@ export function FilesView() {
   const gitBranch = useGitFileStore((s) => s.branch);
   const gitRefresh = useGitFileStore((s) => s.refresh);
 
+  // Search cache: query -> results
+  const searchCacheRef = useRef<Record<string, { path: string; display: string }[]>>({});
+
   // Load root on mount
   useEffect(() => {
     if (!rootLoaded && !rootLoading) {
@@ -31,10 +36,17 @@ export function FilesView() {
     }
   }, [rootLoaded, rootLoading, loadRoot]);
 
-  // Debounced search
+  // Debounced search with cache
   useEffect(() => {
     if (!searchQuery.trim()) {
       setSearchResults([]);
+      return;
+    }
+
+    // Check cache first
+    const cached = searchCacheRef.current[searchQuery];
+    if (cached) {
+      setSearchResults(cached);
       return;
     }
 
@@ -42,12 +54,20 @@ export function FilesView() {
       setIsSearching(true);
       try {
         const result = await api.searchFiles(searchQuery);
-        setSearchResults(
-          result.suggestions
-            .filter((s) => s.kind === "file")
-            .slice(0, 20)
-            .map((s) => ({ path: s.path, display: s.display })),
-        );
+        const mapped = result.suggestions
+          .filter((s) => s.kind === "file")
+          .slice(0, 20)
+          .map((s) => ({ path: s.path, display: s.display }));
+
+        // Cache with LRU-like eviction
+        const cache = searchCacheRef.current;
+        const keys = Object.keys(cache);
+        if (keys.length >= SEARCH_CACHE_SIZE) {
+          delete cache[keys[0]];
+        }
+        cache[searchQuery] = mapped;
+
+        setSearchResults(mapped);
       } catch {
         // ignore
       } finally {

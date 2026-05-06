@@ -2,8 +2,9 @@ import { X, FileText, Copy, Check, Pencil, Save, Eye, Loader2, Code } from "luci
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useFileStore } from "../../stores/useFileStore";
 import { useUIStore, getEffectiveTheme } from "../../stores/useUIStore";
-import { CodeMirrorEditor } from "../ui/CodeMirrorEditor";
+import { CodeMirrorEditor, type CodeMirrorEditorHandle } from "../ui/CodeMirrorEditor";
 import { JsonTreeView } from "../ui/JsonTreeView";
+import { GoToLineDialog } from "../ui/GoToLineDialog";
 import { FileTabs } from "./FileTabs";
 import { ImagePreview } from "./ImagePreview";
 import { MarkdownPreview } from "./MarkdownPreview";
@@ -54,6 +55,10 @@ export function CodeViewer() {
 
   const isDark = getEffectiveTheme(theme) === "dark";
 
+  // Ref for CodeMirrorEditor imperative methods
+  const editorRef = useRef<CodeMirrorEditorHandle>(null);
+  const [goToLineOpen, setGoToLineOpen] = useState(false);
+
   // Get the active file object
   const activeFile = activeFilePath
     ? openFiles.find((f) => f.path === activeFilePath)
@@ -88,8 +93,16 @@ export function CodeViewer() {
       }
     };
 
+    const handleGoToLine = () => {
+      setGoToLineOpen(true);
+    };
+
     el.addEventListener("editor-save", handleSave);
-    return () => el.removeEventListener("editor-save", handleSave);
+    el.addEventListener("editor-gotoline", handleGoToLine);
+    return () => {
+      el.removeEventListener("editor-save", handleSave);
+      el.removeEventListener("editor-gotoline", handleGoToLine);
+    };
   }, [activeFilePath, updateFileContent, saveFile]);
 
   const handleCopy = useCallback(() => {
@@ -126,6 +139,10 @@ export function CodeViewer() {
     },
     [closeFile],
   );
+
+  const handleGoToLine = useCallback((line: number) => {
+    editorRef.current?.goToLine(line);
+  }, []);
 
   // Parse JSON for tree view
   const jsonData = useMemo(() => {
@@ -300,6 +317,7 @@ export function CodeViewer() {
 
         {activeFile && renderMode === "json" && !jsonData && (
           <CodeMirrorEditor
+            ref={editorRef}
             value={activeFile.content}
             onChange={handleEditorChange}
             filePath={activeFile.path}
@@ -310,6 +328,7 @@ export function CodeViewer() {
 
         {activeFile && renderMode === "code" && (
           <CodeMirrorEditor
+            ref={editorRef}
             value={activeFile.content}
             onChange={handleEditorChange}
             filePath={activeFile.path}
@@ -318,6 +337,16 @@ export function CodeViewer() {
           />
         )}
       </div>
+
+      {/* Go to line dialog */}
+      {goToLineOpen && (
+        <GoToLineDialog
+          totalLines={editorRef.current?.getLineCount() ?? 0}
+          currentLine={editorRef.current?.getCurrentLine() ?? 1}
+          onGo={handleGoToLine}
+          onClose={() => setGoToLineOpen(false)}
+        />
+      )}
     </div>
   );
 }

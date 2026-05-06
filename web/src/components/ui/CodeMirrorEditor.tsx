@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
 import { EditorState, Compartment, type Extension } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from "@codemirror/view";
 import { defaultKeymap, indentWithTab } from "@codemirror/commands";
@@ -32,10 +32,20 @@ export interface CodeMirrorEditorProps {
   onViewDestroy?: () => void;
 }
 
+export interface CodeMirrorEditorHandle {
+  /** Scroll to a specific line number */
+  goToLine: (line: number) => void;
+  /** Get the total line count */
+  getLineCount: () => number;
+  /** Get the current line number */
+  getCurrentLine: () => number;
+}
+
 /**
  * A CodeMirror 6 editor component for React 19.
+ * Exposes goToLine, getLineCount, getCurrentLine via ref.
  */
-export function CodeMirrorEditor({
+export const CodeMirrorEditor = forwardRef<CodeMirrorEditorHandle, CodeMirrorEditorProps>(function CodeMirrorEditor({
   value,
   onChange,
   filePath,
@@ -45,7 +55,7 @@ export function CodeMirrorEditor({
   dark = false,
   onViewReady,
   onViewDestroy,
-}: CodeMirrorEditorProps) {
+}, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const [isReady, setIsReady] = useState(false);
@@ -58,6 +68,30 @@ export function CodeMirrorEditor({
 
   // Track the current value to avoid unnecessary updates
   const currentValueRef = useRef(value);
+
+  // Expose imperative methods
+  useImperativeHandle(ref, () => ({
+    goToLine(line: number) {
+      const view = viewRef.current;
+      if (!view) return;
+      const doc = view.state.doc;
+      const clampedLine = Math.max(1, Math.min(line, doc.lines));
+      const pos = doc.line(clampedLine).from;
+      view.dispatch({
+        selection: { anchor: pos },
+        scrollIntoView: true,
+      });
+      view.focus();
+    },
+    getLineCount() {
+      return viewRef.current?.state.doc.lines ?? 0;
+    },
+    getCurrentLine() {
+      if (!viewRef.current) return 0;
+      const pos = viewRef.current.state.selection.main.head;
+      return viewRef.current.state.doc.lineAt(pos).number;
+    },
+  }));
 
   // Create the editor
   useEffect(() => {
@@ -102,20 +136,25 @@ export function CodeMirrorEditor({
             onChange(doc);
           }
         }),
-        // Dom event handling for Ctrl+S
+        // Dom event handling for Ctrl+S and Ctrl+G
         EditorView.domEventHandlers({
           keydown: (event) => {
-            if (
-              (event.ctrlKey || event.metaKey) &&
-              event.key === "s"
-            ) {
+            const isMod = event.ctrlKey || event.metaKey;
+            if (isMod && event.key === "s") {
               event.preventDefault();
-              // Dispatch custom event for save
               containerRef.current?.dispatchEvent(
                 new CustomEvent("editor-save", {
                   detail: { content: currentValueRef.current },
                 }),
               );
+              return true;
+            }
+            if (isMod && event.key === "g") {
+              event.preventDefault();
+              containerRef.current?.dispatchEvent(
+                new CustomEvent("editor-gotoline"),
+              );
+              return true;
             }
             return false;
           },
@@ -233,4 +272,4 @@ export function CodeMirrorEditor({
       className={`codemirror-editor h-full overflow-auto ${className}`}
     />
   );
-}
+});

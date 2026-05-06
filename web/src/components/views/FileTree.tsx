@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronRight,
   ChevronDown,
@@ -20,6 +20,7 @@ import { ContextMenu, type ContextMenuItem } from "../ui/ContextMenu";
 import { CreateItemDialog } from "../ui/CreateItemDialog";
 import { RenameDialog } from "../ui/RenameDialog";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { toast } from "../../stores/useToastStore";
 
 const fileIcons: Record<string, React.ReactNode> = {
   rs: <Code className="h-4 w-4 text-orange-500" />,
@@ -112,6 +113,8 @@ export function FileTree() {
     node: TreeNode | null;
   } | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
+  const [dragOverPath, setDragOverPath] = useState<string | null>(null);
+  const dragNodeRef = useRef<TreeNode | null>(null);
 
   useEffect(() => {
     if (!rootLoaded && !rootLoading) {
@@ -272,6 +275,23 @@ export function FileTree() {
             onToggleExpand={toggleExpand}
             onContextMenu={handleContextMenu}
             gitDisplayMap={gitStatusMap}
+            dragOverPath={dragOverPath}
+            onDragStart={(n) => { dragNodeRef.current = n; }}
+            onDragOver={(path) => { setDragOverPath(path); }}
+            onDragLeave={() => { setDragOverPath(null); }}
+            onDrop={(targetPath) => {
+              const source = dragNodeRef.current;
+              setDragOverPath(null);
+              dragNodeRef.current = null;
+              if (!source || source.path === targetPath) return;
+              const fileName = source.path.split("/").pop() || source.name;
+              const newPath = targetPath
+                ? `${targetPath}/${fileName}`
+                : fileName;
+              if (newPath !== source.path) {
+                renameFile(source.path, newPath).catch(() => {});
+              }
+            }}
           />
         ))}
       </div>
@@ -330,6 +350,11 @@ interface TreeNodeItemProps {
   onToggleExpand: (path: string) => Promise<void>;
   onContextMenu: (e: React.MouseEvent, node: TreeNode) => void;
   gitDisplayMap: Record<string, GitDisplayStatus>;
+  dragOverPath: string | null;
+  onDragStart: (node: TreeNode) => void;
+  onDragOver: (path: string) => void;
+  onDragLeave: () => void;
+  onDrop: (targetPath: string) => void;
 }
 
 function TreeNodeItem({
@@ -340,20 +365,61 @@ function TreeNodeItem({
   onToggleExpand,
   onContextMenu,
   gitDisplayMap,
+  dragOverPath,
+  onDragStart,
+  onDragOver: onDragOverCb,
+  onDragLeave,
+  onDrop,
 }: TreeNodeItemProps) {
   const isSelected = selectedPath === node.path;
   const gitDisplay = gitDisplayMap[node.path];
+  const isDragOver = dragOverPath === node.path;
+
+  const handleDragStart = useCallback(
+    (e: React.DragEvent) => {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", node.path);
+      onDragStart(node);
+    },
+    [node, onDragStart],
+  );
+
+  const handleDragOver = useCallback(
+    (e: React.DragEvent) => {
+      if (node.isDirectory) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        onDragOverCb(node.path);
+      }
+    },
+    [node.isDirectory, node.path, onDragOverCb],
+  );
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      if (node.isDirectory) {
+        onDrop(node.path);
+      }
+    },
+    [node.isDirectory, node.path, onDrop],
+  );
 
   return (
     <div>
       <button
         onClick={() => onNodeClick(node)}
         onContextMenu={(e) => onContextMenu(e, node)}
+        draggable={!node.isDirectory}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={handleDrop}
         className={`flex w-full items-center gap-1 px-2 py-1 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
           isSelected
             ? "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
             : "text-neutral-700 dark:text-neutral-300"
-        }`}
+        } ${isDragOver ? "bg-blue-100 dark:bg-blue-900/30" : ""}`}
         style={{ paddingLeft: `${8 + depth * 16}px` }}
         title={node.path}
       >
@@ -398,6 +464,11 @@ function TreeNodeItem({
                 onToggleExpand={onToggleExpand}
                 onContextMenu={onContextMenu}
                 gitDisplayMap={gitDisplayMap}
+                dragOverPath={dragOverPath}
+                onDragStart={onDragStart}
+                onDragOver={onDragOverCb}
+                onDragLeave={onDragLeave}
+                onDrop={onDrop}
               />
             ))
           ) : (
