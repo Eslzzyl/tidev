@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{broadcast, Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -12,6 +12,8 @@ use crate::{
     snapshot::SnapshotService,
     storage::SessionStore,
 };
+
+use crate::web::terminal::{TerminalManager, TerminalOutput};
 
 // Re-export ConfigPaths for use in routes
 pub use crate::config::ConfigPaths;
@@ -47,6 +49,10 @@ pub struct AppState {
     pub snapshot: Arc<SnapshotService>,
     /// Shared agent runtime (tools, system prompt, agent loop)
     pub agent: AgentRuntime,
+    /// Terminal session manager
+    pub terminal_manager: Arc<TerminalManager>,
+    /// Broadcast channel for terminal output
+    pub terminal_tx: broadcast::Sender<TerminalOutput>,
 }
 
 impl AppState {
@@ -66,6 +72,10 @@ impl AppState {
         // Create snapshot service for undo operations
         let snapshot = SnapshotService::new(&workspace_root, paths)?;
 
+        // Create terminal manager
+        let terminal_manager = Arc::new(TerminalManager::new());
+        let (terminal_tx, _) = broadcast::channel::<TerminalOutput>(1024);
+
         Ok(Self {
             store: Arc::new(Mutex::new(store)),
             event_bus,
@@ -80,6 +90,8 @@ impl AppState {
             file_search_index: Arc::new(FileSearchIndex::new()),
             snapshot: Arc::new(snapshot),
             agent,
+            terminal_manager,
+            terminal_tx,
         })
     }
 

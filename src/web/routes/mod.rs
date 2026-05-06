@@ -2,12 +2,14 @@ pub mod config;
 pub mod events;
 pub mod files;
 pub mod fs;
+pub mod git;
 pub mod messages;
 pub mod models;
 pub mod providers;
 pub mod sessions;
 pub mod skills;
 pub mod static_file;
+pub mod terminal;
 pub mod todos;
 pub mod tools;
 
@@ -76,6 +78,10 @@ pub fn api_routes() -> Router<AppState> {
         // Filesystem browser
         .route("/fs/list", get(fs::list_directory))
         .route("/fs/read", get(fs::read_file))
+        // Git
+        .merge(git::git_routes())
+        // Terminal
+        .merge(terminal::terminal_routes())
         // CORS
         .layer(CorsLayer::permissive())
 }

@@ -13,12 +13,14 @@ import {
   LayoutTemplate,
   ListTodo,
   Wrench,
+  Clock,
 } from "lucide-react";
 import type { ToolCallEntry } from "../../types/round";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { DiffRenderer } from "./DiffRenderer";
 import { CodeLinesRenderer } from "./CodeLinesRenderer";
 import { TodoRenderer } from "./TodoRenderer";
+import { JsonTreeView } from "../ui/JsonTreeView";
 
 interface Props {
   entry: ToolCallEntry;
@@ -38,6 +40,10 @@ function isBash(name: string): boolean {
 
 function isTodo(name: string): boolean {
   return name === "todowrite";
+}
+
+function isWebTool(name: string): boolean {
+  return ["websearch", "webfetch"].includes(name);
 }
 
 function getToolIcon(
@@ -76,6 +82,7 @@ function getToolColor(name: string): string {
   if (isBash(name)) return "text-violet-600 dark:text-violet-400";
   if (name === "task") return "text-amber-600 dark:text-amber-400";
   if (isTodo(name)) return "text-rose-600 dark:text-rose-400";
+  if (isWebTool(name)) return "text-sky-600 dark:text-sky-400";
   return "text-neutral-600 dark:text-neutral-400";
 }
 
@@ -89,6 +96,8 @@ function getToolBg(name: string): string {
     return "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800";
   if (isTodo(name))
     return "bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800";
+  if (isWebTool(name))
+    return "bg-sky-50 dark:bg-sky-950/30 border-sky-200 dark:border-sky-800";
   return "bg-neutral-50 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700";
 }
 
@@ -108,6 +117,10 @@ function getToolLabel(name: string): string {
       return "bash";
     case "todowrite":
       return "Todos";
+    case "websearch":
+      return "Web Search";
+    case "webfetch":
+      return "Web Fetch";
     default:
       return name;
   }
@@ -150,6 +163,12 @@ function summarizeArguments(name: string, entry: ToolCallEntry): string {
           return `${todos.length} item(s)`;
         }
         return "(todos)";
+      }
+      case "websearch": {
+        return args.query || "(no query)";
+      }
+      case "webfetch": {
+        return args.url || "(no url)";
       }
       default:
         return entry.arguments.length > 60
@@ -219,9 +238,36 @@ function getBashCommand(entry: ToolCallEntry): string {
   }
 }
 
+/** Format milliseconds into a human-readable duration string */
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
+}
+
+/** Try to parse output as JSON for tree view display */
+function tryParseJson(output: string): unknown | null {
+  try {
+    const parsed = JSON.parse(output);
+    if (typeof parsed === "object" && parsed !== null) return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Check if output looks like JSON (starts with { or [) */
+function looksLikeJson(output: string): boolean {
+  const trimmed = output.trim();
+  return trimmed.startsWith("{") || trimmed.startsWith("[");
+}
+
 export function ToolCallRow({ entry }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const [elapsedMs, setElapsedMs] = useState(0);
   const didAutoExpand = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startTimeRef = useRef<number | null>(null);
 
   // Determine auto-expand conditions
   const isEmptyResult =
@@ -235,8 +281,7 @@ export function ToolCallRow({ entry }: Props) {
     isBash(entry.name) && entry.resultComplete && !isEmptyResult;
   const hasDiff = entry.result && entry.result.diff;
 
-  // Auto-expand once when result arrives (like defaultExpanded for ThinkingBlock)
-  // After that, user toggle fully controls the state
+  // Auto-expand once when result arrives
   useEffect(() => {
     if (didAutoExpand.current) return;
     if (hasBashOutput || (hasDiff && entry.resultComplete)) {
@@ -245,12 +290,48 @@ export function ToolCallRow({ entry }: Props) {
     }
   }, [hasBashOutput, hasDiff, entry.resultComplete]);
 
-  // isExpanded is purely controlled by the `expanded` state — user toggle always works
+  // Live elapsed timer for running tool calls
+  useEffect(() => {
+    if (!entry.resultComplete && entry.argumentsComplete) {
+      // Tool is running — track elapsed time
+      startTimeRef.current = Date.now();
+      timerRef.current = setInterval(() => {
+        setElapsedMs(Date.now() - (startTimeRef.current ?? Date.now()));
+      }, 100);
+    } else if (entry.resultComplete) {
+      // Tool completed — stop timer; if we have a stored start, calculate final duration
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      if (startTimeRef.current && !entry.result?.exitCode) {
+        // Keep the final elapsed time
+      }
+    }
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [entry.argumentsComplete, entry.resultComplete]);
+
+  // isExpanded is purely controlled by the `expanded` state
   const isExpanded = expanded;
 
   function handleToggle() {
     setExpanded((prev) => !prev);
   }
+
+  // Check if output is JSON and should use tree view
+  const output = entry.result?.output?.trim() || "";
+  const parsedJson = !isBash(entry.name) && !isWriteTool(entry.name) && output && looksLikeJson(output)
+    ? tryParseJson(output)
+    : null;
+
+  const isRunning = !entry.resultComplete && entry.argumentsComplete;
+  const showDuration = entry.resultComplete && elapsedMs > 0;
 
   return (
     <div
@@ -270,7 +351,7 @@ export function ToolCallRow({ entry }: Props) {
           );
         })()}
 
-        {/* Collapsed label: show different layout for bash */}
+        {/* Collapsed label */}
         {isBash(entry.name) ? (
           <div className="flex flex-1 flex-col min-w-0">
             <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
@@ -286,17 +367,30 @@ export function ToolCallRow({ entry }: Props) {
           </span>
         )}
 
-        {/* Spinner for incomplete tool calls */}
-        {!entry.resultComplete && entry.argumentsComplete && (
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-neutral-400" />
-        )}
-
-        {/* Expand/collapse indicator */}
-        {entry.resultComplete && (
-          <ChevronDown
-            className={`h-3.5 w-3.5 flex-shrink-0 text-neutral-400 transition-transform ${isExpanded ? "rotate-180" : ""}`}
-          />
-        )}
+        {/* Status: spinner for in-progress, duration when done */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {isRunning && (
+            <>
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-neutral-400" />
+              {elapsedMs > 0 && (
+                <span className="text-xs tabular-nums text-neutral-400">
+                  {formatDuration(elapsedMs)}
+                </span>
+              )}
+            </>
+          )}
+          {showDuration && (
+            <span className="flex items-center gap-1 text-xs text-neutral-400">
+              <Clock className="h-3 w-3" />
+              {formatDuration(elapsedMs)}
+            </span>
+          )}
+          {entry.resultComplete && (
+            <ChevronDown
+              className={`h-3.5 w-3.5 text-neutral-400 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+            />
+          )}
+        </div>
       </button>
 
       {/* Expanded Content */}
@@ -338,17 +432,35 @@ export function ToolCallRow({ entry }: Props) {
               <TodoRenderer output={entry.result.output} />
             )}
 
-            {/* Other read-only tools: render as markdown */}
+            {/* Other read-only tools: render as markdown or JSON tree */}
             {isReadOnlyTool(entry.name) && entry.name !== "read" && (
-              <MarkdownRenderer content={entry.result.output} />
+              parsedJson ? (
+                <JsonTreeView data={parsedJson} initialExpanded={true} />
+              ) : (
+                <MarkdownRenderer content={entry.result.output} />
+              )
             )}
 
-            {/* Default: render as markdown */}
+            {/* websearch/webfetch: show JSON tree if applicable */}
+            {isWebTool(entry.name) && (
+              parsedJson ? (
+                <JsonTreeView data={parsedJson} initialExpanded={true} maxDepth={5} />
+              ) : (
+                <MarkdownRenderer content={entry.result.output} />
+              )
+            )}
+
+            {/* Default: render as markdown or JSON tree */}
             {!isReadOnlyTool(entry.name) &&
               !isBash(entry.name) &&
               !isWriteTool(entry.name) &&
-              !isTodo(entry.name) && (
-                <MarkdownRenderer content={entry.result.output} />
+              !isTodo(entry.name) &&
+              !isWebTool(entry.name) && (
+                parsedJson ? (
+                  <JsonTreeView data={parsedJson} initialExpanded={true} />
+                ) : (
+                  <MarkdownRenderer content={entry.result.output} />
+                )
               )}
           </div>
 

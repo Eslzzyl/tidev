@@ -11,6 +11,8 @@ import { Header } from "./components/layout/Header";
 import { ChatPanel } from "./components/chat/ChatPanel";
 import { FilesView } from "./components/views/FilesView";
 import { SettingsView } from "./components/views/SettingsView";
+import { TerminalView } from "./components/views/TerminalView";
+import { GitView } from "./components/views/GitView";
 
 function App() {
   const [isLoading, setIsLoading] = useState(true);
@@ -258,6 +260,12 @@ function App() {
           <main className="relative flex-1 min-w-0">
             {activeTab === "chat" && (showWelcomePage ? <WelcomePage /> : <ChatPanel />)}
             {activeTab === "files" && <FilesView />}
+            {activeTab === "terminal" && (
+              <div className="flex h-full flex-col overflow-hidden">
+                <TerminalView />
+              </div>
+            )}
+            {activeTab === "git" && <GitView />}
             {activeTab === "settings" && <SettingsView />}
           </main>
 

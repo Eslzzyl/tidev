@@ -4,6 +4,14 @@ import type { MainTab } from "../lib/router";
 export type { MainTab } from "../lib/router";
 export type Theme = "light" | "dark" | "system";
 
+export interface SettingsState {
+  fontFamily: string;
+  monoFontFamily: string;
+  fontSize: number;
+  diffLayout: "inline" | "side-by-side";
+  enterToSend: boolean;
+}
+
 export interface UIState {
   sidebarOpen: boolean;
   rightSidebarOpen: boolean;
@@ -18,6 +26,7 @@ export interface UIState {
   leftSidebarWidth: number;
   rightSidebarWidth: number;
   activeTab: MainTab;
+  settings: SettingsState;
 }
 
 export interface UIActions {
@@ -44,6 +53,9 @@ export interface UIActions {
   navigateToChat: (sessionId?: string) => void;
   navigateToFiles: () => void;
   navigateToSettings: () => void;
+  navigateToTerminal: () => void;
+  navigateToGit: () => void;
+  updateSettings: (partial: Partial<SettingsState>) => void;
 }
 
 const DEFAULT_LEFT_SIDEBAR_WIDTH = 256;
@@ -65,6 +77,15 @@ function loadLocalStorage() {
     localStorage.getItem("rightSidebarOpen") !== "false";
   const savedActiveTab = localStorage.getItem("activeTab") as MainTab | null;
 
+  function loadSetting<T>(key: string, fallback: T): T {
+    try {
+      const val = localStorage.getItem(key);
+      return val !== null ? (JSON.parse(val) as T) : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
   return {
     leftSidebarWidth: isNaN(savedLeftWidth)
       ? DEFAULT_LEFT_SIDEBAR_WIDTH
@@ -75,6 +96,13 @@ function loadLocalStorage() {
     theme: (savedTheme || "system") as Theme,
     rightSidebarOpen: savedRightSidebarOpen,
     activeTab: (savedActiveTab || "chat") as MainTab,
+    settings: {
+      fontFamily: loadSetting("settings.fontFamily", "Inter, system-ui, sans-serif"),
+      monoFontFamily: loadSetting("settings.monoFontFamily", "JetBrains Mono, Fira Code, monospace"),
+      fontSize: loadSetting("settings.fontSize", 14),
+      diffLayout: loadSetting<"inline" | "side-by-side">("settings.diffLayout", "side-by-side"),
+      enterToSend: loadSetting("settings.enterToSend", true),
+    },
   };
 }
 
@@ -94,6 +122,7 @@ const initialState: UIState = {
   leftSidebarWidth: persisted.leftSidebarWidth,
   rightSidebarWidth: persisted.rightSidebarWidth,
   activeTab: persisted.activeTab,
+  settings: persisted.settings,
 };
 
 function clampSidebarWidth(width: number): number {
@@ -175,6 +204,26 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
     set({ activeTab: "settings" });
     localStorage.setItem("activeTab", "settings");
   },
+
+  navigateToTerminal: () => {
+    set({ activeTab: "terminal" });
+    localStorage.setItem("activeTab", "terminal");
+  },
+
+  navigateToGit: () => {
+    set({ activeTab: "git" });
+    localStorage.setItem("activeTab", "git");
+  },
+
+  updateSettings: (partial) =>
+    set((s) => {
+      const updated = { ...s.settings, ...partial };
+      // Persist each setting individually
+      for (const [key, value] of Object.entries(partial)) {
+        localStorage.setItem(`settings.${key}`, JSON.stringify(value));
+      }
+      return { settings: updated };
+    }),
 }));
 
 /**

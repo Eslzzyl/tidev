@@ -3,6 +3,7 @@ import { Menu, Settings, Info } from "lucide-react";
 import { useSessionStore } from "../../stores/useSessionStore";
 import { useUIStore } from "../../stores/useUIStore";
 import { useSSE } from "../../hooks/useSSE";
+import { usePermissionStore } from "../../stores/usePermissionStore";
 import { api } from "../../api/client";
 import { buildRounds } from "../../utils/round";
 import { MessageRound } from "./MessageRound";
@@ -14,6 +15,7 @@ import { RenameDialog } from "./RenameDialog";
 import { SkillsDialog } from "./SkillsDialog";
 import { ConnectDialog } from "./ConnectDialog";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { PermissionCard } from "./PermissionCard";
 
 export function ChatPanel() {
   const messages = useSessionStore((s) => s.messages);
@@ -370,6 +372,11 @@ export function ChatPanel() {
         <div ref={setMessagesEndRef} />
       </div>
 
+      {/* Permission Request Cards */}
+      {currentSessionId && (
+        <PermissionArea sessionId={currentSessionId} />
+      )}
+
       {/* Input Area */}
       <MessageInput
         onSlashCommand={handleSlashCommand}
@@ -427,6 +434,38 @@ export function ChatPanel() {
         isOpen={connectDialogOpen}
         onClose={() => setConnectDialogOpen(false)}
       />
+    </div>
+  );
+}
+
+/** Renders pending permission request cards for the current session */
+function PermissionArea({ sessionId }: { sessionId: string }) {
+  const pendingPermissions = usePermissionStore((s) => s.pendingPermissions);
+  const removePermission = usePermissionStore((s) => s.removePermission);
+
+  const sessionPermissions = pendingPermissions.filter(
+    (p) => p.sessionId === sessionId,
+  );
+
+  if (sessionPermissions.length === 0) return null;
+
+  const handleResponse = (permissionId: string, response: "once" | "always" | "deny") => {
+    // For now, tools needing permission are auto-rejected by the backend.
+    // This handler will send the response to the backend once the
+    // permission response endpoint is implemented.
+    console.log(`[Permission] ${response} permission ${permissionId}`);
+    removePermission(permissionId);
+  };
+
+  return (
+    <div className="px-4">
+      {sessionPermissions.map((perm) => (
+        <PermissionCard
+          key={perm.id}
+          permission={perm}
+          onResponse={(response) => handleResponse(perm.id, response)}
+        />
+      ))}
     </div>
   );
 }

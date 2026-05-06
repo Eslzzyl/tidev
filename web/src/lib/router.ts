@@ -5,17 +5,19 @@
  * - `#chat` or empty — Chat view (default)
  * - `#files` — Files view
  * - `#settings` — Settings view
+ * - `#terminal` — Terminal view
+ * - `#git` — Git view
  * - `#chat/session-id` — Chat with specific session
  */
 
-export type MainTab = "chat" | "files" | "settings";
+export type MainTab = "chat" | "files" | "settings" | "terminal" | "git";
 
 export interface RouteState {
   tab: MainTab;
   sessionId: string | null;
 }
 
-const VALID_TABS: MainTab[] = ["chat", "files", "settings"];
+const VALID_TABS: MainTab[] = ["chat", "files", "settings", "terminal", "git"];
 
 function isMainTab(value: string): value is MainTab {
   return (VALID_TABS as readonly string[]).includes(value);

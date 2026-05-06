@@ -1,10 +1,12 @@
-import { MessageSquare, FolderTree, Settings, Menu, PanelRightClose } from "lucide-react";
+import { MessageSquare, FolderTree, Settings, Terminal, GitBranch, Menu, PanelRightClose } from "lucide-react";
 import { useUIStore, type MainTab } from "../../stores/useUIStore";
 import { useSessionStore } from "../../stores/useSessionStore";
 
 const tabs: { id: MainTab; label: string; icon: React.ReactNode }[] = [
   { id: "chat", label: "Chat", icon: <MessageSquare className="h-4 w-4" /> },
   { id: "files", label: "Files", icon: <FolderTree className="h-4 w-4" /> },
+  { id: "terminal", label: "Terminal", icon: <Terminal className="h-4 w-4" /> },
+  { id: "git", label: "Git", icon: <GitBranch className="h-4 w-4" /> },
   { id: "settings", label: "Settings", icon: <Settings className="h-4 w-4" /> },
 ];
 

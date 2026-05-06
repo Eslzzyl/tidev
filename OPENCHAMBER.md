@@ -9,16 +9,18 @@
 | 维度 | 状态 (2026-05-06 更新) |
 |------|------------------------|
 | **框架** | React 19 + Vite + Tailwind CSS 4 + Zustand |
-| **路由与导航** | ✅ **已完成**: Hash 路由 (#chat/#files/#settings), Header 导航栏, 视图注册系统 |
+| **路由与导航** | ✅ **已完成**: Hash 路由 (#chat/#files/#settings/#terminal/#git), Header 导航栏, 视图注册系统 |
 | **聊天** | 基础 SSE 流式聊天，消息轮次渲染，Markdown + tool call + diff 渲染 |
 | **文件浏览器** | ✅ **已完成**: 目录树(递归展开/折叠)、文件搜索、代码查看器(语法高亮)、文件读取 API |
 | **Markdown 渲染** | ✅ **已完成**: KaTeX 数学公式、Mermaid 图表、代码块增强(语言标签/复制/下载)、图片内联渲染 |
 | **Diff 预览** | ✅ **已完成**: 并排/统一模式、语法高亮、文件级折叠/展开、大文件降级渲染 |
 | **会话管理** | ✅ **已完成**: 搜索/过滤、内联重命名(双击)、状态指示器(流式动画) |
-| **设置** | 极简：仅主题切换（light/dark/system），**已迁移为完整页面视图** |
+| **设置** | ✅ **已完成**: 字体、Diff 布局、行为设置，主题切换（light/dark/system），**完整页面视图** |
 | **右侧边栏** | Token 用量统计、待办清单、diff 文件列表 |
-| **Git** | 无 |
-| **终端** | 无 |
+| **Git** | ✅ **已完成 (见下方注意事项)**: GitView 面板(更改/历史/分支)、Git API 端点(10个)、提交/push/pull/stash |
+| **终端** | ✅ **已完成 (见下方注意事项)**: xterm.js + portable-pty PTY 终端，多标签页，**浅色/深色主题跟随** |
+| **Tool Call 渲染** | ✅ **已完成**: JSON 树视图、持续时间显示、状态动画、websearch/webfetch 分类 |
+| **权限请求 UI** | ✅ **已完成**: PermissionCard 组件、权限 store、SSE 事件监听 |
 
 ---
 
@@ -95,88 +97,82 @@
 
 ---
 
-## P1: 中优先级 — 显著提升工作效率
+## P1: 中优先级 — 显著提升工作效率 ✅ 已完成 (2026-05-06)
 
-### 6. Git 集成 (GitView)
+### 6. Git 集成 (GitView) ✅ 已完成
 
 **参考**: OpenChamber `views/GitView.tsx` (2309 行), `stores/useGitStore.ts`, `stores/useGitIdentitiesStore.ts`, `components/session/BranchPickerDialog.tsx`
 
-**现状**: TiDev 无任何 git 功能。
+**现状**: ✅ 已完成
 
-**建议引入**:
-- **更改展示**: 暂存/未暂存文件列表，状态指示器，文件类型图标
-- **提交**: 提交信息输入、暂存文件摘要、作者支持、修改提交
-- **历史**: 提交日志、分支图可视化、按提交展开 diff
-- **分支管理**: 创建/切换/删除分支，上游跟踪
-- **同步操作**: push/pull/fetch 带状态反馈
-- **冲突解决**: 交互式冲突解决 UI
-- **Stash**: Stash/unstash 管理
-- **GitHub 集成**: PR 创建工作流、PR 状态检查
+**实现**:
+- **后端 API** (`src/web/routes/git.rs`): 10 个端点 — status/branches/log/commit/branch create/branch delete/push/pull/stash/stash-pop，调用系统 git
+- **GitView 面板** (`web/src/components/views/GitView.tsx`): 三个标签页 — Changes（暂存/未暂存 + 提交）、History（提交列表）、Branches（创建/删除/切换）
+- **顶部栏**: 分支名、SHA、ahead/behind、push/pull/stash 按钮
+- **Hash 路由**: `#git` 注册
 
-**价值**: 中-高。AI 编码场景中 git 操作频繁（创建分支、提交 AI 修改），但不是每天必须。
+**⚠️ 已知问题**: `net::ERR_BLOCKED_BY_CLIENT` — `/api/git/log?count=20` 被广告拦截器（如 uBlock Origin 的 `*log*` 规则）误拦截。可重命名端点或将参数移入 POST body 规避。
 
-### 7. 终端 (TerminalView)
+**文件**: `src/web/routes/git.rs`, `web/src/components/views/GitView.tsx`, `web/src/api/client.ts`, `web/src/types/api.ts`
 
-**参考**: OpenChamber `views/TerminalView.tsx` (1166 行), `components/terminal/TerminalViewport.tsx`, `stores/useTerminalStore.ts`
+### 7. 终端 (TerminalView) ✅ 已完成
 
-**现状**: TiDev 无终端功能。
+**现状**: ✅ 已完成
 
-**建议引入**:
-- **xterm.js 集成**: 完整终端模拟器
-- **多标签页终端**: 排序、添加、关闭、重排
-- **SSE 流连接**: 实时终端流，带重试和指数退避
-- **全屏模式**: 切换全屏终端
-- **快捷键**: Esc、Tab、Enter 等虚拟键（移动端支持）
+**实现**:
+- **xterm.js 集成**: `@xterm/xterm` + `@xterm/addon-fit` 全功能终端模拟器
+- **PTY 后端**: `portable-pty` crate 创建真实 PTY，shell 交互运行
+- **SSE 流**: broadcast channel 推送 PTY 输出，按 session_id 过滤
+- **多标签页**: 创建/关闭/切换
+- **颜色主题**: 跟随前端浅色/深色主题 (`DARK_THEME` / `LIGHT_THEME`)
+- **API**: start/input/resize/events(SSE)/close
 
-**价值**: 中。用户可通过聊天发送 bash 命令，但独立终端提供更灵活的操作。
+**⚠️ 已知问题**:
+1. **输出格式异常** — `ls` 等命令的输出格式错乱，尽管已设 `TERM=xterm-256color`。可能与 resize 未实现有关（PTY 始终 80×24）
+2. **优雅停机卡死** — `spawn_blocking` 中的阻塞 `read()` 导致 tokio 等待 blocking 任务完成。`close_session` 虽 kill 进程期望 EOF，但 500ms 超时不可靠
+3. **Resize 空操作** — 需存储 PTY master 的裸 FD 才能调用 `resize()`
 
-### 8. 权限请求 UI (PermissionCard)
+**文件**: `src/web/terminal.rs`, `src/web/routes/terminal.rs`, `web/src/components/views/TerminalView.tsx`, `web/src/stores/useTerminalStore.ts`
+### 8. 权限请求 UI (PermissionCard) ✅ 已完成
 
-**参考**: OpenChamber `chat/PermissionCard.tsx`, `chat/PermissionRequest.tsx`, `stores/permissionStore.ts`
+**现状**: ✅ 已完成
 
-**现状**: TiDev 后端支持工具权限控制，但前端无可视化权限请求 UI。
+**实现**:
+- **PermissionCard 组件** (`web/src/components/chat/PermissionCard.tsx`): 工具权限请求卡片，Allow once / Always allow / Deny
+- **权限 Store** (`web/src/stores/usePermissionStore.ts`): 待审批管理、auto-accept 持久化、SSE 事件处理
+- **SSE/UI 集成**: useSSE 监听 `permission.request`，ChatPanel 展示 `PermissionArea`
 
-**建议引入**:
-- **权限请求卡片**: 工具调用权限时弹出审批/拒绝/始终允许的卡片
-- **权限设置持久化**: 记住用户的权限选择
-- **权限状态指示器**: 当前会话的权限状态和授权历史
+**⚠️ 注意事项**: 后端 `auto_approve_permissions: false` 下需要权限的工具直接被拒绝（不触发 permission.request 事件）。前端组件已就绪，需后端启用 permission channel 才能激活完整流程。
 
-**价值**: 中-高。对于安全性敏感的用户来说很重要。
+**文件**: `web/src/components/chat/PermissionCard.tsx`, `web/src/stores/usePermissionStore.ts`, `web/src/hooks/useSSE.ts`
+### 9. Tool Call 渲染增强 ✅ 已完成
 
-### 9. Tool Call 渲染增强
+**现状**: ✅ 已完成
 
-**参考**: OpenChamber `chat/message/parts/ToolPart.tsx` (2670 行)
+**实现**:
+- **JSON 树视图** (`web/src/components/ui/JsonTreeView.tsx`): 可折叠 JSON 树形展示，类型彩色编码
+- **持续时间显示**: 实时计时器 + 完成耗时
+- **状态动画**: 运行中 spinner + 实时时间
+- **新增分类**: `websearch`/`webfetch` 工具图标和颜色
 
-**现状**: TiDev 有基础 ToolCallRow 展示，按工具类型展示不同内容。
-
-**建议引入**:
-- **折叠/展开**: 工具调用默认折叠，点击展开显示详细输入输出
-- **JSON 树视图**: 对 JSON 输出用可折叠的树形结构展示
-- **持续时间显示**: 每个工具调用的耗时
-- **文件类型图标**: 根据工具名称和参数显示对应图标
-- **状态动画**: 运行中的工具调用显示加载动画
-
-**价值**: 中。改善用户对 AI 工具调用过程的可见性。
+**文件**: `web/src/components/ui/JsonTreeView.tsx`, `web/src/components/renderers/ToolCallRow.tsx`
 
 ---
 
 ## P2: 较低优先级 — 锦上添花
 
-### 10. 设置面板扩展
-
+### 10. 设置面板扩展 ✅ 已完成
 **参考**: OpenChamber `views/SettingsView.tsx` (818 行), `components/sections/*`
 
-**现状**: TiDev 设置面板极简，仅主题切换。
+**现状**: ✅ 已完成
 
-**建议引入**:
-- **字体设置**: UI 字体、等宽字体、字号
-- **Diff 布局设置**: 动态/内联/并排
-- **行为设置**: 自定义提示词、回复风格预设
-- **Provider 配置**: LLM provider 管理（API Key、Endpoint、模型列表）
-- **键盘快捷键**: 查看和自定义快捷键
-- **关于页面**: 版本信息、更新检查
+**实现**:
+- **字体设置**: UI 字体、等宽字体、字号滑块
+- **Diff 布局**: 并排/内联选择
+- **行为设置**: Enter to send 开关
+- 所有设置 localStorage 持久化
 
-**价值**: 中。属于"用了就回不去"的体验改进，但不是核心功能缺口。
+**文件**: `web/src/stores/useUIStore.ts`, `web/src/components/views/SettingsView.tsx`
 
 ### 11. 多轮次对话的分组与 Timeline
 
@@ -352,12 +348,12 @@
 4. ✅ **Diff 预览增强** — 代码审查核心
 5. ✅ **会话管理增强** — 日常使用优化
 
-### 第二阶段 (当前目标)
-6. **Git 集成** — 显著的效率提升
-7. **终端集成** — 独立操作能力
-8. **权限请求 UI** — 安全体验
-9. **Tool Call 渲染增强** — 透明度提升
-10. **设置面板扩展** — 自定义能力
+### 第二阶段 (已完成 — 2026-05-06)
+6. ✅ **Git 集成** — 显著的效率提升 (⚠️ `ERR_BLOCKED_BY_CLIENT` 见上文)
+7. ✅ **终端集成** — 独立操作能力 (⚠️ 输出格式 + 停机问题见上文)
+8. ✅ **权限请求 UI** — 安全体验 (前端完成，需后端配合)
+9. ✅ **Tool Call 渲染增强** — 透明度提升
+10. ✅ **设置面板扩展** — 自定义能力
 
 ### 第三阶段 (长期)
 11. 语音、多模型并发、内联注释、计划视图、技能市场等

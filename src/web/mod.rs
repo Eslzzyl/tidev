@@ -4,6 +4,7 @@ pub mod event_bus;
 pub mod routes;
 pub mod server;
 pub mod state;
+pub mod terminal;
 
 use std::path::PathBuf;
 use std::sync::Arc;

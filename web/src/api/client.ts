@@ -23,6 +23,10 @@ import type {
   DirectoryEntry,
   ListDirResponse,
   ReadFileResponse,
+  GitStatusResponse,
+  GitBranchResponse,
+  GitLogResponse,
+  GitMessageResponse,
 } from "../types/api";
 
 const API_BASE = "/api";
@@ -215,4 +219,70 @@ export const api = {
     fetchJson<ReadFileResponse>(
       `${API_BASE}/fs/read?path=${encodeURIComponent(path)}`,
     ),
+
+  // Terminal
+  startTerminal: () =>
+    fetchJson<{ session_id: string }>(`${API_BASE}/terminal/start`, {
+      method: "POST",
+    }),
+
+  terminalInput: (sessionId: string, data: string) =>
+    fetch(`${API_BASE}/terminal/input`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, data }),
+    }),
+
+  closeTerminal: (sessionId: string) =>
+    fetch(`${API_BASE}/terminal/${sessionId}`, { method: "DELETE" }),
+
+  // Git
+  gitStatus: () =>
+    fetchJson<GitStatusResponse>(`${API_BASE}/git/status`),
+
+  gitBranches: () =>
+    fetchJson<GitBranchResponse>(`${API_BASE}/git/branches`),
+
+  gitLog: (count = 20) =>
+    fetchJson<GitLogResponse>(`${API_BASE}/git/log?count=${count}`),
+
+  gitCommit: (message: string) =>
+    fetchJson<GitMessageResponse>(`${API_BASE}/git/commit`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
+
+  gitBranchCreate: (name: string, checkout = false) =>
+    fetchJson<GitMessageResponse>(`${API_BASE}/git/branch`, {
+      method: "POST",
+      body: JSON.stringify({ name, checkout }),
+    }),
+
+  gitBranchDelete: (name: string) =>
+    fetchJson<GitMessageResponse>(`${API_BASE}/git/branch/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
+
+  gitPush: (remote?: string, branch?: string, force?: boolean) =>
+    fetchJson<GitMessageResponse>(`${API_BASE}/git/push`, {
+      method: "POST",
+      body: JSON.stringify({ remote, branch, force }),
+    }),
+
+  gitPull: (remote?: string, branch?: string) =>
+    fetchJson<GitMessageResponse>(`${API_BASE}/git/pull`, {
+      method: "POST",
+      body: JSON.stringify({ remote, branch }),
+    }),
+
+  gitStash: (message?: string) =>
+    fetchJson<GitMessageResponse>(`${API_BASE}/git/stash`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
+
+  gitStashPop: () =>
+    fetchJson<GitMessageResponse>(`${API_BASE}/git/stash/pop`, {
+      method: "POST",
+    }),
 };

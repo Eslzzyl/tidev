@@ -189,7 +189,47 @@ export interface CreateProviderRequest {
   models: CreateModelRequest[];
 }
 
-// File system types
+// Git types
+export interface GitStatusResponse {
+  branch: string;
+  sha: string;
+  files: GitStatusFile[];
+  ahead: number;
+  behind: number;
+}
+
+export interface GitStatusFile {
+  path: string;
+  status: string;
+  staged: boolean;
+}
+
+export interface GitBranchResponse {
+  current: string;
+  branches: GitBranchItem[];
+}
+
+export interface GitBranchItem {
+  name: string;
+  current: boolean;
+  remote: string | null;
+}
+
+export interface GitLogResponse {
+  commits: GitCommitItem[];
+}
+
+export interface GitCommitItem {
+  sha: string;
+  author: string;
+  date: string;
+  message: string;
+}
+
+export interface GitMessageResponse {
+  success: boolean;
+  message: string;
+}
 export interface DirectoryEntry {
   name: string;
   path: string;

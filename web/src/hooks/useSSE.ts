@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { sseClient } from "../api/sse";
+import { usePermissionStore } from "../stores/usePermissionStore";
 import { useSessionStore } from "../stores/useSessionStore";
 import { useUIStore } from "../stores/useUIStore";
 import { api } from "../api/client";
@@ -366,6 +367,10 @@ export function useSSE(sessionId: string | null) {
       }
     };
 
+    const handlePermissionRequest = (event: AppEvent) => {
+      usePermissionStore.getState().handlePermissionRequestEvent(event);
+    };
+
     // Register SSE listeners
     sseClient.on("tool.call", handleToolCall);
     sseClient.on("tool.result", handleToolResult);
@@ -378,6 +383,7 @@ export function useSSE(sessionId: string | null) {
     sseClient.on("aborted", handleAborted);
     sseClient.on("connected", handleConnected);
     sseClient.on("messages.updated", handleMessagesUpdated);
+    sseClient.on("permission.request", handlePermissionRequest);
 
     // Connect
     sseClient.connect(sessionId);
@@ -394,6 +400,7 @@ export function useSSE(sessionId: string | null) {
       sseClient.off("aborted", handleAborted);
       sseClient.off("connected", handleConnected);
       sseClient.off("messages.updated", handleMessagesUpdated);
+      sseClient.off("permission.request", handlePermissionRequest);
       sseClient.disconnect();
       setStreamingRound(null);
       streamingRef.current = null;
