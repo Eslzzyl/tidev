@@ -251,3 +251,8 @@ export interface ReadFileResponse {
   line_count: number;
   size: number;
 }
+
+export interface WriteFileResponse {
+  path: string;
+  size: number;
+}

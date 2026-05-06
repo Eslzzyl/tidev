@@ -24,6 +24,12 @@ export interface FileStore {
   openFilePath: string | null;
   openFileContent: string | null;
   openFileLanguage: string | null;
+  /** Whether the open file has unsaved changes */
+  isDirty: boolean;
+  /** The original content of the file (before edits) */
+  originalContent: string | null;
+  /** Whether a save is in progress */
+  isSaving: boolean;
 
   loadRoot: () => Promise<void>;
   toggleExpand: (path: string) => Promise<void>;
@@ -31,6 +37,10 @@ export interface FileStore {
   openFile: (path: string) => Promise<void>;
   closeFile: () => void;
   setRootPath: (path: string) => void;
+  /** Update the content of the currently open file (tracks dirty state) */
+  updateFileContent: (content: string) => void;
+  /** Save the currently open file */
+  saveFile: () => Promise<void>;
 }
 
 function buildTreeNodes(entries: DirectoryEntry[]): TreeNode[] {
@@ -57,6 +67,9 @@ export const useFileStore = create<FileStore>((set, get) => ({
   openFilePath: null,
   openFileContent: null,
   openFileLanguage: null,
+  isDirty: false,
+  originalContent: null,
+  isSaving: false,
 
   setRootPath: (path) => set({ rootPath: path }),
 
@@ -127,6 +140,8 @@ export const useFileStore = create<FileStore>((set, get) => ({
       set({
         openFileContent: result.content,
         openFileLanguage: result.language,
+        originalContent: result.content,
+        isDirty: false,
       });
     } catch (err) {
       set({
@@ -141,7 +156,36 @@ export const useFileStore = create<FileStore>((set, get) => ({
       openFilePath: null,
       openFileContent: null,
       openFileLanguage: null,
+      isDirty: false,
+      originalContent: null,
     }),
+
+  updateFileContent: (content: string) => {
+    const state = get();
+    set({
+      openFileContent: content,
+      isDirty: content !== state.originalContent,
+    });
+  },
+
+  saveFile: async () => {
+    const state = get();
+    if (!state.openFilePath || !state.openFileContent) return;
+
+    set({ isSaving: true });
+    try {
+      await api.writeFile(state.openFilePath, state.openFileContent);
+      set({
+        isDirty: false,
+        originalContent: state.openFileContent,
+        isSaving: false,
+      });
+    } catch (err) {
+      set({ isSaving: false });
+      console.error("Failed to save file:", err);
+      throw err;
+    }
+  },
 }));
 
 function updateNodeChildren(

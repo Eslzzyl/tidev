@@ -7,7 +7,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 
-use crate::web::{error::WebResult, state::AppState};
+use crate::web::error::{AppError, WebResult};
+use crate::web::state::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct ListDirParams {
@@ -142,6 +143,54 @@ pub async fn read_file(
         path: params.path,
         language,
         line_count,
+        size: metadata.len(),
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WriteFileRequest {
+    pub path: String,
+    pub content: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WriteFileResponse {
+    pub path: String,
+    pub size: u64,
+}
+
+/// Write content to a file (create or overwrite).
+pub async fn write_file(
+    State(state): State<AppState>,
+    Json(params): Json<WriteFileRequest>,
+) -> WebResult<Json<WriteFileResponse>> {
+    let target = resolve_path(&state.workspace_root, &params.path)?;
+
+    // Security: ensure the resolved path is within workspace
+    if !target.starts_with(&state.workspace_root) {
+        return Err(AppError::Forbidden(
+            "Access denied: file is outside workspace".to_string(),
+        ));
+    }
+
+    // Ensure parent directory exists
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).await.map_err(|e| {
+            AppError::BadRequest(format!("Failed to create parent directory: {}", e))
+        })?;
+    }
+
+    // Write the file
+    fs::write(&target, &params.content).await.map_err(|e| {
+        AppError::BadRequest(format!("Failed to write file: {}", e))
+    })?;
+
+    let metadata = fs::metadata(&target).await.map_err(|e| {
+        AppError::NotFound(format!("File not found after write: {}", e))
+    })?;
+
+    Ok(Json(WriteFileResponse {
+        path: params.path,
         size: metadata.len(),
     }))
 }

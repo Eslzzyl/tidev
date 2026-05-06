@@ -23,6 +23,7 @@ import type {
   DirectoryEntry,
   ListDirResponse,
   ReadFileResponse,
+  WriteFileResponse,
   GitStatusResponse,
   GitBranchResponse,
   GitLogResponse,
@@ -219,6 +220,12 @@ export const api = {
     fetchJson<ReadFileResponse>(
       `${API_BASE}/fs/read?path=${encodeURIComponent(path)}`,
     ),
+
+  writeFile: (path: string, content: string) =>
+    fetchJson<WriteFileResponse>(`${API_BASE}/fs/write`, {
+      method: "POST",
+      body: JSON.stringify({ path, content }),
+    }),
 
   // Terminal
   startTerminal: (cols?: number, rows?: number) =>

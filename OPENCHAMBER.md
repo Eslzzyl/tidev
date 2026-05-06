@@ -6,12 +6,13 @@
 
 ## 当前 TiDev Web 前端现状
 
-| 维度 | 状态 (2026-05-06 更新) |
+| 维度 | 状态 (2026-05-06 CodeMirror 更新) |
 |------|------------------------|
 | **框架** | React 19 + Vite + Tailwind CSS 4 + Zustand |
 | **路由与导航** | ✅ **已完成**: Hash 路由 (#chat/#files/#settings/#terminal/#git), Header 导航栏, 视图注册系统 |
 | **聊天** | 基础 SSE 流式聊天，消息轮次渲染，Markdown + tool call + diff 渲染 |
-| **文件浏览器** | ✅ **已完成**: 目录树(递归展开/折叠)、文件搜索、代码查看器(语法高亮)、文件读取 API |
+| **文件浏览器** | ✅ **已完成**: 目录树(递归展开/折叠)、文件搜索、文件读取/写入 API |
+| **代码编辑器** | ✅ **已完成**: CodeMirror 6 编辑器，语法高亮(Lezer AST)，编辑/只读切换，Ctrl+S 保存，脏状态跟踪，light/dark 主题跟随 |
 | **Markdown 渲染** | ✅ **已完成**: KaTeX 数学公式、Mermaid 图表、代码块增强(语言标签/复制/下载)、图片内联渲染 |
 | **Diff 预览** | ✅ **已完成**: 并排/统一模式、语法高亮、文件级折叠/展开、大文件降级渲染 |
 | **会话管理** | ✅ **已完成**: 搜索/过滤、内联重命名(双击)、状态指示器(流式动画) |
@@ -52,7 +53,7 @@
 - **文件搜索**: 集成已有 `/api/files/search` 端点
 - **文件 Store**: `web/src/stores/useFileStore.ts` — 树形数据管理、加载状态
 
-**文件**: `src/web/routes/fs.rs`, `src/web/routes/mod.rs`, `src/web/error.rs`, `web/src/stores/useFileStore.ts`, `web/src/components/views/FilesView.tsx`, `web/src/components/views/FileTree.tsx`, `web/src/components/views/CodeViewer.tsx`
+**文件**: `src/web/routes/fs.rs`, `src/web/routes/mod.rs`, `src/web/error.rs`, `web/src/stores/useFileStore.ts`, `web/src/components/views/FilesView.tsx`, `web/src/components/views/FileTree.tsx`, `web/src/components/views/CodeViewer.tsx`, `web/src/components/ui/CodeMirrorEditor.tsx`, `web/src/lib/codemirror/theme.ts`, `web/src/lib/codemirror/languageByExtension.ts`
 
 ### 3. Markdown / 消息渲染增强 ✅ 已完成
 
@@ -503,11 +504,11 @@ type FileNode = {
 
 ### 当前 tidev 与 OpenChamber 对比
 
-| 维度 | tidev 当前 (CodeViewer) | OpenChamber (CodeMirror) |
+| 维度 | tidev 当前 (CodeMirror) | OpenChamber (CodeMirror) |
 |------|-------|-------------|
-| **编辑器引擎** | 自制 span 着色 | CodeMirror 6（完整 IDE 框架） |
-| **语法高亮** | 自制正则规则（9 种语言） | Lezer 解析器（精准 AST，覆盖 15+ 语言） |
-| **文件编辑** | ❌ 只读 | ✅ 读写，Ctrl+S 保存 |
+| **编辑器引擎** | ✅ **CodeMirror 6**（完整 IDE 框架） | CodeMirror 6（完整 IDE 框架） |
+| **语法高亮** | ✅ **Lezer 解析器**（精准 AST，覆盖 20+ 语言） | Lezer 解析器（精准 AST，覆盖 15+ 语言） |
+| **文件编辑** | ✅ **读写**，Ctrl+S 保存，脏状态跟踪 | ✅ 读写，Ctrl+S 保存 |
 | **多标签页** | ❌ 单文件 | ✅ 多标签，标签栏，持久化 |
 | **右键菜单** | ❌ | ✅ 创建/重命名/删除/复制 |
 | **Git 状态** | ❌ | ✅ M/A/D/? 徽章 |
@@ -517,9 +518,9 @@ type FileNode = {
 | **文件搜索** | 基本（300ms debounce） | 缓存 + debounce + 类型过滤 |
 | **块级 Widget** | ❌ | ✅ 支持 React 组件嵌入（评论） |
 | **行高亮** | ❌ | ✅ 指定范围高亮 |
-| **搜索面板** | ❌ | ✅ CodeMirror 内置搜索 |
+| **搜索面板** | ✅ **CodeMirror 内置搜索** | ✅ CodeMirror 内置搜索 |
 | **跳转到行** | ❌ | ✅ GoToLineDialog |
-| **主题** | Tailwind prose | 完整的 CodeMirror 主题（550 行） |
+| **主题** | ✅ **完整的 CodeMirror 主题**（light/dark 自适应） | 完整的 CodeMirror 主题（550 行） |
 
 ### 优化建议（分优先级）
 
@@ -558,26 +559,35 @@ type FileNode = {
 
 #### P3 — 编辑器升级
 
-6. **接入 CodeMirror 6**
-   - 替换自制的 `CodeViewer.tsx`
-   - 获得真正的语法高亮、搜索、行号、折叠
-   - 按需引入语言包，先用最常用的 5-6 种（JS/TS, Python, Rust, JSON, Markdown）
-   - 避免一次性引入全部 18 个包（约 500KB+）
+6. ✅ **接入 CodeMirror 6 （已完成 2026-05-06）**
+   - 替换自制的 `CodeViewer.tsx` 为 `CodeMirrorEditor` 组件
+   - 获得真正的 Lezer AST 语法高亮、搜索、行号、折叠
+   - 预加载常用语言包（JS/TS, Python, Rust, JSON, Markdown, CSS, HTML, SQL, XML, YAML, C++）
+   - 其他语言通过 `@codemirror/language-data` 动态加载
    - 自定义主题适配 tidev 的 light/dark 主题
-   - 复杂度: 大
+   - 新增编辑模式：读写切换、Ctrl+S 保存、脏状态跟踪
+   - 复杂度: 大 ✅ 已完成
 
 ### 不建议直接照搬的设计
 
 1. **FilesView 的 3356 行单体组件** — 承担了标签栏、工具栏、7 种渲染模式、注释系统等太多职责。tidev 应该拆分为更小的组件：`FileTabs`, `FileToolbar`, `FilePreview`, `CodeEditor` 等。
 
-2. **全部 18 个 codemirror 包** — 完整引入会增加约 500KB+ bundle 体积。tidev 可以按需引入，先用 `@codemirror/lang-javascript`、`-python`、`-rust` 等最常用的几种，其他用 `@codemirror/language-data` 动态加载。
+2. **全部 18 个 codemirror 包** — 完整引入会增加约 500KB+ bundle 体积。tidev 采用了折中方案：预加载 11 个最常用语言包，其余通过 `@codemirror/language-data` 动态加载，平衡了体积和体验。
 
 3. **内联评论系统** — CodeMirror 的 Block Widget + `createPortal` 实现很精巧但复杂度高。tidev 在早期不需要这个功能。
 
 ### 结论
 
-当前 tidev 的代码浏览（自制 CodeViewer + 简单语法高亮）对于"浏览 AI 修改的文件"这一核心场景基本可用，但差距明显：
+当前 tidev 的代码编辑已从自制 CodeViewer 升级为 **CodeMirror 6**，获得了完整的 IDE 级编辑器体验：
 
-- **短期优化路径**: 加多标签页 + 编辑功能 + 文件操作（P1，无需新依赖）
-- **中期优化路径**: 加 Git 状态 + 多格式预览（P2，需后端支持）
-- **长期优化路径**: 引入 CodeMirror 6 替换自制 CodeViewer（P3，重大改动但收益最高）
+- ✅ **语法高亮**: Lezer 精准 AST 解析，覆盖 20+ 种语言
+- ✅ **文件编辑**: 编辑/只读切换，Ctrl+S 保存，脏状态跟踪
+- ✅ **搜索面板**: CodeMirror 内置搜索
+- ✅ **主题跟随**: light/dark 自适应主题
+
+后续仍有优化空间：
+
+- **多标签页**: 类似 OpenChamber 的标签栏（打开多个文件标签）
+- **文件操作**: 右键菜单创建/重命名/删除
+- **Git 状态**: 文件树 Git 状态徽章
+- **多格式预览**: 图片/Markdown/JSON 直接内联预览
