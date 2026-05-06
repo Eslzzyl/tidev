@@ -15,6 +15,14 @@ export interface TreeNode {
   children: TreeNode[];
 }
 
+export interface OpenFile {
+  path: string;
+  content: string;
+  language: string | null;
+  isDirty: boolean;
+  originalContent: string;
+}
+
 export interface FileStore {
   rootPath: string;
   rootChildren: TreeNode[];
@@ -22,25 +30,27 @@ export interface FileStore {
   rootLoading: boolean;
   error: string | null;
   selectedPath: string | null;
-  openFilePath: string | null;
-  openFileContent: string | null;
-  openFileLanguage: string | null;
-  /** Whether the open file has unsaved changes */
-  isDirty: boolean;
-  /** The original content of the file (before edits) */
-  originalContent: string | null;
+
+  /** All currently open files (tabs) */
+  openFiles: OpenFile[];
+  /** The path of the currently active file tab */
+  activeFilePath: string | null;
   /** Whether a save is in progress */
   isSaving: boolean;
 
   loadRoot: () => Promise<void>;
   toggleExpand: (path: string) => Promise<void>;
   selectFile: (path: string) => void;
+  /** Open a file (add to tabs, or switch to existing tab) */
   openFile: (path: string) => Promise<void>;
-  closeFile: () => void;
+  /** Close a file tab */
+  closeFile: (path: string) => void;
+  /** Switch to a specific tab */
+  setActiveFile: (path: string) => void;
   setRootPath: (path: string) => void;
-  /** Update the content of the currently open file (tracks dirty state) */
-  updateFileContent: (content: string) => void;
-  /** Save the currently open file */
+  /** Update the content of a specific file (tracks dirty state) */
+  updateFileContent: (path: string, content: string) => void;
+  /** Save the currently active file */
   saveFile: () => Promise<void>;
   /** Create a new file or directory */
   createFile: (path: string, type: "file" | "directory") => Promise<void>;
@@ -73,11 +83,8 @@ export const useFileStore = create<FileStore>((set, get) => ({
   rootLoading: false,
   error: null,
   selectedPath: null,
-  openFilePath: null,
-  openFileContent: null,
-  openFileLanguage: null,
-  isDirty: false,
-  originalContent: null,
+  openFiles: [],
+  activeFilePath: null,
   isSaving: false,
 
   setRootPath: (path) => set({ rootPath: path }),
@@ -103,16 +110,13 @@ export const useFileStore = create<FileStore>((set, get) => ({
   toggleExpand: async (path: string) => {
     const state = get();
 
-    // Update the node's expanded state and optionally load children
     const updateNode = (nodes: TreeNode[]): TreeNode[] =>
       nodes.map((node) => {
         if (node.path === path) {
           if (node.expanded) {
             return { ...node, expanded: false };
           }
-          // Need to expand - load children if not loaded
           if (node.children.length === 0 && node.isDirectory) {
-            // Trigger async load - we'll update after
             api
               .listDirectory(path)
               .then((result) => {
@@ -143,51 +147,102 @@ export const useFileStore = create<FileStore>((set, get) => ({
   selectFile: (path) => set({ selectedPath: path }),
 
   openFile: async (path: string) => {
-    set({ selectedPath: path, openFilePath: path, openFileContent: null });
+    set({ selectedPath: path });
+
+    // If the file is already open, just switch to it
+    const existing = get().openFiles.find((f) => f.path === path);
+    if (existing) {
+      set({ activeFilePath: path });
+      return;
+    }
+
+    // Otherwise, load and add to tabs
     try {
       const result = await api.readFile(path);
-      set({
-        openFileContent: result.content,
-        openFileLanguage: result.language,
-        originalContent: result.content,
+      const openFile: OpenFile = {
+        path,
+        content: result.content,
+        language: result.language,
         isDirty: false,
-      });
+        originalContent: result.content,
+      };
+      set((s) => ({
+        openFiles: [...s.openFiles, openFile],
+        activeFilePath: path,
+      }));
     } catch (err) {
-      set({
-        openFileContent: `Error loading file: ${err instanceof Error ? err.message : "Unknown error"}`,
-        openFileLanguage: null,
-      });
+      // Add an error entry as a tab so the user can see the error
+      const errorFile: OpenFile = {
+        path,
+        content: `Error loading file: ${err instanceof Error ? err.message : "Unknown error"}`,
+        language: null,
+        isDirty: false,
+        originalContent: "",
+      };
+      set((s) => ({
+        openFiles: [...s.openFiles, errorFile],
+        activeFilePath: path,
+      }));
     }
   },
 
-  closeFile: () =>
-    set({
-      openFilePath: null,
-      openFileContent: null,
-      openFileLanguage: null,
-      isDirty: false,
-      originalContent: null,
-    }),
-
-  updateFileContent: (content: string) => {
+  closeFile: (path: string) => {
     const state = get();
+    const idx = state.openFiles.findIndex((f) => f.path === path);
+    if (idx < 0) return;
+
+    const newFiles = state.openFiles.filter((f) => f.path !== path);
+
+    // Determine next active file
+    let nextActive = state.activeFilePath;
+    if (state.activeFilePath === path) {
+      if (newFiles.length === 0) {
+        nextActive = null;
+      } else if (idx < newFiles.length) {
+        nextActive = newFiles[idx].path; // same index (next file)
+      } else {
+        nextActive = newFiles[newFiles.length - 1].path; // last file
+      }
+    }
+
     set({
-      openFileContent: content,
-      isDirty: content !== state.originalContent,
+      openFiles: newFiles,
+      activeFilePath: nextActive,
+      selectedPath: nextActive || state.selectedPath === path ? null : state.selectedPath,
     });
+  },
+
+  setActiveFile: (path: string) => {
+    set({ activeFilePath: path, selectedPath: path });
+  },
+
+  updateFileContent: (path: string, content: string) => {
+    set((s) => ({
+      openFiles: s.openFiles.map((f) =>
+        f.path === path
+          ? { ...f, content, isDirty: content !== f.originalContent }
+          : f,
+      ),
+    }));
   },
 
   saveFile: async () => {
     const state = get();
-    if (!state.openFilePath || !state.openFileContent) return;
+    const activeFile = state.openFiles.find(
+      (f) => f.path === state.activeFilePath,
+    );
+    if (!activeFile) return;
 
     set({ isSaving: true });
     try {
-      await api.writeFile(state.openFilePath, state.openFileContent);
+      await api.writeFile(activeFile.path, activeFile.content);
       set({
-        isDirty: false,
-        originalContent: state.openFileContent,
         isSaving: false,
+        openFiles: state.openFiles.map((f) =>
+          f.path === activeFile.path
+            ? { ...f, isDirty: false, originalContent: f.content }
+            : f,
+        ),
       });
     } catch (err) {
       set({ isSaving: false });
@@ -202,7 +257,6 @@ export const useFileStore = create<FileStore>((set, get) => ({
       toast.success(
         type === "file" ? `File created: ${path}` : `Directory created: ${path}`,
       );
-      // Refresh to show new item
       get().refreshTree();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
@@ -215,17 +269,24 @@ export const useFileStore = create<FileStore>((set, get) => ({
     try {
       await api.renameItem(path, newPath);
       toast.success(`Renamed to: ${newPath}`);
-      // If the renamed file was open, close it (path changed)
+
+      // Update open files if the renamed file was open
       const state = get();
-      if (state.openFilePath === path) {
-        set({
-          openFilePath: null,
-          openFileContent: null,
-          openFileLanguage: null,
-          isDirty: false,
-          originalContent: null,
-        });
+      const wasOpen = state.openFiles.find((f) => f.path === path);
+      if (wasOpen) {
+        set((s) => ({
+          openFiles: s.openFiles.map((f) =>
+            f.path === path
+              ? { ...f, path: newPath }
+              : f,
+          ),
+          activeFilePath:
+            s.activeFilePath === path ? newPath : s.activeFilePath,
+          selectedPath:
+            s.selectedPath === path ? newPath : s.selectedPath,
+        }));
       }
+
       get().refreshTree();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
@@ -238,17 +299,13 @@ export const useFileStore = create<FileStore>((set, get) => ({
     try {
       await api.removeItem(path);
       toast.success(`Deleted: ${path}`);
-      // Close if the deleted file was open
+
+      // Close tab if the deleted file was open
       const state = get();
-      if (state.openFilePath === path) {
-        set({
-          openFilePath: null,
-          openFileContent: null,
-          openFileLanguage: null,
-          isDirty: false,
-          originalContent: null,
-        });
+      if (state.openFiles.some((f) => f.path === path)) {
+        get().closeFile(path);
       }
+
       get().refreshTree();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";

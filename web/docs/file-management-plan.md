@@ -22,6 +22,7 @@
 | **对话框系统** | ✅ | **创建对话框、重命名对话框、删除确认对话框** |
 | **Toast 通知** | ✅ | **成功/错误/警告/信息，自动消失** |
 | **文件树底部按钮** | ✅ | **新建文件、新建目录、刷新按钮** |
+| **多标签页** | ✅ | **同时打开多个文件，标签栏切换，关闭/激活/脏状态指示** |
 
 ---
 
@@ -103,29 +104,39 @@ toast.error("Failed to delete file");
 
 ---
 
-### Phase 2 — 多标签页支持 (P1)
+### Phase 2 — 多标签页支持 (P1) ✅ 已完成
 
-**目标**: 支持同时打开多个文件，标签栏切换，持久化标签状态
+**目标**: 支持同时打开多个文件，标签栏切换，持久化标签状态 ✅ 已完成
 
-#### 2.1 存储层改造
+#### 2.1 存储层改造 ✅
 
-`useFileStore` 增加：
-- `openPaths: string[]` — 已打开的文件路径列表
-- `selectedPath: string | null` — 当前激活的文件路径（已有，重命名为与标签选中一致）
-- `filesContent: Record<string, string>` — 各文件内容（按 path 索引）
-- `filesLanguage: Record<string, string | null>` — 各文件语言
-- `filesDirty: Record<string, boolean>` — 各文件脏状态
-- `filesOriginalContent: Record<string, string>` — 各文件原始内容
+`useFileStore` 改为多文件存储：
 
-**注意**: 当前 `useFileStore` 的设计是单文件的（`openFilePath`, `openFileContent` 等单值）。改为多文件后需要：
-- 保持向后兼容或一次性迁移
-- 使用 `Map` 或 `Record` 存储多文件状态
+```typescript
+interface OpenFile {
+  path: string;
+  content: string;
+  language: string | null;
+  isDirty: boolean;
+  originalContent: string;
+}
 
-**文件**: `web/src/stores/useFileStore.ts`
+openFiles: OpenFile[];        // 所有打开的标签
+activeFilePath: string | null; // 当前激活的标签
+```
 
-#### 2.2 标签栏组件
+核心变更：
+- `openFilePath`/`openFileContent`/`openFileLanguage`/`isDirty`/`originalContent` → 统一为 `openFiles: OpenFile[]` + `activeFilePath`
+- `openFile(path)` → 加载文件并加入标签列表，已打开则直接切换
+- `closeFile(path)` → 关闭指定标签，自动选择下一个
+- `updateFileContent(path, content)` → 按路径更新指定文件内容
+- 重命名/删除时自动更新或关闭对应标签
 
-类似 IDE 的标签栏，水平排列：
+**文件**: `web/src/stores/useFileStore.ts` ✅
+
+#### 2.2 标签栏组件 ✅
+
+`FileTabs` 组件已创建，类似 IDE 的标签栏，水平排列：
 
 ```
 ┌──────────┬──────────┬──────┬───────────────┐
@@ -135,13 +146,13 @@ toast.error("Failed to delete file");
 
 - 激活的文件高亮
 - 脏文件显示圆点（●）
-- 每个标签有关闭按钮（×）
+- 每个标签有关闭按钮（hover 时显示）
 - 标签过多时水平滚动
-- 点击空白区域或 + 按钮触发文件选择
+- 默认显示文件名，title 展示完整路径
 
-**文件**: `web/src/components/views/FileTabs.tsx`
+**文件**: `web/src/components/views/FileTabs.tsx` ✅
 
-#### 2.3 FilesView 布局调整
+#### 2.3 FilesView 布局调整 ✅
 
 FilesView 右侧面板更新为：
 
@@ -300,7 +311,7 @@ CodeMirror 已有行号，但缺少跳转输入。新增 `GoToLineDialog` 组件
 | 阶段 | 功能 | 预估工作量 | 依赖 |
 |------|------|-----------|------|
 | **Phase 1** | 文件 CRUD + 右键菜单 + Toast | ✅ **已完成** | 无 |
-| **Phase 2** | 多标签页 | 2-3 天 | Phase 1 完成（文件操作用于标签管理） |
+| **Phase 2** | 多标签页 | ✅ **已完成** | Phase 1 |
 | **Phase 3** | Git 状态徽章 | 1-2 天 | 无（后端 API 已存在） |
 | **Phase 4** | 多格式预览 | 2-3 天 | 无 |
 | **Phase 5** | 跳转到行/搜索优化 | 1-2 天 | 无 |
