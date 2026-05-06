@@ -58,14 +58,6 @@ fn run_git(args: &[&str], cwd: &PathBuf) -> Result<String, String> {
     }
 }
 
-fn run_git_json<T>(args: &[&str], cwd: &PathBuf) -> Result<T, String>
-where
-    T: serde::de::DeserializeOwned,
-{
-    let output = run_git(args, cwd)?;
-    serde_json::from_str(&output).map_err(|e| format!("Failed to parse git output: {e}"))
-}
-
 // ── Types ─────────────────────────────────────────────────────────────────
 
 #[derive(Serialize)]

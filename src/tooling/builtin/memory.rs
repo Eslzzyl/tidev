@@ -46,7 +46,7 @@ fn execute_store(
         .get("memory_type")
         .and_then(|v| v.as_str())
         .context("memory_type is required for store operation")?;
-    let memory_type = MemoryType::from_str(memory_type_str).context("invalid memory_type")?;
+    let memory_type = MemoryType::parse_str(memory_type_str).context("invalid memory_type")?;
     let title = arguments
         .get("title")
         .and_then(|v| v.as_str())

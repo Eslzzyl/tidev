@@ -21,7 +21,7 @@ impl MemoryType {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse_str(s: &str) -> Option<Self> {
         match s {
             "user" => Some(Self::User),
             "project" => Some(Self::Project),
@@ -236,7 +236,7 @@ impl MemoryStore {
             })
             .collect();
 
-        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.sort_by_key(|e| std::cmp::Reverse(e.0));
 
         let mut selected = Vec::new();
         let mut chars = 0usize;
@@ -307,7 +307,7 @@ impl MemoryStore {
         Ok(MemoryEntry {
             id: row.get::<_, String>(0)?.parse().unwrap_or_default(),
             workspace_root: row.get(1)?,
-            memory_type: MemoryType::from_str(&row.get::<_, String>(2)?)
+            memory_type: MemoryType::parse_str(&row.get::<_, String>(2)?)
                 .unwrap_or(MemoryType::Reference),
             title: row.get(3)?,
             content: row.get(4)?,

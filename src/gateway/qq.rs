@@ -423,8 +423,8 @@ impl QQChannel {
 
     /// Run the full agent loop using shared AgentRuntime.
     ///
-    /// Replaces the previous run_agent_with_tools + run_single_streaming_turn
-    /// + llm_completion_turn + execute_tool_calls methods with a single call
+    /// Replaces the previous run_agent_with_tools, run_single_streaming_turn,
+    /// llm_completion_turn, and execute_tool_calls methods with a single call
     /// to AgentRuntime::run_agent_loop. The agent loop handles streaming,
     /// tool execution, persistence, compaction, and cancellation internally.
     async fn run_agent_with_tools(
