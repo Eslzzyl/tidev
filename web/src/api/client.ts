@@ -244,7 +244,7 @@ export const api = {
     fetchJson<GitBranchResponse>(`${API_BASE}/git/branches`),
 
   gitLog: (count = 20) =>
-    fetchJson<GitLogResponse>(`${API_BASE}/git/log?count=${count}`),
+    fetchJson<GitLogResponse>(`${API_BASE}/git/history?count=${count}`),
 
   gitCommit: (message: string) =>
     fetchJson<GitMessageResponse>(`${API_BASE}/git/commit`, {

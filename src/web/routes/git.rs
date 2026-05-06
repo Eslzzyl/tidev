@@ -2,7 +2,7 @@
 //!
 //! - `GET    /api/git/status`          — Working tree status
 //! - `GET    /api/git/branches`        — List branches
-//! - `GET    /api/git/log`             — Commit log
+//! - `GET    /api/git/history`         — Commit log
 //! - `POST   /api/git/commit`          — Create a commit
 //! - `POST   /api/git/branch`          — Create or switch branch
 //! - `DELETE /api/git/branch/{name}`   — Delete a branch
@@ -26,7 +26,7 @@ pub fn git_routes() -> Router<AppState> {
     Router::new()
         .route("/git/status", get(git_status))
         .route("/git/branches", get(git_branches))
-        .route("/git/log", get(git_log))
+        .route("/git/history", get(git_log))
         .route("/git/commit", post(git_commit))
         .route("/git/branch", post(git_branch_create))
         .route("/git/branch/{name}", delete(git_branch_delete))
@@ -240,7 +240,7 @@ async fn git_branches(
     Ok(Json(GitBranchResponse { current, branches }))
 }
 
-/// `GET /api/git/log?count=20`
+/// `GET /api/git/history?count=20`
 async fn git_log(
     State(state): State<AppState>,
     Query(params): Query<std::collections::HashMap<String, String>>,
