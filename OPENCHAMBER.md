@@ -111,8 +111,6 @@
 - **顶部栏**: 分支名、SHA、ahead/behind、push/pull/stash 按钮
 - **Hash 路由**: `#git` 注册
 
-**⚠️ 已知问题**: `net::ERR_BLOCKED_BY_CLIENT` — `/api/git/log?count=20` 被广告拦截器（如 uBlock Origin 的 `*log*` 规则）误拦截。可重命名端点或将参数移入 POST body 规避。
-
 **文件**: `src/web/routes/git.rs`, `web/src/components/views/GitView.tsx`, `web/src/api/client.ts`, `web/src/types/api.ts`
 
 ### 7. 终端 (TerminalView) ✅ 已完成
@@ -126,11 +124,6 @@
 - **多标签页**: 创建/关闭/切换
 - **颜色主题**: 跟随前端浅色/深色主题 (`DARK_THEME` / `LIGHT_THEME`)
 - **API**: start/input/resize/events(SSE)/close
-
-**⚠️ 已知问题**:
-1. **输出格式异常** — `ls` 等命令的输出格式错乱，尽管已设 `TERM=xterm-256color`。可能与 resize 未实现有关（PTY 始终 80×24）
-2. **优雅停机卡死** — `spawn_blocking` 中的阻塞 `read()` 导致 tokio 等待 blocking 任务完成。`close_session` 虽 kill 进程期望 EOF，但 500ms 超时不可靠
-3. **Resize 空操作** — 需存储 PTY master 的裸 FD 才能调用 `resize()`
 
 **文件**: `src/web/terminal.rs`, `src/web/routes/terminal.rs`, `web/src/components/views/TerminalView.tsx`, `web/src/stores/useTerminalStore.ts`
 ### 8. 权限请求 UI (PermissionCard) ✅ 已完成
@@ -349,8 +342,8 @@
 5. ✅ **会话管理增强** — 日常使用优化
 
 ### 第二阶段 (已完成 — 2026-05-06)
-6. ✅ **Git 集成** — 显著的效率提升 (⚠️ `ERR_BLOCKED_BY_CLIENT` 见上文)
-7. ✅ **终端集成** — 独立操作能力 (⚠️ 输出格式 + 停机问题见上文)
+6. ✅ **Git 集成** — 显著的效率提升
+7. ✅ **终端集成** — 独立操作能力
 8. ✅ **权限请求 UI** — 安全体验 (前端完成，需后端配合)
 9. ✅ **Tool Call 渲染增强** — 透明度提升
 10. ✅ **设置面板扩展** — 自定义能力
