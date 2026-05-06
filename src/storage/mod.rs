@@ -495,60 +495,6 @@ impl SessionStore {
         Ok(())
     }
 
-    pub fn update_message(&self, session_id: Uuid, message: &Message) -> Result<()> {
-        let tool_calls =
-            serde_json::to_string(&message.tool_calls).context("failed to serialize tool calls")?;
-        let attachments = serde_json::to_string(&message.attachments)
-            .context("failed to serialize attachments")?;
-        let metadata =
-            serde_json::to_string(&message.metadata).context("failed to serialize metadata")?;
-        let mode = message
-            .mode
-            .map(|m| serde_json::to_string(&m).unwrap_or_default());
-        let thinking_level = message.thinking_level.as_ref().map(|t| t.to_string());
-        let compressed_content = compress_text(&message.content);
-        let reasoning = if message.reasoning.is_empty() {
-            None
-        } else {
-            Some(compress_text(&message.reasoning))
-        };
-
-        self.write_conn.execute(
-            "UPDATE messages SET role = ?3, content = ?4, attachments = ?5, reasoning = ?6, tool_calls = ?7, tool_call_id = ?8, tool_name = ?9, metadata = ?10, created_at = ?11, completed_at = ?12, streaming = ?13, input_tokens = ?14, output_tokens = ?15, total_tokens = ?16, cache_read_tokens = ?17, cache_write_tokens = ?18, model_id = ?19, tokens_per_second = ?20, snapshot_hash = ?21, patch_files = ?22, file_diffs = ?23, mode = ?24, rtk_rewritten = ?25, thinking_level = ?26 WHERE session_id = ?1 AND id = ?2",
-            params![
-                session_id.to_string(),
-                message.id.to_string(),
-                message.role.db_value(),
-                compressed_content,
-                attachments,
-                reasoning,
-                tool_calls,
-                message.tool_call_id,
-                message.tool_name,
-                metadata,
-                message.created_at.to_rfc3339(),
-                message.completed_at.map(|t| t.to_rfc3339()),
-                if message.streaming { 1_i64 } else { 0_i64 },
-                message.input_tokens,
-                message.output_tokens,
-                message.total_tokens,
-                message.cache_read_tokens,
-                message.cache_write_tokens,
-                message.model_id,
-                message.tokens_per_second,
-                message.snapshot_hash,
-                message.patch_files,
-                message.file_diffs,
-                mode,
-                if message.rtk_rewritten { 1_i64 } else { 0_i64 },
-                thinking_level,
-            ],
-        )?;
-
-        self.touch_session(session_id)?;
-        Ok(())
-    }
-
     pub fn delete_messages(&self, session_id: Uuid, message_ids: &[Uuid]) -> Result<()> {
         if message_ids.is_empty() {
             return Ok(());
