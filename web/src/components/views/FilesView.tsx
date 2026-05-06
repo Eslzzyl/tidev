@@ -1,8 +1,9 @@
-import { Search, FolderTree, RotateCw, Plus, File, Folder } from "lucide-react";
+import { Search, FolderTree, RotateCw, Plus, File, Folder, GitBranch } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { FileTree } from "./FileTree";
 import { CodeViewer } from "./CodeViewer";
 import { useFileStore } from "../../stores/useFileStore";
+import { useGitFileStore } from "../../stores/useGitFileStore";
 import { api } from "../../api/client";
 import { CreateItemDialog } from "../ui/CreateItemDialog";
 
@@ -20,6 +21,8 @@ export function FilesView() {
   const loadRoot = useFileStore((s) => s.loadRoot);
   const rootLoading = useFileStore((s) => s.rootLoading);
   const createFile = useFileStore((s) => s.createFile);
+  const gitBranch = useGitFileStore((s) => s.branch);
+  const gitRefresh = useGitFileStore((s) => s.refresh);
 
   // Load root on mount
   useEffect(() => {
@@ -108,7 +111,7 @@ export function FilesView() {
           )}
         </div>
 
-        {/* Footer with new file/dir buttons */}
+        {/* Footer with new file/dir buttons and git branch */}
         <div className="flex items-center justify-between border-t border-neutral-200 px-2 py-1.5 dark:border-neutral-800">
           <div className="flex items-center gap-1">
             <span className="text-[10px] text-neutral-400">Files</span>
@@ -130,6 +133,13 @@ export function FilesView() {
             >
               <Folder className="h-3 w-3" />
             </button>
+            {/* Git branch */}
+            {gitBranch && (
+              <span className="ml-1 flex items-center gap-0.5 rounded bg-neutral-100 px-1 py-0.5 text-[10px] text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+                <GitBranch className="h-2.5 w-2.5" />
+                {gitBranch}
+              </span>
+            )}
           </div>
           <button
             onClick={handleRefresh}

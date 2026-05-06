@@ -23,6 +23,7 @@
 | **Toast 通知** | ✅ | **成功/错误/警告/信息，自动消失** |
 | **文件树底部按钮** | ✅ | **新建文件、新建目录、刷新按钮** |
 | **多标签页** | ✅ | **同时打开多个文件，标签栏切换，关闭/激活/脏状态指示** |
+| **Git 状态徽章** | ✅ | **文件树显示 M/A/D/? 状态，脚注显示当前分支名** |
 
 ---
 
@@ -168,9 +169,9 @@ FilesView 右侧面板更新为：
 
 ---
 
-### Phase 3 — Git 状态集成 (P1)
+### Phase 3 — Git 状态集成 (P1) ✅ 已完成
 
-**目标**: 在文件树中显示文件的 Git 状态（M/A/D/?），让用户直观看到修改
+**目标**: 在文件树中显示文件的 Git 状态（M/A/D/?），让用户直观看到修改 ✅ 已完成
 
 #### 3.1 后端
 
@@ -188,9 +189,9 @@ FilesView 右侧面板更新为：
 
 无需后端改动。
 
-#### 3.2 前端: Git Store
+#### 3.2 前端: Git Store ✅
 
-新建 `useGitFileStore` 缓存 Git 状态，或直接复用 `useFileStore`：
+新建 `useGitFileStore` 缓存 Git 状态：
 - 文件树加载时自动拉取 Git 状态
 - 缓存已解析的 `path → status` 映射
 - 提供刷新方法
@@ -203,9 +204,9 @@ interface GitFileStore {
 }
 ```
 
-**文件**: `web/src/stores/useGitFileStore.ts`
+**文件**: `web/src/stores/useGitFileStore.ts` ✅
 
-#### 3.3 前端: FileTree 添加徽章
+#### 3.3 前端: FileTree 添加徽章 ✅
 
 在 `FileTree.tsx` 的树节点旁显示：
 
@@ -312,7 +313,7 @@ CodeMirror 已有行号，但缺少跳转输入。新增 `GoToLineDialog` 组件
 |------|------|-----------|------|
 | **Phase 1** | 文件 CRUD + 右键菜单 + Toast | ✅ **已完成** | 无 |
 | **Phase 2** | 多标签页 | ✅ **已完成** | Phase 1 |
-| **Phase 3** | Git 状态徽章 | 1-2 天 | 无（后端 API 已存在） |
+| **Phase 3** | Git 状态徽章 | ✅ **已完成** | 无（后端 API 已存在） |
 | **Phase 4** | 多格式预览 | 2-3 天 | 无 |
 | **Phase 5** | 跳转到行/搜索优化 | 1-2 天 | 无 |
 | **Phase 6** | 拖拽/文件监控 | 3-5 天 | Phase 1-2 完成 |

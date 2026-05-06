@@ -12,8 +12,10 @@ import {
   Terminal,
   Plus,
   Copy,
+  GitBranch,
 } from "lucide-react";
 import { useFileStore, type TreeNode } from "../../stores/useFileStore";
+import { useGitFileStore, type GitDisplayStatus } from "../../stores/useGitFileStore";
 import { ContextMenu, type ContextMenuItem } from "../ui/ContextMenu";
 import { CreateItemDialog } from "../ui/CreateItemDialog";
 import { RenameDialog } from "../ui/RenameDialog";
@@ -49,6 +51,34 @@ function getFileIcon(name: string, isDirectory: boolean): React.ReactNode {
   return fileIcons[ext] || <File className="h-4 w-4 text-neutral-400" />;
 }
 
+/** VS Code-style Git status dot */
+function GitStatusDot({ status }: { status?: GitDisplayStatus }) {
+  if (!status?.hasChanges) return null;
+
+  let dotClass = "";
+  let title = "";
+
+  if (status.isUntracked) {
+    dotClass = "bg-neutral-400 dark:bg-neutral-500";
+    title = "U";
+  } else if (status.hasUnstaged) {
+    dotClass = "bg-orange-400 dark:bg-orange-500";
+    title = status.rawStatus;
+  } else if (status.hasStaged) {
+    dotClass = "bg-green-500 dark:bg-green-400";
+    title = status.rawStatus;
+  } else {
+    return null;
+  }
+
+  return (
+    <span
+      className={`ml-auto shrink-0 h-2 w-2 rounded-full ${dotClass}`}
+      title={title ? `Git: ${title}` : undefined}
+    />
+  );
+}
+
 // Dialog state
 type DialogState =
   | { type: "create"; parentPath: string; itemType: "file" | "directory" }
@@ -71,6 +101,11 @@ export function FileTree() {
   const deleteFile = useFileStore((s) => s.deleteFile);
   const refreshTree = useFileStore((s) => s.refreshTree);
 
+  const gitStatusMap = useGitFileStore((s) => s.displayMap);
+  const gitBranch = useGitFileStore((s) => s.branch);
+  const gitLoading = useGitFileStore((s) => s.loading);
+  const gitRefresh = useGitFileStore((s) => s.refresh);
+
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -83,6 +118,13 @@ export function FileTree() {
       loadRoot();
     }
   }, [rootLoaded, rootLoading, loadRoot]);
+
+  // Fetch git status when tree is loaded
+  useEffect(() => {
+    if (rootLoaded) {
+      gitRefresh();
+    }
+  }, [rootLoaded, gitRefresh]);
 
   const handleNodeClick = useCallback(
     (node: TreeNode) => {
@@ -229,6 +271,7 @@ export function FileTree() {
             onNodeClick={handleNodeClick}
             onToggleExpand={toggleExpand}
             onContextMenu={handleContextMenu}
+            gitDisplayMap={gitStatusMap}
           />
         ))}
       </div>
@@ -286,6 +329,7 @@ interface TreeNodeItemProps {
   onNodeClick: (node: TreeNode) => void;
   onToggleExpand: (path: string) => Promise<void>;
   onContextMenu: (e: React.MouseEvent, node: TreeNode) => void;
+  gitDisplayMap: Record<string, GitDisplayStatus>;
 }
 
 function TreeNodeItem({
@@ -295,8 +339,10 @@ function TreeNodeItem({
   onNodeClick,
   onToggleExpand,
   onContextMenu,
+  gitDisplayMap,
 }: TreeNodeItemProps) {
   const isSelected = selectedPath === node.path;
+  const gitDisplay = gitDisplayMap[node.path];
 
   return (
     <div>
@@ -333,6 +379,9 @@ function TreeNodeItem({
           </>
         )}
         <span className="truncate text-xs">{node.name}</span>
+
+        {/* VS Code-style Git status dot */}
+        <GitStatusDot status={gitDisplay} />
       </button>
 
       {/* Render children if expanded */}
@@ -348,6 +397,7 @@ function TreeNodeItem({
                 onNodeClick={onNodeClick}
                 onToggleExpand={onToggleExpand}
                 onContextMenu={onContextMenu}
+                gitDisplayMap={gitDisplayMap}
               />
             ))
           ) : (
