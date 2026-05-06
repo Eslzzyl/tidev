@@ -625,7 +625,7 @@ impl AgentRuntime {
                 ))
             });
             // Persist write result immediately so diffs render one at a time
-            self.persist_tool_result(session_id, request_id, &tool_call, &result, event_tx)
+            self.persist_tool_result(session_id, request_id, tool_call, &result, event_tx)
                 .await?;
             results.push((tool_call.clone(), result));
         }
