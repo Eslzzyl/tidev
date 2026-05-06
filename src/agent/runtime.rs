@@ -29,7 +29,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     agent::{AgentDefinition, AgentType},
-    config::{ActiveModel, ConfigPaths, reasoning::ThinkingLevelType},
+    config::{ActiveModel, AppConfig, AuthStore, ConfigPaths, reasoning::ThinkingLevelType},
     context::ContextManager,
     instructions,
     prompts::SessionMode,
@@ -89,6 +89,8 @@ pub struct AgentRuntime {
     pub workspace_root: PathBuf,
     pub config_dir: PathBuf,
     pub config_paths: ConfigPaths,
+    pub config: AppConfig,
+    pub auth: AuthStore,
     pub store: Arc<Mutex<SessionStore>>,
     pub llm_client: crate::llm::LlmClient,
     pub tools: ToolRegistry,
@@ -807,11 +809,21 @@ impl AgentRuntime {
                 .ok_or_else(|| anyhow::anyhow!("parent session not found"))?
         };
 
-        // Use agent's model override if set, else inherit parent model
-        let child_model = agent_def
-            .model_override
-            .clone()
-            .unwrap_or_else(|| parent_model.clone());
+        // Use agent's model override if set, else inherit parent model.
+        // First check config's per-agent model settings (e.g. [agent.models]).
+        let child_model = {
+            let agent_type_name = agent_type.display_name();
+            match self
+                .config
+                .resolve_agent_active_model(&self.auth, agent_type_name)
+            {
+                Ok(Some(model)) => model,
+                _ => agent_def
+                    .model_override
+                    .clone()
+                    .unwrap_or_else(|| parent_model.clone()),
+            }
+        };
 
         // 2. Create child session
         {
@@ -1616,6 +1628,8 @@ mod tests {
                 database_file: db_path.clone(),
                 auth_file: tmp.path().join("auth.json"),
             },
+            config: crate::config::AppConfig::default(),
+            auth: crate::config::AuthStore::default(),
             store: Arc::new(Mutex::new(store)),
             llm_client: crate::llm::LlmClient::new().unwrap(),
             tools: crate::tooling::ToolRegistry::new(

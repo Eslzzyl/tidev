@@ -845,10 +845,12 @@ impl App {
                     self.running_subagent_executions
                         .iter_mut()
                         .find(|execution| {
-                            // Runtime flow: match by request_id
+                            // Must match BOTH request_id and child_session_id so that
+                            // parallel subagents (which share the same parent request_id)
+                            // each get their own status updates instead of all going
+                            // to the first matching execution.
                             execution.request_id == request_id
-                        // Old TUI flow: match by child_session_id
-                        || execution.child_session_id == child_session_id
+                            && execution.child_session_id == child_session_id
                         })
                 {
                     execution.status = SubagentStatus::from_status_text(&status_text);

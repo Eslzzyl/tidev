@@ -109,6 +109,8 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
         workspace_root: workspace_root.clone(),
         config_dir: paths.config_dir.clone(),
         config_paths: paths.clone(),
+        config: config.clone(),
+        auth: auth.clone(),
         store: Arc::new(Mutex::new(store.clone())),
         llm_client: llm_client.clone(),
         tools,

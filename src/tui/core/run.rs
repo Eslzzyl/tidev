@@ -72,6 +72,8 @@ impl App {
             workspace_root: workspace_root.clone(),
             config_dir: paths.config_dir.clone(),
             config_paths: paths.clone(),
+            config: config.clone(),
+            auth: auth.clone(),
             store: Arc::new(tokio::sync::Mutex::new(store.clone())),
             llm_client: llm.clone(),
             tools: tools.clone(),
