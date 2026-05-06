@@ -28,7 +28,7 @@ impl LlmClient {
     pub fn new() -> Result<Self> {
         let http = Client::builder()
             .user_agent("tidev/0.1")
-            .timeout(Duration::from_secs(120))
+            .timeout(Duration::from_mins(30))
             .connect_timeout(Duration::from_secs(15))
             .build()
             .context("failed to construct HTTP client")?;
