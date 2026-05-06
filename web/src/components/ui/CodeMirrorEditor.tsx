@@ -6,10 +6,7 @@ import { closeBrackets } from "@codemirror/autocomplete";
 import { bracketMatching, foldGutter } from "@codemirror/language";
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { createCodeMirrorTheme } from "../../lib/codemirror/theme";
-import {
-  languageByExtension,
-  loadLanguageByExtension,
-} from "../../lib/codemirror/languageByExtension";
+import { loadLanguageByExtension } from "../../lib/codemirror/languageByExtension";
 
 export interface CodeMirrorEditorProps {
   /** File content */
@@ -225,12 +222,7 @@ export const CodeMirrorEditor = forwardRef<CodeMirrorEditorHandle, CodeMirrorEdi
       let lang = null;
 
       if (filePath) {
-        // Try synchronous first
-        lang = languageByExtension(filePath);
-        if (!lang) {
-          // Try async
-          lang = await loadLanguageByExtension(filePath);
-        }
+        lang = await loadLanguageByExtension(filePath);
       }
 
       if (!cancelled && viewRef.current) {
