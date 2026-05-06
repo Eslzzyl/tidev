@@ -77,7 +77,9 @@ impl App {
             tools: tools.clone(),
             instructions: config.instructions.clone(),
             instruction_content_cache: std::collections::HashMap::new(),
-            queued_messages: std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+            queued_messages: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::VecDeque::new(),
+            )),
             auto_approve_permissions: true, // TUI handles permissions via channel
         };
         let last_notice = None;
@@ -679,23 +681,21 @@ impl App {
         }
 
         let is_active = self.conversation.session_id == session_id;
-        let Some((conversation, mut context_manager, mut model)) =
-            (if is_active {
-                Some((
-                    self.conversation.clone(),
-                    self.context_manager.clone(),
-                    self.active_model.clone(),
-                ))
-            } else {
-                self.cached_sessions.get(&session_id).map(|cached| {
-                    (
-                        cached.conversation.clone(),
-                        cached.context_manager.clone(),
-                        cached.active_model.clone(),
-                    )
-                })
+        let Some((conversation, mut context_manager, mut model)) = (if is_active {
+            Some((
+                self.conversation.clone(),
+                self.context_manager.clone(),
+                self.active_model.clone(),
+            ))
+        } else {
+            self.cached_sessions.get(&session_id).map(|cached| {
+                (
+                    cached.conversation.clone(),
+                    cached.context_manager.clone(),
+                    cached.active_model.clone(),
+                )
             })
-        else {
+        }) else {
             return;
         };
 
@@ -783,24 +783,24 @@ impl App {
                     let mut updated_existing = false;
                     if manual
                         && let Some(last_msg) = self.conversation.messages.last_mut()
-                            && last_msg.streaming
-                            && last_msg.role == crate::session::MessageRole::System
-                        {
-                            last_msg.streaming = false;
-                            last_msg.content = format!(
-                                "{}\n\n{}",
-                                crate::session::COMPACTION_MESSAGE_LABEL,
-                                summary
-                            );
-                            updated_existing = true;
+                        && last_msg.streaming
+                        && last_msg.role == crate::session::MessageRole::System
+                    {
+                        last_msg.streaming = false;
+                        last_msg.content = format!(
+                            "{}\n\n{}",
+                            crate::session::COMPACTION_MESSAGE_LABEL,
+                            summary
+                        );
+                        updated_existing = true;
 
-                            if let Err(error) = self
-                                .store
-                                .append_message(self.conversation.session_id, last_msg)
-                            {
-                                crate::log_warn!("failed to persist compaction message: {}", error);
-                            }
+                        if let Err(error) = self
+                            .store
+                            .append_message(self.conversation.session_id, last_msg)
+                        {
+                            crate::log_warn!("failed to persist compaction message: {}", error);
                         }
+                    }
                     if !updated_existing {
                         let compaction_message =
                             crate::session::Message::compaction(summary.clone());

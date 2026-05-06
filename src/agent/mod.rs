@@ -86,7 +86,13 @@ impl AgentType {
             Self::General => None,
             // Explorer: read-only search tools + bash for fast searching (no write commands).
             Self::Explorer => Some(&[
-                "read", "list", "glob", "grep", "bash", "websearch", "webfetch",
+                "read",
+                "list",
+                "glob",
+                "grep",
+                "bash",
+                "websearch",
+                "webfetch",
             ]),
             // Librarian: research tools (no code modification).
             Self::Librarian => Some(&[

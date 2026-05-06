@@ -1624,7 +1624,10 @@ mod tests {
         assert!(request.instructions.is_some());
         let instructions = request.instructions.unwrap();
         assert!(instructions.contains("Base system prompt"));
-        assert!(!instructions.contains("Context summary"), "System messages should no longer be merged into instructions");
+        assert!(
+            !instructions.contains("Context summary"),
+            "System messages should no longer be merged into instructions"
+        );
     }
 
     #[test]

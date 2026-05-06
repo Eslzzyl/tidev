@@ -18,5 +18,3 @@ pub fn compose_instruction_prompt(
 
     instruction_prompt
 }
-
-

@@ -1,4 +1,6 @@
 use crate::{
+    config::ProviderSource,
+    provider_setup::{ConnectDialog, EditProviderStep, NewProviderStep},
     tui::mcp_panel::McpPanelState,
     tui::mcp_panel::McpServerEditorState,
     tui::memory_panel::{MemoryPanelMode, MemoryPanelState},
@@ -13,8 +15,6 @@ use crate::{
     tui::ui::rename::RenameSessionDialogState,
     tui::ui::skills_panel::SkillsPanelState,
     tui::ui::workspace_boundary::WorkspaceBoundaryDialogState,
-    config::ProviderSource,
-    provider_setup::{ConnectDialog, EditProviderStep, NewProviderStep},
 };
 use chrono;
 use ratatui::{

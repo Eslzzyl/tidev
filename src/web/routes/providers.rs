@@ -1,11 +1,15 @@
 use axum::{
-    Json, extract::{Path, State},
+    Json,
+    extract::{Path, State},
     http::StatusCode,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::config::{ModelConfig, ProviderConfig};
-use crate::web::{error::{AppError, WebResult}, state::AppState};
+use crate::web::{
+    error::{AppError, WebResult},
+    state::AppState,
+};
 
 /// Model summary in provider response
 #[derive(Serialize)]
@@ -65,12 +69,14 @@ pub struct CreateProviderRequest {
 }
 
 /// List all providers
-pub async fn list_providers(State(state): State<AppState>) -> WebResult<Json<ListProvidersResponse>> {
+pub async fn list_providers(
+    State(state): State<AppState>,
+) -> WebResult<Json<ListProvidersResponse>> {
     crate::log_debug!("Listing all providers");
-    
+
     let config = state.config.read().await;
     let auth = state.auth.read().await;
-    
+
     let providers: Vec<ProviderInfo> = config
         .provider_ids()
         .into_iter()
@@ -78,7 +84,7 @@ pub async fn list_providers(State(state): State<AppState>) -> WebResult<Json<Lis
             let provider = config.provider(&provider_id)?;
             let source = config.provider_source(&provider_id)?;
             let connected = auth.api_key(&provider_id).is_some();
-            
+
             let models: Vec<ProviderModelInfo> = provider
                 .models
                 .iter()
@@ -92,7 +98,7 @@ pub async fn list_providers(State(state): State<AppState>) -> WebResult<Json<Lis
                     supports_streaming: model.supports_streaming,
                 })
                 .collect();
-            
+
             Some(ProviderInfo {
                 id: provider_id,
                 display_name: provider.display_name.clone(),
@@ -106,7 +112,7 @@ pub async fn list_providers(State(state): State<AppState>) -> WebResult<Json<Lis
             })
         })
         .collect();
-    
+
     crate::log_info!("Listed {} providers", providers.len());
     Ok(Json(ListProvidersResponse { providers }))
 }
@@ -118,27 +124,31 @@ pub async fn connect_provider(
     Json(body): Json<ConnectProviderRequest>,
 ) -> WebResult<StatusCode> {
     crate::log_debug!("Connecting provider: {}", provider_id);
-    
+
     // Validate provider exists
     {
         let config = state.config.read().await;
         if config.provider(&provider_id).is_none() {
-            return Err(AppError::NotFound(format!("Provider '{}' not found", provider_id)));
+            return Err(AppError::NotFound(format!(
+                "Provider '{}' not found",
+                provider_id
+            )));
         }
     }
-    
+
     // Validate API key is not empty
     if body.api_key.trim().is_empty() {
         return Err(AppError::BadRequest("API key cannot be empty".to_string()));
     }
-    
+
     // Set API key
     {
         let mut auth = state.auth.write().await;
         auth.set_api_key(&provider_id, body.api_key);
-        auth.save(&state.config_paths).map_err(|e| AppError::Internal(format!("Failed to save auth: {}", e)))?;
+        auth.save(&state.config_paths)
+            .map_err(|e| AppError::Internal(format!("Failed to save auth: {}", e)))?;
     }
-    
+
     crate::log_info!("Connected provider: {}", provider_id);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -149,14 +159,15 @@ pub async fn disconnect_provider(
     Path(provider_id): Path<String>,
 ) -> WebResult<StatusCode> {
     crate::log_debug!("Disconnecting provider: {}", provider_id);
-    
+
     // Remove API key
     {
         let mut auth = state.auth.write().await;
         auth.remove_api_key(&provider_id);
-        auth.save(&state.config_paths).map_err(|e| AppError::Internal(format!("Failed to save auth: {}", e)))?;
+        auth.save(&state.config_paths)
+            .map_err(|e| AppError::Internal(format!("Failed to save auth: {}", e)))?;
     }
-    
+
     crate::log_info!("Disconnected provider: {}", provider_id);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -167,23 +178,25 @@ pub async fn create_provider(
     Json(body): Json<CreateProviderRequest>,
 ) -> WebResult<StatusCode> {
     crate::log_debug!("Creating provider: {}", body.provider_id);
-    
+
     // Validate provider_id
     let provider_id = body.provider_id.trim().to_ascii_lowercase();
     if provider_id.is_empty() {
-        return Err(AppError::BadRequest("Provider ID cannot be empty".to_string()));
+        return Err(AppError::BadRequest(
+            "Provider ID cannot be empty".to_string(),
+        ));
     }
-    
+
     // Check provider_id format (lowercase letters, numbers, -, _)
     if !provider_id
         .chars()
         .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_'))
     {
         return Err(AppError::BadRequest(
-            "Provider ID may only contain lowercase letters, numbers, '-' or '_'".to_string()
+            "Provider ID may only contain lowercase letters, numbers, '-' or '_'".to_string(),
         ));
     }
-    
+
     // Check if provider already exists
     {
         let config = state.config.read().await;
@@ -194,28 +207,34 @@ pub async fn create_provider(
             )));
         }
     }
-    
+
     // Validate required fields
     if body.display_name.trim().is_empty() {
-        return Err(AppError::BadRequest("Display name cannot be empty".to_string()));
+        return Err(AppError::BadRequest(
+            "Display name cannot be empty".to_string(),
+        ));
     }
-    
+
     let base_url = body.base_url.trim().trim_end_matches('/').to_string();
     if base_url.is_empty() {
         return Err(AppError::BadRequest("Base URL cannot be empty".to_string()));
     }
     if !(base_url.starts_with("http://") || base_url.starts_with("https://")) {
-        return Err(AppError::BadRequest("Base URL must start with http:// or https://".to_string()));
+        return Err(AppError::BadRequest(
+            "Base URL must start with http:// or https://".to_string(),
+        ));
     }
-    
+
     if body.api_key.trim().is_empty() {
         return Err(AppError::BadRequest("API key cannot be empty".to_string()));
     }
-    
+
     if body.models.is_empty() {
-        return Err(AppError::BadRequest("At least one model must be configured".to_string()));
+        return Err(AppError::BadRequest(
+            "At least one model must be configured".to_string(),
+        ));
     }
-    
+
     // Build models map
     let mut models = std::collections::BTreeMap::new();
     for model_req in body.models {
@@ -223,19 +242,19 @@ pub async fn create_provider(
         if model_id.is_empty() {
             return Err(AppError::BadRequest("Model ID cannot be empty".to_string()));
         }
-        
+
         let display_name = if model_req.display_name.trim().is_empty() {
             model_id.clone()
         } else {
             model_req.display_name.trim().to_string()
         };
-        
+
         let temperature = if model_req.temperature < 0.0 || model_req.temperature > 2.0 {
             1.0 // Default to 1.0 if out of range
         } else {
             model_req.temperature
         };
-        
+
         models.insert(
             model_id,
             ModelConfig {
@@ -251,7 +270,7 @@ pub async fn create_provider(
             },
         );
     }
-    
+
     // Create provider config
     let provider_config = ProviderConfig {
         display_name: body.display_name.trim().to_string(),
@@ -259,21 +278,26 @@ pub async fn create_provider(
         api_type: None,
         models,
     };
-    
+
     // Add to config
     {
         let mut config = state.config.write().await;
-        config.providers.insert(provider_id.clone(), provider_config);
-        config.save(&state.config_paths).map_err(|e| AppError::Internal(format!("Failed to save config: {}", e)))?;
+        config
+            .providers
+            .insert(provider_id.clone(), provider_config);
+        config
+            .save(&state.config_paths)
+            .map_err(|e| AppError::Internal(format!("Failed to save config: {}", e)))?;
     }
-    
+
     // Set API key
     {
         let mut auth = state.auth.write().await;
         auth.set_api_key(&provider_id, body.api_key);
-        auth.save(&state.config_paths).map_err(|e| AppError::Internal(format!("Failed to save auth: {}", e)))?;
+        auth.save(&state.config_paths)
+            .map_err(|e| AppError::Internal(format!("Failed to save auth: {}", e)))?;
     }
-    
+
     crate::log_info!("Created provider: {}", provider_id);
     Ok(StatusCode::CREATED)
 }
@@ -284,14 +308,14 @@ pub async fn delete_provider(
     Path(provider_id): Path<String>,
 ) -> WebResult<StatusCode> {
     crate::log_debug!("Deleting provider: {}", provider_id);
-    
+
     // Check provider exists and is user-defined
     {
         let config = state.config.read().await;
         match config.provider_source(&provider_id) {
             Some(crate::config::ProviderSource::Bundled) => {
                 return Err(AppError::BadRequest(
-                    "Cannot delete bundled providers".to_string()
+                    "Cannot delete bundled providers".to_string(),
                 ));
             }
             None => {
@@ -303,21 +327,24 @@ pub async fn delete_provider(
             _ => {}
         }
     }
-    
+
     // Remove provider from config
     {
         let mut config = state.config.write().await;
         config.providers.remove(&provider_id);
-        config.save(&state.config_paths).map_err(|e| AppError::Internal(format!("Failed to save config: {}", e)))?;
+        config
+            .save(&state.config_paths)
+            .map_err(|e| AppError::Internal(format!("Failed to save config: {}", e)))?;
     }
-    
+
     // Remove API key
     {
         let mut auth = state.auth.write().await;
         auth.remove_api_key(&provider_id);
-        auth.save(&state.config_paths).map_err(|e| AppError::Internal(format!("Failed to save auth: {}", e)))?;
+        auth.save(&state.config_paths)
+            .map_err(|e| AppError::Internal(format!("Failed to save auth: {}", e)))?;
     }
-    
+
     crate::log_info!("Deleted provider: {}", provider_id);
     Ok(StatusCode::NO_CONTENT)
 }

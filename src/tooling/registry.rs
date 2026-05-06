@@ -378,18 +378,17 @@ impl ToolRegistry {
     ) -> JoinHandle<ToolExecutionResult> {
         let registry = self.clone();
         tokio::task::spawn_blocking(move || {
-            let result =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    registry.execute_call_with_stream(
-                        &runtime_handle,
-                        &store,
-                        session_id,
-                        &call,
-                        mode,
-                        allow_outside,
-                        event_tx,
-                    )
-                }));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                registry.execute_call_with_stream(
+                    &runtime_handle,
+                    &store,
+                    session_id,
+                    &call,
+                    mode,
+                    allow_outside,
+                    event_tx,
+                )
+            }));
             match result {
                 Ok(Ok(r)) => r,
                 Ok(Err(e)) => ToolExecutionResult::new(format!("Error: {e}")),

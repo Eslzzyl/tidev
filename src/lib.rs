@@ -1,5 +1,4 @@
 pub mod agent;
-pub mod tui;
 pub mod balance;
 pub mod config;
 pub mod context;
@@ -22,6 +21,7 @@ pub mod storage;
 pub mod system_info;
 pub mod theme;
 pub mod tooling;
+pub mod tui;
 pub mod utils;
 pub mod web;
 

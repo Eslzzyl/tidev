@@ -27,12 +27,15 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 mod commands;
+mod core;
 mod input;
 mod render;
-mod core;
 mod ui;
 
 pub use commands::{CommandAction, CommandPaletteState, CommandRegistry};
+pub use core::run;
+pub use core::state;
+pub use core::undo;
 pub use input::Composer;
 pub use input::at_mention;
 pub use input::event;
@@ -40,9 +43,6 @@ pub use input::mouse_selection;
 pub use render::diff_render;
 pub use render::render_chat;
 pub use render::render_dialog;
-pub use core::run;
-pub use core::state;
-pub use core::undo;
 pub use ui::balance_panel;
 pub use ui::connect;
 pub use ui::mcp_panel;
@@ -61,6 +61,23 @@ use core::state::*;
 
 use crate::{
     agent::runtime::{AgentRuntime, PendingToolApproval},
+    config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
+    context::ContextManager,
+    llm::LlmClient,
+    mcp::McpManager,
+    memory::types::MemoryStore,
+    notifications,
+    prompts::{SessionMode, init_command},
+    provider_setup::ConnectDialog,
+    session::{
+        AssistantTurn, BackendEvent, COMPACTION_MESSAGE_LABEL, Conversation, Message,
+        MessageAttachment, MessageRole, ToolCall, ToolExecutionResult,
+    },
+    shared::file_search::current_at_fragment,
+    snapshot::{FileDiff, SnapshotService},
+    storage::SessionStore,
+    theme::{ThemeManager, ThemeName},
+    tooling::{FileReadTracker, TodoItem, ToolRegistry},
     tui::at_mention::{AtMentionKind, AtMentionState},
     tui::input::SnippetState,
     tui::input::shell_completion::ShellCompletionState,
@@ -78,20 +95,6 @@ use crate::{
     tui::theme_panel::ThemePanelState,
     tui::ui::rename::RenameSessionDialogState,
     tui::ui::workspace_boundary::WorkspaceBoundaryDialogState,
-    config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
-    context::ContextManager,
-    llm::LlmClient,
-    mcp::McpManager,
-    memory::types::MemoryStore,
-    notifications,
-    prompts::{SessionMode, init_command},
-    provider_setup::ConnectDialog,
-    session::{AssistantTurn, BackendEvent, COMPACTION_MESSAGE_LABEL, Conversation, Message, MessageAttachment, MessageRole, ToolCall, ToolExecutionResult},
-    shared::file_search::current_at_fragment,
-    snapshot::{FileDiff, SnapshotService},
-    storage::SessionStore,
-    theme::{ThemeManager, ThemeName},
-    tooling::{FileReadTracker, TodoItem, ToolRegistry},
     utils::TokenUsage,
 };
 
@@ -779,20 +782,17 @@ impl App {
                     // finalize the existing Tool message instead of creating
                     // a duplicate via record_tool_result.
                     if tool_call.name == "bash" {
-                        let tool_idx = self
-                            .conversation
-                            .messages
-                            .iter()
-                            .rposition(|m| {
-                                m.role == MessageRole::Tool
+                        let tool_idx = self.conversation.messages.iter().rposition(|m| {
+                            m.role == MessageRole::Tool
                                 && m.tool_call_id.as_deref() == Some(&tool_call.id)
-                            });
+                        });
                         if let Some(tool_idx) = tool_idx {
                             let display_result = result.preview_for_storage(Some("bash"));
                             let message_id = self.conversation.messages[tool_idx].id;
                             self.conversation.messages[tool_idx].content = display_result.output;
                             self.conversation.messages[tool_idx].streaming = false;
-                            self.conversation.messages[tool_idx].attachments = display_result.attachments;
+                            self.conversation.messages[tool_idx].attachments =
+                                display_result.attachments;
                             self.message_layout_index.borrow_mut().valid = false;
                             // Invalidate the parent Assistant message's render cache
                             if let Some(assistant_id) = self
@@ -812,10 +812,7 @@ impl App {
                                 .store
                                 .append_message(self.conversation.session_id, &persisted)
                             {
-                                crate::log_warn!(
-                                    "ToolCompleted/bash: failed to persist: {}",
-                                    e
-                                );
+                                crate::log_warn!("ToolCompleted/bash: failed to persist: {}", e);
                             }
                         } else {
                             // Fallback: no streaming message existed
@@ -844,15 +841,15 @@ impl App {
                     return Ok(());
                 }
 
-                if let Some(execution) = self
-                    .running_subagent_executions
-                    .iter_mut()
-                    .find(|execution| {
-                        // Runtime flow: match by request_id
-                        execution.request_id == request_id
+                if let Some(execution) =
+                    self.running_subagent_executions
+                        .iter_mut()
+                        .find(|execution| {
+                            // Runtime flow: match by request_id
+                            execution.request_id == request_id
                         // Old TUI flow: match by child_session_id
                         || execution.child_session_id == child_session_id
-                    })
+                        })
                 {
                     execution.status = SubagentStatus::from_status_text(&status_text);
                     execution.current_tool_call = current_tool_call;
@@ -1136,15 +1133,11 @@ impl App {
                 let bash_tool_call_id = running_bash.map(|r| r.tool_call.id.as_str());
 
                 if let Some(tool_call_id) = bash_tool_call_id {
-                    let existing = self
-                        .conversation
-                        .messages
-                        .iter()
-                        .rposition(|m| {
-                            m.role == MessageRole::Tool
-                                && m.streaming
-                                && m.tool_call_id.as_deref() == Some(tool_call_id)
-                        });
+                    let existing = self.conversation.messages.iter().rposition(|m| {
+                        m.role == MessageRole::Tool
+                            && m.streaming
+                            && m.tool_call_id.as_deref() == Some(tool_call_id)
+                    });
 
                     if let Some(idx) = existing {
                         // Update streaming tool message content.
@@ -1222,8 +1215,7 @@ impl App {
                 // pending_request so the UI shows the spinner again.
                 if !self.pending_request {
                     if let Some(queued) = self.pending_prompt_queue.pop_front() {
-                        let mut user_message =
-                            Message::new(MessageRole::User, &queued.prompt);
+                        let mut user_message = Message::new(MessageRole::User, &queued.prompt);
                         user_message.attachments = queued.attachments;
                         user_message.mode = queued.mode;
                         user_message.thinking_level = queued.thinking_level;
@@ -1313,7 +1305,10 @@ impl App {
             // Tool calls are present — keep `pending_request` true.
             // Permission approval will happen via the channel, and
             // `run_agent_loop` will execute approved tools automatically.
-            self.last_notice = Some(format!("Processing {} tool call(s)...", turn.tool_calls.len()));
+            self.last_notice = Some(format!(
+                "Processing {} tool call(s)...",
+                turn.tool_calls.len()
+            ));
         }
 
         Ok(())
@@ -1488,10 +1483,8 @@ impl App {
             .unwrap_or_else(|| self.thinking_level.clone());
 
         runtime.spawn(async move {
-            let mut context_manager = ContextManager::from_state(
-                context_summary,
-                context_retained_from,
-            );
+            let mut context_manager =
+                ContextManager::from_state(context_summary, context_retained_from);
 
             if let Err(e) = agent
                 .run_agent_loop_with_permission_channel(

@@ -5,9 +5,9 @@ mod openai;
 mod responses;
 mod think_parser;
 
-use std::time::Duration;
 use anyhow::{Context, Result};
 use reqwest::Client;
+use std::time::Duration;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
@@ -147,13 +147,31 @@ impl LlmClient {
         for attempt in 1..=MAX_RETRIES {
             let result = match model.api_type {
                 ApiType::Anthropic => {
-                    anthropic::complete_anthropic(&self.http, model.clone(), messages.clone(), tools.clone()).await
+                    anthropic::complete_anthropic(
+                        &self.http,
+                        model.clone(),
+                        messages.clone(),
+                        tools.clone(),
+                    )
+                    .await
                 }
                 ApiType::OpenAiChatCompletions => {
-                    openai::complete_openai(&self.http, model.clone(), messages.clone(), tools.clone()).await
+                    openai::complete_openai(
+                        &self.http,
+                        model.clone(),
+                        messages.clone(),
+                        tools.clone(),
+                    )
+                    .await
                 }
                 ApiType::OpenAiResponses => {
-                    responses::complete_responses(&self.http, model.clone(), messages.clone(), tools.clone()).await
+                    responses::complete_responses(
+                        &self.http,
+                        model.clone(),
+                        messages.clone(),
+                        tools.clone(),
+                    )
+                    .await
                 }
             };
 

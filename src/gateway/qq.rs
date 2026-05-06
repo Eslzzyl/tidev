@@ -11,8 +11,8 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::time::{Duration, sleep};
-use tokio_util::sync::CancellationToken;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::{
@@ -118,7 +118,9 @@ impl QQChannel {
             tools: tools.clone(),
             instructions: config.instructions.clone(),
             instruction_content_cache: std::collections::HashMap::new(),
-            queued_messages: std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+            queued_messages: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::VecDeque::new(),
+            )),
             auto_approve_permissions: false,
         };
         Self {
@@ -490,12 +492,12 @@ impl QQChannel {
         // run_agent_loop; we only need to emit the final result.
         if let Ok(messages) = self.store.load_messages(session_id)
             && let Some(last_msg) = messages.last()
-                && last_msg.role == MessageRole::Assistant
-                    && !last_msg.content.trim().is_empty()
-                {
-                    self.send_markdown(channel_id, &last_msg.content, Some(msg_id))
-                        .await?;
-                }
+            && last_msg.role == MessageRole::Assistant
+            && !last_msg.content.trim().is_empty()
+        {
+            self.send_markdown(channel_id, &last_msg.content, Some(msg_id))
+                .await?;
+        }
 
         Ok(())
     }

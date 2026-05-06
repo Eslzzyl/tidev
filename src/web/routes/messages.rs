@@ -438,10 +438,7 @@ pub async fn send_message(
         // Create a context manager for message preprocessing
         let mut context_manager = ContextManager::new();
 
-        crate::log_info!(
-            "Starting agent loop for session {}",
-            session_id
-        );
+        crate::log_info!("Starting agent loop for session {}", session_id);
 
         if let Err(e) = agent
             .run_agent_loop(
@@ -909,9 +906,9 @@ pub async fn compact_session(
     // Load session record
     let record = {
         let store = state.store.lock().await;
-        store.load_session_record(session_id)?.ok_or_else(|| {
-            AppError::NotFound(format!("Session {} not found", session_id))
-        })?
+        store
+            .load_session_record(session_id)?
+            .ok_or_else(|| AppError::NotFound(format!("Session {} not found", session_id)))?
     };
 
     // Load existing messages
@@ -935,10 +932,7 @@ pub async fn compact_session(
     );
     conversation.messages = messages;
     if let Some(summary) = &record.context_summary {
-        conversation.set_context_state(
-            Some(summary.clone()),
-            record.context_retained_from,
-        );
+        conversation.set_context_state(Some(summary.clone()), record.context_retained_from);
     }
 
     // Build context manager from existing state
@@ -1016,28 +1010,19 @@ pub async fn compact_session(
                     {
                         let store = store.lock().await;
                         if let Err(e) = store.append_message(session_id, &system_msg) {
-                            crate::log_warn!(
-                                "Failed to persist compaction message: {}",
-                                e
-                            );
+                            crate::log_warn!("Failed to persist compaction message: {}", e);
                         }
                         if let Err(e) = store.update_session_context_state(
                             session_id,
                             context_manager.summary.as_deref(),
                             context_manager.retained_from,
                         ) {
-                            crate::log_warn!(
-                                "Failed to persist compacted context state: {}",
-                                e
-                            );
+                            crate::log_warn!("Failed to persist compacted context state: {}", e);
                         }
                     }
                     crate::log_info!("Compaction completed for session {}", session_id);
                 } else {
-                    crate::log_info!(
-                        "Compaction produced no summary for session {}",
-                        session_id
-                    );
+                    crate::log_info!("Compaction produced no summary for session {}", session_id);
                 }
             }
             Ok(false) => {

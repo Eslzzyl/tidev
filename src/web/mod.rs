@@ -81,7 +81,9 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     crate::log_info!("Auth store loaded");
 
     // Create shared agent runtime (ToolRegistry, MemoryStore, etc.)
-    let memory_store = Arc::new(crate::memory::types::MemoryStore::open(&paths.database_file)?);
+    let memory_store = Arc::new(crate::memory::types::MemoryStore::open(
+        &paths.database_file,
+    )?);
     let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
     let file_read_tracker = Arc::new(FileReadTracker::new());
     let worktree = find_git_worktree(&workspace_root);
@@ -109,11 +111,11 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
         store: Arc::new(Mutex::new(store.clone())),
         llm_client: llm_client.clone(),
         tools,
-            instructions: config.instructions.clone(),
-            instruction_content_cache: std::collections::HashMap::new(),
-            queued_messages: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
-            auto_approve_permissions: false,
-        };
+        instructions: config.instructions.clone(),
+        instruction_content_cache: std::collections::HashMap::new(),
+        queued_messages: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+        auto_approve_permissions: false,
+    };
 
     crate::log_info!("Agent runtime created");
     // Create app state

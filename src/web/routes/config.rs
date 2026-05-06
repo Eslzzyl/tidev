@@ -1,7 +1,7 @@
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 
-use crate::web::{state::AppState, error::AppError};
+use crate::web::{error::AppError, state::AppState};
 
 /// Set default model request
 #[derive(Deserialize)]
@@ -33,18 +33,15 @@ pub async fn set_default_model(
 
     // Verify the provider and model exist
     let config = state.config.read().await;
-    let provider = config
-        .provider(&body.provider_id)
-        .ok_or_else(|| AppError::BadRequest(format!("Provider '{}' not found", body.provider_id)))?;
-    let model = provider
-        .models
-        .get(&body.model_id)
-        .ok_or_else(|| {
-            AppError::BadRequest(format!(
-                "Model '{}' not found for provider '{}'",
-                body.model_id, body.provider_id
-            ))
-        })?;
+    let provider = config.provider(&body.provider_id).ok_or_else(|| {
+        AppError::BadRequest(format!("Provider '{}' not found", body.provider_id))
+    })?;
+    let model = provider.models.get(&body.model_id).ok_or_else(|| {
+        AppError::BadRequest(format!(
+            "Model '{}' not found for provider '{}'",
+            body.model_id, body.provider_id
+        ))
+    })?;
 
     let provider_display_name = provider.display_name.clone();
     let model_display_name = model.display_name.clone();
@@ -97,16 +94,17 @@ pub async fn get_default_model(
     let model_id = config.default_model.clone();
 
     // Get display names
-    let (provider_display_name, model_display_name) = if let Some(provider) = config.provider(&provider_id) {
-        let model_name = provider
-            .models
-            .get(&model_id)
-            .map(|m| m.display_name.clone())
-            .unwrap_or_else(|| model_id.clone());
-        (provider.display_name.clone(), model_name)
-    } else {
-        (provider_id.clone(), model_id.clone())
-    };
+    let (provider_display_name, model_display_name) =
+        if let Some(provider) = config.provider(&provider_id) {
+            let model_name = provider
+                .models
+                .get(&model_id)
+                .map(|m| m.display_name.clone())
+                .unwrap_or_else(|| model_id.clone());
+            (provider.display_name.clone(), model_name)
+        } else {
+            (provider_id.clone(), model_id.clone())
+        };
 
     Ok(Json(GetDefaultModelResponse {
         provider_id,

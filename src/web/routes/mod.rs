@@ -52,13 +52,16 @@ pub fn api_routes() -> Router<AppState> {
         // Models
         .route("/models", get(models::list_models))
         // Config
-        .route("/config/default-model", get(config::get_default_model).post(config::set_default_model))
-        // Providers
-        .route("/providers", get(providers::list_providers).post(providers::create_provider))
         .route(
-            "/providers/{id}",
-            delete(providers::delete_provider),
+            "/config/default-model",
+            get(config::get_default_model).post(config::set_default_model),
         )
+        // Providers
+        .route(
+            "/providers",
+            get(providers::list_providers).post(providers::create_provider),
+        )
+        .route("/providers/{id}", delete(providers::delete_provider))
         .route(
             "/providers/{id}/connect",
             post(providers::connect_provider).delete(providers::disconnect_provider),

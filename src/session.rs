@@ -769,10 +769,7 @@ pub enum BackendEvent {
     /// Emitted by the agent loop when a new turn starts (after executing
     /// tool calls from the previous turn).  Frontends should use this to
     /// update their active request ID and create a new streaming message.
-    TurnStarting {
-        session_id: Uuid,
-        request_id: u64,
-    },
+    TurnStarting { session_id: Uuid, request_id: u64 },
 }
 
 impl BackendEvent {

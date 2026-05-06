@@ -110,7 +110,9 @@ impl TelegramChannel {
             tools: tools.clone(),
             instructions: config.instructions.clone(),
             instruction_content_cache: std::collections::HashMap::new(),
-            queued_messages: std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+            queued_messages: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::VecDeque::new(),
+            )),
             auto_approve_permissions: false,
         };
         Self {
@@ -390,8 +392,7 @@ impl TelegramChannel {
                     BackendEvent::ToolCompleted {
                         tool_call, result, ..
                     } => {
-                        let display =
-                            result.preview_for_storage(Some(tool_call.name.as_str()));
+                        let display = result.preview_for_storage(Some(tool_call.name.as_str()));
                         let text = format!(
                             "🔧 <b>{}</b>\n<pre><code class=\"language-text\">{}</code></pre>",
                             tool_call.name,
@@ -433,48 +434,40 @@ impl TelegramChannel {
         if let Err(ref e) = result {
             crate::log_error!("Telegram agent loop failed: {}", e);
             let error_msg = format!("Error: {e}");
-            let _ = self
-                .cancel_draft(&recipient, &draft_message_id)
-                .await;
-            self.send_reply_chunks(source_message, &error_msg)
-                .await?;
+            let _ = self.cancel_draft(&recipient, &draft_message_id).await;
+            self.send_reply_chunks(source_message, &error_msg).await?;
             return Ok(());
         }
 
         // Handle cancellation
         if cancel_token.is_cancelled() {
-            self.send_reply_chunks(source_message, "Stopped.")
-                .await?;
+            self.send_reply_chunks(source_message, "Stopped.").await?;
             return Ok(());
         }
 
         // Send final response
         if let Ok(messages) = self.store.load_messages(session_id)
             && let Some(last_msg) = messages.last()
-                && last_msg.role == MessageRole::Assistant
-                    && !last_msg.content.trim().is_empty()
-                {
-                    let final_text = normalize_assistant_output(&last_msg.content);
+            && last_msg.role == MessageRole::Assistant
+            && !last_msg.content.trim().is_empty()
+        {
+            let final_text = normalize_assistant_output(&last_msg.content);
 
-                    if last_msg.tool_calls.is_empty() {
-                        // No tool calls — finalize the draft message
-                        if self
-                            .finalize_draft(&recipient, &draft_message_id, &final_text)
-                            .await
-                            .is_err()
-                        {
-                            self.send_reply_chunks(source_message, &final_text)
-                                .await?;
-                        }
-                    } else {
-                        // Had tool calls — delete draft and send as new message
-                        let _ = self
-                            .cancel_draft(&recipient, &draft_message_id)
-                            .await;
-                        self.send_reply_chunks(source_message, &final_text)
-                            .await?;
-                    }
+            if last_msg.tool_calls.is_empty() {
+                // No tool calls — finalize the draft message
+                if self
+                    .finalize_draft(&recipient, &draft_message_id, &final_text)
+                    .await
+                    .is_err()
+                {
+                    self.send_reply_chunks(source_message, &final_text).await?;
                 }
+            } else {
+                // Had tool calls — delete draft and send as new message
+                let _ = self.cancel_draft(&recipient, &draft_message_id).await;
+                self.send_reply_chunks(source_message, &final_text).await?;
+            }
+        }
 
         Ok(())
     }

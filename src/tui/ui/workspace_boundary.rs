@@ -181,12 +181,9 @@ impl App {
             self.mode,
             true, // allow_outside: this tool has been allowed by user
         );
-        let mut result =
-            runtime
-                .block_on(handle)
-                .unwrap_or_else(|join_err| {
-                    ToolExecutionResult::new(format!("Tool failed: {join_err}"))
-                });
+        let mut result = runtime.block_on(handle).unwrap_or_else(|join_err| {
+            ToolExecutionResult::new(format!("Tool failed: {join_err}"))
+        });
 
         // Inject a note into the output indicating this was an outside-workspace access
         // that the user approved. Skip if the tool itself failed.

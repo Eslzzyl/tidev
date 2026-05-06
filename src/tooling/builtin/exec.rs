@@ -224,9 +224,7 @@ fn run_shell_inner(
     }
 
     // ─── Process finished ──────────────────────────────────────────────
-    let status = process
-        .wait()
-        .context("failed to wait for shell command")?;
+    let status = process.wait().context("failed to wait for shell command")?;
     let exit_code = status.code();
 
     // Merge stderr output

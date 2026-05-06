@@ -319,8 +319,7 @@ impl ContextManager {
         // This keeps the system prompt (model.system_prompt) at position 0 unchanged,
         // and the conversation messages match previous normal requests byte-for-byte.
         // The only new content is the final User instruction, maximizing prefix cache hits.
-        let summary_instruction =
-            "Please provide a detailed summary of the conversation history above, \
+        let summary_instruction = "Please provide a detailed summary of the conversation history above, \
              preserving all goals, decisions, file paths, code changes, tool results, \
              and open tasks. Keep the summary dense and factual. Use short sections such \
              as Goal, Decisions, Files, Tool Results, Open Tasks, and Constraints. \

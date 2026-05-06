@@ -1,4 +1,4 @@
-use crate::{tui::Composer, config::ModelSummary};
+use crate::{config::ModelSummary, tui::Composer};
 
 #[derive(Clone, Debug)]
 pub struct ModelPanelTab {

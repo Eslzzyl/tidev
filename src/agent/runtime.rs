@@ -29,10 +29,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     agent::{AgentDefinition, AgentType},
-    config::{
-        reasoning::ThinkingLevelType,
-        ActiveModel, ConfigPaths,
-    },
+    config::{ActiveModel, ConfigPaths, reasoning::ThinkingLevelType},
     context::ContextManager,
     instructions,
     prompts::SessionMode,
@@ -326,13 +323,19 @@ impl AgentRuntime {
         // Mode-switch reminder
         if mode == SessionMode::Plan && !was_plan_mode {
             let reminder = crate::prompts::plan_switch_reminder();
-            if let Some(last_user) = result.iter_mut().rev().find(|m| m.role == MessageRole::User)
+            if let Some(last_user) = result
+                .iter_mut()
+                .rev()
+                .find(|m| m.role == MessageRole::User)
             {
                 last_user.content = format!("{}\n\n{}", reminder, last_user.content);
             }
         } else if mode == SessionMode::Build && was_plan_mode {
             let reminder = crate::prompts::build_switch_reminder();
-            if let Some(last_user) = result.iter_mut().rev().find(|m| m.role == MessageRole::User)
+            if let Some(last_user) = result
+                .iter_mut()
+                .rev()
+                .find(|m| m.role == MessageRole::User)
             {
                 last_user.content = format!("{}\n\n{}", reminder, last_user.content);
             }
@@ -380,19 +383,13 @@ impl AgentRuntime {
             let _ = event_tx.send(event.clone());
 
             match event {
-                BackendEvent::Delta {
-                    content, ..
-                } => {
+                BackendEvent::Delta { content, .. } => {
                     turn.content.push_str(&content);
                 }
-                BackendEvent::ReasoningDelta {
-                    content, ..
-                } => {
+                BackendEvent::ReasoningDelta { content, .. } => {
                     turn.reasoning.push_str(&content);
                 }
-                BackendEvent::ToolCallUpdated {
-                    tool_call, ..
-                } => {
+                BackendEvent::ToolCallUpdated { tool_call, .. } => {
                     turn.upsert_tool_call(tool_call);
                 }
                 BackendEvent::UsageStats {
@@ -502,7 +499,8 @@ impl AgentRuntime {
             if !self.tools.can_execute(&call.name, mode) {
                 crate::log_info!(
                     "execute_tool_calls: rejecting '{}' — not allowed in {:?} mode",
-                    call.name, mode
+                    call.name,
+                    mode
                 );
                 let result = ToolExecutionResult::new(format!(
                     "Tool '{}' is disabled in {:?} mode",
@@ -516,20 +514,21 @@ impl AgentRuntime {
 
             if !self.auto_approve_permissions
                 && let Some(def) = self.tools.definition_for(&call.name)
-                    && def.needs_confirmation() {
-                        crate::log_info!(
-                            "execute_tool_calls: rejecting '{}' — needs confirmation and auto_approve is off",
-                            call.name
-                        );
-                        let result = ToolExecutionResult::new(format!(
-                            "Tool '{}' requires user approval in this mode",
-                            call.name
-                        ));
-                        self.persist_tool_result(session_id, request_id, call, &result, event_tx)
-                            .await?;
-                        results.push((call.clone(), result));
-                        continue;
-                    }
+                && def.needs_confirmation()
+            {
+                crate::log_info!(
+                    "execute_tool_calls: rejecting '{}' — needs confirmation and auto_approve is off",
+                    call.name
+                );
+                let result = ToolExecutionResult::new(format!(
+                    "Tool '{}' requires user approval in this mode",
+                    call.name
+                ));
+                self.persist_tool_result(session_id, request_id, call, &result, event_tx)
+                    .await?;
+                results.push((call.clone(), result));
+                continue;
+            }
 
             filtered.push(call);
         }
@@ -560,10 +559,8 @@ impl AgentRuntime {
                 }
             }
 
-            let mut handles: Vec<(
-                ToolCall,
-                tokio::task::JoinHandle<ToolExecutionResult>,
-            )> = Vec::with_capacity(read_only.len());
+            let mut handles: Vec<(ToolCall, tokio::task::JoinHandle<ToolExecutionResult>)> =
+                Vec::with_capacity(read_only.len());
             for (tool_call, store) in read_only.into_iter().zip(stores) {
                 let handle = self.tools.execute_call_spawned(
                     runtime.clone(),
@@ -578,9 +575,7 @@ impl AgentRuntime {
 
             for (tool_call, handle) in handles {
                 let result = handle.await.unwrap_or_else(|join_err| {
-                    ToolExecutionResult::new(format!(
-                        "Tool task panicked/aborted: {join_err}"
-                    ))
+                    ToolExecutionResult::new(format!("Tool task panicked/aborted: {join_err}"))
                 });
                 // Persist read-only results immediately (Phase 1.5)
                 self.persist_tool_result(session_id, request_id, &tool_call, &result, event_tx)
@@ -598,7 +593,8 @@ impl AgentRuntime {
 
             // Bash tool calls get streaming: output is sent chunk-by-chunk
             // via ShellOutput events while the command runs.
-            let is_bash = tool_call.name == "bash" || canonical_tool_name(&tool_call.name) == Some("bash");
+            let is_bash =
+                tool_call.name == "bash" || canonical_tool_name(&tool_call.name) == Some("bash");
             let handle = if is_bash {
                 self.tools.execute_call_spawned_streaming(
                     runtime.clone(),
@@ -620,9 +616,7 @@ impl AgentRuntime {
                 )
             };
             let result = handle.await.unwrap_or_else(|join_err| {
-                ToolExecutionResult::new(format!(
-                    "Tool task panicked/aborted: {join_err}"
-                ))
+                ToolExecutionResult::new(format!("Tool task panicked/aborted: {join_err}"))
             });
             // Persist write result immediately so diffs render one at a time
             self.persist_tool_result(session_id, request_id, tool_call, &result, event_tx)
@@ -637,11 +631,7 @@ impl AgentRuntime {
     ///
     /// Useful when the caller has already constructed the message with
     /// token usage, mode, and other fields set (e.g. TUI's flow).
-    pub async fn persist_message(
-        &self,
-        session_id: uuid::Uuid,
-        msg: &Message,
-    ) -> Result<()> {
+    pub async fn persist_message(&self, session_id: uuid::Uuid, msg: &Message) -> Result<()> {
         let store = self.store.lock().await;
         store.append_message(session_id, msg)?;
         Ok(())
@@ -865,20 +855,24 @@ impl AgentRuntime {
         let child_context = ContextManager::new();
         let child_thinking = child_model.thinking_level.clone();
         let mut request_sequence: u64 = rand::random();
-        let tools: Vec<ToolDefinition> = tools
-            .into_iter()
-            .filter(|t| t.name != "task")
-            .collect();
+        let tools: Vec<ToolDefinition> = tools.into_iter().filter(|t| t.name != "task").collect();
 
-        send_status(event_tx, format!("Thinking ({})", agent_type.display_name()), None, None, None);
+        send_status(
+            event_tx,
+            format!("Thinking ({})", agent_type.display_name()),
+            None,
+            None,
+            None,
+        );
 
         loop {
             // Check cancellation
             if let Some(ref ct) = cancel_token
-                && ct.is_cancelled() {
-                    crate::log_info!("run_subagent: cancelled");
-                    return Ok(String::new());
-                }
+                && ct.is_cancelled()
+            {
+                crate::log_info!("run_subagent: cancelled");
+                return Ok(String::new());
+            }
 
             // Load messages
             let db_messages = {
@@ -975,13 +969,7 @@ impl AgentRuntime {
                     }
                     BackendEvent::ToolCallUpdated { tool_call, .. } => {
                         turn.upsert_tool_call(tool_call.clone());
-                        send_status(
-                            event_tx,
-                            "Tool".to_string(),
-                            Some(tool_call),
-                            None,
-                            None,
-                        );
+                        send_status(event_tx, "Tool".to_string(), Some(tool_call), None, None);
                     }
                     BackendEvent::Finished {
                         turn: finished_turn,
@@ -1042,12 +1030,18 @@ impl AgentRuntime {
                     .into_iter()
                     .next()
                     .map(|(_, r)| r)
-                    .unwrap_or_else(|| ToolExecutionResult::new("Tool execution returned no result"));
+                    .unwrap_or_else(|| {
+                        ToolExecutionResult::new("Tool execution returned no result")
+                    });
 
                 self.persist_tool_result(
-                    child_session_id, request_sequence,
-                    tool_call, &result, event_tx,
-                ).await?;
+                    child_session_id,
+                    request_sequence,
+                    tool_call,
+                    &result,
+                    event_tx,
+                )
+                .await?;
 
                 send_status(event_tx, "Working".to_string(), None, None, None);
             }
@@ -1092,9 +1086,18 @@ impl AgentRuntime {
     ) -> Result<()> {
         let request_id: u64 = rand::random();
         self.run_agent_loop_with_tools_inner(
-            request_id, session_id, model, context_manager, mode, thinking_level,
-            tools, event_tx, cancel_token, None,
-        ).await
+            request_id,
+            session_id,
+            model,
+            context_manager,
+            mode,
+            thinking_level,
+            tools,
+            event_tx,
+            cancel_token,
+            None,
+        )
+        .await
     }
 
     /// Internal implementation with optional permission channel.
@@ -1116,10 +1119,11 @@ impl AgentRuntime {
         loop {
             // Check cancellation
             if let Some(ref ct) = cancel_token
-                && ct.is_cancelled() {
-                    crate::log_info!("run_agent_loop: cancelled");
-                    return Ok(());
-                }
+                && ct.is_cancelled()
+            {
+                crate::log_info!("run_agent_loop: cancelled");
+                return Ok(());
+            }
 
             // 1. Load messages from DB
             let db_messages = {
@@ -1157,13 +1161,14 @@ impl AgentRuntime {
             // this turn (e.g. by sending a new message), discard the assistant
             // output rather than saving an orphaned tool_calls entry.
             if let Some(ref ct) = cancel_token
-                && ct.is_cancelled() {
-                    crate::log_info!(
-                        "run_agent_loop: cancelled after turn, discarding assistant message"
-                    );
-                    // The old agent loop is done; a new one has been spawned
-                    // with the interrupting message.  Don't persist anything.
-                    return Ok(());
+                && ct.is_cancelled()
+            {
+                crate::log_info!(
+                    "run_agent_loop: cancelled after turn, discarding assistant message"
+                );
+                // The old agent loop is done; a new one has been spawned
+                // with the interrupting message.  Don't persist anything.
+                return Ok(());
             }
 
             // 5. Persist assistant message (Finished was already emitted)
@@ -1196,9 +1201,10 @@ impl AgentRuntime {
                     // Check cancellation before notifying the frontend,
                     // to avoid stale TurnStarting events after abort.
                     if let Some(ref ct) = cancel_token
-                        && ct.is_cancelled() {
-                            crate::log_info!("run_agent_loop: cancelled before TurnStarting (queued)");
-                            return Ok(());
+                        && ct.is_cancelled()
+                    {
+                        crate::log_info!("run_agent_loop: cancelled before TurnStarting (queued)");
+                        return Ok(());
                     }
 
                     // Notify frontend about the new turn so it can create a
@@ -1210,7 +1216,8 @@ impl AgentRuntime {
 
                     continue;
                 }
-                self.maybe_compact(session_id, &model, context_manager, mode, &event_tx).await;
+                self.maybe_compact(session_id, &model, context_manager, mode, &event_tx)
+                    .await;
                 return Ok(());
             }
 
@@ -1241,9 +1248,13 @@ impl AgentRuntime {
                         for approved in approvals {
                             if let Some(rejection) = approved.rejection {
                                 self.persist_tool_result(
-                                    session_id, request_id,
-                                    &approved.tool_call, &rejection, &event_tx,
-                                ).await?;
+                                    session_id,
+                                    request_id,
+                                    &approved.tool_call,
+                                    &rejection,
+                                    &event_tx,
+                                )
+                                .await?;
                             } else if approved.tool_call.name == "task" {
                                 task_calls.push((approved.tool_call, approved.child_session_id));
                             } else {
@@ -1252,7 +1263,9 @@ impl AgentRuntime {
                         }
                     }
                     Err(_) => {
-                        crate::log_info!("run_agent_loop: permission channel closed, stopping loop");
+                        crate::log_info!(
+                            "run_agent_loop: permission channel closed, stopping loop"
+                        );
                         return Ok(());
                     }
                 }
@@ -1269,32 +1282,25 @@ impl AgentRuntime {
 
             // Check cancellation again before executing tools
             if let Some(ref ct) = cancel_token
-                && ct.is_cancelled() {
-                    crate::log_info!("run_agent_loop: cancelled before tool execution");
-                    return Ok(());
-                }
+                && ct.is_cancelled()
+            {
+                crate::log_info!("run_agent_loop: cancelled before tool execution");
+                return Ok(());
+            }
 
             // 7a. Subagent (task) tools — read-only types (Explorer, Librarian,
             // Oracle) run in parallel; write-capable types (Designer, Fixer,
             // General) run serially.
-            let mut task_handles: Vec<(
-                ToolCall,
-                tokio::task::JoinHandle<ToolExecutionResult>,
-            )> = Vec::new();
+            let mut task_handles: Vec<(ToolCall, tokio::task::JoinHandle<ToolExecutionResult>)> =
+                Vec::new();
 
             for (tc, child_sid) in task_calls {
                 // Determine if this subagent is read-only by parsing the
                 // task arguments to extract the subagent_type field.
-                let is_read_only = serde_json::from_str::<crate::tooling::TaskArgs>(
-                    &tc.arguments,
-                )
-                .ok()
-                .and_then(|args| {
-                    args.subagent_type
-                        .as_deref()
-                        .and_then(AgentType::parse)
-                })
-                .is_some_and(|t| t.is_read_only());
+                let is_read_only = serde_json::from_str::<crate::tooling::TaskArgs>(&tc.arguments)
+                    .ok()
+                    .and_then(|args| args.subagent_type.as_deref().and_then(AgentType::parse))
+                    .is_some_and(|t| t.is_read_only());
 
                 if is_read_only {
                     // Read-only subagent — spawn in parallel
@@ -1308,11 +1314,16 @@ impl AgentRuntime {
                     let ct = cancel_token.clone();
 
                     let handle = tokio::spawn(async move {
-                        let fut: Pin<
-                            Box<dyn Future<Output = ToolExecutionResult> + Send>,
-                        > = Box::pin(
-                            agent.run_subagent(sid, rid, owned_tc, tx, ct, pm, owned_child_sid),
-                        );
+                        let fut: Pin<Box<dyn Future<Output = ToolExecutionResult> + Send>> =
+                            Box::pin(agent.run_subagent(
+                                sid,
+                                rid,
+                                owned_tc,
+                                tx,
+                                ct,
+                                pm,
+                                owned_child_sid,
+                            ));
                         fut.await
                     });
                     task_handles.push((tc, handle));
@@ -1328,11 +1339,16 @@ impl AgentRuntime {
                     let pm = model.clone();
 
                     let result: ToolExecutionResult = {
-                        let fut: Pin<
-                            Box<dyn Future<Output = ToolExecutionResult> + Send>,
-                        > = Box::pin(
-                            agent.run_subagent(sid, rid, owned_tc, tx, cancel_token.clone(), pm, owned_child_sid),
-                        );
+                        let fut: Pin<Box<dyn Future<Output = ToolExecutionResult> + Send>> =
+                            Box::pin(agent.run_subagent(
+                                sid,
+                                rid,
+                                owned_tc,
+                                tx,
+                                cancel_token.clone(),
+                                pm,
+                                owned_child_sid,
+                            ));
                         fut.await
                     };
                     self.persist_tool_result(session_id, request_id, &tc, &result, &event_tx)
@@ -1343,9 +1359,7 @@ impl AgentRuntime {
             // Collect parallel task results in order
             for (tc, handle) in task_handles {
                 let result = handle.await.unwrap_or_else(|e| {
-                    ToolExecutionResult::new(format!(
-                        "Subagent task panicked/aborted: {e}"
-                    ))
+                    ToolExecutionResult::new(format!("Subagent task panicked/aborted: {e}"))
                 });
                 self.persist_tool_result(session_id, request_id, &tc, &result, &event_tx)
                     .await?;
@@ -1371,9 +1385,10 @@ impl AgentRuntime {
             // Check cancellation before notifying the frontend,
             // to avoid stale TurnStarting events after abort.
             if let Some(ref ct) = cancel_token
-                && ct.is_cancelled() {
-                    crate::log_info!("run_agent_loop: cancelled before TurnStarting");
-                    return Ok(());
+                && ct.is_cancelled()
+            {
+                crate::log_info!("run_agent_loop: cancelled before TurnStarting");
+                return Ok(());
             }
 
             // Notify frontend about the new turn so it can create a
@@ -1381,7 +1396,8 @@ impl AgentRuntime {
             let _ = event_tx.send(BackendEvent::TurnStarting {
                 session_id,
                 request_id,
-            });        }
+            });
+        }
     }
 
     /// Run the full agent loop.
@@ -1441,9 +1457,18 @@ impl AgentRuntime {
     ) -> Result<()> {
         let tools = self.tool_definitions();
         self.run_agent_loop_with_tools_inner(
-            request_id, session_id, model, context_manager, mode, thinking_level,
-            tools, event_tx, cancel_token, Some(permission_tx),
-        ).await
+            request_id,
+            session_id,
+            model,
+            context_manager,
+            mode,
+            thinking_level,
+            tools,
+            event_tx,
+            cancel_token,
+            Some(permission_tx),
+        )
+        .await
     }
 
     /// Optionally compact the session context after a completed turn.
@@ -1600,15 +1625,15 @@ mod tests {
                 crate::mcp::McpManager::new(tmp.path().join("workspace"), Default::default()),
                 crate::config::PermissionConfig::default(),
                 std::sync::Arc::new(crate::tooling::FileReadTracker::new()),
-                std::sync::Arc::new(
-                    crate::memory::types::MemoryStore::open(&db_path).unwrap(),
-                ),
+                std::sync::Arc::new(crate::memory::types::MemoryStore::open(&db_path).unwrap()),
                 false,
                 None,
             ),
             instructions: vec![],
             instruction_content_cache: Default::default(),
-            queued_messages: std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+            queued_messages: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::VecDeque::new(),
+            )),
             auto_approve_permissions: false,
         };
         (agent, tmp)
@@ -1655,7 +1680,8 @@ mod tests {
             Message::new(MessageRole::User, "hello"),
             Message::streaming(MessageRole::Assistant, "still typing..."),
         ];
-        let result = agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        let result =
+            agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
         assert!(!result.iter().any(|m| m.content == "still typing..."));
     }
 
@@ -1674,14 +1700,18 @@ mod tests {
             Message::tool_result("tc-1", "grep", ToolExecutionResult::new("found!")),
             Message::new(MessageRole::Assistant, "result"),
         ];
-        let result = agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        let result =
+            agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
         let roles: Vec<_> = result.iter().map(|m| m.role.clone()).collect();
-        assert_eq!(roles, vec![
-            MessageRole::User,
-            MessageRole::Assistant,
-            MessageRole::Tool,
-            MessageRole::Assistant,
-        ]);
+        assert_eq!(
+            roles,
+            vec![
+                MessageRole::User,
+                MessageRole::Assistant,
+                MessageRole::Tool,
+                MessageRole::Assistant,
+            ]
+        );
     }
 
     #[test]
@@ -1693,17 +1723,14 @@ mod tests {
             name: "edit".to_string(),
             arguments: "{}".to_string(),
         }];
-        let msgs = vec![
-            assistant,
-            Message::new(MessageRole::User, "what happened?"),
-        ];
-        let result = agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        let msgs = vec![assistant, Message::new(MessageRole::User, "what happened?")];
+        let result =
+            agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
         let roles: Vec<_> = result.iter().map(|m| m.role.clone()).collect();
-        assert_eq!(roles, vec![
-            MessageRole::Assistant,
-            MessageRole::Tool,
-            MessageRole::User,
-        ]);
+        assert_eq!(
+            roles,
+            vec![MessageRole::Assistant, MessageRole::Tool, MessageRole::User,]
+        );
         let tool_msg = &result[1];
         assert_eq!(tool_msg.tool_call_id.as_deref(), Some("orphan"));
         assert!(tool_msg.content.contains("interrupted"));
@@ -1722,13 +1749,13 @@ mod tests {
             orphan_tool_call,
             Message::new(MessageRole::User, "the edit failed"),
         ];
-        let result = agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        let result =
+            agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
         let roles: Vec<_> = result.iter().map(|m| m.role.clone()).collect();
-        assert_eq!(roles, vec![
-            MessageRole::Assistant,
-            MessageRole::Tool,
-            MessageRole::User,
-        ]);
+        assert_eq!(
+            roles,
+            vec![MessageRole::Assistant, MessageRole::Tool, MessageRole::User,]
+        );
         let synthetic = &result[1];
         assert_eq!(synthetic.role, MessageRole::Tool);
         assert_eq!(synthetic.tool_call_id.as_deref(), Some("orphan-call"));
@@ -1747,7 +1774,11 @@ mod tests {
         ];
         let result = agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Plan);
         // The last user message should have the plan switch reminder prepended
-        let last_user = result.iter().rev().find(|m| m.role == MessageRole::User).unwrap();
+        let last_user = result
+            .iter()
+            .rev()
+            .find(|m| m.role == MessageRole::User)
+            .unwrap();
         assert!(
             last_user.content.contains("PLAN MODE") || last_user.content.contains("plan"),
             "Expected plan mode reminder in user message, got: {}",
@@ -1762,11 +1793,13 @@ mod tests {
             summary: Some("Previous context was about Rust".to_string()),
             ..ContextManager::new()
         };
-        let msgs = vec![
-            Message::new(MessageRole::User, "continue"),
-        ];
+        let msgs = vec![Message::new(MessageRole::User, "continue")];
         let result = agent.build_request_messages(&msgs, &cm, SessionMode::Build);
-        assert!(result[0].content.contains("Previous context was about Rust"));
+        assert!(
+            result[0]
+                .content
+                .contains("Previous context was about Rust")
+        );
         assert_eq!(result[0].role, MessageRole::User);
     }
 
@@ -1778,19 +1811,22 @@ mod tests {
             Message::tool_result("nonexistent", "grep", ToolExecutionResult::new("data")),
             Message::new(MessageRole::Assistant, "reply"),
         ];
-        let result = agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        let result =
+            agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
         let roles: Vec<_> = result.iter().map(|m| m.role.clone()).collect();
         assert_eq!(roles, vec![MessageRole::User, MessageRole::Assistant]);
     }
 
     #[test]
-    fn build_request_messages_empty_assistant_skipped() {        let (agent, _tmp) = agent_runtime();
+    fn build_request_messages_empty_assistant_skipped() {
+        let (agent, _tmp) = agent_runtime();
         let msgs = vec![
             Message::new(MessageRole::User, "hello"),
             Message::new(MessageRole::Assistant, ""),
             Message::new(MessageRole::Assistant, "real reply"),
         ];
-        let result = agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        let result =
+            agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].content, "hello");
         assert_eq!(result[1].content, "real reply");
@@ -1823,19 +1859,23 @@ mod tests {
             Message::new(MessageRole::User, "continue?"),
         ];
 
-        let result = agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        let result =
+            agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
         let roles: Vec<_> = result.iter().map(|m| m.role.clone()).collect();
 
         // The orphan from assistant_a should get a synthetic failure injected
         // before assistant_b, so the provider doesn't see a dangling tool_calls.
-        assert_eq!(roles, vec![
-            MessageRole::User,
-            MessageRole::Assistant,
-            MessageRole::Tool,        // synthetic failure for orphan-1
-            MessageRole::Assistant,
-            MessageRole::Tool,        // real response for valid-2
-            MessageRole::User,
-        ]);
+        assert_eq!(
+            roles,
+            vec![
+                MessageRole::User,
+                MessageRole::Assistant,
+                MessageRole::Tool, // synthetic failure for orphan-1
+                MessageRole::Assistant,
+                MessageRole::Tool, // real response for valid-2
+                MessageRole::User,
+            ]
+        );
         let synthetic = &result[2];
         assert_eq!(synthetic.role, MessageRole::Tool);
         assert_eq!(synthetic.tool_call_id.as_deref(), Some("orphan-1"));
@@ -1877,18 +1917,37 @@ mod tests {
         // Simulates the serde_json::from_str::<TaskArgs>(&tc.arguments) logic
         // used in the parallel/serial dispatch.
         let test_cases = vec![
-            (r#"{"description":"x","prompt":"y","subagent_type":"explorer"}"#, true),
-            (r#"{"description":"x","prompt":"y","subagent_type":"librarian"}"#, true),
-            (r#"{"description":"x","prompt":"y","subagent_type":"oracle"}"#, true),
-            (r#"{"description":"x","prompt":"y","subagent_type":"designer"}"#, false),
-            (r#"{"description":"x","prompt":"y","subagent_type":"fixer"}"#, false),
-            (r#"{"description":"x","prompt":"y","subagent_type":"general"}"#, false), // general is not a valid sub-agent type → parse returns None
+            (
+                r#"{"description":"x","prompt":"y","subagent_type":"explorer"}"#,
+                true,
+            ),
+            (
+                r#"{"description":"x","prompt":"y","subagent_type":"librarian"}"#,
+                true,
+            ),
+            (
+                r#"{"description":"x","prompt":"y","subagent_type":"oracle"}"#,
+                true,
+            ),
+            (
+                r#"{"description":"x","prompt":"y","subagent_type":"designer"}"#,
+                false,
+            ),
+            (
+                r#"{"description":"x","prompt":"y","subagent_type":"fixer"}"#,
+                false,
+            ),
+            (
+                r#"{"description":"x","prompt":"y","subagent_type":"general"}"#,
+                false,
+            ), // general is not a valid sub-agent type → parse returns None
             (r#"{"description":"x","prompt":"y"}"#, false), // no subagent_type → and_then returns None
         ];
 
         for (json_str, expected_read_only) in test_cases {
             let args = serde_json::from_str::<TaskArgs>(json_str).unwrap();
-            let is_ro = args.subagent_type
+            let is_ro = args
+                .subagent_type
                 .as_deref()
                 .and_then(crate::agent::AgentType::parse)
                 .map_or(false, |t| t.is_read_only());
@@ -1904,15 +1963,17 @@ mod tests {
         let session_id = uuid::Uuid::new_v4();
         {
             let store = agent.store.lock().await;
-            store.create_session(
-                session_id,
-                &agent.workspace_root,
-                "test",
-                "Test",
-                "test-model",
-                "Test Model",
-                "test-session",
-            ).unwrap();
+            store
+                .create_session(
+                    session_id,
+                    &agent.workspace_root,
+                    "test",
+                    "Test",
+                    "test-model",
+                    "Test Model",
+                    "test-session",
+                )
+                .unwrap();
         }
 
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1931,20 +1992,22 @@ mod tests {
             },
         ];
 
-        let results = agent.execute_tool_calls(
-            session_id,
-            1,
-            &tool_calls,
-            SessionMode::Plan,
-            &tx,
-            &test_active_model(),
-        ).await.unwrap();
+        let results = agent
+            .execute_tool_calls(
+                session_id,
+                1,
+                &tool_calls,
+                SessionMode::Plan,
+                &tx,
+                &test_active_model(),
+            )
+            .await
+            .unwrap();
 
         // Write tool (edit) should be rejected in Plan mode
         let edit_result = results.iter().find(|(tc, _)| tc.id == "tc-1").unwrap();
         assert!(
-            edit_result.1.output.contains("disabled")
-                || edit_result.1.output.contains("Plan"),
+            edit_result.1.output.contains("disabled") || edit_result.1.output.contains("Plan"),
             "Expected edit to be rejected in Plan mode, got: {}",
             edit_result.1.output
         );
@@ -1966,35 +2029,38 @@ mod tests {
         let session_id = uuid::Uuid::new_v4();
         {
             let store = agent.store.lock().await;
-            store.create_session(
-                session_id,
-                &agent.workspace_root,
-                "test",
-                "Test",
-                "test-model",
-                "Test Model",
-                "build-test",
-            ).unwrap();
+            store
+                .create_session(
+                    session_id,
+                    &agent.workspace_root,
+                    "test",
+                    "Test",
+                    "test-model",
+                    "Test Model",
+                    "build-test",
+                )
+                .unwrap();
         }
 
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let tool_calls = vec![
-            ToolCall {
-                id: "tc-1".to_string(),
-                name: "list".to_string(),
-                arguments: r#"{"path":"."}"#.to_string(),
-            },
-        ];
+        let tool_calls = vec![ToolCall {
+            id: "tc-1".to_string(),
+            name: "list".to_string(),
+            arguments: r#"{"path":"."}"#.to_string(),
+        }];
 
-        let results = agent.execute_tool_calls(
-            session_id,
-            1,
-            &tool_calls,
-            SessionMode::Build,
-            &tx,
-            &test_active_model(),
-        ).await.unwrap();
+        let results = agent
+            .execute_tool_calls(
+                session_id,
+                1,
+                &tool_calls,
+                SessionMode::Build,
+                &tx,
+                &test_active_model(),
+            )
+            .await
+            .unwrap();
 
         assert_eq!(results.len(), 1);
         // In Build mode, the tool should execute. The result may succeed or fail
@@ -2008,35 +2074,38 @@ mod tests {
         let session_id = uuid::Uuid::new_v4();
         {
             let store = agent.store.lock().await;
-            store.create_session(
-                session_id,
-                &agent.workspace_root,
-                "test",
-                "Test",
-                "test-model",
-                "Test Model",
-                "persist-test",
-            ).unwrap();
+            store
+                .create_session(
+                    session_id,
+                    &agent.workspace_root,
+                    "test",
+                    "Test",
+                    "test-model",
+                    "Test Model",
+                    "persist-test",
+                )
+                .unwrap();
         }
 
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let tool_calls = vec![
-            ToolCall {
-                id: "tc-persist".to_string(),
-                name: "list".to_string(),
-                arguments: r#"{"path":"."}"#.to_string(),
-            },
-        ];
+        let tool_calls = vec![ToolCall {
+            id: "tc-persist".to_string(),
+            name: "list".to_string(),
+            arguments: r#"{"path":"."}"#.to_string(),
+        }];
 
-        agent.execute_tool_calls(
-            session_id,
-            1,
-            &tool_calls,
-            SessionMode::Build,
-            &tx,
-            &test_active_model(),
-        ).await.unwrap();
+        agent
+            .execute_tool_calls(
+                session_id,
+                1,
+                &tool_calls,
+                SessionMode::Build,
+                &tx,
+                &test_active_model(),
+            )
+            .await
+            .unwrap();
 
         // Verify the tool result message was persisted to DB
         let store = agent.store.lock().await;
@@ -2057,15 +2126,17 @@ mod tests {
         let session_id = uuid::Uuid::new_v4();
         {
             let store = agent.store.lock().await;
-            store.create_session(
-                session_id,
-                &agent.workspace_root,
-                "test",
-                "Test",
-                "test-model",
-                "Test Model",
-                "auto-approve-test",
-            ).unwrap();
+            store
+                .create_session(
+                    session_id,
+                    &agent.workspace_root,
+                    "test",
+                    "Test",
+                    "test-model",
+                    "Test Model",
+                    "auto-approve-test",
+                )
+                .unwrap();
         }
 
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
@@ -2075,23 +2146,24 @@ mod tests {
         // and the default PermissionConfig might not mark bash as needing confirmation.
         // Let's use a tool that's guaranteed to need confirmation, or just verify
         // that a basic tool still works.
-        let tool_calls = vec![
-            ToolCall {
-                id: "tc-bash".to_string(),
-                name: "bash".to_string(),
-                arguments: r#"{"command":"echo hello"}"#.to_string(),
-            },
-        ];
+        let tool_calls = vec![ToolCall {
+            id: "tc-bash".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo hello"}"#.to_string(),
+        }];
 
         // Execute in Build mode — bash may need confirmation
-        let results = agent.execute_tool_calls(
-            session_id,
-            1,
-            &tool_calls,
-            SessionMode::Build,
-            &tx,
-            &test_active_model(),
-        ).await.unwrap();
+        let results = agent
+            .execute_tool_calls(
+                session_id,
+                1,
+                &tool_calls,
+                SessionMode::Build,
+                &tx,
+                &test_active_model(),
+            )
+            .await
+            .unwrap();
 
         // The tool either executed or was rejected for needing confirmation.
         // Both outcomes are valid — what matters is the test doesn't panic/crash.

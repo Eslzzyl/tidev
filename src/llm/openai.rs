@@ -246,7 +246,13 @@ pub(super) async fn complete_openai(
         .api_key
         .clone()
         .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
-    let request = build_openai_request(&model, messages, false, &tools, model.thinking_level.clone())?;
+    let request = build_openai_request(
+        &model,
+        messages,
+        false,
+        &tools,
+        model.thinking_level.clone(),
+    )?;
     let request_body_size = serde_json::to_string(&request)
         .map(|s| s.len())
         .unwrap_or(0);
@@ -363,7 +369,8 @@ fn build_openai_request(
         Some(tools.iter().map(ChatToolSpec::from).collect())
     };
 
-    Ok(ChatCompletionRequest {        model: model.request_model_id.clone(),
+    Ok(ChatCompletionRequest {
+        model: model.request_model_id.clone(),
         messages: request_messages,
         temperature: Some(model.temperature),
         max_tokens: Some(model.max_output_tokens as u32),
@@ -577,7 +584,10 @@ mod tests {
         let system_content = request.messages[0].content.as_ref().unwrap();
         let system_text = system_content.as_str().unwrap();
         assert!(system_text.contains("base system prompt"));
-        assert!(!system_text.contains("Context summary"), "System messages from conversation should no longer be merged into system prompt");
+        assert!(
+            !system_text.contains("Context summary"),
+            "System messages from conversation should no longer be merged into system prompt"
+        );
     }
 
     #[test]

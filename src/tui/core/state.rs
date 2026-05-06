@@ -23,15 +23,15 @@ use crate::tui::ui::agents_panel::AgentsPanelState;
 use crate::tui::ui::rename::RenameSessionDialogState;
 use crate::tui::ui::skills_panel::SkillsPanelState;
 use crate::{
-    tui::commands::CommandPaletteState,
-    tui::input::Composer,
     config::ActiveModel,
     config::reasoning::ThinkingLevelType,
     context::ContextManager,
-    provider_setup::ConnectDialog,
     prompts::SessionMode,
+    provider_setup::ConnectDialog,
     session::{Conversation, MessageAttachment},
     tooling::TodoItem,
+    tui::commands::CommandPaletteState,
+    tui::input::Composer,
 };
 
 pub(crate) const MESSAGE_RENDER_CACHE_MAX_ENTRIES: usize = 1200;
