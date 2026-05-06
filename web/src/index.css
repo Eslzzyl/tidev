@@ -50,6 +50,10 @@ body {
   overflow: hidden;
 }
 
+html {
+  background-color: #ffffff;
+}
+
 /* Focus styles */
 *:focus-visible {
   outline: 2px solid #171717;

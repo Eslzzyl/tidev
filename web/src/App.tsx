@@ -54,6 +54,19 @@ function App() {
     } else {
       document.documentElement.classList.remove("dark");
     }
+
+    // Update body/html background for Safari 26+ browser chrome color
+    const bgColor = effectiveTheme === "dark" ? "#0a0a0a" : "#ffffff";
+    document.documentElement.style.backgroundColor = bgColor;
+    document.body.style.backgroundColor = bgColor;
+
+    // Update theme-color meta tag (fallback for Chrome Android, etc.)
+    const themeColorMeta = document.querySelector(
+      'meta[name="theme-color"]',
+    );
+    if (themeColorMeta) {
+      themeColorMeta.setAttribute("content", bgColor);
+    }
   }, [theme]);
 
   // Listen for system theme changes
@@ -61,11 +74,18 @@ function App() {
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
     const handleChange = () => {
       const effectiveTheme = getEffectiveTheme(theme);
-      if (effectiveTheme === "dark") {
+      const isDark = effectiveTheme === "dark";
+      if (isDark) {
         document.documentElement.classList.add("dark");
       } else {
         document.documentElement.classList.remove("dark");
       }
+      // Sync body/html background for Safari 26+ browser chrome
+      const bgColor = isDark ? "#0a0a0a" : "#ffffff";
+      document.documentElement.style.backgroundColor = bgColor;
+      document.body.style.backgroundColor = bgColor;
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute("content", bgColor);
     };
     mediaQuery.addEventListener("change", handleChange);
     return () => mediaQuery.removeEventListener("change", handleChange);

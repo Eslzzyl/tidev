@@ -24,7 +24,7 @@ export function SettingsView() {
   const effectiveTheme = getEffectiveTheme(theme);
 
   return (
-    <div className="mx-auto flex h-full max-w-2xl flex-col overflow-y-auto p-6">
+    <div className="mx-auto flex h-full w-full max-w-2xl flex-col overflow-y-auto p-4 sm:p-6 lg:max-w-3xl xl:max-w-4xl">
       {/* Header */}
       <div className="mb-6 flex items-center gap-3">
         <button
