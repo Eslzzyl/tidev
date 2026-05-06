@@ -24,6 +24,7 @@
 | **文件树底部按钮** | ✅ | **新建文件、新建目录、刷新按钮** |
 | **多标签页** | ✅ | **同时打开多个文件，标签栏切换，关闭/激活/脏状态指示** |
 | **Git 状态徽章** | ✅ | **文件树显示 M/A/D/? 状态，脚注显示当前分支名** |
+| **多格式预览** | ✅ | **图片内联渲染、Markdown 预览、JSON 树视图** |
 
 ---
 
@@ -223,11 +224,11 @@ interface GitFileStore {
 
 ---
 
-### Phase 4 — 多格式文件预览 (P2)
+### Phase 4 — 多格式文件预览 (P2) ✅ 已完成
 
-**目标**: 根据文件类型自动选择最佳预览方式
+**目标**: 根据文件类型自动选择最佳预览方式 ✅ 已完成
 
-#### 4.1 CodeViewer 添加多模式渲染
+#### 4.1 CodeViewer 添加多模式渲染 ✅
 
 当前 `CodeViewer.tsx` 对所有文件都用 CodeMirror 渲染。改为按扩展名分发：
 
@@ -245,9 +246,9 @@ interface GitFileStore {
 - `MarkdownPreview.tsx` — Markdown 预览
 - `JsonTreeView.tsx` — JSON 树（可复用已有的 `JsonTreeView` 在 `web/src/components/ui/` 中）
 
-**文件**: `web/src/components/views/CodeViewer.tsx`, `web/src/components/views/ImagePreview.tsx`, `web/src/components/views/MarkdownPreview.tsx`
+**文件**: `web/src/components/views/CodeViewer.tsx`, `web/src/components/views/ImagePreview.tsx`, `web/src/components/views/MarkdownPreview.tsx` ✅
 
-#### 4.2 工具栏按钮
+#### 4.2 工具栏按钮 ✅
 
 在 CodeViewer 的标题栏添加预览/编辑切换按钮（类似 OpenChamber 的浮动工具栏）：
 - 自动换行切换
@@ -314,7 +315,7 @@ CodeMirror 已有行号，但缺少跳转输入。新增 `GoToLineDialog` 组件
 | **Phase 1** | 文件 CRUD + 右键菜单 + Toast | ✅ **已完成** | 无 |
 | **Phase 2** | 多标签页 | ✅ **已完成** | Phase 1 |
 | **Phase 3** | Git 状态徽章 | ✅ **已完成** | 无（后端 API 已存在） |
-| **Phase 4** | 多格式预览 | 2-3 天 | 无 |
+| **Phase 4** | 多格式预览 | ✅ **已完成** | 无 |
 | **Phase 5** | 跳转到行/搜索优化 | 1-2 天 | 无 |
 | **Phase 6** | 拖拽/文件监控 | 3-5 天 | Phase 1-2 完成 |
 

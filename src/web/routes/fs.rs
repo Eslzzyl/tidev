@@ -363,6 +363,77 @@ pub async fn remove_item(
     Ok(Json(RemoveItemResponse { path: params.path }))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ReadBase64Params {
+    pub path: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReadBase64Response {
+    pub path: String,
+    pub data: String,
+    pub mime: String,
+}
+
+/// Read a file and return its content as base64 (for images, etc.).
+pub async fn read_file_base64(
+    State(state): State<AppState>,
+    Query(params): Query<ReadBase64Params>,
+) -> WebResult<Json<ReadBase64Response>> {
+    let target = resolve_path(&state.workspace_root, &params.path)?;
+
+    if !target.starts_with(&state.workspace_root) {
+        return Err(AppError::Forbidden(
+            "Access denied: file is outside workspace".to_string(),
+        ));
+    }
+
+    let metadata = fs::metadata(&target).await.map_err(|e| {
+        AppError::NotFound(format!("File not found: {}", e))
+    })?;
+
+    if !metadata.is_file() {
+        return Err(AppError::BadRequest("Path is not a file".to_string()));
+    }
+
+    // Limit to 10MB for binary files
+    if metadata.len() > 10 * 1024 * 1024 {
+        return Err(AppError::BadRequest("File too large (>10MB)".to_string()));
+    }
+
+    let bytes = fs::read(&target).await.map_err(|e| {
+        AppError::BadRequest(format!("Cannot read file: {}", e))
+    })?;
+
+    let ext = Path::new(&params.path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    let mime = match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "svg" => "image/svg+xml",
+        "webp" => "image/webp",
+        "ico" => "image/x-icon",
+        "bmp" => "image/bmp",
+        _ => "application/octet-stream",
+    };
+
+    let data = base64::Engine::encode(
+        &base64::engine::general_purpose::STANDARD,
+        &bytes,
+    );
+
+    Ok(Json(ReadBase64Response {
+        path: params.path,
+        data,
+        mime: mime.to_string(),
+    }))
+}
+
 /// Resolve a workspace-relative path, ensuring it stays within workspace.
 fn resolve_path(workspace_root: &Path, requested: &str) -> WebResult<PathBuf> {
     let base = if requested.is_empty() || requested == "/" || requested == "." {

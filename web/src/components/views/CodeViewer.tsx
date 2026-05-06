@@ -1,9 +1,44 @@
-import { X, FileText, Copy, Check, Pencil, Save, Eye, Loader2 } from "lucide-react";
-import { useState, useCallback, useEffect, useRef } from "react";
+import { X, FileText, Copy, Check, Pencil, Save, Eye, Loader2, Code } from "lucide-react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useFileStore } from "../../stores/useFileStore";
 import { useUIStore, getEffectiveTheme } from "../../stores/useUIStore";
 import { CodeMirrorEditor } from "../ui/CodeMirrorEditor";
+import { JsonTreeView } from "../ui/JsonTreeView";
 import { FileTabs } from "./FileTabs";
+import { ImagePreview } from "./ImagePreview";
+import { MarkdownPreview } from "./MarkdownPreview";
+
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "bmp"]);
+const MARKDOWN_EXTS = new Set(["md", "markdown", "mdx"]);
+const CODE_EXTS = new Set([
+  "rs", "ts", "tsx", "js", "jsx", "mjs", "py", "go", "java", "rb",
+  "c", "h", "cpp", "hpp", "cc", "cxx", "cs", "css", "scss", "less",
+  "html", "htm", "json", "yaml", "yml", "toml", "sql", "sh", "bash",
+  "zsh", "xml", "svg", "vue", "svelte", "astro", "tex", "dockerfile",
+]);
+
+function getFileExt(path: string): string {
+  const name = path.split("/").pop() || path;
+  const idx = name.lastIndexOf(".");
+  return idx >= 0 ? name.slice(idx + 1).toLowerCase() : "";
+}
+
+function isImageFile(path: string): boolean {
+  return IMAGE_EXTS.has(getFileExt(path));
+}
+
+function isMarkdownFile(path: string): boolean {
+  return MARKDOWN_EXTS.has(getFileExt(path));
+}
+
+function isJsonFile(path: string): boolean {
+  return getFileExt(path) === "json";
+}
+
+function isCodeFile(path: string): boolean {
+  const ext = getFileExt(path);
+  return CODE_EXTS.has(ext) || !ext || ext.length > 5;
+}
 
 export function CodeViewer() {
   const openFiles = useFileStore((s) => s.openFiles);
@@ -25,6 +60,15 @@ export function CodeViewer() {
     : null;
 
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Determine render mode
+  const renderMode = useMemo(() => {
+    if (!activeFile) return "empty";
+    if (isImageFile(activeFile.path)) return "image";
+    if (isMarkdownFile(activeFile.path)) return isEditing ? "code" : "markdown";
+    if (isJsonFile(activeFile.path)) return isEditing ? "code" : "json";
+    return "code";
+  }, [activeFile, isEditing]);
 
   // Reset editing state when switching files
   useEffect(() => {
@@ -83,6 +127,20 @@ export function CodeViewer() {
     [closeFile],
   );
 
+  // Parse JSON for tree view
+  const jsonData = useMemo(() => {
+    if (renderMode !== "json" || !activeFile?.content) return null;
+    try {
+      return JSON.parse(activeFile.content);
+    } catch {
+      return null;
+    }
+  }, [renderMode, activeFile?.content]);
+
+  const showEditToggle =
+    activeFile &&
+    (isMarkdownFile(activeFile.path) || isJsonFile(activeFile.path));
+
   if (openFiles.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-xs text-neutral-400">
@@ -114,9 +172,24 @@ export function CodeViewer() {
                 Modified
               </span>
             )}
-            {activeFile.language && (
+            {activeFile.language && renderMode === "code" && (
               <span className="shrink-0 rounded bg-neutral-200 px-1.5 py-0.5 text-[10px] font-medium uppercase text-neutral-600 dark:bg-neutral-700 dark:text-neutral-400">
                 {activeFile.language}
+              </span>
+            )}
+            {renderMode === "image" && (
+              <span className="shrink-0 rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-purple-600 dark:bg-purple-900/40 dark:text-purple-400">
+                Image
+              </span>
+            )}
+            {renderMode === "markdown" && (
+              <span className="shrink-0 rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-green-600 dark:bg-green-900/40 dark:text-green-400">
+                Preview
+              </span>
+            )}
+            {renderMode === "json" && (
+              <span className="shrink-0 rounded bg-cyan-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-cyan-600 dark:bg-cyan-900/40 dark:text-cyan-400">
+                Tree
               </span>
             )}
           </div>
@@ -128,23 +201,49 @@ export function CodeViewer() {
               </span>
             )}
 
-            {/* Edit / View toggle */}
-            <button
-              onClick={toggleEdit}
-              className={`rounded p-1 ${
-                isEditing
-                  ? "bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400"
-                  : "text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
-              }`}
-              aria-label={isEditing ? "View mode" : "Edit mode"}
-              title={isEditing ? "Switch to view mode" : "Switch to edit mode"}
-            >
-              {isEditing ? (
-                <Eye className="h-3.5 w-3.5" />
-              ) : (
-                <Pencil className="h-3.5 w-3.5" />
-              )}
-            </button>
+            {/* Preview / Edit toggle (for markdown and json) */}
+            {showEditToggle && (
+              <button
+                onClick={toggleEdit}
+                className={`rounded p-1 ${
+                  isEditing
+                    ? "bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400"
+                    : "text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
+                }`}
+                aria-label={isEditing ? "Preview mode" : "Edit mode"}
+                title={
+                  isEditing
+                    ? "Switch to preview"
+                    : "Switch to edit source"
+                }
+              >
+                {isEditing ? (
+                  <Eye className="h-3.5 w-3.5" />
+                ) : (
+                  <Pencil className="h-3.5 w-3.5" />
+                )}
+              </button>
+            )}
+
+            {/* Edit / View toggle (for code files) */}
+            {renderMode === "code" && (
+              <button
+                onClick={toggleEdit}
+                className={`rounded p-1 ${
+                  isEditing
+                    ? "bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400"
+                    : "text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
+                }`}
+                aria-label={isEditing ? "View mode" : "Edit mode"}
+                title={isEditing ? "Switch to view mode" : "Switch to edit mode"}
+              >
+                {isEditing ? (
+                  <Eye className="h-3.5 w-3.5" />
+                ) : (
+                  <Pencil className="h-3.5 w-3.5" />
+                )}
+              </button>
+            )}
 
             {/* Save button (only in edit mode and when dirty) */}
             {isEditing && activeFile.isDirty && (
@@ -158,13 +257,20 @@ export function CodeViewer() {
               </button>
             )}
 
-            <button
-              onClick={handleCopy}
-              className="rounded p-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
-              aria-label="Copy file content"
-            >
-              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-            </button>
+            {/* Copy only for code/markdown/json (text-based) */}
+            {renderMode !== "image" && (
+              <button
+                onClick={handleCopy}
+                className="rounded p-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
+                aria-label="Copy file content"
+              >
+                {copied ? (
+                  <Check className="h-3.5 w-3.5" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
+              </button>
+            )}
             <button
               onClick={() => activeFilePath && closeFile(activeFilePath)}
               className="rounded p-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
@@ -176,9 +282,33 @@ export function CodeViewer() {
         </div>
       )}
 
-      {/* CodeMirror editor */}
+      {/* Content area */}
       <div className="flex-1 overflow-hidden">
-        {activeFile && (
+        {activeFile && renderMode === "image" && (
+          <ImagePreview path={activeFile.path} />
+        )}
+
+        {activeFile && renderMode === "markdown" && (
+          <MarkdownPreview content={activeFile.content} />
+        )}
+
+        {activeFile && renderMode === "json" && jsonData && (
+          <div className="h-full overflow-auto p-2">
+            <JsonTreeView data={jsonData} />
+          </div>
+        )}
+
+        {activeFile && renderMode === "json" && !jsonData && (
+          <CodeMirrorEditor
+            value={activeFile.content}
+            onChange={handleEditorChange}
+            filePath={activeFile.path}
+            readOnly={!isEditing}
+            dark={isDark}
+          />
+        )}
+
+        {activeFile && renderMode === "code" && (
           <CodeMirrorEditor
             value={activeFile.content}
             onChange={handleEditorChange}

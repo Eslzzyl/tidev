@@ -280,3 +280,9 @@ export interface RenameItemResponse {
 export interface RemoveItemResponse {
   path: string;
 }
+
+export interface ReadBase64Response {
+  path: string;
+  data: string;
+  mime: string;
+}

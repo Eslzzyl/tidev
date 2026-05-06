@@ -29,6 +29,7 @@ import type {
   RenameItemRequest,
   RenameItemResponse,
   RemoveItemResponse,
+  ReadBase64Response,
   GitStatusResponse,
   GitBranchResponse,
   GitLogResponse,
@@ -249,6 +250,11 @@ export const api = {
       method: "DELETE",
       body: JSON.stringify({ path }),
     }),
+
+  readFileBase64: (path: string) =>
+    fetchJson<ReadBase64Response>(
+      `${API_BASE}/fs/read-base64?path=${encodeURIComponent(path)}`,
+    ),
 
   // Terminal
   startTerminal: (cols?: number, rows?: number) =>

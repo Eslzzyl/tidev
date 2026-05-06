@@ -82,6 +82,7 @@ pub fn api_routes() -> Router<AppState> {
         .route("/fs/create", post(fs::create_item))
         .route("/fs/rename", post(fs::rename_item))
         .route("/fs/remove", delete(fs::remove_item))
+        .route("/fs/read-base64", get(fs::read_file_base64))
         // Git
         .merge(git::git_routes())
         // Terminal
