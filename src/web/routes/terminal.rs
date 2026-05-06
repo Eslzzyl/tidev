@@ -47,19 +47,12 @@ struct StartResponse {
 
 #[derive(Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 struct StartRequest {
     cols: Option<u16>,
     rows: Option<u16>,
 }
 
-impl Default for StartRequest {
-    fn default() -> Self {
-        Self {
-            cols: None,
-            rows: None,
-        }
-    }
-}
 
 #[derive(Deserialize)]
 struct InputRequest {
@@ -108,7 +101,7 @@ async fn start_terminal(
         .terminal_manager
         .start_session(state.terminal_tx.clone(), size)
         .await
-        .map_err(|e| crate::web::error::AppError::Internal(e))?;
+        .map_err(crate::web::error::AppError::Internal)?;
 
     Ok(Json(StartResponse {
         session_id: session_id.to_string(),
@@ -128,7 +121,7 @@ async fn terminal_input(
         .terminal_manager
         .write_input(session_id, req.data.as_bytes())
         .await
-        .map_err(|e| crate::web::error::AppError::Internal(e))?;
+        .map_err(crate::web::error::AppError::Internal)?;
 
     Ok(())
 }
@@ -146,7 +139,7 @@ async fn terminal_resize(
         .terminal_manager
         .resize(session_id, req.cols, req.rows)
         .await
-        .map_err(|e| crate::web::error::AppError::Internal(e))?;
+        .map_err(crate::web::error::AppError::Internal)?;
 
     Ok(())
 }
@@ -318,11 +311,10 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {
                                     .await;
                                 break;
                             }
-                            if let Ok(text) = String::from_utf8(output.data) {
-                                if output_tx_clone.send(Message::Text(text.into())).await.is_err() {
+                            if let Ok(text) = String::from_utf8(output.data)
+                                && output_tx_clone.send(Message::Text(text.into())).await.is_err() {
                                     break;
                                 }
-                            }
                         }
                         Ok(_) => {}
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -389,8 +381,8 @@ async fn handle_ws_message(
 
             // Check for control frames (starting with 0x01 byte)
             if data.first() == Some(&CONTROL_TAG) {
-                if let Ok(rest) = std::str::from_utf8(&data[1..]) {
-                    if let Ok(ctrl) = serde_json::from_str::<WsClientMessage>(rest) {
+                if let Ok(rest) = std::str::from_utf8(&data[1..])
+                    && let Ok(ctrl) = serde_json::from_str::<WsClientMessage>(rest) {
                         match ctrl {
                             WsClientMessage::Resize { cols, rows } => {
                                 let _ = terminal_manager.resize(session_id, cols, rows).await;
@@ -402,7 +394,6 @@ async fn handle_ws_message(
                             }
                         }
                     }
-                }
                 return;
             }
 
@@ -414,8 +405,8 @@ async fn handle_ws_message(
 
             // Check for control frames (starting with 0x01 byte)
             if data.first() == Some(&CONTROL_TAG) {
-                if let Ok(rest) = std::str::from_utf8(&data[1..]) {
-                    if let Ok(ctrl) = serde_json::from_str::<WsClientMessage>(rest) {
+                if let Ok(rest) = std::str::from_utf8(&data[1..])
+                    && let Ok(ctrl) = serde_json::from_str::<WsClientMessage>(rest) {
                         match ctrl {
                             WsClientMessage::Resize { cols, rows } => {
                                 let _ = terminal_manager.resize(session_id, cols, rows).await;
@@ -427,7 +418,6 @@ async fn handle_ws_message(
                             }
                         }
                     }
-                }
                 return;
             }
 

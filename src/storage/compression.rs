@@ -25,11 +25,10 @@ pub fn compress_text(text: &str) -> Vec<u8> {
 /// This ensures backwards compatibility with uncompressed columns.
 pub fn decompress_text(data: &[u8]) -> String {
     // Try zstd decompression first
-    if let Ok(bytes) = decode_all(std::io::Cursor::new(data)) {
-        if let Ok(s) = String::from_utf8(bytes) {
+    if let Ok(bytes) = decode_all(std::io::Cursor::new(data))
+        && let Ok(s) = String::from_utf8(bytes) {
             return s;
         }
-    }
     // Fall back: data might be uncompressed text (old database)
     String::from_utf8_lossy(data).to_string()
 }

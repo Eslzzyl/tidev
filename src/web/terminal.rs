@@ -178,7 +178,7 @@ impl TerminalManager {
     /// Close a single terminal session (kill child, wait for reader, clean up).
     pub async fn close_session(&self, session_id: Uuid) {
         let mut sessions = self.sessions.lock().await;
-        Self::close_session_inner(&mut *sessions, session_id).await;
+        Self::close_session_inner(&mut sessions, session_id).await;
     }
 
     /// Shut down ALL terminal sessions. Called during server graceful shutdown.
@@ -187,7 +187,7 @@ impl TerminalManager {
         let ids: Vec<Uuid> = sessions.keys().copied().collect();
         for id in ids {
             crate::log_info!("Shutting down terminal session {id}");
-            Self::close_session_inner(&mut *sessions, id).await;
+            Self::close_session_inner(&mut sessions, id).await;
         }
         crate::log_info!("All terminal sessions shut down");
     }
