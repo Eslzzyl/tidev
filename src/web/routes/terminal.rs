@@ -234,7 +234,7 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {
         let msg = match tokio::time::timeout(std::time::Duration::from_secs(10), ws.recv()).await {
             Ok(Some(Ok(msg))) => msg,
             Ok(Some(Err(e))) => {
-                crate::log_error!("terminal WS recv error before bind: {e}");
+                crate::log_warn!("terminal WS recv error before bind: {e}");
                 return;
             }
             Ok(None) | Err(_) => {
@@ -325,13 +325,17 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {
     });
 
     // Main loop: read from WS (client input) and from output channel (PTY output).
+    // Send periodic WebSocket pings to keep the connection alive through proxies.
+    let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(15));
+    // Reset the stream so the first tick waits the full interval.
+    ping_interval.reset();
     loop {
         tokio::select! {
             ws_msg = ws.recv() => {
                 let ws_msg = match ws_msg {
                     Some(Ok(msg)) => msg,
                     Some(Err(e)) => {
-                        crate::log_error!("terminal WS recv error: {e}");
+                        crate::log_warn!("terminal WS recv error: {e}");
                         break;
                     }
                     None => break,
@@ -356,6 +360,11 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {
                         }
                     }
                     None => break,
+                }
+            }
+            _ = ping_interval.tick() => {
+                if ws.send(Message::Ping(bytes::Bytes::from_static(b"ping"))).await.is_err() {
+                    break;
                 }
             }
         }

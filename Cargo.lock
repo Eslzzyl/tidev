@@ -3986,6 +3986,7 @@ dependencies = [
  "axum",
  "base64",
  "blake3",
+ "bytes",
  "chrono",
  "clap",
  "crossterm",

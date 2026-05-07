@@ -94,6 +94,7 @@ rand = "0.10.1"
 async-stream = "0.3.6"
 rust-embed = { version = "8.11", features = ["axum"] }
 libc = "0.2.186"
+bytes = "1.11.1"
 
 [dev-dependencies]
 tempfile = "3.27"
