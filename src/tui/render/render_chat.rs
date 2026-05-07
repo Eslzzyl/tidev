@@ -1,6 +1,8 @@
 use crate::{
+    config::{AppConfig, AuthStore},
     markdown_render::{WrapOptions, render_markdown_text_with_width_and_cwd, word_wrap_line},
-    session::{COMPACTION_MESSAGE_LABEL, Message, MessageRole, ToolCall},
+    prompts::SessionMode,
+    session::{COMPACTION_MESSAGE_LABEL, Conversation, Message, MessageRole, ToolCall},
     theme::ThemePalette,
     tooling::builtin::utils::display_workspace_relative,
     tooling::{TodoItem, canonical_tool_name},
@@ -14,6 +16,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
+use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -50,10 +53,13 @@ struct RunningCardRange {
 struct RenderContext<'a> {
     palette: ThemePalette,
     spinner: &'a str,
-    #[allow(dead_code)]
     workspace_root: &'a Path,
     expanded_tool_results: &'a HashSet<Uuid>,
     expanded_tool_outputs: &'a HashMap<Uuid, String>,
+    config: &'a AppConfig,
+    auth: &'a AuthStore,
+    conversation: &'a Conversation,
+    mode: SessionMode,
 }
 
 fn render_tool_call_with_result(
@@ -889,6 +895,450 @@ fn render_output_preview_lines(
     }
 
     lines
+}
+
+// PARALLEL_HELPERS_START
+
+fn render_reasoning_lines(ctx: &RenderContext<'_>, reasoning: &str, body_width: usize) -> Vec<Line<'static>> {
+    render_reasoning_markdown_lines(
+        reasoning,
+        body_width,
+        Some(ctx.workspace_root),
+        ctx.palette,
+    )
+}
+
+fn render_text_body_lines(
+    ctx: &RenderContext<'_>,
+    text: &str,
+    body_width: usize,
+    cwd: Option<&Path>,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    if text.trim().is_empty() {
+        lines.push(line_with_style("(empty)", ctx.palette.muted));
+    } else {
+        let rendered = render_markdown_text_with_width_and_cwd(text, Some(body_width), cwd);
+        lines.extend(rendered.lines);
+    }
+    lines
+}
+
+fn render_error_body_lines(
+    ctx: &RenderContext<'_>,
+    message: &Message,
+    body_width: usize,
+) -> Vec<Line<'static>> {
+    let palette = ctx.palette;
+    let mut lines = Vec::new();
+
+    if !message.reasoning.trim().is_empty() {
+        lines.extend(render_reasoning_lines(ctx, &message.reasoning, body_width));
+        lines.push(Line::from(""));
+    }
+
+    let error_text = if message.content.trim().is_empty() {
+        "Request cancelled.".to_string()
+    } else {
+        message.content.clone()
+    };
+
+    for line in error_text.lines() {
+        lines.push(line_with_prefix(
+            "!",
+            &shorten_single_line(line, body_width.saturating_sub(2)),
+            Style::default().fg(palette.error),
+            Style::default().fg(palette.error),
+        ));
+    }
+
+    if lines.is_empty() {
+        lines.push(line_with_style("! Request cancelled.", palette.error));
+    }
+
+    lines
+}
+
+fn render_assistant_body_lines(
+    ctx: &RenderContext<'_>,
+    message: &Message,
+    body_width: usize,
+    is_round_end: bool,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+
+    if !message.reasoning.trim().is_empty() {
+        lines.extend(render_reasoning_lines(ctx, &message.reasoning, body_width));
+        if !message.content.trim().is_empty() {
+            lines.push(Line::from(""));
+        }
+    }
+
+    if !message.content.is_empty() {
+        if let Some((diff_lines, _)) =
+            render_unified_diff_text(&message.content, body_width, ctx.palette)
+        {
+            lines.extend(diff_lines);
+        } else {
+            let rendered = render_markdown_text_with_width_and_cwd(
+                &message.content,
+                Some(body_width),
+                Some(ctx.workspace_root),
+            );
+            lines.extend(rendered.lines);
+        }
+    }
+
+    if lines.is_empty()
+        && !message.streaming
+        && message.reasoning.trim().is_empty()
+        && message.tool_calls.is_empty()
+    {
+        lines.push(line_with_style("(empty)", ctx.palette.muted));
+    }
+
+    // Add model name, duration, end time, and mode at the end (only for round end)
+    if is_round_end && !message.streaming && message.tool_calls.is_empty() {
+        let model_display_name = message
+            .model_id
+            .as_ref()
+            .and_then(|model_id| {
+                ctx.config
+                    .resolve_model_by_ids(ctx.auth, &ctx.conversation.provider_id, model_id)
+                    .ok()
+                    .map(|model| model.display_name)
+            })
+            .unwrap_or_else(|| ctx.conversation.model_display_name.clone());
+
+        let duration = message.completed_at.map(|completed| {
+            let elapsed = completed - message.created_at;
+            let secs = elapsed.as_seconds_f64();
+            format!("{:.1}s", secs)
+        });
+
+        let end_time = message.completed_at.map(|completed| {
+            completed
+                .with_timezone(&Local)
+                .format("%H:%M:%S")
+                .to_string()
+        });
+
+        let tps = message
+            .tokens_per_second
+            .map(|val| format!("{:.1} t/s", val));
+
+        let mode_label = message
+            .mode
+            .or_else(|| {
+                ctx.conversation
+                    .messages
+                    .iter()
+                    .take_while(|m| m.id != message.id)
+                    .filter(|m| m.role == MessageRole::User)
+                    .last()
+                    .and_then(|m| m.mode)
+            })
+            .unwrap_or(ctx.mode);
+
+        let parts: Vec<String> = [
+            Some(model_display_name),
+            duration,
+            tps,
+            end_time,
+            Some(mode_label.title().to_string()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        let suffix = parts.join(" · ");
+        lines.push(line_with_style_right_aligned(
+            &suffix,
+            body_width,
+            ctx.palette.accent_soft,
+        ));
+    }
+
+    lines
+}
+
+fn render_message_cards_inner(
+    ctx: &RenderContext<'_>,
+    message: &Message,
+    body_width: usize,
+    is_round_end: bool,
+) -> Vec<(Color, Vec<Line<'static>>)> {
+    let palette = ctx.palette;
+
+    match message.role {
+        MessageRole::User | MessageRole::Shell => vec![(palette.panel_alt, {
+            let mut content_lines = render_text_body_lines(
+                ctx,
+                &message.content,
+                body_width.saturating_sub(2),
+                Some(ctx.workspace_root),
+            );
+            for attachment in &message.attachments {
+                content_lines.push(line_with_style(&attachment.summary(), palette.accent_soft));
+            }
+            let mut lines = Vec::new();
+            lines.push(Line::from(""));
+            for line in content_lines {
+                let mut spans = vec![Span::styled(
+                    "┃ ",
+                    Style::default()
+                        .fg(palette.accent)
+                        .add_modifier(Modifier::BOLD),
+                )];
+                spans.extend(line.spans);
+                lines.push(Line::from(spans));
+            }
+            lines.push(Line::from(""));
+            lines
+        })],
+        MessageRole::Assistant => {
+            let mut cards = Vec::new();
+            let body_lines =
+                render_assistant_body_lines(ctx, message, body_width, is_round_end);
+            if !body_lines.is_empty() {
+                let mut lines_with_margin = Vec::new();
+                lines_with_margin.push(Line::from(""));
+                lines_with_margin.extend(body_lines);
+                lines_with_margin.push(Line::from(""));
+                cards.push((palette.background, lines_with_margin));
+            }
+            cards
+        }
+        MessageRole::Tool => Vec::new(),
+        MessageRole::System => {
+            if message.content.starts_with(COMPACTION_MESSAGE_LABEL) {
+                let summary = message.content
+                    .split_once("\n\n")
+                    .map(|(_, s)| s)
+                    .unwrap_or("")
+                    .trim();
+                let mut lines = Vec::new();
+                lines.push(Line::from(""));
+                lines.push(render_compaction_divider_line(COMPACTION_MESSAGE_LABEL, body_width, palette));
+                if !summary.is_empty() {
+                    lines.push(Line::from(""));
+                    lines.extend(render_text_body_lines(ctx, summary, body_width, Some(ctx.workspace_root)));
+                }
+                lines.push(Line::from(""));
+                return vec![(palette.background, lines)];
+            }
+            if message.content.starts_with("Loaded instructions from")
+                || (message.content.starts_with("Loaded ") && message.content.contains(" instruction files:"))
+            {
+                let line = Line::from(vec![
+                    Span::styled("󱁤 ", Style::default().fg(palette.accent_soft)),
+                    Span::styled(message.content.clone(), Style::default().fg(palette.text).add_modifier(Modifier::ITALIC)),
+                ]);
+                return vec![(palette.background, vec![line])];
+            }
+            let content_lines = render_text_body_lines(ctx, &message.content, body_width, Some(ctx.workspace_root));
+            let mut lines = Vec::new();
+            lines.push(Line::from(""));
+            lines.extend(content_lines);
+            lines.push(Line::from(""));
+            vec![(palette.background, lines)]
+        }
+        MessageRole::Error => {
+            let error_lines = render_error_body_lines(ctx, message, body_width);
+            let mut lines = Vec::new();
+            lines.push(Line::from(""));
+            lines.extend(error_lines);
+            lines.push(Line::from(""));
+            vec![(palette.panel_light, lines)]
+        }
+    }
+}
+
+/// Result of computing block data for a single message block.
+struct BlockComputation {
+    message_id: Uuid,
+    message_count: usize,
+    line_count: usize,
+    cache_entries: Vec<(MessageRenderCacheKey, MessageRenderCacheEntry)>,
+}
+
+/// Compute block data without accessing the shared render cache.
+fn compute_block_data(
+    ctx: &RenderContext<'_>,
+    session_id: Uuid,
+    messages: &[Message],
+    start_idx: usize,
+    width: usize,
+    body_width: usize,
+    is_round_end: bool,
+) -> BlockComputation {
+    let message = &messages[start_idx];
+    let message_id = message.id;
+    let palette = ctx.palette;
+
+    let (message_count, line_count, cache_entries) = match message.role {
+        MessageRole::Assistant => {
+            let mut count = 1;
+            while start_idx + count < messages.len()
+                && matches!(messages[start_idx + count].role, MessageRole::Tool)
+            {
+                count += 1;
+            }
+
+            let cards = render_message_cards_inner(ctx, message, body_width, is_round_end);
+            let mut lines = 0;
+            let mut cache_entries = Vec::new();
+
+            let cards_key = MessageRenderCacheKey {
+                session_id,
+                message_id,
+                width: body_width,
+                is_round_end,
+                kind: MessageRenderCacheKind::Cards,
+            };
+            cache_entries.push((
+                cards_key,
+                MessageRenderCacheEntry {
+                    value: MessageRenderCacheValue::Cards(cards.clone()),
+                    last_used_tick: 0,
+                },
+            ));
+
+            for (bg, card_lines) in &cards {
+                lines += decorate_card_lines(card_lines.clone(), width, *bg).len();
+            }
+
+            let tool_results_by_id: HashMap<String, &Message> = {
+                let mut map = HashMap::new();
+                let mut j = start_idx + 1;
+                while j < messages.len() && matches!(messages[j].role, MessageRole::Tool) {
+                    if let Some(id) = &messages[j].tool_call_id {
+                        map.insert(id.clone(), &messages[j]);
+                    }
+                    j += 1;
+                }
+                map
+            };
+
+            if !message.tool_calls.is_empty() {
+                for tool_call in &message.tool_calls {
+                    let tool_result = tool_results_by_id.get(&tool_call.id).copied();
+                    let (card_lines, regions) = render_tool_call_with_result(
+                        tool_call,
+                        tool_result,
+                        body_width,
+                        message.streaming,
+                        ctx,
+                    );
+
+                    let tool_key = MessageRenderCacheKey {
+                        session_id,
+                        message_id,
+                        width: body_width,
+                        is_round_end,
+                        kind: MessageRenderCacheKind::ToolCall(tool_call.id.clone()),
+                    };
+                    cache_entries.push((
+                        tool_key,
+                        MessageRenderCacheEntry {
+                            value: MessageRenderCacheValue::ToolResult(card_lines.clone(), regions),
+                            last_used_tick: 0,
+                        },
+                    ));
+
+                    if !card_lines.is_empty() {
+                        lines += decorate_card_lines(card_lines, width, palette.panel_light).len();
+                    }
+                }
+                lines += 1;
+            }
+
+            (count, lines, cache_entries)
+        }
+        MessageRole::User => {
+            let cards = render_message_cards_inner(ctx, message, body_width, is_round_end);
+            let mut lines = 0;
+            let cards_key = MessageRenderCacheKey {
+                session_id, message_id, width: body_width, is_round_end,
+                kind: MessageRenderCacheKind::Cards,
+            };
+            let cache_entries = vec![(
+                cards_key,
+                MessageRenderCacheEntry {
+                    value: MessageRenderCacheValue::Cards(cards.clone()),
+                    last_used_tick: 0,
+                },
+            )];
+            for (_, card_lines) in &cards {
+                lines += decorate_card_lines(card_lines.clone(), width, palette.panel_alt).len();
+            }
+            lines += 1;
+            (1, lines, cache_entries)
+        }
+        MessageRole::System => {
+            let cards = render_message_cards_inner(ctx, message, body_width, is_round_end);
+            let mut lines = 0;
+            let cards_key = MessageRenderCacheKey {
+                session_id, message_id, width: body_width, is_round_end,
+                kind: MessageRenderCacheKind::Cards,
+            };
+            let cache_entries = vec![(
+                cards_key,
+                MessageRenderCacheEntry {
+                    value: MessageRenderCacheValue::Cards(cards.clone()),
+                    last_used_tick: 0,
+                },
+            )];
+            for (_, card_lines) in &cards {
+                lines += decorate_card_lines(card_lines.clone(), width, palette.background).len();
+            }
+            (1, lines, cache_entries)
+        }
+        MessageRole::Error => {
+            let cards = render_message_cards_inner(ctx, message, body_width, is_round_end);
+            let mut lines = 0;
+            let cards_key = MessageRenderCacheKey {
+                session_id, message_id, width: body_width, is_round_end,
+                kind: MessageRenderCacheKind::Cards,
+            };
+            let cache_entries = vec![(
+                cards_key,
+                MessageRenderCacheEntry {
+                    value: MessageRenderCacheValue::Cards(cards.clone()),
+                    last_used_tick: 0,
+                },
+            )];
+            for (_, card_lines) in &cards {
+                lines += decorate_card_lines(card_lines.clone(), width, palette.panel_light).len();
+            }
+            (1, lines, cache_entries)
+        }
+        MessageRole::Shell => {
+            let cards = render_message_cards_inner(ctx, message, body_width, is_round_end);
+            let mut lines = 0;
+            let cards_key = MessageRenderCacheKey {
+                session_id, message_id, width: body_width, is_round_end,
+                kind: MessageRenderCacheKind::Cards,
+            };
+            let cache_entries = vec![(
+                cards_key,
+                MessageRenderCacheEntry {
+                    value: MessageRenderCacheValue::Cards(cards.clone()),
+                    last_used_tick: 0,
+                },
+            )];
+            for (_, card_lines) in &cards {
+                lines += decorate_card_lines(card_lines.clone(), width, palette.panel_alt).len();
+            }
+            lines += 1;
+            (1, lines, cache_entries)
+        }
+        MessageRole::Tool => {
+            (1, 0, Vec::new())
+        }
+    };
+
+    BlockComputation { message_id, message_count, line_count, cache_entries }
 }
 
 impl App {
@@ -1747,6 +2197,10 @@ impl App {
             workspace_root: self.workspace_root.as_path(),
             expanded_tool_results: &self.expanded_tool_results,
             expanded_tool_outputs: &expanded_tool_outputs,
+            config: &self.config,
+            auth: &self.auth,
+            conversation: &self.conversation,
+            mode: self.mode,
         };
 
         // Render visible blocks
@@ -1867,6 +2321,7 @@ impl App {
 
     fn cached_render_message_cards(
         &self,
+        ctx: &RenderContext<'_>,
         message: &Message,
         body_width: usize,
         is_round_end: bool,
@@ -1893,7 +2348,7 @@ impl App {
         }
 
         self.record_message_render_cache_miss();
-        let cards = self.render_message_cards(message, body_width, is_round_end);
+        let cards = render_message_cards_inner(ctx, message, body_width, is_round_end);
 
         {
             let mut cache = self.message_render_cache.borrow_mut();
@@ -1929,6 +2384,7 @@ impl App {
         outputs
     }
 
+    #[allow(dead_code)]
     fn render_message_cards(
         &self,
         message: &Message,
@@ -2054,6 +2510,7 @@ impl App {
         }
     }
 
+    #[allow(dead_code)]
     fn render_assistant_body_lines(
         &self,
         message: &Message,
@@ -2159,6 +2616,7 @@ impl App {
         lines
     }
 
+    #[allow(dead_code)]
     fn render_text_body_lines(
         &self,
         text: &str,
@@ -2175,6 +2633,7 @@ impl App {
         lines
     }
 
+    #[allow(dead_code)]
     fn render_error_body_lines(&self, message: &Message, body_width: usize) -> Vec<Line<'static>> {
         let palette = self.palette();
         let mut lines = Vec::new();
@@ -2207,6 +2666,7 @@ impl App {
         lines
     }
 
+    #[allow(dead_code)]
     fn render_reasoning_lines(&self, reasoning: &str, body_width: usize) -> Vec<Line<'static>> {
         render_reasoning_markdown_lines(
             reasoning,
@@ -2443,6 +2903,10 @@ impl App {
             index.valid = true;
             index.contains_streaming_messages = force_rebuild;
 
+            if messages.is_empty() {
+                return;
+            }
+
             let expanded_tool_outputs = self.load_expanded_tool_outputs(messages);
             let spinner = self.loading_spinner();
             let ctx = RenderContext {
@@ -2451,14 +2915,21 @@ impl App {
                 workspace_root: self.workspace_root.as_path(),
                 expanded_tool_results: &self.expanded_tool_results,
                 expanded_tool_outputs: &expanded_tool_outputs,
+                config: &self.config,
+                auth: &self.auth,
+                conversation: &self.conversation,
+                mode: self.mode,
             };
+            let session_id = self.conversation.session_id;
 
-            let mut current_line = 0;
+            // Step 1: Determine block boundaries sequentially (cheap)
+            struct BlockInfo {
+                start_idx: usize,
+                is_round_end: bool,
+            }
+            let mut blocks_info = Vec::new();
             let mut i = 0;
-
             while i < messages.len() {
-                // Build block without start_line (calculated below)
-                // Determine is_round_end before generation
                 let count = if matches!(messages[i].role, MessageRole::Assistant) {
                     let mut c = 1;
                     while i + c < messages.len()
@@ -2473,30 +2944,56 @@ impl App {
                 let next_idx = i + count;
                 let is_round_end = next_idx >= messages.len()
                     || matches!(messages[next_idx].role, MessageRole::User);
-
-                let (message_id, message_count, line_count) = self.build_message_block_data(
-                    messages,
-                    i,
-                    width,
-                    body_width,
-                    &ctx,
-                    is_round_end,
-                );
-
-                let block = super::MessageBlock {
-                    message_id,
-                    message_start_idx: i,
-                    message_count,
-                    start_line: current_line,
-                    line_count,
-                };
-
-                current_line += line_count;
-                i += message_count;
-                index.blocks.push(block);
+                blocks_info.push(BlockInfo { start_idx: i, is_round_end });
+                i += count;
             }
 
-            index.total_lines = current_line;
+            // Step 2: Compute block data in parallel using rayon
+            // (RenderContext is Sync, so it can be shared across threads)
+            if !blocks_info.is_empty() {
+                let computations: Vec<BlockComputation> = blocks_info
+                    .par_iter()
+                    .map(|info| {
+                        compute_block_data(
+                            &ctx,
+                            session_id,
+                            messages,
+                            info.start_idx,
+                            width,
+                            body_width,
+                            info.is_round_end,
+                        )
+                    })
+                    .collect();
+
+                // Step 3: Build layout index and insert cache entries sequentially
+                let mut current_line = 0;
+                let mut cache = self.message_render_cache.borrow_mut();
+                for (comp_idx, comp) in computations.iter().enumerate() {
+                    let block = super::MessageBlock {
+                        message_id: comp.message_id,
+                        message_start_idx: blocks_info[comp_idx].start_idx,
+                        message_count: comp.message_count,
+                        start_line: current_line,
+                        line_count: comp.line_count,
+                    };
+                    current_line += comp.line_count;
+                    index.blocks.push(block);
+
+                    // Insert cache entries with fresh ticks
+                    for (key, entry) in &comp.cache_entries {
+                        let tick = self.next_message_render_cache_tick();
+                        cache.insert(
+                            key.clone(),
+                            MessageRenderCacheEntry {
+                                value: entry.value.clone(),
+                                last_used_tick: tick,
+                            },
+                        );
+                    }
+                }
+                index.total_lines = current_line;
+            }
         }
     }
 
@@ -2517,6 +3014,10 @@ impl App {
             workspace_root: self.workspace_root.as_path(),
             expanded_tool_results: &self.expanded_tool_results,
             expanded_tool_outputs: &expanded_tool_outputs,
+            config: &self.config,
+            auth: &self.auth,
+            conversation: &self.conversation,
+            mode: self.mode,
         };
 
         let mut offset = 0;
@@ -2576,7 +3077,7 @@ impl App {
                 }
 
                 // Calculate lines for assistant message
-                let cards = self.cached_render_message_cards(message, body_width, is_round_end);
+                let cards = self.cached_render_message_cards(ctx,message, body_width, is_round_end);
                 let mut lines = 0;
                 for (_, card_lines) in &cards {
                     lines +=
@@ -2618,7 +3119,7 @@ impl App {
                 (count, lines)
             }
             MessageRole::User => {
-                let cards = self.cached_render_message_cards(message, body_width, is_round_end);
+                let cards = self.cached_render_message_cards(ctx,message, body_width, is_round_end);
                 let mut lines = 0;
                 for (_, card_lines) in &cards {
                     lines +=
@@ -2628,7 +3129,7 @@ impl App {
                 (1, lines)
             }
             MessageRole::System => {
-                let cards = self.cached_render_message_cards(message, body_width, is_round_end);
+                let cards = self.cached_render_message_cards(ctx,message, body_width, is_round_end);
                 let mut lines = 0;
                 for (_, card_lines) in &cards {
                     lines +=
@@ -2637,7 +3138,7 @@ impl App {
                 (1, lines)
             }
             MessageRole::Error => {
-                let cards = self.cached_render_message_cards(message, body_width, is_round_end);
+                let cards = self.cached_render_message_cards(ctx,message, body_width, is_round_end);
                 let mut lines = 0;
                 for (_, card_lines) in &cards {
                     lines +=
@@ -2646,7 +3147,7 @@ impl App {
                 (1, lines)
             }
             MessageRole::Shell => {
-                let cards = self.cached_render_message_cards(message, body_width, is_round_end);
+                let cards = self.cached_render_message_cards(ctx,message, body_width, is_round_end);
                 let mut lines = 0;
                 for (_, card_lines) in &cards {
                     lines +=
@@ -2736,7 +3237,7 @@ impl App {
             MessageRole::Assistant => {
                 // Render assistant message cards
                 let assistant_cards =
-                    self.cached_render_message_cards(message, body_width, is_round_end);
+                    self.cached_render_message_cards(ctx,message, body_width, is_round_end);
                 for (card_bg, card_lines) in assistant_cards {
                     if !card_lines.is_empty() {
                         let start_line = current_line_offset + lines.len();
@@ -2849,7 +3350,7 @@ impl App {
                 }
             }
             MessageRole::User | MessageRole::System | MessageRole::Error | MessageRole::Shell => {
-                let cards = self.cached_render_message_cards(message, body_width, is_round_end);
+                let cards = self.cached_render_message_cards(ctx,message, body_width, is_round_end);
                 let bg = match message.role {
                     MessageRole::User => palette.panel_alt,
                     MessageRole::Error => palette.panel_light,
@@ -3018,7 +3519,9 @@ mod tests {
         RenderContext, render_reasoning_markdown_lines, render_tool_call_with_result,
         render_tool_result_detail_lines,
     };
-    use crate::session::{Message, MessageRole};
+    use crate::config::{AppConfig, AuthStore};
+    use crate::prompts::SessionMode;
+    use crate::session::{Conversation, Message, MessageRole};
     use crate::theme::ThemePalette;
     use ratatui::style::Style;
     use ratatui::text::Line;
@@ -3106,6 +3609,18 @@ mod tests {
             workspace_root: std::path::Path::new("/tmp"),
             expanded_tool_results: &HashSet::new(),
             expanded_tool_outputs: &HashMap::new(),
+            config: &AppConfig::default(),
+            auth: &AuthStore::default(),
+            conversation: &Conversation::new(
+                uuid::Uuid::new_v4(),
+                "/tmp",
+                "test",
+                "test",
+                "test",
+                "test",
+                "test",
+            ),
+            mode: SessionMode::Build,
         };
 
         let (lines, _, _) = render_tool_result_detail_lines(&message, 80, &ctx);
@@ -3152,6 +3667,18 @@ mod tests {
             workspace_root: std::path::Path::new("/tmp"),
             expanded_tool_results: &HashSet::new(),
             expanded_tool_outputs: &HashMap::new(),
+            config: &AppConfig::default(),
+            auth: &AuthStore::default(),
+            conversation: &Conversation::new(
+                uuid::Uuid::new_v4(),
+                "/tmp",
+                "test",
+                "test",
+                "test",
+                "test",
+                "test",
+            ),
+            mode: SessionMode::Build,
         };
 
         let (lines, _, _) = render_tool_result_detail_lines(&message, 80, &ctx);
@@ -3183,6 +3710,18 @@ mod tests {
             workspace_root: std::path::Path::new("/tmp"),
             expanded_tool_results: &HashSet::new(),
             expanded_tool_outputs: &HashMap::new(),
+            config: &AppConfig::default(),
+            auth: &AuthStore::default(),
+            conversation: &Conversation::new(
+                uuid::Uuid::new_v4(),
+                "/tmp",
+                "test",
+                "test",
+                "test",
+                "test",
+                "test",
+            ),
+            mode: SessionMode::Build,
         };
 
         let (lines, _) = render_tool_call_with_result(&tool_call, None, 80, true, &ctx);
@@ -3213,15 +3752,17 @@ mod tests {
         let _ = app.messages_text(Some(80));
         let (_, misses_before, entries_before) = app.message_render_cache_stats();
 
+        // Parallel path pre-populates the cache eagerly, so there are no misses.
+        // But entries should be in the cache.
+        assert!(entries_before >= 2, "first render should populate cache");
+
         let _ = app.messages_text(Some(80));
         let (hits_after, misses_after, entries_after) = app.message_render_cache_stats();
 
-        assert!(misses_before >= 2, "first render should have cache misses");
-        assert!(entries_before >= 2, "first render should populate cache");
         assert!(hits_after > 0, "second render should have cache hits");
         assert_eq!(
             misses_after, misses_before,
-            "second render should use cache"
+            "second render should use cache (no new misses)"
         );
         assert_eq!(entries_after, entries_before, "cache size should be stable");
     }
@@ -3237,13 +3778,14 @@ mod tests {
         ));
 
         let _ = app.messages_text(Some(72));
-        let (_, misses_before, entries_before) = app.message_render_cache_stats();
+        let (_, _, entries_before) = app.message_render_cache_stats();
 
         let _ = app.messages_text(Some(100));
-        let (_, misses_after, entries_after) = app.message_render_cache_stats();
+        let (_, _, entries_after) = app.message_render_cache_stats();
 
-        assert!(misses_after > misses_before);
-        assert!(entries_after > entries_before);
+        // Width change triggers full rebuild, re-populating cache.
+        // The parallel path pre-populates eagerly, so new entries are inserted.
+        assert!(entries_after > entries_before, "cache should have new entries for the new width");
     }
 
     #[test]
