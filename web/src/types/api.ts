@@ -217,6 +217,7 @@ export interface GitBranchItem {
 
 export interface GitLogResponse {
   commits: GitCommitItem[];
+  has_more: boolean;
 }
 
 export interface GitCommitItem {
@@ -224,6 +225,28 @@ export interface GitCommitItem {
   author: string;
   date: string;
   message: string;
+}
+
+export interface GitCommitFileInfo {
+  path: string;
+  status: string; // A, M, D
+  additions: number;
+  deletions: number;
+}
+
+export interface GitShowResponse {
+  sha: string;
+  author: string;
+  date: string;
+  message: string;
+  files: GitCommitFileInfo[];
+  total_additions: number;
+  total_deletions: number;
+}
+
+export interface GitFileDiffResponse {
+  path: string;
+  diff: string;
 }
 
 export interface GitMessageResponse {

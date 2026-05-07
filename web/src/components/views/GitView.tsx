@@ -1,8 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   GitBranch,
   GitCommitHorizontal,
-  GitPullRequest,
   ArrowUpFromLine,
   ArrowDownFromLine,
   Archive,
@@ -15,21 +14,29 @@ import {
   FileEdit,
   FileX,
   Loader2,
+  ChevronDown,
+  ChevronRight,
+  X,
 } from "lucide-react";
 import { api } from "../../api/client";
 import type {
   GitStatusResponse,
   GitBranchResponse,
-  GitLogResponse,
+  GitCommitItem,
+  GitShowResponse,
+  GitFileDiffResponse,
 } from "../../types/api";
+import { DiffRenderer } from "../renderers/DiffRenderer";
 
 type GitTab = "changes" | "history" | "branches";
+
+const PAGE_SIZE = 20;
+const MIN_PANEL_PCT = 20; // minimum panel width in %
 
 export function GitView() {
   const [activeTab, setActiveTab] = useState<GitTab>("changes");
   const [status, setStatus] = useState<GitStatusResponse | null>(null);
   const [branches, setBranches] = useState<GitBranchResponse | null>(null);
-  const [log, setLog] = useState<GitLogResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [commitMsg, setCommitMsg] = useState("");
@@ -40,26 +47,279 @@ export function GitView() {
   const [newBranchName, setNewBranchName] = useState("");
   const [creatingBranch, setCreatingBranch] = useState(false);
 
+  // History pagination
+  const [allCommits, setAllCommits] = useState<GitCommitItem[]>([]);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  // Commit detail (History tab)
+  const [selectedCommit, setSelectedCommit] =
+    useState<GitShowResponse | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [fileDiffs, setFileDiffs] = useState<
+    Record<string, GitFileDiffResponse>
+  >({});
+  const [loadingFileDiff, setLoadingFileDiff] = useState<string | null>(null);
+  const [loadingAllDiffs, setLoadingAllDiffs] = useState(false);
+  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
+
+  // Changes diff (Changes tab)
+  const [changeDiffs, setChangeDiffs] = useState<
+    Record<string, GitFileDiffResponse>
+  >({});
+  const [loadingChangeDiff, setLoadingChangeDiff] = useState<string | null>(
+    null,
+  );
+  const [expandedChangeFiles, setExpandedChangeFiles] = useState<
+    Set<string>
+  >(new Set());
+
+  // Mobile detail sheet
+  const [detailOpen, setDetailOpen] = useState(false);
+
+  // Submodule toggle
+  const [showSubmodules, setShowSubmodules] = useState(false);
+
+  // Split panel resize
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+  const [splitRatio, setSplitRatio] = useState(0.4); // left = 40%, right = 60%
+  const [isResizingSplit, setIsResizingSplit] = useState(false);
+  const resizeStartRef = useRef({ x: 0, ratio: 0 });
+
+  // ── Split panel resize handlers ─────────────────────────────────────
+
+  const handleSplitResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      setIsResizingSplit(true);
+      resizeStartRef.current = { x: e.clientX, ratio: splitRatio };
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    },
+    [splitRatio],
+  );
+
+  useEffect(() => {
+    if (!isResizingSplit) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const container = splitContainerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const containerWidth = rect.width;
+      if (containerWidth === 0) return;
+
+      const dx = e.clientX - resizeStartRef.current.x;
+      const newRatio =
+        resizeStartRef.current.ratio + dx / containerWidth;
+      // Clamp
+      const clamped = Math.min(
+        Math.max(newRatio, MIN_PANEL_PCT / 100),
+        1 - MIN_PANEL_PCT / 100,
+      );
+      setSplitRatio(clamped);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingSplit(false);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isResizingSplit]);
+
+  // ── Data fetching ───────────────────────────────────────────────────
+
+  const loadCommits = useCallback(
+    async (skip: number, replace: boolean) => {
+      try {
+        if (replace) {
+          setLoading(true);
+        } else {
+          setLoadingMore(true);
+        }
+        const result = await api.gitLog(PAGE_SIZE, skip);
+        if (replace) {
+          setAllCommits(result.commits);
+        } else {
+          setAllCommits((prev) => [...prev, ...result.commits]);
+        }
+        setHasMore(result.has_more);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Failed to load history",
+        );
+      } finally {
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    [],
+  );
+
   const refreshStatus = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const [s, b, l] = await Promise.all([
+      const [s, b] = await Promise.all([
         api.gitStatus(),
-        api.gitBranches(),
-        api.gitLog(20),
+        api.gitBranches(showSubmodules),
       ]);
       setStatus(s);
       setBranches(b);
-      setLog(l);
+      // Also reset history on refresh
+      await loadCommits(0, true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load git data");
     } finally {
       setLoading(false);
     }
+  }, [showSubmodules, loadCommits]);
+
+  const loadMoreCommits = useCallback(() => {
+    if (loadingMore || !hasMore) return;
+    loadCommits(allCommits.length, false);
+  }, [allCommits.length, hasMore, loadingMore, loadCommits]);
+
+  // ── History commit detail ───────────────────────────────────────────
+
+  const selectCommit = useCallback(async (sha: string) => {
+    setLoadingDetail(true);
+    setDetailError(null);
+    setSelectedCommit(null);
+    setFileDiffs({});
+    setExpandedFiles(new Set());
+    try {
+      const detail = await api.gitShowCommit(sha);
+      setSelectedCommit(detail);
+      setDetailOpen(true);
+    } catch (err) {
+      setDetailError(
+        err instanceof Error ? err.message : "Failed to load commit details",
+      );
+    } finally {
+      setLoadingDetail(false);
+    }
   }, []);
 
+  const loadFileDiff = useCallback(
+    async (filePath: string) => {
+      if (!selectedCommit) return;
+      if (fileDiffs[filePath]) {
+        setExpandedFiles((prev) => {
+          const next = new Set(prev);
+          if (next.has(filePath)) next.delete(filePath);
+          else next.add(filePath);
+          return next;
+        });
+        return;
+      }
+      setLoadingFileDiff(filePath);
+      try {
+        const diffs = await api.gitShowFileDiff(
+          selectedCommit.sha,
+          filePath,
+        );
+        if (diffs.length > 0) {
+          setFileDiffs((prev) => ({
+            ...prev,
+            [filePath]: diffs[0],
+          }));
+        }
+        setExpandedFiles((prev) => new Set(prev).add(filePath));
+      } catch (err) {
+        setDetailError(
+          err instanceof Error ? err.message : "Failed to load file diff",
+        );
+      } finally {
+        setLoadingFileDiff(null);
+      }
+    },
+    [selectedCommit, fileDiffs],
+  );
+
+  const loadAllDiffs = useCallback(async () => {
+    if (!selectedCommit) return;
+    setLoadingAllDiffs(true);
+    try {
+      const diffs = await api.gitShowAllDiffs(selectedCommit.sha);
+      const diffMap: Record<string, GitFileDiffResponse> = {};
+      for (const d of diffs) {
+        diffMap[d.path] = d;
+      }
+      setFileDiffs((prev) => ({ ...prev, ...diffMap }));
+      setExpandedFiles(
+        new Set([...expandedFiles, ...diffs.map((d) => d.path)]),
+      );
+    } catch (err) {
+      setDetailError(
+        err instanceof Error ? err.message : "Failed to load all diffs",
+      );
+    } finally {
+      setLoadingAllDiffs(false);
+    }
+  }, [selectedCommit, expandedFiles]);
+
+  const closeDetail = useCallback(() => {
+    setDetailOpen(false);
+    setSelectedCommit(null);
+    setFileDiffs({});
+    setExpandedFiles(new Set());
+    setDetailError(null);
+  }, []);
+
+  // ── Changes file diff ───────────────────────────────────────────────
+
+  const toggleChangeDiff = useCallback(
+    async (filePath: string, staged: boolean, status: string) => {
+      // Untracked files have no previous version to diff against
+      if (status === "?") {
+        setExpandedChangeFiles((prev) => {
+          const next = new Set(prev);
+          if (next.has(filePath)) next.delete(filePath);
+          else next.add(filePath);
+          return next;
+        });
+        return;
+      }
+      if (changeDiffs[filePath]) {
+        setExpandedChangeFiles((prev) => {
+          const next = new Set(prev);
+          if (next.has(filePath)) next.delete(filePath);
+          else next.add(filePath);
+          return next;
+        });
+        return;
+      }
+      setLoadingChangeDiff(filePath);
+      try {
+        const result = await api.gitDiffFile(filePath, staged);
+        setChangeDiffs((prev) => ({ ...prev, [filePath]: result }));
+        setExpandedChangeFiles((prev) => new Set(prev).add(filePath));
+      } catch (err) {
+        setCommitResult(
+          `Error loading diff: ${err instanceof Error ? err.message : "Unknown"}`,
+        );
+      } finally {
+        setLoadingChangeDiff(null);
+      }
+    },
+    [changeDiffs],
+  );
+
+  // ── Operations ──────────────────────────────────────────────────────
+
   useEffect(() => {
+    // Calling refreshStatus is an intentional async fire-and-forget for initial load.
+    // The setLoading(true) inside is instantaneous, not cascading.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     refreshStatus();
   }, [refreshStatus]);
 
@@ -119,7 +379,7 @@ export function GitView() {
       await refreshStatus();
     } catch (err) {
       setCommitResult(
-        `Stash error: ${err instanceof Error ? err.message : "Stash failed"}`,
+        `Error: ${err instanceof Error ? err.message : "Stash failed"}`,
       );
     } finally {
       setStashLoading(false);
@@ -136,7 +396,7 @@ export function GitView() {
       await refreshStatus();
     } catch (err) {
       setCommitResult(
-        `Branch error: ${err instanceof Error ? err.message : "Branch creation failed"}`,
+        `Error: ${err instanceof Error ? err.message : "Failed to create branch"}`,
       );
     } finally {
       setCreatingBranch(false);
@@ -150,9 +410,13 @@ export function GitView() {
       await refreshStatus();
     } catch (err) {
       setCommitResult(
-        `Delete error: ${err instanceof Error ? err.message : "Delete failed"}`,
+        `Error: ${err instanceof Error ? err.message : "Failed to delete branch"}`,
       );
     }
+  };
+
+  const handleToggleSubmodules = () => {
+    setShowSubmodules((prev) => !prev);
   };
 
   const tabs: { id: GitTab; label: string; icon: React.ReactNode }[] = [
@@ -294,9 +558,9 @@ export function GitView() {
       )}
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex flex-1 overflow-hidden">
         {loading && !status ? (
-          <div className="flex h-full items-center justify-center">
+          <div className="flex h-full w-full items-center justify-center">
             <Loader2 className="h-5 w-5 animate-spin text-neutral-400" />
           </div>
         ) : activeTab === "changes" ? (
@@ -306,20 +570,122 @@ export function GitView() {
             onCommitMsgChange={setCommitMsg}
             onCommit={handleCommit}
             committing={committing}
+            changeDiffs={changeDiffs}
+            loadingChangeDiff={loadingChangeDiff}
+            expandedChangeFiles={expandedChangeFiles}
+            onToggleChangeDiff={toggleChangeDiff}
           />
         ) : activeTab === "history" ? (
-          <HistoryPanel log={log} />
+          <div
+            ref={splitContainerRef}
+            className="flex flex-1 overflow-hidden"
+          >
+            {/* Left: History list */}
+            <div
+              className="overflow-y-auto"
+              style={{ flex: `${splitRatio * 100}%` }}
+            >
+              <HistoryPanel
+                commits={allCommits}
+                hasMore={hasMore}
+                loadingMore={loadingMore}
+                loading={loading}
+                selectedSha={selectedCommit?.sha ?? null}
+                onSelectCommit={selectCommit}
+                onLoadMore={loadMoreCommits}
+              />
+            </div>
+
+            {/* Resize handle */}
+            <div
+              onMouseDown={handleSplitResizeStart}
+              className={`hidden w-1 cursor-col-resize bg-transparent hover:bg-neutral-300 dark:hover:bg-neutral-700 md:block ${
+                isResizingSplit
+                  ? "bg-neutral-400 dark:bg-neutral-600"
+                  : ""
+              }`}
+              role="separator"
+              aria-label="Resize panels"
+            />
+
+            {/* Right: Commit detail */}
+            <div
+              className="hidden overflow-y-auto md:block"
+              style={{ flex: `${(1 - splitRatio) * 100}%` }}
+            >
+              {selectedCommit ? (
+                <div className="p-4">
+                  <CommitDetailPanel
+                    commit={selectedCommit}
+                    fileDiffs={fileDiffs}
+                    loadingFileDiff={loadingFileDiff}
+                    loadingAllDiffs={loadingAllDiffs}
+                    loadingDetail={loadingDetail}
+                    detailError={detailError}
+                    expandedFiles={expandedFiles}
+                    onLoadFileDiff={loadFileDiff}
+                    onLoadAllDiffs={loadAllDiffs}
+                  />
+                </div>
+              ) : (
+                <div className="flex h-full items-center justify-center text-sm text-neutral-400">
+                  Select a commit to view details
+                </div>
+              )}
+            </div>
+          </div>
         ) : (
-          <BranchesPanel
-            branches={branches}
-            newBranchName={newBranchName}
-            onNewBranchNameChange={setNewBranchName}
-            onCreateBranch={handleCreateBranch}
-            creatingBranch={creatingBranch}
-            onDeleteBranch={handleDeleteBranch}
-          />
+          <div className="flex-1 overflow-y-auto">
+            <BranchesPanel
+              branches={branches}
+              newBranchName={newBranchName}
+              onNewBranchNameChange={setNewBranchName}
+              onCreateBranch={handleCreateBranch}
+              creatingBranch={creatingBranch}
+              onDeleteBranch={handleDeleteBranch}
+              showSubmodules={showSubmodules}
+              onToggleSubmodules={handleToggleSubmodules}
+            />
+          </div>
         )}
       </div>
+
+      {/* Mobile bottom sheet for commit detail (History tab) */}
+      {activeTab === "history" && detailOpen && selectedCommit && (
+        <>
+          <button
+            onClick={closeDetail}
+            className="fixed inset-0 z-40 bg-black/30 md:hidden"
+            aria-label="Close detail"
+          />
+          <div className="fixed bottom-0 left-0 right-0 z-50 max-h-[80vh] overflow-y-auto rounded-t-xl border border-neutral-200 bg-white shadow-xl dark:border-neutral-800 dark:bg-neutral-950 md:hidden">
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-neutral-200 bg-white px-4 py-3 dark:border-neutral-800 dark:bg-neutral-950">
+              <span className="text-xs font-medium text-neutral-500">
+                Commit Detail
+              </span>
+              <button
+                onClick={closeDetail}
+                className="rounded p-1 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-4">
+              <CommitDetailPanel
+                commit={selectedCommit}
+                fileDiffs={fileDiffs}
+                loadingFileDiff={loadingFileDiff}
+                loadingAllDiffs={loadingAllDiffs}
+                loadingDetail={loadingDetail}
+                detailError={detailError}
+                expandedFiles={expandedFiles}
+                onLoadFileDiff={loadFileDiff}
+                onLoadAllDiffs={loadAllDiffs}
+              />
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -332,12 +698,20 @@ function ChangesPanel({
   onCommitMsgChange,
   onCommit,
   committing,
+  changeDiffs,
+  loadingChangeDiff,
+  expandedChangeFiles,
+  onToggleChangeDiff,
 }: {
   status: GitStatusResponse | null;
   commitMsg: string;
   onCommitMsgChange: (msg: string) => void;
   onCommit: () => void;
   committing: boolean;
+  changeDiffs: Record<string, GitFileDiffResponse>;
+  loadingChangeDiff: string | null;
+  expandedChangeFiles: Set<string>;
+  onToggleChangeDiff: (path: string, staged: boolean, status: string) => void;
 }) {
   const staged = status?.files.filter((f) => f.staged) || [];
   const unstaged = status?.files.filter((f) => !f.staged) || [];
@@ -375,7 +749,7 @@ function ChangesPanel({
   };
 
   return (
-    <div className="p-4">
+    <div className="flex-1 overflow-y-auto p-4">
       {/* Commit input */}
       <div className="mb-4">
         <textarea
@@ -407,20 +781,46 @@ function ChangesPanel({
 
       {/* File lists */}
       {staged.length > 0 && (
-        <FileList
-          title="Staged"
-          files={staged}
-          icon={fileIcon}
-          statusLabel={statusLabel}
-        />
+        <div className="mb-4">
+          <h3 className="mb-1 text-xs font-medium uppercase text-neutral-500">
+            Staged ({staged.length})
+          </h3>
+          <div className="space-y-0.5">
+            {staged.map((f, i) => (
+              <ChangeFileRow
+                key={i}
+                file={f}
+                icon={fileIcon(f)}
+                label={statusLabel(f.status)}
+                diff={changeDiffs[f.path]}
+                isLoading={loadingChangeDiff === f.path}
+                isExpanded={expandedChangeFiles.has(f.path)}
+                onToggle={() => onToggleChangeDiff(f.path, true, f.status)}
+              />
+            ))}
+          </div>
+        </div>
       )}
       {unstaged.length > 0 && (
-        <FileList
-          title="Changes"
-          files={unstaged}
-          icon={fileIcon}
-          statusLabel={statusLabel}
-        />
+        <div className="mb-4">
+          <h3 className="mb-1 text-xs font-medium uppercase text-neutral-500">
+            Changes ({unstaged.length})
+          </h3>
+          <div className="space-y-0.5">
+            {unstaged.map((f, i) => (
+              <ChangeFileRow
+                key={i}
+                file={f}
+                icon={fileIcon(f)}
+                label={statusLabel(f.status)}
+                diff={changeDiffs[f.path]}
+                isLoading={loadingChangeDiff === f.path}
+                isExpanded={expandedChangeFiles.has(f.path)}
+                onToggle={() => onToggleChangeDiff(f.path, false, f.status)}
+              />
+            ))}
+          </div>
+        </div>
       )}
       {(!status || status.files.length === 0) && (
         <div className="py-8 text-center text-sm text-neutral-500">
@@ -431,46 +831,102 @@ function ChangesPanel({
   );
 }
 
-function FileList({
-  title,
-  files,
+function ChangeFileRow({
+  file,
   icon,
-  statusLabel,
+  label,
+  diff,
+  isLoading,
+  isExpanded,
+  onToggle,
 }: {
-  title: string;
-  files: { path: string; status: string }[];
-  icon: (f: { status: string }) => React.ReactNode;
-  statusLabel: (s: string) => string;
+  file: { path: string; status: string };
+  icon: React.ReactNode;
+  label: string;
+  diff: GitFileDiffResponse | undefined;
+  isLoading: boolean;
+  isExpanded: boolean;
+  onToggle: () => void;
 }) {
   return (
-    <div className="mb-4">
-      <h3 className="mb-1 text-xs font-medium uppercase text-neutral-500">
-        {title} ({files.length})
-      </h3>
-      <div className="space-y-0.5">
-        {files.map((f, i) => (
-          <div
-            key={i}
-            className="flex items-center gap-2 rounded px-2 py-1 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
-          >
-            {icon(f)}
-            <span className="flex-1 truncate text-neutral-700 dark:text-neutral-300">
-              {f.path}
-            </span>
-            <span className="flex-shrink-0 text-neutral-400">
-              {statusLabel(f.status)}
-            </span>
-          </div>
-        ))}
-      </div>
+    <div>
+      <button
+        onClick={onToggle}
+        className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
+      >
+        {icon}
+        <span className="flex-1 truncate text-left text-neutral-700 dark:text-neutral-300">
+          {file.path}
+        </span>
+        <span className="flex-shrink-0 text-neutral-400">{label}</span>
+        {isLoading && (
+          <Loader2 className="h-3 w-3 animate-spin text-neutral-400" />
+        )}
+        <ChevronRight
+          className={`h-3 w-3 text-neutral-400 transition-transform ${
+            isExpanded ? "rotate-90" : ""
+          }`}
+        />
+      </button>
+      {isExpanded && (
+        <div className="ml-4 border-l-2 border-neutral-200 pl-2 dark:border-neutral-700">
+          {file.status === "?" ? (
+            <p className="py-2 text-xs text-neutral-400">
+              New file — no previous version to diff against
+            </p>
+          ) : diff ? (
+            diff.diff ? (
+              <DiffRenderer diff={diff.diff} filepath={file.path} />
+            ) : (
+              <p className="py-2 text-xs text-neutral-400">
+                No diff content (binary or empty file)
+              </p>
+            )
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
 
 // ── History Panel ─────────────────────────────────────────────────────────
 
-function HistoryPanel({ log }: { log: GitLogResponse | null }) {
-  if (!log || log.commits.length === 0) {
+function HistoryPanel({
+  commits,
+  hasMore,
+  loadingMore,
+  loading,
+  selectedSha,
+  onSelectCommit,
+  onLoadMore,
+}: {
+  commits: GitCommitItem[];
+  hasMore: boolean;
+  loadingMore: boolean;
+  loading: boolean;
+  selectedSha: string | null;
+  onSelectCommit: (sha: string) => void;
+  onLoadMore: () => void;
+}) {
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  // IntersectionObserver for infinite scroll
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && hasMore && !loadingMore) {
+          onLoadMore();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, loadingMore, onLoadMore]);
+
+  if (!loading && commits.length === 0) {
     return (
       <div className="flex h-full items-center justify-center p-6">
         <p className="text-sm text-neutral-500">No commits yet</p>
@@ -481,10 +937,15 @@ function HistoryPanel({ log }: { log: GitLogResponse | null }) {
   return (
     <div className="p-4">
       <div className="space-y-2">
-        {log.commits.map((commit) => (
-          <div
+        {commits.map((commit) => (
+          <button
             key={commit.sha}
-            className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800"
+            onClick={() => onSelectCommit(commit.sha)}
+            className={`w-full rounded-lg border p-3 text-left transition-colors ${
+              selectedSha === commit.sha
+                ? "border-neutral-500 bg-neutral-100 dark:border-neutral-500 dark:bg-neutral-800"
+                : "border-neutral-200 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900"
+            }`}
           >
             <div className="mb-1 flex items-center gap-2">
               <GitCommitHorizontal className="h-3.5 w-3.5 text-neutral-400" />
@@ -500,8 +961,180 @@ function HistoryPanel({ log }: { log: GitLogResponse | null }) {
               <span>·</span>
               <span>{new Date(commit.date).toLocaleString()}</span>
             </div>
-          </div>
+          </button>
         ))}
+      </div>
+
+      {/* Sentinel element for infinite scroll */}
+      <div ref={sentinelRef} className="h-4" />
+
+      {/* Loading indicator */}
+      {loadingMore && (
+        <div className="flex items-center justify-center py-4">
+          <Loader2 className="h-4 w-4 animate-spin text-neutral-400" />
+          <span className="ml-2 text-xs text-neutral-500">
+            Loading more...
+          </span>
+        </div>
+      )}
+
+      {!hasMore && commits.length > 0 && (
+        <p className="py-4 text-center text-xs text-neutral-400">
+          All commits loaded
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── Commit Detail Panel ───────────────────────────────────────────────────
+
+function CommitDetailPanel({
+  commit,
+  fileDiffs,
+  loadingFileDiff,
+  loadingAllDiffs,
+  loadingDetail,
+  detailError,
+  expandedFiles,
+  onLoadFileDiff,
+  onLoadAllDiffs,
+}: {
+  commit: GitShowResponse;
+  fileDiffs: Record<string, GitFileDiffResponse>;
+  loadingFileDiff: string | null;
+  loadingAllDiffs: boolean;
+  loadingDetail: boolean;
+  detailError: string | null;
+  expandedFiles: Set<string>;
+  onLoadFileDiff: (path: string) => void;
+  onLoadAllDiffs: () => void;
+}) {
+  const statusIcon = (s: string) => {
+    switch (s) {
+      case "A":
+        return <FilePlus className="h-3.5 w-3.5 text-green-600" />;
+      case "D":
+        return <FileX className="h-3.5 w-3.5 text-red-600" />;
+      case "M":
+        return <FileEdit className="h-3.5 w-3.5 text-yellow-600" />;
+      default:
+        return <FileText className="h-3.5 w-3.5 text-neutral-500" />;
+    }
+  };
+
+  if (loadingDetail) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <Loader2 className="h-5 w-5 animate-spin text-neutral-400" />
+      </div>
+    );
+  }
+
+  if (detailError) {
+    return (
+      <div className="p-4">
+        <p className="text-sm text-red-600 dark:text-red-400">
+          {detailError}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Commit header */}
+      <div>
+        <div className="flex items-center gap-2">
+          <GitCommitHorizontal className="h-4 w-4 text-neutral-400" />
+          <span className="font-mono text-xs text-neutral-500">
+            {commit.sha.substring(0, 7)}
+          </span>
+        </div>
+        <p className="mt-1 text-sm font-medium text-neutral-900 dark:text-neutral-100">
+          {commit.message}
+        </p>
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+          <span>{commit.author}</span>
+          <span>·</span>
+          <span>{new Date(commit.date).toLocaleString()}</span>
+        </div>
+        <div className="mt-1 flex items-center gap-2 text-xs">
+          <span className="text-green-600">+{commit.total_additions}</span>
+          <span className="text-red-600">-{commit.total_deletions}</span>
+          <span className="text-neutral-400">
+            {commit.files.length} file(s)
+          </span>
+        </div>
+      </div>
+
+      {/* Divider */}
+      <div className="border-t border-neutral-200 dark:border-neutral-800" />
+
+      {/* File list */}
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-xs font-medium uppercase text-neutral-500">
+            Changed Files ({commit.files.length})
+          </h3>
+          <button
+            onClick={onLoadAllDiffs}
+            disabled={loadingAllDiffs}
+            className="flex items-center gap-1 rounded px-2 py-1 text-[10px] text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-50"
+          >
+            {loadingAllDiffs ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <ChevronDown className="h-3 w-3" />
+            )}
+            Show all diffs
+          </button>
+        </div>
+        <div className="space-y-1">
+          {commit.files.map((file) => (
+            <div key={file.path}>
+              <button
+                onClick={() => onLoadFileDiff(file.path)}
+                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              >
+                {statusIcon(file.status)}
+                <span className="flex-1 truncate text-left text-neutral-700 dark:text-neutral-300">
+                  {file.path}
+                </span>
+                <span className="flex-shrink-0 text-[10px] text-green-600">
+                  +{file.additions}
+                </span>
+                <span className="flex-shrink-0 text-[10px] text-red-600">
+                  -{file.deletions}
+                </span>
+                {loadingFileDiff === file.path && (
+                  <Loader2 className="h-3 w-3 animate-spin text-neutral-400" />
+                )}
+                <ChevronRight
+                  className={`h-3 w-3 text-neutral-400 transition-transform ${
+                    expandedFiles.has(file.path) ? "rotate-90" : ""
+                  }`}
+                />
+              </button>
+
+              {/* Inline diff for this file */}
+              {expandedFiles.has(file.path) && fileDiffs[file.path] && (
+                <div className="ml-4 border-l-2 border-neutral-200 pl-2 dark:border-neutral-700">
+                  {fileDiffs[file.path].diff ? (
+                    <DiffRenderer
+                      diff={fileDiffs[file.path].diff}
+                      filepath={file.path}
+                    />
+                  ) : (
+                    <p className="py-2 text-xs text-neutral-400">
+                      No diff content (binary or empty file)
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -516,6 +1149,8 @@ function BranchesPanel({
   onCreateBranch,
   creatingBranch,
   onDeleteBranch,
+  showSubmodules,
+  onToggleSubmodules,
 }: {
   branches: GitBranchResponse | null;
   newBranchName: string;
@@ -523,6 +1158,8 @@ function BranchesPanel({
   onCreateBranch: () => void;
   creatingBranch: boolean;
   onDeleteBranch: (name: string) => void;
+  showSubmodules: boolean;
+  onToggleSubmodules: () => void;
 }) {
   if (!branches) {
     return (
@@ -543,59 +1180,77 @@ function BranchesPanel({
   return (
     <div className="p-4">
       {/* Create branch */}
-      <div className="mb-4 flex items-center gap-2">
-        <input
-          type="text"
-          value={newBranchName}
-          onChange={(e) => onNewBranchNameChange(e.target.value)}
-          placeholder="New branch name"
-          className="flex-1 rounded border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 placeholder-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500"
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && newBranchName.trim() && !creatingBranch) {
-              onCreateBranch();
-            }
-          }}
-        />
+      <div className="mb-4">
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={newBranchName}
+            onChange={(e) => onNewBranchNameChange(e.target.value)}
+            placeholder="New branch name"
+            className="flex-1 rounded border border-neutral-300 bg-white px-3 py-1.5 text-xs text-neutral-900 placeholder-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500"
+            onKeyDown={(e) => {
+              if (
+                e.key === "Enter" &&
+                newBranchName.trim() &&
+                !creatingBranch
+              )
+                onCreateBranch();
+            }}
+          />
+          <button
+            onClick={onCreateBranch}
+            disabled={!newBranchName.trim() || creatingBranch}
+            className="flex items-center gap-1 rounded bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+          >
+            {creatingBranch ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Plus className="h-3.5 w-3.5" />
+            )}
+            Create
+          </button>
+        </div>
+      </div>
+
+      {/* Submodule toggle */}
+      <div className="mb-3 flex items-center gap-2">
         <button
-          onClick={onCreateBranch}
-          disabled={!newBranchName.trim() || creatingBranch}
-          className="flex items-center gap-1 rounded bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+          onClick={onToggleSubmodules}
+          className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${
+            showSubmodules
+              ? "bg-neutral-500"
+              : "bg-neutral-300 dark:bg-neutral-600"
+          }`}
         >
-          {creatingBranch ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Plus className="h-3.5 w-3.5" />
-          )}
-          Create
+          <span
+            className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+              showSubmodules ? "translate-x-3.5" : "translate-x-0.5"
+            }`}
+          />
         </button>
+        <span className="text-xs text-neutral-500">
+          Show submodule branches
+        </span>
       </div>
 
       {/* Branch list */}
-      <div className="space-y-0.5">
-        {sorted.map((branch) => (
+      <div className="space-y-1">
+        {sorted.map((branch, i) => (
           <div
-            key={branch.name}
-            className={`flex items-center gap-2 rounded px-3 py-2 text-sm ${
-              branch.current
-                ? "bg-neutral-100 font-medium dark:bg-neutral-800"
-                : "hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
-            }`}
+            key={i}
+            className="flex items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
           >
-            <GitBranch className="h-3.5 w-3.5 text-neutral-400" />
-            <span
-              className={`flex-1 ${
-                branch.current
-                  ? "text-neutral-900 dark:text-neutral-100"
-                  : "text-neutral-600 dark:text-neutral-400"
-              }`}
-            >
+            <GitBranch className="h-3.5 w-3.5 text-neutral-500" />
+            <span className="flex-1 font-medium text-neutral-900 dark:text-neutral-100">
               {branch.name}
             </span>
             {branch.current && (
               <span className="text-xs text-neutral-400">current</span>
             )}
             {branch.remote && (
-              <span className="text-xs text-neutral-400">{branch.remote}</span>
+              <span className="text-xs text-neutral-400">
+                {branch.remote}
+              </span>
             )}
             {!branch.current && (
               <button
