@@ -5,8 +5,8 @@ use axum::{
     extract::{Query, State},
     response::sse::{Event, Sse},
 };
-use futures_util::StreamExt;
 use futures_util::stream::Stream;
+use futures_util::StreamExt;
 use serde::Deserialize;
 use tokio_stream::wrappers::BroadcastStream;
 use uuid::Uuid;
@@ -19,6 +19,32 @@ pub struct EventsQuery {
     session: Uuid,
     /// Optional auth token (for SSE which can't set custom headers)
     token: Option<String>,
+}
+
+/// Convert an AppEvent into the SSE event-type string used on the wire.
+fn event_type_str(event: &AppEvent) -> &'static str {
+    match event {
+        AppEvent::Heartbeat => "heartbeat",
+        AppEvent::MessageChunk { .. } => "message.chunk",
+        AppEvent::ReasoningChunk { .. } => "reasoning.chunk",
+        AppEvent::MessageComplete { .. } => "message.complete",
+        AppEvent::UsageStats { .. } => "usage.stats",
+        AppEvent::ToolCall { .. } => "tool.call",
+        AppEvent::ToolResult { .. } => "tool.result",
+        AppEvent::PermissionRequest { .. } => "permission.request",
+        AppEvent::Aborted { .. } => "aborted",
+        AppEvent::Error { .. } => "error",
+        AppEvent::MessagesUpdated { .. } => "messages.updated",
+        AppEvent::ShellOutput { .. } => "shell.output",
+    }
+}
+
+/// Build an SSE Event from an AppEvent.
+fn sse_from_event(event: &AppEvent) -> Result<Event, serde_json::Error> {
+    let json = serde_json::to_string(event)?;
+    Ok(Event::default()
+        .event(event_type_str(event))
+        .data(json))
 }
 
 /// SSE endpoint for real-time events
@@ -41,10 +67,23 @@ pub async fn events_stream(
 
     let session_id = query.session;
     crate::log_info!("SSE connection established for session {}", session_id);
-    let rx = state.event_bus.subscribe();
+
+    // Atomically subscribe + drain the per-session event buffer.
+    // This ensures we don't lose events published before the subscription.
+    let (rx, buffered) = state.event_bus.subscribe_and_drain(session_id);
     let cancel_token = state.cancel_token.clone();
 
     let stream = async_stream::stream! {
+        // --- Phase 1: replay buffered events (events that were published
+        //     before this SSE client subscribed) --------------------------
+        for event in &buffered {
+            match sse_from_event(event) {
+                Ok(e) => yield Ok(e),
+                Err(_) => continue,
+            }
+        }
+
+        // --- Phase 2: stream live events from the broadcast channel ------
         let mut broadcast_stream = BroadcastStream::new(rx);
 
         loop {
@@ -82,30 +121,10 @@ pub async fn events_stream(
                         continue;
                     }
 
-                    // Convert AppEvent to SSE Event
-                    let event_type = match &event {
-                        AppEvent::Heartbeat => "heartbeat",
-                        AppEvent::MessageChunk { .. } => "message.chunk",
-                        AppEvent::ReasoningChunk { .. } => "reasoning.chunk",
-                        AppEvent::MessageComplete { .. } => "message.complete",
-                        AppEvent::UsageStats { .. } => "usage.stats",
-                        AppEvent::ToolCall { .. } => "tool.call",
-                        AppEvent::ToolResult { .. } => "tool.result",
-                        AppEvent::PermissionRequest { .. } => "permission.request",
-                        AppEvent::Aborted { .. } => "aborted",
-                        AppEvent::Error { .. } => "error",
-                        AppEvent::MessagesUpdated { .. } => "messages.updated",
-                        AppEvent::ShellOutput { .. } => "shell.output",
-                    };
-
-                    let json = match serde_json::to_string(&event) {
-                        Ok(s) => s,
+                    match sse_from_event(&event) {
+                        Ok(e) => yield Ok(e),
                         Err(_) => continue,
-                    };
-
-                    yield Ok(Event::default()
-                        .event(event_type)
-                        .data(json));
+                    }
                 }
             }
         }

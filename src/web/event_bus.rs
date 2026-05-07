@@ -1,6 +1,12 @@
+use std::collections::{HashMap, VecDeque};
+use std::sync::Mutex;
+
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use uuid::Uuid;
+
+/// Max buffered events per session (for late SSE subscribers).
+const MAX_SESSION_EVENTS: usize = 256;
 
 /// Events broadcasted to connected clients via SSE
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -84,26 +90,82 @@ pub enum AppEvent {
     Heartbeat,
 }
 
-/// Event bus for broadcasting events to SSE clients
+impl AppEvent {
+    /// Return the session_id for this event, if any.
+    /// Heartbeat is global (no session).
+    pub fn session_id(&self) -> Option<Uuid> {
+        match self {
+            AppEvent::Heartbeat => None,
+            AppEvent::MessageChunk { session_id, .. } => Some(*session_id),
+            AppEvent::ReasoningChunk { session_id, .. } => Some(*session_id),
+            AppEvent::MessageComplete { session_id, .. } => Some(*session_id),
+            AppEvent::UsageStats { session_id, .. } => Some(*session_id),
+            AppEvent::ToolCall { session_id, .. } => Some(*session_id),
+            AppEvent::ToolResult { session_id, .. } => Some(*session_id),
+            AppEvent::PermissionRequest { session_id, .. } => Some(*session_id),
+            AppEvent::Aborted { session_id, .. } => Some(*session_id),
+            AppEvent::ShellOutput { session_id, .. } => Some(*session_id),
+            AppEvent::Error { session_id, .. } => Some(*session_id),
+            AppEvent::MessagesUpdated { session_id } => Some(*session_id),
+        }
+    }
+}
+
+/// Event bus for broadcasting events to SSE clients.
+///
+/// Maintains a per-session ring buffer so that late SSE subscribers
+/// (who connect after events were published) can catch up.
 #[derive(Clone)]
 pub struct EventBus {
     sender: broadcast::Sender<AppEvent>,
+    /// Per-session ring buffer of recent events.
+    /// Locked with std::sync::Mutex because critical sections are short
+    /// (push/pop on a VecDeque) and we need to atomically drain +
+    /// subscribe without async await points in between.
+    session_events: std::sync::Arc<Mutex<HashMap<Uuid, VecDeque<AppEvent>>>>,
 }
 
 impl EventBus {
-    /// Create a new event bus with the specified capacity
+    /// Create a new event bus with the specified broadcast capacity.
     pub fn new(capacity: usize) -> Self {
         let (sender, _) = broadcast::channel(capacity);
-        Self { sender }
+        Self {
+            sender,
+            session_events: std::sync::Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
-    /// Subscribe to events
+    /// Subscribe to live events.
     pub fn subscribe(&self) -> broadcast::Receiver<AppEvent> {
         self.sender.subscribe()
     }
 
-    /// Publish an event to all subscribers
+    /// Atomically subscribe AND drain the per-session buffer.
+    ///
+    /// Acquires the session buffer lock before subscribing so that
+    /// any `publish()` call that fires during this window blocks on the
+    /// lock, ensuring the event either:
+    ///  - was in the buffer (drained before subscribe -> replayed), OR
+    ///  - arrives via broadcast (subscribed before publish -> live).
+    ///
+    /// Returns (receiver, buffered_events).
+    pub fn subscribe_and_drain(&self, session_id: Uuid) -> (broadcast::Receiver<AppEvent>, Vec<AppEvent>) {
+        let mut buffers = self.session_events.lock().unwrap();
+        let rx = self.sender.subscribe();
+        let buffered = buffers.remove(&session_id).unwrap_or_default().into();
+        (rx, buffered)
+    }
+
+    /// Publish an event to all subscribers and buffer it per-session.
     pub fn publish(&self, event: AppEvent) {
+        // Buffer for late SSE subscribers
+        if let (Some(sid), Ok(mut buffers)) = (event.session_id(), self.session_events.lock()) {
+            let buf = buffers.entry(sid).or_default();
+            buf.push_back(event.clone());
+            if buf.len() > MAX_SESSION_EVENTS {
+                buf.pop_front();
+            }
+        }
         // Ignore send errors (no subscribers is OK)
         let _ = self.sender.send(event);
     }

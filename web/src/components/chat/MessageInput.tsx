@@ -212,6 +212,35 @@ export function MessageInput({
     }
   }, [skillInsert, inputValue]);
 
+  // IME composition guards.
+  //
+  // On macOS with Chinese Pinyin IME, pressing Enter to commit fires
+  // `compositionend` BEFORE `keydown` in the same synchronous dispatch.
+  // By the time keydown fires, both `isComposing` and a simple useRef
+  // are already false, so the Enter key incorrectly submits the message.
+  //
+  // Fix: set a "just committed" flag on compositionend and clear it in a
+  // microtask (Promise.resolve). Since compositionend and keydown fire in
+  // the same synchronous dispatch, the flag is still true when keydown runs,
+  // preventing premature submission.
+  const composingRef = useRef(false);
+  const compositionJustCommittedRef = useRef(false);
+
+  function handleCompositionStart() {
+    composingRef.current = true;
+    compositionJustCommittedRef.current = false;
+  }
+
+  function handleCompositionEnd(_e: React.CompositionEvent<HTMLTextAreaElement>) {
+    composingRef.current = false;
+    if (_e.data) {
+      compositionJustCommittedRef.current = true;
+      void Promise.resolve().then(() => {
+        compositionJustCommittedRef.current = false;
+      });
+    }
+  }
+
   function handleKeydown(event: React.KeyboardEvent) {
     // Command palette navigation takes priority
     if (commandPalette.visible && commandPalette.suggestions.length > 0) {
@@ -268,7 +297,8 @@ export function MessageInput({
     if (
       event.key === "Enter" &&
       !event.shiftKey &&
-      !event.nativeEvent.isComposing
+      !composingRef.current &&
+      !compositionJustCommittedRef.current
     ) {
       event.preventDefault();
       handleSubmit();
@@ -406,7 +436,9 @@ export function MessageInput({
     if (!sessionId) return;
 
     const messages = useSessionStore.getState().messages;
-    const userMessages = messages.filter((m) => m.role === "user");
+    const userMessages = messages.filter(
+      (m) => m.role === "user" && !m.id.startsWith("pending-"),
+    );
     if (userMessages.length === 0) return;
 
     const lastUserMessage = userMessages[userMessages.length - 1];
@@ -843,6 +875,8 @@ export function MessageInput({
             value={inputValue}
             onChange={handleInputChange}
             onKeyDown={handleKeydown}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
             placeholder={
               isDraftSession
                 ? "Type your first message to create the session..."

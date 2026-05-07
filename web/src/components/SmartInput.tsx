@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useRef } from "react";
 import { ChevronDown, ArrowUp, Square, Loader2 } from "lucide-react";
 import { useSmartInput } from "../hooks/useSmartInput";
 import { FileMentionPopover } from "./chat/FileMentionPopover";
@@ -110,6 +110,32 @@ export function SmartInput({
     getSubmitPayload,
   } = smartInput;
 
+  // IME composition guards.
+  //
+  // On macOS with Chinese Pinyin IME, pressing Enter to commit fires
+  // `compositionend` BEFORE `keydown` in the same synchronous dispatch.
+  // A simple isComposing check on keydown is therefore insufficient;
+  // we track a "just committed" flag cleared in the next microtask.
+  const composingRef = useRef(false);
+  const compositionJustCommittedRef = useRef(false);
+
+  function handleCompositionStart() {
+    composingRef.current = true;
+    compositionJustCommittedRef.current = false;
+  }
+
+  function handleCompositionEnd(
+    _e: React.CompositionEvent<HTMLTextAreaElement | HTMLInputElement>,
+  ) {
+    composingRef.current = false;
+    if (_e.data) {
+      compositionJustCommittedRef.current = true;
+      void Promise.resolve().then(() => {
+        compositionJustCommittedRef.current = false;
+      });
+    }
+  }
+
   // Auto-focus on mount
   useEffect(() => {
     if (autoFocus && inputRef.current) {
@@ -218,8 +244,12 @@ export function SmartInput({
         return;
       }
 
-      // Handle submit on Enter
-      if (e.key === "Enter" && !e.shiftKey) {
+      // Handle submit on Enter (skip during IME composition)
+      if (
+        e.key === "Enter" &&
+        !e.shiftKey &&
+        !compositionJustCommittedRef.current
+      ) {
         e.preventDefault();
         if (!isSubmitting && !disabled) {
           handleSubmit();
@@ -388,6 +418,8 @@ export function SmartInput({
             value={inputValue}
             onChange={enhancedHandleInputChange}
             onKeyDown={enhancedHandleKeyDown}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
             placeholder={finalPlaceholder}
             rows={1}
             disabled={!isInputEnabled}
@@ -401,6 +433,8 @@ export function SmartInput({
             value={inputValue}
             onChange={enhancedHandleInputChange}
             onKeyDown={enhancedHandleKeyDown}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
             placeholder={finalPlaceholder}
             disabled={!isInputEnabled}
             className={`w-full rounded-2xl bg-transparent px-4 py-3 pr-12 text-sm text-neutral-900 placeholder-neutral-400 outline-none transition-colors focus:border-neutral-500 disabled:opacity-50 dark:text-neutral-100 dark:placeholder-neutral-500 ${inputClassName}`}

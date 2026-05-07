@@ -49,7 +49,12 @@ export class SSEClient {
     };
 
     this.eventSource.onerror = () => {
-      this.emit("error", undefined as unknown as AppEvent);
+      this.emit("error", {
+        type: "error",
+        session_id: this.sessionId ?? "",
+        request_id: 0,
+        message: "Connection lost",
+      } as AppEvent);
 
       if (this.reconnectAttempts < this.maxReconnectAttempts) {
         this.reconnectAttempts++;

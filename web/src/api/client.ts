@@ -137,10 +137,13 @@ export const api = {
     ),
 
   abortRequest: (sessionId: string, data: AbortRequest) =>
-    fetchWithAuth(`${API_BASE}/sessions/${sessionId}/abort`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
+    fetchJson<{ success: boolean }>(
+      `${API_BASE}/sessions/${sessionId}/abort`,
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+    ),
 
   // Models
   listModels: () => fetchJson<{ models: ModelInfo[] }>(`${API_BASE}/models`),

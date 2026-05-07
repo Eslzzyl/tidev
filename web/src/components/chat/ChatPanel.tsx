@@ -2,7 +2,6 @@ import { useMemo, useEffect, useState, useCallback } from "react";
 import { Menu, Settings, Info } from "lucide-react";
 import { useSessionStore } from "../../stores/useSessionStore";
 import { useUIStore } from "../../stores/useUIStore";
-import { useSSE } from "../../hooks/useSSE";
 import { usePermissionStore } from "../../stores/usePermissionStore";
 import { api } from "../../api/client";
 import { buildRounds } from "../../utils/round";
@@ -34,7 +33,7 @@ export function ChatPanel() {
   );
   const toggleSettings = useUIStore((s) => s.toggleSettings);
 
-  const streamingRound = useSSE(currentSessionId);
+  const streamingRound = useUIStore((s) => s.streamingRound);
 
   const completedRounds = useMemo(() => buildRounds(messages), [messages]);
 

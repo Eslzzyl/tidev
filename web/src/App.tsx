@@ -16,6 +16,7 @@ import { ResizeHandle } from "./components/layout/ResizeHandle";
 import { Header } from "./components/layout/Header";
 import { ChatPanel } from "./components/chat/ChatPanel";
 import { ToastContainer } from "./components/ui/ToastContainer";
+import { useSSE } from "./hooks/useSSE";
 
 // Lazy-loaded views — each will be loaded on first render of that tab
 const FilesView = lazy(() =>
@@ -52,6 +53,10 @@ function App() {
   const setMessages = useSessionStore((s) => s.setMessages);
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
   const isDraftSession = useSessionStore((s) => s.isDraftSession);
+  // SSE connection must be mounted at App level so it's active even when
+  // WelcomePage is showing (ChatPanel hasn't mounted yet). Otherwise events
+  // published by the server during the first message are lost.
+  useSSE(currentSessionId);
   const theme = useUIStore((s) => s.theme);
   const activeTab = useUIStore((s) => s.activeTab);
   const setActiveTab = useUIStore((s) => s.setActiveTab);

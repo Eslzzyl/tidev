@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { sseClient } from "../api/sse";
 import { usePermissionStore } from "../stores/usePermissionStore";
 import { useSessionStore } from "../stores/useSessionStore";
@@ -10,21 +10,21 @@ import type { UsageStatsData } from "../stores/useSessionStore";
 import type { Message, ToolCall } from "../types/api";
 
 export function useSSE(sessionId: string | null) {
-  const [streamingRound, setStreamingRound] = useState<Round | null>(null);
-  const streamingRef = useRef<Round | null>(null);
-
   const setMessages = useSessionStore((s) => s.setMessages);
   const setStreaming = useUIStore((s) => s.setStreaming);
+  const setStreamingRound = useUIStore((s) => s.setStreamingRound);
   const setConnectionStatus = useUIStore((s) => s.setConnectionStatus);
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
 
+  // Mutable ref for synchronous access from event handlers
+  const streamingRef = useRef<Round | null>(null);
+
   const updateStreamingRound = useCallback(
     (updater: (prev: Round | null) => Round | null) => {
-      setStreamingRound((prev) => {
-        const next = updater(prev);
-        streamingRef.current = next;
-        return next;
-      });
+      const prev = streamingRef.current;
+      const next = updater(prev);
+      streamingRef.current = next;
+      useUIStore.getState().setStreamingRound(next);
     },
     [],
   );
@@ -370,7 +370,7 @@ export function useSSE(sessionId: string | null) {
     };
 
     const handleErrorEvent = (event: AppEvent) => {
-      if (event.type === "error") {
+      if (!event || event.type === "error") {
         setStreaming(false);
         setStreamingRound(null);
         streamingRef.current = null;
@@ -387,6 +387,14 @@ export function useSSE(sessionId: string | null) {
 
     const handleConnected = () => {
       setConnectionStatus("connected");
+      // Refresh messages after reconnect to catch any events that
+      // were missed during the disconnection (e.g. message.complete).
+      if (currentSessionId) {
+        api.listMessages(currentSessionId).then(({ messages, todos }) => {
+          setMessages(messages);
+          useSessionStore.getState().setTodos(todos ?? []);
+        });
+      }
     };
 
     const handleMessagesUpdated = () => {
@@ -446,5 +454,6 @@ export function useSSE(sessionId: string | null) {
     updateStreamingRound,
   ]);
 
-  return streamingRound;
+  // No return value — streamingRound is stored in the UI store for
+  // global access (so SSE stays connected even when ChatPanel isn't mounted).
 }
