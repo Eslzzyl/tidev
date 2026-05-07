@@ -1019,6 +1019,29 @@ impl AgentRuntime {
             self.persist_assistant_message(child_session_id, &turn)
                 .await?;
 
+            // Send assistant message to subsession conversation in TUI,
+            // so tool_calls are available for proper rendering.
+            {
+                let mut assistant_msg = Message::new(MessageRole::Assistant, &turn.content);
+                assistant_msg.reasoning = turn.reasoning.clone();
+                assistant_msg.tool_calls = turn.tool_calls.clone();
+                assistant_msg.streaming = false;
+                let _ = event_tx.send(BackendEvent::SubagentStatus {
+                    session_id: child_session_id,
+                    request_id: parent_request_id,
+                    child_session_id,
+                    status_text: if turn.tool_calls.is_empty() {
+                        "Completed".to_string()
+                    } else {
+                        "Tool".to_string()
+                    },
+                    current_tool_call: None,
+                    assistant_message: Some(assistant_msg),
+                    content_delta: None,
+                    reasoning_delta: None,
+                });
+            }
+
             // If no tool calls, done
             if turn.tool_calls.is_empty() {
                 send_status(event_tx, "Completed".to_string(), None, None, None);
@@ -1058,6 +1081,19 @@ impl AgentRuntime {
                     event_tx,
                 )
                 .await?;
+
+                // Send tool result to subsession conversation in TUI
+                let result_msg = Message::tool_result(
+                    &tool_call.id,
+                    &tool_call.name,
+                    result.clone(),
+                );
+                let _ = event_tx.send(BackendEvent::SubagentToolResult {
+                    session_id: child_session_id,
+                    request_id: parent_request_id,
+                    child_session_id,
+                    message: result_msg,
+                });
 
                 send_status(event_tx, "Working".to_string(), None, None, None);
             }
