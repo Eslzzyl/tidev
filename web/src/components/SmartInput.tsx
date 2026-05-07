@@ -1,8 +1,9 @@
-import { useEffect, useCallback } from "react";
-import { ChevronDown, Camera, ArrowUp, Square, Loader2 } from "lucide-react";
+import { useEffect, useCallback, useState } from "react";
+import { ChevronDown, ArrowUp, Square, Loader2 } from "lucide-react";
 import { useSmartInput } from "../hooks/useSmartInput";
 import { FileMentionPopover } from "./chat/FileMentionPopover";
 import { commandFragment, getSuggestions } from "../commands";
+import { ModelPanel } from "./chat/ModelPanel";
 
 export interface SmartInputProps {
   /** Called when user submits the input */
@@ -82,6 +83,8 @@ export function SmartInput({
     initialMode,
   });
 
+  const [modelPanelOpen, setModelPanelOpen] = useState(false);
+
   const {
     inputValue,
     setInputValue,
@@ -91,11 +94,6 @@ export function SmartInput({
     toggleMode,
     selectedModelDisplay,
     handleModelSelect,
-    modelDropdownOpen,
-    setModelDropdownOpen,
-    modelSearchQuery,
-    setModelSearchQuery,
-    groupedModels,
     thinkingOptions,
     selectedThinking,
     setSelectedThinking,
@@ -108,7 +106,6 @@ export function SmartInput({
     setCommandPalette,
     closeCommandPalette,
     inputRef,
-    dropdownRef,
     thinkingDropdownRef,
     getSubmitPayload,
   } = smartInput;
@@ -453,62 +450,25 @@ export function SmartInput({
           {mode === "plan" ? "Plan" : "Build"}
         </button>
 
-        {/* Model Selector */}
-        <div ref={dropdownRef} className="relative">
-          <button
-            onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
-            className="flex items-center gap-1 rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
-          >
-            <span className="max-w-[120px] truncate">
-              {selectedModelDisplay?.display_name || "Select model"}
-            </span>
-            <ChevronDown className="h-3 w-3" />
-          </button>
+        {/* Model Selector - opens ModelPanel */}
+        <button
+          onClick={() => setModelPanelOpen(true)}
+          className="flex items-center gap-1 rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+        >
+          <span className="max-w-[120px] truncate">
+            {selectedModelDisplay?.display_name || "Select model"}
+          </span>
+          <ChevronDown className="h-3 w-3" />
+        </button>
 
-          {modelDropdownOpen && (
-            <div className="absolute bottom-full left-0 z-50 mb-1 w-72 rounded-lg border border-neutral-200 bg-white shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
-              <div className="p-2">
-                <input
-                  type="text"
-                  value={modelSearchQuery}
-                  onChange={(e) => setModelSearchQuery(e.target.value)}
-                  placeholder="Search models..."
-                  className="w-full rounded border border-neutral-300 px-2 py-1.5 text-xs dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-200"
-                  autoFocus
-                />
-              </div>
-              <div className="max-h-64 overflow-y-auto">
-                {Array.from(groupedModels.entries()).map(
-                  ([provider, providerModels]) => (
-                    <div key={provider}>
-                      <div className="px-3 py-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                        {provider}
-                      </div>
-                      {providerModels.map((model) => (
-                        <button
-                          key={model.id}
-                          onClick={() => handleModelSelect(model)}
-                          className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
-                            selectedModelDisplay?.id === model.id
-                              ? "bg-neutral-100 dark:bg-neutral-800"
-                              : ""
-                          }`}
-                        >
-                          <span className="flex-1 font-medium text-neutral-900 dark:text-neutral-100">
-                            {model.display_name}
-                          </span>
-                          {model.supports_vision && (
-                            <Camera className="h-3.5 w-3.5 text-neutral-400" />
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  ),
-                )}
-              </div>
-            </div>
-          )}
-        </div>
+        {/* Model Panel */}
+        <ModelPanel
+          isOpen={modelPanelOpen}
+          onClose={() => setModelPanelOpen(false)}
+          currentModelId={selectedModelDisplay?.id || null}
+          currentProviderId={selectedModelDisplay?.provider_id || null}
+          onModelChange={handleModelSelect}
+        />
 
         {/* Thinking level selector */}
         {thinkingOptions.length > 0 && (

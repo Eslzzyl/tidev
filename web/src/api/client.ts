@@ -20,6 +20,8 @@ import type {
   SetDefaultModelRequest,
   SetDefaultModelResponse,
   GetDefaultModelResponse,
+  GetAgentModelsResponse,
+  SetAgentModelRequest,
   DirectoryEntry,
   ListDirResponse,
   ReadFileResponse,
@@ -209,6 +211,16 @@ export const api = {
     fetchJson<GetDefaultModelResponse>(`${API_BASE}/config/default-model`),
   setDefaultModel: (data: SetDefaultModelRequest) =>
     fetchJson<SetDefaultModelResponse>(`${API_BASE}/config/default-model`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  // Agent models
+  getAgentModels: () =>
+    fetchJson<GetAgentModelsResponse>(`${API_BASE}/config/agent-models`),
+
+  setAgentModel: (data: SetAgentModelRequest) =>
+    fetchJson<{ success: boolean }>(`${API_BASE}/config/agent-models`, {
       method: "POST",
       body: JSON.stringify(data),
     }),

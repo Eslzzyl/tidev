@@ -111,6 +111,16 @@ export interface GetDefaultModelResponse {
   model_display_name: string;
 }
 
+export interface GetAgentModelsResponse {
+  default_model: GetDefaultModelResponse;
+  agent_models: Record<string, string>;
+}
+
+export interface SetAgentModelRequest {
+  agent_type: string;
+  model_str: string;
+}
+
 export interface WorkspaceInfo {
   workspace_root: string;
 }

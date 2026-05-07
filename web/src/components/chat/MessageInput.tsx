@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
   ChevronDown,
-  Camera,
   Square,
   ArrowUp,
   ListTodo,
@@ -17,6 +16,7 @@ import { commandFragment, getSuggestions } from "../../commands";
 import { api } from "../../api/client";
 import type { ModelInfo, FileSuggestion, TodoItem } from "../../types/api";
 import type { CommandSuggestion } from "../../commands";
+import { ModelPanel } from "./ModelPanel";
 
 interface MessageInputProps {
   onSlashCommand?: (command: string) => void;
@@ -54,8 +54,7 @@ export function MessageInput({
 
   // Models state
   const [models, setModels] = useState<ModelInfo[]>([]);
-  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
-  const [modelSearchQuery, setModelSearchQuery] = useState("");
+  const [modelPanelOpen, setModelPanelOpen] = useState(false);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(
     null,
@@ -65,7 +64,6 @@ export function MessageInput({
   const [selectedThinking, setSelectedThinking] = useState<string>("");
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
 
-  const dropdownRef = useRef<HTMLDivElement>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement>(null);
   const todoDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -89,31 +87,6 @@ export function MessageInput({
   const setError = useSessionStore((s) => s.setError);
 
   const isInputEnabled = currentSessionId !== null || isDraftSession;
-
-  // Filtered models
-  const filteredModels = (() => {
-    if (!modelSearchQuery.trim()) return models;
-    const q = modelSearchQuery.toLowerCase();
-    return models.filter(
-      (m) =>
-        m.display_name.toLowerCase().includes(q) ||
-        m.id.toLowerCase().includes(q) ||
-        m.provider_name.toLowerCase().includes(q),
-    );
-  })();
-
-  // Grouped models
-  const groupedModels = (() => {
-    const groups = new Map<string, ModelInfo[]>();
-    for (const m of filteredModels) {
-      const key = m.provider_name || m.provider_id;
-      if (!groups.has(key)) {
-        groups.set(key, []);
-      }
-      groups.get(key)!.push(m);
-    }
-    return groups;
-  })();
 
   // Update thinking levels based on model
   const updateThinkingLevels = useCallback((modelId: string) => {
@@ -178,12 +151,6 @@ export function MessageInput({
   // Close dropdowns on click outside
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(e.target as Node)
-      ) {
-        setModelDropdownOpen(false);
-      }
       if (
         thinkingDropdownRef.current &&
         !thinkingDropdownRef.current.contains(e.target as Node)
@@ -648,11 +615,10 @@ export function MessageInput({
     }, 0);
   }
 
-  function handleModelSelect(model: ModelInfo) {
+  // Called when the ModelPanel's General tab selects a new model
+  function handleModelPanelChange(model: ModelInfo) {
     setSelectedModelId(model.id);
     setSelectedProviderId(model.provider_id);
-    setModelDropdownOpen(false);
-    setModelSearchQuery("");
     updateThinkingLevels(model.id);
   }
 
@@ -677,58 +643,25 @@ export function MessageInput({
             {mode === "plan" ? "Plan" : "Build"}
           </button>
 
-          {/* Model selector */}
-          <div ref={dropdownRef} className="relative">
-            <button
-              onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
-              className="flex items-center gap-1 rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
-            >
-              <span className="max-w-[120px] truncate">
-                {selectedModelDisplay?.display_name || "Select model"}
-              </span>
-              <ChevronDown className="h-3 w-3" />
-            </button>
+          {/* Model selector - opens ModelPanel */}
+          <button
+            onClick={() => setModelPanelOpen(true)}
+            className="flex items-center gap-1 rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+          >
+            <span className="max-w-[120px] truncate">
+              {selectedModelDisplay?.display_name || "Select model"}
+            </span>
+            <ChevronDown className="h-3 w-3" />
+          </button>
 
-            {modelDropdownOpen && (
-              <div className="absolute bottom-full left-0 z-50 mb-1 w-72 rounded-lg border border-neutral-200 bg-white shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
-                <div className="p-2">
-                  <input
-                    type="text"
-                    value={modelSearchQuery}
-                    onChange={(e) => setModelSearchQuery(e.target.value)}
-                    placeholder="Search models..."
-                    className="w-full rounded border border-neutral-300 px-2 py-1.5 text-xs dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-200"
-                    autoFocus
-                  />
-                </div>
-                <div className="max-h-64 overflow-y-auto">
-                  {Array.from(groupedModels.entries()).map(
-                    ([provider, providerModels]) => (
-                      <div key={provider}>
-                        <div className="px-3 py-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                          {provider}
-                        </div>
-                        {providerModels.map((model) => (
-                          <button
-                            key={model.id}
-                            onClick={() => handleModelSelect(model)}
-                            className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 ${selectedModelId === model.id ? "bg-neutral-100 dark:bg-neutral-800" : ""}`}
-                          >
-                            <span className="flex-1 font-medium text-neutral-900 dark:text-neutral-100">
-                              {model.display_name}
-                            </span>
-                            {model.supports_vision && (
-                              <Camera className="h-3.5 w-3.5 text-neutral-400" />
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    ),
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+          {/* Model Panel */}
+          <ModelPanel
+            isOpen={modelPanelOpen}
+            onClose={() => setModelPanelOpen(false)}
+            currentModelId={selectedModelId}
+            currentProviderId={selectedProviderId}
+            onModelChange={handleModelPanelChange}
+          />
 
           {/* Thinking level selector */}
           {thinkingOptions.length > 0 && (

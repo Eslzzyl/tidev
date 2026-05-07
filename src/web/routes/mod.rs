@@ -66,6 +66,10 @@ pub fn api_routes() -> Router<AppState> {
             "/config/default-model",
             get(config::get_default_model).post(config::set_default_model),
         )
+        .route(
+            "/config/agent-models",
+            get(config::get_agent_models).post(config::set_agent_model),
+        )
         // Providers
         .route(
             "/providers",
