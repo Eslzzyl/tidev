@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod config;
 pub mod events;
 pub mod files;
@@ -15,6 +16,7 @@ pub mod tools;
 
 use axum::{
     Router,
+    middleware,
     routing::{delete, get, post},
 };
 use tower_http::compression::CompressionLayer;
@@ -25,6 +27,10 @@ use super::state::AppState;
 /// Create the API router
 pub fn api_routes() -> Router<AppState> {
     Router::new()
+        // Auth (public endpoints — always accessible)
+        .route("/auth/status", get(auth::auth_status))
+        .route("/auth/verify", post(auth::auth_verify))
+        .route("/auth/configure", post(auth::auth_configure))
         // SSE events
         .route("/events", get(events::events_stream))
         // Workspace
@@ -98,6 +104,12 @@ use static_file::StaticConfig;
 pub fn create_router(state: AppState, static_config: StaticConfig) -> Router {
     let api = api_routes();
     let static_files = static_file::static_routes(static_config);
+
+    // Apply auth middleware to API routes only
+    let api = api.layer(middleware::from_fn_with_state(
+        state.clone(),
+        crate::web::auth::auth_middleware,
+    ));
 
     Router::new()
         .nest("/api", api)

@@ -1,4 +1,5 @@
 pub mod assets;
+pub mod auth;
 pub mod error;
 pub mod event_bus;
 pub mod routes;

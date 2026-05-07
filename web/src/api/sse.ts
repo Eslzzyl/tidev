@@ -1,5 +1,13 @@
 import type { AppEvent } from "../types/events";
 
+function getAuthToken(): string | null {
+  try {
+    return localStorage.getItem("web_auth_token");
+  } catch {
+    return null;
+  }
+}
+
 export type EventCallback = (event: AppEvent) => void;
 
 export class SSEClient {
@@ -29,7 +37,10 @@ export class SSEClient {
       this.eventSource = null;
     }
 
-    const url = `/api/events?session=${this.sessionId}`;
+    // Build URL with optional auth token (EventSource can't set custom headers)
+    const token = getAuthToken();
+    const tokenParam = token ? `&token=${encodeURIComponent(token)}` : "";
+    const url = `/api/events?session=${this.sessionId}${tokenParam}`;
     this.eventSource = new EventSource(url);
 
     this.eventSource.onopen = () => {

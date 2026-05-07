@@ -6,12 +6,22 @@ use super::paths::ConfigPaths;
 use super::provider::ApiType;
 use super::reasoning::ThinkingLevelType;
 
+/// Web authentication configuration stored in auth.json
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct WebAuth {
+    /// Optional token for web UI authentication (Bearer token)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_token: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AuthStore {
     #[serde(default)]
     pub providers: BTreeMap<String, ProviderAuth>,
     #[serde(default)]
     pub channels: BTreeMap<String, ChannelAuth>,
+    #[serde(default)]
+    pub web: WebAuth,
 }
 
 impl AuthStore {
@@ -57,6 +67,26 @@ impl AuthStore {
         if let Some(provider) = self.providers.get_mut(provider_id) {
             provider.api_key = None;
         }
+    }
+
+    pub fn web_token(&self) -> Option<&str> {
+        self.web
+            .auth_token
+            .as_deref()
+            .filter(|v| !v.trim().is_empty())
+    }
+
+    pub fn set_web_token(&mut self, token: impl Into<String>) {
+        let token = token.into();
+        if token.trim().is_empty() {
+            self.web.auth_token = None;
+        } else {
+            self.web.auth_token = Some(token);
+        }
+    }
+
+    pub fn clear_web_token(&mut self) {
+        self.web.auth_token = None;
     }
 
     pub fn set_telegram_bot_token(&mut self, token: impl Into<String>) {

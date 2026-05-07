@@ -11,19 +11,34 @@ use serde::Deserialize;
 use tokio_stream::wrappers::BroadcastStream;
 use uuid::Uuid;
 
-use crate::web::{event_bus::AppEvent, state::AppState};
+use crate::web::{error::AppError, event_bus::AppEvent, state::AppState};
 
 /// Query parameters for SSE connection
 #[derive(Deserialize)]
 pub struct EventsQuery {
     session: Uuid,
+    /// Optional auth token (for SSE which can't set custom headers)
+    token: Option<String>,
 }
 
 /// SSE endpoint for real-time events
+///
+/// This endpoint is public (bypasses auth middleware) because EventSource
+/// cannot set custom headers. Auth is handled inline via query param.
 pub async fn events_stream(
     State(state): State<AppState>,
     Query(query): Query<EventsQuery>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AppError> {
+    // Validate auth token if configured
+    let auth = state.auth.read().await;
+    if let Some(configured) = auth.web_token() {
+        let provided = query.token.as_deref().unwrap_or("");
+        if provided != configured {
+            return Err(AppError::Unauthorized("Invalid or missing auth token".into()));
+        }
+    }
+    drop(auth);
+
     let session_id = query.session;
     crate::log_info!("SSE connection established for session {}", session_id);
     let rx = state.event_bus.subscribe();
@@ -98,9 +113,9 @@ pub async fn events_stream(
         crate::log_info!("SSE connection closed for session {}", session_id);
     };
 
-    Sse::new(stream).keep_alive(
+    Ok(Sse::new(stream).keep_alive(
         axum::response::sse::KeepAlive::new()
             .interval(Duration::from_secs(10))
             .text("{}"),
-    )
+    ))
 }

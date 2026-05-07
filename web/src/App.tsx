@@ -5,7 +5,9 @@ import {
   getEffectiveTheme,
   type MainTab,
 } from "./stores/useUIStore";
+import { useAuthStore } from "./stores/useAuthStore";
 import { api } from "./api/client";
+import { AuthGate } from "./components/AuthGate";
 import { Settings } from "./components/Settings";
 import { WelcomePage } from "./components/WelcomePage";
 import { LeftSidebar } from "./components/layout/LeftSidebar";
@@ -63,6 +65,17 @@ function App() {
   const closeMobileRightSidebar = useUIStore((s) => s.closeMobileRightSidebar);
   const setLeftSidebarWidth = useUIStore((s) => s.setLeftSidebarWidth);
   const setRightSidebarWidth = useUIStore((s) => s.setRightSidebarWidth);
+
+  // Auth state
+  const authIsLoading = useAuthStore((s) => s.isLoading);
+  const authIsRequired = useAuthStore((s) => s.isAuthRequired);
+  const authIsAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const checkAuthStatus = useAuthStore((s) => s.checkAuthStatus);
+
+  // Check auth status on mount
+  useEffect(() => {
+    checkAuthStatus();
+  }, [checkAuthStatus]);
 
   // Apply theme
   useEffect(() => {
@@ -219,6 +232,11 @@ function App() {
     },
     [rightSidebarWidth],
   );
+
+  // Show auth gate if auth is required but not authenticated
+  if (authIsRequired && !authIsAuthenticated) {
+    return <AuthGate />;
+  }
 
   if (isLoading) {
     return (

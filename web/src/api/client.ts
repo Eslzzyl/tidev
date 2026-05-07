@@ -34,9 +34,38 @@ import type {
   GitBranchResponse,
   GitLogResponse,
   GitMessageResponse,
+  GitShowResponse,
+  GitFileDiffResponse,
 } from "../types/api";
 
 const API_BASE = "/api";
+
+function getAuthToken(): string | null {
+  try {
+    return localStorage.getItem("web_auth_token");
+  } catch {
+    return null;
+  }
+}
+
+function getAuthHeaders(): Record<string, string> {
+  const token = getAuthToken();
+  if (token) {
+    return { Authorization: `Bearer ${token}` };
+  }
+  return {};
+}
+
+/** Wrapper around fetch that automatically includes auth headers */
+function fetchWithAuth(url: string, options?: RequestInit): Promise<Response> {
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...getAuthHeaders(),
+      ...options?.headers,
+    },
+  });
+}
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   try {
@@ -44,6 +73,7 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
       ...options,
       headers: {
         "Content-Type": "application/json",
+        ...getAuthHeaders(),
         ...options?.headers,
       },
     });
@@ -85,7 +115,7 @@ export const api = {
     fetchJson<SessionDetail>(`${API_BASE}/sessions/${id}`),
 
   deleteSession: (id: string) =>
-    fetch(`${API_BASE}/sessions/${id}`, { method: "DELETE" }).then((r) => {
+    fetchWithAuth(`${API_BASE}/sessions/${id}`, { method: "DELETE" }).then((r) => {
       if (!r.ok) throw new Error(`Failed to delete session: ${r.status}`);
     }),
 
@@ -105,7 +135,7 @@ export const api = {
     ),
 
   abortRequest: (sessionId: string, data: AbortRequest) =>
-    fetch(`${API_BASE}/sessions/${sessionId}/abort`, {
+    fetchWithAuth(`${API_BASE}/sessions/${sessionId}/abort`, {
       method: "POST",
       body: JSON.stringify(data),
     }),
@@ -188,7 +218,7 @@ export const api = {
     fetchJson<{ providers: ProviderInfo[] }>(`${API_BASE}/providers`),
 
   connectProvider: (id: string, data: ConnectProviderRequest) =>
-    fetch(`${API_BASE}/providers/${encodeURIComponent(id)}/connect`, {
+    fetchWithAuth(`${API_BASE}/providers/${encodeURIComponent(id)}/connect`, {
       method: "POST",
       body: JSON.stringify(data),
     }).then((r) => {
@@ -196,14 +226,14 @@ export const api = {
     }),
 
   disconnectProvider: (id: string) =>
-    fetch(`${API_BASE}/providers/${encodeURIComponent(id)}/connect`, {
+    fetchWithAuth(`${API_BASE}/providers/${encodeURIComponent(id)}/connect`, {
       method: "DELETE",
     }).then((r) => {
       if (!r.ok) throw new Error(`Failed to disconnect provider: ${r.status}`);
     }),
 
   createProvider: (data: CreateProviderRequest) =>
-    fetch(`${API_BASE}/providers`, {
+    fetchWithAuth(`${API_BASE}/providers`, {
       method: "POST",
       body: JSON.stringify(data),
     }).then((r) => {
@@ -211,7 +241,7 @@ export const api = {
     }),
 
   deleteProvider: (id: string) =>
-    fetch(`${API_BASE}/providers/${encodeURIComponent(id)}`, {
+    fetchWithAuth(`${API_BASE}/providers/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }).then((r) => {
       if (!r.ok) throw new Error(`Failed to delete provider: ${r.status}`);
@@ -265,29 +295,55 @@ export const api = {
     }),
 
   terminalInput: (sessionId: string, data: string) =>
-    fetch(`${API_BASE}/terminal/input`, {
+    fetchWithAuth(`${API_BASE}/terminal/input`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: sessionId, data }),
     }),
 
   terminalResize: (sessionId: string, cols: number, rows: number) =>
-    fetch(`${API_BASE}/terminal/resize`, {
+    fetchWithAuth(`${API_BASE}/terminal/resize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: sessionId, cols, rows }),
     }),
 
   closeTerminal: (sessionId: string) =>
-    fetch(`${API_BASE}/terminal/${sessionId}`, { method: "DELETE" }),
+    fetchWithAuth(`${API_BASE}/terminal/${sessionId}`, { method: "DELETE" }),
 
   // Git
   gitStatus: () => fetchJson<GitStatusResponse>(`${API_BASE}/git/status`),
 
-  gitBranches: () => fetchJson<GitBranchResponse>(`${API_BASE}/git/branches`),
+  gitBranches: (showSubmodules?: boolean) => {
+    const params = showSubmodules ? "?show_submodules=true" : "";
+    return fetchJson<GitBranchResponse>(`${API_BASE}/git/branches${params}`);
+  },
 
-  gitLog: (count = 20) =>
-    fetchJson<GitLogResponse>(`${API_BASE}/git/history?count=${count}`),
+  gitLog: (count = 20, skip = 0) =>
+    fetchJson<GitLogResponse>(
+      `${API_BASE}/git/history?count=${count}&skip=${skip}`,
+    ),
+
+  gitShowCommit: (sha: string) =>
+    fetchJson<GitShowResponse>(`${API_BASE}/git/show/${sha}`),
+
+  gitShowFileDiff: (sha: string, path: string) => {
+    const params = new URLSearchParams({ path });
+    return fetchJson<GitFileDiffResponse[]>(
+      `${API_BASE}/git/show/${sha}/diff?${params.toString()}`,
+    );
+  },
+
+  gitShowAllDiffs: (sha: string) =>
+    fetchJson<GitFileDiffResponse[]>(`${API_BASE}/git/show/${sha}/diff`),
+
+  gitDiffFile: (path: string, staged?: boolean) => {
+    const params = new URLSearchParams({ path });
+    if (staged) params.set("staged", "true");
+    return fetchJson<GitFileDiffResponse>(
+      `${API_BASE}/git/diff/file?${params.toString()}`,
+    );
+  },
 
   gitCommit: (message: string) =>
     fetchJson<GitMessageResponse>(`${API_BASE}/git/commit`, {

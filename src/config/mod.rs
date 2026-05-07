@@ -16,7 +16,7 @@ use crate::tooling::ToolPermission;
 
 use self::reasoning::ThinkingMatcher;
 
-pub use auth::{ActiveModel, AuthStore, ModelSummary, ProviderAuth};
+pub use auth::{ActiveModel, AuthStore, ModelSummary, ProviderAuth, WebAuth};
 pub use logging::LogConfig;
 pub use mcp::{McpConfig, McpServerConfig};
 pub use paths::ConfigPaths;
