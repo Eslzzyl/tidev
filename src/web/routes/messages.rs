@@ -632,14 +632,6 @@ pub struct RevertResponse {
     pub hidden_message_count: usize,
 }
 
-/// A single step-level patch stored within a round.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-struct StepPatch {
-    hash: String,
-    files: Vec<String>,
-    step: usize,
-}
-
 /// Revert session state to a specific user message.
 /// This will restore files to the state before that message was sent,
 /// and hide all messages after it (they can be restored via redo).
@@ -677,7 +669,7 @@ pub async fn revert_to_message(
     }
 
     // Collect patches from messages after the target
-    let patches = collect_patches_after_message(&messages, body.message_id)?;
+    let patches = crate::shared::undo::collect_patches_after_message(&messages, body.message_id)?;
     crate::log_info!("Collected {} patches to revert", patches.len());
 
     // Capture redo snapshot (current state) if not already saved
@@ -811,83 +803,6 @@ pub async fn redo_last_undo(
         success: true,
         message: "Redo complete".to_string(),
     }))
-}
-
-/// Collect patches from messages after the target message.
-fn collect_patches_after_message(
-    messages: &[Message],
-    message_id: Uuid,
-) -> anyhow::Result<Vec<crate::snapshot::Patch>> {
-    let mut patches = Vec::new();
-    let mut found = false;
-
-    // Iterate through messages in forward order
-    for message in messages {
-        if found {
-            patches = collect_patches_from_message(patches, message);
-            continue;
-        }
-
-        if message.id == message_id {
-            found = true;
-            // Also include the target message's own patches
-            patches = collect_patches_from_message(patches, message);
-        }
-    }
-
-    // Reverse so the OLDEST patches are processed first
-    patches.reverse();
-
-    Ok(patches)
-}
-
-/// Extract patches from a single message's patch_files.
-fn extract_patches_from_message(message: &Message) -> Vec<crate::snapshot::Patch> {
-    use crate::snapshot::Patch;
-
-    let Some(patch_files_str) = &message.patch_files else {
-        return Vec::new();
-    };
-
-    // Try nested format first
-    if let Ok(step_patches) = serde_json::from_str::<Vec<StepPatch>>(patch_files_str) {
-        return step_patches
-            .into_iter()
-            .map(|sp| Patch {
-                hash: sp.hash,
-                files: sp.files,
-            })
-            .collect();
-    }
-
-    // Fallback: old flat format
-    if let Ok(files) = serde_json::from_str::<Vec<String>>(patch_files_str)
-        && !files.is_empty()
-        && let Some(hash) = &message.snapshot_hash
-    {
-        return vec![Patch {
-            hash: hash.clone(),
-            files,
-        }];
-    }
-
-    Vec::new()
-}
-
-/// Collect patches from a message, inserting at the beginning.
-fn collect_patches_from_message(
-    mut patches: Vec<crate::snapshot::Patch>,
-    message: &Message,
-) -> Vec<crate::snapshot::Patch> {
-    let msg_patches = extract_patches_from_message(message);
-    if msg_patches.is_empty() {
-        return patches;
-    }
-
-    for msg_patch in msg_patches.into_iter().rev() {
-        patches.insert(0, msg_patch);
-    }
-    patches
 }
 
 /// Response for compact session

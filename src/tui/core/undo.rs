@@ -2,18 +2,13 @@ use anyhow::Result;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
-use crate::{context::ContextManager, snapshot::Patch};
+use crate::{
+    context::ContextManager,
+    shared::undo::StepPatch,
+    snapshot::Patch,
+};
 
 use super::{App, BackendEvent, Screen};
-
-/// A single step-level patch stored within a round.
-/// Multiple step patches are serialized as a JSON array in `patch_files`.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-struct StepPatch {
-    hash: String,
-    files: Vec<String>,
-    step: usize,
-}
 
 impl App {
     /// Finalize snapshot for the last user message by using cached per-step patches
@@ -448,95 +443,10 @@ impl App {
 
     fn collect_patches_after_message(&self, message_id: Uuid) -> Result<Vec<Patch>> {
         crate::log_info!("collect_patches: looking for message_id={}", message_id);
-
-        let mut patches = Vec::new();
-        let mut found = false;
-
-        // We iterate through the messages in forward order to find the target.
-        // For REVERTING, we collect patches in order such that the OLDEST
-        // snapshot hash for each file takes priority (to restore pre-round state).
-        // The patches are inserted at position 0, so they end up in reverse order
-        // (newest message first). Within each message, step patches are also reversed
-        // so the initial snapshot hash takes priority.
-        for message in &self.conversation.messages {
-            if found {
-                patches = self.collect_patches_from_message(patches, message);
-                continue;
-            }
-
-            if message.id == message_id {
-                found = true;
-                crate::log_info!(
-                    "collect_patches: found target message, snapshot_hash={:?}, patch_files={:?}",
-                    message.snapshot_hash,
-                    message.patch_files.as_ref().map(|s| s.len())
-                );
-                // Also include the target message's own patches
-                patches = self.collect_patches_from_message(patches, message);
-            }
-        }
-
-        // Reverse so the OLDEST patches (closest to target message) are processed first.
-        // This ensures the initial snapshot hash takes priority in revert dedup.
-        patches.reverse();
-
+        let patches =
+            crate::shared::undo::collect_patches_after_message(&self.conversation.messages, message_id)?;
         crate::log_info!("collect_patches: returning {} patches", patches.len());
         Ok(patches)
-    }
-
-    /// Extract patches from a single message's patch_files.
-    /// Handles both new nested format `[{"hash":"...","files":[...],"step":N}]`
-    /// and old flat format `["file1","file2"]`.
-    fn extract_patches_from_message(message: &crate::session::Message) -> Vec<Patch> {
-        let Some(patch_files_str) = &message.patch_files else {
-            return Vec::new();
-        };
-
-        // Try nested format first
-        if let Ok(step_patches) = serde_json::from_str::<Vec<StepPatch>>(patch_files_str) {
-            return step_patches
-                .into_iter()
-                .map(|sp| Patch {
-                    hash: sp.hash,
-                    files: sp.files,
-                })
-                .collect();
-        }
-
-        // Fallback: old flat format `["file1","file2"]` — use message's snapshot_hash
-        if let Ok(files) = serde_json::from_str::<Vec<String>>(patch_files_str)
-            && !files.is_empty()
-            && let Some(hash) = &message.snapshot_hash
-        {
-            return vec![Patch {
-                hash: hash.clone(),
-                files,
-            }];
-        }
-
-        Vec::new()
-    }
-
-    /// Collect patches from a message, inserting them at the beginning of the list
-    /// so that newer messages appear first (will be reversed later for correct ordering).
-    fn collect_patches_from_message(
-        &self,
-        mut patches: Vec<Patch>,
-        message: &crate::session::Message,
-    ) -> Vec<Patch> {
-        let msg_patches = Self::extract_patches_from_message(message);
-        if msg_patches.is_empty() {
-            return patches;
-        }
-        crate::log_info!(
-            "collect_patches: message {} has {} step patches",
-            message.id,
-            msg_patches.len()
-        );
-        for msg_patch in msg_patches.into_iter().rev() {
-            patches.insert(0, msg_patch);
-        }
-        patches
     }
 
     fn set_revert_message_id(
