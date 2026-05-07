@@ -460,7 +460,7 @@ impl App {
     }
 }
 
-pub(super) fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+pub(crate) fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     let width = width.min(area.width.saturating_sub(2)).max(20);
     let height = height.min(area.height.saturating_sub(2)).max(8);
 
