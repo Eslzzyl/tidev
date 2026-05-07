@@ -41,7 +41,7 @@ pub use input::at_mention;
 pub use input::event;
 pub use input::mouse_selection;
 pub use render::diff_render;
-pub use render::render_chat;
+pub use render::chat_render;
 pub use render::render_dialog;
 pub use ui::balance_panel;
 pub use ui::connect;

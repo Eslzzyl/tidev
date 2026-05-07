@@ -470,7 +470,7 @@ pub(super) fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     Rect::new(x, y, width, height)
 }
 
-pub(super) fn shorten(value: &str, max_chars: usize) -> String {
+pub(crate) fn shorten(value: &str, max_chars: usize) -> String {
     let count = value.chars().count();
     if count <= max_chars {
         return value.to_string();
@@ -696,21 +696,21 @@ impl App {
     }
 }
 
-pub(super) fn line_with_style(text: &str, fg: Color) -> Line<'static> {
+pub(crate) fn line_with_style(text: &str, fg: Color) -> Line<'static> {
     Line::from(vec![Span::styled(
         text.to_string(),
         Style::default().fg(fg),
     )])
 }
 
-pub(super) fn line_with_style_right_aligned(text: &str, width: usize, fg: Color) -> Line<'static> {
+pub(crate) fn line_with_style_right_aligned(text: &str, width: usize, fg: Color) -> Line<'static> {
     let text_width = UnicodeWidthStr::width(text);
     let padding = width.saturating_sub(text_width);
     let padded_text = format!("{}{}", " ".repeat(padding), text);
     Line::from(vec![Span::styled(padded_text, Style::default().fg(fg))])
 }
 
-pub(super) fn line_with_prefix(
+pub(crate) fn line_with_prefix(
     prefix: &str,
     text: &str,
     prefix_style: Style,
@@ -722,7 +722,7 @@ pub(super) fn line_with_prefix(
     ])
 }
 
-pub(super) fn decorate_card_lines(
+pub(crate) fn decorate_card_lines(
     lines: Vec<Line<'static>>,
     width: usize,
     background: Color,
@@ -733,7 +733,7 @@ pub(super) fn decorate_card_lines(
         .collect()
 }
 
-pub(super) fn decorate_card_line(
+pub(crate) fn decorate_card_line(
     line: Line<'static>,
     width: usize,
     background: Color,
@@ -764,7 +764,7 @@ pub(super) fn line_display_width(line: &Line<'static>) -> usize {
         .sum()
 }
 
-pub(super) fn shorten_single_line(value: &str, max_chars: usize) -> String {
+pub(crate) fn shorten_single_line(value: &str, max_chars: usize) -> String {
     let single_line = value.replace('\n', " ").replace('\r', "");
     shorten(&single_line, max_chars)
 }
