@@ -15,37 +15,31 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="description" content="TiDev Web - AI coding assistant" />
     <title>TiDev</title>
-    <!--
-      Immediately set body background color to match saved/system theme
-      BEFORE React mounts, so Safari 26+ picks up the correct color
-      for the browser chrome (address bar, bottom toolbar).
-    -->
-    <script>
-      (function () {
-        var isDark = false;
-        try {
-          var saved = localStorage.getItem("theme");
-          if (saved === "dark") {
-            isDark = true;
-          } else if (saved === "system" || saved === null) {
+    </head>
+    <body>
+      <div id="root"></div>
+      <script>
+        (function () {
+          var isDark = false;
+          try {
+            var saved = localStorage.getItem("theme");
+            if (saved === "dark") {
+              isDark = true;
+            } else if (saved === "system" || saved === null) {
+              isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+            }
+          } catch (e) {
             isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
           }
-        } catch (e) {
-          isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-        }
-        var color = isDark ? "#0a0a0a" : "#ffffff";
-        var meta = document.querySelector('meta[name="theme-color"]');
-        if (meta) meta.setAttribute("content", color);
-        document.documentElement.style.backgroundColor = color;
-        document.body.style.backgroundColor = color;
-        if (isDark) {
-          document.documentElement.classList.add("dark");
-        }
-      })();
-    </script>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
+          var color = isDark ? "#0a0a0a" : "#ffffff";
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute("content", color);
+          document.documentElement.style.backgroundColor = color;
+          document.body.style.backgroundColor = color;
+          if (isDark) {
+            document.documentElement.classList.add("dark");
+          }
+        })();
+      </script>
+      <script type="module" src="/src/main.tsx"></script>
+    </body></html>
