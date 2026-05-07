@@ -75,8 +75,11 @@ fn explorer_prompt() -> String {
          </answer>\n\
          </results>\n\n\
          ## Constraints\n\
-         - READ-ONLY: You must NEVER write, modify, create, or delete any files. \
+         - READ-ONLY: You MUST NOT write, edit, create, or delete any files. \
             Search and report only.\n\
+         - You do NOT have access to `write`, `edit`, or `apply_patch` tools. \
+            If asked to edit files, refuse and explain that you are a read-only agent.\n\
+         - Return your analysis/summary as text output. Do not attempt to produce file edits.\n\
          - When using bash, only run read-only commands (find, grep, cat, git log, ls, etc.). \
             Never use sed -i, touch, mkdir, rm, mv, cp, echo >, or any command that modifies the filesystem.\n\
          - Be exhaustive but concise.\n\
@@ -100,7 +103,13 @@ fn librarian_prompt() -> String {
          - Provide evidence-based answers with sources.\n\
          - Quote relevant code snippets.\n\
          - Link to official docs when available.\n\
-         - Distinguish between official and community patterns.",
+         - Distinguish between official and community patterns.\n\n\
+         ## Constraints\n\
+         - READ-ONLY: You MUST NOT write, edit, create, or delete any files. \
+            Research and report only.\n\
+         - You do NOT have access to `write`, `edit`, or `apply_patch` tools. \
+            If asked to edit files, refuse and explain that you are a read-only agent.\n\
+         - Return your research findings as text output. Do not attempt to produce file edits.",
         base_instruction()
     )
 }
@@ -124,7 +133,11 @@ fn oracle_prompt() -> String {
          - Acknowledge uncertainty when present.\n\
          - Prefer simpler designs unless complexity clearly earns its keep.\n\n\
          ## Constraints\n\
-         - READ-ONLY: You advise, you don't implement.\n\
+         - READ-ONLY: You MUST NOT write, edit, create, or delete any files. \
+            You advise, you don't implement.\n\
+         - You do NOT have access to `write`, `edit`, or `apply_patch` tools. \
+            If asked to edit files, refuse and explain that you are a read-only agent.\n\
+         - Return your analysis as text output. Do not attempt to produce file edits.\n\
          - Focus on strategy, not execution.\n\
          - Point to specific files/lines when relevant.",
         base_instruction()
@@ -208,6 +221,24 @@ mod tests {
     fn test_explorer_is_read_only() {
         let prompt = system_prompt(AgentType::Explorer);
         assert!(prompt.contains("READ-ONLY"));
+        assert!(prompt.contains("do NOT have access to `write`"));
+        assert!(prompt.contains("Return your analysis"));
+    }
+
+    #[test]
+    fn test_librarian_is_read_only() {
+        let prompt = system_prompt(AgentType::Librarian);
+        assert!(prompt.contains("READ-ONLY"));
+        assert!(prompt.contains("do NOT have access to `write`"));
+        assert!(prompt.contains("Return your research findings"));
+    }
+
+    #[test]
+    fn test_oracle_is_read_only() {
+        let prompt = system_prompt(AgentType::Oracle);
+        assert!(prompt.contains("READ-ONLY"));
+        assert!(prompt.contains("do NOT have access to `write`"));
+        assert!(prompt.contains("Return your analysis"));
     }
 
     #[test]
