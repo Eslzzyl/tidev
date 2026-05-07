@@ -382,6 +382,7 @@ impl AgentRuntime {
         });
 
         let mut turn = AssistantTurn::default();
+        let call_start = Utc::now();
 
         while let Some(event) = rx.recv().await {
             // Forward to consumer first
@@ -389,9 +390,15 @@ impl AgentRuntime {
 
             match event {
                 BackendEvent::Delta { content, .. } => {
+                    if turn.created_at.is_none() {
+                        turn.created_at = Some(Utc::now());
+                    }
                     turn.content.push_str(&content);
                 }
                 BackendEvent::ReasoningDelta { content, .. } => {
+                    if turn.created_at.is_none() {
+                        turn.created_at = Some(Utc::now());
+                    }
                     turn.reasoning.push_str(&content);
                 }
                 BackendEvent::ToolCallUpdated { tool_call, .. } => {
@@ -415,7 +422,7 @@ impl AgentRuntime {
                     turn.model_id = Some(model_id.clone());
                     turn.tokens_per_second = duration_ms.and_then(|ms| {
                         if ms > 0 {
-                            Some(total_tokens as f32 / (ms as f32 / 1000.0))
+                            Some(output_tokens as f32 / (ms as f32 / 1000.0))
                         } else {
                             None
                         }
@@ -437,6 +444,7 @@ impl AgentRuntime {
                         turn.model_id.clone(),
                         turn.tokens_per_second,
                     );
+                    let saved_created_at = turn.created_at;
                     turn = finished_turn;
                     if turn.input_tokens.is_none() {
                         turn.input_tokens = saved_tokens.0;
@@ -447,6 +455,9 @@ impl AgentRuntime {
                         turn.model_id = saved_tokens.5;
                         turn.tokens_per_second = saved_tokens.6;
                     }
+                    // Restore timestamps (finished_turn has None from Default::default())
+                    turn.created_at = saved_created_at.or(Some(call_start));
+                    turn.completed_at = Some(Utc::now());
                     break;
                 }
                 BackendEvent::Failed { error, .. } => {
@@ -652,11 +663,18 @@ impl AgentRuntime {
         session_id: uuid::Uuid,
         turn: &AssistantTurn,
     ) -> Result<()> {
-        let mut msg = Message::new(MessageRole::Assistant, &turn.content);
+        let created_at = turn.created_at.unwrap_or_else(Utc::now);
+        let completed_at = turn.completed_at.unwrap_or_else(Utc::now);
+        let mut msg = Message::persisted(
+            uuid::Uuid::new_v4(),
+            MessageRole::Assistant,
+            &turn.content,
+            created_at,
+            false,
+        );
+        msg.completed_at = Some(completed_at);
         msg.reasoning = turn.reasoning.clone();
         msg.tool_calls = turn.tool_calls.clone();
-        msg.streaming = false;
-        msg.completed_at = Some(Utc::now());
         // Token usage captured from UsageStats during streaming
         msg.input_tokens = turn.input_tokens;
         msg.output_tokens = turn.output_tokens;
@@ -942,6 +960,7 @@ impl AgentRuntime {
             let mut finished = false;
             let mut last_sent_content_len: usize = 0;
             let mut last_sent_reasoning_len: usize = 0;
+            let call_start = Utc::now();
 
             while let Some(event) = stream_rx.recv().await {
                 // Forward to parent event channel (for standard conversation updates)
@@ -949,6 +968,9 @@ impl AgentRuntime {
 
                 match event {
                     BackendEvent::Delta { content, .. } => {
+                        if turn.created_at.is_none() {
+                            turn.created_at = Some(Utc::now());
+                        }
                         turn.content.push_str(&content);
                         let content_delta = if turn.content.len() > last_sent_content_len {
                             let delta = turn.content[last_sent_content_len..].to_string();
@@ -966,6 +988,9 @@ impl AgentRuntime {
                         );
                     }
                     BackendEvent::ReasoningDelta { content, .. } => {
+                        if turn.created_at.is_none() {
+                            turn.created_at = Some(Utc::now());
+                        }
                         turn.reasoning.push_str(&content);
                         let reasoning_delta = if turn.reasoning.len() > last_sent_reasoning_len {
                             let delta = turn.reasoning[last_sent_reasoning_len..].to_string();
@@ -990,7 +1015,10 @@ impl AgentRuntime {
                         turn: finished_turn,
                         ..
                     } => {
+                        let saved_created_at = turn.created_at;
                         turn = finished_turn;
+                        turn.created_at = saved_created_at.or(Some(call_start));
+                        turn.completed_at = Some(Utc::now());
                         finished = true;
                         break;
                     }

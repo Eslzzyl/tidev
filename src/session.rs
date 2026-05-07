@@ -277,6 +277,12 @@ pub struct AssistantTurn {
     pub model_id: Option<String>,
     #[serde(default)]
     pub tokens_per_second: Option<f32>,
+    /// When the first stream delta was received (start of turn).
+    #[serde(default)]
+    pub created_at: Option<DateTime<Utc>>,
+    /// When the turn finished (after usage stats).
+    #[serde(default)]
+    pub completed_at: Option<DateTime<Utc>>,
 }
 
 impl AssistantTurn {
