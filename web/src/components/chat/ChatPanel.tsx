@@ -1,12 +1,13 @@
-import { useMemo, useEffect, useState, useCallback } from "react";
-import { Menu, Settings, Info } from "lucide-react";
+import { useMemo, useEffect, useState, useCallback, useRef } from "react";
+import { Menu, Settings, Info, ArrowDown } from "lucide-react";
 import { useSessionStore } from "../../stores/useSessionStore";
 import { useUIStore } from "../../stores/useUIStore";
 import { usePermissionStore } from "../../stores/usePermissionStore";
 import { api } from "../../api/client";
 import { buildRounds } from "../../utils/round";
-import { MessageRound } from "./MessageRound";
-import { SystemMessageBlock } from "../renderers/SystemMessageBlock";
+import { VirtualMessageList } from "./VirtualMessageList";
+import { useMessageVirtualizer } from "../../hooks/useMessageVirtualizer";
+import { useChatAutoScroll } from "../../hooks/useChatAutoScroll";
 import type {
   Round,
   SystemMessageBlock as SystemMessageBlockType,
@@ -84,47 +85,31 @@ export function ChatPanel() {
     return rounds;
   }, [completedRounds, streamingRound]);
 
-  // Auto-scroll
-  const [messagesContainerRef, setMessagesContainerRef] =
-    useState<HTMLDivElement | null>(null);
-  const [messagesEndRef, setMessagesEndRef] = useState<HTMLDivElement | null>(
-    null,
-  );
-  const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
-  const [isFirstLoad, setIsFirstLoad] = useState(true);
+  // Virtual list + auto-scroll
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const {
+    virtualItems,
+    totalSize,
+    isVirtualized,
+    measureElement,
+  } = useMessageVirtualizer(scrollContainerRef, allRounds);
 
+  const isStreaming = !!streamingRound;
+  const { handleScroll, scrollToBottom, showScrollButton, endRef } =
+    useChatAutoScroll(scrollContainerRef, isStreaming);
+
+  // Scroll to bottom once when a session is first loaded
+  const scrolledSessionRef = useRef<string | null>(null);
   useEffect(() => {
-    if (isFirstLoad && allRounds.length > 0 && messagesEndRef) {
-      messagesEndRef.scrollIntoView({ behavior: "instant" });
-      setIsFirstLoad(false);
+    if (
+      currentSessionId &&
+      currentSessionId !== scrolledSessionRef.current &&
+      allRounds.length > 0
+    ) {
+      scrolledSessionRef.current = currentSessionId;
+      scrollToBottom(true);
     }
-  }, [allRounds.length, isFirstLoad, messagesEndRef]);
-
-  useEffect(() => {
-    if (!isFirstLoad && shouldAutoScroll && messagesEndRef) {
-      messagesEndRef.scrollIntoView({ behavior: "smooth" });
-    }
-  });
-
-  useEffect(() => {
-    if (currentSessionId) {
-      setIsFirstLoad(true);
-    }
-  }, [currentSessionId]);
-
-  const handleScroll = useCallback(() => {
-    if (!messagesContainerRef) return;
-    const { scrollHeight, scrollTop, clientHeight } = messagesContainerRef;
-    const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
-    setShouldAutoScroll(isNearBottom);
-  }, [messagesContainerRef]);
-
-  const scrollToBottom = useCallback(() => {
-    if (messagesEndRef) {
-      messagesEndRef.scrollIntoView({ behavior: "smooth" });
-      setShouldAutoScroll(true);
-    }
-  }, [messagesEndRef]);
+  }, [currentSessionId, allRounds.length, scrollToBottom]);
 
   // Undo state
   const [undoDialogOpen, setUndoDialogOpen] = useState(false);
@@ -165,7 +150,7 @@ export function ChatPanel() {
     setUndoError(null);
 
     try {
-      const result = await api.revertToMessage(
+      await api.revertToMessage(
         currentSessionId,
         undoTargetMessageId,
       );
@@ -352,46 +337,54 @@ export function ChatPanel() {
       </div>
 
       {/* Messages Area */}
-      <div
-        ref={setMessagesContainerRef}
-        onScroll={handleScroll}
-        className="flex-1 overflow-y-auto overflow-x-hidden"
-      >
-        {!currentSessionId && !isDraftSession ? (
-          <div className="flex h-full items-center justify-center">
-            <div className="text-center">
-              <p className="text-neutral-500 dark:text-neutral-400">
-                Select a session or create a new one to start chatting
-              </p>
+      <div className="relative flex-1 overflow-hidden">
+        <div
+          ref={scrollContainerRef}
+          onScroll={handleScroll}
+          className="h-full overflow-y-auto overflow-x-hidden"
+        >
+          {!currentSessionId && !isDraftSession ? (
+            <div className="flex h-full items-center justify-center">
+              <div className="text-center">
+                <p className="text-neutral-500 dark:text-neutral-400">
+                  Select a session or create a new one to start chatting
+                </p>
+              </div>
             </div>
-          </div>
-        ) : allRounds.length === 0 && !streamingRound ? (
-          <div className="flex h-full items-center justify-center">
-            <div className="text-center">
-              <p className="text-neutral-500 dark:text-neutral-400">
-                {isDraftSession
-                  ? "Type your first message to create the session"
-                  : "No messages yet. Start a conversation!"}
-              </p>
+          ) : allRounds.length === 0 && !streamingRound ? (
+            <div className="flex h-full items-center justify-center">
+              <div className="text-center">
+                <p className="text-neutral-500 dark:text-neutral-400">
+                  {isDraftSession
+                    ? "Type your first message to create the session"
+                    : "No messages yet. Start a conversation!"}
+                </p>
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="divide-y divide-neutral-100 dark:divide-neutral-900">
-            {allRounds.map((item) =>
-              "kind" in item && item.kind === "system" ? (
-                <SystemMessageBlock key={item.id} message={item.message} />
-              ) : (
-                <MessageRound
-                  key={(item as Round).id}
-                  round={item as Round}
-                  onUndoRequest={handleUndoRequest}
-                  canUndo={canUndo}
-                />
-              ),
-            )}
-          </div>
+          ) : (
+            <VirtualMessageList
+              entries={allRounds}
+              virtualItems={virtualItems}
+              totalSize={totalSize}
+              isVirtualized={isVirtualized}
+              measureElement={measureElement}
+              onUndoRequest={handleUndoRequest}
+              canUndo={canUndo}
+            />
+          )}
+          <div ref={endRef} />
+        </div>
+
+        {/* "Back to latest" floating button */}
+        {showScrollButton && (
+          <button
+            onClick={() => scrollToBottom()}
+            className="absolute bottom-4 right-6 z-10 flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm text-white shadow-lg transition-all hover:bg-blue-700 active:scale-95"
+          >
+            <ArrowDown className="h-4 w-4" />
+            Back to latest
+          </button>
         )}
-        <div ref={setMessagesEndRef} />
       </div>
 
       {/* Permission Request Cards */}
