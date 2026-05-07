@@ -370,13 +370,44 @@ export function useSSE(sessionId: string | null) {
     };
 
     const handleErrorEvent = (event: AppEvent) => {
-      if (!event || event.type === "error") {
-        setStreaming(false);
-        setStreamingRound(null);
-        streamingRef.current = null;
-      } else {
-        setConnectionStatus("disconnected");
+      if (!event || event.type !== "error") return;
+      setStreaming(false);
+      // Add error content to streaming round and mark it complete so
+      // the user can see what went wrong.
+      const round = streamingRef.current;
+      if (round) {
+        updateStreamingRound((prev) => {
+          if (!prev) return null;
+          const errorMsg = event.message || "An error occurred";
+          return {
+            ...prev,
+            segments: [
+              ...prev.segments,
+              { type: "text" as const, content: `\n\n**Error**: ${errorMsg}` },
+            ],
+            status: "complete" as const,
+          };
+        });
       }
+      setStreamingRound(null);
+      streamingRef.current = null;
+    };
+
+    const handleRetrying = (event: AppEvent) => {
+      if (event.type !== "retrying") return;
+      // Show retry status in the streaming round so user knows what's happening
+      updateStreamingRound((prev) => {
+        if (!prev) return prev;
+        // Remove any existing retry-status segment, then add current one
+        const filtered = prev.segments.filter(
+          (s) => s.type !== "text" || !s.content.startsWith("\n\n_Retrying"),
+        );
+        const statusLine = `\n\n_Retrying (${event.attempt}/${event.max_attempts}): ${event.reason}..._`;
+        return {
+          ...prev,
+          segments: [...filtered, { type: "text" as const, content: statusLine }],
+        };
+      });
     };
 
     const handleAborted = () => {
@@ -420,6 +451,7 @@ export function useSSE(sessionId: string | null) {
     sseClient.on("message.complete", handleMessageComplete);
     sseClient.on("usage.stats", handleUsageStats);
     sseClient.on("error", handleErrorEvent);
+    sseClient.on("retrying", handleRetrying);
     sseClient.on("aborted", handleAborted);
     sseClient.on("connected", handleConnected);
     sseClient.on("messages.updated", handleMessagesUpdated);
@@ -437,6 +469,7 @@ export function useSSE(sessionId: string | null) {
       sseClient.off("message.complete", handleMessageComplete);
       sseClient.off("usage.stats", handleUsageStats);
       sseClient.off("error", handleErrorEvent);
+      sseClient.off("retrying", handleRetrying);
       sseClient.off("aborted", handleAborted);
       sseClient.off("connected", handleConnected);
       sseClient.off("messages.updated", handleMessagesUpdated);

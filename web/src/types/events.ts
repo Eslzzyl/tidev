@@ -51,6 +51,15 @@ export type AppEvent =
     }
   | { type: "aborted"; session_id: string; request_id: number }
   | { type: "error"; session_id: string; request_id: number; message: string }
+  | {
+      type: "retrying";
+      session_id: string;
+      request_id: number;
+      attempt: number;
+      max_attempts: number;
+      reason: string;
+      retry_after_secs?: number;
+    }
   | { type: "heartbeat" }
   | {
       type: "shell_output";

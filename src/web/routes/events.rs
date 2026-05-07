@@ -34,6 +34,7 @@ fn event_type_str(event: &AppEvent) -> &'static str {
         AppEvent::PermissionRequest { .. } => "permission.request",
         AppEvent::Aborted { .. } => "aborted",
         AppEvent::Error { .. } => "error",
+        AppEvent::Retrying { .. } => "retrying",
         AppEvent::MessagesUpdated { .. } => "messages.updated",
         AppEvent::ShellOutput { .. } => "shell.output",
     }
@@ -113,6 +114,7 @@ pub async fn events_stream(
                         AppEvent::PermissionRequest { session_id: sid, .. } => *sid == session_id,
                         AppEvent::Aborted { session_id: sid, .. } => *sid == session_id,
                         AppEvent::Error { session_id: sid, .. } => *sid == session_id,
+                        AppEvent::Retrying { session_id: sid, .. } => *sid == session_id,
                         AppEvent::ShellOutput { session_id: sid, .. } => *sid == session_id,
                         AppEvent::MessagesUpdated { session_id: sid } => *sid == session_id,
                     };

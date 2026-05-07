@@ -566,6 +566,21 @@ pub async fn send_message(
                     finished,
                     exit_code,
                 }),
+                BackendEvent::Retrying {
+                    session_id,
+                    request_id,
+                    attempt,
+                    max_attempts,
+                    reason,
+                    retry_after_secs,
+                } => Some(AppEvent::Retrying {
+                    session_id,
+                    request_id,
+                    attempt,
+                    max_attempts,
+                    reason,
+                    retry_after_secs,
+                }),
                 _ => None,
             };
 

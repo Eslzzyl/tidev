@@ -99,6 +99,10 @@ export class SSEClient {
       this.emit("aborted", JSON.parse(e.data));
     });
 
+    this.eventSource.addEventListener("retrying", (e: MessageEvent) => {
+      this.emit("retrying", JSON.parse(e.data));
+    });
+
     this.eventSource.addEventListener("error", (e: MessageEvent) => {
       try {
         const data = e.data

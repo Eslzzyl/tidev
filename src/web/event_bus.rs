@@ -86,6 +86,15 @@ pub enum AppEvent {
         request_id: u64,
         message: String,
     },
+    /// LLM retry in progress (retryable error, will retry)
+    Retrying {
+        session_id: Uuid,
+        request_id: u64,
+        attempt: u32,
+        max_attempts: u32,
+        reason: String,
+        retry_after_secs: Option<u32>,
+    },
     /// Heartbeat to keep connection alive
     Heartbeat,
 }
@@ -106,6 +115,7 @@ impl AppEvent {
             AppEvent::Aborted { session_id, .. } => Some(*session_id),
             AppEvent::ShellOutput { session_id, .. } => Some(*session_id),
             AppEvent::Error { session_id, .. } => Some(*session_id),
+            AppEvent::Retrying { session_id, .. } => Some(*session_id),
             AppEvent::MessagesUpdated { session_id } => Some(*session_id),
         }
     }
