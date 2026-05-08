@@ -5,8 +5,8 @@ use axum::{
     extract::{Query, State},
     response::sse::{Event, Sse},
 };
-use futures_util::stream::Stream;
 use futures_util::StreamExt;
+use futures_util::stream::Stream;
 use serde::Deserialize;
 use tokio_stream::wrappers::BroadcastStream;
 use uuid::Uuid;
@@ -43,9 +43,7 @@ fn event_type_str(event: &AppEvent) -> &'static str {
 /// Build an SSE Event from an AppEvent.
 fn sse_from_event(event: &AppEvent) -> Result<Event, serde_json::Error> {
     let json = serde_json::to_string(event)?;
-    Ok(Event::default()
-        .event(event_type_str(event))
-        .data(json))
+    Ok(Event::default().event(event_type_str(event)).data(json))
 }
 
 /// SSE endpoint for real-time events
@@ -61,7 +59,9 @@ pub async fn events_stream(
     if let Some(configured) = auth.web_token() {
         let provided = query.token.as_deref().unwrap_or("");
         if provided != configured {
-            return Err(AppError::Unauthorized("Invalid or missing auth token".into()));
+            return Err(AppError::Unauthorized(
+                "Invalid or missing auth token".into(),
+            ));
         }
     }
     drop(auth);

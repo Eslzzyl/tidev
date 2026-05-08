@@ -11,11 +11,11 @@ use crate::{
     session::{Conversation, Message, MessageRole, ToolCall},
     theme::ThemePalette,
     tooling::canonical_tool_name,
+    tui::App,
     tui::core::state::{
         MessageRenderCacheEntry, MessageRenderCacheKey, MessageRenderCacheKind,
         MessageRenderCacheValue, SelectableRegionRange,
     },
-    tui::App,
     utils::{TokenUsage, format_token_count},
 };
 use ratatui::{
@@ -34,8 +34,7 @@ use uuid::Uuid;
 
 use super::super::permission::{RunningSubagentExecution, SubagentStatus};
 use crate::tui::render::render::{
-    decorate_card_lines, line_with_prefix, line_with_style,
-    shorten, shorten_single_line,
+    decorate_card_lines, line_with_prefix, line_with_style, shorten, shorten_single_line,
 };
 
 use crate::tui::chat_render::content::BlockComputation;
@@ -1031,8 +1030,13 @@ impl App {
         }
 
         self.record_message_render_cache_miss();
-        let result =
-            tool::render_tool_call_with_result(tool_call, tool_result, body_width, is_streaming, ctx);
+        let result = tool::render_tool_call_with_result(
+            tool_call,
+            tool_result,
+            body_width,
+            is_streaming,
+            ctx,
+        );
 
         {
             let mut cache = self.message_render_cache.borrow_mut();
@@ -1145,19 +1149,20 @@ impl App {
         let status_line = match &execution.status {
             SubagentStatus::Tool => {
                 if let Some(tool_call) = &execution.current_tool_call {
-                    let tool_summary = if tool::tool_call_arguments_are_complete(&tool_call.arguments) {
-                        utils::summarize_tool_call(
-                            &tool_call.name,
-                            &tool_call.arguments,
-                            body_width.saturating_sub(10),
-                            self.workspace_root.as_path(),
-                        )
-                    } else {
-                        let canonical_display = canonical_tool_name(&tool_call.name)
-                            .map(|s| s.to_string())
-                            .unwrap_or_else(|| tool_call.name.clone());
-                        format!("{} ...", canonical_display)
-                    };
+                    let tool_summary =
+                        if tool::tool_call_arguments_are_complete(&tool_call.arguments) {
+                            utils::summarize_tool_call(
+                                &tool_call.name,
+                                &tool_call.arguments,
+                                body_width.saturating_sub(10),
+                                self.workspace_root.as_path(),
+                            )
+                        } else {
+                            let canonical_display = canonical_tool_name(&tool_call.name)
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| tool_call.name.clone());
+                            format!("{} ...", canonical_display)
+                        };
                     format!("{}: {}", status_text, tool_summary)
                 } else {
                     status_text.to_string()

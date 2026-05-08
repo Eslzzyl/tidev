@@ -87,10 +87,7 @@ pub fn extract_patches_from_message(message: &Message) -> Vec<Patch> {
 ///
 /// The caller is responsible for reversing the final list so that oldest
 /// patches are applied first during revert.
-pub fn collect_patches_from_message(
-    mut patches: Vec<Patch>,
-    message: &Message,
-) -> Vec<Patch> {
+pub fn collect_patches_from_message(mut patches: Vec<Patch>, message: &Message) -> Vec<Patch> {
     let msg_patches = extract_patches_from_message(message);
     if msg_patches.is_empty() {
         return patches;
@@ -108,10 +105,7 @@ pub fn collect_patches_from_message(
 /// *Patches are returned in application order* — oldest (closest to the
 /// target message) first — so they can be fed directly to
 /// [`SnapshotService::revert`](crate::snapshot::SnapshotService::revert).
-pub fn collect_patches_after_message(
-    messages: &[Message],
-    message_id: Uuid,
-) -> Result<Vec<Patch>> {
+pub fn collect_patches_after_message(messages: &[Message], message_id: Uuid) -> Result<Vec<Patch>> {
     let mut patches = Vec::new();
     let mut found = false;
 
@@ -141,11 +135,7 @@ mod tests {
     use super::*;
     use crate::session::{Message, MessageRole};
 
-    fn make_message(
-        id: Uuid,
-        snapshot_hash: Option<&str>,
-        patch_files: Option<&str>,
-    ) -> Message {
+    fn make_message(id: Uuid, snapshot_hash: Option<&str>, patch_files: Option<&str>) -> Message {
         let mut msg = Message::new(MessageRole::User, "test");
         msg.id = id;
         msg.snapshot_hash = snapshot_hash.map(|s| s.to_string());
@@ -174,11 +164,7 @@ mod tests {
 
     #[test]
     fn extract_flat_format() {
-        let msg = make_message(
-            Uuid::new_v4(),
-            Some("abc"),
-            Some(r#"["a.txt","b.txt"]"#),
-        );
+        let msg = make_message(Uuid::new_v4(), Some("abc"), Some(r#"["a.txt","b.txt"]"#));
         let patches = extract_patches_from_message(&msg);
         assert_eq!(patches.len(), 1);
         assert_eq!(patches[0].hash, "abc");
@@ -192,9 +178,21 @@ mod tests {
         let id3 = Uuid::new_v4();
 
         let msgs = vec![
-            make_message(id1, Some("h1"), Some(r#"[{"hash":"h1","files":["f1"],"step":1}]"#)),
-            make_message(id2, Some("h2"), Some(r#"[{"hash":"h2","files":["f2"],"step":1}]"#)),
-            make_message(id3, Some("h3"), Some(r#"[{"hash":"h3","files":["f3"],"step":1}]"#)),
+            make_message(
+                id1,
+                Some("h1"),
+                Some(r#"[{"hash":"h1","files":["f1"],"step":1}]"#),
+            ),
+            make_message(
+                id2,
+                Some("h2"),
+                Some(r#"[{"hash":"h2","files":["f2"],"step":1}]"#),
+            ),
+            make_message(
+                id3,
+                Some("h3"),
+                Some(r#"[{"hash":"h3","files":["f3"],"step":1}]"#),
+            ),
         ];
 
         // Collect patches after id1 → gets patches for id1, id2, and id3

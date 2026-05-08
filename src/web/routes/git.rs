@@ -406,11 +406,8 @@ async fn git_show_files(
     let cwd = workspace(&state).clone();
 
     // Get commit metadata
-    let info = run_git(
-        &["log", "-1", "--format=%H|%an|%ai|%s", &sha],
-        &cwd,
-    )
-    .map_err(crate::web::error::AppError::Internal)?;
+    let info = run_git(&["log", "-1", "--format=%H|%an|%ai|%s", &sha], &cwd)
+        .map_err(crate::web::error::AppError::Internal)?;
 
     let (author, date, message) = info
         .lines()
@@ -431,14 +428,28 @@ async fn git_show_files(
 
     // Get file list with name-status
     let name_status = run_git(
-        &["diff-tree", "--no-commit-id", "-r", "--name-status", "--root", &sha],
+        &[
+            "diff-tree",
+            "--no-commit-id",
+            "-r",
+            "--name-status",
+            "--root",
+            &sha,
+        ],
         &cwd,
     )
     .map_err(crate::web::error::AppError::Internal)?;
 
     // Get file list with numstat (additions/deletions)
     let numstat = run_git(
-        &["diff-tree", "--no-commit-id", "-r", "--numstat", "--root", &sha],
+        &[
+            "diff-tree",
+            "--no-commit-id",
+            "-r",
+            "--numstat",
+            "--root",
+            &sha,
+        ],
         &cwd,
     )
     .map_err(crate::web::error::AppError::Internal)?;

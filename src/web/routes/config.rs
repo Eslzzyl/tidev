@@ -198,9 +198,9 @@ pub async fn set_agent_model(
         let model_id = parts[1];
 
         let config = state.config.read().await;
-        let provider = config.provider(provider_id).ok_or_else(|| {
-            AppError::BadRequest(format!("Provider '{}' not found", provider_id))
-        })?;
+        let provider = config
+            .provider(provider_id)
+            .ok_or_else(|| AppError::BadRequest(format!("Provider '{}' not found", provider_id)))?;
         if !provider.models.contains_key(model_id) {
             return Err(AppError::BadRequest(format!(
                 "Model '{}' not found for provider '{}'",

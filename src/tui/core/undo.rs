@@ -2,11 +2,7 @@ use anyhow::Result;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
-use crate::{
-    context::ContextManager,
-    shared::undo::StepPatch,
-    snapshot::Patch,
-};
+use crate::{context::ContextManager, shared::undo::StepPatch, snapshot::Patch};
 
 use super::{App, BackendEvent, Screen};
 
@@ -443,8 +439,10 @@ impl App {
 
     fn collect_patches_after_message(&self, message_id: Uuid) -> Result<Vec<Patch>> {
         crate::log_info!("collect_patches: looking for message_id={}", message_id);
-        let patches =
-            crate::shared::undo::collect_patches_after_message(&self.conversation.messages, message_id)?;
+        let patches = crate::shared::undo::collect_patches_after_message(
+            &self.conversation.messages,
+            message_id,
+        )?;
         crate::log_info!("collect_patches: returning {} patches", patches.len());
         Ok(patches)
     }

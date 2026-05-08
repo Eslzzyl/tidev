@@ -17,11 +17,7 @@ const PUBLIC_PREFIXES: &[&str] = &["/auth/", "/events"];
 /// - If no token is configured in AuthStore, all requests pass through.
 /// - If a token is configured, all `/api/*` requests (except `/api/auth/*`)
 ///   must include `Authorization: Bearer <token>`.
-pub async fn auth_middleware(
-    State(state): State<AppState>,
-    req: Request,
-    next: Next,
-) -> Response {
+pub async fn auth_middleware(State(state): State<AppState>, req: Request, next: Next) -> Response {
     let path = req.uri().path();
 
     // Always allow public endpoints (auth status/verify, events)

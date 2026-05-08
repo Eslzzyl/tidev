@@ -12,18 +12,16 @@ use std::collections::HashMap;
 use std::path::Path;
 use uuid::Uuid;
 
+use super::RenderContext;
+use super::tool::{render_compaction_divider_line, render_tool_call_with_result};
+use super::utils::render_reasoning_markdown_lines;
 use crate::tui::core::state::{
-    MessageRenderCacheEntry, MessageRenderCacheKey, MessageRenderCacheKind,
-    MessageRenderCacheValue,
+    MessageRenderCacheEntry, MessageRenderCacheKey, MessageRenderCacheKind, MessageRenderCacheValue,
 };
 use crate::tui::diff_render::render_unified_diff_text;
-use crate::tui::render::render::{decorate_card_lines, line_with_prefix, line_with_style, line_with_style_right_aligned, shorten_single_line};
-use super::tool::{
-    render_tool_call_with_result, render_compaction_divider_line,
-};
-use super::utils::render_reasoning_markdown_lines;
-use super::{
-    RenderContext,
+use crate::tui::render::render::{
+    decorate_card_lines, line_with_prefix, line_with_style, line_with_style_right_aligned,
+    shorten_single_line,
 };
 
 pub(super) fn render_reasoning_lines(

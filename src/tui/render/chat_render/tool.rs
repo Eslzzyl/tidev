@@ -15,12 +15,13 @@ use std::path::Path;
 use unicode_width::UnicodeWidthStr;
 use uuid::Uuid;
 
+use super::utils::{
+    parse_line_range_from_read_output, parse_read_content_metadata, summarize_tool_arguments,
+    summarize_tool_call, tool_output_is_error,
+};
+use super::{RenderContext, TOOL_OUTPUT_EXPANDED_MAX_LINES, TOOL_OUTPUT_PREVIEW_LINES};
 use crate::tui::diff_render::render_unified_diff_text;
 use crate::tui::render::render::{line_with_style, shorten, shorten_single_line};
-use super::utils::{tool_output_is_error, summarize_tool_call, summarize_tool_arguments, parse_line_range_from_read_output, parse_read_content_metadata};
-use super::{
-    RenderContext, TOOL_OUTPUT_PREVIEW_LINES, TOOL_OUTPUT_EXPANDED_MAX_LINES,
-};
 
 pub(super) fn render_tool_call_with_result(
     tool_call: &ToolCall,
@@ -758,7 +759,10 @@ pub(super) fn render_todos_checkbox_list(
     lines
 }
 
-pub(super) fn tool_output_from_message<'a>(message: &'a Message, ctx: &'a RenderContext<'_>) -> &'a str {
+pub(super) fn tool_output_from_message<'a>(
+    message: &'a Message,
+    ctx: &'a RenderContext<'_>,
+) -> &'a str {
     ctx.expanded_tool_outputs
         .get(&message.id)
         .map(|output| output.as_str())

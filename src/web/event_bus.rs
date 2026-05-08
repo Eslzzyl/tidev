@@ -159,7 +159,10 @@ impl EventBus {
     ///  - arrives via broadcast (subscribed before publish -> live).
     ///
     /// Returns (receiver, buffered_events).
-    pub fn subscribe_and_drain(&self, session_id: Uuid) -> (broadcast::Receiver<AppEvent>, Vec<AppEvent>) {
+    pub fn subscribe_and_drain(
+        &self,
+        session_id: Uuid,
+    ) -> (broadcast::Receiver<AppEvent>, Vec<AppEvent>) {
         let mut buffers = self.session_events.lock().unwrap();
         let rx = self.sender.subscribe();
         let buffered = buffers.remove(&session_id).unwrap_or_default().into();

@@ -9,9 +9,7 @@ pub struct AuthStatusResponse {
     pub auth_required: bool,
 }
 
-pub async fn auth_status(
-    State(state): State<AppState>,
-) -> Json<AuthStatusResponse> {
+pub async fn auth_status(State(state): State<AppState>) -> Json<AuthStatusResponse> {
     let auth = state.auth.read().await;
     let auth_required = auth.web_token().is_some();
     Json(AuthStatusResponse { auth_required })
@@ -64,9 +62,7 @@ pub async fn auth_configure(
                 .unwrap_or("");
             let provided = auth_header.strip_prefix("Bearer ").unwrap_or("");
             if provided != existing {
-                return Err(AppError::Unauthorized(
-                    "Invalid current auth token".into(),
-                ));
+                return Err(AppError::Unauthorized("Invalid current auth token".into()));
             }
         }
     }
@@ -75,9 +71,8 @@ pub async fn auth_configure(
     {
         let mut auth = state.auth.write().await;
         auth.set_web_token(body.new_token.clone());
-        auth.save(&state.config_paths).map_err(|e| {
-            AppError::Internal(format!("Failed to save auth store: {}", e))
-        })?;
+        auth.save(&state.config_paths)
+            .map_err(|e| AppError::Internal(format!("Failed to save auth store: {}", e)))?;
     }
 
     crate::log_info!("Web auth token updated");

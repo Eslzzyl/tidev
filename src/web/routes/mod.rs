@@ -15,8 +15,7 @@ pub mod todos;
 pub mod tools;
 
 use axum::{
-    Router,
-    middleware,
+    Router, middleware,
     routing::{delete, get, post},
 };
 use tower_http::compression::CompressionLayer;
