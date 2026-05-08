@@ -105,6 +105,9 @@ pub(crate) struct MessageLayoutIndex {
     pub(crate) valid: bool,
     /// Whether the index was last built while assistant streaming was active.
     pub(crate) contains_streaming_messages: bool,
+    /// Message IDs that need their blocks recomputed (set by content-only invalidations).
+    /// Cleared after incremental update is applied.
+    pub(crate) dirty_messages: Vec<Uuid>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

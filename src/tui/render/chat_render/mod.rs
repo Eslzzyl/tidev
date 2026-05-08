@@ -1315,8 +1315,8 @@ impl App {
     /// - Cache is cleared
     /// - Force rebuild is requested (for streaming messages)
     ///
-    /// For incremental updates, only the tail (last few messages) is rebuilt,
-    /// preserving existing block positions for unchanged messages.
+    /// For incremental updates, only blocks with dirty messages are recomputed,
+    /// preserving positions for unchanged blocks.
     fn update_message_layout_index(&self, width: usize, body_width: usize, force_rebuild: bool) {
         let messages = self.conversation.visible_messages();
         let mut index = self.message_layout_index.borrow_mut();
@@ -1344,6 +1344,7 @@ impl App {
             index.width = width;
             index.valid = true;
             index.contains_streaming_messages = force_rebuild;
+            index.dirty_messages.clear();
 
             if messages.is_empty() {
                 return;
@@ -1396,20 +1397,38 @@ impl App {
             // Step 2: Compute block data in parallel using rayon
             // (RenderContext is Sync, so it can be shared across threads)
             if !blocks_info.is_empty() {
-                let computations: Vec<BlockComputation> = blocks_info
-                    .par_iter()
-                    .map(|info| {
-                        content::compute_block_data(
-                            &ctx,
-                            session_id,
-                            messages,
-                            info.start_idx,
-                            width,
-                            body_width,
-                            info.is_round_end,
-                        )
-                    })
-                    .collect();
+                // Use sequential iteration for small message batches to avoid rayon dispatch overhead
+                let computations: Vec<BlockComputation> = if blocks_info.len() > 4 {
+                    blocks_info
+                        .par_iter()
+                        .map(|info| {
+                            content::compute_block_data(
+                                &ctx,
+                                session_id,
+                                messages,
+                                info.start_idx,
+                                width,
+                                body_width,
+                                info.is_round_end,
+                            )
+                        })
+                        .collect()
+                } else {
+                    blocks_info
+                        .iter()
+                        .map(|info| {
+                            content::compute_block_data(
+                                &ctx,
+                                session_id,
+                                messages,
+                                info.start_idx,
+                                width,
+                                body_width,
+                                info.is_round_end,
+                            )
+                        })
+                        .collect()
+                };
 
                 // Step 3: Build layout index and insert cache entries sequentially
                 let mut current_line = 0;
@@ -1438,6 +1457,84 @@ impl App {
                     }
                 }
                 index.total_lines = current_line;
+            }
+        } else if !index.dirty_messages.is_empty() {
+            // Incremental update: only recompute blocks with dirty messages
+            let dirty_ids: std::collections::HashSet<Uuid> = index.dirty_messages.drain(..).collect();
+
+            let expanded_tool_outputs = self.load_expanded_tool_outputs(messages);
+            let spinner = self.loading_spinner();
+            let ctx = RenderContext {
+                palette: self.palette(),
+                spinner,
+                workspace_root: self.workspace_root.as_path(),
+                expanded_tool_results: &self.expanded_tool_results,
+                expanded_tool_outputs: &expanded_tool_outputs,
+                config: &self.config,
+                auth: &self.auth,
+                conversation: &self.conversation,
+                mode: self.mode,
+            };
+            let session_id = self.conversation.session_id;
+
+            // Find and recompute dirty blocks
+            let mut i = 0;
+            while i < index.blocks.len() {
+                let block = &index.blocks[i];
+                let msg = &messages[block.message_start_idx];
+                if dirty_ids.contains(&msg.id) || dirty_ids.iter().any(|id| {
+                    messages[block.message_start_idx..block.message_start_idx + block.message_count]
+                        .iter()
+                        .any(|m| &m.id == id)
+                }) {
+                    // Recompute this block
+                    let is_round_end = {
+                        let next_idx = block.message_start_idx + block.message_count;
+                        next_idx >= messages.len()
+                            || matches!(messages[next_idx].role, MessageRole::User)
+                    };
+                    let comp = content::compute_block_data(
+                        &ctx,
+                        session_id,
+                        messages,
+                        block.message_start_idx,
+                        width,
+                        body_width,
+                        is_round_end,
+                    );
+
+                    let old_line_count = index.blocks[i].line_count;
+                    let line_count_diff = comp.line_count as isize - old_line_count as isize;
+
+                    // Update the block
+                    index.blocks[i].line_count = comp.line_count;
+                    index.blocks[i].message_count = comp.message_count;
+
+                    // Adjust subsequent blocks' start_line
+                    if line_count_diff != 0 {
+                        for j in (i + 1)..index.blocks.len() {
+                            index.blocks[j].start_line =
+                                (index.blocks[j].start_line as isize + line_count_diff) as usize;
+                        }
+                        index.total_lines =
+                            (index.total_lines as isize + line_count_diff) as usize;
+                    }
+
+                    // Insert cache entries for this block
+                    let mut cache = self.message_render_cache.borrow_mut();
+                    for (key, entry) in &comp.cache_entries {
+                        let tick = self.next_message_render_cache_tick();
+                        cache.insert(
+                            key.clone(),
+                            MessageRenderCacheEntry {
+                                value: entry.value.clone(),
+                                last_used_tick: tick,
+                            },
+                        );
+                    }
+                    drop(cache);
+                }
+                i += 1;
             }
         }
     }
@@ -1502,14 +1599,13 @@ impl App {
         &self,
         messages: &[Message],
         start_idx: usize,
-        width: usize,
+        _width: usize,
         body_width: usize,
         ctx: &RenderContext<'_>,
         is_round_end: bool,
     ) -> (Uuid, usize, usize) {
         let message = &messages[start_idx];
         let message_id = message.id;
-        let palette = self.palette();
 
         let (message_count, line_count) = match message.role {
             MessageRole::Assistant => {
@@ -1526,8 +1622,7 @@ impl App {
                     self.cached_render_message_cards(ctx, message, body_width, is_round_end);
                 let mut lines = 0;
                 for (_, card_lines) in &cards {
-                    lines +=
-                        decorate_card_lines(card_lines.clone(), width, palette.background).len();
+                    lines += card_lines.len();
                 }
 
                 // Calculate lines for tool calls with results
@@ -1555,8 +1650,7 @@ impl App {
                             ctx,
                         );
                         if !card_lines.is_empty() {
-                            lines +=
-                                decorate_card_lines(card_lines, width, palette.panel_light).len();
+                            lines += card_lines.len();
                         }
                     }
                     lines += 1; // Empty line after tool calls
@@ -1569,8 +1663,7 @@ impl App {
                     self.cached_render_message_cards(ctx, message, body_width, is_round_end);
                 let mut lines = 0;
                 for (_, card_lines) in &cards {
-                    lines +=
-                        decorate_card_lines(card_lines.clone(), width, palette.panel_alt).len();
+                    lines += card_lines.len();
                 }
                 lines += 1; // Empty line after user message
                 (1, lines)
@@ -1580,8 +1673,7 @@ impl App {
                     self.cached_render_message_cards(ctx, message, body_width, is_round_end);
                 let mut lines = 0;
                 for (_, card_lines) in &cards {
-                    lines +=
-                        decorate_card_lines(card_lines.clone(), width, palette.background).len();
+                    lines += card_lines.len();
                 }
                 (1, lines)
             }
@@ -1590,8 +1682,7 @@ impl App {
                     self.cached_render_message_cards(ctx, message, body_width, is_round_end);
                 let mut lines = 0;
                 for (_, card_lines) in &cards {
-                    lines +=
-                        decorate_card_lines(card_lines.clone(), width, palette.panel_light).len();
+                    lines += card_lines.len();
                 }
                 (1, lines)
             }
@@ -1600,8 +1691,7 @@ impl App {
                     self.cached_render_message_cards(ctx, message, body_width, is_round_end);
                 let mut lines = 0;
                 for (_, card_lines) in &cards {
-                    lines +=
-                        decorate_card_lines(card_lines.clone(), width, palette.panel_alt).len();
+                    lines += card_lines.len();
                 }
                 lines += 1; // Empty line after shell message
                 (1, lines)

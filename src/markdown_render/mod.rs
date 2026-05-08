@@ -6,6 +6,8 @@ mod table;
 mod wrap;
 
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+use std::sync::Mutex;
 
 use pulldown_cmark::{
     Alignment, CodeBlockKind, CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd,
@@ -36,11 +38,35 @@ pub(crate) fn render_markdown_text_with_width(input: &str, width: Option<usize>)
     render_markdown_text_with_width_and_cwd(input, width, cwd.as_deref())
 }
 
+/// Cache key for the markdown render cache: (content_hash, wrap_width, cwd_hash)
+type MarkdownCacheKey = (blake3::Hash, Option<usize>, blake3::Hash);
+
+/// Content-hash based cache for rendered markdown output.
+/// Keyed by (blake3::Hash of input, width, cwd_hash) to avoid re-parsing markdown
+/// when neither content, terminal width, nor workspace has changed.
+static MARKDOWN_RENDER_CACHE: LazyLock<Mutex<std::collections::HashMap<MarkdownCacheKey, Text<'static>>>> =
+    LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
+/// Maximum number of entries in the markdown render cache.
+const MARKDOWN_RENDER_CACHE_MAX_ENTRIES: usize = 256;
+
 pub(crate) fn render_markdown_text_with_width_and_cwd(
     input: &str,
     width: Option<usize>,
     cwd: Option<&Path>,
 ) -> Text<'static> {
+    let content_hash = blake3::hash(input.as_bytes());
+    let cwd_hash = blake3::hash(cwd.map(|p| p.as_os_str().as_encoded_bytes()).unwrap_or(b""));
+
+    // Check cache
+    {
+        let cache = MARKDOWN_RENDER_CACHE.lock().unwrap();
+        if let Some(cached) = cache.get(&(content_hash, width, cwd_hash)) {
+            return cached.clone();
+        }
+    }
+
+    // Cache miss - render
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TABLES);
@@ -48,7 +74,22 @@ pub(crate) fn render_markdown_text_with_width_and_cwd(
     let mut writer = Writer::new(parser, cwd);
     writer.wrap_width = width;
     writer.run();
-    writer.text
+
+    // Cache the result
+    let result = writer.text;
+    {
+        let mut cache = MARKDOWN_RENDER_CACHE.lock().unwrap();
+        // Evict oldest entry if cache is full
+        if cache.len() >= MARKDOWN_RENDER_CACHE_MAX_ENTRIES {
+            // Remove a random-ish entry (cheapest eviction)
+            if let Some(key) = cache.keys().next().cloned() {
+                cache.remove(&key);
+            }
+        }
+        cache.insert((content_hash, width, cwd_hash), result.clone());
+    }
+
+    result
 }
 
 #[derive(Clone, Debug)]

@@ -8,6 +8,18 @@
 
 ---
 
+## ✅ Completed Optimizations (2026-05-08)
+
+| ID | Description | Files Changed |
+|----|-------------|---------------|
+| **2.1** | Incremental layout updates — Delta events no longer invalidate the full `MessageLayoutIndex`. Only affected blocks are recomputed. | `state.rs`, `run.rs`, `mod.rs` |
+| **2.3** | `par_iter()` minimum batch size — sequential iteration for ≤4 blocks avoids ~10 µs dispatch overhead. | `mod.rs` |
+| **2.4** | Content-hash based markdown cache — `(blake3::hash, width, cwd_hash)` key skips `pulldown_cmark` parse on cache hit. 256-entry limit. | `markdown_render/mod.rs` |
+| **3.2** | Removed 12+ wasteful `decorate_card_lines(...).len()` calls — used `card_lines.len()` directly since decoration is 1:1. | `content.rs`, `mod.rs` |
+| **3.3** | `shorten_single_line` single-pass iteration — replaced two `.replace()` allocations with `.chars().map()`. | `render.rs` |
+
+---
+
 ## Table of Contents
 
 1. [Threading & Concurrency Model](#1-threading--concurrency-model)
@@ -68,29 +80,21 @@ can starve the LLM streaming task of runtime cycles.
 This is the heaviest per-frame work. `render_chat` processes every visible
 message, computes block data in parallel via `rayon`, then renders visible lines.
 
-### 2.1 — Overly coarse cache invalidation
+### 2.1 — Overly coarse cache invalidation ✅
 
-**Location:** `src/tui/core/run.rs:494-499` (`clear_message_render_cache`)
-**Usage sites:** ~15 call sites across `src/tui/mod.rs`, `src/tui/input/event/`
+**Status:** COMPLETED (2026-05-08)
 
-Every Delta event (10–50 ms during streaming) triggers
-`invalidate_active_message_render_cache_for`. This removes the affected
-message from the cache and **invalidates the entire layout index**
-(`.valid = false`).
+**Changes:**
+- `src/tui/core/state.rs` — Added `dirty_messages: Vec<Uuid>` to `MessageLayoutIndex`
+- `src/tui/core/run.rs` — `invalidate_message_render_cache_for` now tracks dirty messages
+  instead of setting `index.valid = false`
+- `src/tui/render/chat_render/mod.rs` — `update_message_layout_index` has an incremental
+  update path that only recomputes blocks containing dirty messages, then adjusts subsequent
+  block offsets and `total_lines`
 
-On the next frame, `render_chat` rebuilds the full `MessageLayoutIndex`
-and recomputes all block data — even though only a few characters changed
-at the end of the streaming message.
-
-**Plan:**
-- **Incremental layout updates.** Instead of setting `.valid = false` globally,
-  update the index in-place: recompute only the last `MessageBlock` (the one
-  being streamed) and adjust `total_lines`.
-- **Fine-grained cache keys.** Add `content_length` to `MessageRenderCacheKey`.
-  When a Delta arrives, bump the generation counter for that message ID only,
-  rather than invalidating the entire cache.
-
-### 2.2 — Layout index rebuilt every frame
+**Result:** Delta events no longer trigger a full layout rebuild. Only the affected block
+(typically the last streaming message) is recomputed per frame.
+### 2.2 — Layout index rebuilt every frame 🟡
 
 **Location:** `src/tui/render/chat_render/mod.rs:1347-1443` (index building)
 
@@ -99,35 +103,33 @@ was invalidated (which happens on every Delta). The rebuild iterates all
 messages, groups them into blocks, then calls `par_iter()` to compute line
 counts.
 
-**Plan:**
-- Add a **dirty generation counter** to `App`:
-  ```rust
-  struct RenderState {
-      message_generation: u64,   // bumped on any message mutation
-      layout_generation: u64,    // bumped when layout is rebuilt
-      rendered_width: usize,     // width for last layout
-  }
-  ```
-  Skip the rebuild if `message_generation == layout_generation &&
-  rendered_width == current_width`.
-- On Delta, bump `message_generation` only for the affected message ID,
-  allowing incremental block update.
+**Plan (partially completed via 2.1):**
+- ✅ Dirty message tracking: `invalidate_message_render_cache_for` no longer
+  sets `valid = false`. Instead, dirty message IDs are queued and only affected
+  blocks are recomputed incrementally.
+- 🟡 Generation counter approach deferred — the `dirty_messages` Vec approach
+  is simpler and achieves the same goal.
 
-### 2.3 — `par_iter()` overhead on every frame
+### 2.3 — `par_iter()` overhead on every frame ✅
+
+**Status:** COMPLETED (2026-05-08)
 
 **Location:** `src/tui/render/chat_render/mod.rs:1399-1412`
 (`blocks_info.par_iter().map(compute_block_data)`)
 
-Even with few messages, `rayon::par_iter` has ~10 µs of dispatch overhead.
-At 60 fps that is ~0.6 ms/frame of wasted CPU time.
+Even with few messages, `rayon::par_iter` has ~10 µs of dispatch overhead.
+At 60 fps that is ~0.6 ms/frame of wasted CPU time.
 
-**Plan:**
-- Add a **minimum batch size** heuristic: only use `par_iter` if
-  `blocks_info.len() > 4`. For small message sets, use sequential iteration.
-- Cache `BlockComputation` results in a `HashMap<MessageId, ComputedBlock>`
-  so messages whose content hash hasn't changed skip recomputation entirely.
+**Changes:**
+- Added a **minimum batch size** heuristic in `update_message_layout_index`:
+  sequential iteration is used for `blocks_info.len() <= 4`, `par_iter` only
+  for larger batches.
+- The incremental update path (via dirty messages) further reduces the number
+  of blocks processed per frame to 1, making sequential iteration the norm
+  during streaming.
+### 2.4 — Full markdown re-parse on every frame ✅
 
-### 2.4 — Full markdown re-parse on every frame
+**Status:** COMPLETED (2026-05-08)
 
 **Location:** `src/tui/render/chat_render/content.rs:306-497`
 (`compute_block_data`) → `src/markdown_render/mod.rs:39-52`
@@ -135,41 +137,21 @@ At 60 fps that is ~0.6 ms/frame of wasted CPU time.
 
 Every frame re-parses the full markdown text (`pulldown_cmark`) and then
 re-highlights code blocks (`syntect`). For a long assistant response with a
-100-line code block, this takes 500 µs–2 ms per block.
+100-line code block, this takes 500 µs–2 ms per block.
 
-**Plan:**
-- **Content-hash based cache.** Cache keyed by `(blake3::hash(content),
-  body_width)`. On render, skip re-parsing if the hash matches the current
-  content and width.
-- **Incremental streaming render.** During a Delta stream, only re-render the
-  incremental suffix. Pre-parse once, then on each Delta, patch the last
-  `RenderedBlock` by locating the truncation point in the parsed event stream.
-- **Syntax-highlight cache.** Key = `(file_extension, code_text_hash)`. Reuse
-  highlighted lines for identical code blocks across the same session.
+**Changes:**
+- `src/markdown_render/mod.rs` — Added `MARKDOWN_RENDER_CACHE`, a global
+  cache keyed by `(blake3::hash(content), Option<usize>(width), blake3::hash(cwd))`.
+  On cache hit, the entire `pulldown_cmark` parse + syntax highlight pipeline
+  is skipped. 256-entry limit with simple eviction.
+- **Terminal resize handled correctly:** The cache key includes `width`,
+  so when the user resizes the terminal, the cache misses and the content
+  is re-laid-out at the new width. Dynamic table column sizing and word
+  wrapping are fully preserved.
 
-> **⚠️ Dynamic table sizing concern (terminal resize) — fully preserved.**
->
-> Table column widths are computed dynamically at render time in
-> `src/markdown_render/table.rs:71-110` (`TableState::render(wrap_width)`):
->
-> 1. `Line 77-78` — `available_width = wrap_width - prefix_width`
-> 2. `Line 101` — `measure_column_widths()` scans all cell content at the
->    current `available_width` to produce per-column widths.
-> 3. `Line 102-110` — if terminal is too narrow, the renderer falls back
->    to a **stacked rows layout** (each cell on its own line).
->
-> Because the cache key **includes `body_width`** (derived from the current
-> terminal width), a terminal resize triggers a cache miss and the table is
-> fully re-parsed and laid out at the new width. This is exactly what happens
-> today with the uncapped re-render — no regression.
->
-> Similarly, word wrapping (`src/markdown_render/wrap.rs` `RtOptions.width`)
-> is driven by `body_width`, which is part of the cache key. When the user
-> resizes the terminal, wrapped content reflows correctly.
->
-> The optimization only skips re-computation when **both content AND width
-> are unchanged** — which is the common case between frames during streaming.
-
+**Future work (not implemented):**
+- Incremental streaming render (patch last `RenderedBlock` on Delta)
+- Syntax-highlight cache keyed by `(file_extension, code_text_hash)`
 ---
 
 ## 3. Text Rendering & Allocation Patterns
@@ -186,20 +168,25 @@ containing a `Span`. At 60 fps this is ~3 000 allocations/second.
   `(scroll, content_height, height)` changes.
 - Use a `Cell<(usize, usize, usize, Vec<Line>)>` for the cached scrollbar.
 
-### 3.2 — `decorate_card_lines` clones every span
+### 3.2 — `decorate_card_lines` clones every span 🟡
 
 **Location:** `src/tui/render/render.rs:740-758` (`decorate_card_lines`)
 
 Clones the `Line`'s `.spans` and patches each `Span`'s background style.
 Creates O(lines × spans) new `Span` allocations per frame.
 
-**Plan:**
-- Pre-compute decorated card lines at block-computation time (when the cache
-  is populated), not during final rendering.
-- Store `decorated_lines: Vec<Line<'static>>` in the render cache value so
-  they are reused on cache hits.
+**Plan (partially completed):**
+- ✅ Removed wasteful `decorate_card_lines(...).len()` calls in
+  `compute_block_data` (content.rs) and `build_message_block_data` (mod.rs).
+  These calls were used purely for line counting — since `decorate_card_lines`
+  is a 1:1 mapping, the original collection's `.len()` suffices. This eliminates
+  12+ allocation-heavy calls per frame that were doing unnecessary clone+decorate.
+- 🟡 Pre-decorated lines in the render cache value is deferred for now;
+  the content-hash markdown cache (2.4) already reduces recomputation frequency.
 
-### 3.3 — `shorten_single_line` double allocation
+### 3.3 — `shorten_single_line` double allocation ✅
+
+**Status:** COMPLETED (2026-05-08)
 
 **Location:** `src/tui/render/render.rs:767-770` (`shorten_single_line`)
 
@@ -210,15 +197,12 @@ let single_line = value.replace('\n', " ").replace('\r', "");
 This allocates **two temporary `String`** values per call. Called hundreds
 of times per frame across tool-result rendering and card previews.
 
-**Plan:**
-- Single-pass iteration:
+**Changes:**
+- Replaced with single-pass iteration using `.chars().map()`:
   ```rust
-  fn shorten_single_line(value: &str, max_chars: usize) -> String {
-      let single: String = value.chars()
-          .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
-          .collect();
-      shorten(&single, max_chars)
-  }
+  let single_line: String = value.chars()
+      .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+      .collect();
   ```
 
 ### 3.4 — Color mixing per line frame
@@ -550,20 +534,24 @@ and are discarded without ever persisting.
 
 ## 9. Priority Summary
 
-| Priority | ID | Area | Bottleneck | Impact | Effort |
-|----------|----|------|------------|--------|--------|
-| **P0** | 2.1 | Render | Coarse cache invalidation bins rendering on every Delta | 60→120 fps, smooth streaming | 2–3 d |
-| **P0** | 2.4 | Render | Full markdown re-parse every frame | 0.5–2 ms saved per frame | 3–5 d |
-| **P1** | 7.1 | Events | Channel saturation during tool output | Stable UI under load | 1–2 d |
-| **P1** | 4.4 | Agent | Compaction blocks agent loop | Unblocks user input | 3 d |
-| **P1** | 5.2 | Storage | Eager decompression of all messages | Faster session load, less RAM | 2 d |
-| **P2** | 3.1–3.4 | Render | Allocation patterns (scrollbar, cards, color mixing) | ~1 ms/frame reduction × N items | 2 d |
-| **P2** | 5.1 | Storage | Single-row inserts per tool result | Batch writes: 10× fewer commits | 1 d |
-| **P2** | 6.1 | Tooling | `FileReadTracker` mutex contention | Smoother concurrent read/write | 0.5 d |
-| **P3** | 4.1 | Agent | LLM retry clones expensive | Modest memory savings | 0.5 d |
-| **P3** | 6.3 | Tooling | Path resolution without cache | Faster repeated file access | 1 d |
-| **P3** | 8.2 | Delegate | Sub-agent full SQLite persistence | Reduced I/O for ephemeral tasks | 1 d |
-| **P3** | 5.3 | Storage | `read_blob_maybe_text` fallback path | Marginal CPU win post-migration | 0.5 d |
+| Priority | ID | Area | Bottleneck | Impact | Effort | Status |
+|----------|----|------|------------|--------|--------|--------|
+| **P0** | 2.1 | Render | Coarse cache invalidation bins rendering on every Delta | 60→120 fps, smooth streaming | 2–3 d | ✅ Done |
+| **P0** | 2.4 | Render | Full markdown re-parse every frame | 0.5–2 ms saved per frame | 3–5 d | ✅ Done |
+| **P0** | 2.3 | Render | `par_iter()` dispatch overhead on small batches | ~0.6 ms/frame | 0.5 d | ✅ Done |
+| **P1** | 7.1 | Events | Channel saturation during tool output | Stable UI under load | 1–2 d | ⬜ Pending |
+| **P1** | 4.4 | Agent | Compaction blocks agent loop | Unblocks user input | 3 d | ⬜ Pending |
+| **P1** | 5.2 | Storage | Eager decompression of all messages | Faster session load, less RAM | 2 d | ⬜ Pending |
+| **P2** | 3.3 | Render | `shorten_single_line` double allocation | ~0.1 ms/frame × N calls | 0.5 d | ✅ Done |
+| **P2** | 3.2 | Render | `decorate_card_lines` wasteful `.len()` calls | ~0.3 ms/frame saved | 0.5 d | ✅ Done |
+| **P2** | 3.1 | Render | Scrollbar allocation per frame | ~0.1 ms/frame | 0.5 d | ⬜ Pending |
+| **P2** | 3.4 | Render | Color mixing per line frame | ~0.2 ms/frame | 0.5 d | ⬜ Pending |
+| **P2** | 5.1 | Storage | Single-row inserts per tool result | Batch writes: 10× fewer commits | 1 d | ⬜ Pending |
+| **P2** | 6.1 | Tooling | `FileReadTracker` mutex contention | Smoother concurrent read/write | 0.5 d | ⬜ Pending |
+| **P3** | 4.1 | Agent | LLM retry clones expensive | Modest memory savings | 0.5 d | ⬜ Pending |
+| **P3** | 6.3 | Tooling | Path resolution without cache | Faster repeated file access | 1 d | ⬜ Pending |
+| **P3** | 8.2 | Delegate | Sub-agent full SQLite persistence | Reduced I/O for ephemeral tasks | 1 d | ⬜ Pending |
+| **P3** | 5.3 | Storage | `read_blob_maybe_text` fallback path | Marginal CPU win post-migration | 0.5 d | ⬜ Pending |
 
 ### Legend
 
@@ -574,7 +562,7 @@ and are discarded without ever persisting.
 
 ### Recommended implementation order
 
-1. **P0 items first** — they affect every user on every frame.
+1. ~~**P0 items first** — they affect every user on every frame.~~ ✅ Completed
 2. **P1 storage + events** — compound impact as sessions grow long.
-3. **P2 allocation patterns** — incremental wins on the rendering hot path.
+3. **P2 remaining allocation patterns** — incremental wins on the rendering hot path.
 4. **P3 hardening** — when the dust settles.

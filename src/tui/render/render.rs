@@ -765,6 +765,9 @@ pub(super) fn line_display_width(line: &Line<'static>) -> usize {
 }
 
 pub(crate) fn shorten_single_line(value: &str, max_chars: usize) -> String {
-    let single_line = value.replace('\n', " ").replace('\r', "");
+    let single_line: String = value
+        .chars()
+        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+        .collect();
     shorten(&single_line, max_chars)
 }

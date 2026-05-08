@@ -500,7 +500,12 @@ impl App {
             .retain(|key, _| !(key.session_id == session_id && key.message_id == message_id));
 
         if session_id == self.conversation.session_id {
-            self.message_layout_index.borrow_mut().valid = false;
+            // Track dirty message for incremental layout update
+            // instead of invalidating the entire layout index
+            let mut index = self.message_layout_index.borrow_mut();
+            if !index.dirty_messages.contains(&message_id) {
+                index.dirty_messages.push(message_id);
+            }
         }
     }
 

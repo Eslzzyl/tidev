@@ -20,8 +20,7 @@ use crate::tui::core::state::{
 };
 use crate::tui::diff_render::render_unified_diff_text;
 use crate::tui::render::render::{
-    decorate_card_lines, line_with_prefix, line_with_style, line_with_style_right_aligned,
-    shorten_single_line,
+    line_with_prefix, line_with_style, line_with_style_right_aligned, shorten_single_line,
 };
 
 pub(super) fn render_reasoning_lines(
@@ -308,13 +307,12 @@ pub(super) fn compute_block_data(
     session_id: Uuid,
     messages: &[Message],
     start_idx: usize,
-    width: usize,
+    _width: usize,
     body_width: usize,
     is_round_end: bool,
 ) -> BlockComputation {
     let message = &messages[start_idx];
     let message_id = message.id;
-    let palette = ctx.palette;
 
     let (message_count, line_count, cache_entries) = match message.role {
         MessageRole::Assistant => {
@@ -344,8 +342,8 @@ pub(super) fn compute_block_data(
                 },
             ));
 
-            for (bg, card_lines) in &cards {
-                lines += decorate_card_lines(card_lines.clone(), width, *bg).len();
+            for (_, card_lines) in &cards {
+                lines += card_lines.len();
             }
 
             let tool_results_by_id: HashMap<String, &Message> = {
@@ -387,7 +385,7 @@ pub(super) fn compute_block_data(
                     ));
 
                     if !card_lines.is_empty() {
-                        lines += decorate_card_lines(card_lines, width, palette.panel_light).len();
+                        lines += card_lines.len();
                     }
                 }
                 lines += 1;
@@ -413,7 +411,7 @@ pub(super) fn compute_block_data(
                 },
             )];
             for (_, card_lines) in &cards {
-                lines += decorate_card_lines(card_lines.clone(), width, palette.panel_alt).len();
+                lines += card_lines.len();
             }
             lines += 1;
             (1, lines, cache_entries)
@@ -436,7 +434,7 @@ pub(super) fn compute_block_data(
                 },
             )];
             for (_, card_lines) in &cards {
-                lines += decorate_card_lines(card_lines.clone(), width, palette.background).len();
+                lines += card_lines.len();
             }
             (1, lines, cache_entries)
         }
@@ -458,7 +456,7 @@ pub(super) fn compute_block_data(
                 },
             )];
             for (_, card_lines) in &cards {
-                lines += decorate_card_lines(card_lines.clone(), width, palette.panel_light).len();
+                lines += card_lines.len();
             }
             (1, lines, cache_entries)
         }
@@ -480,7 +478,7 @@ pub(super) fn compute_block_data(
                 },
             )];
             for (_, card_lines) in &cards {
-                lines += decorate_card_lines(card_lines.clone(), width, palette.panel_alt).len();
+                lines += card_lines.len();
             }
             lines += 1;
             (1, lines, cache_entries)
