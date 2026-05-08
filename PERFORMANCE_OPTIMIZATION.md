@@ -138,14 +138,37 @@ re-highlights code blocks (`syntect`). For a long assistant response with a
 100-line code block, this takes 500 µs–2 ms per block.
 
 **Plan:**
-- **Content-hash based cache.** Each message stores a `computed_lines:
-  Vec<Line<'static>>` alongside a `blake3::Hash` of its content. On render,
-  skip re-parsing if the hash matches.
+- **Content-hash based cache.** Cache keyed by `(blake3::hash(content),
+  body_width)`. On render, skip re-parsing if the hash matches the current
+  content and width.
 - **Incremental streaming render.** During a Delta stream, only re-render the
   incremental suffix. Pre-parse once, then on each Delta, patch the last
   `RenderedBlock` by locating the truncation point in the parsed event stream.
 - **Syntax-highlight cache.** Key = `(file_extension, code_text_hash)`. Reuse
   highlighted lines for identical code blocks across the same session.
+
+> **⚠️ Dynamic table sizing concern (terminal resize) — fully preserved.**
+>
+> Table column widths are computed dynamically at render time in
+> `src/markdown_render/table.rs:71-110` (`TableState::render(wrap_width)`):
+>
+> 1. `Line 77-78` — `available_width = wrap_width - prefix_width`
+> 2. `Line 101` — `measure_column_widths()` scans all cell content at the
+>    current `available_width` to produce per-column widths.
+> 3. `Line 102-110` — if terminal is too narrow, the renderer falls back
+>    to a **stacked rows layout** (each cell on its own line).
+>
+> Because the cache key **includes `body_width`** (derived from the current
+> terminal width), a terminal resize triggers a cache miss and the table is
+> fully re-parsed and laid out at the new width. This is exactly what happens
+> today with the uncapped re-render — no regression.
+>
+> Similarly, word wrapping (`src/markdown_render/wrap.rs` `RtOptions.width`)
+> is driven by `body_width`, which is part of the cache key. When the user
+> resizes the terminal, wrapped content reflows correctly.
+>
+> The optimization only skips re-computation when **both content AND width
+> are unchanged** — which is the common case between frames during streaming.
 
 ---
 
