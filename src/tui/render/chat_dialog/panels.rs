@@ -5,7 +5,7 @@ use crate::{
     tui::mcp_panel::McpServerEditorState,
     tui::memory_panel::{MemoryPanelMode, MemoryPanelState},
     tui::message_panel::MessagePanelState,
-    tui::model_panel::{ModelPanelItem, ModelPanelState},
+    tui::model_panel::{ModelPanelItem, ModelPanelState, thinking_options_for_model},
     tui::session_panel::{SessionPanelState, SessionViewMode},
     tui::settings_panel::SettingsPanelState,
     tui::theme_panel::ThemePanelState,
@@ -713,7 +713,7 @@ impl App {
             if label == "<inherit>" || label.is_empty() {
                 // For inherit, use the main session's active model
                 items.iter().position(|item| {
-                    matches!(item, ModelPanelItem::Model { summary }
+                    matches!(item, ModelPanelItem::Model { summary, .. }
                         if summary.provider_id == self.active_model.provider_id
                         && summary.model_id == self.active_model.model_id)
                 })
@@ -721,7 +721,7 @@ impl App {
                 let p = &label[..slash_pos];
                 let m = &label[slash_pos + 1..];
                 items.iter().position(|item| {
-                    matches!(item, ModelPanelItem::Model { summary }
+                    matches!(item, ModelPanelItem::Model { summary, .. }
                         if summary.provider_id == p && summary.model_id == m)
                 })
             } else {
@@ -750,14 +750,45 @@ impl App {
                         ),
                     ])));
                 }
-                ModelPanelItem::Model { summary } => {
+                ModelPanelItem::Model { summary, .. } => {
                     // Show checkmark for active model, space otherwise
                     let active_marker = if active_index == Some(index) {
                         Span::styled("✓ ", Style::default().fg(palette.accent))
                     } else {
                         Span::raw("  ")
                     };
-                    rows.push(ListItem::new(Line::from(vec![
+
+                    // Determine thinking level to show for this model
+                    let is_selected = panel
+                        .current_tab()
+                        .is_some_and(|t| t.selected_index == index);
+                    // Directly check if this model is the session's active model
+                    // (active_index calculation may fail due to display-name vs id mismatch)
+                    let is_active = summary.provider_id == self.active_model.provider_id
+                        && summary.model_id == self.active_model.model_id
+                        && panel.is_general_tab();
+                    let thinking_level_tag: Option<String> = if is_selected && panel.current_tab().is_some_and(|t| t.thinking_level_expanded) {
+                        // Show the in-progress thinking level selection
+                        let tl_options = thinking_options_for_model(&items, index);
+                        if !tl_options.is_empty() {
+                            let tl_idx = panel.current_tab().map(|t| t.thinking_level_index).unwrap_or(0);
+                            let opt = tl_options[tl_idx % tl_options.len()];
+                            let name = opt.rsplit_once(':').map(|(_, v)| v).unwrap_or(opt);
+                            Some(name.to_string())
+                        } else { None }
+                    } else if is_active && self.thinking_level.is_supported() {
+                        Some(self.thinking_level.display_name().to_string())
+                    } else if !panel.is_general_tab() {
+                        // Check agent thinking level override
+                        if let Some(tab) = panel.current_tab() {
+                            if let Some(tl_str) = self.config.agent.thinking_levels.get(&tab.agent_type_str) {
+                                let tl_level = tl_str.rsplit_once(':').map(|(_, v)| v).unwrap_or(tl_str);
+                                Some(tl_level.to_string())
+                            } else { None }
+                        } else { None }
+                    } else { None };
+
+                    let mut spans = vec![
                         active_marker,
                         Span::styled(
                             summary.model_display_name.clone(),
@@ -765,6 +796,16 @@ impl App {
                                 .fg(palette.text)
                                 .add_modifier(Modifier::BOLD),
                         ),
+                    ];
+                    // Append thinking level tag
+                    if let Some(ref tl_tag) = thinking_level_tag {
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::styled(
+                            format!("[{}]", tl_tag),
+                            Style::default().fg(palette.accent),
+                        ));
+                    }
+                    spans.extend_from_slice(&[
                         Span::raw("  "),
                         Span::styled(
                             format!("({})", summary.model_id),
@@ -773,12 +814,42 @@ impl App {
                         Span::raw("  "),
                         Span::styled(
                             format!(
-                                "{} · max {}",
-                                summary.provider_display_name, summary.max_output_tokens
+                                "{} · {}",
+                                summary.provider_display_name,
+                                format_window_size(summary.context_window)
                             ),
                             Style::default().fg(palette.accent_soft),
                         ),
-                    ])));
+                    ]);
+                    rows.push(ListItem::new(Line::from(spans)));
+
+                    // If this model is the selected one and thinking_level is expanded,
+                    // render thinking level sub-options
+                    let is_selected = panel
+                        .current_tab()
+                        .is_some_and(|t| t.selected_index == index && t.thinking_level_expanded);
+                    if is_selected {
+                        let tl_options = thinking_options_for_model(&items, index);
+                        if !tl_options.is_empty() {
+                            let tl_index = panel.current_tab().map(|t| t.thinking_level_index).unwrap_or(0);
+                            for (i, opt) in tl_options.iter().enumerate() {
+                                let is_tl_selected = i == tl_index;
+                                // opt format: "deepseek:Off", "qwen:On", etc.
+                                let level_name = opt.rsplit_once(':').map(|(_, v)| v).unwrap_or(opt);
+                                let bullet = if is_tl_selected { " ● " } else { " ○ " };
+                                let tl_style = if is_tl_selected {
+                                    Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)
+                                } else {
+                                    Style::default().fg(palette.muted)
+                                };
+                                rows.push(ListItem::new(Line::from(vec![
+                                    Span::raw("    "),
+                                    Span::styled(bullet, tl_style),
+                                    Span::styled(level_name, tl_style),
+                                ])));
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -791,13 +862,29 @@ impl App {
                 sections[3],
             );
         } else {
-            let sel = panel
-                .current_tab()
-                .map(|t| t.selected_index)
-                .unwrap_or(0)
-                .min(items.len().saturating_sub(1));
+            let tab = panel.current_tab();
+            let is_expanded = tab.is_some_and(|t| t.thinking_level_expanded);
+            let sel = if is_expanded {
+                // When thinking level is expanded, highlight the active sub-option:
+                // selected_index (model) + 1 (first sub-option) + thinking_level_index
+                let model_idx = tab.map(|t| t.selected_index).unwrap_or(0).min(items.len().saturating_sub(1));
+                let tl_idx = tab.map(|t| t.thinking_level_index).unwrap_or(0);
+                let tl_count = tab.map(|t| {
+                    thinking_options_for_model(&items, t.selected_index).len()
+                }).unwrap_or(0);
+                // Only offset if there are thinking options
+                if tl_count > 0 {
+                    model_idx + 1 + tl_idx.min(tl_count.saturating_sub(1))
+                } else {
+                    model_idx
+                }
+            } else {
+                tab.map(|t| t.selected_index)
+                    .unwrap_or(0)
+                    .min(items.len().saturating_sub(1))
+            };
             let mut state = ListState::default();
-            state.select(Some(sel));
+            state.select(Some(sel.min(rows.len().saturating_sub(1))));
 
             let list = List::new(rows)
                 .style(Style::default().bg(palette.panel).fg(palette.text))
@@ -812,7 +899,14 @@ impl App {
         }
 
         // --- Footer ---
-        let footer = "Enter apply · Ctrl+E edit provider · Tab switch tab · Esc close";
+        let is_expanded = panel
+            .current_tab()
+            .is_some_and(|t| t.thinking_level_expanded);
+        let footer = if is_expanded {
+            "Enter confirm thinking · ↑ ↓ select level · Esc collapse"
+        } else {
+            "Enter apply / expand thinking · Ctrl+E edit provider · Tab switch tab · Esc close"
+        };
         frame.render_widget(
             Paragraph::new(footer)
                 .alignment(Alignment::Center)
@@ -1495,5 +1589,22 @@ impl App {
             .style(Style::default().bg(palette.panel)),
             Rect::new(inner.x, footer_y, inner.width, 1),
         );
+    }
+}
+
+/// Format a token count into a human-readable window size string.
+/// e.g. 128000 → "128K", 8192 → "8K", 1000 → "1K"
+fn format_window_size(size: usize) -> String {
+    if size >= 1_000_000 {
+        format!("{:.1}M", size as f64 / 1_000_000.0)
+    } else if size >= 1000 {
+        let k = size / 1000;
+        if k >= 1000 {
+            format!("{}K", k)
+        } else {
+            format!("{}K", k)
+        }
+    } else {
+        size.to_string()
     }
 }

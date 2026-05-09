@@ -75,6 +75,9 @@ export interface ModelInfo {
   provider_name: string;
   supports_vision: boolean;
   supports_streaming: boolean;
+  thinking_supported: boolean;
+  thinking_level: string;
+  thinking_options: string[];
 }
 
 export interface ToolInfo {
@@ -114,11 +117,19 @@ export interface GetDefaultModelResponse {
 export interface GetAgentModelsResponse {
   default_model: GetDefaultModelResponse;
   agent_models: Record<string, string>;
+  agent_thinking_levels?: Record<string, string>;
 }
 
 export interface SetAgentModelRequest {
   agent_type: string;
   model_str: string;
+  thinking_level?: string;
+}
+
+export interface SetDefaultModelRequest {
+  provider_id: string;
+  model_id: string;
+  thinking_level?: string;
 }
 
 export interface WorkspaceInfo {

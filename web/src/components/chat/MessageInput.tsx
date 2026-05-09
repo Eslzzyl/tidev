@@ -88,33 +88,26 @@ export function MessageInput({
 
   const isInputEnabled = currentSessionId !== null || isDraftSession;
 
-  // Update thinking levels based on model
+  // Update thinking levels based on model - use data from API model info
   const updateThinkingLevels = useCallback((modelId: string) => {
-    const id = modelId.toLowerCase();
-    if (id.includes("deepseek") && id.includes("4")) {
-      setThinkingOptions([
-        { label: "Off", value: "deepseek:Off" },
-        { label: "High", value: "deepseek:High" },
-        { label: "Max", value: "deepseek:Max" },
-      ]);
-      setSelectedThinking("deepseek:Off");
-    } else if (id.includes("qwen") && id.includes("3.")) {
-      setThinkingOptions([
-        { label: "Off", value: "qwen:Off" },
-        { label: "On", value: "qwen:On" },
-      ]);
-      setSelectedThinking("qwen:Off");
-    } else if (id.includes("glm")) {
-      setThinkingOptions([
-        { label: "Off", value: "glm:Off" },
-        { label: "On", value: "glm:On" },
-      ]);
-      setSelectedThinking("glm:Off");
+    const model = models.find((m) => m.id === modelId);
+    if (model && model.thinking_supported && model.thinking_options.length > 0) {
+      const options = model.thinking_options.map((opt) => {
+        const parts = opt.split(":");
+        const label = parts[1] ? parts[1].charAt(0).toUpperCase() + parts[1].slice(1) : opt;
+        return { label, value: opt };
+      });
+      setThinkingOptions(options);
+      // Prefer the model's default thinking level, fall back to first option
+      const defaultTl = model.thinking_options.includes(model.thinking_level)
+        ? model.thinking_level
+        : model.thinking_options[0];
+      setSelectedThinking(defaultTl);
     } else {
       setThinkingOptions([]);
       setSelectedThinking("");
     }
-  }, []);
+  }, [models]);
 
   // Load models and set initial selection
   useEffect(() => {

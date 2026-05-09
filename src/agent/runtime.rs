@@ -839,10 +839,16 @@ impl AgentRuntime {
                 .resolve_agent_active_model(&self.auth, agent_type_name)
             {
                 Ok(Some(model)) => model,
-                _ => agent_def
-                    .model_override
-                    .clone()
-                    .unwrap_or_else(|| parent_model.clone()),
+                _ => {
+                    let mut m = agent_def
+                        .model_override
+                        .clone()
+                        .unwrap_or_else(|| parent_model.clone());
+                    // Subagents should NOT inherit the parent's thinking_level.
+                    // Use a clean default instead.
+                    m.thinking_level = ThinkingLevelType::default();
+                    m
+                }
             }
         };
 
@@ -1317,10 +1323,16 @@ impl AgentRuntime {
                     let event_tx_clone = event_tx.clone();
                     tokio::spawn(async move {
                         compact_in_background(
-                            llm_client, store, tool_defs,
-                            session_id, compact_model, ctx_config,
-                            conversation, event_tx_clone,
-                        ).await;
+                            llm_client,
+                            store,
+                            tool_defs,
+                            session_id,
+                            compact_model,
+                            ctx_config,
+                            conversation,
+                            event_tx_clone,
+                        )
+                        .await;
                     });
                 }
                 return Ok(());

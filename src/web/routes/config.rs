@@ -10,6 +10,8 @@ use crate::web::{error::AppError, state::AppState};
 pub struct SetDefaultModelRequest {
     pub provider_id: String,
     pub model_id: String,
+    #[serde(default)]
+    pub thinking_level: Option<String>,
 }
 
 /// Set default model response
@@ -60,6 +62,18 @@ pub async fn set_default_model(
         return Err(AppError::Internal(format!("Failed to save config: {}", e)));
     }
     drop(config);
+
+    // Save thinking level preference if provided
+    if let Some(tl) = &body.thinking_level
+        && !tl.is_empty()
+    {
+        let store = state.store.lock().await;
+        let _ = store.save_model_thinking_level(
+            &body.provider_id,
+            &body.model_id,
+            tl,
+        );
+    }
 
     crate::log_info!(
         "Default model set to {} ({}) / {} ({})",
@@ -121,6 +135,7 @@ pub async fn get_default_model(
 pub struct GetAgentModelsResponse {
     pub default_model: GetDefaultModelResponse,
     pub agent_models: HashMap<String, String>,
+    pub agent_thinking_levels: HashMap<String, String>,
 }
 
 pub async fn get_agent_models(
@@ -152,10 +167,13 @@ pub async fn get_agent_models(
 
     // Clone agent model overrides into a HashMap
     let agent_models: HashMap<String, String> = config.agent.models.clone().into_iter().collect();
+    let agent_thinking_levels: HashMap<String, String> =
+        config.agent.thinking_levels.clone().into_iter().collect();
 
     Ok(Json(GetAgentModelsResponse {
         default_model,
         agent_models,
+        agent_thinking_levels,
     }))
 }
 
@@ -165,6 +183,9 @@ pub struct SetAgentModelRequest {
     pub agent_type: String,
     /// "provider_id/model_id" or empty string to clear the override.
     pub model_str: String,
+    /// Optional thinking level override (e.g. "deepseek:High"). Empty to clear.
+    #[serde(default)]
+    pub thinking_level: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -212,7 +233,13 @@ pub async fn set_agent_model(
 
     // Update config and persist
     let mut config = state.config.write().await;
-    config.set_agent_model(&state.config_paths, &agent_type, &body.model_str)?;
+    let tl = body.thinking_level.as_deref().unwrap_or("");
+    config.set_agent_model_and_thinking(
+        &state.config_paths,
+        &agent_type,
+        &body.model_str,
+        tl,
+    )?;
     drop(config);
 
     Ok(Json(SetAgentModelResponse { success: true }))

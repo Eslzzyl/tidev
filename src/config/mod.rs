@@ -14,7 +14,7 @@ use crate::prompts::{SessionMode, default_system_prompt, gateway_system_prompt};
 use crate::theme::ThemeName;
 use crate::tooling::ToolPermission;
 
-use self::reasoning::ThinkingMatcher;
+use self::reasoning::{ThinkingLevelType, ThinkingMatcher};
 
 pub use auth::{ActiveModel, AuthStore, ModelSummary, ProviderAuth, WebAuth};
 pub use logging::LogConfig;
@@ -166,6 +166,12 @@ pub struct AgentConfig {
     /// Format: `"model_id"` or `"provider/model_id"`.
     #[serde(default)]
     pub models: BTreeMap<String, String>,
+    /// Per-agent thinking level overrides, keyed by agent type name.
+    /// E.g. `explorer = "deepseek:High"` or `fixer = "qwen:On"`.
+    /// Format matches `ThinkingLevelType::to_string()` (e.g. "deepseek:High", "qwen:On").
+    /// When set, this overrides the auto-detected thinking level for the agent's model.
+    #[serde(default)]
+    pub thinking_levels: BTreeMap<String, String>,
 }
 
 fn default_agent_enabled() -> bool {
@@ -205,6 +211,7 @@ impl Default for AgentConfig {
             max_depth: 3,
             max_sessions_per_agent: 5,
             models: BTreeMap::new(),
+            thinking_levels: BTreeMap::new(),
         }
     }
 }
@@ -610,17 +617,14 @@ poll_timeout_secs = 30
             (self.default_provider.clone(), model_str.to_string())
         };
 
-        self.resolve_model_by_ids(auth, &provider_id, &model_id)
-            .map(Some)
-            .or_else(|e| {
-                crate::log_warn!(
-                    "failed to resolve agent model '{}' for '{}': {}",
-                    model_str,
-                    agent_type,
-                    e
-                );
-                Ok(None)
-            })
+        let mut model = self.resolve_model_by_ids(auth, &provider_id, &model_id)?;
+
+        // Apply agent-specific thinking_level override if configured
+        if let Some(tl_str) = self.agent.thinking_levels.get(agent_type) {
+            model.thinking_level = ThinkingLevelType::from_string(tl_str);
+        }
+
+        Ok(Some(model))
     }
 
     /// Set the model override for a specific agent type and persist to config.
@@ -637,6 +641,34 @@ poll_timeout_secs = 30
             self.agent
                 .models
                 .insert(agent_type.to_string(), model_str.to_string());
+        }
+        self.save(paths)
+    }
+
+    /// Set both the model override and thinking level for an agent type.
+    /// `model_str` in `"provider/model_id"` format, `thinking_level` in
+    /// `ThinkingLevelType::to_string()` format (e.g. "deepseek:High").
+    /// Pass empty `thinking_level` to clear the override.
+    pub fn set_agent_model_and_thinking(
+        &mut self,
+        paths: &ConfigPaths,
+        agent_type: &str,
+        model_str: &str,
+        thinking_level: &str,
+    ) -> Result<()> {
+        if model_str.is_empty() {
+            self.agent.models.remove(agent_type);
+        } else {
+            self.agent
+                .models
+                .insert(agent_type.to_string(), model_str.to_string());
+        }
+        if thinking_level.is_empty() {
+            self.agent.thinking_levels.remove(agent_type);
+        } else {
+            self.agent
+                .thinking_levels
+                .insert(agent_type.to_string(), thinking_level.to_string());
         }
         self.save(paths)
     }

@@ -10,6 +10,10 @@ pub struct ModelPanelTab {
     pub selected_index: usize,
     /// Current model label shown on the tab, e.g. "openai/gpt-4o" or `"<inherit>"`.
     pub current_label: String,
+    /// Whether the thinking level sub-menu is expanded for the selected model.
+    pub thinking_level_expanded: bool,
+    /// Currently selected thinking level index within the available options.
+    pub thinking_level_index: usize,
 }
 
 impl ModelPanelTab {
@@ -19,6 +23,8 @@ impl ModelPanelTab {
             display_name: display_name.to_string(),
             selected_index: 0,
             current_label: current_label.to_string(),
+            thinking_level_expanded: false,
+            thinking_level_index: 0,
         }
     }
 }
@@ -68,7 +74,7 @@ impl ModelPanelState {
         };
         if let Some((provider_id, model_id)) = active_model
             && let Some(index) = items.iter().position(|item| {
-                matches!(item, ModelPanelItem::Model { summary }
+                matches!(item, ModelPanelItem::Model { summary, .. }
                     if summary.provider_id == provider_id && summary.model_id == model_id)
             })
         {
@@ -83,6 +89,18 @@ impl ModelPanelState {
         let Some(tab) = self.current_tab_mut() else {
             return;
         };
+
+        // If thinking level is expanded, up/down cycles through thinking level options
+        if tab.thinking_level_expanded {
+            let options = thinking_options_for_model(items, tab.selected_index);
+            if !options.is_empty() {
+                let len = options.len() as isize;
+                tab.thinking_level_index =
+                    ((tab.thinking_level_index as isize + delta).rem_euclid(len)) as usize;
+            }
+            return;
+        }
+
         let selectable = selectable_indices(items);
         if selectable.is_empty() {
             tab.selected_index = 0;
@@ -150,7 +168,7 @@ pub enum ModelPanelItem {
 impl ModelPanelItem {
     pub fn as_model(&self) -> Option<&ModelSummary> {
         match self {
-            Self::Model { summary } => Some(summary),
+            Self::Model { summary, .. } => Some(summary),
             Self::ProviderHeader { .. } => None,
         }
     }
@@ -214,4 +232,21 @@ fn model_panel_matches_query(query: &str, summary: &ModelSummary) -> bool {
         || provider_display_name.contains(query)
         || model_id.contains(query)
         || model_display_name.contains(query)
+}
+
+/// Return available thinking level option strings for the model at `index` in `items`.
+pub fn thinking_options_for_model(items: &[ModelPanelItem], index: usize) -> Vec<&'static str> {
+    let Some(ModelPanelItem::Model { summary }) = items.get(index) else {
+        return vec![];
+    };
+    let id = summary.model_id.to_ascii_lowercase();
+    if id.contains("deepseek") && id.contains("4") {
+        vec!["deepseek:Off", "deepseek:High", "deepseek:Max"]
+    } else if id.contains("qwen") && id.contains("3.") {
+        vec!["qwen:Off", "qwen:On"]
+    } else if id.contains("glm") {
+        vec!["glm:Off", "glm:On"]
+    } else {
+        vec![]
+    }
 }

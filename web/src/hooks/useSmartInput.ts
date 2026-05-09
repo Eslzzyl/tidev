@@ -179,33 +179,25 @@ export function useSmartInput(
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement | null>(null);
 
-  // Update thinking levels based on model - defined early for use in effects
+  // Update thinking levels based on model - use data from API model info
   const updateThinkingLevels = useCallback((modelId: string) => {
-    const id = modelId.toLowerCase();
-    if (id.includes("deepseek") && id.includes("4")) {
-      setThinkingOptions([
-        { label: "Off", value: "deepseek:Off" },
-        { label: "High", value: "deepseek:High" },
-        { label: "Max", value: "deepseek:Max" },
-      ]);
-      setSelectedThinkingState("deepseek:Off");
-    } else if (id.includes("qwen") && id.includes("3.")) {
-      setThinkingOptions([
-        { label: "Off", value: "qwen:Off" },
-        { label: "On", value: "qwen:On" },
-      ]);
-      setSelectedThinkingState("qwen:Off");
-    } else if (id.includes("glm")) {
-      setThinkingOptions([
-        { label: "Off", value: "glm:Off" },
-        { label: "On", value: "glm:On" },
-      ]);
-      setSelectedThinkingState("glm:Off");
+    const model = models.find((m) => m.id === modelId);
+    if (model && model.thinking_supported && model.thinking_options.length > 0) {
+      const options = model.thinking_options.map((opt) => {
+        const parts = opt.split(":");
+        const label = parts[1] ? parts[1].charAt(0).toUpperCase() + parts[1].slice(1) : opt;
+        return { label, value: opt };
+      });
+      setThinkingOptions(options);
+      const defaultTl = model.thinking_options.includes(model.thinking_level)
+        ? model.thinking_level
+        : model.thinking_options[0];
+      setSelectedThinkingState(defaultTl);
     } else {
       setThinkingOptions([]);
       setSelectedThinkingState("");
     }
-  }, []);
+  }, [models]);
 
   // Fetch models and default model on mount
   useEffect(() => {

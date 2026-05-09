@@ -1,3 +1,4 @@
+use crate::tui::model_panel::{ModelPanelItem, thinking_options_for_model};
 use super::*;
 
 impl App {
@@ -177,42 +178,129 @@ impl App {
             }
             KeyCode::Enter => {
                 let items = self.model_panel_items(&panel);
-                if let Some(summary) = panel.selected_model(&items).cloned() {
-                    if panel.is_general_tab() {
-                        // General tab: switch main session model
-                        self.switch_model(Some(&summary.label()))?;
-                        // Update the tab's current_label to reflect the active model
+
+                // Check if thinking level is currently expanded
+                let is_expanded = panel
+                    .current_tab()
+                    .is_some_and(|t| t.thinking_level_expanded);
+
+                if is_expanded {
+                    // Confirm the thinking level selection
+                    if let Some(summary) = panel.selected_model(&items).cloned() {
+                        let tl_options = thinking_options_for_model(&items, items.iter().position(|item| {
+                            matches!(item, ModelPanelItem::Model { summary: s, .. }
+                                if s.provider_id == summary.provider_id && s.model_id == summary.model_id)
+                        }).unwrap_or(0));
+                        let tl_index = panel.current_tab().map(|t| t.thinking_level_index).unwrap_or(0);
+                        let tl = if tl_options.is_empty() {
+                            String::new()
+                        } else {
+                            tl_options[tl_index % tl_options.len()].to_string()
+                        };
                         let mut next_panel = panel;
-                        if let Some(t) = next_panel.current_tab_mut() {
-                            t.current_label = summary.label();
+
+                        if next_panel.is_general_tab() {
+                            // Save thinking level preference and switch model
+                            if !tl.is_empty() {
+                                let _ = self.store.save_model_thinking_level(
+                                    &summary.provider_id,
+                                    &summary.model_id,
+                                    &tl,
+                                );
+                            }
+                            self.switch_model(Some(&summary.label()))?;
+                            if let Some(t) = next_panel.current_tab_mut() {
+                                t.current_label = summary.label();
+                                t.thinking_level_expanded = false;
+                            }
+                        } else {
+                            // Agent tab: save model + thinking level
+                            let agent_type_str = next_panel
+                                .current_tab()
+                                .map(|t| t.agent_type_str.clone())
+                                .unwrap_or_default();
+                            let model_str = summary.label();
+                            self.config.set_agent_model_and_thinking(
+                                &self.paths,
+                                &agent_type_str,
+                                &model_str,
+                                &tl,
+                            )?;
+                            if let Some(t) = next_panel.current_tab_mut() {
+                                t.current_label = model_str.clone();
+                                t.thinking_level_expanded = false;
+                            }
+                            self.last_notice = Some(format!(
+                                "Agent '{}' model set to {} ({})",
+                                agent_type_str, model_str,
+                                if tl.is_empty() { "auto" } else { &tl },
+                            ));
                         }
                         self.model_panel = Some(next_panel);
-                    } else {
-                        // Agent tab: save to agent.models
-                        let agent_type_str = panel
+                    }
+                } else {
+                    // Expand to show thinking level options
+                    if let Some(summary) = panel.selected_model(&items).cloned() {
+                        let tl_options = thinking_options_for_model(&items, panel
                             .current_tab()
-                            .map(|t| t.agent_type_str.clone())
-                            .unwrap_or_default();
-                        let model_str = summary.label(); // "provider/model_id"
-                        // Update config and persist
-                        self.config
-                            .set_agent_model(&self.paths, &agent_type_str, &model_str)?;
-                        // Update the tab's current_label
-                        let mut next_panel = panel;
-                        if let Some(t) = next_panel.current_tab_mut() {
-                            t.current_label = model_str.clone();
+                            .map(|t| t.selected_index)
+                            .unwrap_or(0));
+                        if tl_options.is_empty() {
+                            // Model doesn't support thinking: act as before (immediate apply)
+                            if panel.is_general_tab() {
+                                self.switch_model(Some(&summary.label()))?;
+                                let mut next_panel = panel;
+                                if let Some(t) = next_panel.current_tab_mut() {
+                                    t.current_label = summary.label();
+                                }
+                                self.model_panel = Some(next_panel);
+                            } else {
+                                let agent_type_str = panel
+                                    .current_tab()
+                                    .map(|t| t.agent_type_str.clone())
+                                    .unwrap_or_default();
+                                let model_str = summary.label();
+                                self.config.set_agent_model(
+                                    &self.paths,
+                                    &agent_type_str,
+                                    &model_str,
+                                )?;
+                                let mut next_panel = panel;
+                                if let Some(t) = next_panel.current_tab_mut() {
+                                    t.current_label = model_str.clone();
+                                }
+                                self.model_panel = Some(next_panel);
+                                self.last_notice = Some(format!(
+                                    "Agent '{}' model set to {}",
+                                    agent_type_str, model_str
+                                ));
+                            }
+                        } else {
+                            // Expand to show thinking level options
+                            let mut next_panel = panel;
+                            if let Some(t) = next_panel.current_tab_mut() {
+                                t.thinking_level_expanded = true;
+                                t.thinking_level_index = 0;
+                            }
+                            self.model_panel = Some(next_panel);
                         }
-                        self.model_panel = Some(next_panel);
-                        self.last_notice = Some(format!(
-                            "Agent '{}' model set to {}",
-                            agent_type_str, model_str
-                        ));
                     }
                 }
-                // Stay open so the user can continue configuring; close with Esc.
             }
             KeyCode::Esc => {
-                self.close_model_panel();
+                // If thinking level is expanded, collapse first; only close on second Esc
+                let is_expanded = panel
+                    .current_tab()
+                    .is_some_and(|t| t.thinking_level_expanded);
+                if is_expanded {
+                    let mut next_panel = panel;
+                    if let Some(t) = next_panel.current_tab_mut() {
+                        t.thinking_level_expanded = false;
+                    }
+                    self.model_panel = Some(next_panel);
+                } else {
+                    self.close_model_panel();
+                }
             }
             KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let items = self.model_panel_items(&panel);
