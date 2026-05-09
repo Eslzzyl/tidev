@@ -40,9 +40,9 @@ pub use input::Composer;
 pub use input::at_mention;
 pub use input::event;
 pub use input::mouse_selection;
-pub use render::diff_render;
-pub use render::chat_render;
 pub use render::chat_dialog;
+pub use render::chat_render;
+pub use render::diff_render;
 pub use ui::balance_panel;
 pub use ui::connect;
 pub use ui::mcp_panel;
@@ -601,11 +601,7 @@ impl App {
         }
 
         // Flush any remaining coalesced events
-        self.flush_coalesced_events(
-            &mut coalesced_delta,
-            &mut coalesced_reasoning,
-            runtime,
-        )?;
+        self.flush_coalesced_events(&mut coalesced_delta, &mut coalesced_reasoning, runtime)?;
 
         // Check for pending permission approvals from the agent runtime.
         // Take ownership of the receiver to avoid borrow conflicts.
@@ -750,7 +746,8 @@ impl App {
                 {
                     message.content.push_str(&content);
                     let message_id = message.id;
-                    self.message_layout_index.borrow_mut().valid = false;
+                    // Incremental update via dirty_messages (set by invalidate_*) is
+                    // sufficient — content-only changes do not need a full layout rebuild.
                     self.invalidate_active_message_render_cache_for(message_id);
                 }
             }
@@ -772,7 +769,7 @@ impl App {
                 {
                     message.reasoning.push_str(&content);
                     let message_id = message.id;
-                    self.message_layout_index.borrow_mut().valid = false;
+                    // Incremental update via dirty_messages is sufficient.
                     self.invalidate_active_message_render_cache_for(message_id);
                 }
             }
@@ -908,8 +905,8 @@ impl App {
                             self.conversation.messages[tool_idx].streaming = false;
                             self.conversation.messages[tool_idx].attachments =
                                 display_result.attachments;
-                            self.message_layout_index.borrow_mut().valid = false;
-                            // Invalidate the parent Assistant message's render cache
+                            // Incremental update via dirty_messages is sufficient;
+                            // the parent Assistant message is added below.
                             if let Some(assistant_id) = self
                                 .conversation
                                 .messages
@@ -1268,9 +1265,8 @@ impl App {
                         if finished {
                             self.conversation.messages[idx].streaming = false;
                         }
-                        self.message_layout_index.borrow_mut().valid = false;
-                        // Invalidate the parent Assistant message's render cache
-                        // so the tool call card re-renders with new content.
+                        // Incremental update via dirty_messages is sufficient;
+                        // the parent Assistant message is added below.
                         if let Some(assistant_id) = self
                             .conversation
                             .messages
