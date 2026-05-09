@@ -94,8 +94,8 @@ struct RawMessageRow {
     model_id: Option<String>,
     tokens_per_second: Option<f32>,
     snapshot_hash: Option<String>,
-    patch_files: Option<String>,
-    file_diffs: Option<String>,
+    patch_files: Option<Vec<u8>>,
+    file_diffs: Option<Vec<u8>>,
     mode: Option<String>,
     rtk_rewritten: bool,
     thinking_level: Option<String>,
@@ -124,8 +124,8 @@ impl RawMessageRow {
             model_id: row.get(17)?,
             tokens_per_second: row.get(18)?,
             snapshot_hash: row.get(19)?,
-            patch_files: row.get(20)?,
-            file_diffs: row.get(21)?,
+            patch_files: read_opt_blob_maybe_text(row, 20)?,
+            file_diffs: read_opt_blob_maybe_text(row, 21)?,
             mode: row.get(22)?,
             rtk_rewritten: row.get::<_, i64>(23)? != 0,
             thinking_level: row.get(24)?,
@@ -188,8 +188,8 @@ impl RawMessageRow {
         message.model_id = self.model_id;
         message.tokens_per_second = self.tokens_per_second;
         message.snapshot_hash = self.snapshot_hash;
-        message.patch_files = self.patch_files;
-        message.file_diffs = self.file_diffs;
+        message.patch_files = self.patch_files.map(|b| decompress_text(&b));
+        message.file_diffs = self.file_diffs.map(|b| decompress_text(&b));
         message.mode = mode;
         message.rtk_rewritten = self.rtk_rewritten;
         message.thinking_level = thinking_level;
@@ -478,8 +478,8 @@ impl SessionStore {
                 message.model_id,
                 message.tokens_per_second,
                 message.snapshot_hash,
-                message.patch_files,
-                message.file_diffs,
+                message.patch_files.as_deref().map(compress_text),
+                message.file_diffs.as_deref().map(compress_text),
                 mode,
                 if message.rtk_rewritten { 1_i64 } else { 0_i64 },
                 thinking_level,
@@ -556,8 +556,8 @@ impl SessionStore {
                     message.model_id,
                     message.tokens_per_second,
                     message.snapshot_hash,
-                    message.patch_files,
-                    message.file_diffs,
+                    message.patch_files.as_deref().map(compress_text),
+                    message.file_diffs.as_deref().map(compress_text),
                     mode,
                     if message.rtk_rewritten { 1_i64 } else { 0_i64 },
                     thinking_level,
@@ -612,6 +612,7 @@ impl SessionStore {
         output_text: &str,
     ) -> Result<()> {
         let compressed_output = compress_text(output_text);
+        let compressed_input = compress_text(input_json);
         self.write_conn.execute(
             "INSERT INTO tool_events (id, session_id, message_id, tool_name, input_json, output_text, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
@@ -619,7 +620,7 @@ impl SessionStore {
                 session_id.to_string(),
                 message_id.to_string(),
                 tool_name,
-                input_json,
+                compressed_input,
                 compressed_output,
                 Utc::now().to_rfc3339(),
             ],
@@ -793,6 +794,7 @@ impl SessionStore {
         message_id: Option<Uuid>,
         redo_snapshot: Option<&str>,
     ) -> Result<()> {
+        let compressed_snapshot = redo_snapshot.map(compress_text);
         match message_id {
             Some(message_id) => {
                 self.write_conn.execute(
@@ -800,7 +802,7 @@ impl SessionStore {
                     params![
                         session_id.to_string(),
                         message_id.to_string(),
-                        redo_snapshot,
+                        compressed_snapshot,
                         Utc::now().to_rfc3339(),
                     ],
                 )?;
@@ -828,10 +830,11 @@ impl SessionStore {
 
         let snapshot = statement
             .query_row(params![session_id.to_string()], |row| {
-                row.get::<_, Option<String>>(0)
+                read_opt_blob_maybe_text(row, 0)
             })
             .optional()?
-            .flatten();
+            .flatten()
+            .map(|bytes| decompress_text(&bytes));
 
         Ok(snapshot)
     }
@@ -911,9 +914,10 @@ impl SessionStore {
         message_id: Uuid,
         patch_files: &str,
     ) -> Result<()> {
+        let compressed = compress_text(patch_files);
         self.write_conn.execute(
             "UPDATE messages SET patch_files = ?1 WHERE session_id = ?2 AND id = ?3",
-            params![patch_files, session_id.to_string(), message_id.to_string()],
+            params![compressed, session_id.to_string(), message_id.to_string()],
         )?;
         Ok(())
     }
@@ -924,9 +928,10 @@ impl SessionStore {
         message_id: Uuid,
         file_diffs: &str,
     ) -> Result<()> {
+        let compressed = compress_text(file_diffs);
         self.write_conn.execute(
             "UPDATE messages SET file_diffs = ?1 WHERE session_id = ?2 AND id = ?3",
-            params![file_diffs, session_id.to_string(), message_id.to_string()],
+            params![compressed, session_id.to_string(), message_id.to_string()],
         )?;
         Ok(())
     }
@@ -1746,10 +1751,12 @@ impl SessionStore {
             for sid in &session_id_strs {
                 let row = stmt
                     .query_row(params![sid], |row| {
+                        let redo: Option<String> = read_opt_blob_maybe_text(row, 2)?
+                            .map(|bytes| decompress_text(&bytes));
                         Ok((
                             row.get::<_, String>(0)?,
                             row.get::<_, String>(1)?,
-                            row.get::<_, Option<String>>(2)?,
+                            redo,
                             row.get::<_, String>(3)?,
                         ))
                     })
@@ -1829,7 +1836,7 @@ impl SessionStore {
                     let session_id: String = row.get(1)?;
                     let message_id: String = row.get(2)?;
                     let tool_name: String = row.get(3)?;
-                    let input_json: String = row.get(4)?;
+                    let input_json = read_blob_maybe_text(row, 4)?;
                     let output_text = read_blob_maybe_text(row, 5)?;
                     let created_at: String = row.get(6)?;
                     Ok((
@@ -2075,6 +2082,22 @@ fn read_blob_maybe_text(row: &rusqlite::Row, idx: usize) -> rusqlite::Result<Str
             // Fallback for old databases where the column is TEXT
             let text: String = row.get(idx)?;
             Ok(text)
+        }
+    }
+}
+
+/// Helper: read an optional column that may be BLOB or TEXT, returning raw bytes.
+///
+/// This handles backwards compatibility with older databases where the column
+/// is still TEXT — rusqlite will fail to read TEXT as `Option<Vec<u8>>`, so
+/// we fall back to reading as `Option<String>` and convert to bytes.
+fn read_opt_blob_maybe_text(row: &rusqlite::Row, idx: usize) -> rusqlite::Result<Option<Vec<u8>>> {
+    match row.get::<_, Option<Vec<u8>>>(idx) {
+        Ok(v) => Ok(v),
+        Err(_) => {
+            // Fallback for old databases where the column is TEXT
+            let text: Option<String> = row.get(idx)?;
+            Ok(text.map(|s| s.into_bytes()))
         }
     }
 }

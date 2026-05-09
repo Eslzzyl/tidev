@@ -1,4 +1,4 @@
-pub const SCHEMA_VERSION: i64 = 22;
+pub const SCHEMA_VERSION: i64 = 23;
 
 /// The memories table SQL, exported so MemoryStore can create it independently.
 pub const MEMORIES_TABLE_SQL: &str = r#"
@@ -65,7 +65,7 @@ CREATE INDEX IF NOT EXISTS idx_session_instruction_sources_session
 CREATE TABLE IF NOT EXISTS session_reverts (
     session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
     message_id TEXT NOT NULL,
-    redo_snapshot TEXT,
+    redo_snapshot BLOB,
     created_at TEXT NOT NULL
 );
 
@@ -91,8 +91,8 @@ CREATE TABLE IF NOT EXISTS messages (
     model_id TEXT,
     tokens_per_second REAL,
     snapshot_hash TEXT,
-    patch_files TEXT,
-    file_diffs TEXT,
+    patch_files BLOB,
+    file_diffs BLOB,
     mode TEXT,
     rtk_rewritten INTEGER NOT NULL DEFAULT 0,
     thinking_level TEXT
@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS tool_events (
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     message_id TEXT NOT NULL,
     tool_name TEXT NOT NULL,
-    input_json TEXT NOT NULL,
+    input_json BLOB NOT NULL,
     output_text BLOB NOT NULL,
     created_at TEXT NOT NULL
 );
@@ -232,11 +232,15 @@ CREATE INDEX IF NOT EXISTS idx_memories_usage
 
 /// Schema for the export database (no zstd compression).
 ///
-/// Mirrors `SCHEMA_SQL` but uses TEXT instead of BLOB for the three
-/// columns that are zstd-compressed in the main database:
+/// Mirrors `SCHEMA_SQL` but uses TEXT instead of BLOB for the columns
+/// that are zstd-compressed in the main database:
 ///   - `messages.content`
 ///   - `messages.reasoning`
+///   - `messages.patch_files`
+///   - `messages.file_diffs`
+///   - `tool_events.input_json`
 ///   - `tool_events.output_text`
+///   - `session_reverts.redo_snapshot`
 pub const EXPORT_SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,

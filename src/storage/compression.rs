@@ -1,12 +1,20 @@
 //! zstd compression helpers for large text columns.
 //!
-//! We compress the three largest text columns before writing to SQLite:
-//! - `messages.content`
-//! - `messages.reasoning`
-//! - `tool_events.output_text`
+//! We compress large text columns before writing to SQLite, extending
+//! the original three-column strategy to cover more large fields:
 //!
-//! These columns contribute ~88 MB (62 %) of the total database size.
-//! With zstd level 3 we expect a 3–5× reduction, saving ~66 MB.
+//! | Table | Column | Original type | Status |
+//! |-------|--------|--------------|--------|
+//! | `messages` | `content` | BLOB | Compressed |
+//! | `messages` | `reasoning` | BLOB | Compressed |
+//! | `messages` | `patch_files` | BLOB | Compressed |
+//! | `messages` | `file_diffs` | BLOB | Compressed |
+//! | `tool_events` | `input_json` | BLOB | Compressed |
+//! | `tool_events` | `output_text` | BLOB | Compressed |
+//! | `session_reverts` | `redo_snapshot` | BLOB | Compressed |
+//!
+//! With zstd level 3 we expect a 3–5× reduction, saving significant
+//! storage for the large JSON and diff content stored in these columns.
 
 use zstd::stream::{decode_all, encode_all};
 
