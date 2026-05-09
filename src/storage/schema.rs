@@ -1,4 +1,4 @@
-pub const SCHEMA_VERSION: i64 = 23;
+pub const SCHEMA_VERSION: i64 = 24;
 
 /// The memories table SQL, exported so MemoryStore can create it independently.
 pub const MEMORIES_TABLE_SQL: &str = r#"
@@ -76,10 +76,10 @@ CREATE TABLE IF NOT EXISTS messages (
     content BLOB NOT NULL,
     attachments TEXT NOT NULL DEFAULT '[]',
     reasoning BLOB,
-    tool_calls TEXT NOT NULL DEFAULT '[]',
+    tool_calls BLOB NOT NULL DEFAULT '[]',
     tool_call_id TEXT,
     tool_name TEXT,
-    metadata TEXT NOT NULL DEFAULT '{}',
+    metadata BLOB NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
     completed_at TEXT,
     streaming INTEGER NOT NULL DEFAULT 0,

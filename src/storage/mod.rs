@@ -79,10 +79,10 @@ struct RawMessageRow {
     content: Vec<u8>,
     attachments: String,
     reasoning: Option<Vec<u8>>,
-    tool_calls: String,
+    tool_calls: Vec<u8>,
     tool_call_id: Option<String>,
     tool_name: Option<String>,
-    metadata: String,
+    metadata: Vec<u8>,
     created_at: String,
     completed_at: Option<String>,
     streaming: bool,
@@ -109,10 +109,10 @@ impl RawMessageRow {
             content: row.get(2)?,
             attachments: row.get(3)?,
             reasoning: row.get(4)?,
-            tool_calls: row.get(5)?,
+            tool_calls: read_blob_maybe_text_bytes(row, 5)?,
             tool_call_id: row.get(6)?,
             tool_name: row.get(7)?,
-            metadata: row.get(8)?,
+            metadata: read_blob_maybe_text_bytes(row, 8)?,
             created_at: row.get(9)?,
             completed_at: row.get(10)?,
             streaming: row.get::<_, i64>(11)? != 0,
@@ -145,8 +145,10 @@ impl RawMessageRow {
         };
         let attachments: Vec<crate::session::MessageAttachment> =
             serde_json::from_str(&self.attachments).unwrap_or_default();
-        let tool_calls: Vec<ToolCall> = serde_json::from_str(&self.tool_calls).unwrap_or_default();
-        let metadata: ToolMetadata = serde_json::from_str(&self.metadata).unwrap_or_default();
+        let tool_calls: Vec<ToolCall> =
+            serde_json::from_str(&decompress_text(&self.tool_calls)).unwrap_or_default();
+        let metadata: ToolMetadata =
+            serde_json::from_str(&decompress_text(&self.metadata)).unwrap_or_default();
         let mode: Option<SessionMode> = self.mode.and_then(|m| serde_json::from_str(&m).ok());
         let completed_at = self.completed_at.and_then(|s| parse_datetime(&s).ok());
         let thinking_level = self
@@ -438,12 +440,16 @@ impl SessionStore {
     }
 
     pub fn append_message(&self, session_id: Uuid, message: &Message) -> Result<()> {
-        let tool_calls =
-            serde_json::to_string(&message.tool_calls).context("failed to serialize tool calls")?;
+        let tool_calls = compress_text(
+            &serde_json::to_string(&message.tool_calls)
+                .context("failed to serialize tool calls")?,
+        );
         let attachments = serde_json::to_string(&message.attachments)
             .context("failed to serialize attachments")?;
-        let metadata =
-            serde_json::to_string(&message.metadata).context("failed to serialize metadata")?;
+        let metadata = compress_text(
+            &serde_json::to_string(&message.metadata)
+                .context("failed to serialize metadata")?,
+        );
         let mode = message
             .mode
             .map(|m| serde_json::to_string(&m).unwrap_or_default());
@@ -517,12 +523,16 @@ impl SessionStore {
             ).context("failed to prepare batch insert statement")?;
 
             for message in messages {
-                let tool_calls = serde_json::to_string(&message.tool_calls)
-                    .context("failed to serialize tool calls")?;
+                let tool_calls = compress_text(
+                    &serde_json::to_string(&message.tool_calls)
+                        .context("failed to serialize tool calls")?,
+                );
                 let attachments = serde_json::to_string(&message.attachments)
                     .context("failed to serialize attachments")?;
-                let metadata = serde_json::to_string(&message.metadata)
-                    .context("failed to serialize metadata")?;
+                let metadata = compress_text(
+                    &serde_json::to_string(&message.metadata)
+                        .context("failed to serialize metadata")?,
+                );
                 let mode = message
                     .mode
                     .map(|m| serde_json::to_string(&m).unwrap_or_default());
@@ -2074,7 +2084,25 @@ impl SessionStore {
     }
 }
 
-/// Helper: read a column that may be BLOB or TEXT, returning decompressed String.
+/// Helper: read a NOT NULL column that may be BLOB or TEXT, returning raw bytes.
+///
+/// Unlike `read_blob_maybe_text` (which decompresses), this returns the
+/// raw bytes so the caller can decompress later.  Falls back to reading
+/// as TEXT for backwards compatibility with older databases.
+fn read_blob_maybe_text_bytes(row: &rusqlite::Row, idx: usize) -> rusqlite::Result<Vec<u8>> {
+    match row.get::<_, Vec<u8>>(idx) {
+        Ok(v) => Ok(v),
+        Err(_) => {
+            let text: String = row.get(idx)?;
+            Ok(text.into_bytes())
+        }
+    }
+}
+
+/// Helper: read a NOT NULL column that may be BLOB or TEXT, returning decompressed String.
+///
+/// Falls back to reading as TEXT (plain text) for backwards compatibility
+/// with databases created before zstd compression was enabled for the column.
 fn read_blob_maybe_text(row: &rusqlite::Row, idx: usize) -> rusqlite::Result<String> {
     match row.get::<_, Vec<u8>>(idx) {
         Ok(bytes) => Ok(decompress_text(&bytes)),

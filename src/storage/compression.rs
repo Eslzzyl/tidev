@@ -7,6 +7,8 @@
 //! |-------|--------|--------------|--------|
 //! | `messages` | `content` | BLOB | Compressed |
 //! | `messages` | `reasoning` | BLOB | Compressed |
+//! | `messages` | `tool_calls` | BLOB | Compressed |
+//! | `messages` | `metadata` | BLOB | Compressed |
 //! | `messages` | `patch_files` | BLOB | Compressed |
 //! | `messages` | `file_diffs` | BLOB | Compressed |
 //! | `tool_events` | `input_json` | BLOB | Compressed |
