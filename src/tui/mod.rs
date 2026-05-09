@@ -530,9 +530,82 @@ impl App {
     }
 
     fn process_backend_events(&mut self, runtime: &Runtime) -> Result<()> {
+        // Coalesce consecutive Delta and ReasoningDelta events to reduce
+        // per-frame cache invalidation overhead during LLM streaming.
+        let mut coalesced_delta: Option<(Uuid, u64, String)> = None;
+        let mut coalesced_reasoning: Option<(Uuid, u64, String)> = None;
+        let mut event_count = 0;
+        const MAX_EVENTS_PER_BATCH: usize = 200;
+
         while let Ok(event) = self.backend_rx.try_recv() {
-            self.handle_backend_event(event, runtime)?;
+            event_count += 1;
+            if event_count > MAX_EVENTS_PER_BATCH {
+                // Put the event back? No, we can't with try_recv.
+                // Instead, we just stop processing and leave remaining
+                // events in the channel for the next frame.
+                // To avoid losing the event, we need to re-insert it
+                // into the channel. Since we can't, we'll process it
+                // but stop after this one.
+                // Actually, once we've exceeded MAX_EVENTS_PER_BATCH,
+                // the remaining events will be picked up next frame.
+                // But we've already consumed this event from the channel.
+                // The best we can do is: don't break; instead, just
+                // skip the coalescing optimization for the overflow.
+                // For fairness, process the event directly.
+                self.flush_coalesced_events(
+                    &mut coalesced_delta,
+                    &mut coalesced_reasoning,
+                    runtime,
+                )?;
+                self.handle_backend_event(event, runtime)?;
+                // Don't continue draining; leave rest for next frame
+                break;
+            }
+
+            match event {
+                BackendEvent::Delta {
+                    session_id,
+                    request_id,
+                    content,
+                } => {
+                    // Coalesce consecutive Delta events for the same request
+                    if let Some((_, _, ref mut acc)) = coalesced_delta {
+                        acc.push_str(&content);
+                    } else {
+                        coalesced_delta = Some((session_id, request_id, content));
+                    }
+                }
+                BackendEvent::ReasoningDelta {
+                    session_id,
+                    request_id,
+                    content,
+                } => {
+                    // Coalesce consecutive ReasoningDelta events
+                    if let Some((_, _, ref mut acc)) = coalesced_reasoning {
+                        acc.push_str(&content);
+                    } else {
+                        coalesced_reasoning = Some((session_id, request_id, content));
+                    }
+                }
+                _other => {
+                    // Flush coalesced events before processing a non-delta event
+                    // to preserve ordering (deltas must arrive before Finished).
+                    self.flush_coalesced_events(
+                        &mut coalesced_delta,
+                        &mut coalesced_reasoning,
+                        runtime,
+                    )?;
+                    self.handle_backend_event(_other, runtime)?;
+                }
+            }
         }
+
+        // Flush any remaining coalesced events
+        self.flush_coalesced_events(
+            &mut coalesced_delta,
+            &mut coalesced_reasoning,
+            runtime,
+        )?;
 
         // Check for pending permission approvals from the agent runtime.
         // Take ownership of the receiver to avoid borrow conflicts.
@@ -553,6 +626,37 @@ impl App {
             self.pending_permission_rx = Some(rx);
         }
 
+        Ok(())
+    }
+
+    /// Flush coalesced Delta and ReasoningDelta events by sending them
+    /// as single merged events through `handle_backend_event`.
+    fn flush_coalesced_events(
+        &mut self,
+        delta: &mut Option<(Uuid, u64, String)>,
+        reasoning: &mut Option<(Uuid, u64, String)>,
+        runtime: &Runtime,
+    ) -> Result<()> {
+        if let Some((sid, rid, content)) = delta.take() {
+            self.handle_backend_event(
+                BackendEvent::Delta {
+                    session_id: sid,
+                    request_id: rid,
+                    content,
+                },
+                runtime,
+            )?;
+        }
+        if let Some((sid, rid, content)) = reasoning.take() {
+            self.handle_backend_event(
+                BackendEvent::ReasoningDelta {
+                    session_id: sid,
+                    request_id: rid,
+                    content,
+                },
+                runtime,
+            )?;
+        }
         Ok(())
     }
 

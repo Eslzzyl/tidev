@@ -8,7 +8,9 @@
 
 ---
 
-## ✅ Completed Optimizations (2026-05-08)
+## ✅ Completed Optimizations
+
+### Round 1 (2026-05-08)
 
 | ID | Description | Files Changed |
 |----|-------------|---------------|
@@ -17,6 +19,21 @@
 | **2.4** | Content-hash based markdown cache — `(blake3::hash, width, cwd_hash)` key skips `pulldown_cmark` parse on cache hit. 256-entry limit. | `markdown_render/mod.rs` |
 | **3.2** | Removed 12+ wasteful `decorate_card_lines(...).len()` calls — used `card_lines.len()` directly since decoration is 1:1. | `content.rs`, `mod.rs` |
 | **3.3** | `shorten_single_line` single-pass iteration — replaced two `.replace()` allocations with `.chars().map()`. | `render.rs` |
+
+### Round 2 (2026-05-09) — Code review findings
+
+| ID | Description | Files Changed |
+|----|-------------|---------------|
+| **4.5** | Tool execution already parallel — read-only tools run concurrently via `tokio::task::spawn` (Phase 1), write tools execute serially (Phase 2). The doc's proposed `parallel_safe` field was superseded by this simpler read/write split. | `runtime.rs` (designed this way from start) |
+| **6.1** | `FileReadTracker` already uses `RwLock` (not `StdMutex` as doc claimed). Concurrent reads via `RwLock::read()` do not block each other; only writes (`record_read`) acquire exclusive access. `DashMap` migration deferred as marginal benefit. | `file_read_tracker.rs` (always been `RwLock`) |
+
+### Round 3 (2026-05-09) — P1 & P2 implementation
+
+| ID | Description | Files Changed |
+|----|-------------|---------------|
+| **7.1** | Event coalescing in `process_backend_events` — consecutive `Delta` and `ReasoningDelta` events are merged before processing, reducing per-frame cache invalidations. Added `MAX_EVENTS_PER_BATCH` limit (200) to prevent starvation during high-output tool streaming. | `src/tui/mod.rs` |
+| **4.4** | Context compaction runs as a background task — `maybe_compact` replaced with `compact_in_background` spawned via `tokio::spawn`. The agent loop returns immediately; compaction result arrives via `BackendEvent::ContextCompacted`. New `ContextManagerConfig` struct snapshots config across spawn boundary. | `src/agent/runtime.rs`, `src/context.rs` |
+| **5.1** | Batch message insertion — `SessionStore::append_messages()` wraps N message inserts in a single SQLite transaction with prepared statement reuse. Reduces `BEGIN`/`COMMIT` overhead from O(N) to O(1) for tool-heavy turns. | `src/storage/mod.rs` |
 
 ---
 
@@ -264,7 +281,7 @@ message's `content` and `reasoning` fields.
 - Alternatively, reuse a `Vec<Message>` buffer that's cleared and filled
   in-place (with careful capacity management to avoid reallocation).
 
-### 4.3 — System prompt composed every turn
+### 4.3 — System prompt composed every turn 🟡
 
 **Location:** `src/agent/runtime.rs:141-185` (`compose_system_prompt`)
 
@@ -274,11 +291,18 @@ Even though the result is assigned to a model clone (so the original stays
 intact for prefix caching), the composition itself does disk I/O for
 instruction files on every turn.
 
-**Plan:**
-- **System prompt cache** keyed by `(session_id, mode, agent_type,
-  config_etag)`. Bump the etag when config files or AGENTS.md change.
-- Instruction files can be cached in-memory with a file-watcher-based
-  invalidation (`notify` crate).
+**Status:** PARTIALLY ADDRESSED
+- `instruction_content_cache` (`runtime.rs:149-158`) already caches instruction
+  file content in-memory, avoiding repeated disk I/O during system prompt
+  composition within the same session.
+- The full prompt string (base prompt + mode reminder + env info) is still
+  re-concatenated on every turn — but this is a cheap string allocation
+  (~1-5 µs) and not a bottleneck.
+
+**Remaining:**
+- A full system prompt cache keyed by `(session_id, mode, agent_type,
+  config_etag)` could avoid the concatenation entirely, but the benefit is
+  marginal since string allocation is not a measured bottleneck.
 
 ### 4.4 — Context compaction blocks the agent loop
 
@@ -308,14 +332,22 @@ The TUI tracks compacting sessions via `compacting_sessions: HashSet<Uuid>`
 
 **Location:** `src/agent/runtime.rs:497-730` (`execute_tool_calls`)
 
-Tools are executed in a loop, one after another. For independent tools
-(e.g., two `read` calls, or a `read` + `grep`), this wastes parallelism.
+**Actual status:** ✅ ALREADY PARALLEL
 
-**Plan:**
-- Add a `parallel_safe: bool` field to `ToolDefinition`. Tools that are
-  read-only and don't produce side-effects can be executed concurrently
-  via `tokio::join!` or `futures::future::join_all`.
-- Default `read`, `list`, `grep`, `glob` to `parallel_safe = true`.
+Tools are not executed in a simple loop. The implementation divides tools into
+two phases:
+- **Phase 1** (`runtime.rs:568-601`): Read-only tools run concurrently via
+  `tokio::task::spawn` + `.await` on all handles.
+- **Phase 2** (`runtime.rs:603-639`): Write tools (bash, write, edit) execute
+  serially to avoid race conditions.
+
+Read-only tools (`read`, `list`, `grep`, `glob`, `search`) all run in parallel.
+This supersedes the proposed `parallel_safe` field approach.
+
+**Remaining:**
+- The read-only parallel phase clones `SessionStore` N times (one per parallel
+  tool). Fixing `SessionStore::Clone` (see 5.4) would eliminate N SQLite
+  connection opens.
 
 ---
 
@@ -409,13 +441,16 @@ descriptors and repeated WAL setup.
 
 **Location:** `src/tooling/file_read_tracker.rs` (underlying data structure)
 
-`FileReadTracker` uses `Arc<StdMutex<HashMap>>`. The render thread reads
-file-read stamps while the agent runtime writes them. Under heavy tool
-activity, this causes spin-wait contention.
+**Actual status:** ✅ ALREADY `RwLock`
 
-**Plan:**
-- Replace `StdMutex<HashMap>` with `dashmap::DashMap` for lock-free
-  concurrent reads and fine-grained sharded writes.
+`FileReadTracker` uses `RwLock<HashMap>` (`file_read_tracker.rs:13`), **not**
+`StdMutex` as originally claimed. The render thread calls `check_read` which
+acquires a read lock — multiple readers proceed without contention.
+`record_read` acquires a write lock but is infrequent (once per tool call end).
+
+**Remaining:**
+- Under extreme concurrent load, `DashMap` would eliminate the single
+  `RwLock` bottleneck, but measured contention is currently negligible.
 
 ### 6.2 — `canonical_tool_name` called repeatedly
 
@@ -539,15 +574,15 @@ and are discarded without ever persisting.
 | **P0** | 2.1 | Render | Coarse cache invalidation bins rendering on every Delta | 60→120 fps, smooth streaming | 2–3 d | ✅ Done |
 | **P0** | 2.4 | Render | Full markdown re-parse every frame | 0.5–2 ms saved per frame | 3–5 d | ✅ Done |
 | **P0** | 2.3 | Render | `par_iter()` dispatch overhead on small batches | ~0.6 ms/frame | 0.5 d | ✅ Done |
-| **P1** | 7.1 | Events | Channel saturation during tool output | Stable UI under load | 1–2 d | ⬜ Pending |
-| **P1** | 4.4 | Agent | Compaction blocks agent loop | Unblocks user input | 3 d | ⬜ Pending |
+| **P1** | 7.1 | Events | Channel saturation during tool output | Stable UI under load | 1–2 d | ✅ Done |
+| **P1** | 4.4 | Agent | Compaction blocks agent loop | Unblocks user input | 3 d | ✅ Done |
 | **P1** | 5.2 | Storage | Eager decompression of all messages | Faster session load, less RAM | 2 d | ⬜ Pending |
 | **P2** | 3.3 | Render | `shorten_single_line` double allocation | ~0.1 ms/frame × N calls | 0.5 d | ✅ Done |
 | **P2** | 3.2 | Render | `decorate_card_lines` wasteful `.len()` calls | ~0.3 ms/frame saved | 0.5 d | ✅ Done |
 | **P2** | 3.1 | Render | Scrollbar allocation per frame | ~0.1 ms/frame | 0.5 d | ⬜ Pending |
 | **P2** | 3.4 | Render | Color mixing per line frame | ~0.2 ms/frame | 0.5 d | ⬜ Pending |
-| **P2** | 5.1 | Storage | Single-row inserts per tool result | Batch writes: 10× fewer commits | 1 d | ⬜ Pending |
-| **P2** | 6.1 | Tooling | `FileReadTracker` mutex contention | Smoother concurrent read/write | 0.5 d | ⬜ Pending |
+| **P2** | 5.1 | Storage | Single-row inserts per tool result | Batch writes: 10x fewer commits | 1 d | ✅ Done |
+| **P2** | 6.1 | Tooling | FileReadTracker mutex contention | Smoother concurrent read/write | 0.5 d | Already RwLock |
 | **P3** | 4.1 | Agent | LLM retry clones expensive | Modest memory savings | 0.5 d | ⬜ Pending |
 | **P3** | 6.3 | Tooling | Path resolution without cache | Faster repeated file access | 1 d | ⬜ Pending |
 | **P3** | 8.2 | Delegate | Sub-agent full SQLite persistence | Reduced I/O for ephemeral tasks | 1 d | ⬜ Pending |
@@ -563,6 +598,7 @@ and are discarded without ever persisting.
 ### Recommended implementation order
 
 1. ~~**P0 items first** — they affect every user on every frame.~~ ✅ Completed
-2. **P1 storage + events** — compound impact as sessions grow long.
+2. ~~**P1 storage + events** — compound impact as sessions grow long.~~ ✅ Partially done (7.1, 4.4)
+3. **P1 remaining (5.2) + P2 allocation patterns** — incremental wins on the rendering hot path.
 3. **P2 remaining allocation patterns** — incremental wins on the rendering hot path.
 4. **P3 hardening** — when the dust settles.

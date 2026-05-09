@@ -490,6 +490,99 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Append multiple messages in a single transaction.
+    ///
+    /// This is significantly faster than calling [`append_message`] N times
+    /// because all inserts share one SQLite transaction instead of N.
+    /// Use this for tool-heavy turns where 10+ tool results are persisted
+    /// sequentially.
+    pub fn append_messages(&self, session_id: Uuid, messages: &[Message]) -> Result<()> {
+        if messages.is_empty() {
+            return Ok(());
+        }
+
+        // Use execute_batch for transaction control since rusqlite's
+        // Transaction requires &mut self.
+        self.write_conn
+            .execute_batch("BEGIN TRANSACTION")
+            .context("failed to begin transaction")?;
+
+        let rollback = || {
+            let _ = self.write_conn.execute_batch("ROLLBACK");
+        };
+
+        let result = (|| -> Result<()> {
+            let mut stmt = self.write_conn.prepare(
+                "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+            ).context("failed to prepare batch insert statement")?;
+
+            for message in messages {
+                let tool_calls = serde_json::to_string(&message.tool_calls)
+                    .context("failed to serialize tool calls")?;
+                let attachments = serde_json::to_string(&message.attachments)
+                    .context("failed to serialize attachments")?;
+                let metadata = serde_json::to_string(&message.metadata)
+                    .context("failed to serialize metadata")?;
+                let mode = message
+                    .mode
+                    .map(|m| serde_json::to_string(&m).unwrap_or_default());
+                let thinking_level = message.thinking_level.as_ref().map(|t| t.to_string());
+                let compressed_content = compress_text(&message.content);
+                let reasoning = if message.reasoning.is_empty() {
+                    None
+                } else {
+                    Some(compress_text(&message.reasoning))
+                };
+
+                stmt.execute(params![
+                    message.id.to_string(),
+                    session_id.to_string(),
+                    message.role.db_value(),
+                    compressed_content,
+                    attachments,
+                    reasoning,
+                    tool_calls,
+                    message.tool_call_id,
+                    message.tool_name,
+                    metadata,
+                    message.created_at.to_rfc3339(),
+                    message.completed_at.map(|t| t.to_rfc3339()),
+                    if message.streaming { 1_i64 } else { 0_i64 },
+                    message.input_tokens,
+                    message.output_tokens,
+                    message.total_tokens,
+                    message.cache_read_tokens,
+                    message.cache_write_tokens,
+                    message.model_id,
+                    message.tokens_per_second,
+                    message.snapshot_hash,
+                    message.patch_files,
+                    message.file_diffs,
+                    mode,
+                    if message.rtk_rewritten { 1_i64 } else { 0_i64 },
+                    thinking_level,
+                ]).context("failed to insert message in batch")?;
+            }
+
+            drop(stmt);
+            self.write_conn
+                .execute_batch("COMMIT")
+                .context("failed to commit batch insert transaction")?;
+            Ok(())
+        })();
+
+        match result {
+            Ok(()) => {
+                self.touch_session(session_id)?;
+                Ok(())
+            }
+            Err(e) => {
+                rollback();
+                Err(e)
+            }
+        }
+    }
+
     pub fn delete_messages(&self, session_id: Uuid, message_ids: &[Uuid]) -> Result<()> {
         if message_ids.is_empty() {
             return Ok(());
