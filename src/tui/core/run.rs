@@ -674,6 +674,24 @@ impl App {
             }
         }
 
+        // Restore thinking level: preference first, then last message overrides
+        if let Ok(Some(level_str)) = self.store.load_model_thinking_level(
+            &runtime.active_model.provider_id,
+            &runtime.active_model.model_id,
+        ) {
+            runtime.active_model.thinking_level =
+                crate::config::reasoning::ThinkingLevelType::from_string(&level_str);
+        }
+        if let Some(last_level) = runtime
+            .conversation
+            .messages
+            .iter()
+            .rev()
+            .find_map(|m| m.thinking_level.as_ref())
+        {
+            runtime.active_model.thinking_level = last_level.clone();
+        }
+
         Ok(Some(runtime))
     }
 

@@ -264,12 +264,26 @@ impl App {
         {
             self.thinking_level = self.thinking_level.next();
             self.last_notice = Some(format!("Thinking: {}", self.thinking_level.display_name()));
+            if let Err(e) = self.store.save_model_thinking_level(
+                &self.active_model.provider_id,
+                &self.active_model.model_id,
+                &self.thinking_level.to_string(),
+            ) {
+                crate::log_warn!("failed to save thinking level preference: {}", e);
+            }
             return Ok(());
         }
 
         if matches!(key.code, KeyCode::Char('t')) && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.thinking_level = self.thinking_level.next();
             self.last_notice = Some(format!("Thinking: {}", self.thinking_level.display_name()));
+            if let Err(e) = self.store.save_model_thinking_level(
+                &self.active_model.provider_id,
+                &self.active_model.model_id,
+                &self.thinking_level.to_string(),
+            ) {
+                crate::log_warn!("failed to save thinking level preference: {}", e);
+            }
             return Ok(());
         }
 

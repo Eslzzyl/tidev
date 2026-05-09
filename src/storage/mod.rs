@@ -1398,6 +1398,36 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Save the user's thinking level preference for a specific model.
+    pub fn save_model_thinking_level(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+        thinking_level: &str,
+    ) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.write_conn.execute(
+            "INSERT OR REPLACE INTO model_thinking_levels (provider_id, model_id, thinking_level, updated_at) VALUES (?1, ?2, ?3, ?4)",
+            params![provider_id, model_id, thinking_level, now],
+        )?;
+        Ok(())
+    }
+
+    /// Load the user's thinking level preference for a specific model.
+    pub fn load_model_thinking_level(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+    ) -> Result<Option<String>> {
+        let mut statement = self.write_conn.prepare(
+            "SELECT thinking_level FROM model_thinking_levels WHERE provider_id = ?1 AND model_id = ?2",
+        )?;
+        let result = statement
+            .query_row(params![provider_id, model_id], |row| row.get::<_, String>(0))
+            .optional()?;
+        Ok(result)
+    }
+
     pub fn get_time_range_stats(
         &self,
         granularity: Granularity,

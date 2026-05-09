@@ -186,6 +186,14 @@ CREATE INDEX IF NOT EXISTS idx_usage_stats_time_bucket
 CREATE INDEX IF NOT EXISTS idx_usage_stats_provider_model
     ON usage_stats(provider_id, model_id);
 
+CREATE TABLE IF NOT EXISTS model_thinking_levels (
+    provider_id TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    thinking_level TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (provider_id, model_id)
+);
+
 CREATE TABLE IF NOT EXISTS file_reads (
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     file_path TEXT NOT NULL,
@@ -386,6 +394,14 @@ CREATE INDEX IF NOT EXISTS idx_usage_stats_time_bucket
 
 CREATE INDEX IF NOT EXISTS idx_usage_stats_provider_model
     ON usage_stats(provider_id, model_id);
+
+CREATE TABLE IF NOT EXISTS model_thinking_levels (
+    provider_id TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    thinking_level TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (provider_id, model_id)
+);
 
 CREATE TABLE IF NOT EXISTS file_reads (
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

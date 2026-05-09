@@ -347,6 +347,13 @@ impl App {
         let model = self.config.resolve_model(&self.auth, selector)?;
         self.active_model = model.clone();
         self.thinking_level = model.thinking_level.clone();
+        // Load saved thinking level preference for this model (overrides auto-detected value)
+        if let Ok(Some(level_str)) = self.store.load_model_thinking_level(
+            &model.provider_id,
+            &model.model_id,
+        ) {
+            self.thinking_level = crate::config::reasoning::ThinkingLevelType::from_string(&level_str);
+        }
         self.tools.set_active_model(model.clone());
         self.conversation.set_model(
             model.provider_id.clone(),
