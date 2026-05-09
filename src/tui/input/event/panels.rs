@@ -1,5 +1,5 @@
-use crate::tui::model_panel::{ModelPanelItem, thinking_options_for_model};
 use super::*;
+use crate::tui::model_panel::{ModelPanelItem, thinking_options_for_model};
 
 impl App {
     pub(crate) fn handle_theme_panel_key(&mut self, key: KeyEvent) -> Result<()> {
@@ -191,7 +191,10 @@ impl App {
                             matches!(item, ModelPanelItem::Model { summary: s, .. }
                                 if s.provider_id == summary.provider_id && s.model_id == summary.model_id)
                         }).unwrap_or(0));
-                        let tl_index = panel.current_tab().map(|t| t.thinking_level_index).unwrap_or(0);
+                        let tl_index = panel
+                            .current_tab()
+                            .map(|t| t.thinking_level_index)
+                            .unwrap_or(0);
                         let tl = if tl_options.is_empty() {
                             String::new()
                         } else {
@@ -232,7 +235,8 @@ impl App {
                             }
                             self.last_notice = Some(format!(
                                 "Agent '{}' model set to {} ({})",
-                                agent_type_str, model_str,
+                                agent_type_str,
+                                model_str,
                                 if tl.is_empty() { "auto" } else { &tl },
                             ));
                         }
@@ -241,10 +245,10 @@ impl App {
                 } else {
                     // Expand to show thinking level options
                     if let Some(summary) = panel.selected_model(&items).cloned() {
-                        let tl_options = thinking_options_for_model(&items, panel
-                            .current_tab()
-                            .map(|t| t.selected_index)
-                            .unwrap_or(0));
+                        let tl_options = thinking_options_for_model(
+                            &items,
+                            panel.current_tab().map(|t| t.selected_index).unwrap_or(0),
+                        );
                         if tl_options.is_empty() {
                             // Model doesn't support thinking: act as before (immediate apply)
                             if panel.is_general_tab() {

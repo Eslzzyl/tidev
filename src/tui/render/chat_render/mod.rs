@@ -1460,7 +1460,8 @@ impl App {
             }
         } else if !index.dirty_messages.is_empty() {
             // Incremental update: only recompute blocks with dirty messages
-            let dirty_ids: std::collections::HashSet<Uuid> = index.dirty_messages.drain(..).collect();
+            let dirty_ids: std::collections::HashSet<Uuid> =
+                index.dirty_messages.drain(..).collect();
 
             let expanded_tool_outputs = self.load_expanded_tool_outputs(messages);
             let spinner = self.loading_spinner();
@@ -1482,11 +1483,14 @@ impl App {
             while i < index.blocks.len() {
                 let block = &index.blocks[i];
                 let msg = &messages[block.message_start_idx];
-                if dirty_ids.contains(&msg.id) || dirty_ids.iter().any(|id| {
-                    messages[block.message_start_idx..block.message_start_idx + block.message_count]
-                        .iter()
-                        .any(|m| &m.id == id)
-                }) {
+                if dirty_ids.contains(&msg.id)
+                    || dirty_ids.iter().any(|id| {
+                        messages
+                            [block.message_start_idx..block.message_start_idx + block.message_count]
+                            .iter()
+                            .any(|m| &m.id == id)
+                    })
+                {
                     // Recompute this block
                     let is_round_end = {
                         let next_idx = block.message_start_idx + block.message_count;
@@ -1516,8 +1520,7 @@ impl App {
                             index.blocks[j].start_line =
                                 (index.blocks[j].start_line as isize + line_count_diff) as usize;
                         }
-                        index.total_lines =
-                            (index.total_lines as isize + line_count_diff) as usize;
+                        index.total_lines = (index.total_lines as isize + line_count_diff) as usize;
                     }
 
                     // Insert cache entries for this block

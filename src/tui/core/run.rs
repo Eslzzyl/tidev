@@ -67,10 +67,9 @@ impl App {
 
         let mut active_model = fallback_model;
         // Load saved thinking level preference for the default model across restarts
-        if let Ok(Some(level_str)) = store.load_model_thinking_level(
-            &active_model.provider_id,
-            &active_model.model_id,
-        ) {
+        if let Ok(Some(level_str)) =
+            store.load_model_thinking_level(&active_model.provider_id, &active_model.model_id)
+        {
             active_model.thinking_level =
                 crate::config::reasoning::ThinkingLevelType::from_string(&level_str);
         }

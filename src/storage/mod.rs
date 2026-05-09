@@ -447,8 +447,7 @@ impl SessionStore {
         let attachments = serde_json::to_string(&message.attachments)
             .context("failed to serialize attachments")?;
         let metadata = compress_text(
-            &serde_json::to_string(&message.metadata)
-                .context("failed to serialize metadata")?,
+            &serde_json::to_string(&message.metadata).context("failed to serialize metadata")?,
         );
         let mode = message
             .mode
@@ -571,7 +570,8 @@ impl SessionStore {
                     mode,
                     if message.rtk_rewritten { 1_i64 } else { 0_i64 },
                     thinking_level,
-                ]).context("failed to insert message in batch")?;
+                ])
+                .context("failed to insert message in batch")?;
             }
 
             drop(stmt);
@@ -1438,7 +1438,9 @@ impl SessionStore {
             "SELECT thinking_level FROM model_thinking_levels WHERE provider_id = ?1 AND model_id = ?2",
         )?;
         let result = statement
-            .query_row(params![provider_id, model_id], |row| row.get::<_, String>(0))
+            .query_row(params![provider_id, model_id], |row| {
+                row.get::<_, String>(0)
+            })
             .optional()?;
         Ok(result)
     }
@@ -1761,8 +1763,8 @@ impl SessionStore {
             for sid in &session_id_strs {
                 let row = stmt
                     .query_row(params![sid], |row| {
-                        let redo: Option<String> = read_opt_blob_maybe_text(row, 2)?
-                            .map(|bytes| decompress_text(&bytes));
+                        let redo: Option<String> =
+                            read_opt_blob_maybe_text(row, 2)?.map(|bytes| decompress_text(&bytes));
                         Ok((
                             row.get::<_, String>(0)?,
                             row.get::<_, String>(1)?,

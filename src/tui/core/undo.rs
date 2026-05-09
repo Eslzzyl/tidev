@@ -466,13 +466,11 @@ impl App {
                 .conversation
                 .message_index(msg_id)
                 .map(|idx| {
-                    self.conversation
-                        .revert_message_id
-                        .is_none_or(|revert_id| {
-                            self.conversation
-                                .message_index(revert_id)
-                                .is_none_or(|revert_idx| idx < revert_idx)
-                        })
+                    self.conversation.revert_message_id.is_none_or(|revert_id| {
+                        self.conversation
+                            .message_index(revert_id)
+                            .is_none_or(|revert_idx| idx < revert_idx)
+                    })
                 })
                 .unwrap_or(false);
 
@@ -482,14 +480,15 @@ impl App {
                     .messages
                     .iter_mut()
                     .find(|m| m.id == msg_id)
-                    && let Ok(json) = serde_json::to_string(&merged) {
-                        crate::log_info!(
-                            "merge_step_diffs: updating msg.file_diffs with {} files",
-                            merged.len()
-                        );
-                        msg.file_diffs = Some(json);
-                        self.invalidate_active_message_render_cache_for(msg_id);
-                    }
+                && let Ok(json) = serde_json::to_string(&merged)
+            {
+                crate::log_info!(
+                    "merge_step_diffs: updating msg.file_diffs with {} files",
+                    merged.len()
+                );
+                msg.file_diffs = Some(json);
+                self.invalidate_active_message_render_cache_for(msg_id);
+            }
         }
     }
 

@@ -68,11 +68,7 @@ pub async fn set_default_model(
         && !tl.is_empty()
     {
         let store = state.store.lock().await;
-        let _ = store.save_model_thinking_level(
-            &body.provider_id,
-            &body.model_id,
-            tl,
-        );
+        let _ = store.save_model_thinking_level(&body.provider_id, &body.model_id, tl);
     }
 
     crate::log_info!(
@@ -234,12 +230,7 @@ pub async fn set_agent_model(
     // Update config and persist
     let mut config = state.config.write().await;
     let tl = body.thinking_level.as_deref().unwrap_or("");
-    config.set_agent_model_and_thinking(
-        &state.config_paths,
-        &agent_type,
-        &body.model_str,
-        tl,
-    )?;
+    config.set_agent_model_and_thinking(&state.config_paths, &agent_type, &body.model_str, tl)?;
     drop(config);
 
     Ok(Json(SetAgentModelResponse { success: true }))

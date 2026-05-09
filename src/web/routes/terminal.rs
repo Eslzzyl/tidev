@@ -277,9 +277,10 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {
     // connected (e.g. the initial shell prompt), matching the SSE handler.
     let buf = terminal_manager.get_buffer(session_id).await;
     if !buf.is_empty()
-        && let Ok(text) = String::from_utf8(buf) {
-            let _ = ws.send(Message::Text(text.into())).await;
-        }
+        && let Ok(text) = String::from_utf8(buf)
+    {
+        let _ = ws.send(Message::Text(text.into())).await;
+    }
 
     // Subscribe to terminal output
     let mut rx = terminal_tx.subscribe();

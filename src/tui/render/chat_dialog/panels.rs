@@ -767,26 +767,44 @@ impl App {
                     let is_active = summary.provider_id == self.active_model.provider_id
                         && summary.model_id == self.active_model.model_id
                         && panel.is_general_tab();
-                    let thinking_level_tag: Option<String> = if is_selected && panel.current_tab().is_some_and(|t| t.thinking_level_expanded) {
+                    let thinking_level_tag: Option<String> = if is_selected
+                        && panel
+                            .current_tab()
+                            .is_some_and(|t| t.thinking_level_expanded)
+                    {
                         // Show the in-progress thinking level selection
                         let tl_options = thinking_options_for_model(&items, index);
                         if !tl_options.is_empty() {
-                            let tl_idx = panel.current_tab().map(|t| t.thinking_level_index).unwrap_or(0);
+                            let tl_idx = panel
+                                .current_tab()
+                                .map(|t| t.thinking_level_index)
+                                .unwrap_or(0);
                             let opt = tl_options[tl_idx % tl_options.len()];
                             let name = opt.rsplit_once(':').map(|(_, v)| v).unwrap_or(opt);
                             Some(name.to_string())
-                        } else { None }
+                        } else {
+                            None
+                        }
                     } else if is_active && self.thinking_level.is_supported() {
                         Some(self.thinking_level.display_name().to_string())
                     } else if !panel.is_general_tab() {
                         // Check agent thinking level override
                         if let Some(tab) = panel.current_tab() {
-                            if let Some(tl_str) = self.config.agent.thinking_levels.get(&tab.agent_type_str) {
-                                let tl_level = tl_str.rsplit_once(':').map(|(_, v)| v).unwrap_or(tl_str);
+                            if let Some(tl_str) =
+                                self.config.agent.thinking_levels.get(&tab.agent_type_str)
+                            {
+                                let tl_level =
+                                    tl_str.rsplit_once(':').map(|(_, v)| v).unwrap_or(tl_str);
                                 Some(tl_level.to_string())
-                            } else { None }
-                        } else { None }
-                    } else { None };
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
 
                     let mut spans = vec![
                         active_marker,
@@ -831,14 +849,20 @@ impl App {
                     if is_selected {
                         let tl_options = thinking_options_for_model(&items, index);
                         if !tl_options.is_empty() {
-                            let tl_index = panel.current_tab().map(|t| t.thinking_level_index).unwrap_or(0);
+                            let tl_index = panel
+                                .current_tab()
+                                .map(|t| t.thinking_level_index)
+                                .unwrap_or(0);
                             for (i, opt) in tl_options.iter().enumerate() {
                                 let is_tl_selected = i == tl_index;
                                 // opt format: "deepseek:Off", "qwen:On", etc.
-                                let level_name = opt.rsplit_once(':').map(|(_, v)| v).unwrap_or(opt);
+                                let level_name =
+                                    opt.rsplit_once(':').map(|(_, v)| v).unwrap_or(opt);
                                 let bullet = if is_tl_selected { " ● " } else { " ○ " };
                                 let tl_style = if is_tl_selected {
-                                    Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)
+                                    Style::default()
+                                        .fg(palette.accent)
+                                        .add_modifier(Modifier::BOLD)
                                 } else {
                                     Style::default().fg(palette.muted)
                                 };
@@ -867,11 +891,14 @@ impl App {
             let sel = if is_expanded {
                 // When thinking level is expanded, highlight the active sub-option:
                 // selected_index (model) + 1 (first sub-option) + thinking_level_index
-                let model_idx = tab.map(|t| t.selected_index).unwrap_or(0).min(items.len().saturating_sub(1));
+                let model_idx = tab
+                    .map(|t| t.selected_index)
+                    .unwrap_or(0)
+                    .min(items.len().saturating_sub(1));
                 let tl_idx = tab.map(|t| t.thinking_level_index).unwrap_or(0);
-                let tl_count = tab.map(|t| {
-                    thinking_options_for_model(&items, t.selected_index).len()
-                }).unwrap_or(0);
+                let tl_count = tab
+                    .map(|t| thinking_options_for_model(&items, t.selected_index).len())
+                    .unwrap_or(0);
                 // Only offset if there are thinking options
                 if tl_count > 0 {
                     model_idx + 1 + tl_idx.min(tl_count.saturating_sub(1))

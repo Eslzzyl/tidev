@@ -37,7 +37,8 @@ pub async fn list_models(State(state): State<AppState>) -> WebResult<Json<ListMo
             let provider = config.provider(&summary.provider_id);
             let model = provider.and_then(|p| p.models.get(&summary.model_id));
             // Determine thinking level with same cascade as resolve_model_by_ids
-            let thinking_level = if let Some(rid) = model.and_then(|m| m.request_model_id.as_ref()) {
+            let thinking_level = if let Some(rid) = model.and_then(|m| m.request_model_id.as_ref())
+            {
                 ThinkingMatcher::match_for_model(rid)
             } else {
                 ThinkingMatcher::match_for_model(&summary.model_display_name)

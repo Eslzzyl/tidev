@@ -348,11 +348,12 @@ impl App {
         self.active_model = model.clone();
         self.thinking_level = model.thinking_level.clone();
         // Load saved thinking level preference for this model (overrides auto-detected value)
-        if let Ok(Some(level_str)) = self.store.load_model_thinking_level(
-            &model.provider_id,
-            &model.model_id,
-        ) {
-            self.thinking_level = crate::config::reasoning::ThinkingLevelType::from_string(&level_str);
+        if let Ok(Some(level_str)) = self
+            .store
+            .load_model_thinking_level(&model.provider_id, &model.model_id)
+        {
+            self.thinking_level =
+                crate::config::reasoning::ThinkingLevelType::from_string(&level_str);
         }
         self.tools.set_active_model(model.clone());
         self.conversation.set_model(
@@ -412,10 +413,10 @@ impl App {
             self.active_model.thinking_level = model.thinking_level.clone();
             self.thinking_level = model.thinking_level;
         }
-        if let Ok(Some(level_str)) = self.store.load_model_thinking_level(
-            &self.active_model.provider_id,
-            &self.active_model.model_id,
-        ) {
+        if let Ok(Some(level_str)) = self
+            .store
+            .load_model_thinking_level(&self.active_model.provider_id, &self.active_model.model_id)
+        {
             let level = crate::config::reasoning::ThinkingLevelType::from_string(&level_str);
             self.active_model.thinking_level = level.clone();
             self.thinking_level = level;

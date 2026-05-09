@@ -44,8 +44,9 @@ type MarkdownCacheKey = (blake3::Hash, Option<usize>, blake3::Hash);
 /// Content-hash based cache for rendered markdown output.
 /// Keyed by (blake3::Hash of input, width, cwd_hash) to avoid re-parsing markdown
 /// when neither content, terminal width, nor workspace has changed.
-static MARKDOWN_RENDER_CACHE: LazyLock<Mutex<std::collections::HashMap<MarkdownCacheKey, Text<'static>>>> =
-    LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+static MARKDOWN_RENDER_CACHE: LazyLock<
+    Mutex<std::collections::HashMap<MarkdownCacheKey, Text<'static>>>,
+> = LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
 /// Maximum number of entries in the markdown render cache.
 const MARKDOWN_RENDER_CACHE_MAX_ENTRIES: usize = 256;
