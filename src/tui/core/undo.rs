@@ -2,6 +2,7 @@ use anyhow::Result;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
+use crate::snapshot::FileDiff;
 use crate::{context::ContextManager, shared::undo::StepPatch, snapshot::Patch};
 
 use super::{App, BackendEvent, Screen};
@@ -365,6 +366,131 @@ impl App {
         self.scroll_messages_to_bottom();
         crate::log_info!("unrevert: completed");
         Ok(())
+    }
+
+    /// Capture an intermediate snapshot between tool execution steps within a round.
+    /// These are used at round end to compute per-step patches for undo/redo,
+    /// and to provide lightweight sidebar diffs showing changed files in real-time.
+    pub(crate) fn capture_step_snapshot(&mut self, runtime: &Runtime) {
+        crate::log_info!("capture_step_snapshot: starting");
+        match runtime.block_on(self.snapshot.track()) {
+            Ok(Some(hash)) => {
+                crate::log_info!("capture_step_snapshot: captured hash={}", hash);
+                self.step_snapshot_hashes.push(hash.clone());
+
+                let prev_hash = self.step_prev_hash.clone().or_else(|| {
+                    self.conversation
+                        .last_visible_user_message()
+                        .and_then(|m| m.snapshot_hash.clone())
+                });
+
+                if let Some(prev) = prev_hash {
+                    match runtime.block_on(self.snapshot.diff_lightweight(&prev, &hash)) {
+                        Ok(diffs) => {
+                            let files: Vec<String> = diffs
+                                .iter()
+                                .map(|d| {
+                                    self.workspace_root
+                                        .join(&d.file)
+                                        .to_string_lossy()
+                                        .replace('\\', "/")
+                                })
+                                .collect();
+                            self.step_cached_file_lists.push(files);
+                            self.merge_step_diffs(diffs);
+                        }
+                        Err(e) => {
+                            crate::log_warn!(
+                                "capture_step_snapshot: diff_lightweight failed: {}",
+                                e
+                            );
+                            self.step_cached_file_lists.push(Vec::new());
+                        }
+                    }
+                } else {
+                    crate::log_info!("capture_step_snapshot: no previous hash available");
+                    self.step_cached_file_lists.push(Vec::new());
+                }
+
+                self.step_prev_hash = Some(hash);
+            }
+            Ok(None) => {
+                crate::log_info!("capture_step_snapshot: track() returned None (no changes)");
+            }
+            Err(error) => {
+                crate::log_warn!("capture_step_snapshot: track() failed: {}", error);
+            }
+        }
+    }
+
+    /// Merge lightweight per-step diffs into the running cumulative sidebar data.
+    /// Updates step_cached_file_diffs and writes to the current user message's file_diffs.
+    fn merge_step_diffs(&mut self, step_diffs: Vec<FileDiff>) {
+        use std::collections::HashMap;
+
+        let mut cumulative: HashMap<String, FileDiff> = HashMap::new();
+        if let Some(existing) = self.step_cached_file_diffs.take() {
+            for d in existing {
+                cumulative.insert(d.file.clone(), d);
+            }
+        }
+
+        for d in step_diffs {
+            match cumulative.get_mut(&d.file) {
+                Some(existing) => {
+                    existing.additions = d.additions;
+                    existing.deletions = d.deletions;
+                    if existing.status.as_deref() != Some("added") {
+                        existing.status = d.status;
+                    }
+                }
+                None => {
+                    cumulative.insert(d.file.clone(), d);
+                }
+            }
+        }
+
+        let merged: Vec<FileDiff> = cumulative.into_values().collect();
+        self.step_cached_file_diffs = Some(merged.clone());
+
+        let last_user_id = self
+            .conversation
+            .messages
+            .iter()
+            .rev()
+            .find(|m| matches!(m.role, crate::session::MessageRole::User))
+            .map(|m| m.id);
+
+        if let Some(msg_id) = last_user_id {
+            let is_visible = self
+                .conversation
+                .message_index(msg_id)
+                .map(|idx| {
+                    self.conversation
+                        .revert_message_id
+                        .is_none_or(|revert_id| {
+                            self.conversation
+                                .message_index(revert_id)
+                                .is_none_or(|revert_idx| idx < revert_idx)
+                        })
+                })
+                .unwrap_or(false);
+
+            if is_visible
+                && let Some(msg) = self
+                    .conversation
+                    .messages
+                    .iter_mut()
+                    .find(|m| m.id == msg_id)
+                    && let Ok(json) = serde_json::to_string(&merged) {
+                        crate::log_info!(
+                            "merge_step_diffs: updating msg.file_diffs with {} files",
+                            merged.len()
+                        );
+                        msg.file_diffs = Some(json);
+                        self.invalidate_active_message_render_cache_for(msg_id);
+                    }
+        }
     }
 
     pub(crate) fn capture_prompt_snapshot(

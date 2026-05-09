@@ -937,6 +937,9 @@ impl App {
                         self.record_tool_result(running.tool_call, result)?;
                     }
 
+                    // Capture step snapshot for per-step undo tracking and sidebar updates
+                    self.capture_step_snapshot(runtime);
+
                     // Also clean up running_subagent_executions for task tools
                     self.running_subagent_executions
                         .retain(|e| e.request_id != request_id);
