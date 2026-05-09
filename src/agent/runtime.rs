@@ -949,6 +949,9 @@ impl AgentRuntime {
             let tl = child_thinking.clone();
             let stream_req_id = request_sequence;
             let tools_for_spawn = tools.clone();
+            // Clone stream_tx before moving it into the LLM task, so we can
+            // also use it in the cancel listener below.
+            let stream_tx_for_llm = stream_tx.clone();
             tokio::spawn(async move {
                 llm.stream_chat(
                     child_session_id,
@@ -956,11 +959,26 @@ impl AgentRuntime {
                     model_for_task,
                     msgs,
                     tools_for_spawn,
-                    stream_tx,
+                    stream_tx_for_llm,
                     tl,
                 )
                 .await;
             });
+
+            // Listen for cancellation and drop stream_tx to unblock
+            // the event loop below.  The spawned LLM task above is
+            // fire-and-forget (no JoinHandle) so without this the
+            // subagent would block forever on stream_rx.recv() even
+            // after the cancel_token fires.
+            if let Some(ref ct) = cancel_token {
+                let cancel_tx = stream_tx.clone();
+                let ct = ct.clone();
+                tokio::spawn(async move {
+                    ct.cancelled().await;
+                    // Drop the sender so the receiver's recv() returns None
+                    drop(cancel_tx);
+                });
+            }
 
             let mut turn = AssistantTurn::default();
             let mut finished = false;
@@ -1408,8 +1426,11 @@ impl AgentRuntime {
             // 7a. Subagent (task) tools — read-only types (Explorer, Librarian,
             // Oracle) run in parallel; write-capable types (Designer, Fixer,
             // General) run serially.
-            let mut task_handles: Vec<(ToolCall, tokio::task::JoinHandle<ToolExecutionResult>)> =
-                Vec::new();
+            let mut task_handles: Vec<(
+                ToolCall,
+                Option<uuid::Uuid>,
+                tokio::task::JoinHandle<ToolExecutionResult>,
+            )> = Vec::new();
 
             for (tc, child_sid) in task_calls {
                 // Determine if this subagent is read-only by parsing the
@@ -1443,7 +1464,7 @@ impl AgentRuntime {
                             ));
                         fut.await
                     });
-                    task_handles.push((tc, handle));
+                    task_handles.push((tc, child_sid, handle));
                 } else {
                     // Write-capable subagent — run serially to avoid ordering
                     // issues with filesystem and database mutations.
@@ -1470,16 +1491,32 @@ impl AgentRuntime {
                     };
                     self.persist_tool_result(session_id, request_id, &tc, &result, &event_tx)
                         .await?;
+                    // Send SubagentCompleted for serial subagent
+                    let _ = event_tx.send(BackendEvent::SubagentCompleted {
+                        session_id,
+                        request_id,
+                        tool_call: tc.clone(),
+                        child_session_id: child_sid.unwrap_or_else(uuid::Uuid::new_v4),
+                        result: result.clone(),
+                    });
                 }
             }
 
             // Collect parallel task results in order
-            for (tc, handle) in task_handles {
+            for (tc, child_sid, handle) in task_handles {
                 let result = handle.await.unwrap_or_else(|e| {
                     ToolExecutionResult::new(format!("Subagent task panicked/aborted: {e}"))
                 });
                 self.persist_tool_result(session_id, request_id, &tc, &result, &event_tx)
                     .await?;
+                // Send SubagentCompleted for parallel subagent
+                let _ = event_tx.send(BackendEvent::SubagentCompleted {
+                    session_id,
+                    request_id,
+                    tool_call: tc.clone(),
+                    child_session_id: child_sid.unwrap_or_else(uuid::Uuid::new_v4),
+                    result: result.clone(),
+                });
             }
 
             // 7b. Regular tools through execute_tool_calls

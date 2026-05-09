@@ -828,6 +828,21 @@ impl App {
                 error,
             } => {
                 if !self.is_active_request(request_id) {
+                    // This may be a Failed event from a subagent child session
+                    // (the child session has its own request_id).  Try to match
+                    // it against running_subagent_executions and clean up.
+                    if self
+                        .running_subagent_executions
+                        .iter()
+                        .any(|e| e.request_id == request_id)
+                    {
+                        crate::log_info!(
+                            "Failed event for subagent child session request_id={}, cleaning up",
+                            request_id
+                        );
+                        self.running_subagent_executions
+                            .retain(|e| e.request_id != request_id);
+                    }
                     return Ok(());
                 }
 
@@ -928,7 +943,7 @@ impl App {
                             }
                         } else {
                             // Fallback: no streaming message existed
-                            self.record_tool_result(tool_call, result)?;
+                            self.record_tool_result(tool_call.clone(), result)?;
                         }
                     } else {
                         self.record_tool_result(running.tool_call, result)?;
@@ -937,9 +952,21 @@ impl App {
                     // Capture step snapshot for per-step undo tracking and sidebar updates
                     self.capture_step_snapshot(runtime);
 
-                    // Also clean up running_subagent_executions for task tools
-                    self.running_subagent_executions
-                        .retain(|e| e.request_id != request_id);
+                    // Also clean up running_subagent_executions for task tools.
+                    // Match by tool_call.id instead of request_id so that
+                    // parallel subagents (which share the same request_id) are
+                    // each removed individually rather than all at once.
+                    if tool_call.name == "task" {
+                        if let Some(pos) = self
+                            .running_subagent_executions
+                            .iter()
+                            .position(|e| {
+                                e.request_id == request_id && e.tool_call.id == tool_call.id
+                            })
+                        {
+                            self.running_subagent_executions.remove(pos);
+                        }
+                    }
                 }
             }
             BackendEvent::SubagentStatus {
@@ -1042,84 +1069,69 @@ impl App {
                     return Ok(());
                 }
 
-                let execution_index =
-                    self.running_subagent_executions
-                        .iter()
-                        .position(|execution| {
-                            execution.request_id == request_id
-                                && execution.child_session_id == child_session_id
-                                && execution.tool_call.id == tool_call.id
-                        });
-
-                let Some(index) = execution_index else {
-                    crate::log_warn!(
-                        "SubagentCompleted: no matching running_subagent_execution found"
-                    );
-                    return Ok(());
+                // Try to find and remove from running_subagent_executions.
+                // May already be gone if ToolCompleted cleaned it up first.
+                let parent_session_id = {
+                    let idx = self.running_subagent_executions.iter().position(|execution| {
+                        execution.request_id == request_id
+                            && execution.child_session_id == child_session_id
+                            && execution.tool_call.id == tool_call.id
+                    });
+                    idx.map(|i| self.running_subagent_executions.remove(i).parent_session_id)
                 };
 
-                let execution = self.running_subagent_executions.remove(index);
-                let parent_session_id = execution.parent_session_id;
-                crate::log_info!(
-                    "Removed running_subagent_executions[{}], remaining count={}, parent_session_id={}",
-                    index,
-                    self.running_subagent_executions.len(),
-                    parent_session_id
-                );
-
-                let is_on_parent_session = self.conversation.session_id == parent_session_id;
-                crate::log_info!(
-                    "SubagentCompleted: is_on_parent_session={}, current_session_id={}",
-                    is_on_parent_session,
-                    self.conversation.session_id
-                );
-
-                if is_on_parent_session {
-                    self.record_tool_result(tool_call, result)?;
+                if let Some(parent_session_id) = parent_session_id {
                     crate::log_info!(
-                        "record_tool_result done, pending_tool_execution={}, running_subagent_executions={}",
-                        self.pending_tool_execution.is_some(),
-                        self.running_subagent_executions.len()
-                    );
-
-                    if self.pending_tool_execution.is_none()
-                        && self.running_subagent_executions.is_empty()
-                    {
-                        crate::log_info!("SubagentCompleted: calling spawn_agent_loop");
-                        self.spawn_agent_loop(runtime)?;
-                    } else if !self.running_subagent_executions.is_empty() {
-                        self.last_notice = Some(format!(
-                            "Waiting for {} subagent(s)...",
-                            self.running_subagent_executions.len()
-                        ));
-                    }
-                } else {
-                    crate::log_info!(
-                        "SubagentCompleted: user switched away from parent session, writing to database directly"
-                    );
-                    let display_result = if tool_call.name == "task" {
-                        result.clone()
-                    } else {
-                        result.preview_for_storage(Some(tool_call.name.as_str()))
-                    };
-                    let message = Message::tool_result(
-                        tool_call.id.clone(),
-                        tool_call.name.clone(),
-                        display_result,
-                    );
-                    self.store.append_tool_event(
-                        parent_session_id,
-                        message.id,
-                        &tool_call.name,
-                        &tool_call.arguments,
-                        &result.output,
-                    )?;
-                    self.store.append_message(parent_session_id, &message)?;
-                    self.pending_assistant_turns.insert(parent_session_id);
-                    crate::log_info!(
-                        "SubagentCompleted: marked parent_session_id={} as pending assistant turn",
+                        "Removed running_subagent_execution, remaining count={}, parent_session_id={}",
+                        self.running_subagent_executions.len(),
                         parent_session_id
                     );
+
+                    if self.conversation.session_id == parent_session_id {
+                        // We're on the parent session.  ToolCompleted already
+                        // called record_tool_result, so we only update the
+                        // UI notice here.
+                    } else {
+                        // User switched to the child session view.
+                        // ToolCompleted may not have processed the result
+                        // for the parent session, so write it to DB directly.
+                        crate::log_info!(
+                            "SubagentCompleted: user switched away from parent session, writing to database directly"
+                        );
+                        let display_result = if tool_call.name == "task" {
+                            result.clone()
+                        } else {
+                            result.preview_for_storage(Some(tool_call.name.as_str()))
+                        };
+                        let message = Message::tool_result(
+                            tool_call.id.clone(),
+                            tool_call.name.clone(),
+                            display_result,
+                        );
+                        self.store.append_tool_event(
+                            parent_session_id,
+                            message.id,
+                            &tool_call.name,
+                            &tool_call.arguments,
+                            &result.output,
+                        )?;
+                        self.store.append_message(parent_session_id, &message)?;
+                        self.pending_assistant_turns.insert(parent_session_id);
+                        crate::log_info!(
+                            "SubagentCompleted: marked parent_session_id={} as pending assistant turn",
+                            parent_session_id
+                        );
+                    }
+                }
+
+                // Update UI notice based on remaining subagents
+                if self.running_subagent_executions.is_empty() {
+                    self.last_notice = None;
+                } else {
+                    self.last_notice = Some(format!(
+                        "Waiting for {} subagent(s)...",
+                        self.running_subagent_executions.len()
+                    ));
                 }
 
                 self.notifications.notify("Subagent finished");
