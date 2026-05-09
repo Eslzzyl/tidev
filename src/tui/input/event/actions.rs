@@ -401,6 +401,26 @@ impl App {
 
         self.conversation = conversation;
         self.reset_active_runtime();
+
+        // Reset thinking_level to the default auto-detected value for the current model,
+        // then apply any saved user preference.
+        if let Ok(model) = self.config.resolve_model_by_ids(
+            &self.auth,
+            &self.active_model.provider_id,
+            &self.active_model.model_id,
+        ) {
+            self.active_model.thinking_level = model.thinking_level.clone();
+            self.thinking_level = model.thinking_level;
+        }
+        if let Ok(Some(level_str)) = self.store.load_model_thinking_level(
+            &self.active_model.provider_id,
+            &self.active_model.model_id,
+        ) {
+            let level = crate::config::reasoning::ThinkingLevelType::from_string(&level_str);
+            self.active_model.thinking_level = level.clone();
+            self.thinking_level = level;
+        }
+
         self.active_request_id = 0;
         self.screen = Screen::Welcome;
         self.connect_dialog = None;

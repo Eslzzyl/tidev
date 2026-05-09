@@ -280,7 +280,14 @@ impl App {
                             let mut next_panel = panel;
                             if let Some(t) = next_panel.current_tab_mut() {
                                 t.thinking_level_expanded = true;
-                                t.thinking_level_index = 0;
+                                // Calculate the index matching the current thinking level
+                                let tl_options =
+                                    thinking_options_for_model(&items, t.selected_index);
+                                let current_tl = self.thinking_level.to_string();
+                                t.thinking_level_index = tl_options
+                                    .iter()
+                                    .position(|opt| opt.to_ascii_lowercase() == current_tl)
+                                    .unwrap_or(0);
                             }
                             self.model_panel = Some(next_panel);
                         }

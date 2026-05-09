@@ -65,7 +65,15 @@ impl App {
             "Untitled session",
         );
 
-        let active_model = fallback_model.clone();
+        let mut active_model = fallback_model;
+        // Load saved thinking level preference for the default model across restarts
+        if let Ok(Some(level_str)) = store.load_model_thinking_level(
+            &active_model.provider_id,
+            &active_model.model_id,
+        ) {
+            active_model.thinking_level =
+                crate::config::reasoning::ThinkingLevelType::from_string(&level_str);
+        }
         tools.set_active_model(active_model.clone());
         // Build shared AgentRuntime from the same resources
         let agent = AgentRuntime {
