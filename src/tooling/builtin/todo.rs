@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::path::Path;
 
 use crate::storage::SessionStore;
-use crate::tooling::tools::TodoWriteArgs;
+use crate::tooling::tools::{TodoWriteArgs, decode_tool_args};
 use crate::tooling::{ToolDefinition, ToolPermission};
 
 pub fn definitions() -> Vec<ToolDefinition> {
@@ -18,12 +18,10 @@ pub fn execute_tool_call(
     _workspace_root: &Path,
     store: &SessionStore,
     session_id: uuid::Uuid,
-    call: &crate::session::ToolCall,
+    tool_name: &str,
+    arguments: Value,
 ) -> Result<String> {
-    let arguments: Value = serde_json::from_str(&call.arguments)
-        .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
-    let args = serde_json::from_value::<TodoWriteArgs>(arguments)
-        .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
+    let args = decode_tool_args::<TodoWriteArgs>(tool_name, arguments)?;
     validate_todos(&args.todos)?;
     store.replace_todos(session_id, &args.todos)?;
     let todos = store.load_todos(session_id)?;

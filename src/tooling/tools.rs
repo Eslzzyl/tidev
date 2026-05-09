@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -19,6 +21,54 @@ use super::builtin;
 
 pub trait ToolArgs: for<'de> Deserialize<'de> + Serialize {
     fn schema() -> Value;
+}
+
+/// Decode tool arguments with an enhanced error message that includes the
+/// JSON Schema field descriptions so the model can self-correct.
+pub(crate) fn decode_tool_args<Args: ToolArgs>(
+    tool_name: &str,
+    arguments: Value,
+) -> Result<Args> {
+    let schema = Args::schema();
+    serde_json::from_value::<Args>(arguments).map_err(|e| {
+        let expected = describe_schema(&schema);
+        anyhow::anyhow!(
+            "failed to decode arguments for tool '{}': {}\nExpected fields: {}",
+            tool_name,
+            e,
+            expected
+        )
+    })
+}
+
+/// Convert a JSON Schema object to a human-readable field description string.
+/// Example output: `path: string, old_text: string, new_text: string, replace_all (optional): boolean`
+fn describe_schema(schema: &Value) -> String {
+    let properties = match schema.get("properties").and_then(|v| v.as_object()) {
+        Some(props) => props,
+        None => return String::new(),
+    };
+
+    let required: HashSet<&str> = schema
+        .get("required")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+
+    let mut fields: Vec<String> = Vec::with_capacity(properties.len());
+    for (name, prop_schema) in properties {
+        let field_type = prop_schema
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("any");
+        let optional = if required.contains(name.as_str()) {
+            String::new()
+        } else {
+            " (optional)".to_string()
+        };
+        fields.push(format!("{}{}: {}", name, optional, field_type));
+    }
+    fields.join(", ")
 }
 
 macro_rules! tool_field_type {
@@ -308,8 +358,7 @@ pub(super) fn parse_arguments<Args>(tool_name: &str, arguments: Value) -> Result
 where
     Args: ToolArgs,
 {
-    serde_json::from_value(arguments)
-        .with_context(|| format!("failed to decode arguments for tool '{}'", tool_name))
+    decode_tool_args::<Args>(tool_name, arguments)
 }
 
 pub(super) fn tool_definitions(skill_description: String) -> Vec<ToolDefinition> {
@@ -325,9 +374,12 @@ pub fn execute_shell_tool_call(
     session_id: Uuid,
     event_tx: Option<UnboundedSender<crate::session::BackendEvent>>,
 ) -> Result<crate::session::ToolExecutionResult> {
+    let arguments: Value = serde_json::from_str(&call.arguments)
+        .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
     let result = builtin::exec::execute_tool_call_with_cancel(
         workspace_root,
-        call,
+        &call.name,
+        arguments,
         max_output_bytes,
         rtk_enabled,
         cancelled,

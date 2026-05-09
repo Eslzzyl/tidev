@@ -16,7 +16,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use super::utils::truncate_in_place;
 use crate::session::BackendEvent;
-use crate::tooling::tools::BashArgs;
+use crate::tooling::tools::{BashArgs, decode_tool_args};
 use crate::tooling::{ToolDefinition, ToolPermission};
 use uuid::Uuid;
 
@@ -37,16 +37,14 @@ pub fn definitions() -> Vec<ToolDefinition> {
 
 pub fn execute_tool_call(
     workspace_root: &Path,
-    call: &crate::session::ToolCall,
+    tool_name: &str,
+    arguments: Value,
     max_output_bytes: usize,
     rtk_enabled: bool,
     session_id: Uuid,
     event_tx: Option<UnboundedSender<BackendEvent>>,
 ) -> Result<BashExecutionResult> {
-    let arguments: Value = serde_json::from_str(&call.arguments)
-        .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
-    let args = serde_json::from_value::<BashArgs>(arguments)
-        .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
+    let args = decode_tool_args::<BashArgs>(tool_name, arguments)?;
     let timeout = args.timeout.unwrap_or(120_000) as u64; // default 2 minutes
     run_shell_inner(
         workspace_root,
@@ -62,17 +60,15 @@ pub fn execute_tool_call(
 
 pub fn execute_tool_call_with_cancel(
     workspace_root: &Path,
-    call: &crate::session::ToolCall,
+    tool_name: &str,
+    arguments: Value,
     max_output_bytes: usize,
     rtk_enabled: bool,
     cancelled: Arc<std::sync::atomic::AtomicBool>,
     session_id: Uuid,
     event_tx: Option<UnboundedSender<BackendEvent>>,
 ) -> Result<BashExecutionResult> {
-    let arguments: Value = serde_json::from_str(&call.arguments)
-        .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
-    let args = serde_json::from_value::<BashArgs>(arguments)
-        .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
+    let args = decode_tool_args::<BashArgs>(tool_name, arguments)?;
     let timeout = args.timeout.unwrap_or(120_000) as u64; // default 2 minutes
     run_shell_inner(
         workspace_root,

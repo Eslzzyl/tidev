@@ -7,7 +7,9 @@ use std::{fs, io::BufRead, path::Path};
 use super::utils::{display_workspace_relative, read_existing_text, resolve_workspace_path};
 use crate::instructions::resolve_nearby_instructions;
 use crate::session::{MessageAttachment, ToolExecutionResult, ToolMetadata};
-use crate::tooling::tools::{ApplyPatchArgs, EditArgs, ListArgs, ReadArgs, WriteArgs};
+use crate::tooling::tools::{
+    ApplyPatchArgs, EditArgs, ListArgs, ReadArgs, WriteArgs, decode_tool_args,
+};
 use crate::tooling::{ToolDefinition, ToolPermission};
 
 const MAX_LINE_LENGTH: usize = 2000;
@@ -46,17 +48,14 @@ pub fn definitions() -> Vec<ToolDefinition> {
 pub fn execute_tool_call(
     workspace_root: &Path,
     config_dir: &Path,
-    call: &crate::session::ToolCall,
+    tool_name: &str,
+    arguments: Value,
     _max_output_bytes: usize,
     allow_outside: bool,
 ) -> Result<crate::session::ToolExecutionResult> {
-    let arguments: Value = serde_json::from_str(&call.arguments)
-        .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
-
-    match crate::tooling::canonical_tool_name(&call.name) {
+    match crate::tooling::canonical_tool_name(tool_name) {
         Some("read") => {
-            let args = serde_json::from_value::<ReadArgs>(arguments)
-                .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
+            let args = decode_tool_args::<ReadArgs>(tool_name, arguments)?;
             read_path(
                 workspace_root,
                 config_dir,
@@ -67,8 +66,7 @@ pub fn execute_tool_call(
             )
         }
         Some("write") => {
-            let args = serde_json::from_value::<WriteArgs>(arguments)
-                .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
+            let args = decode_tool_args::<WriteArgs>(tool_name, arguments)?;
             let absolute_path =
                 resolve_workspace_path(workspace_root, Path::new(&args.path), allow_outside)?;
             let original_exists = absolute_path.exists();
@@ -89,8 +87,7 @@ pub fn execute_tool_call(
             ))
         }
         Some("edit") => {
-            let args = serde_json::from_value::<EditArgs>(arguments)
-                .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
+            let args = decode_tool_args::<EditArgs>(tool_name, arguments)?;
             edit_file(
                 workspace_root,
                 &args.path,
@@ -101,10 +98,9 @@ pub fn execute_tool_call(
             )
         }
         Some("apply_patch") => {
-            let args = serde_json::from_value::<ApplyPatchArgs>(arguments)
-                .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
+            let args = decode_tool_args::<ApplyPatchArgs>(tool_name, arguments)?;
             let patch = diffy::Patch::from_str(&args.patch_text)
-                .with_context(|| format!("failed to parse patch for tool '{}'", call.name))?;
+                .with_context(|| format!("failed to parse patch for tool '{}'", tool_name))?;
             let file_path = extract_patch_file_path(&patch)
                 .with_context(|| "failed to determine file path from patch".to_string())?;
             let absolute_path =
@@ -138,14 +134,13 @@ pub fn execute_tool_call(
             ))
         }
         Some("list") => {
-            let args = serde_json::from_value::<ListArgs>(arguments)
-                .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
+            let args = decode_tool_args::<ListArgs>(tool_name, arguments)?;
             let path = args.path.unwrap_or_else(|| ".".to_string());
             let output = list_dir(workspace_root, path, allow_outside)?;
             Ok(crate::session::ToolExecutionResult::new(output))
         }
         Some(other) => bail!("unsupported file tool '{}'", other),
-        None => bail!("unknown tool '{}'", call.name),
+        None => bail!("unknown tool '{}'", tool_name),
     }
 }
 

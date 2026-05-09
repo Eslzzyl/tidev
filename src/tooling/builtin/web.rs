@@ -8,7 +8,6 @@ use std::time::Duration;
 use tokio::time::timeout;
 use url::Url;
 
-use crate::session::ToolCall;
 use crate::tooling::tools::{WebFetchArgs as WebFetchToolArgs, WebSearchArgs as WebSearchToolArgs};
 use crate::tooling::{ToolDefinition, ToolPermission};
 
@@ -35,25 +34,25 @@ pub fn definitions() -> Vec<ToolDefinition> {
 
 pub fn execute_tool_call(
     _workspace_root: &std::path::Path,
-    call: &ToolCall,
+    tool_name: &str,
+    arguments: Value,
     _max_output_bytes: usize,
 ) -> Result<String> {
-    let arguments: Value = serde_json::from_str(&call.arguments)
-        .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
-
-    match crate::tooling::canonical_tool_name(&call.name) {
+    match crate::tooling::canonical_tool_name(tool_name) {
         Some("websearch") => {
-            let args = serde_json::from_value::<SearchArgs>(arguments)
-                .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
+            let args = serde_json::from_value::<SearchArgs>(arguments).map_err(|e| {
+                anyhow::anyhow!("failed to decode arguments for tool '{}': {}", tool_name, e)
+            })?;
             run_webtools(async { WebToolsClient::new()?.search(args).await })
         }
         Some("webfetch") => {
-            let args = serde_json::from_value::<FetchArgs>(arguments)
-                .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
+            let args = serde_json::from_value::<FetchArgs>(arguments).map_err(|e| {
+                anyhow::anyhow!("failed to decode arguments for tool '{}': {}", tool_name, e)
+            })?;
             run_webtools(async { WebToolsClient::new()?.fetch(args).await })
         }
         Some(other) => bail!("unsupported web tool '{}'", other),
-        None => bail!("unknown tool '{}'", call.name),
+        None => bail!("unknown tool '{}'", tool_name),
     }
 }
 

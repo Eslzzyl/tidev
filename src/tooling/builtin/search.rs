@@ -15,7 +15,7 @@ use std::{
 };
 
 use super::utils::{display_workspace_relative, resolve_workspace_path, truncate_in_place};
-use crate::tooling::tools::{GlobArgs, GrepArgs};
+use crate::tooling::tools::{GlobArgs, GrepArgs, decode_tool_args};
 use crate::tooling::{ToolDefinition, ToolPermission};
 
 pub fn definitions() -> Vec<ToolDefinition> {
@@ -35,23 +35,19 @@ pub fn definitions() -> Vec<ToolDefinition> {
 
 pub fn execute_tool_call(
     workspace_root: &Path,
-    call: &crate::session::ToolCall,
+    tool_name: &str,
+    arguments: Value,
     _max_output_bytes: usize,
     allow_outside: bool,
 ) -> Result<String> {
-    let arguments: Value = serde_json::from_str(&call.arguments)
-        .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
-
-    match crate::tooling::canonical_tool_name(&call.name) {
+    match crate::tooling::canonical_tool_name(tool_name) {
         Some("glob") => {
-            let args = serde_json::from_value::<GlobArgs>(arguments)
-                .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
+            let args = decode_tool_args::<GlobArgs>(tool_name, arguments)?;
             let path = args.path.unwrap_or_else(|| ".".to_string());
             glob_paths(workspace_root, path, &args.pattern, allow_outside)
         }
         Some("grep") => {
-            let args = serde_json::from_value::<GrepArgs>(arguments)
-                .with_context(|| format!("failed to decode arguments for tool '{}'", call.name))?;
+            let args = decode_tool_args::<GrepArgs>(tool_name, arguments)?;
             let path = args.path.unwrap_or_else(|| ".".to_string());
             grep_paths(
                 workspace_root,
@@ -62,7 +58,7 @@ pub fn execute_tool_call(
             )
         }
         Some(other) => bail!("unsupported search tool '{}'", other),
-        None => bail!("unknown tool '{}'", call.name),
+        None => bail!("unknown tool '{}'", tool_name),
     }
 }
 

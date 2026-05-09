@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::agent::AgentType;
 use crate::prompts::SessionMode;
 use crate::storage::SessionStore;
-use crate::tooling::tools::TaskArgs;
+use crate::tooling::tools::{TaskArgs, decode_tool_args};
 use crate::tooling::{ToolDefinition, ToolPermission};
 
 pub fn definitions() -> Vec<ToolDefinition> {
@@ -23,15 +23,11 @@ pub fn execute_tool_call(
     _workspace_root: &Path,
     _store: &SessionStore,
     _session_id: Uuid,
-    call: &crate::session::ToolCall,
+    tool_name: &str,
+    arguments: Value,
     mode: SessionMode,
 ) -> Result<String> {
-    let arguments: Value = serde_json::from_str(&call.arguments).map_err(|e| {
-        anyhow::anyhow!("failed to parse arguments for tool '{}': {}", call.name, e)
-    })?;
-    let args = serde_json::from_value::<TaskArgs>(arguments).map_err(|e| {
-        anyhow::anyhow!("failed to decode arguments for tool '{}': {}", call.name, e)
-    })?;
+    let args = decode_tool_args::<TaskArgs>(tool_name, arguments)?;
 
     let description = args.description.trim();
     let prompt = args.prompt.trim();

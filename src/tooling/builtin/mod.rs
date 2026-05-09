@@ -65,20 +65,27 @@ pub fn execute_tool_call(
             file::execute_tool_call(
                 workspace_root,
                 config_dir,
-                call,
+                &call.name,
+                arguments,
                 max_output_bytes,
                 allow_outside,
             )?
         }
         Some("glob") | Some("grep") => {
-            let output =
-                search::execute_tool_call(workspace_root, call, max_output_bytes, allow_outside)?;
+            let output = search::execute_tool_call(
+                workspace_root,
+                &call.name,
+                arguments,
+                max_output_bytes,
+                allow_outside,
+            )?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("bash") => {
             let result = exec::execute_tool_call(
                 workspace_root,
-                call,
+                &call.name,
+                arguments,
                 max_output_bytes,
                 rtk_enabled,
                 session_id,
@@ -88,11 +95,24 @@ pub fn execute_tool_call(
                 .with_rtk_rewritten(result.rtk_rewritten)
         }
         Some("task") => {
-            let output = task::execute_tool_call(workspace_root, store, session_id, call, mode)?;
+            let output = task::execute_tool_call(
+                workspace_root,
+                store,
+                session_id,
+                &call.name,
+                arguments,
+                mode,
+            )?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("todowrite") => {
-            let output = todo::execute_tool_call(workspace_root, store, session_id, call)?;
+            let output = todo::execute_tool_call(
+                workspace_root,
+                store,
+                session_id,
+                &call.name,
+                arguments,
+            )?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("skill") => {
@@ -110,7 +130,12 @@ pub fn execute_tool_call(
             crate::session::ToolExecutionResult::new(result)
         }
         Some("websearch") | Some("webfetch") => {
-            let output = web::execute_tool_call(workspace_root, call, max_output_bytes)?;
+            let output = web::execute_tool_call(
+                workspace_root,
+                &call.name,
+                arguments,
+                max_output_bytes,
+            )?;
             crate::session::ToolExecutionResult::new(output)
         }
         None => bail!("unknown tool '{}'", call.name),
@@ -146,20 +171,27 @@ pub fn execute_tool_call_streaming(
             file::execute_tool_call(
                 workspace_root,
                 config_dir,
-                call,
+                &call.name,
+                arguments,
                 max_output_bytes,
                 allow_outside,
             )?
         }
         Some("glob") | Some("grep") => {
-            let output =
-                search::execute_tool_call(workspace_root, call, max_output_bytes, allow_outside)?;
+            let output = search::execute_tool_call(
+                workspace_root,
+                &call.name,
+                arguments,
+                max_output_bytes,
+                allow_outside,
+            )?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("bash") => {
             let result = exec::execute_tool_call(
                 workspace_root,
-                call,
+                &call.name,
+                arguments,
                 max_output_bytes,
                 rtk_enabled,
                 session_id,
@@ -169,11 +201,24 @@ pub fn execute_tool_call_streaming(
                 .with_rtk_rewritten(result.rtk_rewritten)
         }
         Some("task") => {
-            let output = task::execute_tool_call(workspace_root, store, session_id, call, mode)?;
+            let output = task::execute_tool_call(
+                workspace_root,
+                store,
+                session_id,
+                &call.name,
+                arguments,
+                mode,
+            )?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("todowrite") => {
-            let output = todo::execute_tool_call(workspace_root, store, session_id, call)?;
+            let output = todo::execute_tool_call(
+                workspace_root,
+                store,
+                session_id,
+                &call.name,
+                arguments,
+            )?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("skill") => {
@@ -191,7 +236,12 @@ pub fn execute_tool_call_streaming(
             crate::session::ToolExecutionResult::new(result)
         }
         Some("websearch") | Some("webfetch") => {
-            let output = web::execute_tool_call(workspace_root, call, max_output_bytes)?;
+            let output = web::execute_tool_call(
+                workspace_root,
+                &call.name,
+                arguments,
+                max_output_bytes,
+            )?;
             crate::session::ToolExecutionResult::new(output)
         }
         None => bail!("unknown tool '{}'", call.name),

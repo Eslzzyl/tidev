@@ -346,7 +346,7 @@ impl ToolRegistry {
             }));
             match result {
                 Ok(Ok(r)) => r,
-                Ok(Err(e)) => ToolExecutionResult::new(format!("Error: {e}")),
+                Ok(Err(e)) => ToolExecutionResult::new(format!("Error: {e:#}")),
                 Err(panic) => {
                     let msg = if let Some(s) = panic.downcast_ref::<String>() {
                         s.clone()
@@ -391,7 +391,7 @@ impl ToolRegistry {
             }));
             match result {
                 Ok(Ok(r)) => r,
-                Ok(Err(e)) => ToolExecutionResult::new(format!("Error: {e}")),
+                Ok(Err(e)) => ToolExecutionResult::new(format!("Error: {e:#}")),
                 Err(panic) => {
                     let msg = if let Some(s) = panic.downcast_ref::<String>() {
                         s.clone()
