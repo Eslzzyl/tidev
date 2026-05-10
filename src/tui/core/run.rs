@@ -827,12 +827,13 @@ impl App {
                         && last_msg.streaming
                         && last_msg.role == crate::session::MessageRole::System
                     {
+                        // Don't replace message content — Delta events during
+                        // streaming have already accumulated the full summary
+                        // text (via BackendEvent::Delta → push_str).  The
+                        // `summary` parameter here is truncated to
+                        // `maximum_summary_chars` and would cut off the full
+                        // output that the user already saw streaming in.
                         last_msg.streaming = false;
-                        last_msg.content = format!(
-                            "{}\n\n{}",
-                            crate::session::COMPACTION_MESSAGE_LABEL,
-                            summary
-                        );
                         updated_existing = true;
 
                         if let Err(error) = self
