@@ -1973,7 +1973,7 @@ impl SessionStore {
             }
         }
 
-        // 12. memories ── global table, copy all
+        // 12. memories ── global table, copy all (decompress content for export)
         {
             let mut stmt = self.read_conn.prepare(
                 "SELECT id, workspace_root, memory_type, title, content, tags, source_session_id, created_at, updated_at, usage_count, active FROM memories",
@@ -1984,7 +1984,7 @@ impl SessionStore {
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
+                    read_blob_maybe_text(row, 4)?,
                     row.get::<_, String>(5)?,
                     row.get::<_, Option<String>>(6)?,
                     row.get::<_, String>(7)?,

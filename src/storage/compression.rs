@@ -11,6 +11,7 @@
 //! | `messages` | `metadata` | BLOB | Compressed |
 //! | `messages` | `patch_files` | BLOB | Compressed |
 //! | `messages` | `file_diffs` | BLOB | Compressed |
+//! | `memories` | `content` | BLOB | Compressed |
 //! | `tool_events` | `input_json` | BLOB | Compressed |
 //! | `tool_events` | `output_text` | BLOB | Compressed |
 //! | `session_reverts` | `redo_snapshot` | BLOB | Compressed |

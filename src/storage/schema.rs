@@ -1,4 +1,4 @@
-pub const SCHEMA_VERSION: i64 = 24;
+pub const SCHEMA_VERSION: i64 = 25;
 
 /// The memories table SQL, exported so MemoryStore can create it independently.
 pub const MEMORIES_TABLE_SQL: &str = r#"
@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS memories (
     workspace_root TEXT NOT NULL,
     memory_type TEXT NOT NULL,
     title TEXT NOT NULL,
-    content TEXT NOT NULL,
+    content BLOB NOT NULL,
     tags TEXT NOT NULL DEFAULT '[]',
     source_session_id TEXT,
     created_at TEXT NOT NULL,
@@ -211,7 +211,7 @@ CREATE TABLE IF NOT EXISTS memories (
     workspace_root TEXT NOT NULL,
     memory_type TEXT NOT NULL,
     title TEXT NOT NULL,
-    content TEXT NOT NULL,
+    content BLOB NOT NULL,
     tags TEXT NOT NULL DEFAULT '[]',
     source_session_id TEXT,
     created_at TEXT NOT NULL,

@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::storage::compression::{compress_text, decompress_text};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryType {
@@ -119,7 +121,7 @@ impl MemoryStore {
                 entry.workspace_root,
                 entry.memory_type.as_str(),
                 entry.title,
-                entry.content,
+                compress_text(&entry.content),
                 serde_json::to_string(&entry.tags).unwrap_or_default(),
                 entry.source_session_id.map(|id| id.to_string()),
                 entry.created_at.to_rfc3339(),
@@ -140,7 +142,7 @@ impl MemoryStore {
             rusqlite::params![
                 entry.memory_type.as_str(),
                 entry.title,
-                entry.content,
+                compress_text(&entry.content),
                 serde_json::to_string(&entry.tags).unwrap_or_default(),
                 entry.updated_at.to_rfc3339(),
                 entry.usage_count,
@@ -304,13 +306,22 @@ impl MemoryStore {
         let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
         let session_id_str: Option<String> = row.get(6)?;
 
+        // Read content as BLOB (compressed) or TEXT (legacy fallback)
+        let content = match row.get::<_, Vec<u8>>(4) {
+            Ok(bytes) => decompress_text(&bytes),
+            Err(_) => {
+                let text: String = row.get(4)?;
+                text
+            }
+        };
+
         Ok(MemoryEntry {
             id: row.get::<_, String>(0)?.parse().unwrap_or_default(),
             workspace_root: row.get(1)?,
             memory_type: MemoryType::parse_str(&row.get::<_, String>(2)?)
                 .unwrap_or(MemoryType::Reference),
             title: row.get(3)?,
-            content: row.get(4)?,
+            content,
             tags,
             source_session_id: session_id_str.and_then(|s| s.parse().ok()),
             created_at: row
