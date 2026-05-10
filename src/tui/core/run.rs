@@ -814,6 +814,10 @@ impl App {
 
         if self.conversation.session_id == session_id {
             if compacted {
+                // Capture prior context state for undo before overwriting.
+                let prior_summary = self.context_manager.summary.clone();
+                let prior_retained_from = self.context_manager.retained_from;
+
                 self.context_manager.summary = summary.clone();
                 self.context_manager.retained_from = retained_from;
                 self.conversation
@@ -839,6 +843,8 @@ impl App {
                         // `maximum_summary_chars` and would cut off the full
                         // output that the user already saw streaming in.
                         last_msg.streaming = false;
+                        last_msg.metadata.prior_summary = prior_summary.clone();
+                        last_msg.metadata.prior_retained_from = Some(prior_retained_from);
                         updated_existing = true;
 
                         if let Err(error) = self
@@ -849,8 +855,10 @@ impl App {
                         }
                     }
                     if !updated_existing {
-                        let compaction_message =
+                        let mut compaction_message =
                             crate::session::Message::compaction(summary.clone());
+                        compaction_message.metadata.prior_summary = prior_summary;
+                        compaction_message.metadata.prior_retained_from = Some(prior_retained_from);
                         self.conversation.push(compaction_message.clone());
                         if let Err(error) = self
                             .store

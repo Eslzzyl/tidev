@@ -132,6 +132,12 @@ pub struct ToolMetadata {
     pub truncated: Option<bool>,
     #[serde(default)]
     pub exists: Option<bool>,
+    /// Context state before the compaction that produced this message.
+    /// Used by undo to restore the conversation to its pre-compact state.
+    #[serde(default)]
+    pub prior_summary: Option<String>,
+    #[serde(default)]
+    pub prior_retained_from: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -244,6 +250,34 @@ impl MessageRole {
 }
 
 pub const COMPACTION_MESSAGE_LABEL: &str = "Compaction";
+
+/// Find the prior context state stored on the first compaction message
+/// whose content starts with [`COMPACTION_MESSAGE_LABEL`] in the range
+/// after `revert_to_id`.  Returns `(prior_summary, prior_retained_from)`
+/// if such a compaction message carries prior state in its metadata.
+///
+/// Used by undo to restore the context to its pre-compaction state.
+pub fn find_compaction_prior_state(
+    messages: &[Message],
+    revert_to_id: Uuid,
+) -> Option<(Option<String>, usize)> {
+    let mut found_target = false;
+    for message in messages {
+        if message.id == revert_to_id {
+            found_target = true;
+            continue;
+        }
+        if !found_target {
+            continue;
+        }
+        if message.content.starts_with(COMPACTION_MESSAGE_LABEL) {
+            if let Some(prior_retained_from) = message.metadata.prior_retained_from {
+                return Some((message.metadata.prior_summary.clone(), prior_retained_from));
+            }
+        }
+    }
+    None
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ToolCall {
@@ -907,5 +941,112 @@ mod tests {
         assert_eq!(turn.tool_calls.len(), 2);
         assert_eq!(turn.tool_calls[0].arguments, "{\"command\":\"ls -la\"}");
         assert_eq!(turn.tool_calls[1].name, "read");
+    }
+
+    #[test]
+    fn find_compaction_prior_state_none_when_no_compaction() {
+        let id1 = Uuid::new_v4();
+        let msgs = vec![
+            Message::new(MessageRole::User, "hello"),
+            Message::new(MessageRole::Assistant, "hi"),
+        ];
+        assert!(find_compaction_prior_state(&msgs, id1).is_none());
+    }
+
+    #[test]
+    fn find_compaction_prior_state_returns_state_when_present() {
+        let revert_to = Uuid::new_v4();
+        let mut compaction = Message::compaction("new summary");
+        compaction.metadata.prior_summary = Some("old summary".to_string());
+        compaction.metadata.prior_retained_from = Some(42);
+
+        let msgs = vec![
+            Message {
+                id: revert_to,
+                ..Message::new(MessageRole::User, "last user msg")
+            },
+            compaction,
+        ];
+        let result = find_compaction_prior_state(&msgs, revert_to);
+        assert!(result.is_some());
+        let (prior_summary, prior_retained) = result.unwrap();
+        assert_eq!(prior_summary, Some("old summary".to_string()));
+        assert_eq!(prior_retained, 42);
+    }
+
+    #[test]
+    fn find_compaction_prior_state_ignores_compaction_before_target() {
+        let revert_to = Uuid::new_v4();
+        let mut early_compact = Message::compaction("early");
+        early_compact.metadata.prior_retained_from = Some(10);
+
+        let mut late_compact = Message::compaction("late");
+        late_compact.metadata.prior_retained_from = Some(20);
+
+        let msgs = vec![
+            early_compact,
+            Message {
+                id: revert_to,
+                ..Message::new(MessageRole::User, "msg")
+            },
+            late_compact,
+        ];
+        // Should find "late" (after revert_to), not "early" (before)
+        let result = find_compaction_prior_state(&msgs, revert_to);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().1, 20);
+    }
+
+    #[test]
+    fn find_compaction_prior_state_skips_compaction_without_metadata() {
+        let revert_to = Uuid::new_v4();
+        let no_metadata = Message::compaction("no prior state");
+        let mut with_metadata = Message::compaction("with prior");
+        with_metadata.metadata.prior_retained_from = Some(99);
+
+        let msgs = vec![
+            Message {
+                id: revert_to,
+                ..Message::new(MessageRole::User, "msg")
+            },
+            no_metadata,
+            with_metadata,
+        ];
+        // Should skip the one without metadata and find the one with
+        let result = find_compaction_prior_state(&msgs, revert_to);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().1, 99);
+    }
+
+    #[test]
+    fn tool_metadata_prior_state_round_trips_through_json() {
+        let meta = ToolMetadata {
+            prior_summary: Some("old summary".to_string()),
+            prior_retained_from: Some(42),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&meta).unwrap();
+        let deserialized: ToolMetadata = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.prior_summary, Some("old summary".to_string()));
+        assert_eq!(deserialized.prior_retained_from, Some(42));
+    }
+
+    #[test]
+    fn tool_metadata_prior_state_defaults_to_none() {
+        let json = r#"{}"#;
+        let deserialized: ToolMetadata = serde_json::from_str(json).unwrap();
+        assert!(deserialized.prior_summary.is_none());
+        assert!(deserialized.prior_retained_from.is_none());
+    }
+
+    #[test]
+    fn compaction_message_accepts_metadata() {
+        let mut msg = Message::compaction("new summary text");
+        msg.metadata.prior_summary = Some("old summary".to_string());
+        msg.metadata.prior_retained_from = Some(77);
+
+        assert!(msg.content.starts_with(COMPACTION_MESSAGE_LABEL));
+        assert_eq!(msg.metadata.prior_summary.as_deref(), Some("old summary"));
+        assert_eq!(msg.metadata.prior_retained_from, Some(77));
     }
 }

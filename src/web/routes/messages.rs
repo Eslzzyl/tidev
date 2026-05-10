@@ -926,6 +926,9 @@ pub async fn compact_session(
             session_id
         );
 
+        let prior_summary = context_manager.summary.clone();
+        let prior_retained_from = context_manager.retained_from;
+
         let result = context_manager
             .compact(&llm, &active_model, &conversation, true, None, &tools, crate::prompts::SessionMode::Build)
             .await;
@@ -934,7 +937,9 @@ pub async fn compact_session(
             Ok(true) => {
                 if let Some(summary) = context_manager.summary.clone() {
                     // Create a System message with the compaction summary
-                    let system_msg = Message::compaction(summary);
+                    let mut system_msg = Message::compaction(summary);
+                    system_msg.metadata.prior_summary = prior_summary;
+                    system_msg.metadata.prior_retained_from = Some(prior_retained_from);
 
                     // Persist the message
                     {

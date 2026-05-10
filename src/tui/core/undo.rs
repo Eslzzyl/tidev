@@ -321,8 +321,16 @@ impl App {
 
         crate::log_info!("revert_to_message: setting revert_message_id and updating UI");
         self.command_palette.clear();
-        self.context_manager = ContextManager::new();
-        self.conversation.clear_context_state();
+
+        // If the hidden range includes a compaction message, restore the
+        // context state from before that compaction instead of resetting.
+        let restored = self.restore_context_from_undo_compaction(message_id);
+
+        if !restored {
+            self.context_manager = ContextManager::new();
+            self.conversation.clear_context_state();
+        }
+
         self.set_revert_message_id(
             Some(message_id),
             if redo_snapshot.is_empty() {
@@ -593,6 +601,29 @@ impl App {
 
     pub(crate) fn clear_revert_state(&mut self) -> Result<()> {
         self.set_revert_message_id(None, None)
+    }
+
+    /// If undoing past any compaction messages, restore the context state
+    /// from the earliest hidden compaction's prior state.
+    /// Returns `true` if state was restored from a compaction message.
+    fn restore_context_from_undo_compaction(&mut self, revert_to_id: Uuid) -> bool {
+        if let Some((prior_summary, prior_retained_from)) =
+            crate::session::find_compaction_prior_state(&self.conversation.messages, revert_to_id)
+        {
+            crate::log_info!(
+                "restore_context_from_undo_compaction: found compaction msg, \
+                 restoring retained_from={} summary={}",
+                prior_retained_from,
+                prior_summary.is_some(),
+            );
+            self.context_manager.summary = prior_summary.clone();
+            self.context_manager.retained_from = prior_retained_from;
+            self.conversation
+                .set_context_state(prior_summary, prior_retained_from);
+            true
+        } else {
+            false
+        }
     }
 }
 

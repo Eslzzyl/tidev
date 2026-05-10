@@ -958,6 +958,22 @@ impl App {
                     // Capture step snapshot for per-step undo tracking and sidebar updates
                     self.capture_step_snapshot(runtime);
 
+                    // If all tools in this round have completed, finalize the
+                    // snapshot so patch_files are attributed to the correct user
+                    // message rather than left dangling for the next Finished event.
+                    if self.running_tool_executions.is_empty()
+                        && self.running_subagent_executions.is_empty()
+                    {
+                        if let Err(error) =
+                            self.finalize_snapshot_for_last_user_message_sync(runtime)
+                        {
+                            crate::log_warn!(
+                                "ToolCompleted: failed to finalize snapshot: {}",
+                                error
+                            );
+                        }
+                    }
+
                     // Also clean up running_subagent_executions for task tools.
                     // Match by tool_call.id instead of request_id so that
                     // parallel subagents (which share the same request_id) are
