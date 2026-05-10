@@ -1304,7 +1304,6 @@ impl App {
                             {
                                 crate::log_warn!("ShellOutput: failed to persist message: {}", e);
                             }
-                            self.scroll_messages_to_bottom();
                         }
                     } else {
                         // Create a new streaming ToolResult message.
@@ -1316,7 +1315,6 @@ impl App {
                         self.conversation.push(msg);
                         self.message_layout_index.borrow_mut().valid = false;
                         self.clear_message_render_cache();
-                        self.scroll_messages_to_bottom();
                     }
                 }
             }
@@ -1354,7 +1352,6 @@ impl App {
                         user_message.mode = queued.mode;
                         user_message.thinking_level = queued.thinking_level;
                         self.conversation.push(user_message);
-                        self.scroll_messages_to_bottom();
                     }
                     self.pending_request = true;
                     self.last_notice = Some(match self.mode {
