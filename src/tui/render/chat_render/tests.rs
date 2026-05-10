@@ -252,6 +252,65 @@ mod tests {
     }
 
     #[test]
+    fn render_question_result_pairs_shows_qa_formatted() {
+        use crate::tui::chat_render::tool::render_question_result_pairs;
+
+        let output = "\
+Q1: What scope do you prefer?
+A: Global
+
+Q2: What languages do you use?
+A: Rust, Python";
+
+        let lines = render_question_result_pairs(output, 80, ThemePalette::dark());
+        let text = text_lines_to_string(&lines);
+
+        assert!(
+            text.contains("Questions & Answers"),
+            "should have title: {}",
+            text
+        );
+        assert!(
+            text.contains("What scope do you prefer?"),
+            "should show first question: {}",
+            text
+        );
+        assert!(
+            text.contains("Global"),
+            "should show first answer: {}",
+            text
+        );
+        assert!(
+            text.contains("What languages do you use?"),
+            "should show second question: {}",
+            text
+        );
+        assert!(
+            text.contains("Rust, Python"),
+            "should show second answer: {}",
+            text
+        );
+    }
+
+    #[test]
+    fn render_question_result_pairs_fallback_on_empty_input() {
+        use crate::tui::chat_render::tool::render_question_result_pairs;
+
+        // Completely empty output should show fallback
+        let lines = render_question_result_pairs("", 80, ThemePalette::dark());
+        let text = text_lines_to_string(&lines);
+        assert!(
+            text.contains("(no output)") || lines.len() <= 2,
+            "empty should produce minimal output: {} lines",
+            lines.len()
+        );
+
+        // Output that doesn't match Q: / A: format still renders gracefully
+        let lines = render_question_result_pairs("something else", 80, ThemePalette::dark());
+        assert!(lines.len() >= 2, "non-QA output should render: {}", lines.len());
+    }
+
+    #[test]
     fn message_render_cache_hits_on_second_render_same_width() {
         let mut app = test_app();
         app.conversation

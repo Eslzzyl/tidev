@@ -261,25 +261,21 @@ impl QuestionDialogState {
     }
 
     pub(crate) fn formatted_output(&self) -> String {
-        let formatted = self
-            .questions
-            .iter()
-            .enumerate()
-            .map(|(index, question)| {
-                let answer = self.answers.get(index).cloned().unwrap_or_default();
-                let value = if answer.is_empty() {
-                    "Unanswered".to_string()
-                } else {
-                    answer.join(", ")
-                };
-                format!("\"{}\"=\"{}\"", question.question, value)
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
+        let mut parts: Vec<String> = Vec::new();
 
-        format!(
-            "User has answered your questions: {formatted}. You can now continue with the user's answers in mind."
-        )
+        for (index, question) in self.questions.iter().enumerate() {
+            let answer = self.answers.get(index).cloned().unwrap_or_default();
+            let value = if answer.is_empty() {
+                "Unanswered".to_string()
+            } else {
+                answer.join(", ")
+            };
+            // Multi-line format: clearly shows each question followed by its answer
+            parts.push(format!("Q{}: {}", index + 1, question.question));
+            parts.push(format!("A: {}", value));
+        }
+
+        parts.join("\n")
     }
 
     pub(crate) fn regular_options_lines(&self, width: u16) -> Vec<String> {
@@ -662,8 +658,14 @@ impl App {
             } else {
                 "Tool 'question' was dismissed by user".to_string()
             };
+            let result = ToolExecutionResult::new(output);
+            // Also add the tool result to the in-memory conversation so it
+            // renders in the TUI tool cards.  record_tool_result with
+            // is_runtime_flow = true skips persistence (avoiding duplication
+            // with the runtime's persist_tool_result).
+            self.record_tool_result(dialog.tool_call.clone(), result.clone())?;
             self.pending_rejected_tools
-                .push((dialog.tool_call, ToolExecutionResult::new(output)));
+                .push((dialog.tool_call, result));
         } else if allow {
             let output = dialog.formatted_output();
             self.record_tool_result(dialog.tool_call, ToolExecutionResult::new(output))?;
@@ -806,5 +808,61 @@ mod tests {
         dialog.sync_current_custom_input("Custom answer");
 
         assert!(dialog.answers[0].contains(&"Custom answer".to_string()));
+    }
+
+    #[test]
+    fn formatted_output_shows_qa_pairs() {
+        let mut dialog = question_dialog();
+        dialog.toggle_regular_option(0);
+
+        let output = dialog.formatted_output();
+        assert!(
+            output.contains("Q1: Pick one"),
+            "should contain question: {}",
+            output
+        );
+        assert!(output.contains("A: Alpha"), "should contain answer: {}", output);
+    }
+
+    #[test]
+    fn formatted_output_shows_all_questions() {
+        let tool_call = ToolCall {
+            id: "call-3".to_string(),
+            name: "question".to_string(),
+            arguments: "{}".to_string(),
+        };
+        let questions: Vec<QuestionInfo> = serde_json::from_value(json!([
+            {
+                "question": "First question",
+                "header": "First",
+                "options": [{"label": "A", "description": "First opt"}],
+                "multiple": false,
+                "custom": false
+            },
+            {
+                "question": "Second question",
+                "header": "Second",
+                "options": [{"label": "B", "description": "Second opt"}],
+                "multiple": true,
+                "custom": true
+            }
+        ]))
+        .expect("question fixture should deserialize");
+
+        let mut dialog = QuestionDialogState::new(tool_call, questions);
+        dialog.toggle_regular_option(0);
+        dialog.move_next();
+        dialog.toggle_regular_option(0);
+        dialog.sync_current_custom_input("Custom answer");
+
+        let output = dialog.formatted_output();
+        assert!(output.contains("Q1: First question"), "should contain Q1");
+        assert!(output.contains("A: A"), "should contain A1 answer");
+        assert!(output.contains("Q2: Second question"), "should contain Q2");
+        assert!(
+            output.contains("A: B, Custom answer"),
+            "should contain A2 multi-answer: {}",
+            output
+        );
     }
 }

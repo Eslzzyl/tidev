@@ -559,6 +559,15 @@ pub(super) fn render_tool_result_detail_lines(
 
     let is_error = tool_output_is_error(effective_output);
 
+    // Question tool results: render Q&A pairs with clear formatting
+    if canonical_name == "question" {
+        return (
+            render_question_result_pairs(effective_output, body_width, palette),
+            None,
+            vec![],
+        );
+    }
+
     // Try to render diff from metadata first (preferred, full diff not truncated)
     if !is_error
         && matches!(canonical_name, "edit" | "write" | "apply_patch")
@@ -754,6 +763,98 @@ pub(super) fn render_todos_checkbox_list(
             Span::styled(format!("  {priority_marker}{checkbox}"), style),
             Span::styled(content, style),
         ]));
+    }
+
+    lines
+}
+
+/// Parses the formatted output of the question tool (produced by `QuestionDialogState::formatted_output`)
+/// and renders each Q&A pair as a clearly styled block.
+///
+/// Expected input format:
+///   Q1: question text
+///   A: answer text
+///   Q2: another question
+///   A: another answer
+pub(super) fn render_question_result_pairs(
+    output: &str,
+    body_width: usize,
+    palette: ThemePalette,
+) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let wrap_width = body_width.saturating_sub(4);
+
+    // Title
+    lines.push(Line::from(vec![Span::styled(
+        "Questions & Answers",
+        Style::default().fg(palette.accent_soft),
+    )]));
+    lines.push(Line::from(""));
+
+    if output.trim().is_empty() {
+        lines.push(line_with_style("(no output)", palette.muted));
+        return lines;
+    }
+
+    let mut lines_iter = output.lines().peekable();
+    while let Some(q_line) = lines_iter.next() {
+        // Skip empty lines
+        if q_line.trim().is_empty() {
+            continue;
+        }
+
+        // Question line starts with "Q" (e.g. "Q1: ...")
+        let question_text: String = q_line
+            .strip_prefix("Q")
+            .and_then(|rest| rest.splitn(2, ':').nth(1))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| q_line.to_string());
+
+        // Answer line follows (starts with "A: ")
+        let answer_text = lines_iter
+            .next()
+            .and_then(|a_line| a_line.strip_prefix("A: "))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+
+        // Render question
+        lines.push(Line::from(vec![Span::styled(
+            "  Q: ",
+            Style::default().fg(palette.accent_soft).add_modifier(Modifier::BOLD),
+        )]));
+        let q_line_owned = Line::from(question_text.clone());
+        let q_wrapped = word_wrap_line(
+            &q_line_owned,
+            WrapOptions::new(wrap_width),
+        );
+        if q_wrapped.len() <= 1 {
+            lines.push(Line::from(vec![Span::styled(
+                format!("     {}", question_text),
+                Style::default().fg(palette.text),
+            )]));
+        } else {
+            for (i, wl) in q_wrapped.iter().enumerate() {
+                let prefix = if i == 0 { "     " } else { "       " };
+                lines.push(Line::from(vec![Span::styled(
+                    format!("{}{}", prefix, wl.spans.iter().map(|s| &*s.content).collect::<String>()),
+                    Style::default().fg(palette.text),
+                )]));
+            }
+        }
+
+        // Render answer
+        lines.push(Line::from(vec![
+            Span::styled(
+                "  → ",
+                Style::default().fg(palette.success),
+            ),
+            Span::styled(
+                answer_text,
+                Style::default().fg(palette.success).add_modifier(Modifier::BOLD),
+            ),
+        ]));
+
+        lines.push(Line::from(""));
     }
 
     lines
