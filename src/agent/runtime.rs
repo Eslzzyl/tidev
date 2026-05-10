@@ -24,6 +24,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use anyhow::Result;
 use chrono::Utc;
+use std::time::Duration;
 use tokio::sync::{Mutex, mpsc::UnboundedSender, oneshot};
 use tokio_util::sync::CancellationToken;
 
@@ -528,6 +529,26 @@ impl AgentRuntime {
                 continue;
             }
 
+            // Reject phantom "task" tool calls — the task tool is only
+            // handled by the main agent loop's special path, not through
+            // execute_tool_calls.  This prevents subagent LLMs (which
+            // don't have "task" in their tool lists) from hallucinating
+            // a task call and getting a fake "Started ..." result.
+            if call.name == "task" || canonical_tool_name(&call.name) == Some("task") {
+                crate::log_info!(
+                    "execute_tool_calls: rejecting '{}' — not allowed through execute_tool_calls",
+                    call.name
+                );
+                let result = ToolExecutionResult::new(format!(
+                    "Tool '{}' is not available in this context",
+                    call.name
+                ));
+                self.persist_tool_result(session_id, request_id, call, &result, event_tx)
+                    .await?;
+                results.push((call.clone(), result));
+                continue;
+            }
+
             if !self.auto_approve_permissions
                 && let Some(def) = self.tools.definition_for(&call.name)
                 && def.needs_confirmation()
@@ -910,7 +931,7 @@ impl AgentRuntime {
                 && ct.is_cancelled()
             {
                 crate::log_info!("run_subagent: cancelled");
-                return Ok(String::new());
+                anyhow::bail!("Subagent was cancelled by user");
             }
 
             // Load messages
@@ -986,7 +1007,21 @@ impl AgentRuntime {
             let mut last_sent_reasoning_len: usize = 0;
             let call_start = Utc::now();
 
-            while let Some(event) = stream_rx.recv().await {
+            const SUBAGENT_STREAM_TIMEOUT: Duration = Duration::from_secs(300); // 5 minutes
+
+            loop {
+                let event = match tokio::time::timeout(SUBAGENT_STREAM_TIMEOUT, stream_rx.recv()).await
+                {
+                    Ok(Some(event)) => event,
+                    Ok(None) => break,  // stream sender dropped (normal completion)
+                    Err(_) => {
+                        anyhow::bail!(
+                            "Subagent timed out after {} seconds waiting for LLM response",
+                            SUBAGENT_STREAM_TIMEOUT.as_secs()
+                        );
+                    }
+                };
+
                 // Forward to parent event channel (for standard conversation updates)
                 let _ = event_tx.send(event.clone());
 
@@ -1426,15 +1461,61 @@ impl AgentRuntime {
             // 7a. Subagent (task) tools — read-only types (Explorer, Librarian,
             // Oracle) run in parallel; write-capable types (Designer, Fixer,
             // General) run serially.
+            //
+            // Serial subagents run FIRST so that if one fails, no parallel
+            // subagents have been spawned yet (avoids orphaned tasks).
             let mut task_handles: Vec<(
                 ToolCall,
                 Option<uuid::Uuid>,
                 tokio::task::JoinHandle<ToolExecutionResult>,
             )> = Vec::new();
 
-            for (tc, child_sid) in task_calls {
-                // Determine if this subagent is read-only by parsing the
-                // task arguments to extract the subagent_type field.
+            // Serial subagents first
+            for (tc, child_sid) in &task_calls {
+                let is_read_only = serde_json::from_str::<crate::tooling::TaskArgs>(&tc.arguments)
+                    .ok()
+                    .and_then(|args| args.subagent_type.as_deref().and_then(AgentType::parse))
+                    .is_some_and(|t| t.is_read_only());
+
+                if !is_read_only {
+                    // Write-capable subagent — run serially to avoid ordering
+                    // issues with filesystem and database mutations.
+                    let agent = self.clone();
+                    let owned_tc = tc.clone();
+                    let owned_child_sid = *child_sid;
+                    let tx = event_tx.clone();
+                    let sid = session_id;
+                    let rid = request_id;
+                    let pm = model.clone();
+
+                    let result: ToolExecutionResult = {
+                        let fut: Pin<Box<dyn Future<Output = ToolExecutionResult> + Send>> =
+                            Box::pin(agent.run_subagent(
+                                sid,
+                                rid,
+                                owned_tc,
+                                tx,
+                                cancel_token.clone(),
+                                pm,
+                                owned_child_sid,
+                            ));
+                        fut.await
+                    };
+                    self.persist_tool_result(session_id, request_id, tc, &result, &event_tx)
+                        .await?;
+                    // Send SubagentCompleted for serial subagent
+                    let _ = event_tx.send(BackendEvent::SubagentCompleted {
+                        session_id,
+                        request_id,
+                        tool_call: tc.clone(),
+                        child_session_id: child_sid.unwrap_or_else(uuid::Uuid::new_v4),
+                        result: result.clone(),
+                    });
+                }
+            }
+
+            // Parallel subagents second — all spawned here, all collected below
+            for (tc, child_sid) in &task_calls {
                 let is_read_only = serde_json::from_str::<crate::tooling::TaskArgs>(&tc.arguments)
                     .ok()
                     .and_then(|args| args.subagent_type.as_deref().and_then(AgentType::parse))
@@ -1444,7 +1525,7 @@ impl AgentRuntime {
                     // Read-only subagent — spawn in parallel
                     let agent = self.clone();
                     let owned_tc = tc.clone();
-                    let owned_child_sid = child_sid;
+                    let owned_child_sid = *child_sid;
                     let tx = event_tx.clone();
                     let sid = session_id;
                     let rid = request_id;
@@ -1464,41 +1545,7 @@ impl AgentRuntime {
                             ));
                         fut.await
                     });
-                    task_handles.push((tc, child_sid, handle));
-                } else {
-                    // Write-capable subagent — run serially to avoid ordering
-                    // issues with filesystem and database mutations.
-                    let agent = self.clone();
-                    let owned_tc = tc.clone();
-                    let owned_child_sid = child_sid;
-                    let tx = event_tx.clone();
-                    let sid = session_id;
-                    let rid = request_id;
-                    let pm = model.clone();
-
-                    let result: ToolExecutionResult = {
-                        let fut: Pin<Box<dyn Future<Output = ToolExecutionResult> + Send>> =
-                            Box::pin(agent.run_subagent(
-                                sid,
-                                rid,
-                                owned_tc,
-                                tx,
-                                cancel_token.clone(),
-                                pm,
-                                owned_child_sid,
-                            ));
-                        fut.await
-                    };
-                    self.persist_tool_result(session_id, request_id, &tc, &result, &event_tx)
-                        .await?;
-                    // Send SubagentCompleted for serial subagent
-                    let _ = event_tx.send(BackendEvent::SubagentCompleted {
-                        session_id,
-                        request_id,
-                        tool_call: tc.clone(),
-                        child_session_id: child_sid.unwrap_or_else(uuid::Uuid::new_v4),
-                        result: result.clone(),
-                    });
+                    task_handles.push((tc.clone(), *child_sid, handle));
                 }
             }
 

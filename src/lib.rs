@@ -2,7 +2,6 @@ pub mod agent;
 pub mod balance;
 pub mod config;
 pub mod context;
-pub mod delegate;
 pub mod gateway;
 pub mod instructions;
 pub mod llm;
