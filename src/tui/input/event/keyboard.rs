@@ -35,8 +35,10 @@ impl App {
 
         if matches!(key.code, KeyCode::Char('x')) && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.leader_key_pending = true;
-            self.last_notice =
-                Some("Up: parent session, Down/Left/Right: switch subagent".to_string());
+            self.last_notice = Some(
+                "Up: parent session, Down/Left/Right: switch subagent, e: external editor"
+                    .to_string(),
+            );
             return Ok(());
         }
 
@@ -483,6 +485,10 @@ impl App {
                     return Ok(true);
                 }
             }
+            KeyCode::Char('e') => {
+                self.open_external_editor()?;
+                return Ok(true);
+            }
             _ => {}
         }
 
@@ -658,6 +664,94 @@ impl App {
         });
         self.composer.insert_str("[Image]");
         self.last_notice = Some("Image pasted into draft".to_string());
+        Ok(())
+    }
+
+    pub(crate) fn open_external_editor(&mut self) -> Result<()> {
+        let text = self.composer.text().to_string();
+        if text.is_empty() {
+            self.last_notice = Some("No text to edit".to_string());
+            return Ok(());
+        }
+
+        let Some((cmd, mut args)) = crate::tui::input::editor::resolve_editor(&self.config.ui)
+        else {
+            self.last_notice = Some(
+                "No editor found. Set external_editor in config, $VISUAL, or $EDITOR."
+                    .to_string(),
+            );
+            return Ok(());
+        };
+
+        // Create a unique temp file
+        let file_path = crate::tui::input::editor::temp_edit_path();
+        if let Err(e) = std::fs::write(&file_path, &text) {
+            self.last_notice = Some(format!("Failed to create temp file: {e}"));
+            return Ok(());
+        }
+
+        self.last_notice = Some(format!("Opening in {cmd}... Save and close to continue."));
+
+        // Suspend the TUI so the editor can take over the terminal cleanly
+        if let Some(session) = &self.terminal_session {
+            if let Err(e) = session.suspend() {
+                self.last_notice = Some(format!("Failed to suspend TUI: {e}"));
+                let _ = std::fs::remove_file(&file_path);
+                return Ok(());
+            }
+        }
+
+        // Spawn editor and wait for it to close
+        args.push(file_path.to_string_lossy().to_string());
+        let status = std::process::Command::new(&cmd).args(&args).status();
+
+        // Resume the TUI after editor exits
+        if let Some(session) = &self.terminal_session {
+            if let Err(e) = session.resume() {
+                self.last_notice = Some(format!("Failed to resume TUI: {e}"));
+                let _ = std::fs::remove_file(&file_path);
+                return Ok(());
+            }
+        }
+
+        // Mark for full redraw — after alternate screen was left and
+        // re-entered, ratatui's frame buffer is stale and won't redraw.
+        self.force_full_redraw = true;
+
+        // Read back content (even if editor exited with error — user may have saved)
+        let edited = match std::fs::read_to_string(&file_path) {
+            Ok(c) => c,
+            Err(e) => {
+                self.last_notice = Some(format!("Failed to read edited file: {e}"));
+                let _ = std::fs::remove_file(&file_path);
+                return Ok(());
+            }
+        };
+        let _ = std::fs::remove_file(&file_path);
+
+        match status {
+            Ok(s) if !s.success() => {
+                self.last_notice = Some(format!("Editor exited with status {:?}", s.code()));
+            }
+            Err(e) => {
+                self.last_notice = Some(format!("Failed to launch editor: {e}"));
+                return Ok(());
+            }
+            _ => {}
+        }
+
+        // Most editors add a trailing newline when saving. Trim a single one
+        // so the comparison against the original text is meaningful.
+        let edited = edited
+            .strip_suffix('\n')
+            .unwrap_or(&edited)
+            .to_string();
+
+        if edited != text {
+            self.composer.set_text(edited);
+            self.last_notice = Some("Content updated from editor".to_string());
+        }
+
         Ok(())
     }
 }

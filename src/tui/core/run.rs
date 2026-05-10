@@ -207,6 +207,8 @@ impl App {
             thinking_level: active_model.thinking_level.clone(),
             memory_store,
             memory_panel: None,
+            terminal_session: None,
+            force_full_redraw: false,
         };
 
         app.at_mention
@@ -222,7 +224,7 @@ impl App {
                 crate::log_warn!("MCP refresh failed: {}", e);
             }
         });
-        let _session = super::TerminalSession::enter()?;
+        self.terminal_session = Some(super::TerminalSession::enter()?);
         let backend = CrosstermBackend::new(io::stdout());
         let mut terminal = Terminal::new(backend).context("failed to create terminal")?;
         terminal.clear().context("failed to clear terminal")?;
@@ -251,6 +253,13 @@ impl App {
             let now = Instant::now();
             let elapsed = now.duration_since(self.last_render_time);
             let frame_budget = Duration::from_millis(16); // 60fps
+
+            // After TUI suspend/resume (external editor), ratatui's frame
+            // buffer is stale — force a full clear + redraw.
+            if self.force_full_redraw {
+                terminal.clear().context("failed to clear terminal")?;
+                self.force_full_redraw = false;
+            }
 
             if elapsed >= frame_budget || !self.render_throttled {
                 terminal

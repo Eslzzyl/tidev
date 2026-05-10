@@ -248,8 +248,14 @@ struct App {
     memory_store: Arc<MemoryStore>,
     /// Memory management panel
     memory_panel: Option<MemoryPanelState>,
+    /// TUI terminal session for raw mode / alternate screen management.
+    /// Used to suspend/resume the TUI when launching external editors.
+    terminal_session: Option<TerminalSession>,
+    /// Flag set after TUI suspend/resume cycle to force a full terminal redraw
+    /// on the next event loop iteration (ratatui's frame buffer is stale after
+    /// leaving and re-entering the alternate screen).
+    force_full_redraw: bool,
 }
-
 pub fn run() -> Result<()> {
     let runtime = Runtime::new().context("failed to create runtime")?;
     let mut app = App::new()?;
@@ -1778,6 +1784,38 @@ impl TerminalSession {
         .context("failed to enter alternate screen")?;
 
         Ok(Self)
+    }
+
+    /// Suspend the TUI: leave alternate screen, disable raw mode, show cursor.
+    /// Call before spawning an external editor (GUI or terminal).
+    fn suspend(&self) -> Result<()> {
+        disable_raw_mode().context("failed to disable raw mode")?;
+        crossterm::execute!(
+            io::stdout(),
+            LeaveAlternateScreen,
+            DisableBracketedPaste,
+            DisableMouseCapture,
+            DisableFocusChange,
+            Show,
+        )
+        .context("failed to leave alternate screen")?;
+        Ok(())
+    }
+
+    /// Resume the TUI: re-enable raw mode, re-enter alternate screen, hide cursor.
+    /// Call after the external editor exits.
+    fn resume(&self) -> Result<()> {
+        enable_raw_mode().context("failed to enable raw mode")?;
+        crossterm::execute!(
+            io::stdout(),
+            EnterAlternateScreen,
+            EnableBracketedPaste,
+            EnableMouseCapture,
+            EnableFocusChange,
+            crossterm::cursor::Hide,
+        )
+        .context("failed to re-enter alternate screen")?;
+        Ok(())
     }
 }
 

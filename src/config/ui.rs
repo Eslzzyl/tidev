@@ -8,6 +8,10 @@ pub struct UiConfig {
     /// Scroll speed multiplier (default: 3)
     #[serde(default = "default_scroll_speed")]
     pub scroll_speed: f32,
+    /// GUI external editor command (e.g., "code --wait", "cursor --wait").
+    /// Falls back to $VISUAL → $EDITOR → auto-detect among common editors.
+    #[serde(default)]
+    pub external_editor: Option<String>,
 }
 
 fn default_scroll_speed() -> f32 {
@@ -21,6 +25,7 @@ impl Default for UiConfig {
             welcome_width: 72,
             max_input_lines: 6,
             scroll_speed: 3.0,
+            external_editor: None,
         }
     }
 }
