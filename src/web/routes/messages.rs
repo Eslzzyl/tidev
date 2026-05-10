@@ -927,7 +927,7 @@ pub async fn compact_session(
         );
 
         let result = context_manager
-            .compact(&llm, &active_model, &conversation, true, None, &tools)
+            .compact(&llm, &active_model, &conversation, true, None, &tools, crate::prompts::SessionMode::Build)
             .await;
 
         match result {

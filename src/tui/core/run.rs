@@ -743,13 +743,17 @@ impl App {
         // Compose the system prompt the same way the agent loop does,
         // so the compaction request shares the same prefix as normal
         // requests and maximises prefix cache hits.
+        let mode = if is_active {
+            self.mode
+        } else {
+            crate::prompts::SessionMode::Build
+        };
         if is_active {
-            let mode = self.mode;
             let (system_prompt, _) = self.agent.compose_system_prompt(&model.system_prompt, mode);
             model.system_prompt = system_prompt;
         }
         // For cached sessions we don't have the mode readily available;
-        // this is a rare case (background session compaction).
+        // this is a rare case (background session compaction). Use Build.
 
         self.compacting_sessions.insert(session_id);
         let llm = self.llm.clone();
@@ -767,11 +771,12 @@ impl App {
                         true,
                         Some((request_id, tx.clone())),
                         &tools,
+                        mode,
                     )
                     .await
             } else {
                 context_manager
-                    .compact_if_needed(&llm, &model, &conversation, false, None, &tools)
+                    .compact_if_needed(&llm, &model, &conversation, false, None, &tools, mode)
                     .await
             };
 

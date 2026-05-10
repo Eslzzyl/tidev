@@ -1384,6 +1384,7 @@ impl AgentRuntime {
                             ctx_config,
                             conversation,
                             event_tx_clone,
+                            mode,
                         )
                         .await;
                     });
@@ -1706,6 +1707,7 @@ async fn compact_in_background(
     ctx_config: ContextManagerConfig,
     conversation: crate::session::Conversation,
     event_tx: UnboundedSender<BackendEvent>,
+    mode: crate::prompts::SessionMode,
 ) {
     let mut context_manager = ContextManager {
         summary: None,
@@ -1716,7 +1718,7 @@ async fn compact_in_background(
     };
 
     match context_manager
-        .compact(&llm_client, &model, &conversation, false, None, &tool_defs)
+        .compact(&llm_client, &model, &conversation, false, None, &tool_defs, mode)
         .await
     {
         Ok(true) => {

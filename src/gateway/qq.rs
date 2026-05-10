@@ -998,6 +998,7 @@ impl QQChannel {
                     true,
                     None,
                     &tools,
+                    SessionMode::Build,
                 )
                 .await;
 

@@ -1471,6 +1471,7 @@ impl TelegramChannel {
                     true,
                     None,
                     &tools,
+                    SessionMode::Build,
                 )
                 .await;
 

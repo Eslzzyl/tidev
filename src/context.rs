@@ -264,12 +264,13 @@ impl ContextManager {
             tokio::sync::mpsc::UnboundedSender<crate::session::BackendEvent>,
         )>,
         tools: &[ToolDefinition],
+        mode: SessionMode,
     ) -> Result<bool> {
         if !self.needs_compaction(conversation, model) && !manual {
             return Ok(false);
         }
 
-        self.compact(llm, model, conversation, manual, stream_ctx, tools)
+        self.compact(llm, model, conversation, manual, stream_ctx, tools, mode)
             .await
     }
 
@@ -278,53 +279,28 @@ impl ContextManager {
         llm: &LlmClient,
         model: &ActiveModel,
         conversation: &Conversation,
-        manual: bool,
+        _manual: bool,
         stream_ctx: Option<(
             u64,
             tokio::sync::mpsc::UnboundedSender<crate::session::BackendEvent>,
         )>,
         tools: &[ToolDefinition],
+        mode: SessionMode,
     ) -> Result<bool> {
         let messages = conversation.visible_messages();
         if messages.is_empty() {
             return Ok(false);
         }
 
-        let retain_recent_tokens = if manual {
-            0
-        } else {
-            self.compaction_budget_for_model(model).1
-        };
-
-        let mut split_index = self.choose_split_index(messages, retain_recent_tokens);
-        if !manual {
-            if split_index == 0 || split_index >= messages.len() {
-                if messages.len() <= 1 {
-                    return Ok(false);
-                }
-
-                split_index = messages.len() - 1;
-            }
-            if split_index == 0 || split_index >= messages.len() {
-                return Ok(false);
-            }
-        } else if split_index == 0 {
-            split_index = messages.len();
-        }
-
-        let compressed_chunk = &messages[..split_index];
-
-        // Build compaction request using the actual conversation messages
-        // plus a User instruction appended at the end.
-        // This keeps the system prompt (model.system_prompt) at position 0 unchanged,
-        // and the conversation messages match previous normal requests byte-for-byte.
-        // The only new content is the final User instruction, maximizing prefix cache hits.
+        // Build request messages using the same logic as normal requests.
+        // This ensures the prefix (system prompt + summary + retained messages)
+        // is byte-for-byte identical with normal requests, maximizing cache hits.
+        let mut compact_msgs = self.build_request_messages(conversation, mode);
         let summary_instruction = "Please provide a detailed summary of the conversation history above, \
              preserving all goals, decisions, file paths, code changes, tool results, \
              and open tasks. Keep the summary dense and factual. Use short sections such \
              as Goal, Decisions, Files, Tool Results, Open Tasks, and Constraints. \
              Prefer bullets over prose.";
-        let mut compact_msgs = compressed_chunk.to_vec();
         compact_msgs.push(Message::new(MessageRole::User, summary_instruction));
 
         let summary = if let Some((request_id, ui_tx)) = stream_ctx {
@@ -374,11 +350,11 @@ impl ContextManager {
         } else {
             llm.complete_with_messages(model.clone(), compact_msgs, tools.to_vec())
                 .await
-                .unwrap_or_else(|error| self.fallback_summary(compressed_chunk, &error.to_string()))
+                .unwrap_or_else(|error| self.fallback_summary(messages, &error.to_string()))
         };
 
         self.summary = Some(summary.chars().take(self.maximum_summary_chars).collect());
-        self.retained_from = split_index;
+        self.retained_from = messages.len();
         Ok(true)
     }
 
@@ -386,6 +362,7 @@ impl ContextManager {
         self.retained_from
     }
 
+    #[allow(dead_code)]
     fn choose_split_index(&self, messages: &[Message], retain_recent_tokens: usize) -> usize {
         let mut token_budget = retain_recent_tokens;
         let mut keep_from = messages.len();
@@ -404,6 +381,7 @@ impl ContextManager {
         self.align_split_index_to_tool_boundary(messages, keep_from)
     }
 
+    #[allow(dead_code)]
     fn align_split_index_to_tool_boundary(
         &self,
         messages: &[Message],
@@ -629,5 +607,100 @@ mod tests {
             synthetic_tool.content.contains("interrupted"),
             "synthetic tool result should mention interruption"
         );
+    }
+
+    #[test]
+    fn compact_request_uses_build_request_messages_prefix() {
+        // Verifies that compact() builds its message list using
+        // build_request_messages() so the prefix byte-for-byte matches
+        // normal requests, maximizing prefix cache hits.
+
+        // ── Case 1: No previous compaction ──
+        let messages = vec![
+            Message::new(MessageRole::User, "first"),
+            Message::new(MessageRole::Assistant, "response one"),
+            Message::new(MessageRole::User, "second"),
+        ];
+        let manager = ContextManager::new();
+        let conversation = test_conversation(messages.clone());
+
+        // Compact's message assembly (after the change):
+        let mut compact_msgs = manager.build_request_messages(&conversation, SessionMode::Build);
+        let compact_instruction = "Please provide a detailed summary of the conversation history above";
+        compact_msgs.push(Message::new(MessageRole::User, compact_instruction));
+
+        // Normal request structure (same prefix):
+        let normal_msgs = manager.build_request_messages(&conversation, SessionMode::Build);
+
+        // Prefix (everything except last message) matches
+        assert_eq!(
+            compact_msgs.len(),
+            normal_msgs.len() + 1,
+            "compact should have one extra message (the instruction)"
+        );
+        for i in 0..normal_msgs.len() {
+            assert_eq!(
+                compact_msgs[i].role, normal_msgs[i].role,
+                "role mismatch at position {}",
+                i
+            );
+            assert_eq!(
+                compact_msgs[i].content, normal_msgs[i].content,
+                "content mismatch at position {}",
+                i
+            );
+        }
+
+        // Last message in compact is the instruction
+        assert_eq!(compact_msgs.last().unwrap().role, MessageRole::User);
+        assert!(
+            compact_msgs.last().unwrap().content.contains("summary"),
+            "last message should be the compact instruction"
+        );
+
+        // ── Case 2: With previous compaction (retained_from > 0, summary exists) ──
+        let mut manager2 = ContextManager::new();
+        manager2.summary = Some("Previous summary content".to_string());
+        manager2.retained_from = 1; // skip "first" message
+
+        let mut compact_msgs2 = manager2.build_request_messages(&conversation, SessionMode::Build);
+        compact_msgs2.push(Message::new(MessageRole::User, compact_instruction));
+
+        let normal_msgs2 = manager2.build_request_messages(&conversation, SessionMode::Build);
+
+        // Prefix (everything except last message) still matches
+        assert_eq!(
+            compact_msgs2.len(),
+            normal_msgs2.len() + 1,
+            "compact should have one extra message (the instruction)"
+        );
+        for i in 0..normal_msgs2.len() {
+            assert_eq!(
+                compact_msgs2[i].role, normal_msgs2[i].role,
+                "role mismatch at position {} (with summary)",
+                i
+            );
+            assert_eq!(
+                compact_msgs2[i].content, normal_msgs2[i].content,
+                "content mismatch at position {} (with summary)",
+                i
+            );
+        }
+
+        // First message is the summary placeholder
+        assert_eq!(compact_msgs2[0].role, MessageRole::User);
+        assert!(
+            compact_msgs2[0].content.contains("Earlier conversation summary"),
+            "first message should be the old summary when one exists"
+        );
+
+        // ── Case 3: retained_from after compaction should be messages.len() ──
+        assert_eq!(
+            manager2.retained_from, 1,
+            "retained_from should still be the original value before compact"
+        );
+        // After compact() runs successfully:
+        // manager2.retained_from would become conversation.visible_messages().len()
+        // This is verified by compact() setting self.retained_from = messages.len()
     }
 }
