@@ -13,6 +13,8 @@ mod tests {
     use ratatui::style::Style;
     use ratatui::text::Line;
     use std::collections::{HashMap, HashSet};
+    use std::ops::{Deref, DerefMut};
+    use tempfile::TempDir;
 
     fn line_text(line: &Line<'static>) -> String {
         line.spans
@@ -25,26 +27,49 @@ mod tests {
         lines.iter().map(line_text).collect::<Vec<_>>().join("\n")
     }
 
-    fn test_app() -> App {
-        let temp_root =
-            std::env::temp_dir().join(format!("tidev-render-tests-{}", uuid::Uuid::new_v4()));
+    /// Wraps App + TempDir so the temp directory is auto-cleaned on drop.
+    struct TestApp {
+        app: App,
+        _temp_root: TempDir,
+    }
+
+    impl Deref for TestApp {
+        type Target = App;
+        fn deref(&self) -> &App {
+            &self.app
+        }
+    }
+
+    impl DerefMut for TestApp {
+        fn deref_mut(&mut self) -> &mut App {
+            &mut self.app
+        }
+    }
+
+    fn test_app() -> TestApp {
+        let temp_root = TempDir::new().expect("temp dir should be created");
         let paths = crate::config::ConfigPaths {
-            config_dir: temp_root.join(".config").join("tidev"),
-            data_dir: temp_root.join(".local").join("share").join("tidev"),
-            config_file: temp_root.join(".config").join("tidev").join("config.toml"),
+            config_dir: temp_root.path().join(".config").join("tidev"),
+            data_dir: temp_root.path().join(".local").join("share").join("tidev"),
+            config_file: temp_root.path().join(".config").join("tidev").join("config.toml"),
             auth_file: temp_root
+                .path()
                 .join(".local")
                 .join("share")
                 .join("tidev")
                 .join("auth.json"),
             database_file: temp_root
+                .path()
                 .join(".local")
                 .join("share")
                 .join("tidev")
                 .join("sessions.sqlite3"),
         };
 
-        App::new_with_paths(paths).unwrap()
+        TestApp {
+            app: App::new_with_paths(paths).unwrap(),
+            _temp_root: temp_root,
+        }
     }
 
     #[test]

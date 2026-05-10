@@ -345,13 +345,13 @@ impl MemoryStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
-    fn test_store() -> MemoryStore {
-        let dir = std::env::temp_dir().join(format!("tidev_memory_test_{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let db_path = dir.join("test.db");
+    fn test_store() -> (MemoryStore, TempDir) {
+        let dir = TempDir::new().expect("temp dir should be created");
+        let db_path = dir.path().join("test.db");
         // MemoryStore::open creates the table via MEMORIES_TABLE_SQL
-        MemoryStore::open(&db_path).unwrap()
+        (MemoryStore::open(&db_path).unwrap(), dir)
     }
 
     fn sample_entry(ws: &str) -> MemoryEntry {
@@ -372,7 +372,7 @@ mod tests {
 
     #[test]
     fn test_add_and_load() {
-        let store = test_store();
+        let (store, _dir) = test_store();
         let ws = "/test/workspace";
         let entry = sample_entry(ws);
         store.add(&entry).unwrap();
@@ -384,7 +384,7 @@ mod tests {
 
     #[test]
     fn test_delete() {
-        let store = test_store();
+        let (store, _dir) = test_store();
         let ws = "/test/ws2";
         let entry = sample_entry(ws);
         store.add(&entry).unwrap();
@@ -396,7 +396,7 @@ mod tests {
 
     #[test]
     fn test_search() {
-        let store = test_store();
+        let (store, _dir) = test_store();
         let ws = "/test/ws3";
         let mut entry = sample_entry(ws);
         entry.title = "SQLite WAL mode".to_string();
@@ -412,7 +412,7 @@ mod tests {
 
     #[test]
     fn test_select_hot() {
-        let store = test_store();
+        let (store, _dir) = test_store();
         let ws = "/test/ws4";
         for i in 0..5 {
             let mut entry = sample_entry(ws);

@@ -683,12 +683,14 @@ impl App {
             return Ok(());
         };
 
-        // Create a unique temp file
-        let file_path = crate::tui::input::editor::temp_edit_path();
-        if let Err(e) = std::fs::write(&file_path, &text) {
-            self.last_notice = Some(format!("Failed to create temp file: {e}"));
-            return Ok(());
-        }
+        // Create a unique temp file (auto-cleaned on drop)
+        let edit_file = match crate::tui::input::editor::TempEditFile::create(&text) {
+            Ok(f) => f,
+            Err(e) => {
+                self.last_notice = Some(format!("Failed to create temp file: {e}"));
+                return Ok(());
+            }
+        };
 
         self.last_notice = Some(format!("Opening in {cmd}... Save and close to continue."));
 
@@ -696,20 +698,18 @@ impl App {
         if let Some(session) = &self.terminal_session {
             if let Err(e) = session.suspend() {
                 self.last_notice = Some(format!("Failed to suspend TUI: {e}"));
-                let _ = std::fs::remove_file(&file_path);
                 return Ok(());
             }
         }
 
         // Spawn editor and wait for it to close
-        args.push(file_path.to_string_lossy().to_string());
+        args.push(edit_file.path().to_string_lossy().to_string());
         let status = std::process::Command::new(&cmd).args(&args).status();
 
         // Resume the TUI after editor exits
         if let Some(session) = &self.terminal_session {
             if let Err(e) = session.resume() {
                 self.last_notice = Some(format!("Failed to resume TUI: {e}"));
-                let _ = std::fs::remove_file(&file_path);
                 return Ok(());
             }
         }
@@ -719,15 +719,13 @@ impl App {
         self.force_full_redraw = true;
 
         // Read back content (even if editor exited with error — user may have saved)
-        let edited = match std::fs::read_to_string(&file_path) {
+        let edited = match edit_file.read() {
             Ok(c) => c,
             Err(e) => {
                 self.last_notice = Some(format!("Failed to read edited file: {e}"));
-                let _ = std::fs::remove_file(&file_path);
                 return Ok(());
             }
         };
-        let _ = std::fs::remove_file(&file_path);
 
         match status {
             Ok(s) if !s.success() => {

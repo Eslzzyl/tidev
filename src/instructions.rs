@@ -397,21 +397,42 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::PathBuf;
-    use uuid::Uuid;
 
-    fn make_temp_dir() -> Result<PathBuf> {
-        let dir = std::env::temp_dir().join(format!("tidev-instructions-{}", Uuid::new_v4()));
-        fs::create_dir_all(&dir).context("failed to create temp dir")?;
-        Ok(dir)
+    /// Auto-cleaning temp directory wrapper.
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        fn new(prefix: &str) -> Result<Self> {
+            let path = std::env::temp_dir().join(format!("{}-{}", prefix, uuid::Uuid::new_v4()));
+            fs::create_dir_all(&path).context("failed to create temp dir")?;
+            Ok(Self { path })
+        }
+
+        fn path(&self) -> &PathBuf {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn make_temp_dir() -> Result<TempDir> {
+        TempDir::new("tidev-instructions")
     }
 
     #[test]
     fn system_paths_finds_project_agent_file() -> Result<()> {
         let workspace = make_temp_dir()?;
-        fs::write(workspace.join("AGENTS.md"), "# Root")?;
+        let ws_path = workspace.path().clone();
+        fs::write(ws_path.join("AGENTS.md"), "# Root")?;
 
-        let paths = system_paths(&workspace, &workspace, &[])?;
-        assert_eq!(paths, vec![workspace.join("AGENTS.md").canonicalize()?]);
+        let paths = system_paths(&ws_path, &ws_path, &[])?;
+        assert_eq!(paths, vec![ws_path.join("AGENTS.md").canonicalize()?]);
         Ok(())
     }
 
@@ -419,16 +440,18 @@ mod tests {
     fn system_paths_prefers_project_over_global() -> Result<()> {
         let workspace = make_temp_dir()?;
         let global = make_temp_dir()?;
+        let ws_path = workspace.path().clone();
+        let gl_path = global.path().clone();
 
-        fs::write(workspace.join("AGENTS.md"), "# Root")?;
-        fs::write(global.join("AGENTS.md"), "# Global")?;
+        fs::write(ws_path.join("AGENTS.md"), "# Root")?;
+        fs::write(gl_path.join("AGENTS.md"), "# Global")?;
 
-        let paths = system_paths(&workspace, &global, &[])?;
+        let paths = system_paths(&ws_path, &gl_path, &[])?;
         assert_eq!(
             paths,
             vec![
-                workspace.join("AGENTS.md").canonicalize()?,
-                global.join("AGENTS.md").canonicalize()?,
+                ws_path.join("AGENTS.md").canonicalize()?,
+                gl_path.join("AGENTS.md").canonicalize()?,
             ],
         );
         Ok(())
@@ -438,11 +461,13 @@ mod tests {
     fn system_prompt_loads_config_instructions() -> Result<()> {
         let workspace = make_temp_dir()?;
         let global = make_temp_dir()?;
-        let extra = workspace.join("docs");
+        let ws_path = workspace.path();
+        let gl_path = global.path();
+        let extra = ws_path.join("docs");
         fs::create_dir_all(&extra)?;
         fs::write(extra.join("style.md"), "# Style")?;
 
-        let prompt = system_prompt(&workspace, &global, &["docs/style.md".to_string()])?;
+        let prompt = system_prompt(ws_path, gl_path, &["docs/style.md".to_string()])?;
         assert!(prompt.contains("Instructions from:"));
         assert!(prompt.contains("# Style"));
         Ok(())
@@ -451,17 +476,18 @@ mod tests {
     #[test]
     fn system_paths_finds_github_copilot_instructions() -> Result<()> {
         let workspace = make_temp_dir()?;
-        fs::create_dir_all(workspace.join(".github"))?;
+        let ws_path = workspace.path();
+        fs::create_dir_all(ws_path.join(".github"))?;
         fs::write(
-            workspace.join(".github").join("copilot-instructions.md"),
+            ws_path.join(".github").join("copilot-instructions.md"),
             "# Copilot",
         )?;
 
-        let paths = system_paths(&workspace, &workspace, &[])?;
+        let paths = system_paths(ws_path, ws_path, &[])?;
         assert_eq!(
             paths,
             vec![
-                workspace
+                ws_path
                     .join(".github")
                     .join("copilot-instructions.md")
                     .canonicalize()?
@@ -473,7 +499,10 @@ mod tests {
     #[test]
     fn resolve_nearby_instructions_finds_github_copilot_instructions() -> Result<()> {
         let workspace = make_temp_dir()?;
-        let subdir = workspace.join("subdir").join("nested");
+        let config_dir = TempDir::new("tidev-test-config")?;
+        let ws_path = workspace.path();
+        let cf_path = config_dir.path();
+        let subdir = ws_path.join("subdir").join("nested");
         fs::create_dir_all(&subdir)?;
         // Put the instruction file in a subdirectory, not in workspace root
         // to avoid being excluded by find_project_instruction
@@ -484,11 +513,8 @@ mod tests {
         )?;
         fs::write(subdir.join("file.rs"), "let x = 1;")?;
 
-        // Use a config_dir outside the workspace to avoid system path conflicts
-        let config_dir = std::env::temp_dir().join("tidev-test-config-unique");
-        fs::create_dir_all(&config_dir)?;
         let results =
-            resolve_nearby_instructions(&workspace, &config_dir, &subdir.join("file.rs"))?;
+            resolve_nearby_instructions(ws_path, cf_path, &subdir.join("file.rs"))?;
 
         let expected_path = subdir
             .join(".github")
@@ -509,17 +535,17 @@ mod tests {
     #[test]
     fn resolve_nearby_instructions_finds_subdirectory_agents() -> Result<()> {
         let workspace = make_temp_dir()?;
-        let subdir = workspace.join("subdir").join("nested");
+        let config_dir = TempDir::new("tidev-test-config")?;
+        let ws_path = workspace.path();
+        let cf_path = config_dir.path();
+        let subdir = ws_path.join("subdir").join("nested");
         fs::create_dir_all(&subdir)?;
-        fs::write(workspace.join("subdir").join("AGENTS.md"), "# Subdir")?;
+        fs::write(ws_path.join("subdir").join("AGENTS.md"), "# Subdir")?;
         fs::write(subdir.join("file.rs"), "let x = 1;")?;
 
-        // Use a config_dir outside the workspace to avoid system path conflicts
-        let config_dir = std::env::temp_dir().join("tidev-test-config-unique");
-        fs::create_dir_all(&config_dir)?;
         let results =
-            resolve_nearby_instructions(&workspace, &config_dir, &subdir.join("file.rs"))?;
-        let expected_path = workspace.join("subdir").join("AGENTS.md").canonicalize()?;
+            resolve_nearby_instructions(ws_path, cf_path, &subdir.join("file.rs"))?;
+        let expected_path = ws_path.join("subdir").join("AGENTS.md").canonicalize()?;
         // Use canonicalized path for content format to match
         let expected_content = format!(
             "Instructions from: {}\n{}",

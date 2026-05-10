@@ -21,11 +21,13 @@ pub mod system_info;
 pub mod theme;
 pub mod tooling;
 pub mod tui;
+pub mod tmp;
 pub mod utils;
 pub mod web;
 
 use anyhow::Context;
 use clap::Parser;
+use std::time::Duration;
 
 #[derive(Parser, Debug)]
 #[command(name = "tidev", version, about = "TiDev")]
@@ -65,17 +67,49 @@ enum Command {
         #[arg(short, long, default_value = "./export.sqlite")]
         output: std::path::PathBuf,
     },
+    /// Manage temporary files created by tidev
+    Tmp {
+        #[command(subcommand)]
+        action: TmpCommand,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum TmpCommand {
+    /// List known temp files in /tmp
+    List {
+        /// Only show files older than this many minutes (default: 0 = all)
+        #[arg(long, default_value = "0")]
+        min_age_minutes: u64,
+    },
+    /// Delete old temp files
+    Clean {
+        /// Only delete files older than this many minutes (default: 60)
+        #[arg(long, default_value = "60")]
+        min_age_minutes: u64,
+        /// Dry-run: list what would be deleted without actually removing anything
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 pub fn run() -> anyhow::Result<()> {
     match Cli::parse().command {
-        None => tui::run(),
-        Some(Command::Gateway) => gateway::run(),
+        None => {
+            // Auto-cleanup on startup (before TUI starts)
+            auto_cleanup_on_startup();
+            tui::run()
+        }
+        Some(Command::Gateway) => {
+            auto_cleanup_on_startup();
+            gateway::run()
+        }
         Some(Command::Web {
             host,
             port,
             dev_fs,
             workspace,
         }) => {
+            auto_cleanup_on_startup();
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(web::run(web::WebOptions {
                 host,
@@ -125,7 +159,79 @@ pub fn run() -> anyhow::Result<()> {
             );
             Ok(())
         }
+        Some(Command::Tmp { action }) => match action {
+            TmpCommand::List {
+                min_age_minutes,
+            } => {
+                let entries = crate::tmp::scan_temp_files()?;
+                let min_age = Duration::from_secs(min_age_minutes * 60);
+
+                if entries.is_empty() {
+                    println!("No tidev temp files found in /tmp");
+                    return Ok(());
+                }
+
+                for entry in &entries {
+                    if entry.age_secs < min_age.as_secs() {
+                        continue;
+                    }
+                    let kind = if entry.path.is_dir() { "dir " } else { "file" };
+                    println!(
+                        "  {}  {:>8}s  {}",
+                        kind,
+                        entry.age_secs,
+                        entry.path.display()
+                    );
+                }
+                Ok(())
+            }
+            TmpCommand::Clean {
+                min_age_minutes,
+                dry_run,
+            } => {
+                let max_age = Duration::from_secs(min_age_minutes * 60);
+                let removed = crate::tmp::clean_temp_files(max_age, dry_run)?;
+
+                if removed.is_empty() {
+                    println!("No temp files to clean");
+                    return Ok(());
+                }
+
+                for entry in &removed {
+                    let kind = if entry.path.is_dir() { "dir " } else { "file" };
+                    let action = if dry_run { "would remove" } else { "removed" };
+                    println!(
+                        "  {}  {}  {} ({}s old)",
+                        kind,
+                        action,
+                        entry.path.display(),
+                        entry.age_secs
+                    );
+                }
+
+                if !dry_run {
+                    println!("Cleaned {} temp file(s)", removed.len());
+                } else {
+                    println!("Would clean {} temp file(s) (dry-run)", removed.len());
+                }
+                Ok(())
+            }
+        },
     }
+}
+
+/// Try to perform auto-cleanup of old temp files on startup.
+/// Silently ignores errors (e.g., config file not found).
+fn auto_cleanup_on_startup() {
+    let paths = match crate::config::ConfigPaths::discover() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let config = match crate::config::AppConfig::load_or_create(&paths) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    crate::tmp::auto_cleanup(&config.tmp);
 }
 
 #[cfg(test)]

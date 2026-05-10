@@ -90,6 +90,33 @@ pub(crate) fn temp_edit_path() -> std::path::PathBuf {
     tmp_dir.join(format!("tidev-edit-{}.md", Uuid::new_v4()))
 }
 
+/// A temp file that is automatically removed when dropped.
+pub(crate) struct TempEditFile {
+    path: std::path::PathBuf,
+}
+
+impl TempEditFile {
+    pub(crate) fn create(content: &str) -> std::io::Result<Self> {
+        let path = temp_edit_path();
+        std::fs::write(&path, content)?;
+        Ok(Self { path })
+    }
+
+    pub(crate) fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
+    pub(crate) fn read(&self) -> std::io::Result<String> {
+        std::fs::read_to_string(&self.path)
+    }
+}
+
+impl Drop for TempEditFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

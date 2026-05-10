@@ -4,6 +4,7 @@ pub mod mcp;
 mod paths;
 mod provider;
 pub mod reasoning;
+pub mod tmp;
 mod ui;
 
 use anyhow::{Context, Result, bail};
@@ -21,6 +22,7 @@ pub use logging::LogConfig;
 pub use mcp::{McpConfig, McpServerConfig};
 pub use paths::ConfigPaths;
 pub use provider::{ApiType, ModelConfig, ProviderConfig, ProviderSource};
+pub use tmp::TmpConfig;
 pub use ui::UiConfig;
 
 const BUNDLED_PRESETS_TOML: &str = include_str!("../../presets.toml");
@@ -53,6 +55,8 @@ pub struct AppConfig {
     pub rtk: RtkConfig,
     #[serde(default)]
     pub agent: AgentConfig,
+    #[serde(default)]
+    pub tmp: TmpConfig,
     #[serde(skip)]
     pub bundled_providers: BTreeMap<String, ProviderConfig>,
 }
@@ -78,6 +82,7 @@ impl Default for AppConfig {
             gateway: GatewayConfig::default(),
             rtk: RtkConfig::default(),
             agent: AgentConfig::default(),
+            tmp: TmpConfig::default(),
             bundled_providers: bundled_provider_catalog().unwrap_or_default(),
         }
     }
@@ -475,6 +480,13 @@ max_input_lines = 6
 # method = "auto"
 # When to notify: "unfocused" or "always" (default: "unfocused")
 # condition = "unfocused"
+
+# Optional [tmp] configuration for managing temporary files.
+# When auto_cleanup is enabled, tidev will remove its own temp files
+# on startup that are older than max_age_hours.
+#[tmp]
+#auto_cleanup = false
+#max_age_hours = 24
 
 [gateway.telegram]
 enabled = false
