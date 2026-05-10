@@ -1174,7 +1174,7 @@ impl AgentRuntime {
                     Message::tool_result(&tool_call.id, &tool_call.name, result.clone());
                 let _ = event_tx.send(BackendEvent::SubagentToolResult {
                     session_id: child_session_id,
-                    request_id: parent_request_id,
+                    request_id: request_sequence,
                     child_session_id,
                     message: result_msg,
                 });
