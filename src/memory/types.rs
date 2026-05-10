@@ -273,7 +273,7 @@ impl MemoryStore {
                 suffix,
             ));
         }
-        out.push_str("\nUse `memory_list` or `memory_search` to find more.\n");
+        out.push_str("\nUse the `memory` tool with `operation: list` or `operation: search` to find more.\n");
         out
     }
 
