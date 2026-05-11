@@ -197,8 +197,21 @@ function getResultSummary(entry: ToolCallEntry): string {
     }
     case "grep":
     case "glob": {
-      const count = output.split("\n").filter((l) => l.trim()).length;
-      return ` ${count} match(es)`;
+      const firstLine = output.split("\n")[0] || "";
+      let count: number;
+      if (firstLine.startsWith("No files found")) {
+        count = 0;
+      } else if (firstLine.startsWith("Found ")) {
+        // "Found 42 matches" or "Found 10 files"
+        const numStr = firstLine.slice(6).split(" ")[0];
+        count = parseInt(numStr, 10) || 0;
+      } else {
+        // Fallback: count non-empty lines
+        count = output.split("\n").filter((l) => l.trim()).length;
+      }
+      if (count === 0) return " no match";
+      if (count === 1) return " 1 match";
+      return ` ${count} matches`;
     }
     default: {
       const firstLine = output.split("\n")[0] || "";

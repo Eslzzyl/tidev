@@ -258,12 +258,28 @@ pub(super) fn compute_tool_result_suffix(canonical_name: &str, output: &str) -> 
                 };
                 format!(" → failed ({} lines)", count)
             } else {
-                let count = if output.is_empty() {
-                    0
-                } else {
-                    output.lines().count()
-                };
-                format!(" → {} matches", count)
+                let count = output
+                    .lines()
+                    .next()
+                    .and_then(|first_line| {
+                        if first_line.starts_with("No files found") {
+                            Some(0usize)
+                        } else if let Some(rest) = first_line.strip_prefix("Found ") {
+                            // "Found 42 matches" or "Found 10 files"
+                            rest.split(' ').next().and_then(|n| n.parse().ok())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| {
+                        // Fallback: count non-empty lines
+                        output.lines().count()
+                    });
+                match count {
+                    0 => " → no match".to_string(),
+                    1 => " → 1 match".to_string(),
+                    n => format!(" → {} matches", n),
+                }
             }
         }
         "read" => {
