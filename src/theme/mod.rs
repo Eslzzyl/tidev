@@ -11,7 +11,6 @@ mod everforest_light;
 mod github;
 mod gruvbox;
 mod gruvbox_light;
-mod latte;
 mod light;
 mod material;
 mod mocha;
@@ -31,7 +30,6 @@ pub enum ThemeName {
     Nord,
     OneDark,
     Mocha,
-    Latte,
     Solarized,
     Orng,
     Github,
@@ -55,7 +53,6 @@ impl ThemeName {
             "nord" => Some(Self::Nord),
             "one-dark" | "one_dark" | "onedark" => Some(Self::OneDark),
             "mocha" => Some(Self::Mocha),
-            "latte" => Some(Self::Latte),
             "solarized" => Some(Self::Solarized),
             "orng" => Some(Self::Orng),
             "github" => Some(Self::Github),
@@ -82,7 +79,6 @@ impl ThemeName {
             Self::Nord => "nord",
             Self::OneDark => "one-dark",
             Self::Mocha => "mocha",
-            Self::Latte => "latte",
             Self::Solarized => "solarized",
             Self::Orng => "orng",
             Self::Github => "github",
@@ -106,7 +102,6 @@ impl ThemeName {
             ThemeName::Nord,
             ThemeName::OneDark,
             ThemeName::Mocha,
-            ThemeName::Latte,
             ThemeName::Solarized,
             ThemeName::Orng,
             ThemeName::Github,
@@ -187,7 +182,6 @@ impl ThemePalette {
             ThemeName::Nord => Self::nord(),
             ThemeName::OneDark => Self::one_dark(),
             ThemeName::Mocha => Self::mocha(),
-            ThemeName::Latte => Self::latte(),
             ThemeName::Solarized => Self::solarized(),
             ThemeName::Orng => Self::orng(),
             ThemeName::Github => Self::github(),
@@ -245,7 +239,6 @@ impl ThemeManager {
             ThemeName::Nord => ThemePalette::nord(),
             ThemeName::OneDark => ThemePalette::one_dark(),
             ThemeName::Mocha => ThemePalette::mocha(),
-            ThemeName::Latte => ThemePalette::latte(),
             ThemeName::Solarized => ThemePalette::solarized(),
             ThemeName::Orng => ThemePalette::orng(),
             ThemeName::Github => ThemePalette::github(),
