@@ -1,8 +1,16 @@
 use super::*;
+use crate::tui::memory_panel::PanelFocus;
 
 impl App {
     pub(crate) fn handle_mouse_event(&mut self, mouse: MouseEvent, runtime: &Runtime) {
         if self.model_panel.is_some() {
+            return;
+        }
+
+        // Route mouse events to memory panel when it's active
+        if self.memory_panel.is_some()
+            && self.handle_memory_panel_mouse(mouse, runtime)
+        {
             return;
         }
 
@@ -497,6 +505,132 @@ impl App {
         }
 
         None
+    }
+
+    /// Handle mouse events within the memory panel. Returns true if consumed.
+    fn handle_memory_panel_mouse(
+        &mut self,
+        mouse: MouseEvent,
+        _runtime: &Runtime,
+    ) -> bool {
+        let Some(overlay) = self.memory_panel_overlay.get() else {
+            return false;
+        };
+        let position = Position::new(mouse.column, mouse.row);
+        if !overlay.contains(position) {
+            return false;
+        }
+
+        // Inner area (within the border)
+        let inner_x = overlay.x + 1;
+        let inner_y = overlay.y + 1;
+        let inner_w = overlay.width.saturating_sub(2);
+        let inner_h = overlay.height.saturating_sub(2);
+
+        if inner_w < 10 || inner_h < 3 {
+            return true; // too small to interact meaningfully
+        }
+
+        // The inner area is split vertically into main + footer(1)
+        let main_h = inner_h.saturating_sub(1);
+
+        // Local mouse position relative to inner area
+        let local_x = position.x.saturating_sub(inner_x);
+        let local_y = position.y.saturating_sub(inner_y);
+
+        // Determine left (35%) vs right (65%) pane
+        let split_x = (inner_w as usize * 35 / 100) as u16;
+        let in_left = local_x < split_x && local_y < main_h;
+        let in_right = local_x >= split_x && local_y < main_h;
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                if in_left {
+                    // Scroll up in left list → move selection up
+                    if let Some(mut panel) = self.memory_panel.clone() {
+                        panel.move_selection(-1);
+                        self.memory_panel = Some(panel);
+                    }
+                    true
+                } else if in_right {
+                    // Scroll up in right pane → scroll preview up
+                    if let Some(mut panel) = self.memory_panel.clone() {
+                        panel.preview_scroll =
+                            panel.preview_scroll.saturating_sub(3);
+                        self.memory_panel = Some(panel);
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if in_left {
+                    // Scroll down in left list → move selection down
+                    if let Some(mut panel) = self.memory_panel.clone() {
+                        panel.move_selection(1);
+                        self.memory_panel = Some(panel);
+                    }
+                    true
+                } else if in_right {
+                    // Scroll down in right pane → scroll preview down
+                    if let Some(mut panel) = self.memory_panel.clone() {
+                        panel.preview_scroll =
+                            panel.preview_scroll.saturating_add(3);
+                        self.memory_panel = Some(panel);
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                if in_left {
+                    // Click on left list → select the clicked item
+                    if let Some(mut panel) = self.memory_panel.clone() {
+                        // Calculate which item was clicked (accounting for header)
+                        let header_h = 3u16; // "Name" + filter + divider
+                        if local_y >= header_h {
+                            let list_offset = local_y - header_h;
+                            let _half = main_h.saturating_sub(header_h) / 2;
+                            let filtered = panel.filtered_indices();
+                            if !filtered.is_empty() {
+                                let target_idx = list_offset as usize;
+                                if target_idx < filtered.len() {
+                                    panel.selected_index = target_idx;
+                                    panel.preview_scroll = 0;
+                                    self.memory_panel = Some(panel);
+                                }
+                            }
+                        }
+                    }
+                    true
+                } else if in_right {
+                    // Click on right pane → position cursor in edit mode
+                    if let Some(panel) = self.memory_panel.clone() {
+                        if panel.focus == PanelFocus::ContentEdit {
+                            let mut p = panel;
+                            // Account for "EDITING" header (1 line)
+                            let local_line = local_y.saturating_sub(1);
+                            let editor_width = p.editor_width.get().max(1);
+                            p.content_editor.set_cursor_at_visual_position(
+                                editor_width,
+                                local_line,
+                                local_x,
+                            );
+                            self.memory_panel = Some(p);
+                        } else {
+                            // In browse mode, clicking right pane does nothing special
+                            // (keep focus on list)
+                        }
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
     }
 
     pub(crate) fn register_selection_region(&self, _area: Rect) {}

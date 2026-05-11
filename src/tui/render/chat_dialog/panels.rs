@@ -3,7 +3,7 @@ use crate::tui::render::render::{centered_rect, render_scrollbar, shorten};
 use crate::{
     tui::mcp_panel::McpPanelState,
     tui::mcp_panel::McpServerEditorState,
-    tui::memory_panel::{MemoryPanelMode, MemoryPanelState},
+    tui::memory_panel::{MemoryPanelMode, MemoryPanelState, PanelFocus},
     tui::message_panel::MessagePanelState,
     tui::model_panel::{ModelPanelItem, ModelPanelState, thinking_options_for_model},
     tui::session_panel::{SessionPanelState, SessionViewMode},
@@ -14,7 +14,7 @@ use crate::{
 };
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
-    prelude::{Frame, Modifier, Style},
+    prelude::{Frame, Modifier, Position, Style},
     text::{Line, Span},
     widgets::{
         Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState,
@@ -1209,15 +1209,24 @@ impl App {
         let palette = self.palette();
         let filtered = panel.filtered_indices();
 
-        let overlay = centered_rect(area.width.min(96), area.height.min(36), area);
+        // Larger overlay like skills panel
+        let overlay = centered_rect(85, 80, area);
+        // Store overlay rect for mouse hit-testing
+        self.memory_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
 
-        let title_block = Block::default()
+        let title = format!(
+            " Memories · {}/{} ",
+            filtered.len(),
+            panel.memories.len()
+        );
+
+        let panel_block = Block::default()
             .style(Style::default().bg(palette.panel))
-            .title(" Memories ")
+            .title(title)
             .borders(Borders::ALL)
             .border_style(Style::default().fg(palette.border_active()));
-        frame.render_widget(title_block, overlay);
+        frame.render_widget(panel_block, overlay);
 
         let inner = overlay.inner(Margin {
             horizontal: 1,
@@ -1226,85 +1235,402 @@ impl App {
 
         match panel.mode {
             MemoryPanelMode::Browse => {
+                // Two-pane layout: left (list) + right (preview) with footer
                 let sections = Layout::vertical([
-                    Constraint::Length(1), // filter indicator
-                    Constraint::Min(6),    // list
-                    Constraint::Length(1), // count
-                    Constraint::Length(1), // help
+                    Constraint::Min(3),    // main two-pane area
+                    Constraint::Length(1), // footer help
                 ])
                 .split(inner);
 
-                // Filter indicator
-                let filter_text = match panel.filter_type {
-                    None => "All types".to_string(),
-                    Some(t) => format!("Type: {}", t.as_str()),
-                };
-                frame.render_widget(
-                    Paragraph::new(filter_text)
-                        .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
-                    sections[0],
-                );
-
-                // Memory list
                 if filtered.is_empty() {
+                    // Empty state centered in main area
                     frame.render_widget(
                         Paragraph::new("No memories yet. Press 'a' to add one.")
                             .alignment(Alignment::Center)
                             .style(Style::default().bg(palette.panel).fg(palette.muted)),
-                        sections[1],
+                        sections[0],
                     );
                 } else {
-                    let items: Vec<ListItem> = filtered
-                        .iter()
-                        .enumerate()
-                        .map(|(list_idx, &mem_idx)| {
-                            let entry = &panel.memories[mem_idx];
-                            let is_selected = list_idx == panel.selected_index;
-                            let prefix = if is_selected { "▸ " } else { "  " };
-                            let type_label = entry.memory_type.short_label();
-                            let preview: String = entry.content.chars().take(80).collect();
-                            let suffix = if entry.content.len() > 80 { "…" } else { "" };
-                            let text = format!(
-                                "{}[{}] {} – {}{}",
-                                prefix, type_label, entry.title, preview, suffix
-                            );
-                            let style = if is_selected {
-                                Style::default()
-                                    .fg(palette.accent)
-                                    .bg(palette.selection_bg)
-                                    .add_modifier(Modifier::BOLD)
-                            } else {
-                                Style::default().bg(palette.panel).fg(palette.text)
-                            };
-                            ListItem::new(text).style(style)
-                        })
-                        .collect();
+                    // Split main area into left (35%) and right (65%)
+                    let panes = Layout::horizontal([
+                        Constraint::Percentage(35),
+                        Constraint::Percentage(65),
+                    ])
+                    .split(sections[0]);
 
-                    let list = List::new(items);
-                    frame.render_widget(list, sections[1]);
+                    let list_area = panes[0];
+                    let preview_area = panes[1];
+
+                    // ── Left Pane: Memory List ──
+
+                    // Header
+                    let filter_text = match panel.filter_type {
+                        None => "All types".to_string(),
+                        Some(t) => format!("Filter: {}", t.as_str()),
+                    };
+                    let header_lines = vec![
+                        Line::from(vec![Span::styled(
+                            "  Name",
+                            Style::default()
+                                .fg(palette.accent)
+                                .add_modifier(Modifier::BOLD),
+                        )]),
+                        Line::from(Span::styled(
+                            format!("  {}", filter_text),
+                            Style::default().fg(palette.muted),
+                        )),
+                    ];
+                    let header_height = header_lines.len() as u16;
+                    frame.render_widget(
+                        Paragraph::new(header_lines).style(Style::default().bg(palette.panel)),
+                        Rect::new(list_area.x, list_area.y, list_area.width, header_height),
+                    );
+
+                    // Divider
+                    let divider_y = list_area.y + header_height;
+                    frame.render_widget(
+                        Paragraph::new(Line::from(Span::styled(
+                            "─".repeat(list_area.width as usize),
+                            Style::default().fg(palette.muted),
+                        )))
+                        .style(Style::default().bg(palette.panel)),
+                        Rect::new(list_area.x, divider_y, list_area.width, 1),
+                    );
+
+                    // List items with scrollbar
+                    let list_start_y = divider_y + 1;
+                    let list_content_height = list_area.height.saturating_sub(header_height + 1);
+                    let list_content_area = Rect::new(
+                        list_area.x,
+                        list_start_y,
+                        list_area.width,
+                        list_content_height,
+                    );
+
+                    // Split list area into content + scrollbar
+                    let (list_content_area, list_scrollbar_area) =
+                        if list_content_area.width > 2 {
+                            let chunks = Layout::horizontal([
+                                Constraint::Min(1),
+                                Constraint::Length(1),
+                                Constraint::Length(1),
+                            ])
+                            .split(list_content_area);
+                            (chunks[0], Some(chunks[2]))
+                        } else if list_content_area.width > 1 {
+                            let chunks = Layout::horizontal([
+                                Constraint::Min(1),
+                                Constraint::Length(1),
+                            ])
+                            .split(list_content_area);
+                            (chunks[0], Some(chunks[1]))
+                        } else {
+                            (list_content_area, None)
+                        };
+
+                    // Compute visible range such that selected_index is visible
+                    let total_filtered = filtered.len();
+                    let visible_height = list_content_height as usize;
+                    let visible_start = if visible_height == 0 {
+                        0
+                    } else if total_filtered <= visible_height {
+                        0
+                    } else {
+                        // Keep selection visible; prefer showing above selection
+                        let half = visible_height / 2;
+                        if panel.selected_index < half {
+                            0
+                        } else if panel.selected_index + half >= total_filtered {
+                            total_filtered.saturating_sub(visible_height)
+                        } else {
+                            panel.selected_index.saturating_sub(half)
+                        }
+                    };
+                    let visible_end =
+                        (visible_start + visible_height).min(total_filtered);
+
+                    let mut list_lines: Vec<Line<'_>> = Vec::new();
+                    for i in visible_start..visible_end {
+                        let mem_idx = filtered[i];
+                        let entry = &panel.memories[mem_idx];
+                        let is_selected = i == panel.selected_index;
+
+                        // Single-line format: "▸ [proj] Title"
+                        let type_label = entry.memory_type.short_label();
+                        let prefix = if is_selected { "▸" } else { " " };
+                        let base = format!("{} [{}] {}", prefix, type_label, entry.title);
+                        // Truncate to fit width
+                        let max_w = list_content_area.width.saturating_sub(3).max(10) as usize;
+                        let display = if base.chars().count() > max_w {
+                            format!("{}…", base.chars().take(max_w.saturating_sub(1)).collect::<String>())
+                        } else {
+                            base
+                        };
+
+                        let style = if is_selected {
+                            Style::default()
+                                .bg(palette.selection_bg)
+                                .fg(palette.selection_fg)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(palette.text)
+                        };
+
+                        list_lines.push(Line::from(Span::styled(display, style)));
+                    }
+
+                    // Fill remaining space
+                    while list_lines.len() < visible_height {
+                        list_lines.push(Line::from(""));
+                    }
+
+                    frame.render_widget(
+                        Paragraph::new(list_lines).style(Style::default().bg(palette.panel)),
+                        list_content_area,
+                    );
+
+                    // List scrollbar
+                    if let Some(sb_area) = list_scrollbar_area {
+                        render_scrollbar(
+                            frame,
+                            sb_area,
+                            visible_start,
+                            total_filtered,
+                            palette,
+                        );
+                    }
+
+                    // ── Right Pane: Content Preview / Editor ──
+                    match panel.focus {
+                        PanelFocus::List => {
+                            // Browse mode — render markdown preview with auto-wrap
+                            if let Some(entry) = panel.selected_entry() {
+                                let (preview_content_area, preview_scrollbar_area) =
+                                    if preview_area.width > 2 {
+                                        let chunks = Layout::horizontal([
+                                            Constraint::Min(1),
+                                            Constraint::Length(1),
+                                            Constraint::Length(1),
+                                        ])
+                                        .split(preview_area);
+                                        (chunks[0], Some(chunks[2]))
+                                    } else if preview_area.width > 1 {
+                                        let chunks = Layout::horizontal([
+                                            Constraint::Min(1),
+                                            Constraint::Length(1),
+                                        ])
+                                        .split(preview_area);
+                                        (chunks[0], Some(chunks[1]))
+                                    } else {
+                                        (preview_area, None)
+                                    };
+
+                                use crate::markdown_render::render_markdown_text_with_width_and_cwd;
+                                let content_width =
+                                    preview_content_area.width.saturating_sub(2) as usize;
+                                let rendered = render_markdown_text_with_width_and_cwd(
+                                    &entry.content,
+                                    Some(content_width),
+                                    None,
+                                );
+                                let total_preview_lines = rendered.lines.len();
+
+                                let scroll = panel
+                                    .preview_scroll
+                                    .min(total_preview_lines.saturating_sub(1));
+
+                                let visible_lines: Vec<Line<'_>> = rendered
+                                    .into_iter()
+                                    .skip(scroll)
+                                    .take(preview_content_area.height as usize)
+                                    .collect();
+
+                                frame.render_widget(
+                                    Paragraph::new(visible_lines)
+                                        .style(Style::default().bg(palette.panel)),
+                                    preview_content_area,
+                                );
+
+                                if let Some(sb_area) = preview_scrollbar_area {
+                                    render_scrollbar(
+                                        frame,
+                                        sb_area,
+                                        panel.preview_scroll,
+                                        total_preview_lines,
+                                        palette,
+                                    );
+                                }
+                            } else {
+                                frame.render_widget(
+                                    Paragraph::new("No memory selected")
+                                        .alignment(Alignment::Center)
+                                        .style(
+                                            Style::default().bg(palette.panel).fg(palette.muted),
+                                        ),
+                                    preview_area,
+                                );
+                            }
+                        }
+                        PanelFocus::ContentEdit => {
+                            // Edit mode — show entry metadata header + editable content
+                            if let Some(entry) = panel.selected_entry() {
+                                // Split preview area for scrollbar
+                                let (editor_area, _edit_scrollbar_area) =
+                                    if preview_area.width > 2 {
+                                        let chunks = Layout::horizontal([
+                                            Constraint::Min(1),
+                                            Constraint::Length(1),
+                                            Constraint::Length(1),
+                                        ])
+                                        .split(preview_area);
+                                        (chunks[0], Some(chunks[2]))
+                                    } else if preview_area.width > 1 {
+                                        let chunks = Layout::horizontal([
+                                            Constraint::Min(1),
+                                            Constraint::Length(1),
+                                        ])
+                                        .split(preview_area);
+                                        (chunks[0], Some(chunks[1]))
+                                    } else {
+                                        (preview_area, None)
+                                    };
+
+                                // Build header info lines
+                                let mut header_lines: Vec<Line<'_>> = Vec::new();
+
+                                // Type badge + title
+                                header_lines.push(Line::from(vec![
+                                    Span::styled(
+                                        format!("  [{}] ", entry.memory_type.as_str()),
+                                        Style::default().fg(palette.accent)
+                                            .add_modifier(Modifier::BOLD),
+                                    ),
+                                    Span::styled(
+                                        &entry.title,
+                                        Style::default().fg(palette.text)
+                                            .add_modifier(Modifier::BOLD),
+                                    ),
+                                ]));
+
+                                // Tags
+                                if !entry.tags.is_empty() {
+                                    header_lines.push(Line::from(Span::styled(
+                                        format!("  Tags: {}", entry.tags.join(", ")),
+                                        Style::default().fg(palette.muted),
+                                    )));
+                                }
+
+                                // EDITING indicator + separator
+                                let sep_w = editor_area.width.saturating_sub(4) as usize;
+                                header_lines.push(Line::from(Span::styled(
+                                    format!("  ── EDITING ──{}",
+                                        "─".repeat(sep_w.saturating_sub(14).min(40))),
+                                    Style::default().fg(palette.accent)
+                                        .add_modifier(Modifier::BOLD),
+                                )));
+
+                                // Render header
+                                let header_h = header_lines.len() as u16;
+                                frame.render_widget(
+                                    Paragraph::new(header_lines)
+                                        .style(Style::default().bg(palette.panel)),
+                                    Rect::new(
+                                        editor_area.x,
+                                        editor_area.y,
+                                        editor_area.width,
+                                        header_h.min(editor_area.height),
+                                    ),
+                                );
+
+                                // Editor content area (below header)
+                                let edit_content_y = editor_area.y + header_h;
+                                let edit_content_height =
+                                    editor_area.height.saturating_sub(header_h).max(1);
+                                let edit_content_area = Rect::new(
+                                    editor_area.x,
+                                    edit_content_y,
+                                    editor_area.width,
+                                    edit_content_height,
+                                );
+
+                                // Store editor width for cursor movement
+                                panel.editor_width.set(editor_area.width);
+
+                                if edit_content_area.width > 0 && edit_content_height > 0 {
+                                    // Build lines from composer
+                                    let editor_width = edit_content_area.width as usize;
+                                    let visual_lines =
+                                        panel.content_editor.visual_lines(editor_width);
+                                    let editor_scroll = 0;
+                                    let mut lines: Vec<Line<'_>> = Vec::new();
+
+                                    for range in visual_lines.iter() {
+                                        let line_text =
+                                            &panel.content_editor.text()[range.clone()];
+                                        lines.push(Line::from(Span::styled(
+                                            line_text.to_string(),
+                                            Style::default().fg(palette.text),
+                                        )));
+                                    }
+
+                                    let visible_lines: Vec<Line<'_>> = lines
+                                        .into_iter()
+                                        .skip(editor_scroll)
+                                        .take(edit_content_height as usize)
+                                        .collect();
+
+                                    frame.render_widget(
+                                        Paragraph::new(visible_lines)
+                                            .style(Style::default().bg(palette.panel)),
+                                        edit_content_area,
+                                    );
+
+                                    // Set cursor position
+                                    let (cursor_line, cursor_col) = panel
+                                        .content_editor
+                                        .cursor_position(editor_area.width);
+                                    let cursor_y = edit_content_y
+                                        .saturating_add(
+                                            cursor_line.min(edit_content_height.saturating_sub(1)),
+                                        );
+                                    let cursor_x =
+                                        editor_area.x.saturating_add(cursor_col);
+                                    frame.set_cursor_position(Position::new(
+                                        cursor_x,
+                                        cursor_y,
+                                    ));
+                                }
+                            } else {
+                                frame.render_widget(
+                                    Paragraph::new("No memory selected")
+                                        .alignment(Alignment::Center)
+                                        .style(
+                                            Style::default().bg(palette.panel).fg(palette.muted),
+                                        ),
+                                    preview_area,
+                                );
+                            }
+                        }
+                    }
                 }
 
-                // Count
+                // Footer help
+                let footer_y = sections[1].y;
+                let help_text = match panel.focus {
+                    PanelFocus::List => {
+                        "  ↑↓: navigate · ←→: scroll preview · Enter: edit · a: add · e: edit overlay · d: delete · r: filter · Esc: close"
+                    }
+                    PanelFocus::ContentEdit => {
+                        "  ↑↓←→: move cursor · Enter: save · Esc: cancel · Shift+Enter: newline"
+                    }
+                };
                 frame.render_widget(
-                    Paragraph::new(format!(
-                        "{} / {} memories",
-                        filtered.len(),
-                        panel.memories.len()
-                    ))
-                    .alignment(Alignment::Right)
-                    .style(Style::default().bg(palette.panel).fg(palette.muted)),
-                    sections[2],
-                );
-
-                // Help
-                frame.render_widget(
-                    Paragraph::new(
-                        "↑↓ navigate · a add · e edit · d delete · r filter type · Esc close",
-                    )
-                    .alignment(Alignment::Center)
-                    .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
-                    sections[3],
+                    Paragraph::new(Line::from(Span::styled(
+                        help_text,
+                        Style::default().fg(palette.accent_soft),
+                    )))
+                    .style(Style::default().bg(palette.panel)),
+                    Rect::new(inner.x, footer_y, inner.width, 1),
                 );
             }
 

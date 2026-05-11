@@ -188,6 +188,8 @@ struct App {
     sidebar_scroll_offset: usize,
     sidebar_total_lines: usize,
     input_area: Cell<Option<Rect>>,
+    /// Overlay rect of the memory panel (for mouse hit-testing).
+    memory_panel_overlay: Cell<Option<Rect>>,
     /// Scroll offset for the input box when content exceeds visible area.
     input_scroll_offset: usize,
     /// Whether we're currently dragging in the input area (for text selection).

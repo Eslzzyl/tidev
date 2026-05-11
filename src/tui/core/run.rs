@@ -173,6 +173,7 @@ impl App {
             sidebar_scroll_offset: 0,
             sidebar_total_lines: 0,
             input_area: Cell::new(None),
+            memory_panel_overlay: Cell::new(None),
             input_scroll_offset: 0,
             input_dragging: false,
             selection_clipboard_lease: None,

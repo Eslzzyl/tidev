@@ -1,9 +1,12 @@
 use anyhow::Result;
 use chrono::Utc;
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::layout::Rect;
+use std::cell::Cell;
 use uuid::Uuid;
 
 use crate::memory::types::{MemoryEntry, MemoryStore, MemoryType};
+use crate::tui::input::Composer;
 
 use super::App;
 
@@ -19,12 +22,35 @@ pub enum MemoryPanelMode {
     DeleteConfirm,
 }
 
+/// Which part of the Browse two-pane layout has keyboard focus.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PanelFocus {
+    /// Left list is active. ↑/↓ navigates items. Right shows markdown preview.
+    List,
+    /// Right pane shows raw content text for editing. Arrow keys move cursor.
+    ContentEdit,
+}
+
 #[derive(Clone, Debug)]
 pub struct MemoryPanelState {
     pub mode: MemoryPanelMode,
     pub selected_index: usize,
     pub memories: Vec<MemoryEntry>,
     pub filter_type: Option<MemoryType>,
+    /// Scroll offset for the right-side content preview (browse mode)
+    pub preview_scroll: usize,
+    /// Which pane is focused
+    pub focus: PanelFocus,
+    /// Text editor for inline content editing (right pane in ContentEdit mode)
+    pub content_editor: Composer,
+    /// Snapshot of content before editing began (for Esc to cancel)
+    pub content_edit_snapshot: String,
+    /// Width of the right pane editor (set during render, used for cursor movement)
+    pub editor_width: Cell<u16>,
+    /// For mouse hit-testing (set during render)
+    pub panel_rect: Option<Rect>,
+    pub left_rect: Option<Rect>,
+    pub right_rect: Option<Rect>,
     /// For Add/Edit mode
     pub edit_title: String,
     pub edit_content: String,
@@ -46,6 +72,14 @@ impl MemoryPanelState {
             selected_index: 0,
             memories: Vec::new(),
             filter_type: None,
+            preview_scroll: 0,
+            focus: PanelFocus::List,
+            content_editor: Composer::new(""),
+            content_edit_snapshot: String::new(),
+            editor_width: Cell::new(40),
+            panel_rect: None,
+            left_rect: None,
+            right_rect: None,
             edit_title: String::new(),
             edit_content: String::new(),
             edit_type: MemoryType::Project,
@@ -86,6 +120,7 @@ impl MemoryPanelState {
         let current = self.selected_index.min(filtered.len().saturating_sub(1)) as isize;
         let next = (current + delta).rem_euclid(len);
         self.selected_index = filtered.get(next as usize).copied().unwrap_or(0);
+        self.preview_scroll = 0;
     }
 
     pub fn start_add(&mut self) {
@@ -95,18 +130,6 @@ impl MemoryPanelState {
         self.edit_type = MemoryType::Project;
         self.edit_tags.clear();
         self.edit_id = None;
-    }
-
-    pub fn start_edit(&mut self) {
-        let Some(entry) = self.selected_entry().cloned() else {
-            return;
-        };
-        self.mode = MemoryPanelMode::Edit;
-        self.edit_title = entry.title;
-        self.edit_content = entry.content;
-        self.edit_type = entry.memory_type;
-        self.edit_tags = entry.tags.join(", ");
-        self.edit_id = Some(entry.id);
     }
 
     pub fn confirm_save(&mut self, store: &MemoryStore, workspace_root: &str) -> Result<()> {
@@ -177,10 +200,37 @@ impl MemoryPanelState {
             Some(MemoryType::Reference) => None,
         };
         self.selected_index = 0;
+        self.preview_scroll = 0;
+    }
+
+    /// Enter inline content edit mode for the selected memory entry.
+    pub fn enter_content_edit(&mut self) {
+        if let Some(entry) = self.selected_entry().cloned() {
+            self.content_edit_snapshot = entry.content.clone();
+            self.content_editor.set_text(entry.content);
+            self.focus = PanelFocus::ContentEdit;
+        }
+    }
+
+    /// Save the edited content and return to list-focus browse mode.
+    pub fn save_content_edit(&mut self, store: &MemoryStore, workspace_root: &str) -> Result<()> {
+        if let Some(entry) = self.selected_entry().cloned() {
+            let mut updated = entry;
+            updated.content = self.content_editor.text().to_string();
+            store.update(&updated)?;
+            self.load(store, workspace_root)?;
+        }
+        self.focus = PanelFocus::List;
+        self.preview_scroll = 0;
+        Ok(())
+    }
+
+    /// Cancel editing and restore the original content.
+    pub fn cancel_content_edit(&mut self) {
+        self.content_editor.set_text(self.content_edit_snapshot.clone());
+        self.focus = PanelFocus::List;
     }
 }
-
-// ─── App methods ──────────────────────────────────────────────
 
 impl App {
     pub(crate) fn handle_memory_panel_key(
@@ -205,12 +255,23 @@ impl App {
         }
         Ok(())
     }
-
     fn handle_memory_panel_browse_key(
         &mut self,
         panel: MemoryPanelState,
         key: KeyEvent,
         _runtime: &tokio::runtime::Runtime,
+    ) -> Result<()> {
+        match panel.focus {
+            PanelFocus::List => self.handle_browse_list_key(panel, key),
+            PanelFocus::ContentEdit => self.handle_browse_edit_key(panel, key),
+        }
+    }
+
+    /// Keys active when the left list is focused.
+    fn handle_browse_list_key(
+        &mut self,
+        panel: MemoryPanelState,
+        key: KeyEvent,
     ) -> Result<()> {
         match key.code {
             KeyCode::Up => {
@@ -223,6 +284,11 @@ impl App {
                 next.move_selection(1);
                 self.memory_panel = Some(next);
             }
+            KeyCode::Enter => {
+                let mut next = panel;
+                next.enter_content_edit();
+                self.memory_panel = Some(next);
+            }
             KeyCode::Esc => {
                 self.close_memory_panel();
             }
@@ -233,7 +299,7 @@ impl App {
             }
             KeyCode::Char('e') | KeyCode::Char('E') => {
                 let mut next = panel;
-                next.start_edit();
+                next.enter_content_edit();
                 self.memory_panel = Some(next);
             }
             KeyCode::Char('d') | KeyCode::Char('D') if panel.selected_entry().is_some() => {
@@ -260,11 +326,89 @@ impl App {
                 }
                 self.memory_panel = Some(next);
             }
+            KeyCode::Left => {
+                let mut next = panel;
+                next.preview_scroll = next.preview_scroll.saturating_sub(3);
+                self.memory_panel = Some(next);
+            }
+            KeyCode::Right => {
+                let mut next = panel;
+                next.preview_scroll = next.preview_scroll.saturating_add(3);
+                self.memory_panel = Some(next);
+            }
             _ => {}
         }
         Ok(())
     }
 
+    /// Keys active when the right content pane is in edit mode.
+    fn handle_browse_edit_key(
+        &mut self,
+        panel: MemoryPanelState,
+        key: KeyEvent,
+    ) -> Result<()> {
+        match key.code {
+            KeyCode::Esc => {
+                let mut next = panel;
+                next.cancel_content_edit();
+                self.memory_panel = Some(next);
+            }
+            KeyCode::Enter => {
+                if key.modifiers.contains(KeyModifiers::SHIFT)
+                    || key.modifiers.contains(KeyModifiers::ALT)
+                {
+                    // Shift+Enter / Alt+Enter → insert newline
+                    let mut next = panel;
+                    next.content_editor.handle_key(key);
+                    self.memory_panel = Some(next);
+                } else {
+                    // Plain Enter → save and return to list focus
+                    let ws = self.workspace_root.display().to_string();
+                    let mut next = panel;
+                    next.save_content_edit(&self.memory_store, &ws)?;
+                    self.memory_panel = Some(next);
+                }
+            }
+            KeyCode::Up => {
+                // Move cursor up one visual line
+                let mut next = panel;
+                let width = next.editor_width.get().max(1);
+                let (current_line, current_col) =
+                    next.content_editor.cursor_position(width);
+                if current_line > 0 {
+                    next.content_editor.set_cursor_at_visual_position(
+                        width,
+                        current_line - 1,
+                        current_col,
+                    );
+                }
+                self.memory_panel = Some(next);
+            }
+            KeyCode::Down => {
+                // Move cursor down one visual line
+                let mut next = panel;
+                let width = next.editor_width.get().max(1);
+                let lines = next.content_editor.visual_lines(width as usize);
+                let (current_line, current_col) =
+                    next.content_editor.cursor_position(width);
+                if (current_line as usize) + 1 < lines.len() {
+                    next.content_editor.set_cursor_at_visual_position(
+                        width,
+                        current_line + 1,
+                        current_col,
+                    );
+                }
+                self.memory_panel = Some(next);
+            }
+            _ => {
+                // Delegate all other keys to the Composer
+                let mut next = panel;
+                next.content_editor.handle_key(key);
+                self.memory_panel = Some(next);
+            }
+        }
+        Ok(())
+    }
     fn handle_memory_panel_edit_key(
         &mut self,
         panel: MemoryPanelState,
