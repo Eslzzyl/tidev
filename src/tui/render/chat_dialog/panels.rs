@@ -58,7 +58,7 @@ impl App {
             Paragraph::new(Line::from(vec![
                 Span::styled(search_text, search_style),
             ]))
-            .style(Style::default().bg(palette.panel)),
+            .style(Style::default().bg(palette.panel_alt)),
             Rect::new(inner.x, inner.y, inner.width, 1),
         );
 
@@ -66,10 +66,10 @@ impl App {
         let divider_y = inner.y + 1;
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                " ".repeat(inner.width as usize),
-                Style::default().fg(palette.border).bg(palette.panel),
+                "─".repeat(inner.width as usize),
+                Style::default().fg(palette.border),
             )))
-            .style(Style::default().bg(palette.panel)),
+            .style(Style::default().bg(palette.panel_alt)),
             Rect::new(inner.x, divider_y, inner.width, 1),
         );
 
