@@ -186,6 +186,14 @@ pub(super) fn summarize_tool_call(
         "skill" => field("name")
             .map(|name| format!("Loaded skill {name}"))
             .unwrap_or_else(|| "Load skill".to_string()),
+        "websearch" => {
+            let query = field("query").unwrap_or("");
+            format!("Search the web for \"{query}\"")
+        }
+        "webfetch" => {
+            let url = field("url").unwrap_or("");
+            format!("Fetch web page from {url}")
+        }
         _ => {
             let mut summary = display_tool_name(tool_name);
             summary = summary[0..1].to_uppercase() + &summary[1..];
@@ -322,6 +330,36 @@ pub(super) fn summarize_tool_arguments(tool_name: &str, arguments: &str) -> Vec<
         "skill" => {
             if let Some(name) = string_field("name") {
                 fields.push(("name".to_string(), name));
+            }
+        }
+        "websearch" => {
+            if let Some(query) = string_field("query") {
+                fields.push(("query".to_string(), query));
+            }
+            if let Some(num) = parsed
+                .as_ref()
+                .and_then(|v| v.get("num_results"))
+                .and_then(|v| v.as_i64())
+            {
+                fields.push(("num_results".to_string(), format!("{}", num)));
+            }
+            if let Some(st) = string_field("search_type") {
+                fields.push(("search_type".to_string(), st));
+            }
+        }
+        "webfetch" => {
+            if let Some(url) = string_field("url") {
+                fields.push(("url".to_string(), url));
+            }
+            if let Some(fmt) = string_field("format") {
+                fields.push(("format".to_string(), fmt));
+            }
+            if let Some(to) = parsed
+                .as_ref()
+                .and_then(|v| v.get("timeout"))
+                .and_then(|v| v.as_i64())
+            {
+                fields.push(("timeout".to_string(), format!("{}s", to)));
             }
         }
         _ => {}

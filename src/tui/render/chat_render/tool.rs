@@ -537,6 +537,44 @@ pub(super) fn render_tool_call_lines(
                 Span::styled(rel_path, Style::default().fg(palette.text)),
             ]));
         }
+        "websearch" => {
+            let query = get_field("query").unwrap_or("");
+            lines.push(Line::from(vec![
+                Span::styled("  Query: ", Style::default().fg(palette.muted)),
+                Span::styled(query.to_string(), Style::default().fg(palette.text)),
+            ]));
+            if let Some(num) = get_field("num_results") {
+                lines.push(Line::from(vec![
+                    Span::styled("  Max results: ", Style::default().fg(palette.muted)),
+                    Span::styled(num.to_string(), Style::default().fg(palette.text)),
+                ]));
+            }
+            if let Some(st) = get_field("search_type") {
+                lines.push(Line::from(vec![
+                    Span::styled("  Type: ", Style::default().fg(palette.muted)),
+                    Span::styled(st.to_string(), Style::default().fg(palette.text)),
+                ]));
+            }
+        }
+        "webfetch" => {
+            let url = get_field("url").unwrap_or("");
+            lines.push(Line::from(vec![
+                Span::styled("  URL: ", Style::default().fg(palette.muted)),
+                Span::styled(url.to_string(), Style::default().fg(palette.accent)),
+            ]));
+            if let Some(fmt) = get_field("format") {
+                lines.push(Line::from(vec![
+                    Span::styled("  Format: ", Style::default().fg(palette.muted)),
+                    Span::styled(fmt.to_string(), Style::default().fg(palette.text)),
+                ]));
+            }
+            if let Some(to) = get_field("timeout") {
+                lines.push(Line::from(vec![
+                    Span::styled("  Timeout: ", Style::default().fg(palette.muted)),
+                    Span::styled(to.to_string(), Style::default().fg(palette.text)),
+                ]));
+            }
+        }
         _ => {
             let summary = summarize_tool_call(
                 &tool_call.name,
@@ -647,6 +685,42 @@ pub(super) fn render_tool_result_detail_lines(
         );
     }
 
+    // Web search results: render as styled markdown with header
+    if canonical_name == "websearch" {
+        let is_expanded = ctx.expanded_tool_results.contains(&message.id);
+        return (
+            render_websearch_result_lines(
+                effective_output,
+                body_width,
+                palette,
+                is_expanded,
+                is_error,
+                Some(message.id),
+                ctx.expanded_tool_results,
+            ),
+            None,
+            vec![],
+        );
+    }
+
+    // Web fetch results: render page content as styled markdown with header
+    if canonical_name == "webfetch" {
+        let is_expanded = ctx.expanded_tool_results.contains(&message.id);
+        return (
+            render_webfetch_result_lines(
+                effective_output,
+                body_width,
+                palette,
+                is_expanded,
+                is_error,
+                Some(message.id),
+                ctx.expanded_tool_results,
+            ),
+            None,
+            vec![],
+        );
+    }
+
     (
         render_output_preview_lines(
             effective_output,
@@ -734,6 +808,158 @@ pub(super) fn render_subagent_task_preview(
             "  Ctrl+Click to enter subsession",
             Style::default().fg(palette.muted),
         )]));
+    }
+
+    lines
+}
+
+/// Renders websearch results: styled markdown with a "Search Results" header.
+pub(super) fn render_websearch_result_lines(
+    output: &str,
+    body_width: usize,
+    palette: ThemePalette,
+    is_expanded: bool,
+    is_error: bool,
+    message_id: Option<Uuid>,
+    expanded_tool_results: &HashSet<Uuid>,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+
+    if output.trim().is_empty() {
+        lines.push(line_with_style("(no results)", palette.muted));
+        return lines;
+    }
+
+    if is_error {
+        return render_output_preview_lines(output, body_width, true, message_id, expanded_tool_results, palette);
+    }
+
+    // Title header
+    lines.push(Line::from(vec![
+        Span::styled("Search Results", Style::default().fg(palette.accent_soft)),
+    ]));
+    lines.push(Line::from(""));
+
+    // Render the output as markdown
+    let rendered =
+        render_markdown_text_with_width_and_cwd(output, Some(body_width.saturating_sub(2)), None);
+    let md_lines: Vec<Line<'static>> = rendered.lines;
+
+    if is_expanded {
+        let max_lines = TOOL_OUTPUT_EXPANDED_MAX_LINES;
+        let line_count = md_lines.len();
+        if line_count <= max_lines {
+            lines.extend(md_lines);
+        } else {
+            lines.extend(md_lines.into_iter().take(max_lines));
+            lines.push(Line::from(vec![Span::styled(
+                format!(
+                    "  ▼ {} more line(s) — Click to expand",
+                    line_count - max_lines
+                ),
+                Style::default().fg(palette.muted),
+            )]));
+        }
+        lines.push(Line::from(vec![Span::styled(
+            if line_count > max_lines {
+                "▲ Click to collapse"
+            } else {
+                "▲  Click to collapse"
+            },
+            Style::default().fg(palette.muted),
+        )]));
+    } else {
+        let max_preview = TOOL_OUTPUT_PREVIEW_LINES;
+        let line_count = md_lines.len();
+
+        if line_count <= max_preview {
+            lines.extend(md_lines);
+        } else {
+            lines.extend(md_lines.into_iter().take(max_preview));
+            lines.push(Line::from(vec![Span::styled(
+                format!(
+                    "  ▼ {} more line(s) — Click to expand",
+                    line_count - max_preview
+                ),
+                Style::default().fg(palette.muted),
+            )]));
+        }
+    }
+
+    lines
+}
+
+/// Renders webfetch results: styled markdown with a "Page Content" header.
+pub(super) fn render_webfetch_result_lines(
+    output: &str,
+    body_width: usize,
+    palette: ThemePalette,
+    is_expanded: bool,
+    is_error: bool,
+    message_id: Option<Uuid>,
+    expanded_tool_results: &HashSet<Uuid>,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+
+    if output.trim().is_empty() {
+        lines.push(line_with_style("(empty page)", palette.muted));
+        return lines;
+    }
+
+    if is_error {
+        return render_output_preview_lines(output, body_width, true, message_id, expanded_tool_results, palette);
+    }
+
+    // Title header
+    lines.push(Line::from(vec![
+        Span::styled("Page Content", Style::default().fg(palette.accent_soft)),
+    ]));
+    lines.push(Line::from(""));
+
+    // Render the content as markdown
+    let rendered =
+        render_markdown_text_with_width_and_cwd(output, Some(body_width.saturating_sub(2)), None);
+    let md_lines: Vec<Line<'static>> = rendered.lines;
+
+    if is_expanded {
+        let max_lines = TOOL_OUTPUT_EXPANDED_MAX_LINES;
+        let line_count = md_lines.len();
+        if line_count <= max_lines {
+            lines.extend(md_lines);
+        } else {
+            lines.extend(md_lines.into_iter().take(max_lines));
+            lines.push(Line::from(vec![Span::styled(
+                format!(
+                    "  ▼ {} more line(s) — Click to expand",
+                    line_count - max_lines
+                ),
+                Style::default().fg(palette.muted),
+            )]));
+        }
+        lines.push(Line::from(vec![Span::styled(
+            if line_count > max_lines {
+                "▲ Click to collapse"
+            } else {
+                "▲  Click to collapse"
+            },
+            Style::default().fg(palette.muted),
+        )]));
+    } else {
+        let max_preview = TOOL_OUTPUT_PREVIEW_LINES;
+        let line_count = md_lines.len();
+
+        if line_count <= max_preview {
+            lines.extend(md_lines);
+        } else {
+            lines.extend(md_lines.into_iter().take(max_preview));
+            lines.push(Line::from(vec![Span::styled(
+                format!(
+                    "  ▼ {} more line(s) — Click to expand",
+                    line_count - max_preview
+                ),
+                Style::default().fg(palette.muted),
+            )]));
+        }
     }
 
     lines
