@@ -8,7 +8,7 @@ use crate::{
     tui::model_panel::{ModelPanelItem, ModelPanelState, thinking_options_for_model},
     tui::session_panel::{SessionPanelState, SessionViewMode},
     tui::settings_panel::SettingsPanelState,
-    tui::theme_panel::ThemePanelState,
+    tui::theme_panel::{DisplayItem, ThemePanelState},
     tui::ui::agents_panel::AgentsPanelState,
     tui::ui::skills_panel::SkillsPanelState,
 };
@@ -29,52 +29,142 @@ impl App {
         area: Rect,
         panel: &ThemePanelState,
     ) {
-        let current_palette = self.palette();
-        let overlay = centered_rect(40, 18, area);
-        let themes = ThemePanelState::themes();
+        let palette = self.palette();
+        let overlay = centered_rect(36, 22, area);
 
-        let items: Vec<ListItem> = themes
-            .iter()
-            .map(|theme| {
-                ListItem::new(Line::from(vec![Span::styled(
-                    format!("  {}  ", theme.as_str()),
-                    Style::default()
-                        .fg(current_palette.text)
-                        .add_modifier(Modifier::BOLD),
-                )]))
-            })
-            .collect();
-
-        let mut state = ListState::default();
-        state.select(Some(panel.selected_index));
-
-        let panel_block = Block::default()
-            .style(Style::default().bg(current_palette.panel_alt))
-            .title(" Theme ")
+        let block = Block::default()
+            .style(Style::default().bg(palette.panel_alt))
+            .title(" Theme  ")
+            .title(format!(" {} themes ", panel.display_items.iter().filter(|i| matches!(i, DisplayItem::Theme(_))).count()))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(current_palette.border_active()));
-
-        let list = List::new(items)
-            .style(
-                Style::default()
-                    .bg(current_palette.panel_alt)
-                    .fg(current_palette.text),
-            )
-            .highlight_style(
-                Style::default()
-                    .bg(current_palette.selection_bg)
-                    .fg(current_palette.selection_fg)
-                    .add_modifier(Modifier::BOLD),
-            );
+            .border_style(Style::default().fg(palette.border_active()));
 
         frame.render_widget(Clear, overlay);
-        frame.render_widget(panel_block, overlay);
+        frame.render_widget(block, overlay);
         let inner = overlay.inner(Margin {
             horizontal: 1,
             vertical: 1,
         });
         self.register_selection_region(inner);
-        frame.render_stateful_widget(list, inner, &mut state);
+
+        // --- Search / filter bar ---
+        let search_text = if panel.query.is_empty() {
+            "  Type to search...".to_string()
+        } else {
+            format!("  {}", panel.query)
+        };
+        let search_style = Style::default().fg(palette.muted);
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(search_text, search_style),
+            ]))
+            .style(Style::default().bg(palette.panel)),
+            Rect::new(inner.x, inner.y, inner.width, 1),
+        );
+
+        // Divider
+        let divider_y = inner.y + 1;
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                " ".repeat(inner.width as usize),
+                Style::default().fg(palette.border).bg(palette.panel),
+            )))
+            .style(Style::default().bg(palette.panel)),
+            Rect::new(inner.x, divider_y, inner.width, 1),
+        );
+
+        // --- List area ---
+        let list_y = inner.y + 2;
+        let list_height = inner.height.saturating_sub(2);
+        if list_height == 0 {
+            return;
+        }
+        let list_area = Rect::new(inner.x, list_y, inner.width, list_height);
+
+        // Split into content + scrollbar
+        let (content_area, scrollbar_area) = if list_area.width > 2 {
+            let chunks = Layout::horizontal([
+                Constraint::Min(1),
+                Constraint::Length(1),
+            ])
+            .split(list_area);
+            (chunks[0], Some(chunks[1]))
+        } else {
+            (list_area, None)
+        };
+
+        // Compute scroll offset so selected_index is visible
+        let display_len = panel.display_items.len();
+        let scroll = if panel.selected_index + 1 <= list_height as usize {
+            0
+        } else if panel.selected_index < list_height as usize / 2 {
+            0
+        } else {
+            // Try to keep selection centered-ish
+            let target = panel.selected_index.saturating_sub(list_height as usize / 2);
+            target.min(display_len.saturating_sub(list_height as usize))
+        };
+
+        // Render visible items
+        for i in 0..list_height {
+            let idx = scroll + i as usize;
+            if idx >= display_len {
+                break;
+            }
+            let item = &panel.display_items[idx];
+            let y = content_area.y + i;
+
+            match item {
+                DisplayItem::Header(label) => {
+                    frame.render_widget(
+                        Paragraph::new(Line::from(Span::styled(
+                            format!(" {} ", label),
+                            Style::default()
+                                .fg(palette.accent)
+                                .add_modifier(Modifier::BOLD),
+                        )))
+                        .style(Style::default().bg(palette.panel_alt)),
+                        Rect::new(content_area.x, y, content_area.width, 1),
+                    );
+                }
+                DisplayItem::Theme(t) => {
+                    let is_selected = idx == panel.selected_index;
+                    let (text_style, bg_block) = if is_selected {
+                        (
+                            Style::default()
+                                .fg(palette.selection_fg)
+                                .bg(palette.selection_bg)
+                                .add_modifier(Modifier::BOLD),
+                            Style::default().bg(palette.selection_bg),
+                        )
+                    } else {
+                        (
+                            Style::default().fg(palette.text),
+                            Style::default().bg(palette.panel_alt),
+                        )
+                    };
+                    frame.render_widget(
+                        Paragraph::new(Line::from(Span::styled(
+                            format!("  {}", t.as_str()),
+                            text_style,
+                        )))
+                        .style(bg_block),
+                        Rect::new(content_area.x, y, content_area.width, 1),
+                    );
+                }
+            }
+        }
+
+        // Scrollbar
+        if let Some(sb_area) = scrollbar_area {
+            render_scrollbar(
+                frame,
+                sb_area,
+                scroll,
+                display_len,
+                palette,
+            );
+        }
     }
 
     pub(crate) fn render_agents_panel(
@@ -1388,7 +1478,7 @@ impl App {
 
         // --- Left Pane: Skill List ---
         // Header with search status
-        let search_status = if panel.query_active {
+        let search_text = if panel.query_active {
             format!("Search: {}_", panel.query)
         } else if !panel.query.is_empty() {
             format!("Filter: {} (press / to edit)", panel.query)
@@ -1404,7 +1494,7 @@ impl App {
                     .add_modifier(Modifier::BOLD),
             )]),
             Line::from(Span::styled(
-                format!("  {}", search_status),
+                format!("  {}", search_text),
                 Style::default().fg(palette.muted),
             )),
         ];

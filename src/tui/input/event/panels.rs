@@ -5,7 +5,8 @@ impl App {
     pub(crate) fn handle_theme_panel_key(&mut self, key: KeyEvent) -> Result<()> {
         if let Some(panel) = &mut self.theme_panel {
             match key.code {
-                KeyCode::Up => {
+                // Navigation
+                KeyCode::Up | KeyCode::Char('k') => {
                     let previous_theme = panel.preview_theme;
                     panel.move_up();
                     if panel.preview_theme != previous_theme {
@@ -13,7 +14,7 @@ impl App {
                         self.clear_message_render_cache();
                     }
                 }
-                KeyCode::Down => {
+                KeyCode::Down | KeyCode::Char('j') => {
                     let previous_theme = panel.preview_theme;
                     panel.move_down();
                     if panel.preview_theme != previous_theme {
@@ -21,10 +22,24 @@ impl App {
                         self.clear_message_render_cache();
                     }
                 }
+                // Search: backspace removes char
+                KeyCode::Backspace => {
+                    panel.backspace_query();
+                    self.theme.set_mode(panel.preview_theme);
+                    self.clear_message_render_cache();
+                }
+                // Search: any printable char filters
+                KeyCode::Char(ch) if !ch.is_control() => {
+                    panel.append_query(ch);
+                    self.theme.set_mode(panel.preview_theme);
+                    self.clear_message_render_cache();
+                }
+                // Confirm
                 KeyCode::Enter => {
                     let _ = self.close_theme_panel(true);
                 }
-                KeyCode::Esc => {
+                // Cancel
+                KeyCode::Esc | KeyCode::Char('q') => {
                     let _ = self.close_theme_panel(false);
                 }
                 _ => {}

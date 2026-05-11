@@ -128,6 +128,23 @@ impl ThemeName {
         let index = all.iter().position(|theme| *theme == self).unwrap_or(0);
         all[(index + 1) % all.len()]
     }
+
+    pub fn is_dark(self) -> bool {
+        matches!(
+            self,
+            Self::Dark
+                | Self::Nord
+                | Self::OneDark
+                | Self::Mocha
+                | Self::Solarized
+                | Self::Everforest
+                | Self::Dusk
+                | Self::Gruvbox
+                | Self::TokyoNight
+                | Self::RosePine
+                | Self::Contrast
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
