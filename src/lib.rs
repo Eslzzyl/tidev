@@ -19,9 +19,9 @@ pub mod stats;
 pub mod storage;
 pub mod system_info;
 pub mod theme;
+pub mod tmp;
 pub mod tooling;
 pub mod tui;
-pub mod tmp;
 pub mod utils;
 pub mod web;
 
@@ -160,9 +160,7 @@ pub fn run() -> anyhow::Result<()> {
             Ok(())
         }
         Some(Command::Tmp { action }) => match action {
-            TmpCommand::List {
-                min_age_minutes,
-            } => {
+            TmpCommand::List { min_age_minutes } => {
                 let entries = crate::tmp::scan_temp_files()?;
                 let min_age = Duration::from_secs(min_age_minutes * 60);
 

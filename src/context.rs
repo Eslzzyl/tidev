@@ -626,7 +626,8 @@ mod tests {
 
         // Compact's message assembly (after the change):
         let mut compact_msgs = manager.build_request_messages(&conversation, SessionMode::Build);
-        let compact_instruction = "Please provide a detailed summary of the conversation history above";
+        let compact_instruction =
+            "Please provide a detailed summary of the conversation history above";
         compact_msgs.push(Message::new(MessageRole::User, compact_instruction));
 
         // Normal request structure (same prefix):
@@ -690,7 +691,9 @@ mod tests {
         // First message is the summary placeholder
         assert_eq!(compact_msgs2[0].role, MessageRole::User);
         assert!(
-            compact_msgs2[0].content.contains("Earlier conversation summary"),
+            compact_msgs2[0]
+                .content
+                .contains("Earlier conversation summary"),
             "first message should be the old summary when one exists"
         );
 

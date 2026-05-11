@@ -965,27 +965,21 @@ impl App {
                         && self.running_subagent_executions.is_empty()
                         && let Err(error) =
                             self.finalize_snapshot_for_last_user_message_sync(runtime)
-                        {
-                            crate::log_warn!(
-                                "ToolCompleted: failed to finalize snapshot: {}",
-                                error
-                            );
-                        }
+                    {
+                        crate::log_warn!("ToolCompleted: failed to finalize snapshot: {}", error);
+                    }
 
                     // Also clean up running_subagent_executions for task tools.
                     // Match by tool_call.id instead of request_id so that
                     // parallel subagents (which share the same request_id) are
                     // each removed individually rather than all at once.
                     if tool_call.name == "task"
-                        && let Some(pos) = self
-                            .running_subagent_executions
-                            .iter()
-                            .position(|e| {
-                                e.request_id == request_id && e.tool_call.id == tool_call.id
-                            })
-                        {
-                            self.running_subagent_executions.remove(pos);
-                        }
+                        && let Some(pos) = self.running_subagent_executions.iter().position(|e| {
+                            e.request_id == request_id && e.tool_call.id == tool_call.id
+                        })
+                    {
+                        self.running_subagent_executions.remove(pos);
+                    }
                 }
             }
             BackendEvent::SubagentStatus {
@@ -1091,11 +1085,14 @@ impl App {
                 // Try to find and remove from running_subagent_executions.
                 // May already be gone if ToolCompleted cleaned it up first.
                 let parent_session_id = {
-                    let idx = self.running_subagent_executions.iter().position(|execution| {
-                        execution.request_id == request_id
-                            && execution.child_session_id == child_session_id
-                            && execution.tool_call.id == tool_call.id
-                    });
+                    let idx = self
+                        .running_subagent_executions
+                        .iter()
+                        .position(|execution| {
+                            execution.request_id == request_id
+                                && execution.child_session_id == child_session_id
+                                && execution.tool_call.id == tool_call.id
+                        });
                     idx.map(|i| self.running_subagent_executions.remove(i).parent_session_id)
                 };
 

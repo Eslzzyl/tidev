@@ -25,10 +25,7 @@ pub trait ToolArgs: for<'de> Deserialize<'de> + Serialize {
 
 /// Decode tool arguments with an enhanced error message that includes the
 /// JSON Schema field descriptions so the model can self-correct.
-pub(crate) fn decode_tool_args<Args: ToolArgs>(
-    tool_name: &str,
-    arguments: Value,
-) -> Result<Args> {
+pub(crate) fn decode_tool_args<Args: ToolArgs>(tool_name: &str, arguments: Value) -> Result<Args> {
     let schema = Args::schema();
     serde_json::from_value::<Args>(arguments).map_err(|e| {
         let expected = describe_schema(&schema);

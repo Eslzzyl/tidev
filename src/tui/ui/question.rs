@@ -664,8 +664,7 @@ impl App {
             // is_runtime_flow = true skips persistence (avoiding duplication
             // with the runtime's persist_tool_result).
             self.record_tool_result(dialog.tool_call.clone(), result.clone())?;
-            self.pending_rejected_tools
-                .push((dialog.tool_call, result));
+            self.pending_rejected_tools.push((dialog.tool_call, result));
         } else if allow {
             let output = dialog.formatted_output();
             self.record_tool_result(dialog.tool_call, ToolExecutionResult::new(output))?;
@@ -821,7 +820,11 @@ mod tests {
             "should contain question: {}",
             output
         );
-        assert!(output.contains("A: Alpha"), "should contain answer: {}", output);
+        assert!(
+            output.contains("A: Alpha"),
+            "should contain answer: {}",
+            output
+        );
     }
 
     #[test]

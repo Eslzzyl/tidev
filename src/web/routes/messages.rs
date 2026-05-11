@@ -930,7 +930,15 @@ pub async fn compact_session(
         let prior_retained_from = context_manager.retained_from;
 
         let result = context_manager
-            .compact(&llm, &active_model, &conversation, true, None, &tools, crate::prompts::SessionMode::Build)
+            .compact(
+                &llm,
+                &active_model,
+                &conversation,
+                true,
+                None,
+                &tools,
+                crate::prompts::SessionMode::Build,
+            )
             .await;
 
         match result {

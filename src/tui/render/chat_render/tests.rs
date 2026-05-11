@@ -51,7 +51,11 @@ mod tests {
         let paths = crate::config::ConfigPaths {
             config_dir: temp_root.path().join(".config").join("tidev"),
             data_dir: temp_root.path().join(".local").join("share").join("tidev"),
-            config_file: temp_root.path().join(".config").join("tidev").join("config.toml"),
+            config_file: temp_root
+                .path()
+                .join(".config")
+                .join("tidev")
+                .join("config.toml"),
             auth_file: temp_root
                 .path()
                 .join(".local")
@@ -307,7 +311,11 @@ A: Rust, Python";
 
         // Output that doesn't match Q: / A: format still renders gracefully
         let lines = render_question_result_pairs("something else", 80, ThemePalette::dark());
-        assert!(lines.len() >= 2, "non-QA output should render: {}", lines.len());
+        assert!(
+            lines.len() >= 2,
+            "non-QA output should render: {}",
+            lines.len()
+        );
     }
 
     #[test]

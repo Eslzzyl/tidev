@@ -11,9 +11,10 @@ fn main() {
     println!("cargo:rerun-if-changed=web/index.html");
 
     if needs_build()
-        && let Err(msg) = build_web() {
-            println!("cargo:warning={}", msg);
-        }
+        && let Err(msg) = build_web()
+    {
+        println!("cargo:warning={}", msg);
+    }
 }
 
 /// Returns true if any source file is newer than the last build output,
@@ -40,9 +41,10 @@ fn needs_build() -> bool {
         "web/index.html",
     ] {
         if let Some(t) = get_mtime(Path::new(path))
-            && t > baseline {
-                return true;
-            }
+            && t > baseline
+        {
+            return true;
+        }
     }
 
     false

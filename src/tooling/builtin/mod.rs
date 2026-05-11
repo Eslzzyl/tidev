@@ -106,13 +106,8 @@ pub fn execute_tool_call(
             crate::session::ToolExecutionResult::new(output)
         }
         Some("todowrite") => {
-            let output = todo::execute_tool_call(
-                workspace_root,
-                store,
-                session_id,
-                &call.name,
-                arguments,
-            )?;
+            let output =
+                todo::execute_tool_call(workspace_root, store, session_id, &call.name, arguments)?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("skill") => {
@@ -130,12 +125,8 @@ pub fn execute_tool_call(
             crate::session::ToolExecutionResult::new(result)
         }
         Some("websearch") | Some("webfetch") => {
-            let output = web::execute_tool_call(
-                workspace_root,
-                &call.name,
-                arguments,
-                max_output_bytes,
-            )?;
+            let output =
+                web::execute_tool_call(workspace_root, &call.name, arguments, max_output_bytes)?;
             crate::session::ToolExecutionResult::new(output)
         }
         None => bail!("unknown tool '{}'", call.name),
@@ -212,13 +203,8 @@ pub fn execute_tool_call_streaming(
             crate::session::ToolExecutionResult::new(output)
         }
         Some("todowrite") => {
-            let output = todo::execute_tool_call(
-                workspace_root,
-                store,
-                session_id,
-                &call.name,
-                arguments,
-            )?;
+            let output =
+                todo::execute_tool_call(workspace_root, store, session_id, &call.name, arguments)?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("skill") => {
@@ -236,12 +222,8 @@ pub fn execute_tool_call_streaming(
             crate::session::ToolExecutionResult::new(result)
         }
         Some("websearch") | Some("webfetch") => {
-            let output = web::execute_tool_call(
-                workspace_root,
-                &call.name,
-                arguments,
-                max_output_bytes,
-            )?;
+            let output =
+                web::execute_tool_call(workspace_root, &call.name, arguments, max_output_bytes)?;
             crate::session::ToolExecutionResult::new(output)
         }
         None => bail!("unknown tool '{}'", call.name),

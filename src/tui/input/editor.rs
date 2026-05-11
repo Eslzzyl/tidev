@@ -28,14 +28,33 @@ pub(crate) fn resolve_editor(ui_config: &UiConfig) -> Option<(String, Vec<String
         .as_deref()
         .filter(|s| !s.trim().is_empty())
         .map(String::from)
-        .or_else(|| std::env::var("VISUAL").ok().filter(|s| !s.trim().is_empty()))
-        .or_else(|| std::env::var("EDITOR").ok().filter(|s| !s.trim().is_empty()))
+        .or_else(|| {
+            std::env::var("VISUAL")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+        })
+        .or_else(|| {
+            std::env::var("EDITOR")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+        })
         .or_else(|| {
             // Auto-detect: GUI editors first, then terminal editors.
             // VSCode (code) is the most common default and preferred.
             [
-                "code", "cursor", "windsurf", "subl", "zed", "idea", "code-insiders",
-                "vim", "nano", "nvim", "vi", "hx", "emacs",
+                "code",
+                "cursor",
+                "windsurf",
+                "subl",
+                "zed",
+                "idea",
+                "code-insiders",
+                "vim",
+                "nano",
+                "nvim",
+                "vi",
+                "hx",
+                "emacs",
             ]
             .iter()
             .find(|name| is_executable_on_path(name))
@@ -54,9 +73,10 @@ pub(crate) fn resolve_editor(ui_config: &UiConfig) -> Option<(String, Vec<String
     // explicitly passed args (e.g. "code --wait" in config/$VISUAL/$EDITOR),
     // we trust their choice.
     if args.is_empty()
-        && let Some(flag) = editor_wait_flag(&cmd) {
-            args.push(flag.to_string());
-        }
+        && let Some(flag) = editor_wait_flag(&cmd)
+    {
+        args.push(flag.to_string());
+    }
 
     Some((cmd, args))
 }

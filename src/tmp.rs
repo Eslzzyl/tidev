@@ -44,7 +44,10 @@ pub fn scan_temp_files() -> std::io::Result<Vec<CleanEntry>> {
                 Err(_) => 0,
             };
 
-            entries.push(CleanEntry { path, age_secs: age });
+            entries.push(CleanEntry {
+                path,
+                age_secs: age,
+            });
         }
     }
 
@@ -53,10 +56,7 @@ pub fn scan_temp_files() -> std::io::Result<Vec<CleanEntry>> {
 
 /// Remove matching temp files older than `max_age`.
 /// Returns the list of entries that were actually removed.
-pub fn clean_temp_files(
-    max_age: Duration,
-    dry_run: bool,
-) -> std::io::Result<Vec<CleanEntry>> {
+pub fn clean_temp_files(max_age: Duration, dry_run: bool) -> std::io::Result<Vec<CleanEntry>> {
     let entries = scan_temp_files()?;
     let mut removed = Vec::new();
 
@@ -110,8 +110,7 @@ mod tests {
 
     /// Creates a temp file in /tmp with a unique name for testing.
     fn create_test_temp(name: &str) -> PathBuf {
-        let path =
-            std::env::temp_dir().join(format!("tidev-test-{name}-{}", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("tidev-test-{name}-{}", uuid::Uuid::new_v4()));
         let _ = fs::write(&path, "test");
         path
     }
@@ -119,10 +118,8 @@ mod tests {
     #[test]
     fn scan_finds_tidev_prefixed_files() {
         let test_file = create_test_temp("scan-file");
-        let test_dir = std::env::temp_dir().join(format!(
-            "tidev-test-scan-dir-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let test_dir =
+            std::env::temp_dir().join(format!("tidev-test-scan-dir-{}", uuid::Uuid::new_v4()));
         let _ = fs::create_dir_all(&test_dir);
 
         let entries = scan_temp_files().unwrap();
@@ -154,19 +151,23 @@ mod tests {
         let test_file = create_test_temp("dryrun");
 
         let entries_before = scan_temp_files().unwrap();
-        let found_before: Vec<_> =
-            entries_before.iter().filter(|e| e.path == test_file).collect();
+        let found_before: Vec<_> = entries_before
+            .iter()
+            .filter(|e| e.path == test_file)
+            .collect();
 
         let removed = clean_temp_files(Duration::ZERO, true).unwrap();
-        let found_in_removed: Vec<_> =
-            removed.iter().filter(|e| e.path == test_file).collect();
+        let found_in_removed: Vec<_> = removed.iter().filter(|e| e.path == test_file).collect();
 
         // Dry run: file should still exist
         assert!(test_file.exists());
 
         // If the file was found by scan (which it should be), it should be in dry-run output
         if !found_before.is_empty() {
-            assert!(!found_in_removed.is_empty(), "dry-run should report the file");
+            assert!(
+                !found_in_removed.is_empty(),
+                "dry-run should report the file"
+            );
         }
 
         let _ = fs::remove_file(&test_file);

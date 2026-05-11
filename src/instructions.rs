@@ -513,8 +513,7 @@ mod tests {
         )?;
         fs::write(subdir.join("file.rs"), "let x = 1;")?;
 
-        let results =
-            resolve_nearby_instructions(ws_path, cf_path, &subdir.join("file.rs"))?;
+        let results = resolve_nearby_instructions(ws_path, cf_path, &subdir.join("file.rs"))?;
 
         let expected_path = subdir
             .join(".github")
@@ -543,8 +542,7 @@ mod tests {
         fs::write(ws_path.join("subdir").join("AGENTS.md"), "# Subdir")?;
         fs::write(subdir.join("file.rs"), "let x = 1;")?;
 
-        let results =
-            resolve_nearby_instructions(ws_path, cf_path, &subdir.join("file.rs"))?;
+        let results = resolve_nearby_instructions(ws_path, cf_path, &subdir.join("file.rs"))?;
         let expected_path = ws_path.join("subdir").join("AGENTS.md").canonicalize()?;
         // Use canonicalized path for content format to match
         let expected_content = format!(

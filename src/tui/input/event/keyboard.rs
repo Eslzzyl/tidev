@@ -677,8 +677,7 @@ impl App {
         let Some((cmd, mut args)) = crate::tui::input::editor::resolve_editor(&self.config.ui)
         else {
             self.last_notice = Some(
-                "No editor found. Set external_editor in config, $VISUAL, or $EDITOR."
-                    .to_string(),
+                "No editor found. Set external_editor in config, $VISUAL, or $EDITOR.".to_string(),
             );
             return Ok(());
         };
@@ -696,10 +695,11 @@ impl App {
 
         // Suspend the TUI so the editor can take over the terminal cleanly
         if let Some(session) = &self.terminal_session
-            && let Err(e) = session.suspend() {
-                self.last_notice = Some(format!("Failed to suspend TUI: {e}"));
-                return Ok(());
-            }
+            && let Err(e) = session.suspend()
+        {
+            self.last_notice = Some(format!("Failed to suspend TUI: {e}"));
+            return Ok(());
+        }
 
         // Spawn editor and wait for it to close
         args.push(edit_file.path().to_string_lossy().to_string());
@@ -707,10 +707,11 @@ impl App {
 
         // Resume the TUI after editor exits
         if let Some(session) = &self.terminal_session
-            && let Err(e) = session.resume() {
-                self.last_notice = Some(format!("Failed to resume TUI: {e}"));
-                return Ok(());
-            }
+            && let Err(e) = session.resume()
+        {
+            self.last_notice = Some(format!("Failed to resume TUI: {e}"));
+            return Ok(());
+        }
 
         // Mark for full redraw — after alternate screen was left and
         // re-entered, ratatui's frame buffer is stale and won't redraw.
@@ -738,10 +739,7 @@ impl App {
 
         // Most editors add a trailing newline when saving. Trim a single one
         // so the comparison against the original text is meaningful.
-        let edited = edited
-            .strip_suffix('\n')
-            .unwrap_or(&edited)
-            .to_string();
+        let edited = edited.strip_suffix('\n').unwrap_or(&edited).to_string();
 
         if edited != text {
             self.composer.set_text(edited);

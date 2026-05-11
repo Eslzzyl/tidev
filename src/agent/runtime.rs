@@ -1010,17 +1010,17 @@ impl AgentRuntime {
             const SUBAGENT_STREAM_TIMEOUT: Duration = Duration::from_secs(300); // 5 minutes
 
             loop {
-                let event = match tokio::time::timeout(SUBAGENT_STREAM_TIMEOUT, stream_rx.recv()).await
-                {
-                    Ok(Some(event)) => event,
-                    Ok(None) => break,  // stream sender dropped (normal completion)
-                    Err(_) => {
-                        anyhow::bail!(
-                            "Subagent timed out after {} seconds waiting for LLM response",
-                            SUBAGENT_STREAM_TIMEOUT.as_secs()
-                        );
-                    }
-                };
+                let event =
+                    match tokio::time::timeout(SUBAGENT_STREAM_TIMEOUT, stream_rx.recv()).await {
+                        Ok(Some(event)) => event,
+                        Ok(None) => break, // stream sender dropped (normal completion)
+                        Err(_) => {
+                            anyhow::bail!(
+                                "Subagent timed out after {} seconds waiting for LLM response",
+                                SUBAGENT_STREAM_TIMEOUT.as_secs()
+                            );
+                        }
+                    };
 
                 // Forward to parent event channel (for standard conversation updates)
                 let _ = event_tx.send(event.clone());
@@ -1718,7 +1718,15 @@ async fn compact_in_background(
     };
 
     match context_manager
-        .compact(&llm_client, &model, &conversation, false, None, &tool_defs, mode)
+        .compact(
+            &llm_client,
+            &model,
+            &conversation,
+            false,
+            None,
+            &tool_defs,
+            mode,
+        )
         .await
     {
         Ok(true) => {

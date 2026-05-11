@@ -820,13 +820,12 @@ pub(super) fn render_question_result_pairs(
         // Render question
         lines.push(Line::from(vec![Span::styled(
             "  Q: ",
-            Style::default().fg(palette.accent_soft).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(palette.accent_soft)
+                .add_modifier(Modifier::BOLD),
         )]));
         let q_line_owned = Line::from(question_text.clone());
-        let q_wrapped = word_wrap_line(
-            &q_line_owned,
-            WrapOptions::new(wrap_width),
-        );
+        let q_wrapped = word_wrap_line(&q_line_owned, WrapOptions::new(wrap_width));
         if q_wrapped.len() <= 1 {
             lines.push(Line::from(vec![Span::styled(
                 format!("     {}", question_text),
@@ -836,7 +835,11 @@ pub(super) fn render_question_result_pairs(
             for (i, wl) in q_wrapped.iter().enumerate() {
                 let prefix = if i == 0 { "     " } else { "       " };
                 lines.push(Line::from(vec![Span::styled(
-                    format!("{}{}", prefix, wl.spans.iter().map(|s| &*s.content).collect::<String>()),
+                    format!(
+                        "{}{}",
+                        prefix,
+                        wl.spans.iter().map(|s| &*s.content).collect::<String>()
+                    ),
                     Style::default().fg(palette.text),
                 )]));
             }
@@ -844,13 +847,12 @@ pub(super) fn render_question_result_pairs(
 
         // Render answer
         lines.push(Line::from(vec![
-            Span::styled(
-                "  → ",
-                Style::default().fg(palette.success),
-            ),
+            Span::styled("  → ", Style::default().fg(palette.success)),
             Span::styled(
                 answer_text,
-                Style::default().fg(palette.success).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.success)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]));
 
