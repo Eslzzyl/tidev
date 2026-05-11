@@ -695,24 +695,22 @@ impl App {
         self.last_notice = Some(format!("Opening in {cmd}... Save and close to continue."));
 
         // Suspend the TUI so the editor can take over the terminal cleanly
-        if let Some(session) = &self.terminal_session {
-            if let Err(e) = session.suspend() {
+        if let Some(session) = &self.terminal_session
+            && let Err(e) = session.suspend() {
                 self.last_notice = Some(format!("Failed to suspend TUI: {e}"));
                 return Ok(());
             }
-        }
 
         // Spawn editor and wait for it to close
         args.push(edit_file.path().to_string_lossy().to_string());
         let status = std::process::Command::new(&cmd).args(&args).status();
 
         // Resume the TUI after editor exits
-        if let Some(session) = &self.terminal_session {
-            if let Err(e) = session.resume() {
+        if let Some(session) = &self.terminal_session
+            && let Err(e) = session.resume() {
                 self.last_notice = Some(format!("Failed to resume TUI: {e}"));
                 return Ok(());
             }
-        }
 
         // Mark for full redraw — after alternate screen was left and
         // re-entered, ratatui's frame buffer is stale and won't redraw.

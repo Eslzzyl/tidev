@@ -963,8 +963,7 @@ impl App {
                     // message rather than left dangling for the next Finished event.
                     if self.running_tool_executions.is_empty()
                         && self.running_subagent_executions.is_empty()
-                    {
-                        if let Err(error) =
+                        && let Err(error) =
                             self.finalize_snapshot_for_last_user_message_sync(runtime)
                         {
                             crate::log_warn!(
@@ -972,14 +971,13 @@ impl App {
                                 error
                             );
                         }
-                    }
 
                     // Also clean up running_subagent_executions for task tools.
                     // Match by tool_call.id instead of request_id so that
                     // parallel subagents (which share the same request_id) are
                     // each removed individually rather than all at once.
-                    if tool_call.name == "task" {
-                        if let Some(pos) = self
+                    if tool_call.name == "task"
+                        && let Some(pos) = self
                             .running_subagent_executions
                             .iter()
                             .position(|e| {
@@ -988,7 +986,6 @@ impl App {
                         {
                             self.running_subagent_executions.remove(pos);
                         }
-                    }
                 }
             }
             BackendEvent::SubagentStatus {

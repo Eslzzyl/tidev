@@ -270,11 +270,10 @@ pub fn find_compaction_prior_state(
         if !found_target {
             continue;
         }
-        if message.content.starts_with(COMPACTION_MESSAGE_LABEL) {
-            if let Some(prior_retained_from) = message.metadata.prior_retained_from {
+        if message.content.starts_with(COMPACTION_MESSAGE_LABEL)
+            && let Some(prior_retained_from) = message.metadata.prior_retained_from {
                 return Some((message.metadata.prior_summary.clone(), prior_retained_from));
             }
-        }
     }
     None
 }

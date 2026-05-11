@@ -53,11 +53,10 @@ pub(crate) fn resolve_editor(ui_config: &UiConfig) -> Option<(String, Vec<String
     // CLI process blocks until the editor window is closed. If the user
     // explicitly passed args (e.g. "code --wait" in config/$VISUAL/$EDITOR),
     // we trust their choice.
-    if args.is_empty() {
-        if let Some(flag) = editor_wait_flag(&cmd) {
+    if args.is_empty()
+        && let Some(flag) = editor_wait_flag(&cmd) {
             args.push(flag.to_string());
         }
-    }
 
     Some((cmd, args))
 }

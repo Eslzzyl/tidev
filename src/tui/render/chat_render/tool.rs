@@ -806,7 +806,7 @@ pub(super) fn render_question_result_pairs(
         // Question line starts with "Q" (e.g. "Q1: ...")
         let question_text: String = q_line
             .strip_prefix("Q")
-            .and_then(|rest| rest.splitn(2, ':').nth(1))
+            .and_then(|rest| rest.split_once(':').map(|x| x.1))
             .map(|s| s.trim().to_string())
             .unwrap_or_else(|| q_line.to_string());
 
