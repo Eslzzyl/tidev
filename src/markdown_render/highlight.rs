@@ -83,11 +83,21 @@ fn theme_name_to_syntax_theme(name: ThemeName) -> Theme {
         ThemeName::Light => "InspiredGitHub",
         ThemeName::Nord => "base16-ocean.dark",
         ThemeName::OneDark => "base16-ocean.dark",
-        ThemeName::Catppuccin => "base16-mocha.dark",
+        ThemeName::Mocha => "base16-mocha.dark",
+        ThemeName::Latte => "InspiredGitHub",
         ThemeName::Solarized => "Solarized (dark)",
         ThemeName::Orng => "InspiredGitHub",
         ThemeName::Github => "InspiredGitHub",
         ThemeName::Material => "InspiredGitHub",
+        ThemeName::Everforest => "base16-eighties.dark",
+        ThemeName::EverforestLight => "InspiredGitHub",
+        ThemeName::Dusk => "base16-mocha.dark",
+        ThemeName::Gruvbox => "base16-eighties.dark",
+        ThemeName::GruvboxLight => "InspiredGitHub",
+        ThemeName::TokyoNight => "base16-ocean.dark",
+        ThemeName::RosePine => "base16-ocean.dark",
+        ThemeName::RosePineDawn => "InspiredGitHub",
+        ThemeName::Contrast => "base16-eighties.dark",
     };
     themes.get(theme_key).cloned().unwrap_or_else(default_theme)
 }

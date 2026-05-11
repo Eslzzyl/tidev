@@ -1,0 +1,26 @@
+use ratatui::style::Color;
+use crate::theme::{ThemeName, ThemePalette};
+
+impl ThemePalette {
+    pub fn solarized() -> Self {
+        Self {
+            name: ThemeName::Solarized,
+            background: Color::Rgb(0, 43, 54),
+            panel: Color::Rgb(7, 54, 66),
+            panel_alt: Color::Rgb(88, 110, 117),
+            panel_light: Color::Rgb(100, 125, 135),
+            text: Color::Rgb(131, 148, 150),
+            muted: Color::Rgb(147, 161, 161),
+            border: Color::Rgb(38, 139, 210),
+            accent: Color::Rgb(38, 139, 210),
+            accent_soft: Color::Rgb(88, 110, 117),
+            success: Color::Rgb(42, 161, 152),
+            warning: Color::Rgb(203, 75, 22),
+            error: Color::Rgb(220, 50, 47),
+            selection_bg: Color::Rgb(7, 54, 66),
+            selection_fg: Color::Rgb(253, 246, 227),
+            mode_build: Color::Rgb(38, 139, 210),
+            mode_plan: Color::Rgb(88, 110, 117),
+        }
+    }
+}

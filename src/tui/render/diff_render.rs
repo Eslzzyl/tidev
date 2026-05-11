@@ -611,8 +611,14 @@ fn is_dark_theme(name: ThemeName) -> bool {
         ThemeName::Dark
             | ThemeName::Nord
             | ThemeName::OneDark
-            | ThemeName::Catppuccin
+            | ThemeName::Mocha
             | ThemeName::Solarized
+            | ThemeName::Everforest
+            | ThemeName::Dusk
+            | ThemeName::Gruvbox
+            | ThemeName::TokyoNight
+            | ThemeName::RosePine
+            | ThemeName::Contrast
     )
 }
 
