@@ -22,6 +22,7 @@ impl App {
     pub(super) fn render_balance_panel(&self, frame: &mut Frame<'_>, area: Rect) {
         let palette = self.palette();
         let overlay = centered_balance_rect(area);
+        self.balance_panel_overlay.set(Some(overlay));
 
         frame.render_widget(Clear, overlay);
 

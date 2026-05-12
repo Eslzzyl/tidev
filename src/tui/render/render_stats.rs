@@ -27,6 +27,7 @@ impl App {
     pub(super) fn render_stats_panel(&self, frame: &mut Frame<'_>, area: Rect) {
         let palette = self.palette();
         let overlay = centered_stats_rect(area);
+        self.stats_panel_overlay.set(Some(overlay));
 
         frame.render_widget(Clear, overlay);
 

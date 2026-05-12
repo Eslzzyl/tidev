@@ -1,19 +1,96 @@
 use super::*;
 use crate::tui::memory_panel::PanelFocus;
+use crate::tui::model_panel::{ModelPanelItem, selectable_indices, thinking_options_for_model};
+use crate::tui::theme_panel::DisplayItem;
+use crate::mcp::McpConnectionStatus;
+use ratatui::layout::Margin;
+
+/// Helper: check if a position is within an overlay rect (including border).
+fn in_overlay(position: Position, overlay: Option<Rect>) -> bool {
+    overlay.is_some_and(|r| r.contains(position))
+}
 
 impl App {
     pub(crate) fn handle_mouse_event(&mut self, mouse: MouseEvent, runtime: &Runtime) {
+        // Route mouse events to active overlay panel first.
+        // Panels are mutually exclusive — only one can be open at a time.
+        if self.theme_panel.is_some() {
+            if self.handle_theme_panel_mouse(mouse, runtime) {
+                return;
+            }
+            return; // Panel open but event not in its area; still consume.
+        }
+        if self.agents_panel.is_some() {
+            if self.handle_agents_panel_mouse(mouse, runtime) {
+                return;
+            }
+            return;
+        }
+        if self.skills_panel.is_some() {
+            if self.handle_skills_panel_mouse(mouse, runtime) {
+                return;
+            }
+            return;
+        }
+        if self.mcp_panel.is_some() {
+            if self.handle_mcp_panel_mouse(mouse, runtime) {
+                return;
+            }
+            return;
+        }
+        if self.settings_panel.is_some() {
+            if self.handle_settings_panel_mouse(mouse, runtime) {
+                return;
+            }
+            return;
+        }
         if self.model_panel.is_some() {
+            if self.handle_model_panel_mouse(mouse, runtime) {
+                return;
+            }
+            return;
+        }
+        if self.message_panel.is_some() {
+            if self.handle_message_panel_mouse(mouse, runtime) {
+                return;
+            }
+            return;
+        }
+        if self.memory_panel.is_some() {
+            if self.handle_memory_panel_mouse(mouse, runtime) {
+                return;
+            }
+            return;
+        }
+        if self.session_panel.is_some() {
+            if self.handle_session_panel_mouse(mouse, runtime) {
+                return;
+            }
             return;
         }
 
-        // Route mouse events to memory panel when it's active
-        if self.memory_panel.is_some()
-            && self.handle_memory_panel_mouse(mouse, runtime)
-        {
+        // Stats panel
+        if self.stats_panel.as_ref().is_some_and(|p| p.active) {
+            if self.handle_stats_panel_mouse(mouse, runtime) {
+                return;
+            }
             return;
         }
 
+        // Balance panel
+        let balance_active = self
+            .balance_panel
+            .lock()
+            .map(|guard| guard.as_ref().is_some_and(|p| p.active))
+            .unwrap_or(false);
+        if balance_active {
+            if self.handle_balance_panel_mouse(mouse, runtime) {
+                return;
+            }
+            return;
+        }
+
+        // Fall through to chat-area mouse handling
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 let position = Position::new(mouse.column, mouse.row);
@@ -74,34 +151,6 @@ impl App {
                             return;
                         }
                     }
-
-                    // Click on running subagent card → enter subsession
-                    let hit_running = self
-                        .running_subagent_card_bounds
-                        .iter()
-                        .find(|(_, rect)| rect.contains(position))
-                        .map(|(idx, _)| *idx);
-
-                    if let Some(execution_index) = hit_running
-                        && let Some(execution) =
-                            self.running_subagent_executions.get(execution_index)
-                    {
-                        let child_id = execution.child_session_id;
-                        self.switch_session(child_id, runtime).ok();
-                        return;
-                    }
-
-                    // Plain click on tool result card → toggle expand
-                    let hit_message_id = self
-                        .tool_result_card_bounds
-                        .iter()
-                        .find(|(_, rect)| rect.contains(position))
-                        .map(|(id, _)| *id);
-
-                    if let Some(message_id) = hit_message_id {
-                        self.toggle_tool_result_expanded(message_id);
-                        return;
-                    }
                 }
 
                 self.mouse_selection
@@ -137,6 +186,731 @@ impl App {
         }
     }
 
+    // ── Theme Panel ──────────────────────────────────────────────────────────
+
+    fn handle_theme_panel_mouse(&mut self, mouse: MouseEvent, _runtime: &Runtime) -> bool {
+        let overlay = self.theme_panel_overlay.get();
+        let position = Position::new(mouse.column, mouse.row);
+        if !in_overlay(position, overlay) {
+            return false;
+        }
+        let Some(mut panel) = self.theme_panel.clone() else {
+            return false;
+        };
+        let overlay = overlay.unwrap();
+        let inner = overlay.inner(Margin { horizontal: 1, vertical: 1 });
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                panel.move_up();
+                self.handle_theme_panel_preview_change(&panel);
+                true
+            }
+            MouseEventKind::ScrollDown => {
+                panel.move_down();
+                self.handle_theme_panel_preview_change(&panel);
+                true
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                // List starts at inner.y + 2 (search bar + divider above)
+                let header_rows = 2u16;
+                let local_y = position.y.saturating_sub(inner.y);
+                if local_y < header_rows {
+                    return true; // Click on search/header — consume but no action
+                }
+                let row = (local_y - header_rows) as usize;
+                // Compute scroll offset (same logic as in render_theme_panel)
+                let list_height = inner.height.saturating_sub(2) as usize;
+                let scroll = if panel.selected_index + 1 <= list_height {
+                    0
+                } else if panel.selected_index < list_height / 2 {
+                    0
+                } else {
+                    let target = panel.selected_index.saturating_sub(list_height / 2);
+                    target.min(panel.display_items.len().saturating_sub(list_height))
+                };
+                let idx = scroll + row;
+                if idx < panel.display_items.len()
+                    && matches!(panel.display_items[idx], DisplayItem::Theme(_))
+                {
+                    // Click on a theme: select and confirm (same as Enter)
+                    panel.selected_index = idx;
+                    if let DisplayItem::Theme(t) = panel.display_items[idx] {
+                        panel.preview_theme = t;
+                    }
+                    self.theme_panel = Some(panel);
+                    let _ = self.close_theme_panel(true);
+                } else {
+                    // Click on header or out of bounds - just consume
+                    self.theme_panel = Some(panel);
+                }
+                true
+            }
+            _ => true,
+        }
+    }
+
+    /// Helper: apply theme preview after selection change.
+    fn handle_theme_panel_preview_change(&mut self, panel: &ThemePanelState) {
+        if panel.preview_theme != self.theme.palette().name {
+            self.theme.set_mode(panel.preview_theme);
+            self.clear_message_render_cache();
+        }
+        self.theme_panel = Some(panel.clone());
+    }
+
+    // ── Agents Panel ─────────────────────────────────────────────────────────
+
+    fn handle_agents_panel_mouse(&mut self, mouse: MouseEvent, _runtime: &Runtime) -> bool {
+        let overlay = self.agents_panel_overlay.get();
+        let position = Position::new(mouse.column, mouse.row);
+        if !in_overlay(position, overlay) {
+            return false;
+        }
+        let Some(mut panel) = self.agents_panel.clone() else {
+            return false;
+        };
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                panel.scroll_up(3);
+                self.agents_panel = Some(panel);
+                true
+            }
+            MouseEventKind::ScrollDown => {
+                panel.scroll_down(3);
+                self.agents_panel = Some(panel);
+                true
+            }
+            _ => true,
+        }
+    }
+
+    // ── Skills Panel ─────────────────────────────────────────────────────────
+
+    fn handle_skills_panel_mouse(&mut self, mouse: MouseEvent, _runtime: &Runtime) -> bool {
+        let overlay = self.skills_panel_overlay.get();
+        let position = Position::new(mouse.column, mouse.row);
+        if !in_overlay(position, overlay) {
+            return false;
+        }
+        let Some(mut panel) = self.skills_panel.clone() else {
+            return false;
+        };
+        let overlay = overlay.unwrap();
+        let inner = overlay.inner(Margin { horizontal: 1, vertical: 1 });
+
+        // Determine left (35%) vs right (65%) pane
+        let inner_w = inner.width as usize;
+        let split_x = (inner_w * 35 / 100) as u16;
+        let in_left = position.x < inner.x + split_x;
+        // The list occupies left pane; the right pane is preview (scroll only)
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                if in_left {
+                    panel.move_up(10); // matches keyboard step
+                } else {
+                    panel.scroll_preview_up(3);
+                }
+                self.skills_panel = Some(panel);
+                true
+            }
+            MouseEventKind::ScrollDown => {
+                if in_left {
+                    panel.move_down(10);
+                } else {
+                    panel.scroll_preview_down(3);
+                }
+                self.skills_panel = Some(panel);
+                true
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                if in_left {
+                    // Left pane: list area. Layout: header rows then items.
+                    // From render_skills_panel: header (1 line: "Skills") + filter bar (1) + divider (1) = 3 header rows
+                    let header_rows = 3u16;
+                    let list_area = Rect::new(inner.x, inner.y, split_x, inner.height);
+                    if position.y >= list_area.y + header_rows {
+                        let row = (position.y - list_area.y - header_rows) as usize;
+                        let idx = panel.list_scroll + row;
+                        if idx < panel.filtered_indices.len() {
+                            panel.selected_index = idx;
+                            panel.preview_scroll = 0;
+                        }
+                    }
+                }
+                self.skills_panel = Some(panel);
+                true
+            }
+            _ => {
+                self.skills_panel = Some(panel);
+                true
+            }
+        }
+    }
+
+    // ── MCP Panel ────────────────────────────────────────────────────────────
+
+    fn handle_mcp_panel_mouse(&mut self, mouse: MouseEvent, runtime: &Runtime) -> bool {
+        let overlay = self.mcp_panel_overlay.get();
+        let position = Position::new(mouse.column, mouse.row);
+        if !in_overlay(position, overlay) {
+            return false;
+        }
+        let Some(mut panel) = self.mcp_panel.clone() else {
+            return false;
+        };
+        let overlay = overlay.unwrap();
+        let inner = overlay.inner(Margin { horizontal: 1, vertical: 1 });
+
+        // MCP panel layout (non-editor mode):
+        // sections[0]: instruction (2 lines)
+        // sections[1]: search input (3 lines)
+        // sections[2]: list (Min 8)
+        // sections[3]: footer (1 line)
+        let header_rows = 5u16; // instruction (2) + search (3)
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                let items = self.mcp_panel_items();
+                panel.move_selection(&items, -1);
+                self.mcp_panel = Some(panel);
+                true
+            }
+            MouseEventKind::ScrollDown => {
+                let items = self.mcp_panel_items();
+                panel.move_selection(&items, 1);
+                self.mcp_panel = Some(panel);
+                true
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                let local_y = position.y.saturating_sub(inner.y);
+                if local_y >= header_rows {
+                    let row = (local_y - header_rows) as usize;
+                    let items = self.mcp_panel_items();
+                    if row < items.len() {
+                        panel.selected_index = row;
+                        // Same as Enter: toggle connect/disconnect the clicked server
+                        if let Some(selected) = panel.selected_item(&items) {
+                            let name = selected.summary.name.clone();
+                            let result = match selected.summary.status {
+                                McpConnectionStatus::Connected
+                                | McpConnectionStatus::Connecting => {
+                                    runtime.block_on(self.tools.disconnect_mcp_server(&name))
+                                }
+                                _ => runtime.block_on(self.tools.toggle_mcp_server(&name)),
+                            };
+                            match result {
+                                Ok(()) => {
+                                    self.last_notice = Some(format!("Updated MCP server '{name}'"));
+                                }
+                                Err(error) => {
+                                    self.last_notice = Some(error.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+                self.mcp_panel = Some(panel);
+                true
+            }
+            _ => {
+                self.mcp_panel = Some(panel);
+                true
+            }
+        }
+    }
+
+    // ── Settings Panel ───────────────────────────────────────────────────────
+
+    fn handle_settings_panel_mouse(&mut self, mouse: MouseEvent, _runtime: &Runtime) -> bool {
+        let overlay = self.settings_panel_overlay.get();
+        let position = Position::new(mouse.column, mouse.row);
+        if !in_overlay(position, overlay) {
+            return false;
+        }
+        let Some(mut panel) = self.settings_panel.clone() else {
+            return false;
+        };
+        let overlay = overlay.unwrap();
+        let inner = overlay.inner(Margin { horizontal: 1, vertical: 1 });
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                panel.move_up();
+                self.settings_panel = Some(panel);
+                true
+            }
+            MouseEventKind::ScrollDown => {
+                panel.move_down();
+                self.settings_panel = Some(panel);
+                true
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                let local_y = position.y.saturating_sub(inner.y);
+                if local_y < panel.items.len() as u16 {
+                    panel.selected_index = local_y as usize;
+                    // Same as Enter/Space: toggle the selected setting
+                    panel.toggle_selected(self.config.rtk.installed);
+                }
+                self.settings_panel = Some(panel);
+                true
+            }
+            _ => {
+                self.settings_panel = Some(panel);
+                true
+            }
+        }
+    }
+
+            // ── Model Panel ──────────────────────────────────────────────────────────
+
+    fn handle_model_panel_mouse(&mut self, mouse: MouseEvent, _runtime: &Runtime) -> bool {
+        let overlay = self.model_panel_overlay.get();
+        let position = Position::new(mouse.column, mouse.row);
+        if !in_overlay(position, overlay) {
+            return false;
+        }
+        let Some(mut panel) = self.model_panel.clone() else {
+            return false;
+        };
+        let overlay = overlay.unwrap();
+        let inner = overlay.inner(Margin { horizontal: 1, vertical: 1 });
+
+        // Layout sections:
+        // [0] tab bar: 1 line
+        // [1] instruction: 2 lines
+        // [2] search box: 3 lines
+        // [3] model list: Min 8
+        let header_rows = 6u16; // tab bar (1) + instruction (2) + search (3)
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                let items = self.model_panel_items(&panel);
+                panel.move_selection(&items, -1);
+                self.model_panel = Some(panel);
+                true
+            }
+            MouseEventKind::ScrollDown => {
+                let items = self.model_panel_items(&panel);
+                panel.move_selection(&items, 1);
+                self.model_panel = Some(panel);
+                true
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                let local_y = position.y.saturating_sub(inner.y);
+                let local_x = position.x.saturating_sub(inner.x);
+
+                // ── Tab bar click (row 0) ──
+                if local_y == 0 {
+                    let mut x_cursor = 0u16;
+                    for (idx, tab) in panel.tabs.iter().enumerate() {
+                        let label_w = tab.display_name.len() as u16 + 2;
+                        if local_x >= x_cursor && local_x < x_cursor + label_w {
+                            if idx != panel.selected_tab_index {
+                                let mut next_panel = panel;
+                                next_panel.select_tab(idx);
+                                let items = self.model_panel_items(&next_panel);
+                                if next_panel.is_general_tab() {
+                                    // General tab: use self.active_model directly
+                                    next_panel.reset_selection(
+                                        &items,
+                                        Some((&self.active_model.provider_id, &self.active_model.model_id)),
+                                    );
+                                } else {
+                                    let active = super::panels::agent_tab_active_model(
+                                        &next_panel,
+                                        &self.active_model,
+                                    );
+                                    if let Some((p, m)) = active {
+                                        next_panel.reset_selection(&items, Some((&p, &m)));
+                                    } else {
+                                        next_panel.reset_selection(&items, None);
+                                    }
+                                }
+                                self.model_panel = Some(next_panel);
+                            } else {
+                                self.model_panel = Some(panel);
+                            }
+                            return true;
+                        }
+                        // separator " │ " (3 chars), skip for last tab
+                        let sep_w = if idx + 1 < panel.tabs.len() { 3 } else { 0 };
+                        x_cursor += label_w + sep_w;
+                    }
+                    self.model_panel = Some(panel);
+                    return true;
+                }
+
+                if local_y >= header_rows {
+                    let row = (local_y - header_rows) as usize;
+                    let items = self.model_panel_items(&panel);
+                    let tab_index = panel.selected_tab_index;
+                    let is_expanded = panel.tabs.get(tab_index).map(|t| t.thinking_level_expanded).unwrap_or(false);
+                    let model_idx = panel.tabs.get(tab_index).map(|t| t.selected_index).unwrap_or(0);
+
+                    if is_expanded {
+                        // ── Expanded thinking level mode ──
+                        // The render inserts extra rows for thinking options right after the model row.
+                        // Layout:
+                        //   [model_idx]         → items[model_idx] (the expanded model)
+                        //   [model_idx + 1]     → thinking option 0
+                        //   [model_idx + 2]     → thinking option 1
+                        //   ...
+                        //   [model_idx + tl_count] → thinking option N-1
+                        //   [model_idx + tl_count + 1] → items[model_idx + 1] (next item, shifted)
+                        let tl_options = thinking_options_for_model(&items, model_idx);
+                        let tl_count = tl_options.len();
+
+                        if row == model_idx {
+                            // Click on the model row itself → confirm current thinking selection
+                            self.confirm_after_thinking_click(&items, panel, tab_index, model_idx);
+                            return true;
+                        } else if row > model_idx && row <= model_idx + tl_count {
+                            // Click on a thinking sub-option → set its index and confirm
+                            let tl_click = row - model_idx - 1;
+                            let mut next_panel = panel;
+                            if let Some(tab) = next_panel.tabs.get_mut(tab_index) {
+                                tab.selected_index = model_idx;
+                                tab.thinking_level_index = tl_click;
+                            }
+                            self.confirm_after_thinking_click(&items, next_panel, tab_index, model_idx);
+                            return true;
+                        } else if row < model_idx {
+                            // Click above the expanded model: no offset adjustment needed
+                            self.handle_model_click_normal(panel, &items, row, tab_index, false);
+                        } else {
+                            // Click below the expanded thinking area: adjust for extra rows
+                            let real_row = row.saturating_sub(tl_count);
+                            self.handle_model_click_normal(panel, &items, real_row, tab_index, false);
+                        }
+                    } else {
+                        // ── Normal (non-expanded) mode ──
+                        // row directly maps to items[row] (no extra rows)
+                        self.handle_model_click_normal(panel, &items, row, tab_index, false);
+                    }
+                } else {
+                    self.model_panel = Some(panel);
+                }
+                true
+            }
+            _ => {
+                self.model_panel = Some(panel);
+                true
+            }
+        }
+    }
+
+    /// Handle a click on the model panel in non-expanded (normal) mode.
+    /// `row` is the direct index into `items[]` (no thinking offset).
+    /// When `skip_expand` is true, treat clicks on thinking-supporting models
+    /// as immediate apply (used after confirming from expanded mode).
+    fn handle_model_click_normal(
+        &mut self,
+        panel: ModelPanelState,
+        items: &[ModelPanelItem],
+        row: usize,
+        tab_index: usize,
+        skip_expand: bool,
+    ) {
+        // `row` is the direct index into items[]. Map it to a selectable model index.
+        let model_idx = if row < items.len() && items[row].is_selectable() {
+            row
+        } else {
+            let selectable = selectable_indices(items);
+            if selectable.is_empty() {
+                self.model_panel = Some(panel);
+                return;
+            }
+            *selectable.iter().min_by_key(|&&idx| (idx as isize - row as isize).abs()).unwrap()
+        };
+
+        let is_general = panel.is_general_tab();
+
+        let selected_summary = {
+            let mut p = panel.clone();
+            if let Some(tab) = p.tabs.get_mut(tab_index) {
+                tab.selected_index = model_idx;
+            }
+            p.selected_model(items).cloned()
+        };
+
+        let mut next_panel = panel;
+
+        if let Some(summary) = selected_summary {
+            let tl_options = thinking_options_for_model(items, model_idx);
+            if tl_options.is_empty() || skip_expand {
+                // No thinking, or skip_expand: apply immediately
+                if is_general {
+                    self.switch_model(Some(&summary.label())).ok();
+                    if let Some(tab) = next_panel.tabs.get_mut(tab_index) {
+                        tab.selected_index = model_idx;
+                        tab.current_label = summary.label();
+                        tab.thinking_level_expanded = false;
+                    }
+                } else {
+                    let agent_type_str = next_panel.tabs.get(tab_index).map(|t| t.agent_type_str.clone()).unwrap_or_default();
+                    let model_str = summary.label();
+                    self.config.set_agent_model(&self.paths, &agent_type_str, &model_str).ok();
+                    if let Some(tab) = next_panel.tabs.get_mut(tab_index) {
+                        tab.selected_index = model_idx;
+                        tab.current_label = model_str.clone();
+                        tab.thinking_level_expanded = false;
+                    }
+                    self.last_notice = Some(format!("Agent '{}' model set to {}", agent_type_str, model_str));
+                }
+            } else {
+                // Has thinking: expand the submenu
+                if let Some(tab) = next_panel.tabs.get_mut(tab_index) {
+                    tab.selected_index = model_idx;
+                    tab.thinking_level_expanded = true;
+                    let current_tl = self.thinking_level.to_string();
+                    tab.thinking_level_index = tl_options
+                        .iter()
+                        .position(|opt| opt.to_ascii_lowercase() == current_tl)
+                        .unwrap_or(0);
+                }
+            }
+        } else {
+            if let Some(tab) = next_panel.tabs.get_mut(tab_index) {
+                tab.selected_index = model_idx;
+            }
+        }
+        self.model_panel = Some(next_panel);
+    }
+
+    /// Confirm the currently selected thinking level and apply the model.
+    /// Called when clicking in expanded thinking-level mode.
+    fn confirm_after_thinking_click(
+        &mut self,
+        items: &[ModelPanelItem],
+        mut panel: ModelPanelState,
+        tab_index: usize,
+        model_idx: usize,
+    ) {
+        let is_general = panel.is_general_tab();
+
+        let summary = {
+            let mut p = panel.clone();
+            if let Some(tab) = p.tabs.get_mut(tab_index) {
+                tab.selected_index = model_idx;
+            }
+            p.selected_model(items).cloned()
+        };
+
+        let Some(summary) = summary else {
+            self.model_panel = Some(panel);
+            return;
+        };
+
+        let tl_options = thinking_options_for_model(items, model_idx);
+        let tl_index = panel.tabs.get(tab_index).map(|t| t.thinking_level_index).unwrap_or(0);
+        let tl = if tl_options.is_empty() {
+            String::new()
+        } else {
+            tl_options[tl_index % tl_options.len()].to_string()
+        };
+
+        if is_general {
+            if !tl.is_empty() {
+                let _ = self.store.save_model_thinking_level(
+                    &summary.provider_id,
+                    &summary.model_id,
+                    &tl,
+                );
+            }
+            self.switch_model(Some(&summary.label())).ok();
+            if let Some(tab) = panel.tabs.get_mut(tab_index) {
+                tab.current_label = summary.label();
+                tab.thinking_level_expanded = false;
+            }
+        } else {
+            let agent_type_str = panel.tabs.get(tab_index).map(|t| t.agent_type_str.clone()).unwrap_or_default();
+            let model_str = summary.label();
+            self.config.set_agent_model_and_thinking(
+                &self.paths,
+                &agent_type_str,
+                &model_str,
+                &tl,
+            ).ok();
+            if let Some(tab) = panel.tabs.get_mut(tab_index) {
+                tab.current_label = model_str.clone();
+                tab.thinking_level_expanded = false;
+            }
+            self.last_notice = Some(format!(
+                "Agent '{}' model set to {} ({})",
+                agent_type_str, model_str,
+                if tl.is_empty() { "auto" } else { &tl },
+            ));
+        }
+        self.model_panel = Some(panel);
+    }
+
+    // ── Message Panel ────────────────────────────────────────────────────────
+
+    fn handle_message_panel_mouse(&mut self, mouse: MouseEvent, _runtime: &Runtime) -> bool {
+        let overlay = self.message_panel_overlay.get();
+        let position = Position::new(mouse.column, mouse.row);
+        if !in_overlay(position, overlay) {
+            return false;
+        }
+        let Some(mut panel) = self.message_panel.clone() else {
+            return false;
+        };
+        let overlay = overlay.unwrap();
+        let inner = overlay.inner(Margin { horizontal: 1, vertical: 1 });
+
+        // Layout sections:
+        // [0] instruction: 2 lines
+        // [1] search input: 3 lines
+        // [2] list: Min 8
+        // [3] footer: 1 line
+        let header_rows = 5u16;
+
+        let query = self.composer.text().to_string();
+        let matches = panel.matching_indices(&query);
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                panel.move_selection(&query, -1);
+                self.message_panel = Some(panel);
+                true
+            }
+            MouseEventKind::ScrollDown => {
+                panel.move_selection(&query, 1);
+                self.message_panel = Some(panel);
+                true
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                let local_y = position.y.saturating_sub(inner.y);
+                if local_y >= header_rows {
+                    let row = (local_y - header_rows) as usize;
+                    if row < matches.len() {
+                        panel.selected_index = row;
+                        // Same as Enter: scroll to the selected message and close
+                        if let Some(message) = panel.selected_message(&query) {
+                            self.scroll_messages_to_message(message.message_id);
+                            self.close_message_panel();
+                            return true;
+                        }
+                    }
+                }
+                self.message_panel = Some(panel);
+                true
+            }
+            _ => {
+                self.message_panel = Some(panel);
+                true
+            }
+        }
+    }
+
+    // ── Session Panel ────────────────────────────────────────────────────────
+
+    fn handle_session_panel_mouse(&mut self, mouse: MouseEvent, runtime: &Runtime) -> bool {
+        let overlay = self.session_panel_overlay.get();
+        let position = Position::new(mouse.column, mouse.row);
+        if !in_overlay(position, overlay) {
+            return false;
+        }
+        let Some(mut panel) = self.session_panel.clone() else {
+            return false;
+        };
+        let overlay = overlay.unwrap();
+        let inner = overlay.inner(Margin { horizontal: 1, vertical: 1 });
+
+        // Layout sections:
+        // [0] instruction: 2 lines
+        // [1] search input: 3 lines
+        // [2] table: Min 8
+        // [3] footer: 1 line
+        let header_rows = 5u16;
+
+        let query = self.composer.text().to_string();
+        let matches = panel.matching_indices(&query);
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                if panel.selected_index > 0 {
+                    panel.selected_index = panel.selected_index.saturating_sub(1);
+                }
+                self.session_panel = Some(panel);
+                true
+            }
+            MouseEventKind::ScrollDown => {
+                if panel.selected_index + 1 < matches.len() {
+                    panel.selected_index = panel.selected_index.saturating_add(1);
+                }
+                self.session_panel = Some(panel);
+                true
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                let local_y = position.y.saturating_sub(inner.y);
+                if local_y >= header_rows {
+                    let row = (local_y - header_rows) as usize;
+                    if row < matches.len() {
+                        panel.selected_index = row;
+                        // Same as Enter: load the selected session and close
+                        if let Some(session) = panel.selected_session(&query).cloned() {
+                            self.switch_session(session.session_id, runtime).ok();
+                            self.close_session_panel();
+                            return true;
+                        }
+                    }
+                }
+                self.session_panel = Some(panel);
+                true
+            }
+            _ => {
+                self.session_panel = Some(panel);
+                true
+            }
+        }
+    }
+
+    // ── Balance Panel ────────────────────────────────────────────────────────
+
+    fn handle_balance_panel_mouse(&mut self, mouse: MouseEvent, _runtime: &Runtime) -> bool {
+        let overlay = self.balance_panel_overlay.get();
+        let position = Position::new(mouse.column, mouse.row);
+        if !in_overlay(position, overlay) {
+            return false;
+        }
+
+        // Balance panel has no scrollable content currently; just consume events.
+        match mouse.kind {
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => true,
+            _ => true,
+        }
+    }
+
+    // ── Stats Panel ──────────────────────────────────────────────────────────
+
+    fn handle_stats_panel_mouse(&mut self, mouse: MouseEvent, _runtime: &Runtime) -> bool {
+        let overlay = self.stats_panel_overlay.get();
+        let position = Position::new(mouse.column, mouse.row);
+        if !in_overlay(position, overlay) {
+            return false;
+        }
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                if let Some(panel) = &mut self.stats_panel {
+                    panel.scroll_offset = panel.scroll_offset.saturating_sub(3);
+                }
+                true
+            }
+            MouseEventKind::ScrollDown => {
+                if let Some(panel) = &mut self.stats_panel {
+                    panel.scroll_offset = panel.scroll_offset.saturating_add(3);
+                }
+                true
+            }
+            _ => true,
+        }
+    }
+
     /// Handle mouse down on scrollbar area.
     /// Returns true if the event was handled by the scrollbar.
     fn handle_scrollbar_mouse_down(&mut self, position: Position) -> bool {
@@ -168,48 +942,199 @@ impl App {
             start_mouse_y: position.y,
             max_scroll,
         });
-
-        // Clear mouse selection when scrolling via scrollbar
-        self.clear_mouse_selection();
-
         true
     }
 
-    /// Handle mouse drag on scrollbar.
-    /// Returns true if the event was handled by the scrollbar.
+    /// Handle drag on scrollbar, returning true if consumed.
     fn handle_scrollbar_drag(&mut self, position: Position) -> bool {
-        let Some(ref state) = self.scrollbar_drag_state else {
+        let Some(ref drag) = self.scrollbar_drag_state else {
             return false;
         };
 
-        let Some(scrollbar_area) = self.message_scrollbar_area else {
-            return false;
-        };
+        let max_scroll = drag.max_scroll;
+        let track_height = self.message_scrollbar_area.map_or(1, |a| a.height as usize);
 
-        if !scrollbar_area.contains(position) {
+        if track_height == 0 {
             return false;
         }
 
-        // Calculate the new scroll position based on mouse position
-        let track_height = scrollbar_area.height as usize;
-        let delta_y = position.y as i32 - state.start_mouse_y as i32;
+        let delta_y = position.y as isize - drag.start_mouse_y as isize;
+        let scroll_delta = (delta_y as f32 / track_height as f32) * max_scroll as f32;
+        let new_scroll = (drag.start_scroll as isize + scroll_delta.round() as isize)
+            .max(0)
+            .min(max_scroll as isize) as usize;
 
-        if delta_y == 0 {
-            return true;
-        }
-
-        // Calculate scroll delta: each row change in scrollbar = max_scroll / track_height
-        let scroll_per_pixel = state.max_scroll as f32 / track_height.max(1) as f32;
-        let scroll_delta = (delta_y as f32 * scroll_per_pixel).round() as i32;
-
-        let new_scroll =
-            (state.start_scroll as i32 + scroll_delta).clamp(0, state.max_scroll as i32);
-
-        self.message_scroll_offset = new_scroll as usize;
-        self.message_follow_tail = self.message_scroll_offset >= state.max_scroll;
-
+        self.message_scroll_offset = new_scroll;
+        self.message_follow_tail = self.message_scroll_offset >= max_scroll;
         true
     }
+
+    pub(crate) fn clear_mouse_selection(&mut self) {
+        self.mouse_selection.clear();
+    }
+
+    pub(crate) fn selection_bounds_for_position(&self, position: Position) -> Option<Rect> {
+        if let Some(area) = self.message_content_area
+            && area.contains(position)
+        {
+            for rect in &self.selectable_regions {
+                if rect.contains(position) {
+                    return Some(Rect {
+                        x: rect.x,
+                        y: area.y,
+                        width: rect.width,
+                        height: area.height,
+                    });
+                }
+            }
+            return Some(area);
+        }
+
+        if let Some(area) = self.sidebar_area
+            && area.contains(position)
+        {
+            return Some(area.inner(ratatui::layout::Margin {
+                horizontal: 1,
+                vertical: 1,
+            }));
+        }
+
+        None
+    }
+
+    /// Handle mouse events within the memory panel. Returns true if consumed.
+    fn handle_memory_panel_mouse(
+        &mut self,
+        mouse: MouseEvent,
+        _runtime: &Runtime,
+    ) -> bool {
+        let Some(overlay) = self.memory_panel_overlay.get() else {
+            return false;
+        };
+        let position = Position::new(mouse.column, mouse.row);
+
+        if !overlay.contains(position) {
+            return false;
+        }
+
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+
+        let inner_x = inner.x;
+        let inner_y = inner.y;
+        let inner_w = inner.width;
+        let inner_h = inner.height;
+
+        if inner_w < 10 || inner_h < 3 {
+            return true; // too small to interact meaningfully
+        }
+
+        // The inner area is split vertically into main + footer(1)
+        let main_h = inner_h.saturating_sub(1);
+
+        // Local mouse position relative to inner area
+        let local_x = position.x.saturating_sub(inner_x);
+        let local_y = position.y.saturating_sub(inner_y);
+
+        // Determine left (35%) vs right (65%) pane
+        let split_x = (inner_w as usize * 35 / 100) as u16;
+        let in_left = local_x < split_x && local_y < main_h;
+        let in_right = local_x >= split_x && local_y < main_h;
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                if in_left {
+                    // Scroll up in left list → move selection up
+                    if let Some(mut panel) = self.memory_panel.clone() {
+                        panel.move_selection(-1);
+                        self.memory_panel = Some(panel);
+                    }
+                    true
+                } else if in_right {
+                    // Scroll up in right pane → scroll preview up
+                    if let Some(mut panel) = self.memory_panel.clone() {
+                        panel.preview_scroll =
+                            panel.preview_scroll.saturating_sub(3);
+                        self.memory_panel = Some(panel);
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if in_left {
+                    // Scroll down in left list → move selection down
+                    if let Some(mut panel) = self.memory_panel.clone() {
+                        panel.move_selection(1);
+                        self.memory_panel = Some(panel);
+                    }
+                    true
+                } else if in_right {
+                    // Scroll down in right pane → scroll preview down
+                    if let Some(mut panel) = self.memory_panel.clone() {
+                        panel.preview_scroll =
+                            panel.preview_scroll.saturating_add(3);
+                        self.memory_panel = Some(panel);
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                if in_left {
+                    // Click on left list → select the clicked item
+                    if let Some(mut panel) = self.memory_panel.clone() {
+                        // Calculate which item was clicked (accounting for header)
+                        let header_h = 3u16; // "Name" + filter + divider
+                        if local_y >= header_h {
+                            let list_offset = local_y - header_h;
+                            let filtered = panel.filtered_indices();
+                            if !filtered.is_empty() {
+                                let target_idx = list_offset as usize;
+                                if target_idx < filtered.len() {
+                                    panel.selected_index = target_idx;
+                                    panel.preview_scroll = 0;
+                                    self.memory_panel = Some(panel);
+                                }
+                            }
+                        }
+                    }
+                    true
+                } else if in_right {
+                    // Click on right pane → position cursor in edit mode
+                    if let Some(panel) = self.memory_panel.clone() {
+                        if panel.focus == PanelFocus::ContentEdit {
+                            let mut p = panel;
+                            // Account for "EDITING" header (1 line)
+                            let local_line = local_y.saturating_sub(1);
+                            let editor_width = p.editor_width.get().max(1);
+                            p.content_editor.set_cursor_at_visual_position(
+                                editor_width,
+                                local_line,
+                                local_x,
+                            );
+                            self.memory_panel = Some(p);
+                        } else {
+                            // In browse mode, clicking right pane does nothing special
+                            // (keep focus on list)
+                        }
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn register_selection_region(&self, _area: Rect) {}
+
+    // ── Input area mouse handlers ────────────────────────────────────────────
 
     fn handle_input_area_mouse_down(&mut self, position: Position) -> bool {
         let Some(inner) = self.input_area.get() else {
@@ -431,207 +1356,32 @@ impl App {
             return false;
         };
 
-        // Get current mouse position from the last drag event
-        let Some(pointer) = self.mouse_selection.pointer() else {
+        if inner.width == 0 || inner.height == 0 {
             return false;
-        };
+        }
 
-        let top_threshold = inner.y.saturating_add(1);
-        let bottom_threshold = inner.y.saturating_add(inner.height.saturating_sub(2));
+        let top_threshold = inner.y;
+        let bottom_threshold = inner.y.saturating_add(inner.height.saturating_sub(1));
 
-        let scrolled = if pointer.y <= top_threshold && self.input_scroll_offset > 0 {
+        // Auto-scroll up when cursor is above the input area
+        if self.mouse_selection.pointer().map_or(false, |p| p.y < top_threshold)
+            && self.input_scroll_offset > 0
+        {
             self.input_scroll_offset -= 1;
-            true
-        } else if pointer.y >= bottom_threshold {
-            let visible_lines = inner.height as usize;
-            let total_lines = self.composer.display_line_count(inner.width as usize);
-            let max_scroll = total_lines.saturating_sub(visible_lines);
-            if self.input_scroll_offset < max_scroll {
-                self.input_scroll_offset += 1;
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-
-        // If we scrolled, update cursor position to follow
-        if scrolled {
-            let scroll = self.input_scroll_offset as u16;
-            let clamped_y = pointer
-                .y
-                .clamp(inner.y, inner.y + inner.height.saturating_sub(1));
-            let local_line = clamped_y.saturating_sub(inner.y);
-            let target_line = scroll.saturating_add(local_line);
-            self.composer.set_cursor_at_visual_position(
-                inner.width,
-                target_line,
-                pointer.x.saturating_sub(inner.x),
-            );
+            return true;
         }
 
-        scrolled
-    }
-
-    pub(crate) fn clear_mouse_selection(&mut self) {
-        self.mouse_selection.clear();
-    }
-
-    pub(crate) fn selection_bounds_for_position(&self, position: Position) -> Option<Rect> {
-        if let Some(area) = self.message_content_area
-            && area.contains(position)
+        // Auto-scroll down when cursor is below the input area
+        let visible_lines = inner.height as usize;
+        let total_lines = self.composer.display_line_count(inner.width as usize);
+        let max_scroll = total_lines.saturating_sub(visible_lines);
+        if self.mouse_selection.pointer().map_or(false, |p| p.y > bottom_threshold)
+            && self.input_scroll_offset < max_scroll
         {
-            for rect in &self.selectable_regions {
-                if rect.contains(position) {
-                    return Some(Rect {
-                        x: rect.x,
-                        y: area.y,
-                        width: rect.width,
-                        height: area.height,
-                    });
-                }
-            }
-            return Some(area);
+            self.input_scroll_offset += 1;
+            return true;
         }
 
-        if let Some(area) = self.sidebar_area
-            && area.contains(position)
-        {
-            return Some(area.inner(ratatui::layout::Margin {
-                horizontal: 1,
-                vertical: 1,
-            }));
-        }
-
-        None
+        false
     }
-
-    /// Handle mouse events within the memory panel. Returns true if consumed.
-    fn handle_memory_panel_mouse(
-        &mut self,
-        mouse: MouseEvent,
-        _runtime: &Runtime,
-    ) -> bool {
-        let Some(overlay) = self.memory_panel_overlay.get() else {
-            return false;
-        };
-        let position = Position::new(mouse.column, mouse.row);
-        if !overlay.contains(position) {
-            return false;
-        }
-
-        // Inner area (within the border)
-        let inner_x = overlay.x + 1;
-        let inner_y = overlay.y + 1;
-        let inner_w = overlay.width.saturating_sub(2);
-        let inner_h = overlay.height.saturating_sub(2);
-
-        if inner_w < 10 || inner_h < 3 {
-            return true; // too small to interact meaningfully
-        }
-
-        // The inner area is split vertically into main + footer(1)
-        let main_h = inner_h.saturating_sub(1);
-
-        // Local mouse position relative to inner area
-        let local_x = position.x.saturating_sub(inner_x);
-        let local_y = position.y.saturating_sub(inner_y);
-
-        // Determine left (35%) vs right (65%) pane
-        let split_x = (inner_w as usize * 35 / 100) as u16;
-        let in_left = local_x < split_x && local_y < main_h;
-        let in_right = local_x >= split_x && local_y < main_h;
-
-        match mouse.kind {
-            MouseEventKind::ScrollUp => {
-                if in_left {
-                    // Scroll up in left list → move selection up
-                    if let Some(mut panel) = self.memory_panel.clone() {
-                        panel.move_selection(-1);
-                        self.memory_panel = Some(panel);
-                    }
-                    true
-                } else if in_right {
-                    // Scroll up in right pane → scroll preview up
-                    if let Some(mut panel) = self.memory_panel.clone() {
-                        panel.preview_scroll =
-                            panel.preview_scroll.saturating_sub(3);
-                        self.memory_panel = Some(panel);
-                    }
-                    true
-                } else {
-                    false
-                }
-            }
-            MouseEventKind::ScrollDown => {
-                if in_left {
-                    // Scroll down in left list → move selection down
-                    if let Some(mut panel) = self.memory_panel.clone() {
-                        panel.move_selection(1);
-                        self.memory_panel = Some(panel);
-                    }
-                    true
-                } else if in_right {
-                    // Scroll down in right pane → scroll preview down
-                    if let Some(mut panel) = self.memory_panel.clone() {
-                        panel.preview_scroll =
-                            panel.preview_scroll.saturating_add(3);
-                        self.memory_panel = Some(panel);
-                    }
-                    true
-                } else {
-                    false
-                }
-            }
-            MouseEventKind::Down(MouseButton::Left) => {
-                if in_left {
-                    // Click on left list → select the clicked item
-                    if let Some(mut panel) = self.memory_panel.clone() {
-                        // Calculate which item was clicked (accounting for header)
-                        let header_h = 3u16; // "Name" + filter + divider
-                        if local_y >= header_h {
-                            let list_offset = local_y - header_h;
-                            let _half = main_h.saturating_sub(header_h) / 2;
-                            let filtered = panel.filtered_indices();
-                            if !filtered.is_empty() {
-                                let target_idx = list_offset as usize;
-                                if target_idx < filtered.len() {
-                                    panel.selected_index = target_idx;
-                                    panel.preview_scroll = 0;
-                                    self.memory_panel = Some(panel);
-                                }
-                            }
-                        }
-                    }
-                    true
-                } else if in_right {
-                    // Click on right pane → position cursor in edit mode
-                    if let Some(panel) = self.memory_panel.clone() {
-                        if panel.focus == PanelFocus::ContentEdit {
-                            let mut p = panel;
-                            // Account for "EDITING" header (1 line)
-                            let local_line = local_y.saturating_sub(1);
-                            let editor_width = p.editor_width.get().max(1);
-                            p.content_editor.set_cursor_at_visual_position(
-                                editor_width,
-                                local_line,
-                                local_x,
-                            );
-                            self.memory_panel = Some(p);
-                        } else {
-                            // In browse mode, clicking right pane does nothing special
-                            // (keep focus on list)
-                        }
-                    }
-                    true
-                } else {
-                    false
-                }
-            }
-            _ => false,
-        }
-    }
-
-    pub(crate) fn register_selection_region(&self, _area: Rect) {}
 }

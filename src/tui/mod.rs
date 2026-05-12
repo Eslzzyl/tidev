@@ -190,6 +190,17 @@ struct App {
     input_area: Cell<Option<Rect>>,
     /// Overlay rect of the memory panel (for mouse hit-testing).
     memory_panel_overlay: Cell<Option<Rect>>,
+    /// Overlay rects for various panels (for mouse hit-testing).
+    theme_panel_overlay: Cell<Option<Rect>>,
+    model_panel_overlay: Cell<Option<Rect>>,
+    session_panel_overlay: Cell<Option<Rect>>,
+    message_panel_overlay: Cell<Option<Rect>>,
+    skills_panel_overlay: Cell<Option<Rect>>,
+    settings_panel_overlay: Cell<Option<Rect>>,
+    agents_panel_overlay: Cell<Option<Rect>>,
+    mcp_panel_overlay: Cell<Option<Rect>>,
+    balance_panel_overlay: Cell<Option<Rect>>,
+    stats_panel_overlay: Cell<Option<Rect>>,
     /// Scroll offset for the input box when content exceeds visible area.
     input_scroll_offset: usize,
     /// Whether we're currently dragging in the input area (for text selection).

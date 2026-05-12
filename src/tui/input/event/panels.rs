@@ -338,13 +338,21 @@ impl App {
             KeyCode::Tab if key.modifiers.is_empty() => {
                 let mut next_panel = panel;
                 next_panel.next_tab();
-                // Reset selection to the new tab's saved position
                 let items = self.model_panel_items(&next_panel);
-                let active = agent_tab_active_model(&next_panel, &self.active_model);
-                if let Some((p, m)) = active {
-                    next_panel.reset_selection(&items, Some((&p, &m)));
+                let is_general = next_panel.is_general_tab();
+                if is_general {
+                    // General tab: use self.active_model directly (authoritative source)
+                    next_panel.reset_selection(
+                        &items,
+                        Some((&self.active_model.provider_id, &self.active_model.model_id)),
+                    );
                 } else {
-                    next_panel.reset_selection(&items, None);
+                    let active = agent_tab_active_model(&next_panel, &self.active_model);
+                    if let Some((p, m)) = active {
+                        next_panel.reset_selection(&items, Some((&p, &m)));
+                    } else {
+                        next_panel.reset_selection(&items, None);
+                    }
                 }
                 self.model_panel = Some(next_panel);
             }
@@ -352,11 +360,19 @@ impl App {
                 let mut next_panel = panel;
                 next_panel.prev_tab();
                 let items = self.model_panel_items(&next_panel);
-                let active = agent_tab_active_model(&next_panel, &self.active_model);
-                if let Some((p, m)) = active {
-                    next_panel.reset_selection(&items, Some((&p, &m)));
+                let is_general = next_panel.is_general_tab();
+                if is_general {
+                    next_panel.reset_selection(
+                        &items,
+                        Some((&self.active_model.provider_id, &self.active_model.model_id)),
+                    );
                 } else {
-                    next_panel.reset_selection(&items, None);
+                    let active = agent_tab_active_model(&next_panel, &self.active_model);
+                    if let Some((p, m)) = active {
+                        next_panel.reset_selection(&items, Some((&p, &m)));
+                    } else {
+                        next_panel.reset_selection(&items, None);
+                    }
                 }
                 self.model_panel = Some(next_panel);
             }
@@ -367,11 +383,18 @@ impl App {
                     let items = self.model_panel_items(&panel);
                     let mut next_panel = panel;
                     // On query change, reset the current tab's selection to its configured model
-                    let active = agent_tab_active_model(&next_panel, &self.active_model);
-                    if let Some((p, m)) = active {
-                        next_panel.reset_selection(&items, Some((&p, &m)));
+                    if next_panel.is_general_tab() {
+                        next_panel.reset_selection(
+                            &items,
+                            Some((&self.active_model.provider_id, &self.active_model.model_id)),
+                        );
                     } else {
-                        next_panel.reset_selection(&items, None);
+                        let active = agent_tab_active_model(&next_panel, &self.active_model);
+                        if let Some((p, m)) = active {
+                            next_panel.reset_selection(&items, Some((&p, &m)));
+                        } else {
+                            next_panel.reset_selection(&items, None);
+                        }
                     }
                     self.model_panel = Some(next_panel);
                 } else {
@@ -787,7 +810,7 @@ impl App {
     }
 }
 
-fn agent_tab_active_model(
+pub(super) fn agent_tab_active_model(
     panel: &crate::tui::model_panel::ModelPanelState,
     default: &crate::config::ActiveModel,
 ) -> Option<(String, String)> {

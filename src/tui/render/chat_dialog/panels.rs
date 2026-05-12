@@ -31,6 +31,7 @@ impl App {
     ) {
         let palette = self.palette();
         let overlay = centered_rect(36, 22, area);
+        self.theme_panel_overlay.set(Some(overlay));
 
         let block = Block::default()
             .style(Style::default().bg(palette.panel_alt))
@@ -175,9 +176,9 @@ impl App {
     ) {
         let palette = self.palette();
         let overlay = centered_rect(70, 24, area);
+        self.agents_panel_overlay.set(Some(overlay));
 
         frame.render_widget(Clear, overlay);
-
         let panel_block = Block::default()
             .style(Style::default().bg(palette.panel))
             .title(" Agents ")
@@ -306,6 +307,7 @@ impl App {
         use crate::tui::ui::settings_panel::SettingType;
         let current_palette = self.palette();
         let overlay = centered_rect(60, 12, area);
+        self.settings_panel_overlay.set(Some(overlay));
 
         let items: Vec<ListItem> = panel
             .items
@@ -363,17 +365,16 @@ impl App {
             .highlight_style(
                 Style::default()
                     .bg(current_palette.selection_bg)
-                    .fg(current_palette.selection_fg),
+                    .fg(current_palette.selection_fg)
+                    .add_modifier(Modifier::BOLD),
             );
 
         frame.render_widget(Clear, overlay);
         frame.render_widget(panel_block, overlay);
-        let inner = overlay.inner(Margin {
+        frame.render_stateful_widget(list, overlay.inner(Margin {
             horizontal: 1,
             vertical: 1,
-        });
-        self.register_selection_region(inner);
-        frame.render_stateful_widget(list, inner, &mut state);
+        }), &mut state);
     }
 
     pub(crate) fn render_session_panel(
@@ -384,6 +385,7 @@ impl App {
     ) {
         let palette = self.palette();
         let overlay = centered_rect(area.width.min(112), area.height.min(36), area);
+        self.session_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
 
         let view_mode_text = match panel.view_mode {
@@ -605,6 +607,7 @@ impl App {
     ) {
         let palette = self.palette();
         let overlay = centered_rect(area.width.min(112), area.height.min(36), area);
+        self.message_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
 
         let title = Block::default()
@@ -714,8 +717,8 @@ impl App {
     ) {
         let palette = self.palette();
         let overlay = centered_rect(area.width.min(104), area.height.min(34), area);
+        self.model_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
-
         let title = Block::default()
             .style(Style::default().bg(palette.panel))
             .title(" Select model ")
@@ -798,26 +801,35 @@ impl App {
         let items = self.model_panel_items(panel);
 
         // Determine the "active" model index (the model currently in use / saved)
-        let active_index = panel.current_tab().and_then(|tab| {
-            let label = &tab.current_label;
-            if label == "<inherit>" || label.is_empty() {
-                // For inherit, use the main session's active model
-                items.iter().position(|item| {
-                    matches!(item, ModelPanelItem::Model { summary, .. }
-                        if summary.provider_id == self.active_model.provider_id
-                        && summary.model_id == self.active_model.model_id)
-                })
-            } else if let Some(slash_pos) = label.find('/') {
-                let p = &label[..slash_pos];
-                let m = &label[slash_pos + 1..];
-                items.iter().position(|item| {
-                    matches!(item, ModelPanelItem::Model { summary, .. }
-                        if summary.provider_id == p && summary.model_id == m)
-                })
-            } else {
-                None
-            }
-        });
+        let active_index = if panel.is_general_tab() {
+            // General tab: checkmark always tracks the authoritative self.active_model
+            items.iter().position(|item| {
+                matches!(item, ModelPanelItem::Model { summary, .. }
+                    if summary.provider_id == self.active_model.provider_id
+                    && summary.model_id == self.active_model.model_id)
+            })
+        } else {
+            panel.current_tab().and_then(|tab| {
+                let label = &tab.current_label;
+                if label == "<inherit>" || label.is_empty() {
+                    // For inherit, use the main session's active model
+                    items.iter().position(|item| {
+                        matches!(item, ModelPanelItem::Model { summary, .. }
+                            if summary.provider_id == self.active_model.provider_id
+                            && summary.model_id == self.active_model.model_id)
+                    })
+                } else if let Some(slash_pos) = label.find('/') {
+                    let p = &label[..slash_pos];
+                    let m = &label[slash_pos + 1..];
+                    items.iter().position(|item| {
+                        matches!(item, ModelPanelItem::Model { summary, .. }
+                            if summary.provider_id == p && summary.model_id == m)
+                    })
+                } else {
+                    None
+                }
+            })
+        };
 
         let mut rows = Vec::new();
         for (index, item) in items.iter().enumerate() {
@@ -1049,8 +1061,8 @@ impl App {
             },
             area,
         );
+        self.mcp_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
-
         let title_text = panel
             .editor
             .as_ref()
@@ -1742,8 +1754,8 @@ impl App {
 
         // Main overlay - 85% width, 80% height
         let overlay = centered_rect(85, 80, area);
+        self.skills_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
-
         // Main block with title
         let title = if panel.is_empty() {
             " Skills ".to_string()
