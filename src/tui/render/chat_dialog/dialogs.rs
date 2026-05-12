@@ -1,6 +1,7 @@
 use crate::tui::App;
 use crate::tui::render::render::centered_rect;
 use crate::tui::ui::connect::ProviderPickerItem;
+use crate::tui::ui::sensitive::SensitiveFileDialogState;
 use crate::{
     config::ProviderSource,
     provider_setup::{ConnectDialog, EditProviderStep, NewProviderStep},
@@ -671,6 +672,67 @@ impl App {
 
         frame.render_widget(
             Paragraph::new("A tool is trying to access a path outside the workspace:")
+                .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+            sections[0],
+        );
+
+        let path_text = format!(
+            "Requested: {}\nWorkspace: {}",
+            dialog.path_display(),
+            dialog.workspace_display()
+        );
+        frame.render_widget(
+            Paragraph::new(path_text).style(
+                Style::default()
+                    .bg(palette.panel_alt)
+                    .fg(palette.accent_soft),
+            ),
+            sections[1],
+        );
+
+        frame.render_widget(
+            Paragraph::new("Y allow once · A allow until exit · N deny once · D deny until exit · Esc deny once")
+                .style(
+                    Style::default()
+                        .bg(palette.panel_alt)
+                        .fg(palette.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            sections[2],
+        );
+    }
+
+    pub(crate) fn render_sensitive_file_dialog(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        dialog: &SensitiveFileDialogState,
+    ) {
+        let palette = self.palette();
+        let inner = area.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+
+        frame.render_widget(Clear, area);
+
+        let block = Block::default()
+            .style(Style::default().bg(palette.panel_alt))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.error))
+            .title(format!(" {} ", dialog.title()));
+        frame.render_widget(block, area);
+
+        let sections = Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Length(2),
+            Constraint::Length(2),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+        frame.render_widget(
+            Paragraph::new("A tool is trying to read a sensitive file:")
                 .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
             sections[0],
         );

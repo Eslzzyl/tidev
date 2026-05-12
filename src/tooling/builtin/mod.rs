@@ -13,6 +13,7 @@ pub mod exec;
 pub mod file;
 pub mod memory;
 pub mod search;
+pub mod sensitive;
 pub mod task;
 pub mod todo;
 pub mod utils;
@@ -56,6 +57,7 @@ pub fn execute_tool_call(
     memory_store: &Arc<crate::memory::types::MemoryStore>,
     mode: SessionMode,
     allow_outside: bool,
+    sensitive_file_approved: bool,
 ) -> Result<crate::session::ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
@@ -69,6 +71,7 @@ pub fn execute_tool_call(
                 arguments,
                 max_output_bytes,
                 allow_outside,
+                sensitive_file_approved,
             )?
         }
         Some("glob") | Some("grep") => {
@@ -152,6 +155,7 @@ pub fn execute_tool_call_streaming(
     memory_store: &Arc<crate::memory::types::MemoryStore>,
     mode: SessionMode,
     allow_outside: bool,
+    sensitive_file_approved: bool,
     event_tx: Option<UnboundedSender<BackendEvent>>,
 ) -> Result<crate::session::ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
@@ -166,6 +170,7 @@ pub fn execute_tool_call_streaming(
                 arguments,
                 max_output_bytes,
                 allow_outside,
+                sensitive_file_approved,
             )?
         }
         Some("glob") | Some("grep") => {

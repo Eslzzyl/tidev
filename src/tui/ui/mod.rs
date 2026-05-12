@@ -11,6 +11,7 @@ pub mod model_panel;
 pub mod permission;
 pub mod question;
 pub mod rename;
+pub mod sensitive;
 pub mod session_panel;
 pub mod settings_panel;
 pub mod skills_panel;

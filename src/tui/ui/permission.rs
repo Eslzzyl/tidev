@@ -323,6 +323,68 @@ impl App {
                 }
             }
 
+            // Check for sensitive file reads (only for the read tool)
+            if crate::tooling::canonical_tool_name(&tool_call.name) == Some("read") {
+                // Extract the file path from arguments
+                let file_path: Option<String> = serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
+                    .ok()
+                    .and_then(|v| v.get("file_path")?.as_str().map(|s| s.to_string()));
+
+                if let Some(ref path_str) = file_path {
+                    if let Ok(resolved_path) = crate::tooling::builtin::utils::resolve_workspace_path(
+                        &self.workspace_root,
+                        std::path::Path::new(path_str),
+                        false,
+                    ) {
+                        let patterns = crate::tooling::builtin::sensitive::load_sensitive_patterns(&self.workspace_root);
+                        if crate::tooling::builtin::sensitive::is_path_sensitive(
+                            &self.workspace_root,
+                            &resolved_path,
+                            &patterns,
+                        ) {
+                            let path_str = resolved_path.display().to_string();
+
+                            // Check stored permissions in memory
+                            if let Some(allowed) = self.is_sensitive_file_allowed(&path_str) {
+                                if !allowed {
+                                    let output = format!(
+                                        "[User denied access] The path '{}' is listed in sensitive.txt.",
+                                        path_str
+                                    );
+                                    rejected.push((tool_call, ToolExecutionResult::new(output)));
+                                    self.advance_pending_tool_execution();
+                                    continue;
+                                }
+                                // Previously allowed — execute with sensitive_file_approved=true
+                                self.sensitive_file_approved
+                                    .insert(tool_call.id.clone(), true);
+                                self.pending_tool_execution
+                                    .as_mut()
+                                    .unwrap()
+                                    .add_ready(tool_call);
+                                self.advance_pending_tool_execution();
+                                continue;
+                            } else {
+                                // No stored permission - show dialog
+                                self.sensitive_file_dialog = Some(
+                                    crate::tui::ui::sensitive::SensitiveFileDialogState {
+                                        pending:
+                                            crate::tui::ui::sensitive::PendingSensitiveFileCheck {
+                                                tool_call: tool_call.clone(),
+                                                sensitive_path: resolved_path,
+                                                workspace_root: self.workspace_root.clone(),
+                                            },
+                                        current_index,
+                                        total,
+                                    },
+                                );
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+            }
+
             if tool_call.name == "question" {
                 let args = match serde_json::from_str::<QuestionArgs>(&tool_call.arguments) {
                     Ok(args) => args,
@@ -438,6 +500,7 @@ impl App {
                 rejection: Some(result),
                 child_session_id: None,
                 allow_outside: false,
+                sensitive_file_approved: false,
             })
             .collect();
         for tc in ready_calls.drain(..) {
@@ -450,11 +513,16 @@ impl App {
                 .workspace_boundary_approved
                 .remove(&tc.id)
                 .unwrap_or(false);
+            let sensitive_file_approved = self
+                .sensitive_file_approved
+                .remove(&tc.id)
+                .unwrap_or(false);
             approvals.push(ApprovedTool {
                 tool_call: tc,
                 rejection: None,
                 child_session_id,
                 allow_outside,
+                sensitive_file_approved,
             });
         }
 

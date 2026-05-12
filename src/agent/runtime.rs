@@ -74,6 +74,10 @@ pub struct ApprovedTool {
     /// Whether this tool call is allowed to access paths outside the workspace.
     /// Set by the TUI frontend when the user approves a workspace boundary violation.
     pub allow_outside: bool,
+    /// Whether this tool call is allowed to read sensitive files listed in
+    /// `.tidev/sensitive.txt`.  Set by the TUI frontend when the user
+    /// approves a sensitive file read.
+    pub sensitive_file_approved: bool,
 }
 
 /// Request sent by `run_agent_loop` to the frontend for tool call approval.
@@ -495,12 +499,14 @@ impl AgentRuntime {
     ///    `auto_approve_permissions` is `false`, these tools are rejected
     ///    with an error.  If `true`, they execute without confirmation
     ///    (the TUI handles confirmation itself via the permission channel).
+    ///
+    /// Each entry is `(tool_call, allow_outside, sensitive_file_approved)`.
     #[allow(clippy::too_many_arguments)]
     pub async fn execute_tool_calls(
         &mut self,
         session_id: uuid::Uuid,
         request_id: u64,
-        tool_calls: &[(ToolCall, bool)], // (tool_call, allow_outside)
+        tool_calls: &[(ToolCall, bool, bool)], // (tool_call, allow_outside, sensitive_file_approved)
         mode: SessionMode,
         event_tx: &UnboundedSender<BackendEvent>,
         _parent_model: &crate::config::ActiveModel,
@@ -512,8 +518,8 @@ impl AgentRuntime {
         // ─── Phase 0: Mode-based + confirmation filtering ────────────
         // Reject tools that are not allowed in the current mode, or that
         // need confirmation when auto_approve is off.
-        let mut filtered: Vec<(&ToolCall, bool)> = Vec::with_capacity(tool_calls.len());
-        for (call, allow_outside) in tool_calls {
+        let mut filtered: Vec<(&ToolCall, bool, bool)> = Vec::with_capacity(tool_calls.len());
+        for (call, allow_outside, sensitive_file_approved) in tool_calls {
             if !self.tools.can_execute(&call.name, mode) {
                 crate::log_info!(
                     "execute_tool_calls: rejecting '{}' — not allowed in {:?} mode",
@@ -568,7 +574,7 @@ impl AgentRuntime {
                 continue;
             }
 
-            filtered.push((call, *allow_outside));
+            filtered.push((call, *allow_outside, *sensitive_file_approved));
         }
 
         // All tools filtered out — return early
@@ -577,13 +583,13 @@ impl AgentRuntime {
         }
 
         // Separate tool calls by execution strategy.
-        let mut read_only: Vec<(&ToolCall, bool)> = Vec::new();
-        let mut write: Vec<(&ToolCall, bool)> = Vec::new();
-        for (call, allow) in &filtered {
+        let mut read_only: Vec<(&ToolCall, bool, bool)> = Vec::new();
+        let mut write: Vec<(&ToolCall, bool, bool)> = Vec::new();
+        for (call, allow, sensitive_approved) in &filtered {
             if self.tools.is_read_only_call(call) {
-                read_only.push((call, *allow));
+                read_only.push((call, *allow, *sensitive_approved));
             } else {
-                write.push((call, *allow));
+                write.push((call, *allow, *sensitive_approved));
             }
         }
 
@@ -599,7 +605,7 @@ impl AgentRuntime {
 
             let mut handles: Vec<(ToolCall, tokio::task::JoinHandle<ToolExecutionResult>)> =
                 Vec::with_capacity(read_only.len());
-            for ((tool_call, allow_outside), store) in read_only.into_iter().zip(stores) {
+            for ((tool_call, allow_outside, sensitive_file_approved), store) in read_only.into_iter().zip(stores) {
                 let handle = self.tools.execute_call_spawned(
                     runtime.clone(),
                     store,
@@ -607,6 +613,7 @@ impl AgentRuntime {
                     tool_call.clone(),
                     mode,
                     allow_outside,
+                    sensitive_file_approved,
                 );
                 handles.push((tool_call.clone(), handle));
             }
@@ -623,7 +630,7 @@ impl AgentRuntime {
         }
 
         // ─── Phase 2: Write tools serially ──────────────────────────────
-        for (tool_call, allow_outside) in write {
+        for (tool_call, allow_outside, sensitive_file_approved) in write {
             let store = {
                 let s = self.store.lock().await;
                 s.clone()
@@ -641,6 +648,7 @@ impl AgentRuntime {
                     tool_call.clone(),
                     mode,
                     allow_outside,
+                    sensitive_file_approved,
                     event_tx.clone(),
                 )
             } else {
@@ -651,6 +659,7 @@ impl AgentRuntime {
                     tool_call.clone(),
                     mode,
                     allow_outside,
+                    sensitive_file_approved,
                 )
             };
             let result = handle.await.unwrap_or_else(|join_err| {
@@ -1143,7 +1152,7 @@ impl AgentRuntime {
                 let summary = format!("Tool: {canonical}");
                 send_status(event_tx, summary, Some(tool_call.clone()), None, None);
 
-                let call_with_allow = [(tool_call.clone(), false)];
+                let call_with_allow = [(tool_call.clone(), false, false)];
                 let result = self
                     .execute_tool_calls(
                         child_session_id,
@@ -1405,7 +1414,7 @@ impl AgentRuntime {
             // needs_confirmation) is handled inside execute_tool_calls below.
 
             let mut task_calls: Vec<(ToolCall, Option<uuid::Uuid>)> = Vec::new();
-            let mut other_calls: Vec<(ToolCall, bool)> = Vec::new();
+            let mut other_calls: Vec<(ToolCall, bool, bool)> = Vec::new(); // (tool_call, allow_outside, sensitive_file_approved)
 
             if let Some(ref perm_tx) = permission_tx {
                 let (resp_tx, resp_rx) = oneshot::channel();
@@ -1430,7 +1439,7 @@ impl AgentRuntime {
                             } else if approved.tool_call.name == "task" {
                                 task_calls.push((approved.tool_call, approved.child_session_id));
                             } else {
-                                other_calls.push((approved.tool_call, approved.allow_outside));
+                                other_calls.push((approved.tool_call, approved.allow_outside, approved.sensitive_file_approved));
                             }
                         }
                     }
@@ -1447,7 +1456,7 @@ impl AgentRuntime {
                     if tc.name == "task" {
                         task_calls.push((tc, None));
                     } else {
-                        other_calls.push((tc, false));
+                        other_calls.push((tc, false, false));
                     }
                 }
             }
@@ -2199,6 +2208,7 @@ mod tests {
                         .to_string(),
                 },
                 false,
+                false,
             ),
             (
                 ToolCall {
@@ -2206,6 +2216,7 @@ mod tests {
                     name: "read".to_string(),
                     arguments: r#"{"file_path":"/nonexistent"}"#.to_string(),
                 },
+                false,
                 false,
             ),
         ];
@@ -2269,6 +2280,7 @@ mod tests {
                 arguments: r#"{"file_path":"."}"#.to_string(),
             },
             false,
+            false,
         )];
 
         let results = agent
@@ -2316,6 +2328,7 @@ mod tests {
                 name: "read".to_string(),
                 arguments: r#"{"file_path":"."}"#.to_string(),
             },
+            false,
             false,
         )];
 
@@ -2376,6 +2389,7 @@ mod tests {
                 name: "bash".to_string(),
                 arguments: r#"{"command":"echo hello"}"#.to_string(),
             },
+            false,
             false,
         )];
 

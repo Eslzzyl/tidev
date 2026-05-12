@@ -1,0 +1,8 @@
+# Sensitive files — reading these will require user confirmation.
+# One pattern per line. Supports glob patterns (*, ?, **).
+#
+# Examples:
+.env
+*.pem
+secrets/*
+config/credentials.toml

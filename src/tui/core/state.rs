@@ -18,10 +18,10 @@ use super::permission::{
 use super::question::QuestionDialogState;
 use super::session_panel::SessionPanelState;
 use super::theme_panel::ThemePanelState;
-use super::ui::workspace_boundary::WorkspaceBoundaryDialogState;
 use crate::tui::ui::agents_panel::AgentsPanelState;
 use crate::tui::ui::rename::RenameSessionDialogState;
 use crate::tui::ui::skills_panel::SkillsPanelState;
+use crate::tui::ui::workspace_boundary::WorkspaceBoundaryDialogState;
 use crate::{
     config::ActiveModel,
     config::reasoning::ThinkingLevelType,
@@ -183,7 +183,9 @@ pub(crate) struct CachedSessionRuntime {
     pub(crate) pending_tool_execution: Option<PendingToolExecution>,
     pub(crate) permission_dialog: Option<PermissionDialogState>,
     pub(crate) workspace_boundary_dialog: Option<WorkspaceBoundaryDialogState>,
+    pub(crate) sensitive_file_dialog: Option<crate::tui::ui::sensitive::SensitiveFileDialogState>,
     pub(crate) workspace_boundary_permissions: std::collections::HashMap<String, bool>,
+    pub(crate) sensitive_file_permissions: std::collections::HashMap<String, bool>,
     pub(crate) question_dialog: Option<QuestionDialogState>,
     pub(crate) running_tool_executions: Vec<RunningToolExecution>,
     pub(crate) running_subagent_executions: Vec<RunningSubagentExecution>,

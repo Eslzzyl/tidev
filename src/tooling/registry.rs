@@ -262,6 +262,7 @@ impl ToolRegistry {
         call: &ToolCall,
         mode: SessionMode,
         allow_outside: bool,
+        sensitive_file_approved: bool,
     ) -> Result<ToolExecutionResult> {
         if self.mcp.definition_for(&call.name).is_some() {
             return runtime.block_on(self.mcp.execute_call(call));
@@ -279,6 +280,7 @@ impl ToolRegistry {
             &self.memory_store,
             mode,
             allow_outside,
+            sensitive_file_approved,
         )?;
 
         // Image capability check: If the result contains images but the model doesn't support them,
@@ -331,6 +333,7 @@ impl ToolRegistry {
         call: ToolCall,
         mode: SessionMode,
         allow_outside: bool,
+        sensitive_file_approved: bool,
     ) -> JoinHandle<ToolExecutionResult> {
         let registry = self.clone();
         tokio::task::spawn_blocking(move || {
@@ -342,6 +345,7 @@ impl ToolRegistry {
                     &call,
                     mode,
                     allow_outside,
+                    sensitive_file_approved,
                 )
             }));
             match result {
@@ -374,6 +378,7 @@ impl ToolRegistry {
         call: ToolCall,
         mode: SessionMode,
         allow_outside: bool,
+        sensitive_file_approved: bool,
         event_tx: UnboundedSender<BackendEvent>,
     ) -> JoinHandle<ToolExecutionResult> {
         let registry = self.clone();
@@ -386,6 +391,7 @@ impl ToolRegistry {
                     &call,
                     mode,
                     allow_outside,
+                    sensitive_file_approved,
                     event_tx,
                 )
             }));
@@ -415,6 +421,7 @@ impl ToolRegistry {
         call: &ToolCall,
         mode: SessionMode,
         allow_outside: bool,
+        sensitive_file_approved: bool,
         event_tx: UnboundedSender<BackendEvent>,
     ) -> Result<ToolExecutionResult> {
         if self.mcp.definition_for(&call.name).is_some() {
@@ -433,6 +440,7 @@ impl ToolRegistry {
             &self.memory_store,
             mode,
             allow_outside,
+            sensitive_file_approved,
             Some(event_tx),
         )?;
 

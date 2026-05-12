@@ -71,6 +71,10 @@ impl App {
             return self.handle_workspace_boundary_dialog_key(key, runtime);
         }
 
+        if self.sensitive_file_dialog.is_some() {
+            return self.handle_sensitive_file_dialog_key(key, runtime);
+        }
+
         if self.question_dialog.is_some() {
             return self.handle_question_dialog_key(key, runtime);
         }

@@ -47,6 +47,7 @@ pub fn execute_tool_call(
     arguments: Value,
     _max_output_bytes: usize,
     allow_outside: bool,
+    sensitive_file_approved: bool,
 ) -> Result<crate::session::ToolExecutionResult> {
     match crate::tooling::canonical_tool_name(tool_name) {
         Some("read") => {
@@ -58,6 +59,7 @@ pub fn execute_tool_call(
                 args.offset,
                 args.limit,
                 allow_outside,
+                sensitive_file_approved,
             )
         }
         Some("write") => {
@@ -262,8 +264,23 @@ pub(super) fn read_path(
     offset: Option<i64>,
     limit: Option<i64>,
     allow_outside: bool,
+    sensitive_file_approved: bool,
 ) -> Result<ToolExecutionResult> {
     let path = resolve_workspace_path(workspace_root, relative_path.as_ref(), allow_outside)?;
+
+    // Backend safety net: reject reads of sensitive files unless the user
+    // has explicitly approved via the TUI dialog (sensitive_file_approved).
+    if !sensitive_file_approved {
+        let patterns = super::sensitive::load_sensitive_patterns(workspace_root);
+        if super::sensitive::is_path_sensitive(workspace_root, &path, &patterns) {
+            bail!(
+                "Reading sensitive file '{}' requires user confirmation. \
+                 The file is listed in {}.",
+                super::utils::display_workspace_relative(workspace_root, &path),
+                ".tidev/sensitive.txt"
+            );
+        }
+    }
 
     if !path.exists() {
         let suggestions = find_fuzzy_suggestions(workspace_root, relative_path.as_ref())?;

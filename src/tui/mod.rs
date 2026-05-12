@@ -136,12 +136,19 @@ struct App {
     pending_tool_execution: Option<PendingToolExecution>,
     permission_dialog: Option<PermissionDialogState>,
     workspace_boundary_dialog: Option<WorkspaceBoundaryDialogState>,
+    sensitive_file_dialog: Option<ui::sensitive::SensitiveFileDialogState>,
+    /// In-memory sensitive file permissions (path -> allowed).
+    /// Cleared when tidev exits or session switches.
+    sensitive_file_permissions: std::collections::HashMap<String, bool>,
     /// In-memory workspace boundary permissions (path -> allowed).
     /// Cleared when tidev exits or session switches.
     workspace_boundary_permissions: std::collections::HashMap<String, bool>,
     /// Per-batch: tool calls approved for outside-workspace access (tool_call.id -> allow_outside).
     /// Populated during permission checking, consumed during parallel execution dispatch.
     workspace_boundary_approved: std::collections::HashMap<String, bool>,
+    /// Per-batch: tool calls approved for sensitive file reads (tool_call.id -> bool).
+    /// Populated during permission checking, consumed during parallel execution dispatch.
+    sensitive_file_approved: std::collections::HashMap<String, bool>,
     question_dialog: Option<QuestionDialogState>,
     fork_confirm_dialog: Option<ui::fork_confirm::ForkConfirmDialogState>,
     undo_confirm_dialog: Option<ui::undo_confirm::UndoConfirmDialogState>,

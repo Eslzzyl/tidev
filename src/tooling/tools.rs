@@ -453,6 +453,7 @@ pub(super) fn execute_tool_call(
         memory_store,
         mode,
         false, // allow_outside: skill execution doesn't allow outside workspace
+        false, // sensitive_file_approved: skill execution requires explicit user approval
     )?;
 
     // Post-execution: record file reads
