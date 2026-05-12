@@ -599,10 +599,15 @@ impl App {
             let status = if self.conversation.parent_session_id.is_some() {
                 format!("{} Thinking...", spinner)
             } else if !self.running_subagent_executions.is_empty() {
+                let count = self.running_subagent_executions.len();
+                let label = if count == 1 {
+                    "subagent"
+                } else {
+                    "subagents"
+                };
                 format!(
-                    "{} Waiting for {} subagent(s)",
-                    spinner,
-                    self.running_subagent_executions.len()
+                    "{} Waiting for {} {}",
+                    spinner, count, label
                 )
             } else if !self.running_tool_executions.is_empty() {
                 let tool_names: Vec<_> = self

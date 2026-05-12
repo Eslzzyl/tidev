@@ -1156,9 +1156,15 @@ impl App {
                 if self.running_subagent_executions.is_empty() {
                     self.last_notice = None;
                 } else {
+                    let count = self.running_subagent_executions.len();
+                    let label = if count == 1 {
+                        "subagent"
+                    } else {
+                        "subagents"
+                    };
                     self.last_notice = Some(format!(
-                        "Waiting for {} subagent(s)...",
-                        self.running_subagent_executions.len()
+                        "Waiting for {} {}...",
+                        count, label
                     ));
                 }
 
