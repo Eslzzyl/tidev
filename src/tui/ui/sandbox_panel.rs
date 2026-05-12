@@ -2,12 +2,9 @@
 //!
 //! Allows the user to view and change the sandbox policy at runtime.
 //! This overrides the config file value for the current session only.
-//!
-//! In Plan mode the panel shows a locked notice (sandbox is always read-only).
-//! In Build mode the panel offers workspace-write and full-access options.
+//! Available in both Plan and Build modes.
 
 use crate::sandbox::SandboxPolicy;
-use crate::prompts::SessionMode;
 
 use super::App;
 
@@ -19,25 +16,9 @@ pub struct SandboxPanelState {
 }
 
 impl SandboxPanelState {
-    pub fn new(current_mode: SessionMode) -> Self {
-        // For Plan mode, show that sandbox is locked
-        if current_mode.is_read_only() {
-            return Self { selected_index: 0 };
-        }
-
-        // For Build mode, find the current policy index
-        let current_policy = Self::build_items()
-            .first()
-            .map(|item| item.policy.label())
-            .unwrap_or("");
-        let current_index = Self::build_items()
-            .iter()
-            .position(|item| item.policy.label() == current_policy)
-            .unwrap_or(0);
-
-        Self {
-            selected_index: current_index,
-        }
+    pub fn new() -> Self {
+        // Default to first policy (workspace-write)
+        Self { selected_index: 0 }
     }
 
     pub fn move_selection(&mut self, delta: isize) {
@@ -50,7 +31,7 @@ impl SandboxPanelState {
         self.selected_index = next;
     }
 
-    /// Build the list of available policies for Build mode.
+    /// Build the list of available sandbox policies.
     pub fn build_items() -> Vec<PolicyItem> {
         vec![
             PolicyItem {
@@ -59,6 +40,11 @@ impl SandboxPanelState {
                 },
                 label: "workspace-write",
                 description: "Read access everywhere, writes restricted to workspace and /tmp",
+            },
+            PolicyItem {
+                policy: SandboxPolicy::ReadOnly,
+                label: "read-only",
+                description: "Read-only access, no writes allowed anywhere",
             },
             PolicyItem {
                 policy: SandboxPolicy::DangerFullAccess,
@@ -95,7 +81,7 @@ impl App {
         self.stats_panel = None;
         self.skills_panel = None;
 
-        self.sandbox_panel = Some(SandboxPanelState::new(self.mode));
+        self.sandbox_panel = Some(SandboxPanelState::new());
     }
 
     /// Apply the currently selected sandbox policy.
@@ -103,15 +89,6 @@ impl App {
         let Some(ref panel) = self.sandbox_panel else {
             return;
         };
-
-        // In Plan mode, sandbox is locked — do nothing
-        if self.mode.is_read_only() {
-            self.last_notice = Some(
-                "Sandbox is locked to read-only in Plan mode. Switch to Build to change.".to_string(),
-            );
-            self.sandbox_panel = None;
-            return;
-        }
 
         let items = SandboxPanelState::build_items();
         let Some(item) = items.get(panel.selected_index) else {

@@ -526,14 +526,8 @@ impl App {
         use ratatui::layout::{Layout, Constraint, Margin};
 
         let palette = self.palette();
-        let is_plan = self.mode.is_read_only();
 
-        // Determine overlay size
-        let overlay = if is_plan {
-            centered_rect(50, 5, area)
-        } else {
-            centered_rect(56, S::build_items().len() as u16 + 6, area)
-        };
+        let overlay = centered_rect(56, S::build_items().len() as u16 + 6, area);
         frame.render_widget(Clear, overlay);
 
         let block = Block::default()
@@ -548,83 +542,70 @@ impl App {
             vertical: 1,
         });
 
-        if is_plan {
-            // Plan mode: show locked notice
-            let notice = Line::from(Span::styled(
-                "Sandbox is locked to read-only in Plan mode.\nSwitch to Build to configure.",
-                Style::default().fg(palette.muted),
-            ));
-            frame.render_widget(
-                Paragraph::new(notice).centered().style(Style::default().bg(palette.panel)),
-                inner,
-            );
-        } else {
-            // Build mode: show selectable policies
-            let items = S::build_items();
+        let items = S::build_items();
 
-            // Header
-            let header = Line::from(vec![
-                Span::styled("  Policy", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
-                Span::raw("    "),
-                Span::styled("Description", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
-            ]);
+        // Header
+        let header = Line::from(vec![
+            Span::styled("  Policy", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
+            Span::raw("    "),
+            Span::styled("Description", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
+        ]);
 
-            // Build list items
-            let list_items: Vec<ratatui::widgets::ListItem> = items
-                .iter()
-                .enumerate()
-                .map(|(idx, item)| {
-                    let selected = idx == panel.selected_index;
-                    let prefix = if selected { ">" } else { " " };
-                    let style = if selected {
-                        Style::default().fg(palette.selection_fg).bg(palette.selection_bg)
-                    } else {
-                        Style::default().fg(palette.text)
-                    };
-                    ratatui::widgets::ListItem::new(Line::from(vec![
-                        Span::styled(format!("{}  {}  ", prefix, item.label), style.clone()),
-                        Span::styled(item.description, Style::default().fg(palette.muted)),
-                    ]))
-                    .style(style)
-                })
-                .collect();
+        // Build list items
+        let list_items: Vec<ratatui::widgets::ListItem> = items
+            .iter()
+            .enumerate()
+            .map(|(idx, item)| {
+                let selected = idx == panel.selected_index;
+                let prefix = if selected { ">" } else { " " };
+                let style = if selected {
+                    Style::default().fg(palette.selection_fg).bg(palette.selection_bg)
+                } else {
+                    Style::default().fg(palette.text)
+                };
+                ratatui::widgets::ListItem::new(Line::from(vec![
+                    Span::styled(format!("{}  {}  ", prefix, item.label), style.clone()),
+                    Span::styled(item.description, Style::default().fg(palette.muted)),
+                ]))
+                .style(style)
+            })
+            .collect();
 
-            let sections = Layout::vertical([
-                Constraint::Length(1), // header
-                Constraint::Length(1), // divider
-                Constraint::Min(0),    // list
-            ])
-            .split(inner);
+        let sections = Layout::vertical([
+            Constraint::Length(1), // header
+            Constraint::Length(1), // divider
+            Constraint::Min(0),    // list
+        ])
+        .split(inner);
 
-            frame.render_widget(
-                Paragraph::new(header).style(Style::default().bg(palette.panel)),
-                sections[0],
-            );
+        frame.render_widget(
+            Paragraph::new(header).style(Style::default().bg(palette.panel)),
+            sections[0],
+        );
 
-            let divider = Line::from(Span::styled(
-                "\u{2500}".repeat(inner.width.saturating_sub(2).max(0) as usize),
-                Style::default().fg(palette.muted),
-            ));
-            frame.render_widget(
-                Paragraph::new(divider).style(Style::default().bg(palette.panel)),
-                sections[1],
-            );
+        let divider = Line::from(Span::styled(
+            "\u{2500}".repeat(inner.width.saturating_sub(2).max(0) as usize),
+            Style::default().fg(palette.muted),
+        ));
+        frame.render_widget(
+            Paragraph::new(divider).style(Style::default().bg(palette.panel)),
+            sections[1],
+        );
 
-            let list = List::new(list_items)
-                .highlight_style(Style::default().bg(palette.selection_bg))
-                .highlight_symbol("");
-            frame.render_widget(list, sections[2]);
+        let list = List::new(list_items)
+            .highlight_style(Style::default().bg(palette.selection_bg))
+            .highlight_symbol("");
+        frame.render_widget(list, sections[2]);
 
-            // Footer hint
-            let hint = Line::from(Span::styled(
-                "  j/k navigate | Enter apply | Esc cancel",
-                Style::default().fg(palette.muted),
-            ));
-            frame.render_widget(
-                Paragraph::new(hint).style(Style::default().bg(palette.panel)),
-                sections[1],
-            );
-        }
+        // Footer hint
+        let hint = Line::from(Span::styled(
+            "  j/k navigate | Enter apply | Esc cancel",
+            Style::default().fg(palette.muted),
+        ));
+        frame.render_widget(
+            Paragraph::new(hint).style(Style::default().bg(palette.panel)),
+            sections[1],
+        );
     }
 
     /// Render the sandbox elevation dialog.
@@ -695,9 +676,9 @@ impl App {
         let chunks =
             Layout::horizontal([Constraint::Min(1), Constraint::Length(status_width)]).split(area);
 
-        // Build the left label: [mode sandbox-policy] model-name
+        // Build the left label: [sandbox-policy] model-name
         let sandbox_label = self.mode.sandbox_policy(&self.config.sandbox).label();
-        let mode_tag = format!("[{} {}]", self.mode.as_str(), sandbox_label);
+        let mode_tag = format!("[{}]", sandbox_label);
 
         let model_label = self.active_model.label();
         let full_label = if self.thinking_level.is_supported() {
