@@ -664,14 +664,6 @@ impl App {
             // AgentRuntime::persist_tool_result.
             self.record_tool_result(dialog.tool_call.clone(), result.clone())?;
             self.pending_rejected_tools.push((dialog.tool_call, result));
-        } else if allow {
-            let output = dialog.formatted_output();
-            self.record_tool_result(dialog.tool_call, ToolExecutionResult::new(output))?;
-        } else {
-            self.record_tool_result(
-                dialog.tool_call,
-                ToolExecutionResult::new("Tool 'question' was dismissed by user"),
-            )?;
         }
 
         self.composer.clear();
