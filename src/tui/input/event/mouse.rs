@@ -221,7 +221,7 @@ impl App {
                 let row = (local_y - header_rows) as usize;
                 // Compute scroll offset (same logic as in render_theme_panel)
                 let list_height = inner.height.saturating_sub(2) as usize;
-                let scroll = if panel.selected_index + 1 <= list_height {
+                let scroll = if panel.selected_index < list_height {
                     0
                 } else if panel.selected_index < list_height / 2 {
                     0
@@ -1364,7 +1364,7 @@ impl App {
         let bottom_threshold = inner.y.saturating_add(inner.height.saturating_sub(1));
 
         // Auto-scroll up when cursor is above the input area
-        if self.mouse_selection.pointer().map_or(false, |p| p.y < top_threshold)
+        if self.mouse_selection.pointer().is_some_and(|p| p.y < top_threshold)
             && self.input_scroll_offset > 0
         {
             self.input_scroll_offset -= 1;
@@ -1375,7 +1375,7 @@ impl App {
         let visible_lines = inner.height as usize;
         let total_lines = self.composer.display_line_count(inner.width as usize);
         let max_scroll = total_lines.saturating_sub(visible_lines);
-        if self.mouse_selection.pointer().map_or(false, |p| p.y > bottom_threshold)
+        if self.mouse_selection.pointer().is_some_and(|p| p.y > bottom_threshold)
             && self.input_scroll_offset < max_scroll
         {
             self.input_scroll_offset += 1;

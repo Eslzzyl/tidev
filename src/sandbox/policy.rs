@@ -72,11 +72,10 @@ impl SandboxPolicy {
                 if path.starts_with("/tmp") {
                     return true;
                 }
-                if let Ok(tmpdir) = std::env::var("TMPDIR") {
-                    if path.starts_with(&tmpdir) {
+                if let Ok(tmpdir) = std::env::var("TMPDIR")
+                    && path.starts_with(&tmpdir) {
                         return true;
                     }
-                }
                 false
             }
         }

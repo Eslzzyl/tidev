@@ -357,8 +357,8 @@ impl App {
                     .ok()
                     .and_then(|v| v.get("file_path")?.as_str().map(|s| s.to_string()));
 
-                if let Some(ref path_str) = file_path {
-                    if let Ok(resolved_path) = crate::tooling::builtin::utils::resolve_workspace_path(
+                if let Some(ref path_str) = file_path
+                    && let Ok(resolved_path) = crate::tooling::builtin::utils::resolve_workspace_path(
                         &self.workspace_root,
                         std::path::Path::new(path_str),
                         false,
@@ -409,7 +409,6 @@ impl App {
                             }
                         }
                     }
-                }
             }
 
             if tool_call.name == "question" {

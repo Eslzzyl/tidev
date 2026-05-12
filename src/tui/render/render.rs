@@ -564,7 +564,7 @@ impl App {
                     Style::default().fg(palette.text)
                 };
                 ratatui::widgets::ListItem::new(Line::from(vec![
-                    Span::styled(format!("{}  {}  ", prefix, item.label), style.clone()),
+                    Span::styled(format!("{}  {}  ", prefix, item.label), style),
                     Span::styled(item.description, Style::default().fg(palette.muted)),
                 ]))
                 .style(style)
@@ -584,7 +584,7 @@ impl App {
         );
 
         let divider = Line::from(Span::styled(
-            "\u{2500}".repeat(inner.width.saturating_sub(2).max(0) as usize),
+            "\u{2500}".repeat(inner.width.saturating_sub(2) as usize),
             Style::default().fg(palette.muted),
         ));
         frame.render_widget(
@@ -612,7 +612,7 @@ impl App {
     pub(super) fn render_sandbox_elevation_dialog(&self, frame: &mut Frame<'_>, area: Rect) {
         use ratatui::widgets::{Block, Borders, Clear, Paragraph};
         use ratatui::text::{Line, Span};
-        use ratatui::style::{Style, Modifier};
+        use ratatui::style::Style;
         use ratatui::layout::{Layout, Constraint, Margin};
 
         let palette = self.palette();
@@ -660,7 +660,7 @@ impl App {
 
         // Separator
         let sep = Line::from(Span::styled(
-            "\u{2500}".repeat(inner.width.saturating_sub(2).max(0) as usize),
+            "\u{2500}".repeat(inner.width.saturating_sub(2) as usize),
             Style::default().fg(palette.muted),
         ));
         frame.render_widget(

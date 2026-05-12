@@ -96,7 +96,7 @@ impl App {
 
         // Compute scroll offset so selected_index is visible
         let display_len = panel.display_items.len();
-        let scroll = if panel.selected_index + 1 <= list_height as usize {
+        let scroll = if panel.selected_index < list_height as usize {
             0
         } else if panel.selected_index < list_height as usize / 2 {
             0
@@ -1291,10 +1291,7 @@ impl App {
                         let cursor = if (std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default()
-                            .as_millis()
-                            / 500)
-                            % 2
-                            == 0
+                            .as_millis() / 500).is_multiple_of(2)
                         {
                             "|"
                         } else {

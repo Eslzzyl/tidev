@@ -169,15 +169,14 @@ fn generate_write_policy(policy: &SandboxPolicy) -> String {
             write_rules.push('\n');
 
             // Allow write to TMPDIR if set
-            if let Ok(tmpdir) = std::env::var("TMPDIR") {
-                if !tmpdir.is_empty() {
+            if let Ok(tmpdir) = std::env::var("TMPDIR")
+                && !tmpdir.is_empty() {
                     write_rules.push_str(&format!(
                         r#"(allow file-write* (subpath "{}"))"#,
                         tmpdir
                     ));
                     write_rules.push('\n');
                 }
-            }
 
             if writable_roots.is_empty() {
                 return write_rules;
