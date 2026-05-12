@@ -1,12 +1,12 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
-use std::sync::{Arc, atomic::AtomicBool};
+
 use tokio::runtime::Runtime;
 
 use crate::agent::runtime::ApprovedTool;
 use crate::prompts::SessionMode;
 use crate::session::{ToolCall, ToolExecutionResult};
-use crate::tooling::{QuestionArgs, canonical_tool_name};
+use crate::tooling::QuestionArgs;
 
 use super::App;
 
@@ -79,32 +79,20 @@ impl PermissionDialogState {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-#[allow(dead_code)]
-pub(crate) enum RunningStatus {
-    Running,
-    Completed,
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct RunningToolExecution {
     pub request_id: u64,
     pub tool_call: ToolCall,
-    pub cancel_requested: Arc<AtomicBool>,
-    pub _status: RunningStatus,
 }
 
 impl RunningToolExecution {
     pub(crate) fn new(
         request_id: u64,
         tool_call: ToolCall,
-        cancel_requested: Arc<AtomicBool>,
     ) -> Self {
         Self {
             request_id,
             tool_call,
-            cancel_requested,
-            _status: RunningStatus::Running,
         }
     }
 }
@@ -149,7 +137,6 @@ pub(crate) struct RunningSubagentExecution {
     pub subagent_type: String,
     pub status: SubagentStatus,
     pub current_tool_call: Option<ToolCall>,
-    pub cancel_requested: Arc<AtomicBool>,
 }
 
 impl RunningSubagentExecution {
@@ -161,7 +148,6 @@ impl RunningSubagentExecution {
         child_session_id: uuid::Uuid,
         task_description: String,
         subagent_type: String,
-        cancel_requested: Arc<AtomicBool>,
     ) -> Self {
         Self {
             request_id,
@@ -172,7 +158,6 @@ impl RunningSubagentExecution {
             subagent_type,
             status: SubagentStatus::Thinking,
             current_tool_call: None,
-            cancel_requested,
         }
     }
 }
@@ -487,7 +472,6 @@ impl App {
                 self.running_tool_executions.push(RunningToolExecution::new(
                     self.active_request_id,
                     approval.tool_call.clone(),
-                    Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 ));
 
                 // If this is a task/subagent tool, also track it as a
@@ -510,7 +494,6 @@ impl App {
                             child_session_id,
                             description,
                             subagent_type_str,
-                            Arc::new(std::sync::atomic::AtomicBool::new(false)),
                         ));
                 }
             }
@@ -561,13 +544,6 @@ impl App {
         }
         self.advance_pending_tool_execution();
         self.process_pending_tool_execution(runtime)
-    }
-
-    pub(crate) fn is_readonly_tool(name: &str) -> bool {
-        matches!(
-            canonical_tool_name(name),
-            Some("read" | "glob" | "grep" | "websearch" | "webfetch")
-        )
     }
 
     pub(crate) fn record_tool_result(

@@ -107,96 +107,6 @@ impl App {
         self.workspace_boundary_permissions.insert(path, allowed);
     }
 
-    /// Execute a tool that has been allowed to access outside workspace.
-    fn execute_boundary_allowed_tool(
-        &mut self,
-        tool_call: ToolCall,
-        runtime: &Runtime,
-    ) -> Result<()> {
-        // Handle special cases like question tool
-        if tool_call.name == "question" {
-            let args =
-                match serde_json::from_str::<crate::tooling::QuestionArgs>(&tool_call.arguments) {
-                    Ok(args) => args,
-                    Err(error) => {
-                        self.record_tool_result(
-                            tool_call,
-                            ToolExecutionResult::new(format!(
-                                "Tool failed: failed to decode question arguments: {error}"
-                            )),
-                        )?;
-                        self.advance_pending_tool_execution();
-                        return self.process_pending_tool_execution(runtime);
-                    }
-                };
-
-            if args.questions.is_empty() {
-                self.record_tool_result(
-                    tool_call,
-                    ToolExecutionResult::new(
-                        "Tool failed: question tool requires at least one question",
-                    ),
-                )?;
-                self.advance_pending_tool_execution();
-                return self.process_pending_tool_execution(runtime);
-            }
-
-            self.begin_question_dialog(tool_call, args)?;
-            return Ok(());
-        }
-
-        // Note: Shell commands are handled by RTK system for security,
-        // so we don't need special handling here.
-
-        // Execute the tool with allow_outside=true on a blocking thread
-        // with catch_unwind protection.
-        let handle = self.tools.execute_call_spawned(
-            runtime.handle().clone(),
-            self.store.clone(),
-            self.conversation.session_id,
-            tool_call.clone(),
-            self.mode,
-            true, // allow_outside: this tool has been allowed by user
-        );
-        let mut result = runtime.block_on(handle).unwrap_or_else(|join_err| {
-            ToolExecutionResult::new(format!("Tool failed: {join_err}"))
-        });
-
-        // Inject a note into the output indicating this was an outside-workspace access
-        // that the user approved. Skip if the tool itself failed.
-        if !result.output.starts_with("Tool failed:") {
-            result
-                .output
-                .push_str("\n\n[User approved access to path outside the workspace]");
-        }
-
-        self.record_tool_result(tool_call, result)?;
-        self.advance_pending_tool_execution();
-        self.process_pending_tool_execution(runtime)
-    }
-
-    /// Handle keyboard input for the workspace boundary dialog.
-    pub(crate) fn handle_workspace_boundary_dialog_key(
-        &mut self,
-        key: KeyEvent,
-        runtime: &Runtime,
-    ) -> Result<()> {
-        let decision = match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => Some(BoundaryDecision::AllowOnce),
-            KeyCode::Char('a') | KeyCode::Char('A') => Some(BoundaryDecision::AllowUntilExit),
-            KeyCode::Char('n') | KeyCode::Char('N') => Some(BoundaryDecision::DenyOnce),
-            KeyCode::Char('d') | KeyCode::Char('D') => Some(BoundaryDecision::DenyUntilExit),
-            KeyCode::Esc => Some(BoundaryDecision::DenyOnce),
-            _ => None,
-        };
-
-        if let Some(decision) = decision {
-            self.resolve_workspace_boundary_dialog(decision, runtime)?;
-        }
-
-        Ok(())
-    }
-
     /// Resolve the workspace boundary dialog with the user's decision.
     fn resolve_workspace_boundary_dialog(
         &mut self,
@@ -223,23 +133,49 @@ impl App {
         }
 
         if allowed {
-            // Check if the tool is read-only; dispatch async instead of inline execute
-            if Self::is_readonly_tool(&dialog.pending.tool_call.name) {
-                // If it's also a "question" tool, handle via dialog (fall through below)
-                if dialog.pending.tool_call.name != "question" {
-                    self.workspace_boundary_approved
-                        .insert(dialog.pending.tool_call.id.clone(), true);
-                    self.pending_tool_execution
-                        .as_mut()
-                        .unwrap()
-                        .add_ready(dialog.pending.tool_call);
+            // Handle "question" tool via dialog (needs TUI interaction)
+            if dialog.pending.tool_call.name == "question" {
+                let args = match serde_json::from_str::<crate::tooling::QuestionArgs>(
+                    &dialog.pending.tool_call.arguments,
+                ) {
+                    Ok(args) => args,
+                    Err(error) => {
+                        self.record_tool_result(
+                            dialog.pending.tool_call.clone(),
+                            ToolExecutionResult::new(format!(
+                                "Tool failed: failed to decode question arguments: {error}"
+                            )),
+                        )?;
+                        self.advance_pending_tool_execution();
+                        return self.process_pending_tool_execution(runtime);
+                    }
+                };
+
+                if args.questions.is_empty() {
+                    self.record_tool_result(
+                        dialog.pending.tool_call.clone(),
+                        ToolExecutionResult::new(
+                            "Tool failed: question tool requires at least one question",
+                        ),
+                    )?;
                     self.advance_pending_tool_execution();
                     return self.process_pending_tool_execution(runtime);
                 }
+
+                self.begin_question_dialog(dialog.pending.tool_call, args)?;
+                return Ok(());
             }
-            // Execute the tool immediately with allow_outside=true
-            self.execute_boundary_allowed_tool(dialog.pending.tool_call, runtime)?;
-            return Ok(());
+
+            // For all other tools, route through normal runtime flow
+            // via send_permission_approval, which propagates allow_outside.
+            self.workspace_boundary_approved
+                .insert(dialog.pending.tool_call.id.clone(), true);
+            self.pending_tool_execution
+                .as_mut()
+                .unwrap()
+                .add_ready(dialog.pending.tool_call);
+            self.advance_pending_tool_execution();
+            return self.process_pending_tool_execution(runtime);
         } else {
             // Record the denial with a message that won't trigger error rendering
             let output = format!(
@@ -252,5 +188,27 @@ impl App {
 
         // Continue processing pending tools
         self.process_pending_tool_execution(runtime)
+    }
+
+    /// Handle keyboard input for the workspace boundary dialog.
+    pub(crate) fn handle_workspace_boundary_dialog_key(
+        &mut self,
+        key: KeyEvent,
+        runtime: &Runtime,
+    ) -> Result<()> {
+        let decision = match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => Some(BoundaryDecision::AllowOnce),
+            KeyCode::Char('a') | KeyCode::Char('A') => Some(BoundaryDecision::AllowUntilExit),
+            KeyCode::Char('n') | KeyCode::Char('N') => Some(BoundaryDecision::DenyOnce),
+            KeyCode::Char('d') | KeyCode::Char('D') => Some(BoundaryDecision::DenyUntilExit),
+            KeyCode::Esc => Some(BoundaryDecision::DenyOnce),
+            _ => None,
+        };
+
+        if let Some(decision) = decision {
+            self.resolve_workspace_boundary_dialog(decision, runtime)?;
+        }
+
+        Ok(())
     }
 }

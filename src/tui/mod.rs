@@ -15,7 +15,6 @@ use std::{
     cell::{Cell, RefCell},
     env, io,
     path::{Path, PathBuf},
-    sync::atomic::Ordering,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };

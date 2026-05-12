@@ -29,9 +29,6 @@ impl App {
     }
 
     pub(crate) fn cancel_running_subagents(&mut self) {
-        for execution in &self.running_subagent_executions {
-            execution.cancel_requested.store(true, Ordering::SeqCst);
-        }
         self.running_subagent_executions.clear();
     }
 
@@ -74,8 +71,6 @@ impl App {
             let cancel_output = "User cancelled the request".to_string();
 
             for execution in self.running_subagent_executions.drain(..) {
-                execution.cancel_requested.store(true, Ordering::SeqCst);
-
                 let result = ToolExecutionResult::new(cancel_output.clone());
                 let msg = Message::tool_result(
                     execution.tool_call.id.clone(),
@@ -113,8 +108,6 @@ impl App {
             let cancel_output = "User cancelled the request".to_string();
 
             for running in self.running_tool_executions.drain(..) {
-                running.cancel_requested.store(true, Ordering::SeqCst);
-
                 let result = ToolExecutionResult::new(cancel_output.clone());
                 let msg = Message::tool_result(
                     running.tool_call.id.clone(),
