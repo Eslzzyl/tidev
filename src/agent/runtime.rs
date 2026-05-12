@@ -142,10 +142,9 @@ impl AgentRuntime {
     pub fn compose_system_prompt(
         &mut self,
         base_prompt: &str,
-        mode: SessionMode,
+        mode: Option<SessionMode>,
     ) -> (String, Vec<String>) {
         let base_prompt = base_prompt.trim();
-        let mode_reminder = mode.reminder();
 
         let (instruction_prompt, sources, new_cache) =
             instructions::system_prompt_and_sources_with_cache(
@@ -168,10 +167,12 @@ impl AgentRuntime {
             }
             prompt.push_str(&instruction_prompt);
         }
-        if !prompt.is_empty() {
-            prompt.push_str("\n\n");
+        if let Some(mode) = mode {
+            if !prompt.is_empty() {
+                prompt.push_str("\n\n");
+            }
+            prompt.push_str(mode.reminder());
         }
-        prompt.push_str(mode_reminder);
 
         // Environment info (same format as TUI)
         let system_info = SystemInfo::detect();
@@ -942,7 +943,7 @@ impl AgentRuntime {
 
             // Compose + build
             let (system_prompt, _sources) =
-                self.compose_system_prompt(&child_model.system_prompt, SessionMode::Build);
+                self.compose_system_prompt(&child_model.system_prompt, None);
             let mut model_for_turn = child_model.clone();
             model_for_turn.system_prompt = system_prompt;
             let request_messages =
@@ -1268,7 +1269,7 @@ impl AgentRuntime {
             };
 
             // 2. Compose system prompt
-            let (system_prompt, _sources) = self.compose_system_prompt(&model.system_prompt, mode);
+            let (system_prompt, _sources) = self.compose_system_prompt(&model.system_prompt, Some(mode));
 
             // 3. Build request messages
             let request_messages = self.build_request_messages(&db_messages, context_manager, mode);
@@ -1362,7 +1363,7 @@ impl AgentRuntime {
                         session_id
                     );
                     let (system_prompt, _sources) =
-                        self.compose_system_prompt(&model.system_prompt, mode);
+                        self.compose_system_prompt(&model.system_prompt, Some(mode));
                     let mut compact_model = model.clone();
                     compact_model.system_prompt = system_prompt;
                     let ctx_config = ContextManagerConfig {

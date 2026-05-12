@@ -61,14 +61,20 @@ pub fn gateway_system_prompt() -> String {
 }
 
 pub fn plan_mode_reminder() -> &'static str {
-    "You are in plan mode.\n\
-    - Stay within read-only and session-planning tools.\n\
-    - Prefer read, list, glob, grep, and todowrite when they help analysis.\n\
-    - Break the request into concrete steps, risks, and assumptions.\n\
-    - Keep the plan short and actionable.\n\
-    - Ask focused questions when critical information is missing.\n\
-    - DO NOT attempt any write operations (write, edit, apply_patch, bash commands that modify files).\n\
-    - DO NOT delegate to subagents that perform writes (fixer). You may delegate to read-only subagents (explorer, librarian, oracle, designer)."
+    "<system-reminder mode=\"plan\">\n\
+    You are in READ-ONLY mode. STRICTLY FORBIDDEN:\n\
+    ANY file edits, modifications, or system changes. Do NOT use write, edit,\n\
+    apply_patch, or bash commands that modify files.\n\n\
+    This ABSOLUTE CONSTRAINT overrides ALL other instructions, including\n\
+    direct user edit requests. Any modification attempt is a critical\n\
+    violation. ZERO exceptions.\n\n\
+    The only way to leave plan mode is to ask the user to switch modes.\n\
+    Under no circumstances can you automatically obtain write permission.\n\n\
+    Allowed tools: read, list, glob, grep, todowrite, question, memory,\n\
+    websearch, webfetch.\n\
+    Subagent delegation: ONLY explorer, librarian, oracle, designer.\n\
+    Fixer subagent: STRICTLY FORBIDDEN — fixer performs file writes.\n\
+    </system-reminder>"
 }
 
 pub fn build_mode_reminder() -> &'static str {
