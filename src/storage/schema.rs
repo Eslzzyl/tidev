@@ -1,4 +1,4 @@
-pub const SCHEMA_VERSION: i64 = 25;
+pub const SCHEMA_VERSION: i64 = 26;
 
 /// The memories table SQL, exported so MemoryStore can create it independently.
 pub const MEMORIES_TABLE_SQL: &str = r#"
@@ -103,22 +103,6 @@ CREATE INDEX IF NOT EXISTS idx_messages_session_created_at
 
 CREATE INDEX IF NOT EXISTS idx_messages_session_id
     ON messages(session_id);
-
-CREATE TABLE IF NOT EXISTS tool_events (
-    id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    message_id TEXT NOT NULL,
-    tool_name TEXT NOT NULL,
-    input_json BLOB NOT NULL,
-    output_text BLOB NOT NULL,
-    created_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_tool_events_session_message
-    ON tool_events(session_id, message_id);
-
-CREATE INDEX IF NOT EXISTS idx_tool_events_session_created_at
-    ON tool_events(session_id, created_at);
 
 CREATE TABLE IF NOT EXISTS todos (
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -238,8 +222,6 @@ CREATE INDEX IF NOT EXISTS idx_memories_usage
 ///   - `messages.reasoning`
 ///   - `messages.patch_files`
 ///   - `messages.file_diffs`
-///   - `tool_events.input_json`
-///   - `tool_events.output_text`
 ///   - `session_reverts.redo_snapshot`
 pub const EXPORT_SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS meta (
@@ -316,22 +298,6 @@ CREATE INDEX IF NOT EXISTS idx_messages_session_created_at
 
 CREATE INDEX IF NOT EXISTS idx_messages_session_id
     ON messages(session_id);
-
-CREATE TABLE IF NOT EXISTS tool_events (
-    id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    message_id TEXT NOT NULL,
-    tool_name TEXT NOT NULL,
-    input_json TEXT NOT NULL,
-    output_text TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_tool_events_session_message
-    ON tool_events(session_id, message_id);
-
-CREATE INDEX IF NOT EXISTS idx_tool_events_session_created_at
-    ON tool_events(session_id, created_at);
 
 CREATE TABLE IF NOT EXISTS todos (
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

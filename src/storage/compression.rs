@@ -12,8 +12,6 @@
 //! | `messages` | `patch_files` | BLOB | Compressed |
 //! | `messages` | `file_diffs` | BLOB | Compressed |
 //! | `memories` | `content` | BLOB | Compressed |
-//! | `tool_events` | `input_json` | BLOB | Compressed |
-//! | `tool_events` | `output_text` | BLOB | Compressed |
 //! | `session_reverts` | `redo_snapshot` | BLOB | Compressed |
 //!
 //! With zstd level 3 we expect a 3–5× reduction, saving significant
@@ -47,7 +45,7 @@ pub fn decompress_text(data: &[u8]) -> String {
 
 /// Read a column that may be either TEXT or BLOB and decompress it.
 ///
-/// Use this in `load_messages` / `load_tool_event_output` when you do
+/// Use this in `load_messages` when you do
 /// not know whether the stored value is compressed or not (handles
 /// old databases with TEXT columns gracefully).
 pub fn read_decompress_column(data: &[u8]) -> String {

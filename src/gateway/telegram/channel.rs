@@ -1123,11 +1123,12 @@ impl TelegramChannel {
             .filter(|m| m.role == MessageRole::Assistant)
             .count();
 
-        // Get tool call count from database
-        let tool_call_count = self
-            .store
-            .count_tool_events(conversation.session_id)
-            .unwrap_or(0);
+        // Get tool call count from messages
+        let tool_call_count = conversation
+            .messages
+            .iter()
+            .filter(|m| m.role == MessageRole::Tool)
+            .count();
 
         // Get token stats from database
         let token_stats = self

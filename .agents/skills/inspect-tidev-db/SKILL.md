@@ -1,11 +1,11 @@
 ---
 name: inspect-tidev-db
-description: Debug tidev's database by searching session titles, exporting decompressed copies, and inspecting messages/tool_events. Use when investigating session data, diagnosing storage issues, or auditing conversation history.
+description: Debug tidev's database by searching session titles, exporting decompressed copies, and inspecting messages. Use when investigating session data, diagnosing storage issues, or auditing conversation history.
 ---
 
 # Inspect Tidev Database
 
-A structured workflow for reading and debugging tidev's session database. The main database at `~/.local/share/tidev/sessions.sqlite3` stores certain columns (e.g. `messages.content`, `tool_events.output_text`) as zstd-compressed BLOBs, so you cannot read message content directly. This skill explains how to work around that.
+A structured workflow for reading and debugging tidev's session database. The main database at `~/.local/share/tidev/sessions.sqlite3` stores certain columns (e.g. `messages.content`) as zstd-compressed BLOBs, so you cannot read message content directly. This skill explains how to work around that.
 
 ## Prerequisites
 
@@ -31,7 +31,6 @@ A structured workflow for reading and debugging tidev's session database. The ma
 |---|---|---|
 | `messages` | `content`, `reasoning` | Main conversation content |
 | `messages` | `patch_files`, `file_diffs` | File patches (may be NULL) |
-| `tool_events` | `input_json`, `output_text` | Tool calls and results |
 | `session_reverts` | `redo_snapshot` | Snapshot for undo |
 | `todos` | `content` | Task list items |
 | `memories` | `content` | Memory store |
@@ -95,15 +94,6 @@ sqlite3 "$OUTFILE" \
 ```bash
 sqlite3 "$OUTFILE" \
   "SELECT role, COUNT(*) AS count FROM messages GROUP BY role;"
-```
-
-**List tool events (tool calls + results):**
-```bash
-sqlite3 "$OUTFILE" \
-  "SELECT tool_name, \
-          substr(input_json,1,150) AS input, \
-          substr(output_text,1,150) AS output \
-   FROM tool_events ORDER BY created_at;"
 ```
 
 **Get full content of a specific message (by ID):**

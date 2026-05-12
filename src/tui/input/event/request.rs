@@ -84,13 +84,6 @@ impl App {
                 );
 
                 // Store in DB for parent session
-                let _ = self.store.append_tool_event(
-                    parent_session_id,
-                    msg.id,
-                    &execution.tool_call.name,
-                    &execution.tool_call.arguments,
-                    &cancel_output,
-                );
                 let _ = self.store.append_message(parent_session_id, &msg);
 
                 if is_in_subsession {
@@ -129,13 +122,6 @@ impl App {
                     result,
                 );
 
-                let _ = self.store.append_tool_event(
-                    session_id,
-                    msg.id,
-                    &running.tool_call.name,
-                    &running.tool_call.arguments,
-                    &cancel_output,
-                );
                 let _ = self.store.append_message(session_id, &msg);
                 self.conversation.messages.push(msg);
             }

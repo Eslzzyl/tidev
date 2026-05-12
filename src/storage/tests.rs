@@ -172,53 +172,7 @@ fn child_session_round_trip_records_parent() {
 }
 
 #[test]
-fn tool_event_output_round_trip() {
-    let path = std::env::temp_dir().join(format!(
-        "tidev-session-store-tool-output-{}.sqlite3",
-        uuid::Uuid::new_v4()
-    ));
-
-    {
-        let store = SessionStore::open(&path).expect("store should open");
-        let session_id = uuid::Uuid::new_v4();
-        let message_id = uuid::Uuid::new_v4();
-
-        store
-            .create_session(
-                session_id,
-                Path::new("/tmp/workspace"),
-                "openai",
-                "OpenAI",
-                "gpt-4o",
-                "GPT-4o",
-                "Untitled session",
-            )
-            .expect("session should be created");
-
-        store
-            .append_tool_event(
-                session_id,
-                message_id,
-                "grep",
-                r#"{"pattern":"foo"}"#,
-                "match-one\nmatch-two",
-            )
-            .expect("tool event should append");
-
-        let output = store
-            .load_tool_event_output(session_id, message_id)
-            .expect("tool output should load")
-            .expect("tool output should exist");
-
-        assert_eq!(output, "match-one\nmatch-two");
-    }
-
-    let _ = std::fs::remove_file(path);
-}
-
-#[test]
-fn copy_tool_permissions_inherits_parent_permissions() {
-    let path = std::env::temp_dir().join(format!(
+fn copy_tool_permissions_inherits_parent_permissions() {    let path = std::env::temp_dir().join(format!(
         "tidev-session-store-permissions-{}.sqlite3",
         uuid::Uuid::new_v4()
     ));

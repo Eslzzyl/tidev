@@ -600,41 +600,10 @@ impl SessionStore {
 
         for message_id in message_ids {
             self.write_conn.execute(
-                "DELETE FROM tool_events WHERE session_id = ?1 AND message_id = ?2",
-                params![session_id.to_string(), message_id.to_string()],
-            )?;
-            self.write_conn.execute(
                 "DELETE FROM messages WHERE session_id = ?1 AND id = ?2",
                 params![session_id.to_string(), message_id.to_string()],
             )?;
         }
-
-        self.touch_session(session_id)?;
-        Ok(())
-    }
-
-    pub fn append_tool_event(
-        &self,
-        session_id: Uuid,
-        message_id: Uuid,
-        tool_name: &str,
-        input_json: &str,
-        output_text: &str,
-    ) -> Result<()> {
-        let compressed_output = compress_text(output_text);
-        let compressed_input = compress_text(input_json);
-        self.write_conn.execute(
-            "INSERT INTO tool_events (id, session_id, message_id, tool_name, input_json, output_text, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
-                Uuid::new_v4().to_string(),
-                session_id.to_string(),
-                message_id.to_string(),
-                tool_name,
-                compressed_input,
-                compressed_output,
-                Utc::now().to_rfc3339(),
-            ],
-        )?;
 
         self.touch_session(session_id)?;
         Ok(())
@@ -847,36 +816,6 @@ impl SessionStore {
             .map(|bytes| decompress_text(&bytes));
 
         Ok(snapshot)
-    }
-
-    pub fn load_tool_event_output(
-        &self,
-        session_id: Uuid,
-        message_id: Uuid,
-    ) -> Result<Option<String>> {
-        let mut statement = self.read_conn.prepare(
-            "SELECT output_text FROM tool_events WHERE session_id = ?1 AND message_id = ?2 ORDER BY created_at DESC LIMIT 1",
-        )?;
-
-        let output = statement
-            .query_row(
-                params![session_id.to_string(), message_id.to_string()],
-                |row| read_blob_maybe_text(row, 0),
-            )
-            .optional()?;
-
-        Ok(output)
-    }
-
-    /// Count total tool events (tool calls) for a session.
-    pub fn count_tool_events(&self, session_id: Uuid) -> Result<usize> {
-        let mut statement = self
-            .write_conn
-            .prepare("SELECT COUNT(*) FROM tool_events WHERE session_id = ?1")?;
-
-        let count: i64 = statement.query_row(params![session_id.to_string()], |row| row.get(0))?;
-
-        Ok(count as usize)
     }
 
     /// Get token statistics for a session.
@@ -1830,40 +1769,6 @@ impl SessionStore {
                         if msg.rtk_rewritten { 1_i64 } else { 0_i64 },
                         thinking_level,
                     ])?;
-                }
-            }
-        }
-
-        // 7. tool_events ── decompress output_text
-        {
-            let mut stmt = self.read_conn.prepare(
-                "SELECT id, session_id, message_id, tool_name, input_json, output_text, created_at FROM tool_events WHERE session_id = ?1 ORDER BY created_at ASC",
-            )?;
-            let mut insert = tx.prepare(
-                "INSERT OR REPLACE INTO tool_events (id, session_id, message_id, tool_name, input_json, output_text, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            )?;
-            for sid in &session_id_strs {
-                let rows = stmt.query_map(params![sid], |row| {
-                    let id: String = row.get(0)?;
-                    let session_id: String = row.get(1)?;
-                    let message_id: String = row.get(2)?;
-                    let tool_name: String = row.get(3)?;
-                    let input_json = read_blob_maybe_text(row, 4)?;
-                    let output_text = read_blob_maybe_text(row, 5)?;
-                    let created_at: String = row.get(6)?;
-                    Ok((
-                        id,
-                        session_id,
-                        message_id,
-                        tool_name,
-                        input_json,
-                        output_text,
-                        created_at,
-                    ))
-                })?;
-                for row in rows {
-                    let (id, sid2, msg_id, tname, input, output, created) = row?;
-                    insert.execute(params![id, sid2, msg_id, tname, input, output, created])?;
                 }
             }
         }

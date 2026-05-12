@@ -660,9 +660,8 @@ impl App {
             };
             let result = ToolExecutionResult::new(output);
             // Also add the tool result to the in-memory conversation so it
-            // renders in the TUI tool cards.  record_tool_result with
-            // is_runtime_flow = true skips persistence (avoiding duplication
-            // with the runtime's persist_tool_result).
+            // renders in the TUI tool cards.  Persistence is handled by
+            // AgentRuntime::persist_tool_result.
             self.record_tool_result(dialog.tool_call.clone(), result.clone())?;
             self.pending_rejected_tools.push((dialog.tool_call, result));
         } else if allow {

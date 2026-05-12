@@ -575,7 +575,6 @@ impl App {
         tool_call: ToolCall,
         result: ToolExecutionResult,
     ) -> Result<()> {
-        let is_runtime_flow = self.pending_permission_rx.is_some();
         let display_result = if tool_call.name == "task" {
             // Subagent (task) results should not be preview-truncated;
             // the caller expects the complete output for correct decision-making.
@@ -583,24 +582,13 @@ impl App {
         } else {
             result.preview_for_storage(Some(tool_call.name.as_str()))
         };
-        let output_for_tool_event = display_result.output.clone();
         let message = crate::session::Message::tool_result(
             tool_call.id,
             tool_call.name.clone(),
             display_result,
         );
 
-        // In runtime flow, persistence is handled by AgentRuntime::persist_tool_result.
-        // We only need to append the tool event for lookup purposes.
-        if !is_runtime_flow {
-            self.store.append_tool_event(
-                self.conversation.session_id,
-                message.id,
-                &tool_call.name,
-                &tool_call.arguments,
-                &output_for_tool_event,
-            )?;
-        }
+        // Persistence is handled by AgentRuntime::persist_tool_result.
 
         if !result.instruction_sources.is_empty() {
             self.update_loaded_instruction_sources(&result.instruction_sources)
@@ -608,10 +596,6 @@ impl App {
         }
 
         self.conversation.push(message.clone());
-        if !is_runtime_flow {
-            self.store
-                .append_message(self.conversation.session_id, &message)?;
-        }
 
         // Invalidate layout index and render cache since we added a new message
         self.message_layout_index.borrow_mut().valid = false;
