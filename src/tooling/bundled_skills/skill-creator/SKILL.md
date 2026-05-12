@@ -12,7 +12,7 @@ Guide for creating and maintaining AgentSkills.
 Each skill is a directory containing a `SKILL.md` file (required) and optional companion files:
 
 ```
-.agent/skills/<name>/
+.agents/skills/<name>/
 ├── SKILL.md                  # Required: YAML frontmatter + markdown instructions
 ├── references/               # Optional: reference docs, examples, guides
 │   ├── guide.md
