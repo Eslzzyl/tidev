@@ -13,8 +13,9 @@
 /// Perform process hardening for a sandboxed child process.
 ///
 /// This is intended to be called via `Command::pre_exec()` which runs in the
-/// forked child before exec(). On success, the process is hardened; on failure,
-/// the function returns an Err that causes the fork to abort.
+/// forked child before exec().  Only async-signal-safe operations are
+/// performed here — anything that allocates memory (e.g. env var removal)
+/// is done in the parent process before `spawn()`.
 ///
 /// # Safety
 ///
@@ -31,12 +32,6 @@ pub unsafe fn pre_exec_hardening() -> Result<(), std::io::Error> {
 
     #[cfg(any(target_os = "linux", target_os = "android"))]
     disable_ptrace_linux()?;
-
-    // Remove dangerous environment variables that could be used for library
-    // injection or information leakage.
-    // SAFETY: remove_env operations are safe in the single-threaded child
-    // process context where pre_exec_hardening runs.
-    unsafe { remove_dangerous_env_vars(); }
 
     Ok(())
 }
@@ -95,18 +90,30 @@ fn disable_ptrace_macos() -> Result<(), std::io::Error> {
 
 /// Remove environment variables that are dangerous in a sandboxed context.
 ///
-/// # Safety
-///
-/// Must only be called in the child process after fork(), before exec().
-unsafe fn remove_dangerous_env_vars() {
-    #[cfg(target_os = "linux")]
-    unsafe { remove_env_vars_with_prefix("LD_"); }
+/// This is called in the **parent** process before spawning the child,
+/// NOT in `pre_exec`.  Removing env vars via `std::env::remove_var`
+/// inside `pre_exec` is NOT async-signal-safe and can deadlock after
+/// `fork()` if another thread was holding the `malloc` lock.
+pub fn remove_dangerous_env_vars_parent() {
+    let keys_to_remove: Vec<String> = std::env::vars()
+        .filter_map(|(key, _)| {
+            #[cfg(target_os = "linux")]
+            if key.starts_with("LD_") {
+                return Some(key);
+            }
+            #[cfg(target_os = "macos")]
+            if key.starts_with("DYLD_")
+                || key.starts_with("MallocStackLogging")
+                || key.starts_with("MallocLogFile")
+            {
+                return Some(key);
+            }
+            None
+        })
+        .collect();
 
-    #[cfg(target_os = "macos")]
-    unsafe {
-        remove_env_vars_with_prefix("DYLD_");
-        remove_env_vars_with_prefix("MallocStackLogging");
-        remove_env_vars_with_prefix("MallocLogFile");
+    for key in &keys_to_remove {
+        unsafe { std::env::remove_var(key); }
     }
 
     // Also remove common injection variables on all platforms
@@ -116,54 +123,38 @@ unsafe fn remove_dangerous_env_vars() {
     }
 }
 
-/// Remove all environment variables whose name starts with the given prefix.
-///
-/// # Safety
-///
-/// Must only be called in the child process after fork(), before exec().
-unsafe fn remove_env_vars_with_prefix(prefix: &str) {
-    let keys_to_remove: Vec<std::ffi::OsString> = std::env::vars_os()
-        .filter_map(|(key, _)| {
-            let key_str = key.to_string_lossy();
-            if key_str.starts_with(prefix) {
-                Some(key)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    for key in keys_to_remove {
-        unsafe { std::env::remove_var(key); }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_remove_env_vars_with_prefix() {
-        unsafe { std::env::set_var("LD_TEST_VAR", "1"); }
+    fn test_remove_dangerous_env_vars() {
+        unsafe { std::env::set_var("LD_PRELOAD", "/evil.so"); }
+        unsafe { std::env::set_var("LD_LIBRARY_PATH", "/evil"); }
         unsafe { std::env::set_var("PATH", "/usr/bin"); }
-        unsafe { std::env::set_var("DYLD_TEST", "1"); }
+        unsafe { std::env::set_var("DYLD_INSERT_LIBRARIES", "/evil.dylib"); }
 
-        unsafe { remove_env_vars_with_prefix("LD_"); }
+        remove_dangerous_env_vars_parent();
 
-        assert!(std::env::var("LD_TEST_VAR").is_err());
+        // These should be removed
+        assert!(std::env::var("LD_PRELOAD").is_err());
+        assert!(std::env::var("LD_LIBRARY_PATH").is_err());
+        assert!(std::env::var("DYLD_INSERT_LIBRARIES").is_err());
+
+        // These should still exist
         assert_eq!(std::env::var("PATH").unwrap(), "/usr/bin");
-        assert_eq!(std::env::var("DYLD_TEST").unwrap(), "1");
 
         // Cleanup
         unsafe {
-            std::env::remove_var("LD_TEST_VAR");
-            std::env::remove_var("DYLD_TEST");
+            std::env::remove_var("LD_PRELOAD");
+            std::env::remove_var("LD_LIBRARY_PATH");
+            std::env::remove_var("DYLD_INSERT_LIBRARIES");
         }
     }
 
     #[test]
-    fn test_remove_env_vars_with_prefix_empty() {
-        // Should not crash when removing from clean env
-        unsafe { remove_env_vars_with_prefix("NONEXISTENT_"); }
+    fn test_remove_dangerous_env_vars_empty() {
+        // Should not crash when no dangerous vars are present
+        remove_dangerous_env_vars_parent();
     }
 }

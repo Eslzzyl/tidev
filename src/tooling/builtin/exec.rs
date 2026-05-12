@@ -17,7 +17,7 @@ use std::os::unix::process::CommandExt;
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::utils::truncate_in_place;
-use crate::sandbox::{CommandSpec, SandboxManager, SandboxPolicy, pre_exec_hardening};
+use crate::sandbox::{CommandSpec, SandboxManager, SandboxPolicy, pre_exec_hardening, remove_dangerous_env_vars_parent};
 use crate::session::{BackendEvent, tool_output_preview};
 use crate::tooling::tools::{BashArgs, decode_tool_args};
 use crate::tooling::{ToolDefinition, ToolPermission};
@@ -132,11 +132,23 @@ fn run_shell_inner(
 
         let mut cmd = std::process::Command::new(exec_env.program());
         cmd.args(exec_env.args())
-            .env_clear()
-            .envs(&exec_env.env)
             .current_dir(&exec_env.cwd)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+
+        // Apply environment variables from the sandbox spec on top of
+        // inherited environment.  We do NOT call env_clear() here —
+        // remove_dangerous_env_vars_parent() handles stripping dangerous
+        // vars (LD_PRELOAD, DYLD_*, …) in the parent before spawn.
+        if !exec_env.env.is_empty() {
+            cmd.envs(&exec_env.env);
+        }
+
+        // Remove dangerous environment variables in the parent process
+        // (safe, before fork).  The child inherits the cleaned environment.
+        // MUST NOT be done in pre_exec — anything that allocates memory
+        // can deadlock after fork() in a multi-threaded process.
+        remove_dangerous_env_vars_parent();
 
         // Determine if Landlock should be applied in the child process
         // (Landlock requires in-process syscalls before exec).

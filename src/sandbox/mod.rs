@@ -38,6 +38,7 @@ use std::time::Duration;
 
 pub use policy::SandboxPolicy;
 pub use process_hardening::pre_exec_hardening;
+pub use process_hardening::remove_dangerous_env_vars_parent;
 
 // ---------------------------------------------------------------------------
 // CommandSpec
