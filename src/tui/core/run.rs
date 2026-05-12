@@ -29,7 +29,7 @@ impl App {
         let store = SessionStore::open(paths.default_database_path())?;
         let memory_store = Arc::new(MemoryStore::open(paths.default_database_path())?);
         let llm = LlmClient::new()?;
-        let http_client = Arc::new(reqwest::Client::new());
+        let http_client = Arc::new(llm.http().clone());
         let theme = ThemeManager::new(&config.theme);
         let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
         let file_read_tracker = Arc::new(FileReadTracker::new());
