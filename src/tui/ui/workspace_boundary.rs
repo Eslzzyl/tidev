@@ -73,11 +73,15 @@ pub(crate) fn extract_boundary_violation_path(
 
     let path_buf: PathBuf = match canonical_name {
         "read" | "write" | "edit" | "glob" | "grep" => {
-            let path_str = args.get("path")?.as_str()?;
+            // read/write/edit use "file_path", glob/grep use "path" (optional)
+            let path_str = args
+                .get("file_path")
+                .or_else(|| args.get("path"))?
+                .as_str()?;
             PathBuf::from(path_str)
         }
         "apply_patch" => {
-            let patch = args.get("patch")?.as_str()?;
+            let patch = args.get("patch_text")?.as_str()?;
             PathBuf::from(crate::tooling::extract_file_path_from_patch(patch)?)
         }
         "bash" => return None,
