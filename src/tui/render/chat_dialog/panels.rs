@@ -1280,18 +1280,39 @@ impl App {
                         None => "All types".to_string(),
                         Some(t) => format!("Filter: {}", t.as_str()),
                     };
-                    let header_lines = vec![
-                        Line::from(vec![Span::styled(
-                            "  Name",
-                            Style::default()
-                                .fg(palette.accent)
-                                .add_modifier(Modifier::BOLD),
-                        )]),
-                        Line::from(Span::styled(
-                            format!("  {}", filter_text),
+                    let mut header_lines: Vec<Line<'static>> = Vec::new();
+                    header_lines.push(Line::from(vec![Span::styled(
+                        "  Name",
+                        Style::default()
+                            .fg(palette.accent)
+                            .add_modifier(Modifier::BOLD),
+                    )]));
+                    if panel.search_active {
+                        let cursor = if (std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis()
+                            / 500)
+                            % 2
+                            == 0
+                        {
+                            "|"
+                        } else {
+                            " "
+                        };
+                        header_lines.push(Line::from(vec![
+                            Span::styled("  🔍 ", Style::default().fg(palette.accent)),
+                            Span::styled(
+                                format!("{}{}", panel.query, cursor),
+                                Style::default().fg(palette.text),
+                            ),
+                        ]));
+                    } else {
+                        header_lines.push(Line::from(Span::styled(
+                            format!("  {}  ·  / to search", filter_text),
                             Style::default().fg(palette.muted),
-                        )),
-                    ];
+                        )));
+                    }
                     let header_height = header_lines.len() as u16;
                     frame.render_widget(
                         Paragraph::new(header_lines).style(Style::default().bg(palette.panel)),
@@ -1629,8 +1650,11 @@ impl App {
                 // Footer help
                 let footer_y = sections[1].y;
                 let help_text = match panel.focus {
+                    PanelFocus::List if panel.search_active => {
+                        "  Type to search · Esc: clear/exit · Enter: confirm · ↑↓: navigate"
+                    }
                     PanelFocus::List => {
-                        "  ↑↓: navigate · ←→: scroll preview · Enter: edit · a: add · e: edit overlay · d: delete · r: filter · Esc: close"
+                        "  ↑↓: navigate · ←→: scroll preview · /: search · Enter: edit · a: add · e: edit overlay · d: delete · r: filter · Esc: close"
                     }
                     PanelFocus::ContentEdit => {
                         "  ↑↓←→: move cursor · Enter: save · Esc: cancel · Shift+Enter: newline"

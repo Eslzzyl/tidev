@@ -57,6 +57,10 @@ pub struct MemoryPanelState {
     pub edit_type: MemoryType,
     pub edit_tags: String,
     pub edit_id: Option<Uuid>,
+    /// Search query text (empty = no search filter). Typed when search is active.
+    pub query: String,
+    /// Whether search input mode is active. When true, printable chars go to query.
+    pub search_active: bool,
 }
 
 impl Default for MemoryPanelState {
@@ -85,6 +89,8 @@ impl MemoryPanelState {
             edit_type: MemoryType::Project,
             edit_tags: String::new(),
             edit_id: None,
+            query: String::new(),
+            search_active: false,
         }
     }
 
@@ -97,10 +103,19 @@ impl MemoryPanelState {
     }
 
     pub fn filtered_indices(&self) -> Vec<usize> {
+        let q = self.query.trim().to_lowercase();
         self.memories
             .iter()
             .enumerate()
             .filter(|(_, m)| self.filter_type.is_none_or(|t| m.memory_type == t))
+            .filter(|(_, m)| {
+                if q.is_empty() {
+                    return true;
+                }
+                m.title.to_lowercase().contains(&q)
+                    || m.content.to_lowercase().contains(&q)
+                    || m.tags.iter().any(|t| t.to_lowercase().contains(&q))
+            })
             .map(|(i, _)| i)
             .collect()
     }
@@ -273,6 +288,54 @@ impl App {
         panel: MemoryPanelState,
         key: KeyEvent,
     ) -> Result<()> {
+        // If search is active, intercept printable keys and special keys
+        if panel.search_active {
+            match key.code {
+                KeyCode::Esc => {
+                    let mut next = panel;
+                    if !next.query.is_empty() {
+                        // Clear query and stay in search mode
+                        next.query.clear();
+                    } else {
+                        // Exit search mode
+                        next.search_active = false;
+                    }
+                    next.selected_index = 0;
+                    next.preview_scroll = 0;
+                    self.memory_panel = Some(next);
+                }
+                KeyCode::Backspace => {
+                    let mut next = panel;
+                    next.query.pop();
+                    next.selected_index = 0;
+                    next.preview_scroll = 0;
+                    self.memory_panel = Some(next);
+                }
+                KeyCode::Enter => {
+                    // Exit search mode, keep query as filter
+                    let mut next = panel;
+                    next.search_active = false;
+                    self.memory_panel = Some(next);
+                }
+                KeyCode::Up | KeyCode::Down => {
+                    // Still allow navigation while searching
+                    let mut next = panel;
+                    let delta = if key.code == KeyCode::Up { -1 } else { 1 };
+                    next.move_selection(delta);
+                    self.memory_panel = Some(next);
+                }
+                KeyCode::Char(ch) => {
+                    let mut next = panel;
+                    next.query.push(ch);
+                    next.selected_index = 0;
+                    next.preview_scroll = 0;
+                    self.memory_panel = Some(next);
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         match key.code {
             KeyCode::Up => {
                 let mut next = panel;
@@ -291,6 +354,13 @@ impl App {
             }
             KeyCode::Esc => {
                 self.close_memory_panel();
+            }
+            KeyCode::Char('/') => {
+                // Enter search mode
+                let mut next = panel;
+                next.search_active = true;
+                next.query.clear();
+                self.memory_panel = Some(next);
             }
             KeyCode::Char('a') | KeyCode::Char('A') => {
                 let mut next = panel;

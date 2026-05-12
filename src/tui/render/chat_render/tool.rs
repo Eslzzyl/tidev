@@ -7,7 +7,7 @@ use crate::{
     tui::core::state::SelectableRegionRange,
 };
 use ratatui::{
-    prelude::{Modifier, Style},
+    prelude::{Color, Modifier, Style},
     text::{Line, Span},
 };
 use std::collections::HashSet;
@@ -396,6 +396,37 @@ pub(super) fn compute_tool_result_suffix(canonical_name: &str, output: &str) -> 
                 }
             }
         }
+        "memory" => {
+            if output.starts_with("Memory saved:") {
+                " → saved".to_string()
+            } else if output.starts_with("Memory ") && output.ends_with(" deleted.") {
+                " → deleted".to_string()
+            } else if output.starts_with("Found ") {
+                // "Found N memories:"
+                if let Some(count) = output.split_whitespace().nth(1) {
+                    format!(" → {} memories", count)
+                } else {
+                    String::new()
+                }
+            } else if let Some(rest) = output.strip_prefix("Workspace memories (") {
+                // "Workspace memories (N active):"
+                if let Some(count) = rest.split_whitespace().next() {
+                    format!(" → {} memories", count)
+                } else {
+                    String::new()
+                }
+            } else if output.starts_with("# [") {
+                // Read output: count content lines after metadata
+                let content_lines: Vec<&str> = output
+                    .lines()
+                    .skip_while(|l| l.starts_with('#') || l.starts_with("**"))
+                    .filter(|l| !l.is_empty())
+                    .collect();
+                format!(" → {} lines", content_lines.len())
+            } else {
+                String::new()
+            }
+        }
         _ => String::new(),
     }
 }
@@ -721,6 +752,24 @@ pub(super) fn render_tool_result_detail_lines(
         );
     }
 
+    // Memory tool results: structured cards for search/list/read
+    if canonical_name == "memory" && !is_error {
+        let is_expanded = ctx.expanded_tool_results.contains(&message.id);
+        return (
+            render_memory_result_lines(
+                effective_output,
+                body_width,
+                palette,
+                is_expanded,
+                is_error,
+                Some(message.id),
+                ctx.expanded_tool_results,
+            ),
+            None,
+            vec![],
+        );
+    }
+
     (
         render_output_preview_lines(
             effective_output,
@@ -963,6 +1012,308 @@ pub(super) fn render_webfetch_result_lines(
     }
 
     lines
+}
+
+/// Renders memory tool results with structured cards.
+pub(super) fn render_memory_result_lines(
+    output: &str,
+    body_width: usize,
+    palette: ThemePalette,
+    is_expanded: bool,
+    is_error: bool,
+    message_id: Option<Uuid>,
+    expanded_tool_results: &HashSet<Uuid>,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let trimmed = output.trim();
+
+    if trimmed.is_empty() {
+        lines.push(line_with_style("(no results)", palette.muted));
+        return lines;
+    }
+
+    if is_error {
+        return render_output_preview_lines(
+            output, body_width, true, message_id, expanded_tool_results, palette,
+        );
+    }
+
+    // Store / Delete: simple confirmation
+    if trimmed.starts_with("Memory saved:") || (trimmed.starts_with("Memory ") && trimmed.ends_with(" deleted.")) {
+        let style = if trimmed.starts_with("Memory saved:") {
+            Style::default().fg(palette.success)
+        } else {
+            Style::default().fg(palette.muted)
+        };
+        lines.push(Line::from(vec![
+            Span::styled("  ✓ ", style),
+            Span::styled(trimmed.to_string(), style),
+        ]));
+        return lines;
+    }
+
+    // Read: metadata header + markdown content
+    if trimmed.starts_with("# [") {
+        return render_memory_read_lines(trimmed, body_width, palette, is_expanded, message_id, expanded_tool_results);
+    }
+
+    // Search / List: parse result lines
+    let all_lines: Vec<&str> = trimmed.lines().collect();
+    let is_search = trimmed.starts_with("Found ") || trimmed.starts_with("No memories found");
+    let is_list = trimmed.starts_with("Workspace memories") || trimmed.starts_with("No memories yet");
+
+    if is_search || is_list {
+        let data_lines: Vec<&str> = all_lines
+            .iter()
+            .skip(1)
+            .filter(|l| !l.trim().is_empty())
+            .copied()
+            .collect();
+
+        if data_lines.is_empty() {
+            lines.push(line_with_style(trimmed, palette.muted));
+            return lines;
+        }
+
+        let max_items = if is_expanded {
+            (TOOL_OUTPUT_EXPANDED_MAX_LINES / 2).max(2)
+        } else {
+            (TOOL_OUTPUT_PREVIEW_LINES / 2).max(2)
+        };
+        let total = data_lines.len();
+        let shown = data_lines.iter().take(max_items).copied().collect::<Vec<_>>();
+
+        for (i, line) in shown.iter().enumerate() {
+            if i > 0 {
+                lines.push(Line::from(""));
+            }
+            if is_search {
+                if let Some((label, title, content)) = parse_memory_search_line(line) {
+                    lines.push(render_memory_card_line(label, title, palette));
+                    lines.push(Line::from(Span::styled(
+                        format!("    {}", content),
+                        Style::default().fg(palette.muted),
+                    )));
+                } else {
+                    lines.push(line_with_style(line, palette.text));
+                }
+            } else {
+                if let Some((label, title, content)) = parse_memory_list_line(line) {
+                    lines.push(render_memory_card_line(label, title, palette));
+                    lines.push(Line::from(Span::styled(
+                        format!("    {}", content),
+                        Style::default().fg(palette.muted),
+                    )));
+                } else {
+                    lines.push(line_with_style(line, palette.text));
+                }
+            }
+        }
+
+        let remaining = total.saturating_sub(shown.len());
+        if remaining > 0 {
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![Span::styled(
+                format!("  … {} more result(s)", remaining),
+                Style::default().fg(palette.muted),
+            )]));
+        }
+
+        if total > max_items {
+            lines.push(Line::from(vec![Span::styled(
+                if is_expanded { "▲ Click to collapse" } else { "▼ Click to expand" },
+                Style::default().fg(palette.muted),
+            )]));
+        }
+
+        return lines;
+    }
+
+    // Fallback: plain preview
+    render_output_preview_lines(output, body_width, false, message_id, expanded_tool_results, palette)
+}
+
+/// Render a single memory card title line: "  ◉ [proj] Title"
+fn render_memory_card_line(
+    label: &str,
+    title: &str,
+    palette: ThemePalette,
+) -> Line<'static> {
+    let badge_color = memory_type_color(label, palette);
+    Line::from(vec![
+        Span::styled("  ◉ ", Style::default().fg(badge_color)),
+        Span::styled(
+            format!("[{}] ", label),
+            Style::default().fg(badge_color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            title.to_string(),
+            Style::default().fg(palette.text).add_modifier(Modifier::BOLD),
+        ),
+    ])
+}
+
+/// Render read output: metadata header + content
+fn render_memory_read_lines(
+    output: &str,
+    body_width: usize,
+    palette: ThemePalette,
+    is_expanded: bool,
+    message_id: Option<Uuid>,
+    expanded_tool_results: &HashSet<Uuid>,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let content_width = body_width.saturating_sub(4).max(20);
+    let all_lines: Vec<&str> = output.lines().collect();
+
+    let title_line = all_lines.first().unwrap_or(&"");
+    let (type_label, entry_title) = if let Some(rest) = title_line.strip_prefix("# [") {
+        if let Some((label, title_rest)) = rest.split_once(']') {
+            (label.trim(), title_rest.trim())
+        } else {
+            ("", "")
+        }
+    } else {
+        ("", "")
+    };
+
+    if type_label.is_empty() {
+        return render_output_preview_lines(output, body_width, false, message_id, expanded_tool_results, palette);
+    }
+
+    let badge_color = memory_type_color(type_label, palette);
+
+    // Card header
+    lines.push(Line::from(vec![
+        Span::styled(
+            format!("  [{}] ", type_label),
+            Style::default().fg(badge_color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            entry_title.to_string(),
+            Style::default().fg(palette.text).add_modifier(Modifier::BOLD),
+        ),
+    ]));
+
+    // Metadata lines
+    let mut in_metadata = true;
+    let mut content_start = all_lines.len();
+    for (i, line) in all_lines.iter().enumerate().skip(1) {
+        if in_metadata {
+            if line.starts_with("**Type**:") || line.starts_with("**Created**:")
+                || line.starts_with("**Updated**:") || line.starts_with("**Used**:")
+                || line.starts_with("Tags:")
+            {
+                lines.push(Line::from(Span::styled(
+                    format!("  {}", line),
+                    Style::default().fg(palette.muted),
+                )));
+            } else if line.trim().is_empty() {
+                in_metadata = false;
+                content_start = i + 1;
+                lines.push(Line::from(Span::styled(
+                    "  ─────────────────────────────────",
+                    Style::default().fg(palette.muted),
+                )));
+            }
+        }
+    }
+
+    if in_metadata {
+        content_start = all_lines.len();
+    }
+
+    let content_text: String = all_lines[content_start..].join("\n");
+    if content_text.trim().is_empty() {
+        lines.push(Line::from(Span::styled("  (no content)", Style::default().fg(palette.muted))));
+        return lines;
+    }
+
+    let rendered = render_markdown_text_with_width_and_cwd(&content_text, Some(content_width), None);
+    let md_lines: Vec<Line<'static>> = rendered.lines;
+    let prefix = Span::styled("  ", Style::default());
+
+    if is_expanded {
+        let max_lines = TOOL_OUTPUT_EXPANDED_MAX_LINES;
+        let line_count = md_lines.len();
+        if line_count <= max_lines {
+            for l in md_lines {
+                let mut spans = vec![prefix.clone()];
+                spans.extend(l.spans);
+                lines.push(Line::from(spans));
+            }
+        } else {
+            for l in md_lines.into_iter().take(max_lines) {
+                let mut spans = vec![prefix.clone()];
+                spans.extend(l.spans);
+                lines.push(Line::from(spans));
+            }
+            lines.push(Line::from(vec![Span::styled(
+                format!("  … {} more line(s)", line_count - max_lines),
+                Style::default().fg(palette.muted),
+            )]));
+            lines.push(Line::from(vec![Span::styled(
+                "▲ Click to collapse",
+                Style::default().fg(palette.muted),
+            )]));
+        }
+    } else {
+        let max_preview = TOOL_OUTPUT_PREVIEW_LINES;
+        let line_count = md_lines.len();
+        if line_count <= max_preview {
+            for l in md_lines {
+                let mut spans = vec![prefix.clone()];
+                spans.extend(l.spans);
+                lines.push(Line::from(spans));
+            }
+        } else {
+            for l in md_lines.into_iter().take(max_preview) {
+                let mut spans = vec![prefix.clone()];
+                spans.extend(l.spans);
+                lines.push(Line::from(spans));
+            }
+            lines.push(Line::from(vec![Span::styled(
+                format!("  ▼ {} more line(s) — Click to expand", line_count - max_preview),
+                Style::default().fg(palette.muted),
+            )]));
+        }
+    }
+
+    lines
+}
+
+/// Get a colour for a memory type badge label ("proj", "usr", "ref", "feed").
+fn memory_type_color(label: &str, palette: ThemePalette) -> Color {
+    match label {
+        "proj" | "project" => palette.accent,
+        "usr" | "user" => palette.accent_soft,
+        "ref" | "reference" => palette.warning,
+        "feed" | "feedback" => palette.success,
+        _ => palette.muted,
+    }
+}
+
+/// Parse a search result line: `- [proj] **Title**: content preview…`
+fn parse_memory_search_line(line: &str) -> Option<(&str, &str, &str)> {
+    let line = line.trim();
+    let line = line.strip_prefix("- [")?;
+    let (label, rest) = line.split_once(']')?;
+    let rest = rest.strip_prefix(" **")?;
+    let (title, rest) = rest.split_once("**: ")?;
+    Some((label, title.trim(), rest.trim()))
+}
+
+/// Parse a list result line: `` `uuid` [proj] Title — content preview… ``
+fn parse_memory_list_line(line: &str) -> Option<(&str, &str, &str)> {
+    let line = line.trim();
+    let line = line.strip_prefix('`')?;
+    let (_uuid, rest) = line.split_once('`')?;
+    let rest = rest.trim();
+    let rest = rest.strip_prefix('[')?;
+    let (label, rest) = rest.split_once(']')?;
+    let rest = rest.trim();
+    let (title, content) = rest.split_once(" — ")?;
+    Some((label, title.trim(), content.trim()))
 }
 
 pub(super) fn render_todos_checkbox_list(

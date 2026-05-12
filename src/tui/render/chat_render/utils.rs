@@ -194,6 +194,34 @@ pub(super) fn summarize_tool_call(
             let url = field("url").unwrap_or("");
             format!("Fetch web page from {url}")
         }
+        "memory" => {
+            let op = field("operation").unwrap_or("query");
+            match op {
+                "store" => {
+                    let mtype = field("memory_type").unwrap_or("");
+                    let title = field("title").unwrap_or("untitled");
+                    if mtype.is_empty() {
+                        format!("Save memory: {title}")
+                    } else {
+                        format!("Save [{mtype}] {title}")
+                    }
+                }
+                "search" => {
+                    let query = field("query").unwrap_or("");
+                    format!("Search memories for \"{query}\"")
+                }
+                "list" => "List all memories".to_string(),
+                "read" => {
+                    let id = field("memory_id").unwrap_or("");
+                    format!("Read memory {id}")
+                }
+                "delete" => {
+                    let id = field("memory_id").unwrap_or("");
+                    format!("Delete memory {id}")
+                }
+                other => format!("Memory: {other}"),
+            }
+        }
         _ => {
             let mut summary = display_tool_name(tool_name);
             summary = summary[0..1].to_uppercase() + &summary[1..];
@@ -360,6 +388,20 @@ pub(super) fn summarize_tool_arguments(tool_name: &str, arguments: &str) -> Vec<
                 .and_then(|v| v.as_i64())
             {
                 fields.push(("timeout".to_string(), format!("{}s", to)));
+            }
+        }
+        "memory" => {
+            if let Some(op) = string_field("operation") {
+                fields.push(("operation".to_string(), op));
+            }
+            if let Some(query) = string_field("query") {
+                fields.push(("query".to_string(), query));
+            }
+            if let Some(title) = string_field("title") {
+                fields.push(("title".to_string(), title));
+            }
+            if let Some(mtype) = string_field("memory_type") {
+                fields.push(("type".to_string(), mtype));
             }
         }
         _ => {}
