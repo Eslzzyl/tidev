@@ -522,10 +522,29 @@ pub(super) fn render_tool_call_lines(
             let desc = get_field("description");
 
             if let Some(d) = desc {
-                lines.push(Line::from(vec![
-                    Span::styled("  Description: ", Style::default().fg(palette.muted)),
-                    Span::styled(d.to_string(), Style::default().fg(palette.text)),
-                ]));
+                let desc_line = Line::from(d.to_string());
+                let wrap_width = body_width.saturating_sub(4);
+                let wrapped = word_wrap_line(
+                    &desc_line,
+                    WrapOptions::new(wrap_width).break_words(true),
+                );
+                for (i, wrapped_line) in wrapped.iter().enumerate() {
+                    let mut spans = if i == 0 {
+                        vec![Span::styled(
+                            "  Description: ",
+                            Style::default().fg(palette.muted),
+                        )]
+                    } else {
+                        vec![Span::styled(
+                            "                ",
+                            Style::default(),
+                        )]
+                    };
+                    spans.extend(wrapped_line.spans.iter().map(|s| {
+                        Span::styled(s.content.to_string(), Style::default().fg(palette.text))
+                    }));
+                    lines.push(Line::from(spans));
+                }
             }
 
             for line in command.lines() {

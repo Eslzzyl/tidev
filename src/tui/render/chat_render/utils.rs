@@ -296,8 +296,17 @@ pub(super) fn summarize_tool_arguments(tool_name: &str, arguments: &str) -> Vec<
             }
         }
         "bash" => {
-            if let Some(command) = string_field("command") {
-                fields.push(("command".to_string(), command));
+            // Use raw JSON access for command to preserve the full text with newlines,
+            // so the expanded view in tool.rs can word-wrap it properly.
+            if let Some(command) = parsed
+                .as_ref()
+                .and_then(|v| v.get("command"))
+                .and_then(serde_json::Value::as_str)
+            {
+                fields.push(("command".to_string(), command.to_string()));
+            }
+            if let Some(description) = string_field("description") {
+                fields.push(("description".to_string(), description));
             }
         }
         "task" => {
