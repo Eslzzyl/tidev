@@ -105,6 +105,8 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     if let Ok(default_model) = config.resolve_active_model(&auth) {
         tools.set_active_model(default_model);
     }
+    // Web mode has full access — same as direct TUI usage
+    tools.set_sandbox_policy(Some(crate::sandbox::SandboxPolicy::DangerFullAccess));
 
     let agent = AgentRuntime {
         workspace_root: workspace_root.clone(),

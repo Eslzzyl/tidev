@@ -17,6 +17,7 @@ pub enum CommandAction {
     Theme,
     Stats,
     Settings,
+    Sandbox,
     Quit,
     Init,
     Agents,
@@ -368,5 +369,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         description: "Browse and preview available skills",
         usage: "/skills",
         action: CommandAction::Skills,
+    },
+    CommandSpec {
+        name: "sandbox",
+        aliases: &[],
+        description: "View and change sandbox policy for shell commands",
+        usage: "/sandbox",
+        action: CommandAction::Sandbox,
     },
 ];

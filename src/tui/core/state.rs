@@ -14,6 +14,7 @@ use super::model_panel::ModelPanelState;
 use super::mouse_selection::MouseSelectionState;
 use super::permission::{
     PendingToolExecution, PermissionDialogState, RunningSubagentExecution, RunningToolExecution,
+    SandboxElevationDialog,
 };
 use super::question::QuestionDialogState;
 use super::session_panel::SessionPanelState;
@@ -182,6 +183,7 @@ pub(crate) struct CachedSessionRuntime {
     pub(crate) context_manager: ContextManager,
     pub(crate) pending_tool_execution: Option<PendingToolExecution>,
     pub(crate) permission_dialog: Option<PermissionDialogState>,
+    pub(crate) sandbox_elevation: Option<SandboxElevationDialog>,
     pub(crate) workspace_boundary_dialog: Option<WorkspaceBoundaryDialogState>,
     pub(crate) sensitive_file_dialog: Option<crate::tui::ui::sensitive::SensitiveFileDialogState>,
     pub(crate) workspace_boundary_permissions: std::collections::HashMap<String, bool>,
@@ -207,7 +209,6 @@ pub(crate) struct CachedSessionRuntime {
     #[allow(dead_code)]
     pub(crate) instruction_content_cache: HashMap<String, String>,
 }
-
 #[derive(Clone, Debug)]
 pub(crate) struct UiStateSnapshot {
     pub(crate) screen: Screen,
@@ -221,6 +222,7 @@ pub(crate) struct UiStateSnapshot {
     pub(crate) mcp_panel: Option<McpPanelState>,
     pub(crate) agents_panel: Option<AgentsPanelState>,
     pub(crate) skills_panel: Option<SkillsPanelState>,
+    pub(crate) sandbox_panel: Option<crate::tui::ui::sandbox_panel::SandboxPanelState>,
     pub(crate) at_mention: AtMentionState,
     pub(crate) snippet_state: SnippetState,
     pub(crate) command_palette: CommandPaletteState,

@@ -151,6 +151,15 @@ pub struct ToolExecutionResult {
     pub instruction_sources: Vec<String>,
     #[serde(default)]
     pub rtk_rewritten: bool,
+    /// Whether the tool was executed inside a sandbox.
+    #[serde(default)]
+    pub sandboxed: bool,
+    /// The type of sandbox used, if any (e.g. "macos-seatbelt", "linux-bubblewrap").
+    #[serde(default)]
+    pub sandbox_type: String,
+    /// Whether the tool execution was denied by the sandbox.
+    #[serde(default)]
+    pub sandbox_denied: bool,
 }
 
 impl ToolExecutionResult {
@@ -161,11 +170,25 @@ impl ToolExecutionResult {
             metadata: ToolMetadata::default(),
             instruction_sources: Vec::new(),
             rtk_rewritten: false,
+            sandboxed: false,
+            sandbox_type: String::new(),
+            sandbox_denied: false,
         }
     }
 
     pub fn with_rtk_rewritten(mut self, rewritten: bool) -> Self {
         self.rtk_rewritten = rewritten;
+        self
+    }
+
+    pub fn with_sandbox(mut self, sandboxed: bool, sandbox_type: String) -> Self {
+        self.sandboxed = sandboxed;
+        self.sandbox_type = sandbox_type;
+        self
+    }
+
+    pub fn with_sandbox_denied(mut self, denied: bool) -> Self {
+        self.sandbox_denied = denied;
         self
     }
 
@@ -181,6 +204,9 @@ impl ToolExecutionResult {
             metadata: self.metadata.clone(),
             instruction_sources: self.instruction_sources.clone(),
             rtk_rewritten: self.rtk_rewritten,
+            sandboxed: self.sandboxed,
+            sandbox_type: self.sandbox_type.clone(),
+            sandbox_denied: self.sandbox_denied,
         }
     }
 }
@@ -810,6 +836,17 @@ pub enum BackendEvent {
     /// tool calls from the previous turn).  Frontends should use this to
     /// update their active request ID and create a new streaming message.
     TurnStarting { session_id: Uuid, request_id: u64 },
+    /// Emitted when a sandboxed command was denied by the OS sandbox.
+    /// The frontend should show an elevation dialog and send a response
+    /// through `response_tx`.
+    SandboxElevationRequest {
+        session_id: Uuid,
+        request_id: u64,
+        tool_name: String,
+        tool_arguments: String,
+        /// Send `true` to retry with full access, `false` to accept the denial.
+        response_tx: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<bool>>>>,
+    },
 }
 
 impl BackendEvent {
@@ -830,7 +867,8 @@ impl BackendEvent {
             | Self::ContextCompacted { session_id, .. }
             | Self::SidebarSnapshotReady { session_id, .. }
             | Self::ShellOutput { session_id, .. }
-            | Self::TurnStarting { session_id, .. } => *session_id,
+            | Self::TurnStarting { session_id, .. }
+            | Self::SandboxElevationRequest { session_id, .. } => *session_id,
         }
     }
 
@@ -848,7 +886,8 @@ impl BackendEvent {
             | Self::SubagentCompleted { request_id, .. }
             | Self::UsageStats { request_id, .. }
             | Self::SidebarSnapshotReady { request_id, .. }
-            | Self::TurnStarting { request_id, .. } => Some(*request_id),
+            | Self::TurnStarting { request_id, .. }
+            | Self::SandboxElevationRequest { request_id, .. } => Some(*request_id),
             Self::InstructionsLoaded { .. }
             | Self::ContextCompacted { .. }
             | Self::ShellOutput { .. } => None,

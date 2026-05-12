@@ -282,6 +282,9 @@ impl App {
             CommandAction::Skills => {
                 self.open_skills_panel();
             }
+            CommandAction::Sandbox => {
+                self.open_sandbox_panel();
+            }
         }
 
         Ok(())

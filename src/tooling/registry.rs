@@ -6,6 +6,7 @@ use tokio::task::JoinHandle;
 
 use crate::mcp::McpManager;
 use crate::memory::types::MemoryStore;
+use crate::sandbox::SandboxPolicy;
 use crate::session::BackendEvent;
 use crate::tooling::SkillCatalog;
 use crate::{
@@ -31,6 +32,7 @@ pub struct ToolRegistry {
     memory_store: Arc<MemoryStore>,
     active_model: Option<crate::config::ActiveModel>,
     rtk_enabled: bool,
+    sandbox_policy: Option<SandboxPolicy>,
 }
 
 impl ToolRegistry {
@@ -65,11 +67,22 @@ impl ToolRegistry {
             memory_store,
             active_model: None,
             rtk_enabled,
+            sandbox_policy: None,
         }
     }
 
     pub fn set_active_model(&mut self, model: crate::config::ActiveModel) {
         self.active_model = Some(model);
+    }
+
+    /// Set the sandbox policy for shell command execution.
+    pub fn set_sandbox_policy(&mut self, policy: Option<SandboxPolicy>) {
+        self.sandbox_policy = policy;
+    }
+
+    /// Get the current sandbox policy.
+    pub fn sandbox_policy(&self) -> Option<&SandboxPolicy> {
+        self.sandbox_policy.as_ref()
     }
 
     pub fn model_supports_images(&self) -> bool {
@@ -281,6 +294,7 @@ impl ToolRegistry {
             mode,
             allow_outside,
             sensitive_file_approved,
+            self.sandbox_policy.clone(),
         )?;
 
         // Image capability check: If the result contains images but the model doesn't support them,
@@ -442,6 +456,7 @@ impl ToolRegistry {
             allow_outside,
             sensitive_file_approved,
             Some(event_tx),
+            self.sandbox_policy.clone(),
         )?;
 
         // Image capability check

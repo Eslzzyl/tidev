@@ -636,6 +636,9 @@ impl AgentRuntime {
                 s.clone()
             };
 
+            // Save original sandbox policy before any elevation
+            let original_policy = self.tools.sandbox_policy().cloned();
+
             // Bash tool calls get streaming: output is sent chunk-by-chunk
             // via ShellOutput events while the command runs.
             let is_bash =
@@ -665,6 +668,65 @@ impl AgentRuntime {
             let result = handle.await.unwrap_or_else(|join_err| {
                 ToolExecutionResult::new(format!("Tool task panicked/aborted: {join_err}"))
             });
+
+            // ─── Sandbox elevation  ────────────────────────────────────
+            // If the tool was denied by the OS sandbox, ask the user
+            // whether to retry with full filesystem access.  The tool
+            // execution is paused until the user responds.
+            if result.sandbox_denied && is_bash {
+                let (tx, rx) = oneshot::channel();
+                let tx_wrapper = Arc::new(std::sync::Mutex::new(Some(tx)));
+                let _ = event_tx.send(BackendEvent::SandboxElevationRequest {
+                    session_id,
+                    request_id,
+                    tool_name: tool_call.name.clone(),
+                    tool_arguments: tool_call.arguments.clone(),
+                    response_tx: tx_wrapper,
+                });
+
+                // Wait for the user's decision (true = retry with full access)
+                if rx.await.unwrap_or(false) {
+                    // User approved elevation — retry with full access
+                    self.tools
+                        .set_sandbox_policy(Some(crate::sandbox::SandboxPolicy::DangerFullAccess));
+
+                    // Re-run the same tool call with elevated sandbox
+                    let store = {
+                        let s = self.store.lock().await;
+                        s.clone()
+                    };
+                    let retry_handle = self.tools.execute_call_spawned_streaming(
+                        runtime.clone(),
+                        store,
+                        session_id,
+                        tool_call.clone(),
+                        mode,
+                        allow_outside,
+                        sensitive_file_approved,
+                        event_tx.clone(),
+                    );
+                    let retry_result = retry_handle.await.unwrap_or_else(|join_err| {
+                        ToolExecutionResult::new(format!(
+                            "Tool task panicked/aborted: {join_err}"
+                        ))
+                    });
+                    // Restore the original sandbox policy for subsequent commands
+                    self.tools.set_sandbox_policy(original_policy);
+
+                    self.persist_tool_result(
+                        session_id,
+                        request_id,
+                        tool_call,
+                        &retry_result,
+                        event_tx,
+                    )
+                    .await?;
+                    results.push((tool_call.clone(), retry_result));
+                    continue;
+                }
+                // User cancelled — fall through to persist the original denial
+            }
+
             // Persist write result immediately so diffs render one at a time
             self.persist_tool_result(session_id, request_id, tool_call, &result, event_tx)
                 .await?;
@@ -1104,7 +1166,8 @@ impl AgentRuntime {
                     | BackendEvent::ToolCompleted { .. }
                     | BackendEvent::SubagentStatus { .. }
                     | BackendEvent::SubagentToolResult { .. }
-                    | BackendEvent::SubagentCompleted { .. } => {}
+                    | BackendEvent::SubagentCompleted { .. }
+                    | BackendEvent::SandboxElevationRequest { .. } => {}
                 }
             }
 

@@ -87,6 +87,7 @@ use crate::{
     tui::mouse_selection::{ClipboardLease, MouseSelectionState},
     tui::permission::{
         PendingToolExecution, PermissionDialogState, RunningSubagentExecution, RunningToolExecution,
+        SandboxElevationDialog,
     },
     tui::question::QuestionDialogState,
     tui::session_panel::SessionPanelState,
@@ -130,11 +131,13 @@ struct App {
     mcp_panel: Option<McpPanelState>,
     agents_panel: Option<ui::agents_panel::AgentsPanelState>,
     skills_panel: Option<ui::skills_panel::SkillsPanelState>,
+    sandbox_panel: Option<ui::sandbox_panel::SandboxPanelState>,
     at_mention: AtMentionState,
     snippet_state: SnippetState,
     shell_completion: ShellCompletionState,
     pending_tool_execution: Option<PendingToolExecution>,
     permission_dialog: Option<PermissionDialogState>,
+    sandbox_elevation: Option<SandboxElevationDialog>,
     workspace_boundary_dialog: Option<WorkspaceBoundaryDialogState>,
     sensitive_file_dialog: Option<ui::sensitive::SensitiveFileDialogState>,
     /// In-memory sensitive file permissions (path -> allowed).
@@ -466,6 +469,9 @@ impl App {
             self.config.rtk.enabled,
             worktree,
         );
+        // Set sandbox policy based on current mode
+        let sandbox_policy = self.mode.sandbox_policy(&self.config.sandbox);
+        self.tools.set_sandbox_policy(Some(sandbox_policy));
     }
 
     /// Find the git worktree root by looking for a .git directory,
@@ -682,6 +688,26 @@ impl App {
     }
 
     fn handle_backend_event(&mut self, event: BackendEvent, runtime: &Runtime) -> Result<()> {
+        // Sandbox elevation requests are handled here, outside the per-session
+        // dispatch, because they carry a oneshot sender that must not be moved
+        // into the event handler's match.
+        if let BackendEvent::SandboxElevationRequest {
+            tool_name,
+            tool_arguments,
+            response_tx,
+            ..
+        } = event
+        {
+            // Extract the sender from the Arc wrapper
+            let sender = response_tx.lock().unwrap().take();
+            self.sandbox_elevation = Some(SandboxElevationDialog::new(
+                tool_name,
+                tool_arguments,
+                sender,
+            ));
+            return Ok(());
+        }
+
         let session_id = event.session_id();
         let request_id = event.request_id();
         if session_id != self.conversation.session_id {
@@ -740,6 +766,7 @@ impl App {
             BackendEvent::SidebarSnapshotReady { .. } => "SidebarSnapshotReady",
             BackendEvent::ShellOutput { .. } => "ShellOutput",
             BackendEvent::TurnStarting { .. } => "TurnStarting",
+            BackendEvent::SandboxElevationRequest { .. } => "SandboxElevationRequest",
         };
         if event_type != "Delta"
             && event_type != "ReasoningDelta"
@@ -1392,6 +1419,9 @@ impl App {
                 let mut assistant_message = Message::streaming(MessageRole::Assistant, "");
                 assistant_message.mode = Some(self.mode);
                 self.conversation.push(assistant_message);
+            }
+            BackendEvent::SandboxElevationRequest { .. } => {
+                // Handled in handle_backend_event before dispatch
             }
         }
 

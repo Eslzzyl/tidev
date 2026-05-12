@@ -49,6 +49,17 @@ impl SessionMode {
             Self::Build => Self::Plan,
         }
     }
+
+    /// Get the sandbox policy corresponding to this session mode.
+    ///
+    /// Plan mode always uses ReadOnly sandbox regardless of user config.
+    /// Build mode uses the user-configured sandbox policy.
+    pub fn sandbox_policy(self, config: &crate::config::SandboxConfig) -> crate::sandbox::SandboxPolicy {
+        match self {
+            Self::Plan => crate::sandbox::SandboxPolicy::ReadOnly,
+            Self::Build => config.to_policy(),
+        }
+    }
 }
 
 pub fn default_system_prompt() -> String {

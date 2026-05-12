@@ -90,6 +90,9 @@ impl App {
         if let Some(panel) = &self.skills_panel {
             self.render_skills_panel(frame, area, panel);
         }
+        if let Some(panel) = &self.sandbox_panel {
+            self.render_sandbox_panel(frame, area, panel);
+        }
         if let Some(panel) = &self.settings_panel {
             self.render_settings_panel(frame, area, panel);
         }
@@ -127,6 +130,9 @@ impl App {
         }
         if let Some(dialog) = &self.permission_dialog {
             self.render_permission_dialog(frame, area, dialog);
+        }
+        if self.sandbox_elevation.is_some() {
+            self.render_sandbox_elevation_dialog(frame, area);
         }
         if self.fork_confirm_dialog.is_some() {
             self.render_fork_confirm_dialog(frame, area);
@@ -506,6 +512,182 @@ pub(super) fn spans_with_highlights(
 }
 
 impl App {
+    /// Render the sandbox policy selection panel.
+    pub(super) fn render_sandbox_panel(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        panel: &crate::tui::ui::sandbox_panel::SandboxPanelState,
+    ) {
+        use crate::tui::ui::sandbox_panel::SandboxPanelState as S;
+        use ratatui::widgets::{Block, Borders, List, Paragraph, Clear};
+        use ratatui::text::{Line, Span};
+        use ratatui::style::{Style, Modifier};
+        use ratatui::layout::{Layout, Constraint, Margin};
+
+        let palette = self.palette();
+        let is_plan = self.mode.is_read_only();
+
+        // Determine overlay size
+        let overlay = if is_plan {
+            centered_rect(50, 5, area)
+        } else {
+            centered_rect(56, S::build_items().len() as u16 + 6, area)
+        };
+        frame.render_widget(Clear, overlay);
+
+        let block = Block::default()
+            .title(" Sandbox Policy ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.border_active()))
+            .style(Style::default().bg(palette.panel));
+        frame.render_widget(block, overlay);
+
+        let inner = overlay.inner(Margin {
+            horizontal: 2,
+            vertical: 1,
+        });
+
+        if is_plan {
+            // Plan mode: show locked notice
+            let notice = Line::from(Span::styled(
+                "Sandbox is locked to read-only in Plan mode.\nSwitch to Build to configure.",
+                Style::default().fg(palette.muted),
+            ));
+            frame.render_widget(
+                Paragraph::new(notice).centered().style(Style::default().bg(palette.panel)),
+                inner,
+            );
+        } else {
+            // Build mode: show selectable policies
+            let items = S::build_items();
+
+            // Header
+            let header = Line::from(vec![
+                Span::styled("  Policy", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
+                Span::raw("    "),
+                Span::styled("Description", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
+            ]);
+
+            // Build list items
+            let list_items: Vec<ratatui::widgets::ListItem> = items
+                .iter()
+                .enumerate()
+                .map(|(idx, item)| {
+                    let selected = idx == panel.selected_index;
+                    let prefix = if selected { ">" } else { " " };
+                    let style = if selected {
+                        Style::default().fg(palette.selection_fg).bg(palette.selection_bg)
+                    } else {
+                        Style::default().fg(palette.text)
+                    };
+                    ratatui::widgets::ListItem::new(Line::from(vec![
+                        Span::styled(format!("{}  {}  ", prefix, item.label), style.clone()),
+                        Span::styled(item.description, Style::default().fg(palette.muted)),
+                    ]))
+                    .style(style)
+                })
+                .collect();
+
+            let sections = Layout::vertical([
+                Constraint::Length(1), // header
+                Constraint::Length(1), // divider
+                Constraint::Min(0),    // list
+            ])
+            .split(inner);
+
+            frame.render_widget(
+                Paragraph::new(header).style(Style::default().bg(palette.panel)),
+                sections[0],
+            );
+
+            let divider = Line::from(Span::styled(
+                "\u{2500}".repeat(inner.width.saturating_sub(2).max(0) as usize),
+                Style::default().fg(palette.muted),
+            ));
+            frame.render_widget(
+                Paragraph::new(divider).style(Style::default().bg(palette.panel)),
+                sections[1],
+            );
+
+            let list = List::new(list_items)
+                .highlight_style(Style::default().bg(palette.selection_bg))
+                .highlight_symbol("");
+            frame.render_widget(list, sections[2]);
+
+            // Footer hint
+            let hint = Line::from(Span::styled(
+                "  j/k navigate | Enter apply | Esc cancel",
+                Style::default().fg(palette.muted),
+            ));
+            frame.render_widget(
+                Paragraph::new(hint).style(Style::default().bg(palette.panel)),
+                sections[1],
+            );
+        }
+    }
+
+    /// Render the sandbox elevation dialog.
+    pub(super) fn render_sandbox_elevation_dialog(&self, frame: &mut Frame<'_>, area: Rect) {
+        use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+        use ratatui::text::{Line, Span};
+        use ratatui::style::{Style, Modifier};
+        use ratatui::layout::{Layout, Constraint, Margin};
+
+        let palette = self.palette();
+        let overlay = centered_rect(56, 8, area);
+        frame.render_widget(Clear, overlay);
+
+        let block = Block::default()
+            .title(" Sandbox Denied ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.warning))
+            .style(Style::default().bg(palette.panel));
+        frame.render_widget(&block, overlay);
+
+        let inner = overlay.inner(Margin::new(2, 1));
+        let sections = Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .split(inner);
+
+        // Main message
+        let msg = Line::from(Span::styled(
+            "This command was blocked by the OS sandbox.",
+            Style::default().fg(palette.text),
+        ));
+        let hint = Line::from(Span::styled(
+            "Retry with full filesystem access?",
+            Style::default().fg(palette.muted),
+        ));
+        frame.render_widget(
+            Paragraph::new(vec![msg, hint]).style(Style::default().bg(palette.panel)),
+            sections[0],
+        );
+
+        // Options
+        let options = Line::from(vec![
+            Span::styled("  [Y] Retry with full access  ", Style::default().fg(palette.success)),
+            Span::styled("[N] Cancel  ", Style::default().fg(palette.error)),
+        ]);
+        frame.render_widget(
+            Paragraph::new(options).style(Style::default().bg(palette.panel)),
+            sections[1],
+        );
+
+        // Separator
+        let sep = Line::from(Span::styled(
+            "\u{2500}".repeat(inner.width.saturating_sub(2).max(0) as usize),
+            Style::default().fg(palette.muted),
+        ));
+        frame.render_widget(
+            Paragraph::new(sep).style(Style::default().bg(palette.panel)),
+            sections[2],
+        );
+    }
+
     pub(super) fn render_prompt_footer(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let palette = self.palette();
         let status_text = self.footer_status_text();
@@ -513,14 +695,19 @@ impl App {
         let chunks =
             Layout::horizontal([Constraint::Min(1), Constraint::Length(status_width)]).split(area);
 
+        // Build the left label: [mode sandbox-policy] model-name
+        let sandbox_label = self.mode.sandbox_policy(&self.config.sandbox).label();
+        let mode_tag = format!("[{} {}]", self.mode.as_str(), sandbox_label);
+
         let model_label = self.active_model.label();
-        let model_display = if self.thinking_level.is_supported() {
-            format!("{} [{}]", model_label, self.thinking_level.display_name())
+        let full_label = if self.thinking_level.is_supported() {
+            format!("{} {} [{}]", mode_tag, model_label, self.thinking_level.display_name())
         } else {
-            model_label
+            format!("{} {}", mode_tag, model_label)
         };
+
         let model_line = Line::from(vec![Span::styled(
-            model_display,
+            full_label,
             Style::default().fg(palette.accent),
         )]);
 

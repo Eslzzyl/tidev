@@ -12,19 +12,28 @@ use std::{
     thread,
     time::Duration,
 };
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::utils::truncate_in_place;
-use crate::session::BackendEvent;
+use crate::sandbox::{CommandSpec, SandboxManager, SandboxPolicy, pre_exec_hardening};
+use crate::session::{BackendEvent, tool_output_preview};
 use crate::tooling::tools::{BashArgs, decode_tool_args};
 use crate::tooling::{ToolDefinition, ToolPermission};
 use uuid::Uuid;
 
-/// Result of bash tool execution, including whether RTK rewrote the command.
+/// Result of bash tool execution, including sandbox and RTK metadata.
 #[derive(Debug)]
 pub struct BashExecutionResult {
     pub output: String,
     pub rtk_rewritten: bool,
+    /// Whether the command was executed inside a sandbox.
+    pub sandboxed: bool,
+    /// The type of sandbox used, if any.
+    pub sandbox_type: String,
+    /// Whether the command appeared to be denied by the sandbox.
+    pub sandbox_denied: bool,
 }
 
 pub fn definitions() -> Vec<ToolDefinition> {
@@ -41,6 +50,7 @@ pub fn execute_tool_call(
     arguments: Value,
     max_output_bytes: usize,
     rtk_enabled: bool,
+    sandbox_policy: Option<SandboxPolicy>,
     session_id: Uuid,
     event_tx: Option<UnboundedSender<BackendEvent>>,
 ) -> Result<BashExecutionResult> {
@@ -53,6 +63,7 @@ pub fn execute_tool_call(
         rtk_enabled,
         None,
         timeout,
+        sandbox_policy,
         event_tx,
         session_id,
     )
@@ -65,6 +76,7 @@ pub fn execute_tool_call_with_cancel(
     max_output_bytes: usize,
     rtk_enabled: bool,
     cancelled: Arc<std::sync::atomic::AtomicBool>,
+    sandbox_policy: Option<SandboxPolicy>,
     session_id: Uuid,
     event_tx: Option<UnboundedSender<BackendEvent>>,
 ) -> Result<BashExecutionResult> {
@@ -77,6 +89,7 @@ pub fn execute_tool_call_with_cancel(
         rtk_enabled,
         Some(cancelled),
         timeout,
+        sandbox_policy,
         event_tx,
         session_id,
     )
@@ -89,6 +102,7 @@ fn run_shell_inner(
     rtk_enabled: bool,
     cancelled: Option<Arc<AtomicBool>>,
     timeout_ms: u64,
+    sandbox_policy: Option<SandboxPolicy>,
     event_tx: Option<UnboundedSender<BackendEvent>>,
     session_id: Uuid,
 ) -> Result<BashExecutionResult> {
@@ -100,23 +114,85 @@ fn run_shell_inner(
         (command.to_string(), false)
     };
 
-    let mut process = if cfg!(target_os = "windows") {
-        std::process::Command::new("powershell")
-            .args(["-NoProfile", "-Command", &actual_command])
-            .current_dir(workspace_root)
+    // Prepare sandbox if a policy is provided
+    let sandbox_policy = sandbox_policy.unwrap_or(SandboxPolicy::DangerFullAccess);
+    let use_sandbox = !matches!(sandbox_policy, SandboxPolicy::DangerFullAccess)
+        && !matches!(sandbox_policy, SandboxPolicy::ExternalSandbox);
+
+    let mut process = if use_sandbox {
+        let spec = CommandSpec::shell(
+            &actual_command,
+            workspace_root.to_path_buf(),
+            Duration::from_millis(timeout_ms),
+        )
+        .with_policy(sandbox_policy);
+
+        let manager = SandboxManager::new();
+        let exec_env = manager.prepare(&spec);
+
+        let mut cmd = std::process::Command::new(exec_env.program());
+        cmd.args(exec_env.args())
+            .env_clear()
+            .envs(&exec_env.env)
+            .current_dir(&exec_env.cwd)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .with_context(|| format!("failed to run command '{actual_command}'"))?
+            .stderr(Stdio::piped());
+
+        // Determine if Landlock should be applied in the child process
+        // (Landlock requires in-process syscalls before exec).
+        #[cfg(target_os = "linux")]
+        let use_landlock = exec_env.sandbox_type == crate::sandbox::SandboxType::LinuxLandlock;
+
+        // Apply process hardening and Landlock (on Linux) in pre_exec
+        #[cfg(unix)]
+        if exec_env.is_sandboxed() {
+            unsafe {
+                cmd.pre_exec(move || {
+                    // For Landlock, apply filesystem restrictions before exec
+                    #[cfg(target_os = "linux")]
+                    if use_landlock {
+                        let cwd = std::path::Path::new(".");
+                        if let Err(e) = crate::sandbox::landlock::apply_landlock_policy(
+                            &sandbox_policy,
+                            cwd,
+                        ) {
+                            // If Landlock fails, abort the child process
+                            let _ = std::io::Write::write(
+                                &mut std::io::stderr(),
+                                format!("Landlock error: {e}\n").as_bytes(),
+                            );
+                            std::process::abort();
+                        }
+                    }
+
+                    // Apply general process hardening
+                    pre_exec_hardening()
+                });
+            }
+        }
+
+        cmd.spawn()
+            .with_context(|| format!("failed to run sandboxed command '{actual_command}'"))?
     } else {
-        std::process::Command::new("sh")
-            .arg("-lc")
-            .arg(&actual_command)
-            .current_dir(workspace_root)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .with_context(|| format!("failed to run command '{actual_command}'"))?
+        // No sandbox: direct execution (original behavior)
+        if cfg!(target_os = "windows") {
+            std::process::Command::new("powershell")
+                .args(["-NoProfile", "-Command", &actual_command])
+                .current_dir(workspace_root)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .with_context(|| format!("failed to run command '{actual_command}'"))?
+        } else {
+            std::process::Command::new("sh")
+                .arg("-lc")
+                .arg(&actual_command)
+                .current_dir(workspace_root)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .with_context(|| format!("failed to run command '{actual_command}'"))?
+        }
     };
 
     let mut stderr = process.stderr.take();
@@ -249,9 +325,44 @@ fn run_shell_inner(
     }
 
     let status_code = exit_code.unwrap_or_default();
+
+    // Determine sandbox type for result metadata
+    let sandbox_type = if use_sandbox {
+        crate::sandbox::get_platform_sandbox()
+            .map(|t| t.to_string())
+            .unwrap_or_else(|| "none".to_string())
+    } else {
+        "none".to_string()
+    };
+
+    // Detect sandbox denial from exit code and output content
+    let sandbox_denied = use_sandbox
+        && status_code != 0
+        && (combined.contains("Operation not permitted")
+            || combined.contains("denied")
+            || combined.contains("Sandbox")
+            || combined.contains("sandbox")
+            || combined.contains("not allowed")
+            || combined.contains("permission denied")
+            || combined.contains("EPERM"));
+
     Ok(BashExecutionResult {
-        output: format!("[exit {status_code}]\n{combined}"),
+        output: if sandbox_denied {
+            format!(
+                "[exit {status_code}] (sandbox blocked this command)\n\n\
+                 The command was blocked by the {} sandbox.\n\
+                 Open the panel with /sandbox and switch to \"full access\" to retry.\n\n\
+                 {}",
+                sandbox_type,
+                tool_output_preview(Some("bash"), &combined)
+            )
+        } else {
+            format!("[exit {status_code}]\n{}", combined)
+        },
         rtk_rewritten,
+        sandboxed: use_sandbox,
+        sandbox_type,
+        sandbox_denied,
     })
 }
 

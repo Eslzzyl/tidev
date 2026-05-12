@@ -67,6 +67,10 @@ impl App {
             return self.handle_permission_dialog_key(key, runtime);
         }
 
+        if self.sandbox_elevation.is_some() {
+            return self.handle_sandbox_elevation_key(key);
+        }
+
         if self.workspace_boundary_dialog.is_some() {
             return self.handle_workspace_boundary_dialog_key(key, runtime);
         }
@@ -106,6 +110,10 @@ impl App {
 
         if self.skills_panel.is_some() {
             return self.handle_skills_panel_key(key);
+        }
+
+        if self.sandbox_panel.is_some() {
+            return self.handle_sandbox_panel_key(key);
         }
 
         if self.mcp_panel.is_some() {

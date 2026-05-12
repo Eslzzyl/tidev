@@ -4,9 +4,9 @@ pub mod mcp;
 mod paths;
 mod provider;
 pub mod reasoning;
-pub mod tmp;
+pub mod sandbox;
+mod tmp;
 mod ui;
-
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -24,6 +24,8 @@ pub use paths::ConfigPaths;
 pub use provider::{ApiType, ModelConfig, ProviderConfig, ProviderSource};
 pub use tmp::TmpConfig;
 pub use ui::UiConfig;
+
+pub use self::sandbox::SandboxConfig;
 
 const BUNDLED_PRESETS_TOML: &str = include_str!("../../presets.toml");
 
@@ -56,6 +58,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub agent: AgentConfig,
     #[serde(default)]
+    pub sandbox: SandboxConfig,
+    #[serde(default)]
     pub tmp: TmpConfig,
     #[serde(skip)]
     pub bundled_providers: BTreeMap<String, ProviderConfig>,
@@ -82,6 +86,7 @@ impl Default for AppConfig {
             gateway: GatewayConfig::default(),
             rtk: RtkConfig::default(),
             agent: AgentConfig::default(),
+            sandbox: SandboxConfig::default(),
             tmp: TmpConfig::default(),
             bundled_providers: bundled_provider_catalog().unwrap_or_default(),
         }
@@ -480,6 +485,13 @@ max_input_lines = 6
 # method = "auto"
 # When to notify: "unfocused" or "always" (default: "unfocused")
 # condition = "unfocused"
+
+# Optional [sandbox] configuration for shell command sandboxing.
+# When enabled, shell commands are restricted by the OS sandbox
+# (Seatbelt on macOS, Bubblewrap/Landlock on Linux).
+# mode can be: "workspace-write" (default) or "danger-full-access"
+#[sandbox]
+#mode = "workspace-write"
 
 # Optional [tmp] configuration for managing temporary files.
 # When auto_cleanup is enabled, tidev will remove its own temp files

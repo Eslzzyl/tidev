@@ -107,6 +107,8 @@ async fn run_async() -> Result<()> {
             worktree,
         );
         tools.set_active_model(default_model.clone());
+        // Use default sandbox policy for gateway mode
+        tools.set_sandbox_policy(Some(crate::sandbox::SandboxPolicy::default()));
 
         let channel = telegram::TelegramChannel::new(
             workspace_root.clone(),
@@ -169,6 +171,8 @@ async fn run_async() -> Result<()> {
             worktree2,
         );
         tools.set_active_model(default_model.clone());
+        // Use default sandbox policy for gateway mode
+        tools.set_sandbox_policy(Some(crate::sandbox::SandboxPolicy::default()));
 
         let channel = qq::QQChannel::new(
             workspace_root.clone(),

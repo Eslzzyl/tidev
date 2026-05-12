@@ -362,6 +362,7 @@ pub fn execute_shell_tool_call(
     call: &ToolCall,
     max_output_bytes: usize,
     rtk_enabled: bool,
+    sandbox_policy: Option<crate::sandbox::SandboxPolicy>,
     cancelled: Arc<AtomicBool>,
     session_id: Uuid,
     event_tx: Option<UnboundedSender<crate::session::BackendEvent>>,
@@ -375,11 +376,14 @@ pub fn execute_shell_tool_call(
         max_output_bytes,
         rtk_enabled,
         cancelled,
+        sandbox_policy,
         session_id,
         event_tx,
     )?;
     Ok(crate::session::ToolExecutionResult::new(result.output)
-        .with_rtk_rewritten(result.rtk_rewritten))
+        .with_rtk_rewritten(result.rtk_rewritten)
+        .with_sandbox(result.sandboxed, result.sandbox_type)
+        .with_sandbox_denied(result.sandbox_denied))
 }
 
 #[allow(dead_code)]
@@ -454,6 +458,7 @@ pub(super) fn execute_tool_call(
         mode,
         false, // allow_outside: skill execution doesn't allow outside workspace
         false, // sensitive_file_approved: skill execution requires explicit user approval
+        None,  // sandbox_policy: skill execution uses default (no sandbox)
     )?;
 
     // Post-execution: record file reads

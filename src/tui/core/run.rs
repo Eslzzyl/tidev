@@ -74,6 +74,9 @@ impl App {
                 crate::config::reasoning::ThinkingLevelType::from_string(&level_str);
         }
         tools.set_active_model(active_model.clone());
+        // Set sandbox policy based on session mode and config
+        let sandbox_policy = mode.sandbox_policy(&config.sandbox);
+        tools.set_sandbox_policy(Some(sandbox_policy));
         // Build shared AgentRuntime from the same resources
         let agent = AgentRuntime {
             workspace_root: workspace_root.clone(),
@@ -129,11 +132,13 @@ impl App {
             mcp_panel: None,
             agents_panel: None,
             skills_panel: None,
+            sandbox_panel: None,
             at_mention: AtMentionState::default(),
             snippet_state: SnippetState::default(),
             shell_completion: ShellCompletionState::default(),
             pending_tool_execution: None,
             permission_dialog: None,
+            sandbox_elevation: None,
             workspace_boundary_dialog: None,
             sensitive_file_dialog: None,
             sensitive_file_permissions: std::collections::HashMap::new(),
@@ -336,6 +341,7 @@ impl App {
             context_manager: self.context_manager.clone(),
             pending_tool_execution: self.pending_tool_execution.clone(),
             permission_dialog: self.permission_dialog.clone(),
+            sandbox_elevation: None, // not stored in snapshot (not Clone)
             workspace_boundary_dialog: self.workspace_boundary_dialog.clone(),
             sensitive_file_dialog: self.sensitive_file_dialog.clone(),
             workspace_boundary_permissions: self.workspace_boundary_permissions.clone(),
@@ -373,6 +379,7 @@ impl App {
             mcp_panel: self.mcp_panel.clone(),
             agents_panel: self.agents_panel.clone(),
             skills_panel: self.skills_panel.clone(),
+            sandbox_panel: self.sandbox_panel.clone(),
             memory_panel: self.memory_panel.clone(),
             message_panel: self.message_panel.clone(),
             at_mention: self.at_mention.clone(),
@@ -399,6 +406,7 @@ impl App {
         self.mcp_panel = snapshot.mcp_panel;
         self.agents_panel = snapshot.agents_panel;
         self.skills_panel = snapshot.skills_panel;
+        self.sandbox_panel = snapshot.sandbox_panel;
         self.at_mention = snapshot.at_mention;
         self.snippet_state = snapshot.snippet_state;
         self.command_palette = snapshot.command_palette;
@@ -648,6 +656,7 @@ impl App {
             context_manager,
             pending_tool_execution: None,
             permission_dialog: None,
+            sandbox_elevation: None,
             workspace_boundary_dialog: None,
             sensitive_file_dialog: None,
             workspace_boundary_permissions: std::collections::HashMap::new(),

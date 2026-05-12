@@ -58,6 +58,7 @@ pub fn execute_tool_call(
     mode: SessionMode,
     allow_outside: bool,
     sensitive_file_approved: bool,
+    sandbox_policy: Option<crate::sandbox::SandboxPolicy>,
 ) -> Result<crate::session::ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
@@ -91,11 +92,14 @@ pub fn execute_tool_call(
                 arguments,
                 max_output_bytes,
                 rtk_enabled,
+                sandbox_policy,
                 session_id,
                 None, // event_tx — caller who needs streaming uses the dedicated streaming path
             )?;
             crate::session::ToolExecutionResult::new(result.output)
                 .with_rtk_rewritten(result.rtk_rewritten)
+                .with_sandbox(result.sandboxed, result.sandbox_type)
+                .with_sandbox_denied(result.sandbox_denied)
         }
         Some("task") => {
             let output = task::execute_tool_call(
@@ -157,6 +161,7 @@ pub fn execute_tool_call_streaming(
     allow_outside: bool,
     sensitive_file_approved: bool,
     event_tx: Option<UnboundedSender<BackendEvent>>,
+    sandbox_policy: Option<crate::sandbox::SandboxPolicy>,
 ) -> Result<crate::session::ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
@@ -190,11 +195,14 @@ pub fn execute_tool_call_streaming(
                 arguments,
                 max_output_bytes,
                 rtk_enabled,
+                sandbox_policy,
                 session_id,
                 event_tx, // pass the sender through for streaming
             )?;
             crate::session::ToolExecutionResult::new(result.output)
                 .with_rtk_rewritten(result.rtk_rewritten)
+                .with_sandbox(result.sandboxed, result.sandbox_type)
+                .with_sandbox_denied(result.sandbox_denied)
         }
         Some("task") => {
             let output = task::execute_tool_call(
