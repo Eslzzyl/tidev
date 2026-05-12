@@ -1,4 +1,5 @@
 pub mod builtin;
+pub(crate) mod bundled_skills;
 mod file_read_tracker;
 mod registry;
 mod skills;

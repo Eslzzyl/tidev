@@ -137,6 +137,28 @@ fn discover_inner(
         skills.push(skill);
     }
 
+    // Inject bundled (compiled-in) skills.
+    // Disk-based skills take precedence via `seen_names` dedup.
+    let bundled_count_before = skills.len();
+    for skill in crate::tooling::bundled_skills::load() {
+        if !seen_names.insert(skill.name.clone()) {
+            crate::log_debug!(
+                "discover_inner: bundled skill '{}' skipped (duplicate name)",
+                skill.name
+            );
+            continue;
+        }
+        crate::log_info!(
+            "discover_inner: loaded bundled skill '{}'",
+            skill.name
+        );
+        skills.push(skill);
+    }
+    let bundled_count = skills.len() - bundled_count_before;
+    if bundled_count > 0 {
+        crate::log_info!("discover_inner: loaded {} bundled skill(s)", bundled_count);
+    }
+
     crate::log_info!("discover_inner: done, total skills = {}", skills.len());
     SkillCatalogInner { skills }
 }
@@ -570,7 +592,7 @@ fn collect_companion_files(skill_dir: &Path, skill_file: &Path) -> Vec<PathBuf> 
     files
 }
 
-fn is_valid_skill_name(name: &str) -> bool {
+pub(crate) fn is_valid_skill_name(name: &str) -> bool {
     let name = name.trim();
     if name.is_empty() || name.len() > 64 {
         return false;
