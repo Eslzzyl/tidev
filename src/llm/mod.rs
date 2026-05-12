@@ -4,6 +4,8 @@ mod error;
 mod openai;
 mod responses;
 mod think_parser;
+mod tool_call_format;
+mod turn;
 
 use anyhow::{Context, Result};
 use reqwest::Client;

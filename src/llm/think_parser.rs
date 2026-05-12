@@ -1,32 +1,5 @@
-use std::collections::BTreeMap;
-
-use crate::session::{AssistantTurn, ToolCall};
-
-#[derive(Clone, Debug, Default)]
-pub(super) struct ToolCallBuilder {
-    pub(super) id: String,
-    pub(super) name: String,
-    pub(super) arguments: String,
-}
-
-impl ToolCallBuilder {
-    pub(super) fn into_tool_call(self, index: usize) -> ToolCall {
-        ToolCall {
-            id: if self.id.is_empty() {
-                format!("tool-call-{index}")
-            } else {
-                self.id
-            },
-            name: if self.name.is_empty() {
-                "unknown_tool".to_string()
-            } else {
-                self.name
-            },
-            arguments: self.arguments,
-        }
-    }
-}
-
+/// Stream-aware `<think>…</think>` tag parser used to separate chain-of-thought
+/// reasoning from visible assistant text in streaming LLM responses.
 #[derive(Clone, Debug, Default)]
 pub(super) struct ThinkParser {
     in_think: bool,
@@ -34,6 +7,7 @@ pub(super) struct ThinkParser {
 }
 
 impl ThinkParser {
+    /// Push a chunk of streaming text and return `(visible, reasoning)`.
     pub(super) fn push(&mut self, text: &str) -> (String, String) {
         self.buffer.push_str(text);
 
@@ -73,6 +47,7 @@ impl ThinkParser {
         (visible, reasoning)
     }
 
+    /// Drain any remaining buffered text. Call this after the stream ends.
     pub(super) fn finish(&mut self) -> (String, String) {
         let mut visible = String::new();
         let mut reasoning = String::new();
@@ -88,6 +63,8 @@ impl ThinkParser {
     }
 }
 
+/// Returns the maximum suffix of `text` that could be a partial `<think>` or
+/// `</think>` tag.  This prevents splitting a multi-chunk tag boundary.
 fn think_tag_suffix_len(text: &str) -> usize {
     const TAGS: [&str; 2] = ["</think>", "<think>"];
 
@@ -101,37 +78,4 @@ fn think_tag_suffix_len(text: &str) -> usize {
     }
 
     0
-}
-
-pub(super) fn finalize_turn(
-    assistant_text: String,
-    reasoning_text: String,
-    finish_reason: Option<String>,
-    tool_calls: &BTreeMap<usize, ToolCallBuilder>,
-    think_parser: &mut ThinkParser,
-) -> AssistantTurn {
-    let (visible, reasoning) = think_parser.finish();
-    let assistant_text = assistant_text + &visible;
-    let reasoning_text = reasoning_text + &reasoning;
-
-    let tool_calls = tool_calls
-        .iter()
-        .map(|(index, builder)| builder.clone().into_tool_call(*index))
-        .collect::<Vec<_>>();
-
-    let final_finish_reason = finish_reason.unwrap_or_else(|| {
-        if tool_calls.is_empty() {
-            "stop".to_string()
-        } else {
-            "tool_calls".to_string()
-        }
-    });
-
-    AssistantTurn {
-        content: assistant_text,
-        reasoning: reasoning_text,
-        tool_calls,
-        finish_reason: Some(final_finish_reason),
-        ..Default::default()
-    }
 }
