@@ -297,13 +297,13 @@ tool_args! {
 
 tool_args! {
     pub struct MemoryArgs {
-        operation: string("Operation: store, search, list, read, or delete"),
+        operation: string("Operation: store, update, search, list, read, or delete"),
         memory_type: optional_string("Memory type: user, project, feedback, reference (required for store)"),
         title: optional_string("Memory title (required for store)"),
         content: optional_string("Memory content in markdown (required for store)"),
-        tags: optional_string("Comma-separated tags for search (optional)"),
+        tags: optional_string("Comma-separated tags or JSON array of tags (optional)"),
         query: optional_string("Search query (required for search)"),
-        memory_id: optional_string("Memory UUID (required for read, delete)"),
+        memory_id: optional_string("Memory UUID (required for read, delete, update)"),
     }
 }
 

@@ -381,8 +381,12 @@ pub(super) fn compute_tool_result_suffix(canonical_name: &str, output: &str) -> 
             }
         }
         "memory" => {
-            if output.starts_with("Memory saved:") {
-                " → saved".to_string()
+            if output.starts_with("Memory saved:") || output.starts_with("Memory updated:") {
+                if output.starts_with("Memory saved:") {
+                    " → saved".to_string()
+                } else {
+                    " → updated".to_string()
+                }
             } else if output.starts_with("Memory ") && output.ends_with(" deleted.") {
                 " → deleted".to_string()
             } else if output.starts_with("Found ") {
@@ -1022,17 +1026,28 @@ pub(super) fn render_memory_result_lines(
         );
     }
 
-    // Store / Delete: simple confirmation
-    if trimmed.starts_with("Memory saved:") || (trimmed.starts_with("Memory ") && trimmed.ends_with(" deleted.")) {
-        let style = if trimmed.starts_with("Memory saved:") {
+    // Store / Update / Delete: simple confirmation
+    if trimmed.starts_with("Memory saved:") || trimmed.starts_with("Memory updated:") || (trimmed.starts_with("Memory ") && trimmed.ends_with(" deleted.")) {
+        let style = if trimmed.starts_with("Memory saved:") || trimmed.starts_with("Memory updated:") {
             Style::default().fg(palette.success)
         } else {
             Style::default().fg(palette.muted)
         };
+        // Show only the first line as the confirmation; hints/footnotes follow below
+        let first_line = trimmed.lines().next().unwrap_or(trimmed);
         lines.push(Line::from(vec![
             Span::styled("  ✓ ", style),
-            Span::styled(trimmed.to_string(), style),
+            Span::styled(first_line.to_string(), style),
         ]));
+        // Render any additional lines (e.g. dedup hints) in muted style as subsequent lines
+        for extra in trimmed.lines().skip(1) {
+            if !extra.trim().is_empty() {
+                lines.push(Line::from(Span::styled(
+                    format!("    {}", extra.trim()),
+                    palette.muted,
+                )));
+            }
+        }
         return lines;
     }
 

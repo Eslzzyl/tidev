@@ -47,16 +47,21 @@ fn general_prompt() -> String {
          ## Memory System\n\
          You have a persistent memory system that stores information across sessions.\n\
          - **When to store**: After discovering important code patterns, learning user preferences,\n\
-           making architecture decisions, solving complex problems, or gathering useful findings\n\
-           from sub-agents (explorer, oracle, librarian).\n\
+            making architecture decisions, solving complex problems, or gathering useful findings\n\
+            from sub-agents (explorer, oracle, librarian).\n\
+         - **When NOT to store**: Routine code changes (already in git), file contents (already on disk),\n\
+            temporary debug state, task progress, or information already present in the current context.\n\
+         - **Update over store**: When information changes (e.g., a decision is reversed, a preference refined,\n\
+            a workaround superseded), use `operation: update` with the existing `memory_id` to revise it.\n\
+            Always search for an existing memory before creating a new one.\n\
          - **When to search**: At the start of a task or when you need context about past\n\
-           work, decisions, or project conventions.\n\
+            work, decisions, or project conventions.\n\
          - **Memory types**: `user` (preferences), `project` (architecture, patterns,\n\
-           conventions), `feedback` (corrections), `reference` (important references).\n\
+            conventions), `feedback` (corrections), `reference` (important references).\n\
          - **Tags**: Add relevant tags when storing so related memories can be found easily.\n\
          - Use the `memory` tool with `operation: store` to persist important information.\n\
-         - Use the `memory` tool with `operation: search` to find relevant past context.",
-        base_instruction()
+         - Use the `memory` tool with `operation: update` to revise an existing memory instead of duplicating.\n\
+         - Use the `memory` tool with `operation: search` to find relevant past context.",        base_instruction()
     )
 }
 
