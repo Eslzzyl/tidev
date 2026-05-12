@@ -566,7 +566,7 @@ impl App {
     pub(crate) fn is_readonly_tool(name: &str) -> bool {
         matches!(
             canonical_tool_name(name),
-            Some("read" | "list" | "glob" | "grep" | "websearch" | "webfetch")
+            Some("read" | "glob" | "grep" | "websearch" | "webfetch")
         )
     }
 

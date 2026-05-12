@@ -8,7 +8,7 @@ use super::utils::{display_workspace_relative, read_existing_text, resolve_works
 use crate::instructions::resolve_nearby_instructions;
 use crate::session::{MessageAttachment, ToolExecutionResult, ToolMetadata};
 use crate::tooling::tools::{
-    ApplyPatchArgs, EditArgs, ListArgs, ReadArgs, WriteArgs, decode_tool_args,
+    ApplyPatchArgs, EditArgs, ReadArgs, WriteArgs, decode_tool_args,
 };
 use crate::tooling::{ToolDefinition, ToolPermission};
 
@@ -37,11 +37,6 @@ pub fn definitions() -> Vec<ToolDefinition> {
             "Apply a unified diff patch to a file (relative to workspace root, or absolute). Accessing files outside the workspace requires user confirmation. You MUST use the Read tool at least once before applying a patch to an existing file. This tool will fail if you did not read the file first.",
             ToolPermission::Edit,
         ),
-        ToolDefinition::new::<ListArgs>(
-            "list",
-            "List entries in a directory (relative to workspace root, or absolute). Accessing directories outside the workspace requires user confirmation.",
-            ToolPermission::Read,
-        ),
     ]
 }
 
@@ -59,7 +54,7 @@ pub fn execute_tool_call(
             read_path(
                 workspace_root,
                 config_dir,
-                args.path,
+                args.file_path,
                 args.offset,
                 args.limit,
                 allow_outside,
@@ -68,7 +63,7 @@ pub fn execute_tool_call(
         Some("write") => {
             let args = decode_tool_args::<WriteArgs>(tool_name, arguments)?;
             let absolute_path =
-                resolve_workspace_path(workspace_root, Path::new(&args.path), allow_outside)?;
+                resolve_workspace_path(workspace_root, Path::new(&args.file_path), allow_outside)?;
             let original_exists = absolute_path.exists();
             let old_content = if original_exists {
                 read_existing_text(&absolute_path).unwrap_or_default()
@@ -76,7 +71,7 @@ pub fn execute_tool_call(
                 String::new()
             };
 
-            write_file(workspace_root, &args.path, &args.content, allow_outside)?;
+            write_file(workspace_root, &args.file_path, &args.content, allow_outside)?;
             Ok(file_change_output(
                 workspace_root,
                 &absolute_path,
@@ -90,7 +85,7 @@ pub fn execute_tool_call(
             let args = decode_tool_args::<EditArgs>(tool_name, arguments)?;
             edit_file(
                 workspace_root,
-                &args.path,
+                &args.file_path,
                 &args.old_text,
                 &args.new_text,
                 args.replace_all.unwrap_or(false),
@@ -132,12 +127,6 @@ pub fn execute_tool_call(
                 "Patched",
                 original_exists,
             ))
-        }
-        Some("list") => {
-            let args = decode_tool_args::<ListArgs>(tool_name, arguments)?;
-            let path = args.path.unwrap_or_else(|| ".".to_string());
-            let output = list_dir(workspace_root, path, allow_outside)?;
-            Ok(crate::session::ToolExecutionResult::new(output))
         }
         Some(other) => bail!("unsupported file tool '{}'", other),
         None => bail!("unknown tool '{}'", tool_name),

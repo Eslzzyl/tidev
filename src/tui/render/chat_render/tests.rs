@@ -110,45 +110,6 @@ mod tests {
     }
 
     #[test]
-    fn render_tool_result_detail_lines_list_shows_output_preview() {
-        use crate::session::{Message, ToolExecutionResult};
-
-        let message = Message::tool_result(
-            "tool-call-id",
-            "list",
-            ToolExecutionResult::new("./\nfile1.txt\nfile2.txt"),
-        );
-
-        let ctx = RenderContext {
-            palette: ThemePalette::dark(),
-            spinner: "|",
-            workspace_root: std::path::Path::new("/tmp"),
-            expanded_tool_results: &HashSet::new(),
-            expanded_tool_outputs: &HashMap::new(),
-            config: &AppConfig::default(),
-            auth: &AuthStore::default(),
-            conversation: &Conversation::new(
-                uuid::Uuid::new_v4(),
-                "/tmp",
-                "test",
-                "test",
-                "test",
-                "test",
-                "test",
-            ),
-            mode: SessionMode::Build,
-        };
-
-        let (lines, _, _) = render_tool_result_detail_lines(&message, 80, &ctx);
-        let text = text_lines_to_string(&lines);
-        assert!(
-            text.contains("file1.txt"),
-            "should contain file listing: {}",
-            text
-        );
-    }
-
-    #[test]
     fn render_tool_result_detail_lines_todowrite_formats_checkbox_list() {
         use crate::session::{Message, ToolExecutionResult};
         use crate::tooling::TodoItem;
@@ -217,7 +178,7 @@ mod tests {
         let tool_call = ToolCall {
             id: "tool-call-id".to_string(),
             name: "read".to_string(),
-            arguments: "{\"path\": \"/tmp/example.txt\"}".to_string(),
+            arguments: "{\"file_path\": \"/tmp/example.txt\"}".to_string(),
         };
 
         let ctx = RenderContext {

@@ -132,18 +132,15 @@ pub(super) fn summarize_tool_call(
     let path_to_relative = |path: &str| display_workspace_relative(workspace_root, Path::new(path));
 
     let summary = match canonical_name {
-        "read" => field("path")
+        "read" => field("file_path")
             .map(|path| format!("Read {}", path_to_relative(path)))
             .unwrap_or_else(|| "Read file".to_string()),
-        "write" => field("path")
+        "write" => field("file_path")
             .map(|path| format!("Write {}", path_to_relative(path)))
             .unwrap_or_else(|| "Write file".to_string()),
-        "edit" => field("path")
+        "edit" => field("file_path")
             .map(|path| format!("Edit {}", path_to_relative(path)))
             .unwrap_or_else(|| "Edit file".to_string()),
-        "list" => field("path")
-            .map(|path| format!("List {}", path_to_relative(path)))
-            .unwrap_or_else(|| "List items".to_string()),
         "glob" => {
             let pattern = field("pattern").unwrap_or("*");
             let path = field("path").unwrap_or(".");
@@ -253,8 +250,8 @@ pub(super) fn summarize_tool_arguments(tool_name: &str, arguments: &str) -> Vec<
 
     match canonical_name {
         "read" => {
-            if let Some(path) = string_field("path") {
-                fields.push(("path".to_string(), path));
+            if let Some(path) = string_field("file_path") {
+                fields.push(("file_path".to_string(), path));
             }
             // Extract offset and limit for read tool
             if let Some(offset) = parsed
@@ -273,15 +270,9 @@ pub(super) fn summarize_tool_arguments(tool_name: &str, arguments: &str) -> Vec<
             }
         }
         "write" | "edit" => {
-            if let Some(path) = string_field("path") {
-                fields.push(("path".to_string(), path));
+            if let Some(path) = string_field("file_path") {
+                fields.push(("file_path".to_string(), path));
             }
-        }
-        "list" => {
-            fields.push((
-                "path".to_string(),
-                string_field("path").unwrap_or_else(|| ".".to_string()),
-            ));
         }
         "glob" => {
             if let Some(pattern) = string_field("pattern") {

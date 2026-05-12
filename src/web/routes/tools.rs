@@ -49,12 +49,6 @@ pub async fn list_tools() -> WebResult<Json<ListToolsResponse>> {
             permission: "execute".to_string(),
         },
         ToolInfo {
-            name: "list".to_string(),
-            display_name: "List Directory".to_string(),
-            description: "List files in a directory".to_string(),
-            permission: "read".to_string(),
-        },
-        ToolInfo {
             name: "glob".to_string(),
             display_name: "Glob Search".to_string(),
             description: "Search files using glob patterns".to_string(),

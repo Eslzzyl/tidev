@@ -2202,8 +2202,8 @@ mod tests {
             (
                 ToolCall {
                     id: "tc-2".to_string(),
-                    name: "list".to_string(),
-                    arguments: r#"{"path":"."}"#.to_string(),
+                    name: "read".to_string(),
+                    arguments: r#"{"file_path":"/nonexistent"}"#.to_string(),
                 },
                 false,
             ),
@@ -2264,8 +2264,8 @@ mod tests {
         let tool_calls = vec![(
             ToolCall {
                 id: "tc-1".to_string(),
-                name: "list".to_string(),
-                arguments: r#"{"path":"."}"#.to_string(),
+                name: "read".to_string(),
+                arguments: r#"{"file_path":"."}"#.to_string(),
             },
             false,
         )];
@@ -2312,8 +2312,8 @@ mod tests {
         let tool_calls = vec![(
             ToolCall {
                 id: "tc-persist".to_string(),
-                name: "list".to_string(),
-                arguments: r#"{"path":"."}"#.to_string(),
+                name: "read".to_string(),
+                arguments: r#"{"file_path":"."}"#.to_string(),
             },
             false,
         )];

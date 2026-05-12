@@ -87,7 +87,6 @@ impl AgentType {
             // Explorer: read-only search tools + bash for fast searching (no write commands).
             Self::Explorer => Some(&[
                 "read",
-                "list",
                 "glob",
                 "grep",
                 "bash",
@@ -98,7 +97,6 @@ impl AgentType {
             // Librarian: research tools (no code modification).
             Self::Librarian => Some(&[
                 "read",
-                "list",
                 "glob",
                 "grep",
                 "websearch",
@@ -109,7 +107,6 @@ impl AgentType {
             // Oracle: read-only analysis.
             Self::Oracle => Some(&[
                 "read",
-                "list",
                 "glob",
                 "grep",
                 "websearch",
@@ -120,7 +117,6 @@ impl AgentType {
             // Designer: read + write for design work.
             Self::Designer => Some(&[
                 "read",
-                "list",
                 "glob",
                 "grep",
                 "write",

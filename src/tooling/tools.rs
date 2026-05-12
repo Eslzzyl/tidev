@@ -215,7 +215,7 @@ macro_rules! tool_args {
 
 tool_args! {
     pub struct ReadArgs {
-        path: string("Path to read (relative to workspace root, or absolute)"),
+        file_path: string("Path to read (relative to workspace root, or absolute)"),
         offset: optional_integer("1-indexed line number to start reading from"),
         limit: optional_integer("Maximum number of lines to read"),
     }
@@ -223,14 +223,14 @@ tool_args! {
 
 tool_args! {
     pub struct WriteArgs {
-        path: string("Path to write (relative to workspace root, or absolute)"),
+        file_path: string("Path to write (relative to workspace root, or absolute)"),
         content: string("File contents to write"),
     }
 }
 
 tool_args! {
     pub struct EditArgs {
-        path: string("Path to edit (relative to workspace root, or absolute)"),
+        file_path: string("Path to edit (relative to workspace root, or absolute)"),
         old_text: string("Text to replace; must match exactly"),
         new_text: string("Replacement text"),
         replace_all: optional_boolean("Replace all matches instead of only the first"),
@@ -240,12 +240,6 @@ tool_args! {
 tool_args! {
     pub struct ApplyPatchArgs {
         patch_text: string("The full patch text that describes all changes to be made"),
-    }
-}
-
-tool_args! {
-    pub struct ListArgs {
-        path: optional_string("Directory path (relative to workspace root, or absolute)"),
     }
 }
 
@@ -267,6 +261,7 @@ tool_args! {
 tool_args! {
     pub struct BashArgs {
         command: string("Shell command to execute from the workspace root"),
+        description: optional_string("Clear, concise description of what this command does"),
         timeout: optional_integer("Timeout in milliseconds (default: 120000, max: 600000)"),
     }
 }

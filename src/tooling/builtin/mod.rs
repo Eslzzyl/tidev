@@ -61,7 +61,7 @@ pub fn execute_tool_call(
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
 
     let result = match canonical_tool_name(&call.name) {
-        Some("read") | Some("write") | Some("edit") | Some("apply_patch") | Some("list") => {
+        Some("read") | Some("write") | Some("edit") | Some("apply_patch") => {
             file::execute_tool_call(
                 workspace_root,
                 config_dir,
@@ -158,7 +158,7 @@ pub fn execute_tool_call_streaming(
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
 
     let result = match canonical_tool_name(&call.name) {
-        Some("read") | Some("write") | Some("edit") | Some("apply_patch") | Some("list") => {
+        Some("read") | Some("write") | Some("edit") | Some("apply_patch") => {
             file::execute_tool_call(
                 workspace_root,
                 config_dir,

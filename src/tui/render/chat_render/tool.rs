@@ -36,10 +36,10 @@ pub(super) fn render_tool_call_with_result(
     // Check if this is a pending call (arguments not complete)
     let is_pending = tool_result.is_none()
         && is_streaming
-        && !matches!(canonical_name, "read" | "list" | "glob" | "grep")
+        && !matches!(canonical_name, "read" | "glob" | "grep")
         && !tool_call_arguments_are_complete(&tool_call.arguments);
 
-    if matches!(canonical_name, "list" | "grep" | "glob" | "read" | "skill") {
+    if matches!(canonical_name, "grep" | "glob" | "read" | "skill") {
         return (
             render_tool_call_summary_line(tool_call, tool_result, body_width, palette, ctx),
             vec![],
@@ -153,10 +153,6 @@ pub(super) fn render_tool_call_summary_line(
     let rel_path = |p: &str| display_workspace_relative(ctx.workspace_root, Path::new(p));
 
     let (action_label, target) = match canonical_name {
-        "list" => {
-            let path = get_field("path").unwrap_or(".");
-            ("List", rel_path(path).to_string())
-        }
         "grep" => {
             let pattern = get_field("pattern").unwrap_or("");
             let path = get_field("path").unwrap_or(".");
@@ -168,7 +164,7 @@ pub(super) fn render_tool_call_summary_line(
             ("Find", format!("{} in {}", pattern, rel_path(path)))
         }
         "read" => {
-            let path = get_field("path").unwrap_or("file");
+            let path = get_field("file_path").unwrap_or("file");
             ("Read", rel_path(path).to_string())
         }
         "skill" => {
@@ -237,18 +233,6 @@ pub(super) fn render_tool_call_summary_line(
 
 pub(super) fn compute_tool_result_suffix(canonical_name: &str, output: &str) -> String {
     match canonical_name {
-        "list" => {
-            if output == "(empty)" {
-                " → empty".to_string()
-            } else {
-                let count = output
-                    .lines()
-                    .filter(|line| !line.trim().is_empty())
-                    .count()
-                    .saturating_sub(1); // Subtract the path line
-                format!(" → {} items", count)
-            }
-        }
         "grep" | "glob" => {
             if tool_output_is_error(output) {
                 let count = if output.is_empty() {
@@ -561,7 +545,7 @@ pub(super) fn render_tool_call_lines(
             }
         }
         "write" => {
-            let path = get_field("path").unwrap_or("file");
+            let path = get_field("file_path").unwrap_or("file");
             let rel_path = display_workspace_relative(workspace_root, Path::new(path));
             lines.push(Line::from(vec![
                 Span::styled("  Path: ", Style::default().fg(palette.muted)),

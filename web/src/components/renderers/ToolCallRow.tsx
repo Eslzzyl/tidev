@@ -3,7 +3,6 @@ import {
   Loader2,
   ChevronDown,
   FileText,
-  FolderTree,
   Search,
   Files,
   FileEdit,
@@ -27,7 +26,7 @@ interface Props {
 }
 
 function isReadOnlyTool(name: string): boolean {
-  return ["read", "list", "grep", "glob", "skill"].includes(name);
+  return ["read", "grep", "glob", "skill"].includes(name);
 }
 
 function isWriteTool(name: string): boolean {
@@ -52,8 +51,6 @@ function getToolIcon(
   switch (name) {
     case "read":
       return FileText;
-    case "list":
-      return FolderTree;
     case "grep":
       return Search;
     case "glob":
@@ -105,8 +102,6 @@ function getToolLabel(name: string): string {
   switch (name) {
     case "read":
       return "Read";
-    case "list":
-      return "List";
     case "grep":
       return "Search";
     case "glob":
@@ -132,9 +127,8 @@ function summarizeArguments(name: string, entry: ToolCallEntry): string {
     switch (name) {
       case "read":
       case "write":
-      case "edit":
-      case "list": {
-        return args.path || "(unknown)";
+      case "edit": {
+        return args.file_path || "(unknown)";
       }
       case "grep": {
         const pattern = args.pattern || "";
@@ -186,15 +180,11 @@ function getResultSummary(entry: ToolCallEntry): string {
   if (entry.result.isError) return " failed";
 
   const name = entry.name;
-  const canonical = ["list", "grep", "glob", "skill"].includes(name)
+  const canonical = ["grep", "glob", "skill"].includes(name)
     ? name
     : "";
 
   switch (canonical) {
-    case "list": {
-      const count = output.split("\n").filter((l) => l.trim()).length;
-      return ` ${count} item(s)`;
-    }
     case "grep":
     case "glob": {
       const firstLine = output.split("\n")[0] || "";
@@ -248,6 +238,18 @@ function getBashCommand(entry: ToolCallEntry): string {
     return args.command || "";
   } catch {
     return "";
+  }
+}
+
+/**
+ * Get the bash description from parsed arguments, for display purposes.
+ */
+function getBashDescription(entry: ToolCallEntry): string | null {
+  try {
+    const args = JSON.parse(entry.arguments);
+    return args.description || null;
+  } catch {
+    return null;
   }
 }
 
@@ -422,9 +424,14 @@ export function ToolCallRow({ entry }: Props) {
               />
             )}
 
-            {/* Bash: show command + output */}
+            {/* Bash: show description + command + output */}
             {isBash(entry.name) && (
               <div className="space-y-1">
+                {getBashDescription(entry) && (
+                  <div className="rounded bg-neutral-100 px-3 py-1.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400">
+                    {getBashDescription(entry)}
+                  </div>
+                )}
                 <div className="overflow-x-auto whitespace-pre-wrap break-all rounded bg-black/5 px-3 py-1.5 font-mono text-xs leading-relaxed text-neutral-600 dark:bg-white/5 dark:text-neutral-400">
                   $ {getBashCommand(entry)}
                 </div>

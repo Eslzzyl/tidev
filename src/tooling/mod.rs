@@ -160,7 +160,6 @@ pub(crate) fn canonical_tool_name(tool_name: &str) -> Option<&'static str> {
         "read" | "read_file" => Some("read"),
         "write" | "write_file" => Some("write"),
         "edit" => Some("edit"),
-        "list" | "list_dir" => Some("list"),
         "glob" => Some("glob"),
         "grep" => Some("grep"),
         "bash" | "shell" => Some("bash"),

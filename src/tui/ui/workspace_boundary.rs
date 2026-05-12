@@ -72,7 +72,7 @@ pub(crate) fn extract_boundary_violation_path(
     let canonical_name = crate::tooling::canonical_tool_name(&tool_call.name)?;
 
     let path_buf: PathBuf = match canonical_name {
-        "read" | "write" | "edit" | "list" | "glob" | "grep" => {
+        "read" | "write" | "edit" | "glob" | "grep" => {
             let path_str = args.get("path")?.as_str()?;
             PathBuf::from(path_str)
         }
