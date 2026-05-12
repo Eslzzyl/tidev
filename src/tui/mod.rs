@@ -281,7 +281,12 @@ struct App {
 pub fn run() -> Result<()> {
     let runtime = Runtime::new().context("failed to create runtime")?;
     let mut app = App::new()?;
-    app.run(&runtime)
+    app.run(&runtime)?;
+    // Don't wait for blocking tasks (e.g. tool executions that are
+    // still running) — the program is exiting and the OS will clean
+    // up any orphaned child processes.
+    runtime.shutdown_background();
+    Ok(())
 }
 
 impl App {

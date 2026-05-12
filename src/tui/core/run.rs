@@ -329,6 +329,15 @@ impl App {
 
         self.cleanup_cancel
             .store(true, std::sync::atomic::Ordering::SeqCst);
+
+        // Cancel the agent loop so it can exit promptly instead of
+        // blocking the tokio runtime shutdown.
+        if let Some(token) = self.request_cancel_token.take() {
+            token.cancel();
+        }
+        self.pending_permission_rx = None;
+        self.pending_permission_response = None;
+
         terminal.show_cursor().ok();
         Ok(())
     }
