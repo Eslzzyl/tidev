@@ -84,7 +84,6 @@ fn theme_name_to_syntax_theme(name: ThemeName) -> Theme {
         ThemeName::Nord => "base16-ocean.dark",
         ThemeName::OneDark => "base16-ocean.dark",
         ThemeName::Mocha => "base16-mocha.dark",
-        ThemeName::Latte => "InspiredGitHub",
         ThemeName::Solarized => "Solarized (dark)",
         ThemeName::Orng => "InspiredGitHub",
         ThemeName::Github => "InspiredGitHub",

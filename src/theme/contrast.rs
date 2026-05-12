@@ -17,8 +17,8 @@ impl ThemePalette {
             success: Color::Rgb(166, 226, 46),
             warning: Color::Rgb(230, 219, 116),
             error: Color::Rgb(249, 38, 114),
-            selection_bg: Color::Rgb(73, 72, 62),
-            selection_fg: Color::Rgb(248, 248, 242),
+            selection_bg: Color::Rgb(166, 226, 46),
+            selection_fg: Color::Rgb(255, 255, 255),
             mode_build: Color::Rgb(166, 226, 46),
             mode_plan: Color::Rgb(117, 113, 94),
         }
