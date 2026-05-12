@@ -164,7 +164,7 @@ impl FileSearchIndex {
         let (stop_tx, stop_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
 
-        let mut watcher = match RecommendedWatcher::new(
+        let watcher = match RecommendedWatcher::new(
             move |result| {
                 let _ = event_tx.send(result);
             },
@@ -176,14 +176,6 @@ impl FileSearchIndex {
                 return;
             }
         };
-
-        if let Err(error) = watcher.watch(workspace_root, RecursiveMode::Recursive) {
-            crate::log_warn!(
-                "failed to watch workspace for file search refreshes: {}",
-                error
-            );
-            return;
-        }
 
         let old_handle = {
             let mut watcher_slot = self.watcher.lock().unwrap();
@@ -218,10 +210,20 @@ impl FileSearchIndex {
         self: Arc<Self>,
         watcher_id: u64,
         workspace_root: PathBuf,
-        _watcher: RecommendedWatcher,
+        mut watcher: RecommendedWatcher,
         event_rx: mpsc::Receiver<notify::Result<Event>>,
         stop_rx: mpsc::Receiver<()>,
     ) {
+        // Set up recursive inotify watches in the background thread
+        // so the main thread does not block on filesystem traversal.
+        if let Err(error) = watcher.watch(&workspace_root, RecursiveMode::Recursive) {
+            crate::log_warn!(
+                "failed to watch workspace for file search refreshes: {}",
+                error,
+            );
+            return;
+        }
+
         let debounce = Duration::from_millis(150);
         let mut pending_dirs: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut last_event = std::time::Instant::now() - debounce - Duration::from_secs(1);

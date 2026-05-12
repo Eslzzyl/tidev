@@ -222,9 +222,6 @@ impl App {
             force_full_redraw: false,
         };
 
-        app.at_mention
-            .start_background_indexing(app.workspace_root.as_path());
-
         Ok(app)
     }
 
