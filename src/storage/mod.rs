@@ -609,6 +609,23 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Delete all tool result messages with the given `tool_call_id`.
+    ///
+    /// Used to clean up stale ShellOutput-persisted messages (e.g. sandbox
+    /// denial output) before persisting a retry result.
+    pub fn delete_messages_by_tool_call_id(
+        &self,
+        session_id: Uuid,
+        tool_call_id: &str,
+    ) -> Result<()> {
+        self.write_conn.execute(
+            "DELETE FROM messages WHERE session_id = ?1 AND tool_call_id = ?2",
+            params![session_id.to_string(), tool_call_id],
+        )?;
+        self.touch_session(session_id)?;
+        Ok(())
+    }
+
     pub fn remember_tool_permission(
         &self,
         session_id: Uuid,

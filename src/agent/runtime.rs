@@ -713,6 +713,19 @@ impl AgentRuntime {
                     // Restore the original sandbox policy for subsequent commands
                     self.tools.set_sandbox_policy(original_policy);
 
+                    // Delete any stale ShellOutput-persisted messages so the
+                    // retry result is the only tool result the model sees.
+                    {
+                        let store = self.store.lock().await;
+                        if let Err(e) =
+                            store.delete_messages_by_tool_call_id(session_id, &tool_call.id)
+                        {
+                            crate::log_warn!(
+                                "delete_messages_by_tool_call_id (sandbox retry cleanup): {e}"
+                            );
+                        }
+                    }
+
                     self.persist_tool_result(
                         session_id,
                         request_id,
