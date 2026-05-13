@@ -5,7 +5,7 @@ impl App {
     pub(crate) fn handle_sandbox_elevation_key(&mut self, key: KeyEvent) -> Result<()> {
         if self.sandbox_elevation.is_some() {
             match key.code {
-                KeyCode::Char('y') | KeyCode::Enter => {
+                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                     // User approved: retry with full access
                     if let Some(dialog) = self.sandbox_elevation.take() {
                         if let Some(tx) = dialog.response_tx.lock().unwrap().take() {
@@ -21,7 +21,7 @@ impl App {
                         );
                     }
                 }
-                KeyCode::Char('n') | KeyCode::Esc | KeyCode::Char('q') => {
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc | KeyCode::Char('q') => {
                     // User cancelled: pass the denial through
                     if let Some(dialog) = self.sandbox_elevation.take()
                         && let Some(tx) = dialog.response_tx.lock().unwrap().take() {
