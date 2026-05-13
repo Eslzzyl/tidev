@@ -350,7 +350,6 @@ impl App {
             context_manager: self.context_manager.clone(),
             pending_tool_execution: self.pending_tool_execution.clone(),
             permission_dialog: self.permission_dialog.clone(),
-            sandbox_elevation: None, // not stored in snapshot (not Clone)
             workspace_boundary_dialog: self.workspace_boundary_dialog.clone(),
             sensitive_file_dialog: self.sensitive_file_dialog.clone(),
             workspace_boundary_permissions: self.workspace_boundary_permissions.clone(),
@@ -665,7 +664,6 @@ impl App {
             context_manager,
             pending_tool_execution: None,
             permission_dialog: None,
-            sandbox_elevation: None,
             workspace_boundary_dialog: None,
             sensitive_file_dialog: None,
             workspace_boundary_permissions: std::collections::HashMap::new(),

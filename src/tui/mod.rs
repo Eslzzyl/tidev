@@ -700,19 +700,13 @@ impl App {
         // dispatch, because they carry a oneshot sender that must not be moved
         // into the event handler's match.
         if let BackendEvent::SandboxElevationRequest {
-            tool_name,
-            tool_arguments,
             response_tx,
             ..
         } = event
         {
             // Extract the sender from the Arc wrapper
             let sender = response_tx.lock().unwrap().take();
-            self.sandbox_elevation = Some(SandboxElevationDialog::new(
-                tool_name,
-                tool_arguments,
-                sender,
-            ));
+            self.sandbox_elevation = Some(SandboxElevationDialog::new(sender));
             return Ok(());
         }
 

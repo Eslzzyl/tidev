@@ -86,21 +86,15 @@ impl PermissionDialogState {
 /// retry with full access or cancel (which lets the error through).
 #[derive(Clone, Debug)]
 pub(crate) struct SandboxElevationDialog {
-    pub tool_name: String,
-    pub tool_arguments: String,
     /// The oneshot sender wrapped for clonability.
     pub(crate) response_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<bool>>>>,
 }
 
 impl SandboxElevationDialog {
     pub(crate) fn new(
-        tool_name: String,
-        tool_arguments: String,
         response_tx: Option<tokio::sync::oneshot::Sender<bool>>,
     ) -> Self {
         Self {
-            tool_name,
-            tool_arguments,
             response_tx: Arc::new(Mutex::new(response_tx)),
         }
     }

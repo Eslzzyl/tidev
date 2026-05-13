@@ -21,8 +21,6 @@ const BWRAP_BINARY: &str = "bwrap";
 
 /// Minimum bwrap version that supports `--argv0`.
 /// We check by trying `bwrap --argv0` rather than parsing version strings.
-const BWRAP_MIN_VERSION: &str = "0.6.0";
-
 /// Check if bubblewrap is available and functional on this system.
 pub fn is_bwrap_available() -> bool {
     static BWRAP_AVAILABLE: OnceLock<bool> = OnceLock::new();
