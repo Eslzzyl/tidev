@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::panel_launcher::PanelLauncherState;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{io, path::Path, time::Duration};
 use tokio::runtime::Runtime;
@@ -128,6 +129,7 @@ impl App {
             file_read_tracker,
             commands,
             command_palette,
+            panel_launcher: PanelLauncherState::default(),
             connect_dialog: None,
             theme_panel: None,
             model_panel: None,
@@ -401,6 +403,7 @@ impl App {
             at_mention: self.at_mention.clone(),
             snippet_state: self.snippet_state.clone(),
             command_palette: self.command_palette.clone(),
+            panel_launcher: self.panel_launcher.clone(),
             leader_key_pending: self.leader_key_pending,
             composer: self.composer.clone(),
             draft_attachments: self.draft_attachments.clone(),
@@ -427,6 +430,7 @@ impl App {
         self.at_mention = snapshot.at_mention;
         self.snippet_state = snapshot.snippet_state;
         self.command_palette = snapshot.command_palette;
+        self.panel_launcher = snapshot.panel_launcher;
         self.leader_key_pending = snapshot.leader_key_pending;
         self.composer = snapshot.composer;
         self.draft_attachments = snapshot.draft_attachments;

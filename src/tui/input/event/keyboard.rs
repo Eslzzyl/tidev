@@ -100,6 +100,11 @@ impl App {
             return self.handle_rename_session_dialog_key(key, runtime);
         }
 
+        // Panel launcher overlay takes priority over individual panels
+        if self.panel_launcher.visible {
+            return self.handle_panel_launcher_key(key, runtime);
+        }
+
         if self.theme_panel.is_some() {
             return self.handle_theme_panel_key(key);
         }
@@ -161,9 +166,9 @@ impl App {
             return Ok(());
         }
 
-        // Ctrl+P: 打开模型选择面板（无论当前是否有面板）
+        // Ctrl+P: 打开面板启动器（命令面板）
         if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            self.open_model_panel(String::new());
+            self.open_panel_launcher();
             return Ok(());
         }
 

@@ -81,6 +81,7 @@ impl App {
         }
         let area = frame.area();
         self.render_connect_dialog(frame, area);
+        self.render_panel_launcher(frame, area);
         if let Some(panel) = &self.theme_panel {
             self.render_theme_panel(frame, area, panel);
         }

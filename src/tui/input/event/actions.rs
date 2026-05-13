@@ -46,6 +46,105 @@ impl App {
         self.settings_panel = Some(SettingsPanelState::new(&self.config));
     }
 
+    pub(crate) fn open_panel_launcher(&mut self) {
+        // Close any open panels so the launcher is clean
+        self.command_palette.clear();
+        self.theme_panel = None;
+        self.model_panel = None;
+        self.session_panel = None;
+        self.mcp_panel = None;
+        self.agents_panel = None;
+        self.settings_panel = None;
+        self.memory_panel = None;
+        self.message_panel = None;
+        self.skills_panel = None;
+        self.sandbox_panel = None;
+        self.panel_launcher.open();
+    }
+
+    pub(crate) fn handle_panel_launcher_key(
+        &mut self,
+        key: KeyEvent,
+        runtime: &Runtime,
+    ) -> Result<()> {
+        match key.code {
+            KeyCode::Esc => {
+                self.panel_launcher.clear();
+            }
+            KeyCode::Up => {
+                self.panel_launcher.move_selection(-1);
+            }
+            KeyCode::Down => {
+                self.panel_launcher.move_selection(1);
+            }
+            KeyCode::Enter => {
+                if let Some(action) = self.panel_launcher.take_selected_action() {
+                    self.execute_panel_action(action, runtime);
+                }
+            }
+            KeyCode::Char(c) if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
+                self.panel_launcher.query.push(c);
+                self.panel_launcher.sync();
+            }
+            KeyCode::Backspace => {
+                self.panel_launcher.query.pop();
+                self.panel_launcher.sync();
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub(crate) fn execute_panel_action(&mut self, action: PanelAction, runtime: &Runtime) {
+        use crate::tui::ui;
+        match action {
+            PanelAction::Model => {
+                self.open_model_panel(String::new());
+            }
+            PanelAction::Session => {
+                if let Err(e) = self.open_session_panel(String::new()) {
+                    self.last_notice = Some(format!("{e}"));
+                }
+            }
+            PanelAction::Theme => {
+                self.open_theme_panel();
+            }
+            PanelAction::Settings => {
+                self.open_settings_panel();
+            }
+            PanelAction::Memory => {
+                if let Err(e) = self.open_memory_panel() {
+                    self.last_notice = Some(format!("{e}"));
+                }
+            }
+            PanelAction::Mcp => {
+                self.open_mcp_panel(String::new());
+            }
+            PanelAction::Agents => {
+                self.agents_panel = Some(ui::agents_panel::AgentsPanelState::new());
+            }
+            PanelAction::Skills => {
+                self.open_skills_panel();
+            }
+            PanelAction::Sandbox => {
+                self.open_sandbox_panel();
+            }
+            PanelAction::Stats => {
+                self.toggle_stats_panel();
+            }
+            PanelAction::Balance => {
+                if let Err(e) = self.open_balance_panel(runtime) {
+                    self.last_notice = Some(format!("{e}"));
+                }
+            }
+            PanelAction::Message => {
+                if let Err(e) = self.open_message_panel(String::new()) {
+                    self.last_notice = Some(format!("{e}"));
+                }
+            }
+        }
+    }
+
     pub(crate) fn open_model_panel(&mut self, initial_query: String) {
         self.command_palette.clear();
         self.connect_dialog = None;

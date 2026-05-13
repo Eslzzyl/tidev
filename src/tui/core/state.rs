@@ -32,6 +32,7 @@ use crate::{
     session::{Conversation, MessageAttachment},
     tooling::TodoItem,
     tui::commands::CommandPaletteState,
+    tui::panel_launcher::PanelLauncherState,
     tui::input::Composer,
 };
 
@@ -226,6 +227,7 @@ pub(crate) struct UiStateSnapshot {
     pub(crate) at_mention: AtMentionState,
     pub(crate) snippet_state: SnippetState,
     pub(crate) command_palette: CommandPaletteState,
+    pub(crate) panel_launcher: PanelLauncherState,
     pub(crate) leader_key_pending: bool,
     pub(crate) composer: Composer,
     pub(crate) draft_attachments: Vec<MessageAttachment>,

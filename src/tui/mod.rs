@@ -28,10 +28,12 @@ use uuid::Uuid;
 mod commands;
 mod core;
 mod input;
+mod panel_launcher;
 mod render;
 mod ui;
 
 pub use commands::{CommandAction, CommandPaletteState, CommandRegistry};
+pub(crate) use panel_launcher::PanelAction;
 pub use core::run;
 pub use core::state;
 pub use core::undo;
@@ -121,6 +123,7 @@ struct App {
     file_read_tracker: Arc<FileReadTracker>,
     commands: CommandRegistry,
     command_palette: CommandPaletteState,
+    panel_launcher: panel_launcher::PanelLauncherState,
     connect_dialog: Option<ConnectDialog>,
     theme_panel: Option<ThemePanelState>,
     model_panel: Option<ModelPanelState>,
