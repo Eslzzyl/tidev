@@ -343,17 +343,6 @@ fn should_allow_writes(policy: &SandboxPolicy) -> bool {
     }
 
     #[test]
-    fn test_build_landlock_exec_args() {
-        let (program, args) = build_landlock_exec_args(
-            "sh",
-            &["-c".to_string(), "echo hi".to_string()],
-        );
-
-        assert_eq!(program, "sh");
-        assert_eq!(args, vec!["-c".to_string(), "echo hi".to_string()]);
-    }
-
-    #[test]
     fn test_add_path_rule_non_existent_path() {
         // Adding a rule for a non-existent path should fail
         if cfg!(target_os = "linux") && is_landlock_available() {

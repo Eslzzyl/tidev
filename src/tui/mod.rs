@@ -477,6 +477,9 @@ impl App {
         // Set sandbox policy based on current mode
         let sandbox_policy = self.mode.sandbox_policy(&self.config.sandbox);
         self.tools.set_sandbox_policy(Some(sandbox_policy));
+        // Also sync to the agent's ToolRegistry (separate copy at init)
+        let agent_policy = self.mode.sandbox_policy(&self.config.sandbox);
+        self.agent.tools.set_sandbox_policy(Some(agent_policy));
     }
 
     /// Find the git worktree root by looking for a .git directory,

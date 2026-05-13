@@ -92,6 +92,8 @@ impl App {
         };
 
         self.tools.set_sandbox_policy(Some(item.policy.clone()));
+        // Also sync to the agent's ToolRegistry (separate copy at init)
+        self.agent.tools.set_sandbox_policy(Some(item.policy.clone()));
 
         // Persist to config file so the choice survives restarts
         self.config.sandbox.mode = match &item.policy {

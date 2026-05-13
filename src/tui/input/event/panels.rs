@@ -13,6 +13,9 @@ impl App {
                         }
                         self.tools
                             .set_sandbox_policy(Some(crate::sandbox::SandboxPolicy::DangerFullAccess));
+                        // Also sync to the agent's ToolRegistry (separate copy at init)
+                        self.agent.tools
+                            .set_sandbox_policy(Some(crate::sandbox::SandboxPolicy::DangerFullAccess));
                         self.last_notice = Some(
                             "Sandbox policy elevated to full access for retry".to_string(),
                         );

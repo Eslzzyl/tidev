@@ -356,7 +356,9 @@ fn run_shell_inner(
             || combined.contains("sandbox")
             || combined.contains("not allowed")
             || combined.contains("permission denied")
-            || combined.contains("EPERM"));
+            || combined.contains("EPERM")
+            // bwrap read-only filesystem denial
+            || combined.contains("Read-only file system"));
 
     Ok(BashExecutionResult {
         output: if sandbox_denied {

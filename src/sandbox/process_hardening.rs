@@ -139,11 +139,13 @@ mod tests {
         // These should be removed
         assert!(std::env::var("LD_PRELOAD").is_err());
         assert!(std::env::var("LD_LIBRARY_PATH").is_err());
+
+        // DYLD vars are only handled on macOS
+        #[cfg(target_os = "macos")]
         assert!(std::env::var("DYLD_INSERT_LIBRARIES").is_err());
 
         // These should still exist
         assert_eq!(std::env::var("PATH").unwrap(), "/usr/bin");
-
         // Cleanup
         unsafe {
             std::env::remove_var("LD_PRELOAD");

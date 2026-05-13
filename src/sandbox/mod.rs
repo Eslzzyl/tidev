@@ -543,15 +543,19 @@ mod tests {
             .with_policy(SandboxPolicy::ReadOnly);
         let manager = SandboxManager::new();
         let env = manager.prepare(&spec);
-        // When sandbox is available (macOS in CI), the command is wrapped with
-        // sandbox-exec. When unavailable, it falls through to plain execution.
-        // Either way it should not crash.
-        if cfg!(not(target_os = "macos")) {
+        // When sandbox is available, the command is wrapped with the platform
+        // sandbox (sandbox-exec on macOS, bwrap on Linux). When unavailable,
+        // it falls through to plain execution. Either way it should not crash.
+        if env.is_sandboxed() {
+            // Should be wrapped by platform sandbox
+            #[cfg(target_os = "macos")]
+            assert_eq!(env.program(), "/usr/bin/sandbox-exec");
+            #[cfg(target_os = "linux")]
+            assert!(env.program().contains("bwrap"));
+        } else {
+            // No sandbox available — falls through to plain execution
             assert_eq!(env.program(), "sh");
             assert_eq!(env.args(), &["-c", "ls"]);
-        } else {
-            // On macOS, sandbox-exec should wrap the command
-            assert_eq!(env.program(), "/usr/bin/sandbox-exec");
         }
     }
 

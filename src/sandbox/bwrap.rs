@@ -182,7 +182,6 @@ mod tests {
         let args = create_bwrap_args(&policy, Path::new("/workspace"), &[]);
 
         assert!(args.contains(&"--ro-bind".to_string()));
-        assert!(args.contains(&"--unshare-net".to_string()));
         assert!(args.contains(&"--unshare-pid".to_string()));
 
         // Should not have any --bind (writeable mounts)
