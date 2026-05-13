@@ -10,6 +10,7 @@ mod ui;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 use crate::prompts::{SessionMode, default_system_prompt, gateway_system_prompt};
 use crate::theme::ThemeName;
@@ -409,6 +410,123 @@ impl AppConfig {
             config.rtk.enabled = false;
         }
         config.attach_bundled_providers()
+    }
+
+    /// Load the global config (`~/.config/tidev/config.toml`), then merge
+    /// in a project-local override from `<workspace_root>/.tidev/config.toml`
+    /// if it exists.
+    ///
+    /// Merge rules:
+    /// - Scalar fields (strings, bools, numbers): project value wins.
+    /// - Map fields (providers, mcp servers): project entries override global.
+    /// - List fields (hooks, instructions, skills): **appended** — both global
+    ///   and project entries are active, with project entries running last.
+    /// - `hooks.disable_all_hooks`: project wins (project can opt out of all hooks).
+    /// - Sub-config sections (`[ui]`, `[logging]`, etc.) are replaced only
+    ///   when the project config explicitly contains that section.
+    pub fn load_with_project_overlay(
+        paths: &ConfigPaths,
+        workspace_root: &Path,
+    ) -> Result<Self> {
+        let mut config = Self::load_or_create(paths)?;
+
+        let project_config_path = workspace_root.join(".tidev/config.toml");
+        if project_config_path.exists() {
+            let project_toml = std::fs::read_to_string(&project_config_path)
+                .with_context(|| format!("failed to read {}", project_config_path.display()))?;
+            let keys = top_level_toml_keys(&project_toml);
+            let project_config: Self = toml::from_str(&project_toml)
+                .with_context(|| format!("failed to parse {}", project_config_path.display()))?;
+            config.merge_overlay(project_config, &keys);
+        }
+
+        Ok(config)
+    }
+
+    /// Merge `overlay` into `self`, with `overlay` values taking priority.
+    ///
+    /// This is a **shallow merge** at the field level:
+    /// - Scalar fields are replaced.
+    /// - `BTreeMap` fields are extended (overlay entries override).
+    /// - `Vec` fields are appended (both sets active).
+    ///
+    /// `keys_in_toml` lists the top-level TOML keys that were explicitly
+    /// present in the overlay source file.  Sub-configs not in this list
+    /// are left untouched (so a project config that only sets `[hooks]`
+    /// won't accidentally zero out `[ui]`, etc.).
+    pub(crate) fn merge_overlay(
+        &mut self,
+        overlay: AppConfig,
+        keys_in_toml: &std::collections::BTreeSet<String>,
+    ) {
+        // Helper: check whether a TOML key was explicitly present.
+        let has = |key: &str| keys_in_toml.contains(key);
+
+        // ── Scalars: project wins ──────────────────────────────────────
+        if has("default_provider") && !overlay.default_provider.is_empty() {
+            self.default_provider = overlay.default_provider;
+        }
+        if has("default_model") && !overlay.default_model.is_empty() {
+            self.default_model = overlay.default_model;
+        }
+        if has("theme") {
+            self.theme = overlay.theme;
+        }
+
+        // ── Maps: project entries override ─────────────────────────────
+        if has("providers") {
+            self.providers.extend(overlay.providers);
+        }
+        // mcp is a sub-table with nested `servers` map; only merge if the
+        // overlay explicitly contained an `[mcp]` section.
+        if has("mcp") {
+            self.mcp.servers.extend(overlay.mcp.servers);
+        }
+
+        // ── Lists: appended ────────────────────────────────────────────
+        if has("instructions") {
+            self.instructions.extend(overlay.instructions);
+        }
+        if has("skills") {
+            self.skills.extend(overlay.skills);
+        }
+
+        // ── Sub-configs: full replacement when section is present ─────
+        if has("ui") {
+            self.ui = overlay.ui;
+        }
+        if has("logging") {
+            self.logging = overlay.logging;
+        }
+        if has("permissions") {
+            self.permissions = overlay.permissions;
+        }
+        if has("notifications") {
+            self.notifications = overlay.notifications;
+        }
+        if has("gateway") {
+            self.gateway = overlay.gateway;
+        }
+        if has("rtk") {
+            self.rtk = overlay.rtk;
+        }
+        if has("agent") {
+            self.agent = overlay.agent;
+        }
+        if has("sandbox") {
+            self.sandbox = overlay.sandbox;
+        }
+        if has("tmp") {
+            self.tmp = overlay.tmp;
+        }
+
+        // ── Hooks: append (project hooks run after global hooks) ─────
+        if has("hooks") {
+            if overlay.hooks.disable_all_hooks {
+                self.hooks.disable_all_hooks = true;
+            }
+            self.hooks.post_tool_use.extend(overlay.hooks.post_tool_use);
+        }
     }
 
     pub fn save(&self, paths: &ConfigPaths) -> Result<()> {
@@ -874,6 +992,56 @@ fn bundled_provider_catalog() -> Result<BTreeMap<String, ProviderConfig>> {
     let catalog: BundledProviderCatalog =
         toml::from_str(BUNDLED_PRESETS_TOML).context("failed to parse bundled provider catalog")?;
     Ok(catalog.providers)
+}
+
+/// Extract the top-level key names from raw TOML text.
+///
+/// This is used during config merging to determine which sections the
+/// project config explicitly sets, so we don't accidentally overwrite
+/// global config sections with default values.
+pub(crate) fn top_level_toml_keys(toml_str: &str) -> std::collections::BTreeSet<String> {
+    use std::collections::BTreeSet;
+
+    let mut keys = BTreeSet::new();
+    for line in toml_str.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        // Table header: [section] or [section.nested]
+        // Array-of-tables header: [[array_name]]
+        if trimmed.starts_with('[') {
+            // Count opening brackets to distinguish [[ from [
+            let open_count = trimmed.chars().take_while(|c| *c == '[').count();
+            let close_count = trimmed.chars().rev().take_while(|c| *c == ']').count();
+            if open_count > 0 && open_count == close_count && open_count <= 2 {
+                let key = trimmed[open_count..trimmed.len() - close_count]
+                    .split('.')
+                    .next()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                if !key.is_empty() {
+                    keys.insert(key);
+                }
+            }
+            continue;
+        }
+
+        // Key-value at top level: key = value
+        if let Some(eq_pos) = trimmed.find('=') {
+            let before_eq = trimmed[..eq_pos].trim();
+            // Skip quoted keys and inline tables
+            if !before_eq.starts_with('"') && !before_eq.starts_with('{') {
+                let key = before_eq.to_string();
+                if !key.is_empty() {
+                    keys.insert(key);
+                }
+            }
+        }
+    }
+    keys
 }
 
 #[cfg(test)]

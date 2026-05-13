@@ -22,7 +22,7 @@ impl App {
 
     pub(crate) fn new_with_paths(paths: ConfigPaths) -> Result<Self> {
         let workspace_root = env::current_dir().context("failed to determine workspace root")?;
-        let config = AppConfig::load_or_create(&paths)?;
+        let config = AppConfig::load_with_project_overlay(&paths, &workspace_root)?;
         crate::logging::init(&paths.data_dir, config.logging.clone());
         crate::log_info!("App initializing, workspace={}", workspace_root.display());
         let auth = AuthStore::load_or_create(&paths)?;

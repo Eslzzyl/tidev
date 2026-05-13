@@ -10,6 +10,7 @@ pub mod terminal;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use anyhow::Context;
 use tokio::sync::Mutex;
 
 use crate::{
@@ -53,7 +54,24 @@ pub struct WebOptions {
 pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     // Load configuration first (needed for logging setup)
     let paths = ConfigPaths::discover()?;
-    let config = AppConfig::load_or_create(&paths)?;
+    let mut config = AppConfig::load_or_create(&paths)?;
+
+    // Determine workspace root (use current dir or provided path)
+    let workspace_root = options
+        .workspace_root
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let workspace_root = workspace_root.canonicalize().unwrap_or(workspace_root);
+
+    // Load project-local config overlay (`.tidev/config.toml`)
+    let project_config_path = workspace_root.join(".tidev/config.toml");
+    if project_config_path.exists() {
+        let project_toml = std::fs::read_to_string(&project_config_path)
+            .with_context(|| format!("failed to read {}", project_config_path.display()))?;
+        let keys = crate::config::top_level_toml_keys(&project_toml);
+        let project_config: AppConfig = toml::from_str(&project_toml)
+            .with_context(|| format!("failed to parse {}", project_config_path.display()))?;
+        config.merge_overlay(project_config, &keys);
+    }
 
     // Initialize logging (console enabled for web mode)
     let mut logging_config = config.logging.clone();
@@ -71,11 +89,6 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     // Create event bus
     let event_bus = EventBus::new(1024);
 
-    // Determine workspace root (use current dir or provided path)
-    let workspace_root = options
-        .workspace_root
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let workspace_root = workspace_root.canonicalize().unwrap_or(workspace_root);
     crate::log_info!("Workspace root: {}", workspace_root.display());
 
     // Load auth store

@@ -44,7 +44,7 @@ pub fn run() -> Result<()> {
 async fn run_async() -> Result<()> {
     let workspace_root = env::current_dir().context("failed to determine workspace root")?;
     let paths = ConfigPaths::discover()?;
-    let config = AppConfig::load_or_create(&paths)?;
+    let config = AppConfig::load_with_project_overlay(&paths, &workspace_root)?;
     crate::log_info!("Gateway starting, config loaded");
 
     let mut logging_config = config.logging.clone();
