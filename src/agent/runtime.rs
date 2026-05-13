@@ -253,7 +253,7 @@ impl AgentRuntime {
                             tool_call_id,
                             tool_name,
                             ToolExecutionResult::new(
-                                "Tool call failed: execution was interrupted or did not complete",
+                                "Tool was cancelled by user or interrupted before completion",
                             ),
                         ));
                     }
@@ -284,7 +284,7 @@ impl AgentRuntime {
                                 tool_call_id,
                                 tool_name,
                                 ToolExecutionResult::new(
-                                    "Tool call failed: execution was interrupted or did not complete",
+                                    "Tool was cancelled by user or interrupted before completion",
                                 ),
                             ));
                         }
@@ -326,7 +326,7 @@ impl AgentRuntime {
                 tool_call_id.clone(),
                 tool_name.clone(),
                 ToolExecutionResult::new(
-                    "Tool call failed: execution was interrupted or did not complete",
+                    "Tool was cancelled by user or interrupted before completion",
                 ),
             ));
         }

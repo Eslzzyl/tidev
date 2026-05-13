@@ -881,6 +881,7 @@ impl App {
         frame.render_widget(block, area);
 
         let options_height = options_lines.len().max(2) as u16;
+        let body_height = dialog.body_height(inner.width);
         let sections = if dialog.editing_custom {
             let available_input_height = inner
                 .height
@@ -895,7 +896,7 @@ impl App {
 
             Layout::vertical([
                 Constraint::Length(1),
-                Constraint::Min(2),
+                Constraint::Min(body_height),
                 Constraint::Min(options_height),
                 Constraint::Min(input_height),
                 Constraint::Length(1),
@@ -904,7 +905,7 @@ impl App {
         } else {
             Layout::vertical([
                 Constraint::Length(1),
-                Constraint::Min(2),
+                Constraint::Min(body_height),
                 Constraint::Min(options_height),
                 Constraint::Length(1),
             ])

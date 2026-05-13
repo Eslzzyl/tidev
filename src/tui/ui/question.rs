@@ -398,16 +398,29 @@ impl QuestionDialogState {
         lines
     }
 
+    /// Number of wrapped lines needed for the current question's body text.
+    pub(crate) fn body_height(&self, width: u16) -> u16 {
+        let body = self.body_title();
+        if body.is_empty() {
+            return 2;
+        }
+        let wrap_width = width.max(1) as usize;
+        let wrapped = wrap(&body, wrap_width);
+        wrapped.len().max(2) as u16
+    }
+
     pub(crate) fn prompt_height(&self, width: u16, input_height: u16) -> u16 {
-        let regular_option_lines = self.regular_options_lines(width.saturating_sub(2));
-        let custom_option_lines = self.custom_option_lines(width.saturating_sub(2));
+        let inner_w = width.saturating_sub(2);
+        let regular_option_lines = self.regular_options_lines(inner_w);
+        let custom_option_lines = self.custom_option_lines(inner_w);
         let input_height = if self.editing_custom { input_height } else { 0 };
 
-        2u16.saturating_add(2)
+        self.body_height(inner_w) // question body text
+            .saturating_add(2) // title + footer
             .saturating_add(regular_option_lines.len() as u16)
             .saturating_add(custom_option_lines.len() as u16)
             .saturating_add(input_height)
-            .saturating_add(2)
+            .saturating_add(2) // padding
     }
 }
 

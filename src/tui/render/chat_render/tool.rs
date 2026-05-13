@@ -1393,7 +1393,6 @@ pub(super) fn render_question_result_pairs(
     palette: ThemePalette,
 ) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
-    let wrap_width = body_width.saturating_sub(4);
 
     // Title
     lines.push(Line::from(vec![Span::styled(
@@ -1428,44 +1427,69 @@ pub(super) fn render_question_result_pairs(
             .map(|s| s.trim().to_string())
             .unwrap_or_default();
 
-        // Render question
-        lines.push(Line::from(vec![Span::styled(
-            "  Q: ",
-            Style::default()
-                .fg(palette.accent_soft)
-                .add_modifier(Modifier::BOLD),
-        )]));
+        // Render question with "  Q: " label merged with text (word-wrapped)
+        // Uses initial_indent/subsequent_indent so word_wrap_line correctly
+        // accounts for the prefix width — same approach as message content area.
         let q_line_owned = Line::from(question_text.clone());
-        let q_wrapped = word_wrap_line(&q_line_owned, WrapOptions::new(wrap_width));
-        if q_wrapped.len() <= 1 {
-            lines.push(Line::from(vec![Span::styled(
-                format!("     {}", question_text),
-                Style::default().fg(palette.text),
-            )]));
-        } else {
-            for (i, wl) in q_wrapped.iter().enumerate() {
-                let prefix = if i == 0 { "     " } else { "       " };
-                lines.push(Line::from(vec![Span::styled(
-                    format!(
-                        "{}{}",
-                        prefix,
-                        wl.spans.iter().map(|s| &*s.content).collect::<String>()
-                    ),
+        let q_wrapped = word_wrap_line(
+            &q_line_owned,
+            WrapOptions::new(body_width)
+                .initial_indent(Line::from(vec![Span::styled(
+                    "  Q: ",
+                    Style::default()
+                        .fg(palette.accent_soft)
+                        .add_modifier(Modifier::BOLD),
+                )]))
+                .subsequent_indent(Line::from(vec![Span::styled(
+                    "     ",
                     Style::default().fg(palette.text),
-                )]));
+                )])),
+        );
+        for wl in q_wrapped {
+            let mut owned_spans: Vec<Span<'static>> = wl
+                .spans
+                .into_iter()
+                .map(|s| Span::styled(s.content.to_string(), s.style))
+                .collect();
+            // Style content parts (after prefix) with text color
+            for span in owned_spans.iter_mut().skip(1) {
+                if span.style.fg.is_none() {
+                    span.style = span.style.fg(palette.text);
+                }
             }
+            lines.push(Line::from(owned_spans));
         }
 
-        // Render answer
-        lines.push(Line::from(vec![
-            Span::styled("  → ", Style::default().fg(palette.success)),
-            Span::styled(
-                answer_text,
-                Style::default()
-                    .fg(palette.success)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
+        // Render answer with word wrapping
+        let a_line_owned = Line::from(answer_text.clone());
+        let a_wrapped = word_wrap_line(
+            &a_line_owned,
+            WrapOptions::new(body_width)
+                .initial_indent(Line::from(vec![Span::styled(
+                    "  → ",
+                    Style::default().fg(palette.success),
+                )]))
+                .subsequent_indent(Line::from(vec![Span::styled(
+                    "     ",
+                    Style::default().fg(palette.text),
+                )])),
+        );
+        for wl in a_wrapped {
+            let mut owned_spans: Vec<Span<'static>> = wl
+                .spans
+                .into_iter()
+                .map(|s| Span::styled(s.content.to_string(), s.style))
+                .collect();
+            // Style content parts (after prefix) with answer text styling
+            for span in owned_spans.iter_mut().skip(1) {
+                if span.style.fg.is_none() {
+                    span.style = span.style
+                        .fg(palette.success)
+                        .add_modifier(Modifier::BOLD);
+                }
+            }
+            lines.push(Line::from(owned_spans));
+        }
 
         lines.push(Line::from(""));
     }
