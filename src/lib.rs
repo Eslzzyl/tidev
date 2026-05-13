@@ -3,6 +3,7 @@ pub mod balance;
 pub mod config;
 pub mod context;
 pub mod gateway;
+pub mod hooks;
 pub mod instructions;
 pub mod llm;
 pub mod logging;

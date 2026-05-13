@@ -119,6 +119,8 @@ pub struct AgentRuntime {
     /// Web and gateway frontends typically leave this `false` as a
     /// safe default: tools that require approval are simply rejected.
     pub auto_approve_permissions: bool,
+    /// Hook engine for PostToolUse hooks (formatting, etc.)
+    pub hooks: crate::hooks::HookEngine,
 }
 
 impl AgentRuntime {
@@ -665,7 +667,7 @@ impl AgentRuntime {
                     sensitive_file_approved,
                 )
             };
-            let result = handle.await.unwrap_or_else(|join_err| {
+            let mut result = handle.await.unwrap_or_else(|join_err| {
                 ToolExecutionResult::new(format!("Tool task panicked/aborted: {join_err}"))
             });
 
@@ -738,6 +740,19 @@ impl AgentRuntime {
                     continue;
                 }
                 // User cancelled — fall through to persist the original denial
+            }
+
+            // ─── PostToolUse Hooks ──────────────────────────────────────
+            // Run hooks that match this tool (e.g., auto-formatting after
+            // write/edit/apply_patch).  Hooks modify the file on disk, so
+            // we read the pre-hook content first, run hooks, then append a
+            // formatting notification to the result output.
+            let hook_outcome = self.hooks.on_post_tool_use(tool_call, &result).await;
+
+            if let Some(formatted_msg) = hook_outcome.format_for_result() {
+                result
+                    .output
+                    .push_str(&format!("\n\n{}", formatted_msg));
             }
 
             // Persist write result immediately so diffs render one at a time
@@ -1931,6 +1946,10 @@ mod tests {
                 std::collections::VecDeque::new(),
             )),
             auto_approve_permissions: false,
+            hooks: crate::hooks::HookEngine::new(
+                Default::default(),
+                tmp.path().join("workspace"),
+            ),
         };
         (agent, tmp)
     }

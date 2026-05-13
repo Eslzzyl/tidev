@@ -121,6 +121,10 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
         instruction_content_cache: std::collections::HashMap::new(),
         queued_messages: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
         auto_approve_permissions: false,
+        hooks: crate::hooks::HookEngine::new(
+            config.hooks.clone(),
+            workspace_root.clone(),
+        ),
     };
 
     crate::log_info!("Agent runtime created");

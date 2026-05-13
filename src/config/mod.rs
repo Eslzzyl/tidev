@@ -61,6 +61,8 @@ pub struct AppConfig {
     pub sandbox: SandboxConfig,
     #[serde(default)]
     pub tmp: TmpConfig,
+    #[serde(default)]
+    pub hooks: crate::hooks::HooksConfig,
     #[serde(skip)]
     pub bundled_providers: BTreeMap<String, ProviderConfig>,
 }
@@ -88,6 +90,7 @@ impl Default for AppConfig {
             agent: AgentConfig::default(),
             sandbox: SandboxConfig::default(),
             tmp: TmpConfig::default(),
+            hooks: crate::hooks::HooksConfig::default(),
             bundled_providers: bundled_provider_catalog().unwrap_or_default(),
         }
     }

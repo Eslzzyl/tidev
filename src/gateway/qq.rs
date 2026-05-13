@@ -124,6 +124,10 @@ impl QQChannel {
                 std::collections::VecDeque::new(),
             )),
             auto_approve_permissions: false,
+            hooks: crate::hooks::HookEngine::new(
+                config.hooks.clone(),
+                workspace_root.clone(),
+            ),
         };
         Self {
             workspace_root,

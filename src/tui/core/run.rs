@@ -93,6 +93,10 @@ impl App {
                 std::collections::VecDeque::new(),
             )),
             auto_approve_permissions: true, // TUI handles permissions via channel
+            hooks: crate::hooks::HookEngine::new(
+                config.hooks.clone(),
+                workspace_root.clone(),
+            ),
         };
         let last_notice = None;
         let retrying_hint = None;
