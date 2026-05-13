@@ -101,7 +101,7 @@ impl SandboxPolicy {
     /// Return a human-readable label.
     pub fn label(&self) -> &'static str {
         match self {
-            SandboxPolicy::DangerFullAccess => "full access",
+            SandboxPolicy::DangerFullAccess => "off",
             SandboxPolicy::ReadOnly => "read-only",
             SandboxPolicy::ExternalSandbox => "external sandbox",
             SandboxPolicy::WorkspaceWrite { .. } => "workspace-write",

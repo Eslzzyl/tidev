@@ -39,17 +39,14 @@ impl SandboxPanelState {
                     writable_roots: vec![],
                 },
                 label: "workspace-write",
-                description: "Read access everywhere, writes restricted to workspace and /tmp",
             },
             PolicyItem {
                 policy: SandboxPolicy::ReadOnly,
                 label: "read-only",
-                description: "Read-only access, no writes allowed anywhere",
             },
             PolicyItem {
                 policy: SandboxPolicy::DangerFullAccess,
-                label: "full access",
-                description: "No filesystem restrictions",
+                label: "off",
             },
         ]
     }
@@ -60,7 +57,6 @@ impl SandboxPanelState {
 pub struct PolicyItem {
     pub policy: SandboxPolicy,
     pub label: &'static str,
-    pub description: &'static str,
 }
 
 impl App {
@@ -96,6 +92,15 @@ impl App {
         };
 
         self.tools.set_sandbox_policy(Some(item.policy.clone()));
+
+        // Persist to config file so the choice survives restarts
+        self.config.sandbox.mode = match &item.policy {
+            crate::sandbox::SandboxPolicy::DangerFullAccess => "danger-full-access".to_string(),
+            crate::sandbox::SandboxPolicy::ReadOnly => "read-only".to_string(),
+            crate::sandbox::SandboxPolicy::ExternalSandbox => "external-sandbox".to_string(),
+            crate::sandbox::SandboxPolicy::WorkspaceWrite { .. } => "workspace-write".to_string(),
+        };
+        let _ = self.config.save(&self.paths);
 
         self.last_notice = Some(format!(
             "Sandbox policy changed to: {}",

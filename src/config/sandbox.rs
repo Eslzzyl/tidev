@@ -10,14 +10,15 @@ use serde::{Deserialize, Serialize};
 ///
 /// The sandbox restricts what filesystem resources a shell command can
 /// access. Network access is always allowed.
+///
+/// Supported modes:
+/// - `workspace-write` (default): Read access everywhere, write restricted to workspace and /tmp.
+/// - `read-only`: Read-only access to the entire filesystem.
+/// - `danger-full-access`: No filesystem restrictions.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SandboxConfig {
-    /// Sandbox mode: "workspace-write" (default) or "danger-full-access".
-    ///
-    /// - `workspace-write`: Read access everywhere, write access restricted
-    ///   to the current working directory and /tmp.
-    /// - `danger-full-access`: No filesystem restrictions.
+    /// Sandbox mode: "workspace-write" (default), "read-only", or "danger-full-access".
     pub mode: String,
 
     /// Additional directories where writes are allowed (workspace-write only).
@@ -42,6 +43,7 @@ impl SandboxConfig {
 
         match self.mode.as_str() {
             "danger-full-access" | "full_access" | "full" => SandboxPolicy::DangerFullAccess,
+            "read-only" | "read_only" => SandboxPolicy::ReadOnly,
             _ => SandboxPolicy::WorkspaceWrite {
                 writable_roots: self
                     .writable_roots

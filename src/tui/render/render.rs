@@ -263,10 +263,15 @@ impl App {
         );
 
         let model_label = self.active_model.label();
+        let sandbox_label = self
+            .tools
+            .sandbox_policy()
+            .map(|p| p.label())
+            .unwrap_or_else(|| self.mode.sandbox_policy(&self.config.sandbox).label());
         let model_display = if self.thinking_level.is_supported() {
-            format!("{} [{}]", model_label, self.thinking_level.display_name())
+            format!("{} [{}]  Sandbox: {}", model_label, self.thinking_level.display_name(), sandbox_label)
         } else {
-            model_label
+            format!("{}  Sandbox: {}", model_label, sandbox_label)
         };
         let model_line = Line::from(vec![Span::styled(
             model_display,
@@ -520,14 +525,14 @@ impl App {
         panel: &crate::tui::ui::sandbox_panel::SandboxPanelState,
     ) {
         use crate::tui::ui::sandbox_panel::SandboxPanelState as S;
-        use ratatui::widgets::{Block, Borders, List, Paragraph, Clear};
+        use ratatui::widgets::{Block, Borders, List, Clear};
         use ratatui::text::{Line, Span};
         use ratatui::style::{Style, Modifier};
-        use ratatui::layout::{Layout, Constraint, Margin};
+        use ratatui::layout::Margin;
 
         let palette = self.palette();
 
-        let overlay = centered_rect(56, S::build_items().len() as u16 + 6, area);
+        let overlay = centered_rect(28, S::build_items().len() as u16 + 2, area);
         frame.render_widget(Clear, overlay);
 
         let block = Block::default()
@@ -544,68 +549,27 @@ impl App {
 
         let items = S::build_items();
 
-        // Header
-        let header = Line::from(vec![
-            Span::styled("  Policy", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
-            Span::raw("    "),
-            Span::styled("Description", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
-        ]);
-
         // Build list items
         let list_items: Vec<ratatui::widgets::ListItem> = items
             .iter()
-            .enumerate()
-            .map(|(idx, item)| {
-                let selected = idx == panel.selected_index;
-                let prefix = if selected { ">" } else { " " };
-                let style = if selected {
-                    Style::default().fg(palette.selection_fg).bg(palette.selection_bg)
-                } else {
-                    Style::default().fg(palette.text)
-                };
+            .map(|item| {
                 ratatui::widgets::ListItem::new(Line::from(vec![
-                    Span::styled(format!("{}  {}  ", prefix, item.label), style),
-                    Span::styled(item.description, Style::default().fg(palette.muted)),
+                    Span::styled(item.label, Style::default().add_modifier(Modifier::BOLD)),
                 ]))
-                .style(style)
             })
             .collect();
 
-        let sections = Layout::vertical([
-            Constraint::Length(1), // header
-            Constraint::Length(1), // divider
-            Constraint::Min(0),    // list
-        ])
-        .split(inner);
-
-        frame.render_widget(
-            Paragraph::new(header).style(Style::default().bg(palette.panel)),
-            sections[0],
-        );
-
-        let divider = Line::from(Span::styled(
-            "\u{2500}".repeat(inner.width.saturating_sub(2) as usize),
-            Style::default().fg(palette.muted),
-        ));
-        frame.render_widget(
-            Paragraph::new(divider).style(Style::default().bg(palette.panel)),
-            sections[1],
-        );
+        let mut list_state = ratatui::widgets::ListState::default();
+        list_state.select(Some(panel.selected_index.min(items.len().saturating_sub(1))));
 
         let list = List::new(list_items)
-            .highlight_style(Style::default().bg(palette.selection_bg))
+            .highlight_style(
+                Style::default()
+                    .bg(palette.selection_bg)
+                    .fg(palette.selection_fg),
+            )
             .highlight_symbol("");
-        frame.render_widget(list, sections[2]);
-
-        // Footer hint
-        let hint = Line::from(Span::styled(
-            "  j/k navigate | Enter apply | Esc cancel",
-            Style::default().fg(palette.muted),
-        ));
-        frame.render_widget(
-            Paragraph::new(hint).style(Style::default().bg(palette.panel)),
-            sections[1],
-        );
+        frame.render_stateful_widget(list, inner, &mut list_state);
     }
 
     /// Render the sandbox elevation dialog.
@@ -676,15 +640,19 @@ impl App {
         let chunks =
             Layout::horizontal([Constraint::Min(1), Constraint::Length(status_width)]).split(area);
 
-        // Build the left label: [sandbox-policy] model-name
-        let sandbox_label = self.mode.sandbox_policy(&self.config.sandbox).label();
-        let mode_tag = format!("[{}]", sandbox_label);
+        // Build the left label: model-name [thinking-level]  Sandbox: xxxx
+        // Check runtime override first, fall back to mode-based config policy
+        let sandbox_label = self
+            .tools
+            .sandbox_policy()
+            .map(|p| p.label())
+            .unwrap_or_else(|| self.mode.sandbox_policy(&self.config.sandbox).label());
 
         let model_label = self.active_model.label();
         let full_label = if self.thinking_level.is_supported() {
-            format!("{} {} [{}]", mode_tag, model_label, self.thinking_level.display_name())
+            format!("{} [{}]  Sandbox: {}", model_label, self.thinking_level.display_name(), sandbox_label)
         } else {
-            format!("{} {}", mode_tag, model_label)
+            format!("{}  Sandbox: {}", model_label, sandbox_label)
         };
 
         let model_line = Line::from(vec![Span::styled(
