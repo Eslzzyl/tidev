@@ -151,6 +151,18 @@ impl App {
                             return;
                         }
                     }
+
+                    // Plain click on tool result card → toggle expand/collapse
+                    let hit_message_id = self
+                        .tool_result_card_bounds
+                        .iter()
+                        .find(|(_, rect)| rect.contains(position))
+                        .map(|(id, _)| *id);
+
+                    if let Some(message_id) = hit_message_id {
+                        self.toggle_tool_result_expanded(message_id);
+                        return;
+                    }
                 }
 
                 self.mouse_selection
