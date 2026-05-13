@@ -301,7 +301,7 @@ unsafe fn add_path_rule(
             ruleset_fd,
             LANDLOCK_RULE_PATH_BENEATH,
             &raw const path_attr,
-            libc::LANDLOCK_ACCESS_FS_READ_FILE as u32, // Was only using the flags value
+            LANDLOCK_ACCESS_FS_READ_FILE as u32, // Was only using the flags value
         )
     };
 

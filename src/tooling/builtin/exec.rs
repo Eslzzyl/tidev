@@ -125,7 +125,7 @@ fn run_shell_inner(
             workspace_root.to_path_buf(),
             Duration::from_millis(timeout_ms),
         )
-        .with_policy(sandbox_policy);
+        .with_policy(sandbox_policy.clone());
 
         let manager = SandboxManager::new();
         let exec_env = manager.prepare(&spec);
