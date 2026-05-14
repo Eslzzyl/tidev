@@ -10,21 +10,9 @@
 	path = zeroclaw
 	url = https://github.com/zeroclaw-labs/zeroclaw.git
 	shallow = true
-[submodule "nanobot"]
-	path = nanobot
-	url = https://github.com/HKUDS/nanobot.git
-	shallow = true
-[submodule "openchamber"]
-	path = openchamber
-	url = https://github.com/openchamber/openchamber.git
-	shallow = true
 [submodule "opencode-dynamic-context-pruning"]
 	path = opencode-dynamic-context-pruning
 	url = https://github.com/Opencode-DCP/opencode-dynamic-context-pruning.git
-	shallow = true
-[submodule "deepseek-tui"]
-	path = deepseek-tui
-	url = https://github.com/Hmbown/DeepSeek-TUI.git
 	shallow = true
 [submodule "agentmemory"]
 	path = agentmemory
