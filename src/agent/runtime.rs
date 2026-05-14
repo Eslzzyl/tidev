@@ -894,18 +894,17 @@ impl AgentRuntime {
         let args = serde_json::from_str::<TaskArgs>(&tool_call.arguments)?;
         let description = args.description.trim().to_string();
         let prompt = args.prompt.trim().to_string();
-        let subagent_type = args.subagent_type.as_deref().unwrap_or_default();
-        let agent_type = if subagent_type.is_empty() {
+        let subagent_type = args.subagent_type.trim();
+        if subagent_type.is_empty() {
             anyhow::bail!(
                 "subagent_type is required: specify one of explorer, librarian, oracle, designer, fixer"
             );
-        } else {
-            AgentType::parse(subagent_type).ok_or_else(|| {
-                anyhow::anyhow!(
-                    "unknown subagent type '{subagent_type}': expected one of explorer, librarian, oracle, designer, fixer"
-                )
-            })?
-        };
+        }
+        let agent_type = AgentType::parse(subagent_type).ok_or_else(|| {
+            anyhow::anyhow!(
+                "unknown subagent type '{subagent_type}': expected one of explorer, librarian, oracle, designer, fixer"
+            )
+        })?;
         let agent_def = AgentDefinition::new(agent_type);
 
         let child_session_id = child_session_id.unwrap_or_else(uuid::Uuid::new_v4);
@@ -1576,7 +1575,7 @@ impl AgentRuntime {
             for (tc, child_sid) in &task_calls {
                 let is_read_only = serde_json::from_str::<crate::tooling::TaskArgs>(&tc.arguments)
                     .ok()
-                    .and_then(|args| args.subagent_type.as_deref().and_then(AgentType::parse))
+                    .and_then(|args| AgentType::parse(args.subagent_type.trim()))
                     .is_some_and(|t| t.is_read_only());
 
                 if !is_read_only {
@@ -1620,7 +1619,7 @@ impl AgentRuntime {
             for (tc, child_sid) in &task_calls {
                 let is_read_only = serde_json::from_str::<crate::tooling::TaskArgs>(&tc.arguments)
                     .ok()
-                    .and_then(|args| args.subagent_type.as_deref().and_then(AgentType::parse))
+                    .and_then(|args| AgentType::parse(args.subagent_type.trim()))
                     .is_some_and(|t| t.is_read_only());
 
                 if is_read_only {
@@ -2256,15 +2255,11 @@ mod tests {
                 r#"{"description":"x","prompt":"y","subagent_type":"general"}"#,
                 false,
             ), // general is not a valid sub-agent type → parse returns None
-            (r#"{"description":"x","prompt":"y"}"#, false), // no subagent_type → and_then returns None
         ];
 
         for (json_str, expected_read_only) in test_cases {
             let args = serde_json::from_str::<TaskArgs>(json_str).unwrap();
-            let is_ro = args
-                .subagent_type
-                .as_deref()
-                .and_then(crate::agent::AgentType::parse)
+            let is_ro = crate::agent::AgentType::parse(args.subagent_type.trim())
                 .map_or(false, |t| t.is_read_only());
             assert_eq!(is_ro, expected_read_only, "failed for: {json_str}");
         }

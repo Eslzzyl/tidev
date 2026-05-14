@@ -35,14 +35,11 @@ pub fn execute_tool_call(
     ensure!(!description.is_empty(), "task description cannot be empty");
     ensure!(!prompt.is_empty(), "task prompt cannot be empty");
 
-    let subagent_type_str = args
-        .subagent_type
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| anyhow::anyhow!(
-            "subagent_type is required: specify one of explorer, librarian, oracle, designer, fixer"
-        ))?;
+    let subagent_type_str = args.subagent_type.trim();
+    ensure!(
+        !subagent_type_str.is_empty(),
+        "subagent_type is required: specify one of explorer, librarian, oracle, designer, fixer"
+    );
 
     let agent_type = AgentType::parse(subagent_type_str)
         .ok_or_else(|| anyhow::anyhow!(

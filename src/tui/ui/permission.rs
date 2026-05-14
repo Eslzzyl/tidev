@@ -572,7 +572,7 @@ impl App {
                 {
                     let child_session_id =
                         approval.child_session_id.unwrap_or_else(uuid::Uuid::new_v4);
-                    let subagent_type_str = args.subagent_type.unwrap_or_default();
+                    let subagent_type_str = args.subagent_type.clone();
                     let description = args.description.trim().to_string();
                     self.running_subagent_executions
                         .push(RunningSubagentExecution::new(
