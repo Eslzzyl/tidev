@@ -116,6 +116,7 @@ jobs:
         with:
           path: artifacts
           pattern: tidev-*
+          merge-multiple: true
 
       - name: List artifacts
         run: find artifacts -type f
