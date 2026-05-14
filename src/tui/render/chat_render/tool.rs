@@ -39,6 +39,32 @@ pub(super) fn render_tool_call_with_result(
         && !matches!(canonical_name, "read" | "glob" | "grep")
         && !tool_call_arguments_are_complete(&tool_call.arguments);
 
+    // Precompute line counts for write/edit tools (used by both
+    // is_waiting_result and the progress render block below).
+    let write_lines = if matches!(canonical_name, "write") && tool_result.is_none() {
+        count_lines_in_partial_json(&tool_call.arguments, "content")
+    } else {
+        0
+    };
+    let (edit_old_lines, edit_new_lines) = if matches!(canonical_name, "edit") && tool_result.is_none() {
+        (
+            count_lines_in_partial_json(&tool_call.arguments, "old_text"),
+            count_lines_in_partial_json(&tool_call.arguments, "new_text"),
+        )
+    } else {
+        (0, 0)
+    };
+
+    // For write/edit, also show progress when arguments are complete but
+    // the tool hasn't executed yet (covers rapid chunks that skip is_pending).
+    let is_waiting_result = tool_result.is_none()
+        && matches!(canonical_name, "write" | "edit")
+        && match canonical_name {
+            "write" => write_lines > 0,
+            "edit" => edit_old_lines > 0 || edit_new_lines > 0,
+            _ => false,
+        };
+
     if matches!(canonical_name, "grep" | "glob" | "read" | "skill") {
         return (
             render_tool_call_summary_line(tool_call, tool_result, body_width, palette, ctx),
@@ -69,14 +95,23 @@ pub(super) fn render_tool_call_with_result(
     );
     lines.extend(call_lines);
 
-    if is_pending {
-        // Show calling status inline
+    if is_pending || is_waiting_result {
+        // Show calling status inline with live line counts for write/edit
+        let progress_text = match canonical_name {
+            "write" if write_lines > 0 => format!("Writing {} lines...", write_lines),
+            "edit" if edit_old_lines > 0 && edit_new_lines > 0 => {
+                format!("Replacing {} lines with {} lines...", edit_old_lines, edit_new_lines)
+            }
+            "edit" if edit_old_lines > 0 => format!("Replacing {} lines...", edit_old_lines),
+            "edit" if edit_new_lines > 0 => format!("Writing {} lines...", edit_new_lines),
+            _ => "Calling...".to_string(),
+        };
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{} ", ctx.spinner),
                 Style::default().fg(palette.accent_soft),
             ),
-            Span::styled("Calling...", Style::default().fg(palette.muted)),
+            Span::styled(progress_text, Style::default().fg(palette.muted)),
         ]));
     } else if !result_lines.is_empty() {
         lines.push(Line::from(""));
@@ -90,6 +125,56 @@ pub(super) fn render_tool_call_with_result(
 
     lines.push(Line::from(""));
     (lines, regions)
+}
+
+/// Count lines of content in a partial JSON field value from streaming
+/// tool call arguments. Returns the number of lines counted so far
+/// (newlines + 1), or 0 if the field hasn't been streamed in yet.
+///
+/// This is designed to work on incomplete JSON as it arrives chunk by chunk
+/// during LLM streaming. It searches for `"field":` (with optional whitespace
+/// after the colon) and reads the string value, counting both JSON `\n` escape
+/// sequences and literal newline characters. Handles escaped quotes correctly.
+fn count_lines_in_partial_json(args: &str, field: &str) -> usize {
+    // Match "fieldname":  (with optional whitespace after colon)
+    let key = format!("\"{}\":", field);
+    if let Some(start) = args.find(&key) {
+        let after_colon = &args[start + key.len()..];
+        // Skip whitespace after colon
+        let value_start = after_colon.trim_start();
+        // Expect opening quote of the string value
+        if !value_start.starts_with('"') {
+            return 0;
+        }
+        let rest = &value_start[1..]; // skip opening quote
+
+        // Single pass: find closing quote while counting newlines
+        let mut i = 0usize;
+        let mut newlines = 0usize;
+        let bytes = rest.as_bytes();
+        while i < bytes.len() {
+            if bytes[i] == b'\\' {
+                // JSON escape: check for \n, then skip 2 bytes
+                if i + 1 < bytes.len() && bytes[i + 1] == b'n' {
+                    newlines += 1;
+                }
+                i += 2;
+            } else if bytes[i] == b'"' {
+                break; // unescaped quote = end of value
+            } else {
+                if bytes[i] == b'\n' {
+                    newlines += 1;
+                }
+                i += 1;
+            }
+        }
+        if i == 0 {
+            return 0;
+        }
+        newlines + 1
+    } else {
+        0
+    }
 }
 
 pub(super) fn render_compaction_divider_line(
