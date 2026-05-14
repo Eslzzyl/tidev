@@ -93,6 +93,38 @@ impl App {
         self.model_panel = None;
     }
 
+    pub(crate) fn open_search_panel(&mut self) {
+        self.command_palette.clear();
+        self.connect_dialog = None;
+        self.theme_panel = None;
+        self.model_panel = None;
+        self.mcp_panel = None;
+        self.agents_panel = None;
+        self.settings_panel = None;
+        self.session_panel = None;
+        self.memory_panel = None;
+
+        self.search_panel = Some(ui::search_panel::SearchPanelState::new(
+            &self.config.websearch.default_provider,
+        ));
+    }
+
+    pub(crate) fn close_search_panel(&mut self) {
+        self.search_panel = None;
+    }
+
+    /// Switch the active search provider and persist to config.
+    pub(crate) fn switch_search_provider(&mut self, provider: &str) -> anyhow::Result<()> {
+        // Update ToolRegistry so subsequent websearch calls use this provider
+        self.tools.set_active_search_provider(provider);
+
+        // Persist to config
+        self.config.websearch.default_provider = provider.to_string();
+        self.config.save(&self.paths)?;
+
+        Ok(())
+    }
+
     pub(crate) fn open_skills_panel(&mut self) {
         // Close other panels
         self.mcp_panel = None;

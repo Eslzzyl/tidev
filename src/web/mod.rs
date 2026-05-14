@@ -112,6 +112,8 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
         memory_store,
         config.rtk.enabled,
         worktree,
+        config.websearch.clone(),
+        Arc::new(auth.clone()),
     );
 
     // Resolve default model to set on tools

@@ -171,6 +171,7 @@ impl App {
                 | CommandAction::Init
                 | CommandAction::Memory
                 | CommandAction::Agents
+                | CommandAction::Search
                 | CommandAction::Skills => {}
                 _ => {
                     self.last_notice = Some(
@@ -223,6 +224,9 @@ impl App {
             },
             CommandAction::Model => {
                 self.open_model_panel(args.join(" "));
+            }
+            CommandAction::Search => {
+                self.open_search_panel();
             }
             CommandAction::Session => {
                 self.open_session_panel(args.join(" "))?;

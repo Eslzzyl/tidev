@@ -12,6 +12,13 @@ pub struct WebAuth {
     /// Optional token for web UI authentication (Bearer token)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth_token: Option<String>,
+    /// API keys for web search providers, keyed by provider name.
+    /// E.g. `{ "brave": "BSA-xxx", "google": "AIza-xxx", "tavily": "tvly-xxx" }`
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub search_api_keys: BTreeMap<String, String>,
+    /// Google Custom Search Engine ID (required for the `google` search provider).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub google_cx: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -72,6 +79,23 @@ impl AuthStore {
     pub fn web_token(&self) -> Option<&str> {
         self.web
             .auth_token
+            .as_deref()
+            .filter(|v| !v.trim().is_empty())
+    }
+
+    /// Get the API key for a named web search provider (brave, google, tavily).
+    pub fn search_api_key(&self, provider: &str) -> Option<&str> {
+        self.web
+            .search_api_keys
+            .get(provider)
+            .map(|s| s.as_str())
+            .filter(|v| !v.trim().is_empty())
+    }
+
+    /// Get the Google Custom Search Engine ID (cx).
+    pub fn google_cx(&self) -> Option<&str> {
+        self.web
+            .google_cx
             .as_deref()
             .filter(|v| !v.trim().is_empty())
     }

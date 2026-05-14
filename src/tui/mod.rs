@@ -132,6 +132,7 @@ struct App {
     agents_panel: Option<ui::agents_panel::AgentsPanelState>,
     skills_panel: Option<ui::skills_panel::SkillsPanelState>,
     sandbox_panel: Option<ui::sandbox_panel::SandboxPanelState>,
+    search_panel: Option<ui::search_panel::SearchPanelState>,
     at_mention: AtMentionState,
     snippet_state: SnippetState,
     shell_completion: ShellCompletionState,
@@ -473,6 +474,8 @@ impl App {
             self.memory_store.clone(),
             self.config.rtk.enabled,
             worktree,
+            self.config.websearch.clone(),
+            Arc::new(self.auth.clone()),
         );
         // Set sandbox policy based on current mode
         let sandbox_policy = self.mode.sandbox_policy(&self.config.sandbox);

@@ -6,6 +6,8 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use super::tools::{MemoryArgs, QuestionArgs, SkillArgs};
 use super::{SkillCatalog, ToolDefinition, ToolPermission, canonical_tool_name};
+use crate::config::AuthStore;
+use crate::config::WebSearchConfig;
 use crate::session::BackendEvent;
 use crate::{prompts::SessionMode, session::ToolCall, storage::SessionStore};
 
@@ -59,6 +61,8 @@ pub fn execute_tool_call(
     allow_outside: bool,
     sensitive_file_approved: bool,
     sandbox_policy: Option<crate::sandbox::SandboxPolicy>,
+    web_search_config: &WebSearchConfig,
+    auth_store: &AuthStore,
 ) -> Result<crate::session::ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
@@ -132,8 +136,14 @@ pub fn execute_tool_call(
             crate::session::ToolExecutionResult::new(result)
         }
         Some("websearch") | Some("webfetch") => {
-            let output =
-                web::execute_tool_call(workspace_root, &call.name, arguments, max_output_bytes)?;
+            let output = web::execute_tool_call(
+                workspace_root,
+                &call.name,
+                arguments,
+                max_output_bytes,
+                web_search_config,
+                auth_store,
+            )?;
             crate::session::ToolExecutionResult::new(output)
         }
         None => bail!("unknown tool '{}'", call.name),
@@ -162,6 +172,8 @@ pub fn execute_tool_call_streaming(
     sensitive_file_approved: bool,
     event_tx: Option<UnboundedSender<BackendEvent>>,
     sandbox_policy: Option<crate::sandbox::SandboxPolicy>,
+    web_search_config: &WebSearchConfig,
+    auth_store: &AuthStore,
 ) -> Result<crate::session::ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
@@ -235,8 +247,14 @@ pub fn execute_tool_call_streaming(
             crate::session::ToolExecutionResult::new(result)
         }
         Some("websearch") | Some("webfetch") => {
-            let output =
-                web::execute_tool_call(workspace_root, &call.name, arguments, max_output_bytes)?;
+            let output = web::execute_tool_call(
+                workspace_root,
+                &call.name,
+                arguments,
+                max_output_bytes,
+                web_search_config,
+                auth_store,
+            )?;
             crate::session::ToolExecutionResult::new(output)
         }
         None => bail!("unknown tool '{}'", call.name),

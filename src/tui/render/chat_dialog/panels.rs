@@ -11,6 +11,7 @@ use crate::{
     tui::theme_panel::{DisplayItem, ThemePanelState},
     tui::ui::agents_panel::AgentsPanelState,
     tui::ui::skills_panel::SkillsPanelState,
+    tui::ui::search_panel::{SearchPanelState, BUILTIN_PROVIDERS},
 };
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
@@ -1041,6 +1042,144 @@ impl App {
                 .alignment(Alignment::Center)
                 .style(Style::default().bg(palette.panel).fg(palette.muted)),
             sections[4],
+        );
+    }
+
+    pub(crate) fn render_search_panel(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        panel: &SearchPanelState,
+    ) {
+        let palette = self.palette();
+        let overlay = centered_rect(area.width.min(60), area.height.min(20), area);
+        frame.render_widget(Clear, overlay);
+        let title = Block::default()
+            .style(Style::default().bg(palette.panel))
+            .title(" Search Provider ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(palette.border_active()));
+        frame.render_widget(title, overlay);
+
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+
+        // If editing API key, show a compact input view
+        if panel.editing_api_key.is_some() {
+            let sections = Layout::vertical([
+                Constraint::Length(3), // prompt input
+                Constraint::Length(1), // footer help
+            ])
+            .split(inner);
+
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(
+                        panel.input_buffer.placeholder(),
+                        Style::default().fg(palette.muted),
+                    ),
+                ]))
+                .style(Style::default().bg(palette.panel)),
+                sections[0],
+            );
+
+            // Render the actual input
+            let input_width = sections[0].width.saturating_sub(2);
+            let text = panel.input_buffer.text();
+            let display = if text.len() > input_width as usize {
+                &text[text.len().saturating_sub(input_width as usize)..]
+            } else {
+                text
+            };
+            frame.render_widget(
+                Paragraph::new(display.to_string())
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+                sections[0],
+            );
+
+            let footer = Line::from(vec![
+                Span::styled(
+                    "Enter to save",
+                    Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  ·  "),
+                Span::styled("Esc to cancel", Style::default().fg(palette.muted)),
+            ]);
+            frame.render_widget(
+                Paragraph::new(footer)
+                    .alignment(Alignment::Center)
+                    .style(Style::default().bg(palette.panel)),
+                sections[1],
+            );
+            return;
+        }
+
+        let sections = Layout::vertical([
+            Constraint::Length(1), // instruction
+            Constraint::Min(4),    // provider list
+            Constraint::Length(1), // footer help
+        ])
+        .split(inner);
+
+        // --- Instruction ---
+        frame.render_widget(
+            Paragraph::new("Select a web search provider. ↑↓ navigate, Enter select.")
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(palette.panel).fg(palette.muted)),
+            sections[0],
+        );
+
+        // --- Provider list ---
+        let mut rows: Vec<ListItem> = Vec::new();
+        for i in 0..panel.provider_count() {
+            let status_text = panel.provider_status(i, &self.auth);
+
+            let is_selected = i == panel.selected_index;
+            let row_style = if is_selected {
+                Style::default()
+                    .fg(palette.selection_fg)
+                    .bg(palette.selection_bg)
+            } else {
+                Style::default().bg(palette.panel)
+            };
+
+            // Active checkmark (like model panel)
+            let info = &BUILTIN_PROVIDERS[i];
+            let active_marker = if info.id == panel.active_provider {
+                Span::styled(" ✓", Style::default().fg(palette.accent))
+            } else {
+                Span::raw("  ")
+            };
+
+            let parts = vec![
+                active_marker,
+                Span::raw("  "),
+                Span::styled(status_text, row_style),
+            ];
+
+            rows.push(ListItem::new(Line::from(parts)).style(row_style));
+        }
+
+        frame.render_widget(
+            ratatui::widgets::List::new(rows)
+                .style(Style::default().bg(palette.panel)),
+            sections[1],
+        );
+
+        // --- Footer help ---
+        let footer = Line::from(vec![
+            Span::styled("Enter", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
+            Span::raw(" select provider · "),
+            Span::styled("Esc", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
+            Span::raw(" close"),
+        ]);
+        frame.render_widget(
+            Paragraph::new(footer)
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(palette.panel).fg(palette.muted)),
+            sections[2],
         );
     }
 

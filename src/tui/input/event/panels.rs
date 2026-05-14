@@ -438,6 +438,110 @@ impl App {
         Ok(())
     }
 
+    pub(crate) fn handle_search_panel_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Some(mut panel) = self.search_panel.clone() else {
+            return Ok(());
+        };
+
+        // If editing an API key, route input to the buffer
+        if panel.editing_api_key.is_some() {
+            match key.code {
+                KeyCode::Enter => {
+                    // Save the API key
+                    let input = panel.input_buffer.text().trim().to_string();
+                    if !input.is_empty() {
+                        let provider = panel.editing_api_key.clone().unwrap_or_default();
+                        if panel.editing_cx {
+                            self.auth.web.google_cx = Some(input);
+                        } else {
+                            self.auth
+                                .web
+                                .search_api_keys
+                                .insert(provider.clone(), input);
+                        }
+                        self.auth.save(&self.paths)?;
+                    }
+                    // Clear editing state
+                    panel.editing_api_key = None;
+                    panel.editing_cx = false;
+                    self.search_panel = Some(panel);
+                }
+                KeyCode::Esc => {
+                    panel.editing_api_key = None;
+                    panel.editing_cx = false;
+                    self.search_panel = Some(panel);
+                }
+                KeyCode::Char(c) => {
+                    panel.input_buffer.handle_key(KeyEvent::new(
+                        KeyCode::Char(c),
+                        KeyModifiers::empty(),
+                    ));
+                    self.search_panel = Some(panel);
+                }
+                KeyCode::Backspace => {
+                    panel.input_buffer.handle_key(KeyEvent::new(
+                        KeyCode::Backspace,
+                        KeyModifiers::empty(),
+                    ));
+                    self.search_panel = Some(panel);
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
+        match key.code {
+            KeyCode::Up => {
+                panel.move_selection(-1);
+                self.search_panel = Some(panel);
+            }
+            KeyCode::Down => {
+                panel.move_selection(1);
+                self.search_panel = Some(panel);
+            }
+            KeyCode::Enter => {
+                let auth = &self.auth;
+
+                // Case 1: provider needs API key but none set → enter key edit mode
+                if panel.selected_provider_missing_key(auth) {
+                    panel.start_editing_api_key();
+                    self.search_panel = Some(panel);
+                    return Ok(());
+                }
+
+                // Case 2: provider needs Google CX but none set → enter cx edit mode
+                if panel.selected_provider_missing_cx(auth) {
+                    panel.start_editing_cx();
+                    self.search_panel = Some(panel);
+                    return Ok(());
+                }
+
+                // Case 3: switch to this provider
+                if let Some(info) = panel
+                    .selected_index
+                    .checked_sub(0)
+                    .and_then(|i| ui::search_panel::BUILTIN_PROVIDERS.get(i))
+                {
+                    self.switch_search_provider(info.id)?;
+                    panel.active_provider = info.id.to_string();
+                    self.search_panel = Some(panel);
+                }
+            }
+            KeyCode::Esc => {
+                if panel.editing_api_key.is_some() {
+                    panel.editing_api_key = None;
+                    panel.editing_cx = false;
+                    self.search_panel = Some(panel);
+                } else {
+                    self.close_search_panel();
+                }
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn handle_model_panel_paste(&mut self, text: &str) -> Result<()> {
         let Some(mut panel) = self.model_panel.clone() else {
             return Ok(());

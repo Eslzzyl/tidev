@@ -45,6 +45,8 @@ impl App {
             memory_store.clone(),
             config.rtk.enabled,
             worktree,
+            config.websearch.clone(),
+            Arc::new(auth.clone()),
         );
         #[allow(unused_variables)]
         let commands = CommandRegistry::new();
@@ -137,6 +139,7 @@ impl App {
             agents_panel: None,
             skills_panel: None,
             sandbox_panel: None,
+            search_panel: None,
             at_mention: AtMentionState::default(),
             snippet_state: SnippetState::default(),
             shell_completion: ShellCompletionState::default(),
@@ -392,6 +395,7 @@ impl App {
             agents_panel: self.agents_panel.clone(),
             skills_panel: self.skills_panel.clone(),
             sandbox_panel: self.sandbox_panel.clone(),
+            search_panel: self.search_panel.clone(),
             memory_panel: self.memory_panel.clone(),
             message_panel: self.message_panel.clone(),
             at_mention: self.at_mention.clone(),
@@ -419,6 +423,7 @@ impl App {
         self.agents_panel = snapshot.agents_panel;
         self.skills_panel = snapshot.skills_panel;
         self.sandbox_panel = snapshot.sandbox_panel;
+        self.search_panel = snapshot.search_panel;
         self.at_mention = snapshot.at_mention;
         self.snippet_state = snapshot.snippet_state;
         self.command_palette = snapshot.command_palette;

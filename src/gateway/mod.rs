@@ -105,6 +105,8 @@ async fn run_async() -> Result<()> {
             memory_store,
             config.rtk.enabled,
             worktree,
+            config.websearch.clone(),
+            Arc::new(auth.clone()),
         );
         tools.set_active_model(default_model.clone());
         // Use default sandbox policy for gateway mode
@@ -169,6 +171,8 @@ async fn run_async() -> Result<()> {
             memory_store2,
             config.rtk.enabled,
             worktree2,
+            config.websearch.clone(),
+            Arc::new(auth.clone()),
         );
         tools.set_active_model(default_model.clone());
         // Use default sandbox policy for gateway mode

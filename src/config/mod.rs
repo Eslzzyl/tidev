@@ -28,6 +28,41 @@ pub use ui::UiConfig;
 
 pub use self::sandbox::SandboxConfig;
 
+// ---------------------------------------------------------------------------
+// Web search configuration
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WebSearchConfig {
+    /// Default search provider (exa, brave, google, tavily).
+    #[serde(default = "default_websearch_provider")]
+    pub default_provider: String,
+    /// Per-provider configuration overrides.
+    #[serde(default)]
+    pub providers: BTreeMap<String, WebSearchProviderConfig>,
+}
+
+impl Default for WebSearchConfig {
+    fn default() -> Self {
+        Self {
+            default_provider: default_websearch_provider(),
+            providers: BTreeMap::new(),
+        }
+    }
+}
+
+fn default_websearch_provider() -> String {
+    "exa".to_string()
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WebSearchProviderConfig {
+    /// Optional custom endpoint URL for the provider
+    /// (e.g., a self-hosted Exa instance).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+}
+
 const BUNDLED_PRESETS_TOML: &str = include_str!("../../presets.toml");
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -64,6 +99,8 @@ pub struct AppConfig {
     pub tmp: TmpConfig,
     #[serde(default)]
     pub hooks: crate::hooks::HooksConfig,
+    #[serde(default)]
+    pub websearch: WebSearchConfig,
     #[serde(skip)]
     pub bundled_providers: BTreeMap<String, ProviderConfig>,
 }
@@ -92,6 +129,7 @@ impl Default for AppConfig {
             sandbox: SandboxConfig::default(),
             tmp: TmpConfig::default(),
             hooks: crate::hooks::HooksConfig::default(),
+            websearch: WebSearchConfig::default(),
             bundled_providers: bundled_provider_catalog().unwrap_or_default(),
         }
     }
@@ -626,6 +664,11 @@ enabled = false
 # allowlist can contain Telegram user IDs or chat IDs as strings.
 allowlist = []
 poll_timeout_secs = 30
+
+# Web search provider configuration.
+[websearch]
+# Default search provider: exa, brave, google, tavily
+default_provider = "exa"
 "#
     }
 

@@ -4,13 +4,14 @@ use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
+use crate::config::AuthStore;
+use crate::config::{PermissionConfig, WebSearchConfig};
 use crate::mcp::McpManager;
 use crate::memory::types::MemoryStore;
 use crate::sandbox::SandboxPolicy;
 use crate::session::BackendEvent;
 use crate::tooling::SkillCatalog;
 use crate::{
-    config::PermissionConfig,
     prompts::SessionMode,
     session::{ToolCall, ToolExecutionResult},
     storage::SessionStore,
@@ -33,6 +34,8 @@ pub struct ToolRegistry {
     active_model: Option<crate::config::ActiveModel>,
     rtk_enabled: bool,
     sandbox_policy: Option<SandboxPolicy>,
+    web_search_config: WebSearchConfig,
+    auth_store: Arc<AuthStore>,
 }
 
 impl ToolRegistry {
@@ -46,6 +49,8 @@ impl ToolRegistry {
         memory_store: Arc<MemoryStore>,
         rtk_enabled: bool,
         worktree: Option<PathBuf>,
+        web_search_config: WebSearchConfig,
+        auth_store: Arc<AuthStore>,
     ) -> Self {
         let skills = SkillCatalog::discover(
             &workspace_root,
@@ -68,11 +73,20 @@ impl ToolRegistry {
             active_model: None,
             rtk_enabled,
             sandbox_policy: None,
+            web_search_config,
+            auth_store,
         }
     }
 
     pub fn set_active_model(&mut self, model: crate::config::ActiveModel) {
         self.active_model = Some(model);
+    }
+
+    /// Set the active web search provider by name (exa, brave, google, tavily).
+    /// This updates `web_search_config.default_provider` so subsequent websearch
+    /// tool calls will use the chosen provider.
+    pub fn set_active_search_provider(&mut self, provider: &str) {
+        self.web_search_config.default_provider = provider.to_string();
     }
 
     /// Set the sandbox policy for shell command execution.
@@ -295,6 +309,8 @@ impl ToolRegistry {
             allow_outside,
             sensitive_file_approved,
             self.sandbox_policy.clone(),
+            &self.web_search_config,
+            self.auth_store.as_ref(),
         )?;
 
         // Image capability check: If the result contains images but the model doesn't support them,
@@ -457,6 +473,8 @@ impl ToolRegistry {
             sensitive_file_approved,
             Some(event_tx),
             self.sandbox_policy.clone(),
+            &self.web_search_config,
+            self.auth_store.as_ref(),
         )?;
 
         // Image capability check

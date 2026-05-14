@@ -128,6 +128,10 @@ impl App {
             return self.handle_model_panel_key(key);
         }
 
+        if self.search_panel.is_some() {
+            return self.handle_search_panel_key(key);
+        }
+
         if self.message_panel.is_some() {
             return self.handle_message_panel_key(key);
         }

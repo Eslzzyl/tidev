@@ -1938,6 +1938,8 @@ mod tests {
                 std::sync::Arc::new(crate::memory::types::MemoryStore::open(&db_path).unwrap()),
                 false,
                 None,
+                crate::config::WebSearchConfig::default(),
+                std::sync::Arc::new(crate::config::AuthStore::default()),
             ),
             instructions: vec![],
             instruction_content_cache: Default::default(),

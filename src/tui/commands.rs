@@ -7,6 +7,7 @@ pub enum CommandAction {
     Mcp,
     Memory,
     Model,
+    Search,
     Session,
     Compact,
     Rename,
@@ -271,6 +272,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         description: "Open the model panel",
         usage: "/model [query]",
         action: CommandAction::Model,
+    },
+    CommandSpec {
+        name: "search",
+        aliases: &["websearch"],
+        description: "Open the search provider panel",
+        usage: "/search",
+        action: CommandAction::Search,
     },
     CommandSpec {
         name: "session",

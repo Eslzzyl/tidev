@@ -459,6 +459,8 @@ pub(super) fn execute_tool_call(
         false, // allow_outside: skill execution doesn't allow outside workspace
         false, // sensitive_file_approved: skill execution requires explicit user approval
         None,  // sandbox_policy: skill execution uses default (no sandbox)
+        &crate::config::WebSearchConfig::default(),
+        &crate::config::AuthStore::default(),
     )?;
 
     // Post-execution: record file reads

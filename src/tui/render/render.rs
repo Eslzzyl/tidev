@@ -102,6 +102,9 @@ impl App {
         if let Some(panel) = &self.model_panel {
             self.render_model_panel(frame, area, panel);
         }
+        if let Some(panel) = &self.search_panel {
+            self.render_search_panel(frame, area, panel);
+        }
         if let Some(panel) = &self.message_panel {
             self.render_message_panel(frame, area, panel);
         }
