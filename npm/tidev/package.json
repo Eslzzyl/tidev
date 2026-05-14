@@ -1,0 +1,48 @@
+{
+  "name": "tidev",
+  "version": "0.3.0",
+  "tidevBinaryVersion": "0.3.0",
+  "description": "Install and run tidev binary from GitHub release artifacts.",
+  "author": "Eslzzyl",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/Eslzzyl/tidev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Eslzzyl/tidev.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Eslzzyl/tidev/issues"
+  },
+  "keywords": [
+    "tidev",
+    "ai",
+    "coding",
+    "cli",
+    "tui",
+    "agent",
+    "terminal"
+  ],
+  "type": "commonjs",
+  "bin": {
+    "tidev": "bin/tidev.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install.js --optional",
+    "prepublishOnly": "node scripts/verify-release-assets.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "preferGlobal": true,
+  "files": [
+    "bin/*.js",
+    "scripts/*.js",
+    "test/*.js",
+    "README.md",
+    "package.json"
+  ]
+}

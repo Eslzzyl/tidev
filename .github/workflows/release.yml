@@ -1,0 +1,180 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g., 0.4.0, without v prefix)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      ref: ${{ steps.resolve.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve tag & version
+        id: resolve
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="v${{ inputs.version }}"
+            VERSION="${{ inputs.version }}"
+            git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
+            REF="${TAG}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${GITHUB_REF_NAME#v}"
+            REF="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: [resolve]
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: tidev-linux-x64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact: tidev-linux-arm64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: tidev-macos-x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: tidev-macos-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: tidev-windows-x64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build web frontend
+        run: pnpm --dir web install --frozen-lockfile && pnpm --dir web build
+      - name: Build tidev binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Rename binary
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            ext=".exe"
+          else
+            ext=""
+          fi
+          cp "target/${{ matrix.target }}/release/tidev${ext}" "${{ matrix.artifact }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    needs: [build, resolve]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: tidev-*
+
+      - name: List artifacts
+        run: find artifacts -type f
+
+      - name: Generate checksum manifest
+        shell: bash
+        run: |
+          manifest="artifacts/tidev-sha256.txt"
+          : > "${manifest}"
+          while IFS= read -r -d '' file; do
+            hash="$(sha256sum "${file}" | awk '{print $1}')"
+            base="$(basename "${file}")"
+            printf '%s  %s\n' "${hash}" "${base}" >> "${manifest}"
+          done < <(find artifacts -type f ! -name 'tidev-sha256.txt' -print0 | sort -z)
+          cat "${manifest}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve.outputs.tag }}
+          files: artifacts/*
+          body: |
+            ## tidev v${{ needs.resolve.outputs.version }}
+
+            ### Install via npm
+
+            ```bash
+            npm install -g tidev
+            ```
+
+            ### Install via cargo
+
+            ```bash
+            cargo install tidev --locked
+            ```
+
+            ### Manual download
+
+            | Platform | Binary |
+            |----------|--------|
+            | Linux x64 | [`tidev-linux-x64`](./tidev-linux-x64) |
+            | Linux ARM64 | [`tidev-linux-arm64`](./tidev-linux-arm64) |
+            | macOS x64 | [`tidev-macos-x64`](./tidev-macos-x64) |
+            | macOS ARM64 | [`tidev-macos-arm64`](./tidev-macos-arm64) |
+            | Windows x64 | [`tidev-windows-x64.exe`](./tidev-windows-x64.exe) |
+
+            ### Verify
+
+            Download `tidev-sha256.txt` and check:
+
+            ```bash
+            sha256sum -c tidev-sha256.txt   # Linux
+            shasum -a 256 -c tidev-sha256.txt  # macOS
+            ```
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd npm/tidev
+          npm version ${{ needs.resolve.outputs.version }} --no-git-tag-version
+          npm publish --provenance

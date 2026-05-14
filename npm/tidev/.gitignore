@@ -1,0 +1,6 @@
+# Ignore downloaded prebuilt binaries
+bin/downloads/
+
+# npm artifacts
+node_modules/
+package-lock.json
