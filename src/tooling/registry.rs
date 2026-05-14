@@ -1,6 +1,9 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{
+    atomic::AtomicBool,
+    Arc,
+};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
@@ -410,6 +413,7 @@ impl ToolRegistry {
         allow_outside: bool,
         sensitive_file_approved: bool,
         event_tx: UnboundedSender<BackendEvent>,
+        cancelled: Option<Arc<AtomicBool>>,
     ) -> JoinHandle<ToolExecutionResult> {
         let registry = self.clone();
         tokio::task::spawn_blocking(move || {
@@ -423,6 +427,7 @@ impl ToolRegistry {
                     allow_outside,
                     sensitive_file_approved,
                     event_tx,
+                    cancelled,
                 )
             }));
             match result {
@@ -453,6 +458,7 @@ impl ToolRegistry {
         allow_outside: bool,
         sensitive_file_approved: bool,
         event_tx: UnboundedSender<BackendEvent>,
+        cancelled: Option<Arc<AtomicBool>>,
     ) -> Result<ToolExecutionResult> {
         if self.mcp.definition_for(&call.name).is_some() {
             return runtime.block_on(self.mcp.execute_call(call));
@@ -475,6 +481,7 @@ impl ToolRegistry {
             self.sandbox_policy.clone(),
             &self.web_search_config,
             self.auth_store.as_ref(),
+            cancelled,
         )?;
 
         // Image capability check

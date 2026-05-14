@@ -1,7 +1,10 @@
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{
+    atomic::AtomicBool,
+    Arc,
+};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::tools::{MemoryArgs, QuestionArgs, SkillArgs};
@@ -174,6 +177,7 @@ pub fn execute_tool_call_streaming(
     sandbox_policy: Option<crate::sandbox::SandboxPolicy>,
     web_search_config: &WebSearchConfig,
     auth_store: &AuthStore,
+    cancelled: Option<Arc<AtomicBool>>,
 ) -> Result<crate::session::ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
@@ -201,12 +205,13 @@ pub fn execute_tool_call_streaming(
             crate::session::ToolExecutionResult::new(output)
         }
         Some("bash") => {
-            let result = exec::execute_tool_call(
+            let result = exec::execute_tool_call_with_cancel(
                 workspace_root,
                 &call.name,
                 arguments,
                 max_output_bytes,
                 rtk_enabled,
+                cancelled.unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
                 sandbox_policy,
                 session_id,
                 event_tx, // pass the sender through for streaming

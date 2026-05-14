@@ -20,7 +20,11 @@ use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{
+    atomic::AtomicBool,
+    Arc,
+    Mutex as StdMutex,
+};
 
 use anyhow::Result;
 use chrono::Utc;
@@ -512,6 +516,7 @@ impl AgentRuntime {
         mode: SessionMode,
         event_tx: &UnboundedSender<BackendEvent>,
         _parent_model: &crate::config::ActiveModel,
+        cancel_token: Option<CancellationToken>,
     ) -> Result<Vec<(ToolCall, ToolExecutionResult)>> {
         let runtime = tokio::runtime::Handle::current();
         let mut results: Vec<(ToolCall, ToolExecutionResult)> =
@@ -645,6 +650,24 @@ impl AgentRuntime {
             // via ShellOutput events while the command runs.
             let is_bash =
                 tool_call.name == "bash" || canonical_tool_name(&tool_call.name) == Some("bash");
+            let cancelled_flag: Option<Arc<AtomicBool>> = if is_bash && cancel_token.is_some() {
+                let flag = Arc::new(AtomicBool::new(false));
+                // Spawn a monitoring task that sets the flag when the
+                // cancellation token fires.  The bash execution loop in
+                // run_shell_inner checks the flag every ~100ms and kills
+                // the child process.
+                if let Some(ref ct) = cancel_token {
+                    let flag_clone = flag.clone();
+                    let ct = ct.clone();
+                    tokio::spawn(async move {
+                        ct.cancelled().await;
+                        flag_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+                    });
+                }
+                Some(flag)
+            } else {
+                None
+            };
             let handle = if is_bash {
                 self.tools.execute_call_spawned_streaming(
                     runtime.clone(),
@@ -655,6 +678,7 @@ impl AgentRuntime {
                     allow_outside,
                     sensitive_file_approved,
                     event_tx.clone(),
+                    cancelled_flag.clone(),
                 )
             } else {
                 self.tools.execute_call_spawned(
@@ -706,6 +730,7 @@ impl AgentRuntime {
                         allow_outside,
                         sensitive_file_approved,
                         event_tx.clone(),
+                        cancelled_flag.clone(),
                     );
                     let retry_result = retry_handle.await.unwrap_or_else(|join_err| {
                         ToolExecutionResult::new(format!(
@@ -1251,6 +1276,7 @@ impl AgentRuntime {
                         SessionMode::Build,
                         event_tx,
                         &child_model,
+                        None, // subagent tools don't use parent's cancel token
                     )
                     .await?
                     .into_iter()
@@ -1677,6 +1703,7 @@ impl AgentRuntime {
                         mode,
                         &event_tx,
                         &model,
+                        cancel_token.clone(),
                     )
                     .await?;
             }
@@ -2321,6 +2348,7 @@ mod tests {
                 SessionMode::Plan,
                 &tx,
                 &test_active_model(),
+                None,
             )
             .await
             .unwrap();
@@ -2383,6 +2411,7 @@ mod tests {
                 SessionMode::Build,
                 &tx,
                 &test_active_model(),
+                None,
             )
             .await
             .unwrap();
@@ -2432,6 +2461,7 @@ mod tests {
                 SessionMode::Build,
                 &tx,
                 &test_active_model(),
+                None,
             )
             .await
             .unwrap();
@@ -2494,6 +2524,7 @@ mod tests {
                 SessionMode::Build,
                 &tx,
                 &test_active_model(),
+                None,
             )
             .await
             .unwrap();
