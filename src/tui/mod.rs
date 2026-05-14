@@ -1376,7 +1376,7 @@ impl App {
                 }
             }
             BackendEvent::TurnStarting {
-                session_id: _,
+                session_id,
                 request_id,
             } => {
                 crate::log_info!(
@@ -1384,6 +1384,16 @@ impl App {
                     request_id,
                     self.active_request_id
                 );
+
+                // Only handle TurnStarting for the current conversation
+                // session.  Child sessions (from parallel subagents) send
+                // their own TurnStarting, which must not overwrite the
+                // parent's active_request_id — otherwise subsequent parent
+                // events (ToolCompleted, SubagentCompleted, etc.) would
+                // fail the is_active_request check and be silently ignored.
+                if session_id != self.conversation.session_id {
+                    return Ok(());
+                }
 
                 // Ignore stale TurnStarting from a cancelled/aborted agent
                 // loop.  If no cancel token exists, no agent loop is
