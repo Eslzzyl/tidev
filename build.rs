@@ -176,11 +176,10 @@ fn collect_asset_paths(base: &Path, dir: &Path, paths: &mut Vec<String>) {
             let path = entry.path();
             if path.is_dir() {
                 collect_asset_paths(base, &path, paths);
-            } else if path.is_file() {
-                if let Ok(rel) = path.strip_prefix(base) {
+            } else if path.is_file()
+                && let Ok(rel) = path.strip_prefix(base) {
                     paths.push(rel.to_str().unwrap_or("").replace('\\', "/"));
                 }
-            }
         }
     }
 }

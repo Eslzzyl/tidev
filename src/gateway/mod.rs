@@ -90,7 +90,7 @@ async fn run_async() -> Result<()> {
 
         // Each channel gets its own resources
         let store = SessionStore::open(db_path)?;
-        let memory_store = Arc::new(crate::memory::types::MemoryStore::open(db_path).unwrap());
+        let memory_store = Arc::new(crate::memory::MemoryStore::open(db_path).unwrap());
         let llm = LlmClient::new()?;
         let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
         let file_read_tracker = Arc::new(FileReadTracker::new());
@@ -156,7 +156,7 @@ async fn run_async() -> Result<()> {
 
         // Each channel gets its own resources
         let store = SessionStore::open(db_path)?;
-        let memory_store2 = Arc::new(crate::memory::types::MemoryStore::open(db_path).unwrap());
+        let memory_store2 = Arc::new(crate::memory::MemoryStore::open(db_path).unwrap());
         let llm = LlmClient::new()?;
         let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
         let file_read_tracker = Arc::new(FileReadTracker::new());

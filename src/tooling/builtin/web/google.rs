@@ -105,11 +105,10 @@ fn format_google_results(body: &serde_json::Value) -> Result<String> {
 
     // Include search metadata if present
     let mut output = String::new();
-    if let Some(info) = body.get("searchInformation") {
-        if let Some(total) = info.get("totalResults").and_then(|v| v.as_str()) {
+    if let Some(info) = body.get("searchInformation")
+        && let Some(total) = info.get("totalResults").and_then(|v| v.as_str()) {
             output.push_str(&format!("Total results: {}\n\n", total));
         }
-    }
 
     for (i, item) in items.iter().enumerate() {
         let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("");

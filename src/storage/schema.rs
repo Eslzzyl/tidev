@@ -1,30 +1,4 @@
-pub const SCHEMA_VERSION: i64 = 26;
-
-/// The memories table SQL, exported so MemoryStore can create it independently.
-pub const MEMORIES_TABLE_SQL: &str = r#"
-CREATE TABLE IF NOT EXISTS memories (
-    id TEXT PRIMARY KEY,
-    workspace_root TEXT NOT NULL,
-    memory_type TEXT NOT NULL,
-    title TEXT NOT NULL,
-    content BLOB NOT NULL,
-    tags TEXT NOT NULL DEFAULT '[]',
-    source_session_id TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    usage_count INTEGER NOT NULL DEFAULT 0,
-    active INTEGER NOT NULL DEFAULT 1
-);
-
-CREATE INDEX IF NOT EXISTS idx_memories_workspace_active
-    ON memories(workspace_root, active);
-
-CREATE INDEX IF NOT EXISTS idx_memories_type
-    ON memories(workspace_root, memory_type, active);
-
-CREATE INDEX IF NOT EXISTS idx_memories_usage
-    ON memories(workspace_root, usage_count DESC);
-"#;
+pub const SCHEMA_VERSION: i64 = 27;
 
 pub const SESSION_SELECT_COLUMNS: &str = "s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, s.context_summary, s.context_retained_from, COALESCE(sw.workspace_root, '')";
 
@@ -195,7 +169,7 @@ CREATE TABLE IF NOT EXISTS memories (
     workspace_root TEXT NOT NULL,
     memory_type TEXT NOT NULL,
     title TEXT NOT NULL,
-    content BLOB NOT NULL,
+    content TEXT NOT NULL,
     tags TEXT NOT NULL DEFAULT '[]',
     source_session_id TEXT,
     created_at TEXT NOT NULL,
@@ -385,6 +359,71 @@ CREATE TABLE IF NOT EXISTS file_reads (
 CREATE INDEX IF NOT EXISTS idx_file_reads_session
     ON file_reads(session_id);
 
+-- ── New Memory System Tables (Phase 1) ──
+
+CREATE TABLE IF NOT EXISTS observations (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    timestamp TEXT NOT NULL,
+    hook_type TEXT NOT NULL,
+    tool_name TEXT,
+    tool_input TEXT,
+    tool_output TEXT,
+    user_prompt TEXT,
+    assistant_response TEXT,
+    modality TEXT NOT NULL DEFAULT 'text',
+    image_data TEXT,
+    dedup_hash TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_observations_session ON observations(session_id);
+CREATE INDEX IF NOT EXISTS idx_observations_timestamp ON observations(timestamp);
+
+CREATE TABLE IF NOT EXISTS compressed_observations (
+    id TEXT PRIMARY KEY,
+    observation_id TEXT NOT NULL REFERENCES observations(id),
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    obs_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    subtitle TEXT,
+    facts TEXT NOT NULL DEFAULT '[]',
+    narrative TEXT NOT NULL DEFAULT '',
+    concepts TEXT NOT NULL DEFAULT '[]',
+    files TEXT NOT NULL DEFAULT '[]',
+    importance INTEGER NOT NULL DEFAULT 5,
+    confidence REAL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_compressed_obs_session ON compressed_observations(session_id);
+
+CREATE TABLE IF NOT EXISTS session_summaries (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id),
+    project TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    title TEXT,
+    narrative TEXT,
+    key_decisions TEXT NOT NULL DEFAULT '[]',
+    files_modified TEXT NOT NULL DEFAULT '[]',
+    concepts TEXT NOT NULL DEFAULT '[]',
+    observation_count INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id TEXT PRIMARY KEY,
+    timestamp TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    actor TEXT,
+    details TEXT,
+    session_id TEXT REFERENCES sessions(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
+CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_type, entity_id);
+
+-- Extended memories table (replaces old schema v26 version)
 CREATE TABLE IF NOT EXISTS memories (
     id TEXT PRIMARY KEY,
     workspace_root TEXT NOT NULL,
@@ -396,7 +435,16 @@ CREATE TABLE IF NOT EXISTS memories (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     usage_count INTEGER NOT NULL DEFAULT 0,
-    active INTEGER NOT NULL DEFAULT 1
+    active INTEGER NOT NULL DEFAULT 1,
+    concepts TEXT NOT NULL DEFAULT '[]',
+    files TEXT NOT NULL DEFAULT '[]',
+    strength REAL NOT NULL DEFAULT 0.0,
+    importance INTEGER NOT NULL DEFAULT 5,
+    version INTEGER NOT NULL DEFAULT 1,
+    parent_id TEXT,
+    supersedes TEXT NOT NULL DEFAULT '[]',
+    related_ids TEXT NOT NULL DEFAULT '[]',
+    is_latest INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE INDEX IF NOT EXISTS idx_memories_workspace_active
@@ -407,4 +455,24 @@ CREATE INDEX IF NOT EXISTS idx_memories_type
 
 CREATE INDEX IF NOT EXISTS idx_memories_usage
     ON memories(workspace_root, usage_count DESC);
+
+CREATE INDEX IF NOT EXISTS idx_memories_parent
+    ON memories(parent_id);
+
+-- FTS5 virtual tables for full-text search
+CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(
+    tool_name, tool_input, tool_output,
+    title, narrative, facts,
+    concepts, files,
+    content='observations',
+    content_rowid='rowid',
+    tokenize='porter unicode61'
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+    title, content, tags, concepts, files,
+    content='memories',
+    content_rowid='rowid',
+    tokenize='porter unicode61'
+);
 "#;

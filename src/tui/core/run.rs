@@ -77,6 +77,8 @@ impl App {
                 crate::config::reasoning::ThinkingLevelType::from_string(&level_str);
         }
         tools.set_active_model(active_model.clone());
+        // Attach LLM to memory store for compression/summarization
+        memory_store.set_llm(llm.clone(), active_model.clone());
         // Set sandbox policy based on session mode and config
         let sandbox_policy = mode.sandbox_policy(&config.sandbox);
         tools.set_sandbox_policy(Some(sandbox_policy));
@@ -99,7 +101,7 @@ impl App {
             hooks: crate::hooks::HookEngine::new(
                 config.hooks.clone(),
                 workspace_root.clone(),
-            ),
+            ).with_memory_store(memory_store.clone()),
         };
         let last_notice = None;
         let retrying_hint = None;

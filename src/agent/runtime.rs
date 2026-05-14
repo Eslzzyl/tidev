@@ -207,7 +207,7 @@ impl AgentRuntime {
         let ws = self.workspace_root.display().to_string();
         let memory_store = self.tools.memory_store();
         if let Ok(memories) = memory_store.select_hot(&ws, 5, 800) {
-            let memory_prompt = crate::memory::types::MemoryStore::format_for_prompt(&memories);
+            let memory_prompt = crate::memory::MemoryStore::format_for_prompt(&memories);
             if !memory_prompt.is_empty() {
                 prompt.push_str(&memory_prompt);
             }
@@ -772,7 +772,7 @@ impl AgentRuntime {
             // write/edit/apply_patch).  Hooks modify the file on disk, so
             // we read the pre-hook content first, run hooks, then append a
             // formatting notification to the result output.
-            let hook_outcome = self.hooks.on_post_tool_use(tool_call, &result).await;
+            let hook_outcome = self.hooks.on_post_tool_use(tool_call, &result, Some(session_id)).await;
 
             if let Some(formatted_msg) = hook_outcome.format_for_result() {
                 result
@@ -1962,7 +1962,7 @@ mod tests {
                 crate::mcp::McpManager::new(tmp.path().join("workspace"), Default::default()),
                 crate::config::PermissionConfig::default(),
                 std::sync::Arc::new(crate::tooling::FileReadTracker::new()),
-                std::sync::Arc::new(crate::memory::types::MemoryStore::open(&db_path).unwrap()),
+                std::sync::Arc::new(crate::memory::MemoryStore::open(&db_path).unwrap()),
                 false,
                 None,
                 crate::config::WebSearchConfig::default(),

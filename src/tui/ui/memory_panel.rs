@@ -5,7 +5,7 @@ use ratatui::layout::Rect;
 use std::cell::Cell;
 use uuid::Uuid;
 
-use crate::memory::types::{MemoryEntry, MemoryStore, MemoryType};
+use crate::memory::{MemoryEntry, MemoryStore, MemoryType};
 use crate::tui::input::Composer;
 
 use super::App;
@@ -169,6 +169,15 @@ impl MemoryPanelState {
                 updated_at: now,
                 usage_count: 0,
                 active: true,
+                concepts: vec![],
+                files: vec![],
+                strength: 0.0,
+                importance: 5,
+                version: 1,
+                parent_id: None,
+                supersedes: vec![],
+                related_ids: vec![],
+                is_latest: true,
             };
             if let Some(existing) = self.memories.iter().find(|e| e.id == id) {
                 entry.created_at = existing.created_at;
@@ -188,6 +197,15 @@ impl MemoryPanelState {
                 updated_at: now,
                 usage_count: 0,
                 active: true,
+                concepts: vec![],
+                files: vec![],
+                strength: 0.0,
+                importance: 5,
+                version: 1,
+                parent_id: None,
+                supersedes: vec![],
+                related_ids: vec![],
+                is_latest: true,
             };
             store.add(&entry)?;
         }
@@ -212,7 +230,13 @@ impl MemoryPanelState {
             Some(MemoryType::User) => Some(MemoryType::Project),
             Some(MemoryType::Project) => Some(MemoryType::Feedback),
             Some(MemoryType::Feedback) => Some(MemoryType::Reference),
-            Some(MemoryType::Reference) => None,
+            Some(MemoryType::Reference) => Some(MemoryType::Pattern),
+            Some(MemoryType::Pattern) => Some(MemoryType::Preference),
+            Some(MemoryType::Preference) => Some(MemoryType::Architecture),
+            Some(MemoryType::Architecture) => Some(MemoryType::Bug),
+            Some(MemoryType::Bug) => Some(MemoryType::Workflow),
+            Some(MemoryType::Workflow) => Some(MemoryType::Fact),
+            Some(MemoryType::Fact) => None,
         };
         self.selected_index = 0;
         self.preview_scroll = 0;
@@ -503,7 +527,13 @@ impl App {
                     MemoryType::User => MemoryType::Project,
                     MemoryType::Project => MemoryType::Feedback,
                     MemoryType::Feedback => MemoryType::Reference,
-                    MemoryType::Reference => MemoryType::User,
+                    MemoryType::Reference => MemoryType::Pattern,
+                    MemoryType::Pattern => MemoryType::Preference,
+                    MemoryType::Preference => MemoryType::Architecture,
+                    MemoryType::Architecture => MemoryType::Bug,
+                    MemoryType::Bug => MemoryType::Workflow,
+                    MemoryType::Workflow => MemoryType::Fact,
+                    MemoryType::Fact => MemoryType::User,
                 };
                 self.memory_panel = Some(next);
             }

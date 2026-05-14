@@ -66,7 +66,7 @@ use crate::{
     context::ContextManager,
     llm::LlmClient,
     mcp::McpManager,
-    memory::types::MemoryStore,
+    memory::MemoryStore,
     notifications,
     prompts::{SessionMode, init_command},
     provider_setup::ConnectDialog,

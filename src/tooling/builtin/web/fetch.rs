@@ -181,11 +181,10 @@ fn markdown_to_text(markdown: &str) -> String {
             Event::SoftBreak | Event::HardBreak => {
                 output.push('\n');
             }
-            Event::Start(Tag::Paragraph) => {
-                if !output.is_empty() && !output.ends_with('\n') {
+            Event::Start(Tag::Paragraph)
+                if !output.is_empty() && !output.ends_with('\n') => {
                     output.push('\n');
                 }
-            }
             Event::End(TagEnd::Paragraph) => {
                 output.push('\n');
             }

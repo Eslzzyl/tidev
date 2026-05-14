@@ -1,8 +1,10 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::hooks::config::{HooksConfig, PostToolUseHookConfig};
 use crate::hooks::matcher::matches_tool;
 use crate::hooks::runner::run_hook_command;
+use crate::memory::{HookPayload, HookType, MemoryStore};
 use crate::session::{ToolCall, ToolExecutionResult};
 
 /// Outcome of running hooks for a single tool call.
@@ -65,6 +67,7 @@ impl PostToolUseHookOutcome {
 pub struct HookEngine {
     config: HooksConfig,
     workspace_root: PathBuf,
+    memory_store: Option<Arc<MemoryStore>>,
 }
 
 impl HookEngine {
@@ -72,7 +75,14 @@ impl HookEngine {
         Self {
             config,
             workspace_root,
+            memory_store: None,
         }
+    }
+
+    /// Attach a MemoryStore for automatic observation capture.
+    pub fn with_memory_store(mut self, store: Arc<MemoryStore>) -> Self {
+        self.memory_store = Some(store);
+        self
     }
 
     /// Update the config at runtime (e.g., after config reload).
@@ -93,6 +103,7 @@ impl HookEngine {
         &self,
         tool_call: &ToolCall,
         result: &ToolExecutionResult,
+        session_id: Option<uuid::Uuid>,
     ) -> PostToolUseHookOutcome {
         if self.config.disable_all_hooks {
             return PostToolUseHookOutcome::default();
@@ -149,6 +160,21 @@ impl HookEngine {
                 display_name: hook.display_name().to_string(),
                 filepath: result.metadata.filepath.clone(),
             });
+        }
+
+        // ── Memory observation capture ────────────────────────────────
+        if let (Some(store), Some(sid)) = (&self.memory_store, session_id) {
+            let payload = HookPayload {
+                session_id: sid,
+                hook_type: HookType::PostToolUse,
+                timestamp: chrono::Utc::now(),
+                tool_name: Some(tool_call.name.clone()),
+                tool_input: Some(tool_call.arguments.clone()),
+                tool_output: Some(result.output.clone()),
+                user_prompt: None,
+                assistant_response: None,
+            };
+            let _ = store.observe(&payload);
         }
 
         PostToolUseHookOutcome {

@@ -96,7 +96,7 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     crate::log_info!("Auth store loaded");
 
     // Create shared agent runtime (ToolRegistry, MemoryStore, etc.)
-    let memory_store = Arc::new(crate::memory::types::MemoryStore::open(
+    let memory_store = Arc::new(crate::memory::MemoryStore::open(
         &paths.database_file,
     )?);
     let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());

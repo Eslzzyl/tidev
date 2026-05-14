@@ -10,7 +10,7 @@ use tokio::task::JoinHandle;
 use crate::config::AuthStore;
 use crate::config::{PermissionConfig, WebSearchConfig};
 use crate::mcp::McpManager;
-use crate::memory::types::MemoryStore;
+use crate::memory::MemoryStore;
 use crate::sandbox::SandboxPolicy;
 use crate::session::BackendEvent;
 use crate::tooling::SkillCatalog;
@@ -129,7 +129,7 @@ impl ToolRegistry {
         self.mcp.summaries()
     }
 
-    pub fn memory_store(&self) -> Arc<crate::memory::types::MemoryStore> {
+    pub fn memory_store(&self) -> Arc<crate::memory::MemoryStore> {
         self.memory_store.clone()
     }
 

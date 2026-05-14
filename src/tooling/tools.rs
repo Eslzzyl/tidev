@@ -419,7 +419,7 @@ pub(super) fn execute_tool_call(
     call: &ToolCall,
     max_output_bytes: usize,
     rtk_enabled: bool,
-    memory_store: &Arc<crate::memory::types::MemoryStore>,
+    memory_store: &Arc<crate::memory::MemoryStore>,
     mode: crate::prompts::SessionMode,
 ) -> Result<ToolExecutionResult> {
     // Pre-execution checks for file read tracking
