@@ -174,12 +174,73 @@ impl HookEngine {
                 user_prompt: None,
                 assistant_response: None,
             };
-            let _ = store.observe(&payload);
+            if let Ok(Some(obs_id)) = store.observe(&payload) {
+                // Schedule compression on a blocking thread (rusqlite Connection is !Send)
+                let store = store.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    let rt = tokio::runtime::Handle::current();
+                    if let Err(e) = rt.block_on(store.compress(obs_id)) {
+                        crate::log_warn!("auto-compression failed: {}", e);
+                    }
+                });
+            }
         }
 
         PostToolUseHookOutcome {
             hooks: outcomes,
             any_hook_ran,
+        }
+    }
+
+    /// Record a memory observation before tool execution.
+    pub fn on_pre_tool_use(&self, tool_call: &ToolCall, session_id: Option<uuid::Uuid>) {
+        if let (Some(store), Some(sid)) = (&self.memory_store, session_id) {
+            let payload = HookPayload {
+                session_id: sid,
+                hook_type: HookType::PreToolUse,
+                timestamp: chrono::Utc::now(),
+                tool_name: Some(tool_call.name.clone()),
+                tool_input: Some(tool_call.arguments.clone()),
+                tool_output: None,
+                user_prompt: None,
+                assistant_response: None,
+            };
+            let _ = store.observe(&payload);
+        }
+    }
+
+    /// Record a memory observation after tool failure.
+    pub fn on_post_tool_failure(&self, tool_call: &ToolCall, error: &str, session_id: Option<uuid::Uuid>) {
+        if let (Some(store), Some(sid)) = (&self.memory_store, session_id) {
+            let payload = HookPayload {
+                session_id: sid,
+                hook_type: HookType::PostToolFailure,
+                timestamp: chrono::Utc::now(),
+                tool_name: Some(tool_call.name.clone()),
+                tool_input: Some(tool_call.arguments.clone()),
+                tool_output: Some(error.to_string()),
+                user_prompt: None,
+                assistant_response: None,
+            };
+            let _ = store.observe(&payload);
+        }
+    }
+
+    /// Record a generic memory observation (for session_end, subagent, etc.)
+    pub fn record_observation(&self, hook_type: HookType, tool_name: Option<String>, tool_input: Option<String>, tool_output: Option<String>, session_id: Option<uuid::Uuid>) {
+        if let (Some(store), Some(sid)) = (&self.memory_store, session_id) {
+            let payload = HookPayload {
+                session_id: sid,
+                hook_type,
+                timestamp: chrono::Utc::now(),
+                tool_name,
+                tool_input,
+                tool_output,
+                user_prompt: None,
+                assistant_response: None,
+            };
+            let _ = store.observe(&payload);
         }
     }
 

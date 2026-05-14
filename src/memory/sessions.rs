@@ -106,35 +106,40 @@ pub struct SessionService;
 
 impl SessionService {
     /// Generate and store a session summary using LLM.
+    /// Opens its own DB connection to avoid !Send issues.
     pub async fn summarize_session(
-        db: &Connection,
+        db_path: &std::path::Path,
         llm: &LlmClient,
         model: &ActiveModel,
         session_id: Uuid,
         project: &str,
     ) -> Result<SessionSummary> {
-        // 1. Load compressed observations for this session
-        let mut stmt = db.prepare(
-            "SELECT obs_type, title, narrative, files, concepts
-             FROM compressed_observations
-             WHERE session_id = ?1
-             ORDER BY created_at ASC",
-        )?;
+        // 1. Load compressed observations (sync, connection dropped before await)
+        let views = {
+            let db = Connection::open(db_path)?;
+            let mut stmt = db.prepare(
+                "SELECT obs_type, title, narrative, files, concepts
+                 FROM compressed_observations
+                 WHERE session_id = ?1
+                 ORDER BY created_at ASC",
+            )?;
 
-        let views: Vec<CompressedView> = stmt.query_map(
-            rusqlite::params![session_id.to_string()],
-            |row| {
-                let files_json: String = row.get(3)?;
-                let concepts_json: String = row.get(4)?;
-                Ok(CompressedView {
-                    obs_type: row.get(0)?,
-                    title: row.get(1)?,
-                    narrative: row.get(2)?,
-                    files: serde_json::from_str(&files_json).unwrap_or_default(),
-                    concepts: serde_json::from_str(&concepts_json).unwrap_or_default(),
-                })
-            },
-        )?.filter_map(|r| r.ok()).collect();
+            let views: Vec<CompressedView> = stmt.query_map(
+                rusqlite::params![session_id.to_string()],
+                |row| {
+                    let files_json: String = row.get(3)?;
+                    let concepts_json: String = row.get(4)?;
+                    Ok(CompressedView {
+                        obs_type: row.get(0)?,
+                        title: row.get(1)?,
+                        narrative: row.get(2)?,
+                        files: serde_json::from_str(&files_json).unwrap_or_default(),
+                        concepts: serde_json::from_str(&concepts_json).unwrap_or_default(),
+                    })
+                },
+            )?.filter_map(|r| r.ok()).collect();
+            views
+        };
 
         if views.is_empty() {
             // No compressed observations — return empty summary
@@ -149,11 +154,12 @@ impl SessionService {
                 concepts: vec![],
                 observation_count: 0,
             };
-            Self::store_summary(db, &summary)?;
+            let store_db = Connection::open(db_path)?;
+            Self::store_summary(&store_db, &summary)?;
             return Ok(summary);
         }
 
-        // 2. Build prompt and call LLM
+        // 2. Build prompt and call LLM (no DB connection held)
         let prompt = build_summary_prompt(&views);
         let messages = vec![
             Message::new(MessageRole::System, SUMMARY_SYSTEM.to_string()),
@@ -184,8 +190,9 @@ impl SessionService {
             observation_count: views.len() as i64,
         };
 
-        // 4. Persist
-        Self::store_summary(db, &summary)?;
+        // 4. Persist (sync, new connection)
+        let db = Connection::open(db_path)?;
+        Self::store_summary(&db, &summary)?;
 
         Ok(summary)
     }

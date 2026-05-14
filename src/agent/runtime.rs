@@ -698,6 +698,8 @@ impl AgentRuntime {
                     sensitive_file_approved,
                 )
             };
+            // Record pre-tool-use observation
+            self.hooks.on_pre_tool_use(tool_call, Some(session_id));
             let mut result = handle.await.unwrap_or_else(|join_err| {
                 ToolExecutionResult::new(format!("Tool task panicked/aborted: {join_err}"))
             });
@@ -1354,7 +1356,7 @@ impl AgentRuntime {
         cancel_token: Option<CancellationToken>,
     ) -> Result<()> {
         let request_id: u64 = rand::random();
-        self.run_agent_loop_with_tools_inner(
+        let result = self.run_agent_loop_with_tools_inner(
             request_id,
             session_id,
             model,
@@ -1365,8 +1367,18 @@ impl AgentRuntime {
             event_tx,
             cancel_token,
             None,
-        )
-        .await
+        ).await;
+
+        // ── Auto-summarize session on exit ─────────────────────────────
+        if result.is_ok() {
+            let ws = self.workspace_root.display().to_string();
+            let memory_store = self.tools.memory_store();
+            if let Err(e) = memory_store.summarize_session(session_id, &ws).await {
+                crate::log_warn!("session summarization failed: {}", e);
+            }
+        }
+
+        result
     }
 
     /// Internal implementation with optional permission channel.

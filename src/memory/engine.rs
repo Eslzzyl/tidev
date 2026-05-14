@@ -132,6 +132,7 @@ impl MemoryStore {
                 entry.is_latest as i64,
             ],
         )?;
+        let _ = AuditService::record(&db, "add", "memory", &entry.id.to_string(), None, None, None);
         Ok(())
     }
 
@@ -155,6 +156,7 @@ impl MemoryStore {
                 entry.id.to_string(),
             ],
         )?;
+        let _ = AuditService::record(&db, "update", "memory", &entry.id.to_string(), None, None, None);
         Ok(())
     }
 
@@ -165,6 +167,7 @@ impl MemoryStore {
             "UPDATE memories SET active = 0 WHERE id = ?1 AND workspace_root = ?2",
             rusqlite::params![id.to_string(), workspace_root],
         )?;
+        let _ = AuditService::record(&db, "delete", "memory", &id.to_string(), None, None, None);
         Ok(())
     }
 
@@ -326,34 +329,42 @@ impl MemoryStore {
 
     /// Run LLM compression on an observation (async).
     pub async fn compress(&self, observation_id: Uuid) -> Result<CompressedObservation> {
-        let llm_guard = self.llm.read().unwrap();
-        let llm = llm_guard.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("LLM client not configured for compression"))?;
-        let model = self.active_model.read().unwrap().clone()
-            .ok_or_else(|| anyhow::anyhow!("Active model not configured for compression"))?;
-        let db = self.connection.lock().unwrap();
-        let compressed = CompressionService::compress(&db, llm, &model, observation_id).await?;
+        // Step 1: Load raw observation synchronously, drop locks
+        let (llm, model) = {
+            let llm = self.llm.read().unwrap().clone();
+            let model = self.active_model.read().unwrap().clone();
+            (llm, model)
+        };
+        let llm = llm.ok_or_else(|| anyhow::anyhow!("LLM client not configured for compression"))?;
+        let model = model.ok_or_else(|| anyhow::anyhow!("Active model not configured for compression"))?;
 
-        // Add to BM25 index
+        // Step 2: Run LLM compression (async, no locks held)
+        let db_path = self.db_path.clone();
+        let compressed = {
+            let conn = Connection::open(&db_path)?;
+            CompressionService::compress(&conn, &llm, &model, observation_id).await?
+        };
+
+        // Step 3: Update indexes (synchronous, no DB lock needed for in-memory indexes)
         self.bm25.write().unwrap().add(
             &compressed.id.to_string(),
             &compressed.to_search_text(),
             &compressed.session_id.to_string(),
         );
 
-        // Add to vector index (async, best-effort)
-        if let Some(embedder) = self.embedder.read().unwrap().as_ref() {
+        // Step 4: Add to vector index (async, best-effort)
+        if let Some(ref embedder) = *self.embedder.read().unwrap() {
             let id = compressed.id.to_string();
             let session_id = compressed.session_id.to_string();
             let search_text = compressed.to_search_text();
-            let result = embedder.embed(&search_text).await;
-            match result {
+            match embedder.embed(&search_text).await {
                 Ok(embedding) => {
-                        if let Err(e) = self.vector_index.write().unwrap().add(&id, &session_id, embedding) {
-                            crate::log_warn!("vector index add failed: {}", e);
-                        }
+                    if let Err(e) = self.vector_index.write().unwrap().add(&id, &session_id, embedding) {
+                        crate::log_warn!("vector index add failed: {}", e);
                     }
-                    Err(e) => crate::log_warn!("embedding failed: {}", e),            }
+                }
+                Err(e) => crate::log_warn!("embedding failed: {}", e),
+            }
         }
 
         Ok(compressed)
@@ -401,13 +412,16 @@ impl MemoryStore {
         session_id: Uuid,
         project: &str,
     ) -> Result<SessionSummary> {
-        let llm_guard = self.llm.read().unwrap();
-        let llm = llm_guard.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("LLM client not configured for summarization"))?;
-        let model = self.active_model.read().unwrap().clone()
-            .ok_or_else(|| anyhow::anyhow!("Active model not configured for summarization"))?;
-        let db = self.connection.lock().unwrap();
-        SessionService::summarize_session(&db, llm, &model, session_id, project).await
+        let (llm, model) = {
+            let llm = self.llm.read().unwrap().clone();
+            let model = self.active_model.read().unwrap().clone();
+            (llm, model)
+        };
+        let llm = llm.ok_or_else(|| anyhow::anyhow!("LLM client not configured for summarization"))?;
+        let model = model.ok_or_else(|| anyhow::anyhow!("Active model not configured for summarization"))?;
+
+        let db_path = self.db_path.clone();
+        SessionService::summarize_session(&db_path, &llm, &model, session_id, project).await
     }
 
     /// Query audit log.
