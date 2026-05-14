@@ -10,11 +10,33 @@ fn main() {
     println!("cargo:rerun-if-changed=web/vite.config.ts");
     println!("cargo:rerun-if-changed=web/index.html");
 
-    if needs_build()
-        && let Err(msg) = build_web()
-    {
-        println!("cargo:warning={}", msg);
+    if needs_build() {
+        if let Err(msg) = build_web() {
+            println!("cargo:warning={}", msg);
+            // Ensure web/dist exists so rust-embed doesn't fail at compile time.
+            // If pnpm wasn't available, create a placeholder directory.
+            ensure_dist_placeholder();
+        }
     }
+}
+
+/// Create a minimal web/dist placeholder so that rust-embed compilation succeeds
+/// even when the full frontend build is skipped (e.g., pnpm not available).
+fn ensure_dist_placeholder() {
+    let dist = std::path::Path::new("web/dist");
+    if dist.exists() {
+        return;
+    }
+    std::fs::create_dir_all(dist.join("assets")).ok();
+    let placeholder = r#"<!DOCTYPE html>
+<html>
+<head><title>TiDev</title></head>
+<body>
+  <h1>Frontend not available</h1>
+  <p>The web frontend was not built. Run <code>cd web && pnpm install && pnpm build</code> to build it.</p>
+</body>
+</html>"#;
+    std::fs::write(dist.join("index.html"), placeholder).ok();
 }
 
 /// Returns true if any source file is newer than the last build output,

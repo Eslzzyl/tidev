@@ -16,11 +16,10 @@ categories = ["development-tools", "command-line-utilities"]
 
 include = [
     "/src",
-    "/web/dist",
-    "README.md",
-    "LICENSE",
-    "presets.toml",
-    "build.rs",
+    "/README.md",
+    "/LICENSE",
+    "/presets.toml",
+    "/build.rs",
 ]
 
 [dependencies]
