@@ -26,3 +26,7 @@
 	path = deepseek-tui
 	url = https://github.com/Hmbown/DeepSeek-TUI.git
 	shallow = true
+[submodule "agentmemory"]
+	path = agentmemory
+	url = https://github.com/rohitg00/agentmemory.git
+	shallow = true
