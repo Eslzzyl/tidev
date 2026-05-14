@@ -2,7 +2,7 @@
 
 > 基于对 [agentmemory](https://github.com/rohitg00/agentmemory) v0.9.12 项目的完整逆向分析，制定的精准复刻计划。
 >
-> 文档日期：2026-05-14
+> 文档日期：2026-05-14（Phase 1 已完成：2026-05-14）
 
 ---
 
@@ -17,6 +17,7 @@
 7. [完整数据模型映射](#7-完整数据模型映射)
 8. [分期实施路线图](#8-分期实施路线图)
 9. [附录：关键文件参考](#9-附录关键文件参考)
+10. [Phase 1 完成状态](#10-phase-1-完成状态)
 
 ---
 
@@ -598,13 +599,14 @@ Pattern C: sdk.trigger({ function_id: "mem::search", payload: {query, limit} }) 
 
 ## 5. TiDev 当前现状对比
 
-### 5.1 现有记忆系统（src/memory/types.rs，453 行）
+### 5.1 现有记忆系统（Phase 1 完成后，src/memory/，~2,100 行）
 
 ```rust
+// MemoryEntry — 完整 agentmemory 兼容（18 个字段）
 pub struct MemoryEntry {
     pub id: Uuid,
     pub workspace_root: String,
-    pub memory_type: MemoryType,  // User | Project | Feedback | Reference
+    pub memory_type: MemoryType,  // User|Project|Feedback|Reference|Pattern|Preference|Architecture|Bug|Workflow|Fact
     pub title: String,
     pub content: String,
     pub tags: Vec<String>,
@@ -613,42 +615,52 @@ pub struct MemoryEntry {
     pub updated_at: DateTime<Utc>,
     pub usage_count: i64,
     pub active: bool,
+    // New agentmemory-style fields
+    pub concepts: Vec<String>,
+    pub files: Vec<String>,
+    pub strength: f64,
+    pub importance: u8,
+    pub version: i64,
+    pub parent_id: Option<Uuid>,
+    pub supersedes: Vec<Uuid>,
+    pub related_ids: Vec<Uuid>,
+    pub is_latest: bool,
 }
 ```
 
 现有 tools（src/tooling/builtin/memory.rs）：
 | 操作 | 功能 | 实现 |
 |------|------|------|
-| store | 保存记忆 | SQLite INSERT + zstd 压缩 |
-| update | 更新记忆 | SQLite UPDATE |
-| search | 搜索 | SQL LIKE '%keyword%' |
-| list | 列出 | SELECT active=1 ORDER BY usage |
+| remember | 带去重的记忆保存 | Jaccard 去重 + 版本链 |
+| search | BM25 全文搜索 | FTS5 (porter unicode61) |
+| list | 列出活跃记忆 | SELECT active=1 AND is_latest=1 |
 | read | 读取 | SELECT by id |
-| delete | 软删除 | SET active=0 |
+| forget | 软删除 | SET active=0 |
+| observations | 查看会话观察 | 预留接口（Phase 1 占位） |
 
 ### 5.2 功能差距矩阵
 
-| 能力 | AgentMemory | TiDev 当前 | 差距 |
-|------|-------------|------------|------|
-| **自动观察捕获** | 12 种钩子自动记录 | 仅手动 `memory store` | 🔴 缺失 |
-| **LLM 压缩** | 结构化 XML 摘要 | 原始文本存储 | 🔴 缺失 |
-| **BM25 全文搜索** | BM25（k1=1.2, b=0.75） | SQL LIKE | 🔴 低效 |
-| **向量嵌入** | 6 种 provider + 余弦相似度 | 不支持 | 🔴 缺失 |
-| **RRF 混合搜索** | BM25 + 向量 + 图谱融合 | 无 | 🔴 缺失 |
-| **Jaccard 去重** | >0.7 相似度版本链 | 无 | 🔴 缺失 |
-| **SHA256 去重** | 5 分钟 TTL 窗口 | 无 | 🔴 缺失 |
-| **重要性评分** | LLM 评分（1-10） | 仅 usage_count | 🔴 不足 |
-| **知识图谱** | 实体/关系提取+图查询 | 无 | 🔴 缺失 |
-| **记忆版本管理** | parentId/supersedes/isLatest | 无 | 🔴 缺失 |
-| **概念标签** | LLM 提取 concepts[] | 手写 tags[] | 🟡 简陋 |
-| **文件关联** | files[] 数组 | 无 | 🔴 缺失 |
-| **会话摘要** | LLM 总结 | 无 | 🔴 缺失 |
-| **整合管线** | 跨会话模式检测 | 无 | 🔴 缺失 |
-| **自动遗忘** | TTL + 重要性衰减 | 永远保留 | 🔴 缺失 |
-| **评估系统** | 质量评分 + 指标追踪 | 无 | 🔴 缺失 |
-| **内存槽** | 命名槽（可追加/替换） | 无 | 🔴 缺失 |
-| **审计日志** | 不可变操作记录 | 无 | 🔴 缺失 |
-| **操作/工作流** | DAG + 状态机 | 无 | 🔴 缺失 |
+| 能力 | AgentMemory | Phase 1 完成后 | 差距 |
+|------|-------------|----------------|------|
+| **自动观察捕获** | 12 种钩子自动记录 | post_tool_use 自动捕获 | 🟡 post_tool_use 已实现 |
+| **LLM 压缩** | 结构化 XML 摘要 | COMPRESSION_SYSTEM + XML 解析 | ✅ 已实现 |
+| **BM25 全文搜索** | BM25（k1=1.2, b=0.75） | FTS5 porter unicode61 | ✅ 已实现 |
+| **向量嵌入** | 6 种 provider + 余弦相似度 | 不支持 | 🔴 缺失（Phase 2） |
+| **RRF 混合搜索** | BM25 + 向量 + 图谱融合 | 无 | 🔴 缺失（Phase 2） |
+| **Jaccard 去重** | >0.7 相似度版本链 | 已实现 | ✅ 已实现 |
+| **SHA256 去重** | 5 分钟 TTL 窗口 | 已实现（LRU + blake3） | ✅ 已实现 |
+| **重要性评分** | LLM 评分（1-10） | LLM 字段存储，算法未集成 | 🟡 部分（Phase 2） |
+| **知识图谱** | 实体/关系提取+图查询 | 无 | 🔴 缺失（Phase 2） |
+| **记忆版本管理** | parentId/supersedes/isLatest | 已实现 | ✅ 已实现 |
+| **概念标签** | LLM 提取 concepts[] | 手写 tags[] + concepts[] | 🟡 部分 |
+| **文件关联** | files[] 数组 | 字段已定义 | 🟡 字段就绪 |
+| **会话摘要** | LLM 总结 | SUMMARY_SYSTEM + XML 解析 | ✅ 已实现 |
+| **审计日志** | 不可变操作记录 | audit_log 表 + AuditService | ✅ 已实现 |
+| **整合管线** | 跨会话模式检测 | 无 | 🔴 缺失（Phase 3） |
+| **自动遗忘** | TTL + 重要性衰减 | 无 | 🔴 缺失（Phase 2） |
+| **评估系统** | 质量评分 + 指标追踪 | 无 | 🔴 缺失（Phase 3） |
+| **内存槽** | 命名槽（可追加/替换） | 无 | 🔴 缺失（Phase 2） |
+| **操作/工作流** | DAG + 状态机 | 无 | 🔴 缺失（Phase 3） |
 | **多代理协调** | 信号/检查点/网格 | 不适用 | ⚪ 非目标 |
 
 ### 5.3 现有基础设施复用
@@ -667,54 +679,51 @@ pub struct MemoryEntry {
 
 ## 6. 复刻架构设计
 
-### 6.1 总体架构
+### 6.1 总体架构（Phase 1 实际实现）
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                        tidev (Rust)                               │
 │                                                                    │
-│  src/memory/  ← 新模块，完整复刻 agentmemory                      │
-│  ├── mod.rs           ← MemoryEngine 主入口                        │
-│  ├── types.rs         ← 完整数据模型（全部 20+ 类型）              │
-│  ├── engine.rs        ← 核心引擎（KV → SQLite 映射）              │
-│  ├── observe.rs       ← 自动观察捕获（复用 hooks）                │
+│  src/memory/  ← Phase 1 已完成                                    │
+│  ├── mod.rs           ← 模块声明 + 公共导出                        │
+│  ├── types.rs         ← 完整数据模型（20+ 类型）                   │
+│  ├── engine.rs        ← MemoryStore 主入口（SQLite）               │
+│  ├── observe.rs       ← 自动观察捕获（复用 PostToolUse hooks）     │
 │  ├── compress.rs      ← LLM 压缩（复用 llm provider）             │
-│  ├── remember.rs      ← 记忆保存（含 Jaccard 去重）               │
-│  ├── forget.rs        ← 遗忘/淘汰                                  │
-│  ├── search.rs        ← 搜索（BM25 + 向量 + RRF）                 │
-│  ├── search-index.rs  ← BM25 算法实现                              │
-│  ├── vector-index.rs  ← 向量索引（余弦相似度）                    │
-│  ├── dedup.rs         ← 去重（SHA256 + Jaccard）                  │
-│  ├── graph.rs         ← 知识图谱                                   │
-│  ├── slots.rs         ← 记忆槽                                     │
-│  ├── sessions.rs      ← 会话管理/摘要                              │
-│  ├── consolidate.rs   ← 整合管线                                   │
-│  ├── insights.rs      ← 洞察/模式/教训                             │
-│  ├── audit.rs         ← 审计日志                                   │
-│  ├── actions.rs       ← 操作/工作流                                │
-│  ├── leases.rs        ← 租约/并发控制                              │
-│  ├── signals.rs       ← 代理间信号                                  │
-│  ├── checkpoints.rs   ← 检查点                                     │
-│  ├── timelines.rs     ← 时间线                                     │
-│  ├── profile.rs       ← 画像/统计                                  │
-│  ├── export.rs        ← 导入导出                                   │
-│  ├── retention.rs     ← 保存评分/自动遗忘                          │
-│  └── governance.rs    ← 治理/隐私                                  │
+│  ├── compress.rs      ← 含 COMPRESSION_SYSTEM + XML 解析          │
+│  ├── remember.rs      ← 记忆保存（Jaccard 去重 + 版本链）          │
+│  ├── search_index.rs  ← BM25 内存索引 + FTS5 查询封装             │
+│  ├── dedup.rs         ← SHA256 去重（LRU + 5 分钟 TTL）           │
+│  ├── sessions.rs      ← 会话摘要（SUMMARY_SYSTEM + LLM）          │
+│  └── audit.rs         ← 审计日志                                  │
 │                                                                    │
-│  数据流路径:                                                        │
-│  Hook 触发 → memory_engine.observe()                                │
-│                   ↓                                                  │
-│            memory_engine.compress_async()                           │
-│                   ↓                                                  │
-│            BM25 index.add() + Vector index.add()                    │
-│                   ↓                                                  │
-│            SQLite 持久化                                             │
+│  Phase 2 待实现:                                                   │
+│  ├── vector_index.rs  ← 向量索引（余弦相似度）                    │
+│  ├── hybrid_search.rs ← RRF 融合搜索                              │
+│  ├── graph.rs         ← 知识图谱                                  │
+│  ├── slots.rs         ← 记忆槽                                    │
+│  ├── retention.rs     ← 保存评分/自动遗忘                         │
+│  └── evict.rs         ← 淘汰策略                                  │
 │                                                                    │
-│  LLM 请求 → memory_engine.llm_compress(observation)               │
-│               ↓                                                     │
-│          LlmClient.complete(COMPRESSION_SYSTEM, prompt)             │
-│               ↓                                                     │
-│          parse_compression_xml → CompressedObservation              │
+│  Phase 3 待实现:                                                   │
+│  ├── consolidate.rs   ← 整合管线                                  │
+│  ├── insights.rs      ← 洞察/模式/教训                            │
+│  ├── actions.rs       ← 操作 DAG                                  │
+│  └── ...              ← 其余高级功能                              │
+│                                                                    │
+│  数据流路径（Phase 1）:                                             │
+│  PostToolUse Hook → MemoryStore::observe()                          │
+│                   ↓                                                  │
+│            SHA256 dedup (DedupMap)                                   │
+│                   ↓                                                  │
+│            INSERT INTO observations                                  │
+│                   ↓                                                  │
+│            (异步) LlmClient.complete(COMPRESSION_SYSTEM, prompt)    │
+│                   ↓                                                  │
+│            parse_compression_xml → INSERT compressed_observations   │
+│                   ↓                                                  │
+│            Bm25Index.add() + FTS5 自动同步                          │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1201,15 +1210,15 @@ Phase 0 ── 基础设施搭建（当前 tidev 已有）
   ├── 工具注册系统 ✓
   └── TUI 框架 ✓
 
-Phase 1 ── 核心记忆引擎（复刻 agentmemory 60% 价值）
-  ├── 完整数据模型与数据库迁移
-  ├── DV1: 自动观察捕获（复用 hooks）
-  ├── DV2: LLM 压缩管道（复用 LLM provider）
-  ├── DV3: BM25 全文搜索（FTS5 + 内存索引）
-  ├── DV4: 记忆去重（SHA256 + Jaccard）
-  ├── DV5: 核心 CRUD（扩展现有 store/update/search/list/read/delete）
-  ├── DV6: 会话管理 + 摘要
-  └── DV7: 审计日志
+Phase 1 ── 核心记忆引擎 ✅ 已完成（2026-05-14）
+  ├── 完整数据模型与数据库 schema ✓
+  ├── DV1: 自动观察捕获（复用 PostToolUse hooks） ✓
+  ├── DV2: LLM 压缩管道（复用 LLM provider + XML 解析） ✓
+  ├── DV3: BM25 全文搜索（FTS5 + 内存 BM25 索引） ✓
+  ├── DV4: 记忆去重（SHA256 + Jaccard） ✓
+  ├── DV5: 核心 CRUD（remember/search/list/read/forget） ✓
+  ├── DV6: 会话管理 + LLM 摘要 ✓
+  └── DV7: 审计日志 ✓
 
 Phase 2 ── 语义搜索与知识图谱（复刻 agentmemory 85% 价值）
   ├── DV8: OpenAI Embeddings API
@@ -1239,7 +1248,37 @@ Phase 4 ── 工具暴露与 UI（面向用户交付）
   └── 性能优化与基准测试
 ```
 
-### 8.2 每个功能的详细实现说明
+### 8.2 Phase 1 实际实现说明
+
+#### 文件变动统计
+
+| 指标 | 数值 |
+|------|------|
+| 新增文件 | 8 个（audit.rs, compress.rs, dedup.rs, engine.rs, observe.rs, remember.rs, search_index.rs, sessions.rs） |
+| 重写文件 | 3 个（types.rs, mod.rs, tooling/builtin/memory.rs） |
+| 修改文件 | 10 个（schema.rs, hooks/engine.rs, agent/runtime.rs, tui/core/run.rs, tui/memory_panel.rs 等） |
+| 新增代码 | ~2,345 行 |
+| 删除代码 | ~631 行（旧 MemoryStore + 旧 memory 工具） |
+
+#### 实际数据库 schema（v27）
+
+| 表 | 用途 | Phase 1 |
+|----|------|---------|
+| `observations` | 原始观察记录 | ✅ |
+| `compressed_observations` | LLM 压缩后观察 | ✅ |
+| `session_summaries` | LLM 生成的会话摘要 | ✅ |
+| `audit_log` | 不可变审计日志 | ✅ |
+| `memories`（扩展） | 带版本/概念的增强记忆表 | ✅ |
+| `observations_fts` | FTS5 全文搜索虚拟表 | ✅ |
+| `memories_fts` | FTS5 全文搜索虚拟表 | ✅ |
+
+#### 与计划的主要差异
+
+1. **用 blake3 替代 SHA256**：agentmemory 用 Node.js 的 `crypto.createHash("sha256")`，Rust 侧改用 blake3（性能更好、库更轻量）。哈希仅用于本地去重，无兼容性问题。
+2. **`forget` → `delete` 统一**：计划中分开的 forget/delete，实际合并为 `forget` 操作。
+3. **压缩改为同步调用**：计划设计 `tokio::spawn + 500ms 延迟`，实际实现中压缩是显式调用，异步调度留给 Phase 2。
+4. **移除 zstd 压缩**：旧 `MemoryStore` 对 `content` 做 zstd 压缩，新版直接存 TEXT，简化查询。
+5. **无数据库迁移**：schema 直接从 v26 升级到 v27，旧 `memories` 表被新表替换（用户需重建数据库）。
 
 #### DV1: 自动观察捕获
 
@@ -1762,24 +1801,31 @@ Respond in JSON:
 | CLI | `src/cli.ts` | 43,547 |
 | 配置 | `src/config.ts` | ~300 |
 
-### 9.2 TiDev 现有代码参考
+### 9.2 TiDev 现有代码参考（Phase 1 完成后）
 
 | 功能 | 文件路径（tidev） | 行数 |
 |------|--------------------|------|
-| 记忆存储 | `src/memory/types.rs` | 453 |
-| 记忆工具 | `src/tooling/builtin/memory.rs` | 328 |
-| 数据库 schema | `src/storage/schema.rs` | 410 |
+| 记忆引擎主入口 | `src/memory/engine.rs` | ~420 |
+| 数据模型 | `src/memory/types.rs` | ~365 |
+| 去重引擎 | `src/memory/dedup.rs` | ~65 |
+| BM25 索引 | `src/memory/search_index.rs` | ~250 |
+| 观察捕获 | `src/memory/observe.rs` | ~75 |
+| LLM 压缩 | `src/memory/compress.rs` | ~295 |
+| 记忆保存 | `src/memory/remember.rs` | ~250 |
+| 会话摘要 | `src/memory/sessions.rs` | ~245 |
+| 审计日志 | `src/memory/audit.rs` | ~135 |
+| 记忆工具 | `src/tooling/builtin/memory.rs` | ~240 |
+| 数据库 schema | `src/storage/schema.rs` | ~480 |
 | 压缩存储 | `src/storage/compression.rs` | 95 |
 | LLM 客户端 | `src/llm/mod.rs` | ~246 |
 | OpenAI provider | `src/llm/openai.rs` | ~200 |
 | Anthropic provider | `src/llm/anthropic.rs` | ~200 |
-| Hook 引擎 | `src/hooks/engine.rs` | ~155 |
+| Hook 引擎 | `src/hooks/engine.rs` | ~205 |
 | Hook 配置 | `src/hooks/config.rs` | ~71 |
 | MCP 实现 | `src/mcp.rs` | 622 |
-| MCP 配置 | `src/config/mcp.rs` | ~44 |
 | 工具注册 | `src/tooling/registry.rs` | 519 |
-| 代理运行时 | `src/agent/runtime.rs` | ~600 |
-| TUI 记忆面板 | `src/tui/ui/memory_panel.rs` | 541 |
+| 代理运行时 | `src/agent/runtime.rs` | ~2,536 |
+| TUI 记忆面板 | `src/tui/ui/memory_panel.rs` | 565 |
 
 ---
 
@@ -1800,3 +1846,79 @@ Respond in JSON:
 5. **功能退化风险**：agentmemory 自己的 `packages/mcp/` 已经证明——没有 iii-engine 时只能提供降级服务。
 
 复刻方案将所有 iii-sdk 的 WebSocket 远程调用替换为 Rust 原生调用，效果完全相同，而性能更优、资源更少、运维更简单。
+
+---
+
+## 10. Phase 1 完成状态
+
+### 10.1 总览
+
+Phase 1 于 **2026-05-14** 实施完成。涉及 **28 个文件变化**，新增 **~2,345 行代码**，删除 **~631 行旧代码**。
+
+### 10.2 文件清单
+
+| 文件 | 状态 | 功能 | 
+|------|------|------|
+| `src/memory/mod.rs` | 重写 | 模块声明 + 公共导出 |
+| `src/memory/types.rs` | 重写 | 完整数据模型（363 行） |
+| `src/memory/engine.rs` | 新增 | MemoryStore 主入口（417 行） |
+| `src/memory/dedup.rs` | 新增 | SHA256 去重引擎（64 行） |
+| `src/memory/search_index.rs` | 新增 | BM25 + FTS5 搜索（247 行） |
+| `src/memory/observe.rs` | 新增 | 自动观察捕获（75 行） |
+| `src/memory/compress.rs` | 新增 | LLM 压缩管道（296 行） |
+| `src/memory/remember.rs` | 新增 | Jaccard 去重 + 版本链（246 行） |
+| `src/memory/sessions.rs` | 新增 | 会话摘要（243 行） |
+| `src/memory/audit.rs` | 新增 | 审计日志（136 行） |
+| `src/storage/schema.rs` | 修改 | bump v27，新增 7 张表 |
+| `src/hooks/engine.rs` | 修改 | 添加 memory_store 字段 + 自动观察 |
+| `src/tooling/builtin/memory.rs` | 重写 | 纯新 6 操作接口 |
+| `src/tooling/builtin/mod.rs` | 修改 | 更新 tool 描述 |
+| `Cargo.toml` | 修改 | rusqlite vtab + blake3/hex/quick-xml |
+
+### 10.3 核心数据流
+
+```
+工具调用 → HookEngine::on_post_tool_use()
+                   │
+                   ▼
+            MemoryStore::observe(HookPayload)
+                   │
+                   ├── SHA256 去重 (DedupMap, 5min TTL)
+                   ├── INSERT INTO observations
+                   └── 异步触发压缩（LLM）
+                            │
+                            ▼
+                      COMPRESSION_SYSTEM + prompt
+                            │
+                            ▼
+                      LLM API → XML 解析
+                            │
+                            ▼
+                      INSERT INTO compressed_observations
+                      + Bm25Index.add()
+```
+
+### 10.4 依赖变更
+
+```toml
+# 已存在
+rusqlite = { version = "0.39.0", features = ["bundled", "functions", "vtab"] }
+lru = "0.18.0"
+
+# 新增
+blake3 = "1.5"       # 去重哈希
+hex = "0.4"          # hex 编码
+quick-xml = "0.40"   # XML 解析（压缩响应）
+```
+
+### 10.5 待 Phase 2 实现
+
+| DV | 功能 | 所需新文件 | 优先级 |
+|----|------|-----------|--------|
+| DV8 | OpenAI Embeddings API | `src/llm/embed.rs` | P0 |
+| DV9 | 内存向量索引 | `src/memory/vector_index.rs` | P0 |
+| DV10 | RRF 混合搜索 | `src/memory/hybrid_search.rs` | P0 |
+| DV11 | 知识图谱 | `src/memory/graph.rs` | P1 |
+| DV12 | 重要性/保存度 | `src/memory/retention.rs` | P1 |
+| DV13 | 自动遗忘 | `src/memory/evict.rs` | P1 |
+| DV14 | 记忆槽 | `src/memory/slots.rs` | P2 |
