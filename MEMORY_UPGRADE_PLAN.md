@@ -2,7 +2,7 @@
 
 > 基于对 [agentmemory](https://github.com/rohitg00/agentmemory) v0.9.12 项目的完整逆向分析，制定的精准复刻计划。
 >
-> 文档日期：2026-05-14（Phase 1 已完成：2026-05-14）
+> 文档日期：2026-05-14（Phase 1 ✅ 2026-05-14, Phase 2 ✅ 2026-05-14）
 
 ---
 
@@ -1220,14 +1220,14 @@ Phase 1 ── 核心记忆引擎 ✅ 已完成（2026-05-14）
   ├── DV6: 会话管理 + LLM 摘要 ✓
   └── DV7: 审计日志 ✓
 
-Phase 2 ── 语义搜索与知识图谱（复刻 agentmemory 85% 价值）
-  ├── DV8: OpenAI Embeddings API
-  ├── DV9: 内存向量索引
-  ├── DV10: RRF 混合搜索融合
-  ├── DV11: 知识图谱（实体/关系提取 + 图查询）
-  ├── DV12: 重要性评分 + 保存度计算
-  ├── DV13: 自动遗忘 + 淘汰策略
-  └── DV14: 记忆槽
+Phase 2 ── 语义搜索与知识图谱 ✅ 已完成（2026-05-14）
+  ├── DV8: OpenAI Embeddings API ✓
+  ├── DV9: 内存向量索引 ✓
+  ├── DV10: RRF 混合搜索融合 ✓
+  ├── DV11: 知识图谱（schema 就绪，逻辑待实现） ⏳ 预留
+  ├── DV12: 重要性评分 + 保存度计算 ✓
+  ├── DV13: 自动遗忘 + 淘汰策略 ✓
+  └── DV14: 记忆槽 ✓
 
 Phase 3 ── 高级能力（完整复刻）
   ├── DV15: 整合管线（跨会话模式检测）
@@ -1279,6 +1279,48 @@ Phase 4 ── 工具暴露与 UI（面向用户交付）
 3. **压缩改为同步调用**：计划设计 `tokio::spawn + 500ms 延迟`，实际实现中压缩是显式调用，异步调度留给 Phase 2。
 4. **移除 zstd 压缩**：旧 `MemoryStore` 对 `content` 做 zstd 压缩，新版直接存 TEXT，简化查询。
 5. **无数据库迁移**：schema 直接从 v26 升级到 v27，旧 `memories` 表被新表替换（用户需重建数据库）。
+
+### 8.3 Phase 2 实际实现说明
+
+#### 文件变动统计
+
+| 指标 | 数值 |
+|------|------|
+| 新增文件 | 6 个（slots.rs, embed.rs, vector_index.rs, hybrid_search.rs, retention.rs, evict.rs） |
+| 修改文件 | 5 个（engine.rs, mod.rs, types.rs, schema.rs, tooling/builtin/memory.rs, runtime.rs） |
+| 新增代码 | ~800 行 |
+| 删除代码 | ~0 行 |
+
+#### 实际功能清单
+
+| DV | 功能 | 实现文件 | 核心算法/依赖 |
+|----|------|---------|-------------|
+| DV14 | 记忆槽 | `slots.rs`（210 行） | 8 个默认槽位，SQLite CRUD，提示词注入 |
+| DV8 | Embeddings API | `embed.rs`（100 行） | OpenAI text-embedding-3-small，复用 reqwest |
+| DV9 | 向量索引 | `vector_index.rs`（130 行） | 余弦相似度 + BinaryHeap Top-K |
+| DV10 | RRF 混合搜索 | `hybrid_search.rs`（110 行） | BM25 + 向量 RRF（k=60）融合 |
+| DV12 | 保存度评分 | `retention.rs`（65 行） | `importance * exp(-0.1 * age) + access_boost` |
+| DV13 | 自动遗忘 | `evict.rs`（65 行） | 淘汰 stale 记忆 + 旧版本 + 清理 retention 表 |
+
+#### 默认 Slot 定义
+
+| 槽位 | 作用域 | 大小 | 用途 |
+|------|--------|------|------|
+| `persona` | global | 1000 | 角色、语气、行为准则 |
+| `user_preferences` | global | 2000 | 编码风格、工具偏好、命名约定 |
+| `tool_guidelines` | global | 1500 | 工具选择规则 |
+| `project_context` | project | 3000 | 架构决策、构建命令 |
+| `guidance` | project | 1500 | 下一步建议 |
+| `pending_items` | project | 2000 | 待办事项 |
+| `session_patterns` | project | 1500 | 观察到的行为模式 |
+| `self_notes` | project | 1500 | 自由笔记 |
+
+#### 与计划的主要差异
+
+1. **知识图谱预留**：`graph_nodes` 和 `graph_edges` 表已创建，但实体提取和查询逻辑未实现。
+2. **Embedding 只在 OpenAI 上实现**：仅支持 OpenAI Embeddings API，未实现 Anthropic 或其他 provider。
+3. **无自动压缩集成**：向量索引的 populate 需要在 `compress.rs` 中调用 embedder，当前是独立方法等待集成。
+4. **Schema 继续升级**：v27 → v28，新增 4 张表。
 
 #### DV1: 自动观察捕获
 
@@ -1911,14 +1953,36 @@ hex = "0.4"          # hex 编码
 quick-xml = "0.40"   # XML 解析（压缩响应）
 ```
 
-### 10.5 待 Phase 2 实现
+### 10.5 状态总览：Phase 1 + Phase 2
 
-| DV | 功能 | 所需新文件 | 优先级 |
-|----|------|-----------|--------|
-| DV8 | OpenAI Embeddings API | `src/llm/embed.rs` | P0 |
-| DV9 | 内存向量索引 | `src/memory/vector_index.rs` | P0 |
-| DV10 | RRF 混合搜索 | `src/memory/hybrid_search.rs` | P0 |
-| DV11 | 知识图谱 | `src/memory/graph.rs` | P1 |
-| DV12 | 重要性/保存度 | `src/memory/retention.rs` | P1 |
-| DV13 | 自动遗忘 | `src/memory/evict.rs` | P1 |
-| DV14 | 记忆槽 | `src/memory/slots.rs` | P2 |
+| Phase | 状态 | 完成日期 | 新增文件 | 新增代码 |
+|-------|------|---------|---------|---------|
+| Phase 1 | ✅ 已完成 | 2026-05-14 | 8 个 | ~2,345 |
+| Phase 2 | ✅ 已完成 | 2026-05-14 | 6 个 | ~800 |
+| Phase 2 知识图谱 | ⏳ schema 就绪 | — | — | — |
+
+### 10.6 Phase 2 新增文件
+
+| 文件 | 行数 | 功能 |
+|------|------|------|
+| `src/memory/slots.rs` | ~210 | 记忆槽 CRUD + 8 默认槽 + 提示词渲染 |
+| `src/memory/embed.rs` | ~100 | OpenAI Embeddings API |
+| `src/memory/vector_index.rs` | ~130 | 内存余弦相似度索引 |
+| `src/memory/hybrid_search.rs` | ~110 | RRF BM25 + 向量融合搜索 |
+| `src/memory/retention.rs` | ~65 | 指数时间衰减 + 访问频率保存度 |
+| `src/memory/evict.rs` | ~65 | 自动淘汰 stale 记忆 + 旧版本 |
+
+### 10.7 Phase 3 待实现
+
+| DV | 功能 | 预计行数 |
+|----|------|---------|
+| DV11 | 知识图谱（实体提取 + 图查询） | ~250 |
+| DV15 | 整合管线（跨会话模式检测） | ~200 |
+| DV16 | 洞察/模式/教训提取 | ~200 |
+| DV17 | 操作 DAG + 前沿计算 | ~300 |
+| DV18 | 工作流例程 | ~250 |
+| DV19 | 导入导出 | ~150 |
+| DV20 | 治理/隐私 | ~100 |
+| DV21 | 评估系统 | ~150 |
+| DV22 | 租约/互斥锁 | ~100 |
+| DV23 | 信号/检查点 | ~150 |

@@ -4,17 +4,15 @@ use std::path::Path;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::memory::{MemoryStore, MemoryType};
+use crate::memory::{MemoryStore, MemoryType, MemorySlot, SlotScope};
 
 /// Execute a memory tool call.
 ///
-/// Supported operations (agentmemory-style):
-/// - remember: Save memory with Jaccard dedup + version chain
-/// - search: BM25/FTS5 full-text search
-/// - list: List active memories
-/// - read: Read a memory by ID
-/// - forget: Soft-delete a memory
-/// - observations: List raw observations for a session
+/// Operations:
+/// - remember/search/list/read/forget: Memory CRUD
+/// - observations: List observations
+/// - slot_list/slot_get/slot_set/slot_append/slot_delete: Slot management
+/// - evict: Run eviction rules
 pub fn execute_tool_call(
     workspace_root: &Path,
     memory_store: &Arc<MemoryStore>,
@@ -35,6 +33,14 @@ pub fn execute_tool_call(
         "read" => execute_read(memory_store, &ws, &arguments),
         "forget" => execute_forget(memory_store, &ws, &arguments),
         "observations" => execute_observations(memory_store, &arguments),
+        // Slots
+        "slot_list" => execute_slot_list(memory_store, &ws, &arguments),
+        "slot_get" => execute_slot_get(memory_store, &ws, &arguments),
+        "slot_set" => execute_slot_set(memory_store, &ws, &arguments),
+        "slot_append" => execute_slot_append(memory_store, &ws, &arguments),
+        "slot_delete" => execute_slot_delete(memory_store, &ws, &arguments),
+        // Eviction
+        "evict" => execute_evict(memory_store),
         _ => bail!("unknown memory operation '{}'", operation),
     }
 }
@@ -269,4 +275,101 @@ fn execute_observations(
 
     // This would query observations table - for Phase 1 return placeholder
     Ok(format!("Observations for session {}: (Phase 1 - query via storage layer)", session_id))
+}
+
+// ─── Slot Operations ──────────────────────────────────────────────
+
+fn execute_slot_list(memory_store: &Arc<MemoryStore>, workspace_root: &str, _args: &Value) -> Result<String> {
+    let slots = memory_store.list_slots(None, Some(workspace_root))?;
+    if slots.is_empty() {
+        return Ok("No slots found.".to_string());
+    }
+    let mut lines = vec!["Memory slots:".to_string()];
+    for slot in &slots {
+        let pinned = if slot.pinned { " [pinned]" } else { "" };
+        let scope = match slot.scope {
+            SlotScope::Global => "global",
+            SlotScope::Project => "project",
+        };
+        let content_preview: String = slot.content.chars().take(60).collect();
+        let suffix = if slot.content.len() > 60 { "…" } else { "" };
+        lines.push(format!(
+            "  {} ({}, {}{}): {}{}",
+            slot.label, scope, slot.size_limit, pinned, content_preview, suffix
+        ));
+    }
+    Ok(lines.join("\n"))
+}
+
+fn execute_slot_get(memory_store: &Arc<MemoryStore>, workspace_root: &str, args: &Value) -> Result<String> {
+    let label = args.get("label").and_then(|v| v.as_str()).context("label is required")?;
+    let scope = parse_slot_scope(args)?;
+    let slot = memory_store.get_slot(label, scope, workspace_root)?
+        .context("slot not found")?;
+    let pinned = if slot.pinned { " [pinned]" } else { "" };
+    let scope_str = match slot.scope { SlotScope::Global => "global", SlotScope::Project => "project" };
+    Ok(format!(
+        "Slot: {} ({}, {}{})\nDescription: {}\nSize limit: {}\n---\n{}",
+        slot.label, scope_str, slot.size_limit, pinned, slot.description, slot.size_limit, slot.content,
+    ))
+}
+
+fn execute_slot_set(memory_store: &Arc<MemoryStore>, workspace_root: &str, args: &Value) -> Result<String> {
+    let label = args.get("label").and_then(|v| v.as_str()).context("label is required")?;
+    let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
+    let scope = parse_slot_scope(args)?;
+    let description = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
+    let size_limit = args.get("size_limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
+    let pinned = args.get("pinned").and_then(|v| v.as_bool()).unwrap_or(false);
+    let project_str = match scope { SlotScope::Global => "", SlotScope::Project => workspace_root };
+
+    let now = chrono::Utc::now();
+    let slot = MemorySlot {
+        label: label.to_string(),
+        content: content.to_string(),
+        size_limit,
+        description: description.to_string(),
+        pinned,
+        read_only: false,
+        scope,
+        project: project_str.to_string(),
+        created_at: now,
+        updated_at: now,
+    };
+    memory_store.set_slot(&slot)?;
+    Ok(format!("Slot '{}' saved ({} chars).", label, content.len()))
+}
+
+fn execute_slot_append(memory_store: &Arc<MemoryStore>, workspace_root: &str, args: &Value) -> Result<String> {
+    let label = args.get("label").and_then(|v| v.as_str()).context("label is required")?;
+    let content = args.get("content").and_then(|v| v.as_str()).context("content is required")?;
+    let scope = parse_slot_scope(args)?;
+    let slot = memory_store.append_slot(label, scope, workspace_root, content)?;
+    Ok(format!("Slot '{}' appended (total {} chars).", label, slot.content.len()))
+}
+
+fn execute_slot_delete(memory_store: &Arc<MemoryStore>, workspace_root: &str, args: &Value) -> Result<String> {
+    let label = args.get("label").and_then(|v| v.as_str()).context("label is required")?;
+    let scope = parse_slot_scope(args)?;
+    memory_store.delete_slot(label, scope, workspace_root)?;
+    Ok(format!("Slot '{}' deleted.", label))
+}
+
+fn parse_slot_scope(args: &Value) -> Result<SlotScope> {
+    match args.get("scope").and_then(|v| v.as_str()) {
+        Some("global") => Ok(SlotScope::Global),
+        Some("project") | None => Ok(SlotScope::Project),
+        Some(other) => bail!("invalid scope '{}', expected 'global' or 'project'", other),
+    }
+}
+
+// ─── Eviction ─────────────────────────────────────────────────────
+
+fn execute_evict(memory_store: &Arc<MemoryStore>) -> Result<String> {
+    let report = memory_store.run_eviction()?;
+    Ok(format!(
+        "Eviction complete:\n  Stale memories removed: {}\n  Old versions removed: {}",
+        report.stale_memories_removed,
+        report.old_versions_removed,
+    ))
 }

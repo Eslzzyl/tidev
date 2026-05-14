@@ -7,6 +7,12 @@ pub mod remember;
 pub mod sessions;
 pub mod audit;
 pub mod engine;
+pub mod slots;
+pub mod embed;
+pub mod vector_index;
+pub mod hybrid_search;
+pub mod retention;
+pub mod evict;
 
 pub use types::*;
 pub use dedup::DedupMap;

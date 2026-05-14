@@ -19,11 +19,15 @@ use super::compress::CompressionService;
 use super::remember::RememberService;
 use super::sessions::SessionService;
 use super::audit::{AuditService, AuditQuery};
+use super::slots::SlotService;
+use super::retention::RetentionService;
+use super::evict::{EvictionService, EvictionReport};
+use super::vector_index::VectorIndex;
+use super::hybrid_search::HybridSearch;
 
 // ─── MemoryStore ───────────────────────────────────────────────────
 
-/// Main memory store — replaces the old `MemoryStore` with complete
-/// agentmemory-style functionality. All old public methods preserved.
+/// Main memory store.
 #[derive(Debug)]
 pub struct MemoryStore {
     db_path: PathBuf,
@@ -33,6 +37,8 @@ pub struct MemoryStore {
     bm25: RwLock<Bm25Index>,
     llm: RwLock<Option<LlmClient>>,
     active_model: RwLock<Option<ActiveModel>>,
+    vector_index: RwLock<VectorIndex>,
+    hybrid_search: RwLock<HybridSearch>,
 }
 
 impl MemoryStore {
@@ -57,6 +63,8 @@ impl MemoryStore {
             bm25: RwLock::new(Bm25Index::new()),
             llm: RwLock::new(None),
             active_model: RwLock::new(None),
+            vector_index: RwLock::new(VectorIndex::new(1536)),
+            hybrid_search: RwLock::new(HybridSearch::new()),
         })
     }
 
@@ -408,6 +416,81 @@ impl MemoryStore {
         // In Phase 1, this is a placeholder.
         // The hook system will call compress() explicitly from the runtime.
         // In a full implementation, this would spawn a tokio task with 500ms delay.
+    }
+
+    // ─── Phase 2: Slots ────────────────────────────────────────────
+
+    /// Ensure default slots exist.
+    pub fn ensure_default_slots(&self, project: &str) -> Result<()> {
+        let db = self.connection.lock().unwrap();
+        SlotService::ensure_defaults(&db, project)
+    }
+
+    /// List memory slots.
+    pub fn list_slots(&self, scope: Option<SlotScope>, project: Option<&str>) -> Result<Vec<MemorySlot>> {
+        let db = self.read_connection.lock().unwrap();
+        SlotService::list(&db, scope, project)
+    }
+
+    /// Get a single slot.
+    pub fn get_slot(&self, label: &str, scope: SlotScope, project: &str) -> Result<Option<MemorySlot>> {
+        let db = self.read_connection.lock().unwrap();
+        SlotService::get(&db, label, scope, project)
+    }
+
+    /// Set a slot.
+    pub fn set_slot(&self, slot: &MemorySlot) -> Result<()> {
+        let db = self.connection.lock().unwrap();
+        SlotService::set(&db, slot)
+    }
+
+    /// Append content to a slot.
+    pub fn append_slot(&self, label: &str, scope: SlotScope, project: &str, content: &str) -> Result<MemorySlot> {
+        let db = self.connection.lock().unwrap();
+        SlotService::append(&db, label, scope, project, content)
+    }
+
+    /// Delete a slot.
+    pub fn delete_slot(&self, label: &str, scope: SlotScope, project: &str) -> Result<()> {
+        let db = self.connection.lock().unwrap();
+        SlotService::delete(&db, label, scope, project)
+    }
+
+    /// Render pinned slots for prompt injection.
+    pub fn render_pinned_slots(&self, project: &str) -> Result<String> {
+        let db = self.read_connection.lock().unwrap();
+        SlotService::render_pinned(&db, project)
+    }
+
+    // ─── Phase 2: Retention ────────────────────────────────────────
+
+    /// Compute and store retention score for a memory.
+    pub fn compute_retention(&self, entity_id: &str, entity_type: &str, importance: f64, age_days: f64, access_count: i64) -> Result<RetentionScore> {
+        let db = self.connection.lock().unwrap();
+        RetentionService::compute_and_store(&db, entity_id, entity_type, importance, age_days, access_count)
+    }
+
+    // ─── Phase 2: Eviction ─────────────────────────────────────────
+
+    /// Run eviction rules.
+    pub fn run_eviction(&self) -> Result<EvictionReport> {
+        let db = self.connection.lock().unwrap();
+        EvictionService::run_eviction(&db)
+    }
+
+    // ─── Phase 2: Vector + Hybrid Search ───────────────────────────
+
+    /// Get a reference to the vector index.
+    pub fn vector_index(&self) -> &RwLock<VectorIndex> {
+        &self.vector_index
+    }
+
+    /// Run hybrid search (BM25 + vector).
+    pub fn hybrid_search(&self, query: &str, limit: usize, query_embedding: Option<&[f32]>) -> Vec<HybridSearchResult> {
+        let bm25 = self.bm25.read().unwrap();
+        let vector = self.vector_index.read().unwrap();
+        let hs = self.hybrid_search.read().unwrap();
+        hs.search(query, limit, &bm25, &vector, query_embedding)
     }
 }
 

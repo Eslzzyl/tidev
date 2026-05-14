@@ -362,3 +362,71 @@ pub enum ObservationResult {
     New(Uuid),
     Deduplicated,
 }
+
+// ─── Phase 2 Types ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemorySlot {
+    pub label: String,
+    pub content: String,
+    pub size_limit: usize,
+    pub description: String,
+    pub pinned: bool,
+    pub read_only: bool,
+    pub scope: SlotScope,
+    pub project: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SlotScope {
+    Global,
+    Project,
+}
+
+impl SlotScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Global => "global",
+            Self::Project => "project",
+        }
+    }
+
+    pub fn parse_str(s: &str) -> Option<Self> {
+        match s {
+            "global" => Some(Self::Global),
+            "project" => Some(Self::Project),
+            _ => None,
+        }
+    }
+}
+
+/// Embedding provider trait.
+#[async_trait::async_trait]
+pub trait EmbeddingProvider: Send + Sync {
+    fn name(&self) -> &str;
+    fn dimensions(&self) -> usize;
+    async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>>;
+}
+
+/// Hybrid search result with score components.
+#[derive(Debug, Clone)]
+pub struct HybridSearchResult {
+    pub id: String,
+    pub combined_score: f64,
+    pub bm25_score: Option<f64>,
+    pub vector_score: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetentionScore {
+    pub entity_id: String,
+    pub entity_type: String,
+    pub importance: f64,
+    pub access_frequency: f64,
+    pub age_days: f64,
+    pub score: f64,
+    pub computed_at: DateTime<Utc>,
+}

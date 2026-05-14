@@ -44,7 +44,7 @@ pub fn definitions(skill_description: String) -> Vec<ToolDefinition> {
     ));
     definitions.push(ToolDefinition::new::<MemoryArgs>(
         "memory",
-        "Store, search, and manage workspace memories that persist across sessions. Use to remember user preferences, project decisions, architecture decisions, and other important context. Operations: remember (save with dedup), search (full-text), list, read, forget, observations. Actively store noteworthy findings so they are available in future sessions. Prefer updating existing memories over creating duplicates — search before storing.",
+        "Store, search, and manage workspace memories and slots. Operations: remember, search, list, read, forget, observations. Slots: slot_list, slot_get, slot_set, slot_append, slot_delete. Eviction: evict. Use to remember user preferences, project decisions, architecture decisions, and other important context.",
         ToolPermission::Session,
     ));
     definitions

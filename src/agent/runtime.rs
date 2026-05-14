@@ -212,6 +212,13 @@ impl AgentRuntime {
                 prompt.push_str(&memory_prompt);
             }
         }
+        // Memory slots (ensure defaults + render pinned)
+        if let Ok(slot_content) = memory_store.render_pinned_slots(&ws) {
+            if !slot_content.is_empty() {
+                prompt.push_str("\n\n");
+                prompt.push_str(&slot_content);
+            }
+        }
 
         (prompt, sources)
     }

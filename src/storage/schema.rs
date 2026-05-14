@@ -1,4 +1,4 @@
-pub const SCHEMA_VERSION: i64 = 27;
+pub const SCHEMA_VERSION: i64 = 28;
 
 pub const SESSION_SELECT_COLUMNS: &str = "s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, s.context_summary, s.context_retained_from, COALESCE(sw.workspace_root, '')";
 
@@ -474,5 +474,57 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
     content='memories',
     content_rowid='rowid',
     tokenize='porter unicode61'
+);
+
+-- ── Phase 2 Tables ──
+
+CREATE TABLE IF NOT EXISTS memory_slots (
+    label TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT 'global',
+    project TEXT NOT NULL DEFAULT '',
+    content TEXT NOT NULL DEFAULT '',
+    size_limit INTEGER NOT NULL DEFAULT 2000,
+    description TEXT NOT NULL DEFAULT '',
+    pinned INTEGER NOT NULL DEFAULT 0,
+    read_only INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (label, scope, project)
+);
+
+CREATE INDEX IF NOT EXISTS idx_slots_scope ON memory_slots(scope, project);
+
+CREATE TABLE IF NOT EXISTS graph_nodes (
+    id TEXT PRIMARY KEY,
+    node_type TEXT NOT NULL,
+    label TEXT NOT NULL,
+    properties TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_graph_nodes_type ON graph_nodes(node_type);
+
+CREATE TABLE IF NOT EXISTS graph_edges (
+    id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL REFERENCES graph_nodes(id),
+    target_id TEXT NOT NULL REFERENCES graph_nodes(id),
+    relation TEXT NOT NULL,
+    weight REAL NOT NULL DEFAULT 1.0,
+    properties TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    session_id TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges(source_id);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges(target_id);
+
+CREATE TABLE IF NOT EXISTS retention_scores (
+    entity_id TEXT PRIMARY KEY,
+    entity_type TEXT NOT NULL,
+    importance REAL NOT NULL DEFAULT 5.0,
+    access_frequency REAL NOT NULL DEFAULT 0.0,
+    age_days REAL NOT NULL DEFAULT 0.0,
+    score REAL NOT NULL DEFAULT 5.0,
+    computed_at TEXT NOT NULL
 );
 "#;
