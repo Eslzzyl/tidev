@@ -95,8 +95,11 @@ I'd like to pronounce it as "tide-v", but "ti-dev" should also be fine.
 
 ## Install from crates.io
 
+1. Ensure [pnpm](https://pnpm.io) and Node.js are installed (required to build the web frontend).
 1. `cargo install tidev`
 1. Run `tidev` in your working directory.
+
+> **Note**: If pnpm is not available during installation, the web frontend is skipped and the WebUI (`tidev web`) will show a placeholder page. The terminal TUI and all other features work without pnpm.
 
 ## Install from Source
 
