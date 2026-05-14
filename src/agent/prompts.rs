@@ -61,7 +61,17 @@ fn general_prompt() -> String {
          - **Tags**: Add relevant tags when storing so related memories can be found easily.\n\
          - Use the `memory` tool with `operation: store` to persist important information.\n\
          - Use the `memory` tool with `operation: update` to revise an existing memory instead of duplicating.\n\
-         - Use the `memory` tool with `operation: search` to find relevant past context.",        base_instruction()
+         - Use the `memory` tool with `operation: search` to find relevant past context.\n\n\
+         ## Question Tool Usage\n\n\
+         The `question` tool is ONLY for **decision** questions where you need \
+         the user to pick between options (e.g. \"which approach should I take\", \
+         \"which library should I use\").\n\n\
+         Do NOT use the `question` tool for yes/no **confirmation** questions such as:\n\
+         - \"Shall I start implementing?\"\n\
+         - \"Should I adjust the plan?\"\n\
+         - \"Does this look good to proceed?\"\n\n\
+         For confirmation questions, simply ask them directly in your response text. \
+         The user will reply naturally.",        base_instruction()
     )
 }
 
