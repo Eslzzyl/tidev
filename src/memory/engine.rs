@@ -24,11 +24,11 @@ use super::retention::RetentionService;
 use super::evict::{EvictionService, EvictionReport};
 use super::vector_index::VectorIndex;
 use super::hybrid_search::HybridSearch;
+use super::embed::OpenAIEmbedder;
 
 // ─── MemoryStore ───────────────────────────────────────────────────
 
 /// Main memory store.
-#[derive(Debug)]
 pub struct MemoryStore {
     db_path: PathBuf,
     connection: Mutex<Connection>,
@@ -39,6 +39,7 @@ pub struct MemoryStore {
     active_model: RwLock<Option<ActiveModel>>,
     vector_index: RwLock<VectorIndex>,
     hybrid_search: RwLock<HybridSearch>,
+    embedder: RwLock<Option<OpenAIEmbedder>>,
 }
 
 impl MemoryStore {
@@ -65,18 +66,39 @@ impl MemoryStore {
             active_model: RwLock::new(None),
             vector_index: RwLock::new(VectorIndex::new(1536)),
             hybrid_search: RwLock::new(HybridSearch::new()),
+            embedder: RwLock::new(None),
         })
+    }
+}
+
+impl std::fmt::Debug for MemoryStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MemoryStore")
+            .field("db_path", &self.db_path)
+            .field("bm25", &self.bm25)
+            .field("llm", &self.llm)
+            .field("vector_index", &self.vector_index)
+            .finish()
+    }
+}
+
+impl MemoryStore {
+    pub fn set_llm(&self, llm: LlmClient, model: ActiveModel) {
+        *self.llm.write().unwrap() = Some(llm);
+        *self.active_model.write().unwrap() = Some(model);
+    }
+
+    /// Set the OpenAI embedder for vector search.
+    pub fn set_embedder(&self, embedder: OpenAIEmbedder) {
+        let dims = embedder.dimensions();
+        *self.embedder.write().unwrap() = Some(embedder);
+        // Re-create vector index with correct dimensions
+        *self.vector_index.write().unwrap() = VectorIndex::new(dims);
     }
 
     /// Clone for sharing — opens a new connection.
     pub fn try_clone(&self) -> Result<Self> {
         Self::open(&self.db_path)
-    }
-
-    /// Set the LLM client for compression and summarization.
-    pub fn set_llm(&self, llm: LlmClient, model: ActiveModel) {
-        *self.llm.write().unwrap() = Some(llm);
-        *self.active_model.write().unwrap() = Some(model);
     }
 
     // ─── Backward-compatible Old API ────────────────────────────────
@@ -146,18 +168,28 @@ impl MemoryStore {
         Ok(())
     }
 
-    /// Search memories by keyword.
+    /// Search memories. Uses FTS5 for sync path.
+    /// For hybrid search (BM25 + vector), use the async `search_hybrid` method.
     pub fn search(&self, workspace_root: &str, query: &str) -> Result<Vec<MemoryEntry>> {
+        // Try hybrid search if we're in a tokio context and embedder is available
+        if self.embedder.read().unwrap().is_some() {
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                let future = self.search_hybrid(query, workspace_root, 20);
+                if let Ok(results) = handle.block_on(future) {
+                    if !results.is_empty() {
+                        return Ok(results);
+                    }
+                }
+            }
+        }
+        // Fall back to FTS5
         let db = self.read_connection.lock().unwrap();
-
         if query.trim().is_empty() {
+            // Just return latest memories
             return self.get_or_load(workspace_root);
         }
-
-        // Try FTS5 search first
         let fts_results = fts5_search_memories(&db, query, workspace_root, 20)
             .unwrap_or_default();
-
         if !fts_results.is_empty() {
             let mut entries = Vec::new();
             for (id, _title, _score) in &fts_results {
@@ -169,23 +201,18 @@ impl MemoryStore {
                 return Ok(entries);
             }
         }
-
-        // Fallback: LIKE search
+        // Final fallback: LIKE search
         let pattern = format!("%{}%", query);
         let mut stmt = db.prepare(
             "SELECT id, workspace_root, memory_type, title, content, tags, source_session_id, created_at, updated_at, usage_count, active, concepts, files, strength, importance, version, parent_id, supersedes, related_ids, is_latest
-             FROM memories
-             WHERE workspace_root = ?1 AND active = 1
+             FROM memories WHERE workspace_root = ?1 AND active = 1
              AND (title LIKE ?2 OR content LIKE ?3 OR tags LIKE ?4)
-             ORDER BY usage_count DESC
-             LIMIT 20",
+             ORDER BY usage_count DESC LIMIT 20",
         )?;
-
         let entries = stmt.query_map(
             rusqlite::params![workspace_root, pattern, pattern, pattern],
-            super::remember::map_memory_entry_from_row,
+            |row| super::remember::map_memory_entry_from_row(row),
         )?;
-
         let mut result = Vec::new();
         for entry in entries {
             result.push(entry?);
@@ -313,6 +340,21 @@ impl MemoryStore {
             &compressed.to_search_text(),
             &compressed.session_id.to_string(),
         );
+
+        // Add to vector index (async, best-effort)
+        if let Some(embedder) = self.embedder.read().unwrap().as_ref() {
+            let id = compressed.id.to_string();
+            let session_id = compressed.session_id.to_string();
+            let search_text = compressed.to_search_text();
+            let result = embedder.embed(&search_text).await;
+            match result {
+                Ok(embedding) => {
+                        if let Err(e) = self.vector_index.write().unwrap().add(&id, &session_id, embedding) {
+                            crate::log_warn!("vector index add failed: {}", e);
+                        }
+                    }
+                    Err(e) => crate::log_warn!("embedding failed: {}", e),            }
+        }
 
         Ok(compressed)
     }
@@ -485,12 +527,45 @@ impl MemoryStore {
         &self.vector_index
     }
 
-    /// Run hybrid search (BM25 + vector).
-    pub fn hybrid_search(&self, query: &str, limit: usize, query_embedding: Option<&[f32]>) -> Vec<HybridSearchResult> {
-        let bm25 = self.bm25.read().unwrap();
-        let vector = self.vector_index.read().unwrap();
-        let hs = self.hybrid_search.read().unwrap();
-        hs.search(query, limit, &bm25, &vector, query_embedding)
+    /// Run hybrid search (BM25 + vector). Falls back to FTS5 if no embedder.
+    pub async fn search_hybrid(&self, query: &str, workspace_root: &str, limit: usize) -> Result<Vec<MemoryEntry>> {
+        // If embedder is available, try hybrid search
+        if let Some(embedder) = self.embedder.read().unwrap().as_ref() {
+            let query_embedding = embedder.embed(query).await;
+            match query_embedding {
+                Ok(emb) => {
+                    let hs = self.hybrid_search.read().unwrap();
+                    let bm25 = self.bm25.read().unwrap();
+                    let vector = self.vector_index.read().unwrap();
+                    let results = hs.search(query, limit, &bm25, &vector, Some(&emb));
+
+                    if !results.is_empty() {
+                        let db = self.read_connection.lock().unwrap();
+                        let ids: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
+                        let mut entries = Vec::new();
+                        for id in &ids {
+                            // Try to look up as a memory
+                            let _uuid = Uuid::parse_str(id).unwrap_or(Uuid::nil());
+                            if let Ok(entry) = db.query_row(
+                                "SELECT id, workspace_root, memory_type, title, content, tags, source_session_id, created_at, updated_at, usage_count, active, concepts, files, strength, importance, version, parent_id, supersedes, related_ids, is_latest
+                                 FROM memories WHERE id = ?1 AND workspace_root = ?2 AND active = 1",
+                                rusqlite::params![id, workspace_root],
+                                |row| super::remember::map_memory_entry_from_row(row),
+                            ) {
+                                entries.push(entry);
+                            }
+                        }
+                        if !entries.is_empty() {
+                            return Ok(entries);
+                        }
+                    }
+                }
+                Err(e) => crate::log_warn!("hybrid search embedding failed: {}", e),
+            }
+        }
+
+        // Fall back to FTS5
+        self.search(workspace_root, query)
     }
 }
 

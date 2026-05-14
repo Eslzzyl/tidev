@@ -18,3 +18,4 @@ pub use types::*;
 pub use dedup::DedupMap;
 pub use search_index::Bm25Index;
 pub use engine::MemoryStore;
+pub use embed::OpenAIEmbedder;

@@ -9,7 +9,7 @@ use crate::memory::{MemoryStore, MemoryType, MemorySlot, SlotScope};
 /// Execute a memory tool call.
 ///
 /// Operations:
-/// - remember/search/list/read/forget: Memory CRUD
+/// - remember/search/list/read/forget: Memory CRUD (search uses hybrid BM25+vector)
 /// - observations: List observations
 /// - slot_list/slot_get/slot_set/slot_append/slot_delete: Slot management
 /// - evict: Run eviction rules
@@ -45,7 +45,8 @@ pub fn execute_tool_call(
     }
 }
 
-/// Parse tags from a JSON Value that may be a JSON array or a comma-separated string.
+// ─── Helper ────────────────────────────────────────────────────────
+
 fn parse_tags(value: &Value) -> Vec<String> {
     match value {
         Value::String(s) => s
@@ -58,11 +59,10 @@ fn parse_tags(value: &Value) -> Vec<String> {
     }
 }
 
+
 // ─── New API (agentmemory-style) ────────────────────────────────────
 
-/// remember: Save a memory with Jaccard dedup and versioning.
-fn execute_remember(
-    memory_store: &Arc<MemoryStore>,
+fn execute_remember(    memory_store: &Arc<MemoryStore>,
     workspace_root: &str,
     arguments: &Value,
 ) -> Result<String> {

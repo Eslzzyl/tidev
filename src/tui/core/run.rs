@@ -79,6 +79,15 @@ impl App {
         tools.set_active_model(active_model.clone());
         // Attach LLM to memory store for compression/summarization
         memory_store.set_llm(llm.clone(), active_model.clone());
+        // Attach OpenAI embedder for vector search (if api key available)
+        if let Some(openai_key) = auth.api_key("openai") {
+            let embedder = crate::memory::OpenAIEmbedder::new(
+                llm.http().clone(),
+                openai_key.to_string(),
+                "text-embedding-3-small",
+            );
+            memory_store.set_embedder(embedder);
+        }
         // Set sandbox policy based on session mode and config
         let sandbox_policy = mode.sandbox_policy(&config.sandbox);
         tools.set_sandbox_policy(Some(sandbox_policy));
@@ -103,6 +112,23 @@ impl App {
                 workspace_root.clone(),
             ).with_memory_store(memory_store.clone()),
         };
+        // Schedule periodic eviction (every 60 minutes)
+        {
+            let evict_store = memory_store.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+                // Run once on startup
+                if let Err(e) = evict_store.run_eviction() {
+                    crate::log_warn!("initial eviction failed: {}", e);
+                }
+                loop {
+                    interval.tick().await;
+                    if let Err(e) = evict_store.run_eviction() {
+                        crate::log_warn!("scheduled eviction failed: {}", e);
+                    }
+                }
+            });
+        }
         let last_notice = None;
         let retrying_hint = None;
 
