@@ -45,7 +45,7 @@ Significantly lower memory usage and binary size compared to OpenCode:
 
 | Metric | OpenCode | tidev |
 |--------|----------|-------|
-| Binary size | 121 MB | 16 MB |
+| Binary size | 121 MB | 26 MB |
 
 ---
 
