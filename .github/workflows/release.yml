@@ -172,10 +172,13 @@ jobs:
             ```
 
       - name: Publish to npm
-        if: secrets.NPM_TOKEN != ''
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "NPM_TOKEN not set, skipping npm publish"
+            exit 0
+          fi
           cd npm/tidev
           npm version ${{ needs.resolve.outputs.version }} --no-git-tag-version
           npm publish --ignore-scripts
