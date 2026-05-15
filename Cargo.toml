@@ -14,13 +14,7 @@ homepage = "https://github.com/Eslzzyl/tidev"
 keywords = ["ai", "coding", "agent", "tui"]
 categories = ["development-tools", "command-line-utilities"]
 
-include = [
-    "/src",
-    "/README.md",
-    "/LICENSE",
-    "/presets.toml",
-    "/build.rs",
-]
+include = ["/src", "/README.md", "/LICENSE", "/presets.toml", "/build.rs"]
 
 [dependencies]
 anyhow = "1.0.102"
@@ -108,7 +102,6 @@ async-stream = "0.3.6"
 libc = "0.2.186"
 bytes = "1.11.1"
 hex = "0.4.3"
-quick-xml = "0.40.0"
 
 [dev-dependencies]
 tempfile = "3.27"
