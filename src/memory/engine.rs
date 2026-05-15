@@ -427,32 +427,46 @@ impl MemoryStore {
         }
     }
 
-    /// Run LLM compression on an observation (async).
+    /// Run compression on an observation. Uses LLM when available, falls
+    /// back to synthetic (rule-based) compression otherwise.
     pub async fn compress(&self, observation_id: Uuid) -> Result<CompressedObservation> {
-        // Step 1: Load raw observation synchronously, drop locks
-        let (llm, model) = {
-            let llm = self.llm.read().unwrap().clone();
-            let model = self.active_model.read().unwrap().clone();
-            (llm, model)
-        };
-        let llm = llm.ok_or_else(|| anyhow::anyhow!("LLM client not configured for compression"))?;
-        let model = model.ok_or_else(|| anyhow::anyhow!("Active model not configured for compression"))?;
-
-        // Step 2: Run LLM compression (async, no locks held)
         let db_path = self.db_path.clone();
-        let compressed = {
-            let conn = Connection::open(&db_path)?;
-            CompressionService::compress(&conn, &llm, &model, observation_id).await?
+
+        // Try LLM compression if configured
+        let llm_available = {
+            let llm = self.llm.read().unwrap().is_some();
+            let model = self.active_model.read().unwrap().is_some();
+            llm && model
         };
 
-        // Step 3: Update indexes (synchronous, no DB lock needed for in-memory indexes)
+        let compressed = if llm_available {
+            let (llm, model) = {
+                let llm = self.llm.read().unwrap().clone();
+                let model = self.active_model.read().unwrap().clone();
+                (llm, model)
+            };
+            let conn = Connection::open(&db_path)?;
+            match CompressionService::compress(&conn, &llm.unwrap(), &model.unwrap(), observation_id).await {
+                Ok(c) => c,
+                Err(e) => {
+                    crate::log_warn!("LLM compression failed, falling back to synthetic: {}", e);
+                    let conn = Connection::open(&db_path)?;
+                    CompressionService::compress_synthetic(&conn, observation_id)?
+                }
+            }
+        } else {
+            let conn = Connection::open(&db_path)?;
+            CompressionService::compress_synthetic(&conn, observation_id)?
+        };
+
+        // Update indexes (in-memory BM25 + vector)
         self.bm25.write().unwrap().add(
             &compressed.id.to_string(),
             &compressed.to_search_text(),
             &compressed.session_id.to_string(),
         );
 
-        // Step 4: Add to vector index (async, best-effort)
+        // Add to vector index (async, best-effort)
         if let Some(ref embedder) = *self.embedder.read().unwrap() {
             let id = compressed.id.to_string();
             let session_id = compressed.session_id.to_string();

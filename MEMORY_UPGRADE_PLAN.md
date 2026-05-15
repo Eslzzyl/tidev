@@ -2,7 +2,7 @@
 
 > 基于对 [agentmemory](https://github.com/rohitg00/agentmemory) v0.9.12 的逆向分析，在 tidev 中以 Rust 复刻。
 >
-> 更新时间：2026-05-15（Phase 1 完成 ✅）
+> 更新时间：2026-05-15（Phase 1 ✅, Phase 2 ✅）
 
 ---
 
@@ -120,6 +120,7 @@ search(query, workspace_root)
 |------|------|-----------------|-----------|
 | 自动观察捕获 | `observe.rs` | `src/functions/observe.ts` | PostToolUse + PreToolUse hook, blake3 去重 |
 | LLM 压缩 | `compress.rs` | `src/functions/compress.ts`, `src/prompts/compression.ts` | COMPRESSION_SYSTEM + XML 解析, 自动后台调度 |
+| 合成压缩降级 ✅ Phase2 | `compress.rs` | `src/functions/compress.ts` (synthetic) | 启发式规则（工具名推断+路径提取+重要性评分）, LLM 不可用/失败时自动降级 |
 | BM25 全文搜索 | `search_index.rs` | `src/state/search-index.ts` | FTS5 porter unicode61 (k1=1.2, b=0.75), + 内存索引用于 RRF |
 | Jaccard 去重 | `remember.rs` | `src/state/schema.ts` (jaccardSimilarity), `src/functions/remember.ts` | >0.7 token 集相似度, 版本链 |
 | blake3 去重 | `dedup.rs` | `src/functions/dedup.ts` | blake3, LRU + 5 分钟 TTL |
@@ -205,38 +206,11 @@ agentmemory 的 `observe.ts` 有 `stripPrivateData()` 过滤密码和 API key。
 
 `on_post_tool_failure()` 方法已定义但未接入执行路径。`ToolExecutionResult` 没有 error 字段，失败信息嵌在 `output` 中。可靠检测需要改造 `ToolExecutionResult` 结构体，属跨模块改动。
 
-### 4.7 缺乏完善的降级措施 [待实现]
+### 4.7 缺乏完善的降级措施 [待实现] ✅ Phase2（LLM 压缩降级已修复）
 
-agentmemory 设计了多层次的降级策略，让整个系统可以在没有任何外部 API 的情况下正常工作。tidev 在这方面的实现非常薄弱。
+#### 4.7.1 LLM 压缩的降级 ✅ Phase2
 
-#### 4.7.1 LLM 压缩的降级
-
-agentmemory 有三层压缩策略：
-
-```
-agentmemory:
-  AGENTMEMORY_AUTO_COMPRESS=true?
-    ├─ No  (默认) → 合成压缩（零 LLM 调用）
-    │    compress-synthetic.ts: buildSyntheticCompression()
-    │    根据工具名启发式推断类型（read→file_read, bash→command_run, ...）
-    │    从 tool_input 中提取文件路径
-    │    title = 工具名, narrative = 截断的 input|output
-    │    importance = 5（中性）, confidence = 0.3（低置信度）
-    │    无需任何 API key，完全本地运行
-    │
-    ├─ Yes → 有 API key?
-    │    ├─ Yes → LLM 压缩（完整 XML 摘要）
-    │    │    ResilientProvider → CircuitBreaker（3 次失败 → 熔断 30 秒）
-    │    │    FallbackChainProvider（首选 → 备选 provider 自动切换）
-    │    │
-    │    └─ No  → NoopProvider（返回空字符串）
-    │         detectLlmProviderKind() → "noop"
-    │         compress / summarize 都返回 ""
-    │         调用者检测空结果后跳过 LLM 流程
-    │
-    搜索/上下文注入: 合成压缩和 LLM 压缩的输出格式完全相同
-    （都是 CompressedObservation），下游代码无需区分。
-```
+已修复（2026-05-15）：`MemoryStore::compress()` 现在自动判断 LLM 可用性，不可用时走合成压缩路径。完整启发式规则已实现（类型推断、路径提取、重要性评分）。
 
 tidev 的现状：
 
@@ -244,19 +218,14 @@ tidev 的现状：
 tidev:
   LLM client 可用?
     ├─ Yes → LLM 压缩（compress.rs:compress()）
-    │    如果 LLM 调用失败 → anyhow::bail! → 调用者报错
-    │    无重试，无熔断，无备选 provider
+    │    如果 LLM 调用失败 → log_warn + 自动降级到合成压缩
     │
-    └─ No  → compress() 直接返回 "LLM client not configured" 错误
-         schedule_compression() 是空函数（engine.rs:471-474）
-         compress_synthetic() 已实现但标注 `#[allow(dead_code)]`（从未调用）
+    └─ No  → 合成压缩（compress_synthetic()），全功能可用
 ```
 
-**具体问题**：
-1. `compress_synthetic()` 实现了启发式规则但**从未被调用**
-2. 没有 `isAutoCompressEnabled()` 之类的配置开关
-3. 没有 `NoopProvider` 概念——LLM 不可用时压缩直接崩溃
-4. 没有熔断器或重试逻辑
+**剩余问题**：
+1. 没有熔断器（连续 N 次失败后暂停 LLM 压缩一段时间）—— 可后续补
+2. 没有 `isAutoCompressEnabled()` 配置开关 —— 当前行为等价于始终开启
 
 #### 4.7.2 Embedding 的降级
 
@@ -297,11 +266,11 @@ tidev 的 `summarize_session()` 在 LLM 不可用时：`llm.ok_or_else` → `any
 
 | 降级场景 | agentmemory | tidev | 优先级 |
 |----------|-------------|-------|--------|
-| 无 LLM API key | 合成压缩（规则驱动） | ❌ 崩溃 | **高** |
-| LLM API 调用失败 | 熔断器（3次→30秒） + FallbackChain | ❌ 直接报错 | **高** |
-| 无 embedding API key | 本地 ONNX 模型（384维） | ❌ 降级 FTS5（可接受） | 中 |
-| embedding API 调用失败 | 忽略（不影响上游写入） | ❌ 写入路径出错 | 中 |
-| 摘要时无 LLM | 跳过 | ❌ 报错但无害 | 低 |
+| 无 LLM API key | 合成压缩（规则驱动） | ✅ 合成压缩（Phase 2） | 已修复 |
+| LLM API 调用失败 | 熔断器（3次→30秒） + FallbackChain | ✅ 自动降级到合成压缩 | 已修复 |
+| 无 embedding API key | 本地 ONNX 模型（384维） | ⚠ 降级 FTS5（可接受） | 中 |
+| embedding API 调用失败 | 忽略（不影响上游写入） | ✅ log_warn，不影响写入 | 中 |
+| 摘要时无 LLM | 跳过 | ⚠ 报错但无害 | 低 |
 
 ---
 
@@ -476,16 +445,18 @@ memory_store.select_hot(&ws, 5, 800)
 
 这不包含任何语义检索。如果 LLM 不主动调用 `memory search` 工具，它只能看到 5 条高频记忆 + pinned slots。agentmemory 的自动注入能提供跨 session、带重要性筛选的上下文。
 
-### 7.7 缺乏完善的降级措施 [中]（参见 §4.7）
+### 7.7 缺乏完善的降级措施 [中]（参见 §4.7）✅ Phase2
 
-tidev 的压缩功能在 LLM 不可用时**直接崩溃**——`compress_synthetic()` 已实现但标注 `#[allow(dead_code)]` 从未调用。而 agentmemory 将此作为默认路径（无 API key 时自动启用合成压缩）。
+已修复（2026-05-15）：
+- `compress_synthetic()` 已完整实现：从骨架代码升级为完整的启发式规则引擎，含工具名推断、重要性评分、文件路径提取、概念推断
+- `MemoryStore::compress()` 添加降级路径：LLM 不可用时自动走合成压缩，LLM 失败时自动降级
 
 对比：
 
 | 场景 | agentmemory | tidev |
 |------|-------------|-------|
-| 无 LLM API key | 合成压缩（自动降级，全功能可用） | ❌ `compress()` 返回错误，observe 链断裂 |
-| LLM API 临时故障 | 熔断 + 自动恢复 + 可选 FallbackChain | ❌ 直接 `anyhow::bail!` |
+| 无 LLM API key | 合成压缩（自动降级，全功能可用） | ✅ 合成压缩（主动降级） |
+| LLM API 临时故障 | 熔断 + 自动恢复 + 可选 FallbackChain | ✅ 自动降级到合成压缩 |
 | 无 Embedding API key | 可装本地 ONNX 模型 | 降级 FTS5（可接受） |
 | Embedding 故障 | 忽略错误，不影响写入 | 写入路径上 `embedder.embed()` 失败 → log_warn（可接受） |
 
