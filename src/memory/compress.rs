@@ -160,6 +160,7 @@ pub struct CompressionService;
 
 impl CompressionService {
     /// Compress a raw observation using the LLM.
+    /// Updates the existing observation row in-place (agentmemory "KV overwrite").
     pub async fn compress(
         db: &Connection,
         llm: &LlmClient,
@@ -186,10 +187,9 @@ impl CompressionService {
         let (obs_type, title, subtitle, facts, narrative, concepts, files, importance) =
             parse_compression_xml(&response)?;
 
-        // 4. Build compressed observation
+        // 4. Build compressed observation (same id as raw observation)
         let compressed = CompressedObservation {
-            id: Uuid::new_v4(),
-            observation_id,
+            id: observation_id,
             session_id: raw.session_id,
             obs_type,
             title,
@@ -203,14 +203,15 @@ impl CompressionService {
             created_at: Utc::now(),
         };
 
-        // 5. Persist to DB
+        // 5. Update in-place: fill compressed fields, clear raw fields
         db.execute(
-            "INSERT INTO compressed_observations (id, observation_id, session_id, obs_type, title, subtitle, facts, narrative, concepts, files, importance, confidence, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            "UPDATE compressed_observations SET
+                obs_type = ?1, title = ?2, subtitle = ?3,
+                facts = ?4, narrative = ?5, concepts = ?6,
+                files = ?7, importance = ?8, confidence = ?9,
+                tool_input = NULL, tool_output = NULL
+             WHERE id = ?10",
             rusqlite::params![
-                compressed.id.to_string(),
-                compressed.observation_id.to_string(),
-                compressed.session_id.to_string(),
                 compressed.obs_type.as_str(),
                 compressed.title,
                 compressed.subtitle,
@@ -220,12 +221,9 @@ impl CompressionService {
                 serde_json::to_string(&compressed.files)?,
                 compressed.importance as i64,
                 compressed.confidence,
-                compressed.created_at.to_rfc3339(),
+                compressed.id.to_string(),
             ],
         )?;
-
-        // 6. Update FTS index by updating the content table trigger will handle it
-        // The FTS5 content-sync trigger automatically updates observations_fts
 
         Ok(compressed)
     }
@@ -246,8 +244,7 @@ impl CompressionService {
         let importance = infer_importance(tool_name, &raw);
 
         let compressed = CompressedObservation {
-            id: Uuid::new_v4(),
-            observation_id,
+            id: observation_id,
             session_id: raw.session_id,
             obs_type,
             title,
@@ -262,12 +259,13 @@ impl CompressionService {
         };
 
         db.execute(
-            "INSERT INTO compressed_observations (id, observation_id, session_id, obs_type, title, subtitle, facts, narrative, concepts, files, importance, confidence, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            "UPDATE compressed_observations SET
+                obs_type = ?1, title = ?2, subtitle = ?3,
+                facts = ?4, narrative = ?5, concepts = ?6,
+                files = ?7, importance = ?8, confidence = ?9,
+                tool_input = NULL, tool_output = NULL
+             WHERE id = ?10",
             rusqlite::params![
-                compressed.id.to_string(),
-                compressed.observation_id.to_string(),
-                compressed.session_id.to_string(),
                 compressed.obs_type.as_str(),
                 compressed.title,
                 compressed.subtitle,
@@ -277,7 +275,7 @@ impl CompressionService {
                 serde_json::to_string(&compressed.files)?,
                 compressed.importance as i64,
                 compressed.confidence,
-                compressed.created_at.to_rfc3339(),
+                compressed.id.to_string(),
             ],
         )?;
 
@@ -541,8 +539,8 @@ fn infer_importance(tool_name: &str, raw: &RawObservation) -> u8 {
 impl CompressionService {
     fn load_raw_observation(db: &Connection, id: Uuid) -> Result<RawObservation> {
         db.query_row(
-            "SELECT id, session_id, timestamp, hook_type, tool_name, tool_input, tool_output, user_prompt, assistant_response, modality, image_data
-             FROM observations WHERE id = ?1",
+            "SELECT id, session_id, created_at, hook_type, tool_name, tool_input, tool_output, user_prompt, assistant_response, NULL, NULL
+             FROM compressed_observations WHERE id = ?1",
             rusqlite::params![id.to_string()],
             |row| {
                 Ok(RawObservation {

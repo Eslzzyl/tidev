@@ -377,7 +377,7 @@ impl MemoryStore {
     ) -> Result<Vec<CompressedObservation>> {
         let db = self.read_connection.lock().unwrap();
         let mut stmt = db.prepare(
-            "SELECT id, observation_id, session_id, obs_type, title, subtitle,
+            "SELECT id, session_id, obs_type, title, subtitle,
                     facts, narrative, concepts, files, importance, confidence, created_at
              FROM compressed_observations
              WHERE session_id = ?1 AND importance >= ?2
@@ -427,19 +427,18 @@ impl MemoryStore {
     ) -> rusqlite::Result<CompressedObservation> {
         Ok(CompressedObservation {
             id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap_or(Uuid::nil()),
-            observation_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap_or(Uuid::nil()),
-            session_id: Uuid::parse_str(&row.get::<_, String>(2)?).unwrap_or(Uuid::nil()),
-            obs_type: ObservationType::parse_str(&row.get::<_, String>(3)?)
+            session_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap_or(Uuid::nil()),
+            obs_type: ObservationType::parse_str(&row.get::<_, String>(2)?)
                 .unwrap_or(ObservationType::Other),
-            title: row.get(4)?,
-            subtitle: row.get(5)?,
-            facts: serde_json::from_str(&row.get::<_, String>(6)?).unwrap_or_default(),
-            narrative: row.get(7)?,
-            concepts: serde_json::from_str(&row.get::<_, String>(8)?).unwrap_or_default(),
-            files: serde_json::from_str(&row.get::<_, String>(9)?).unwrap_or_default(),
-            importance: row.get::<_, i64>(10)? as u8,
-            confidence: row.get(11)?,
-            created_at: row.get::<_, String>(12).ok()
+            title: row.get(3)?,
+            subtitle: row.get(4)?,
+            facts: serde_json::from_str(&row.get::<_, String>(5)?).unwrap_or_default(),
+            narrative: row.get(6)?,
+            concepts: serde_json::from_str(&row.get::<_, String>(7)?).unwrap_or_default(),
+            files: serde_json::from_str(&row.get::<_, String>(8)?).unwrap_or_default(),
+            importance: row.get::<_, i64>(9)? as u8,
+            confidence: row.get(10)?,
+            created_at: row.get::<_, String>(11).ok()
                 .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
                 .map(|d| d.with_timezone(&chrono::Utc))
                 .unwrap_or_else(chrono::Utc::now),
@@ -650,8 +649,8 @@ impl MemoryStore {
     fn load_raw_observation(db: &Connection, id: Uuid) -> Result<RawObservation> {
         use super::types::HookType;
         db.query_row(
-            "SELECT id, session_id, timestamp, hook_type, tool_name, tool_input, tool_output, user_prompt, assistant_response, modality, image_data
-             FROM observations WHERE id = ?1",
+            "SELECT id, session_id, created_at, hook_type, tool_name, tool_input, tool_output, user_prompt, assistant_response, NULL, NULL
+             FROM compressed_observations WHERE id = ?1",
             rusqlite::params![id.to_string()],
             |row| {
                 Ok(RawObservation {

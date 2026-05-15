@@ -169,46 +169,6 @@ pub fn escape_fts5_query(query: &str) -> String {
 }
 
 /// Search observations using FTS5 with BM25 ranking.
-pub fn fts5_search_observations(
-    db: &Connection,
-    query: &str,
-    session_id: Option<&str>,
-    limit: usize,
-) -> Result<Vec<(Uuid, String, String, f64)>> {
-    let safe_query = escape_fts5_query(query);
-    let fts_query = if let Some(sid) = session_id {
-        format!("({}) AND session_id:{}", safe_query, escape_fts5_query(sid))
-    } else {
-        safe_query
-    };
-
-    let mut stmt = db.prepare(
-        "SELECT o.id, o.tool_name, COALESCE(c.title, o.tool_name), rank
-         FROM observations_fts f
-         JOIN observations o ON o.rowid = f.rowid
-         LEFT JOIN compressed_observations c ON c.observation_id = o.id
-         WHERE observations_fts MATCH ?1
-         ORDER BY rank
-         LIMIT ?2",
-    )?;
-
-    let uuid = uuid::Uuid::nil(); // placeholder for type inference
-    let results = stmt.query_map(rusqlite::params![fts_query, limit as i64], |row| {
-        let id_str: String = row.get(0)?;
-        let id = uuid::Uuid::parse_str(&id_str).unwrap_or(uuid);
-        let tool_name: Option<String> = row.get(1)?;
-        let title: String = row.get(2)?;
-        let score: f64 = row.get(3)?;
-        Ok::<_, rusqlite::Error>((id, tool_name.unwrap_or_default(), title, score))
-    })?;
-
-    let mut out = Vec::new();
-    for r in results {
-        out.push(r?);
-    }
-    Ok(out)
-}
-
 /// Search memories using FTS5 with BM25 ranking.
 pub fn fts5_search_memories(
     db: &Connection,

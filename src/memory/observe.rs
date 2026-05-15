@@ -46,8 +46,8 @@ impl ObservationService {
         let now = Utc::now().to_rfc3339();
 
         db.execute(
-            "INSERT INTO observations (id, session_id, timestamp, hook_type, tool_name, tool_input, tool_output, user_prompt, assistant_response, modality, image_data, dedup_hash)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            "INSERT INTO compressed_observations (id, session_id, created_at, hook_type, tool_name, tool_input, tool_output, user_prompt, assistant_response, dedup_hash)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             rusqlite::params![
                 obs_id.to_string(),
                 payload.session_id.to_string(),
@@ -58,8 +58,6 @@ impl ObservationService {
                 payload.tool_output,
                 payload.user_prompt,
                 payload.assistant_response,
-                "text",
-                None::<String>,
                 hash,
             ],
         )

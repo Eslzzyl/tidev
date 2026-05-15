@@ -282,10 +282,10 @@ pub struct RawObservation {
 }
 
 /// Compressed observation — after LLM compression.
+/// Same id as the raw observation (observe → compress is in-place).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompressedObservation {
     pub id: Uuid,
-    pub observation_id: Uuid,
     pub session_id: Uuid,
     pub obs_type: ObservationType,
     pub title: String,

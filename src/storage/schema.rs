@@ -361,30 +361,24 @@ CREATE INDEX IF NOT EXISTS idx_file_reads_session
 
 -- ── New Memory System Tables (Phase 1) ──
 
-CREATE TABLE IF NOT EXISTS observations (
+-- Merged table: raw observation → compressed observation in one row.
+-- observe() writes raw fields, compress() fills compressed fields
+-- and NULLs tool_input/tool_output (agentmemory's "KV overwrite" semantics).
+CREATE TABLE IF NOT EXISTS compressed_observations (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL REFERENCES sessions(id),
-    timestamp TEXT NOT NULL,
-    hook_type TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    -- Raw observation (written by observe(), read by compress(), then NULL'd)
+    hook_type TEXT,
     tool_name TEXT,
     tool_input TEXT,
     tool_output TEXT,
     user_prompt TEXT,
     assistant_response TEXT,
-    modality TEXT NOT NULL DEFAULT 'text',
-    image_data TEXT,
-    dedup_hash TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_observations_session ON observations(session_id);
-CREATE INDEX IF NOT EXISTS idx_observations_timestamp ON observations(timestamp);
-
-CREATE TABLE IF NOT EXISTS compressed_observations (
-    id TEXT PRIMARY KEY,
-    observation_id TEXT NOT NULL REFERENCES observations(id),
-    session_id TEXT NOT NULL REFERENCES sessions(id),
-    obs_type TEXT NOT NULL,
-    title TEXT NOT NULL,
+    dedup_hash TEXT,
+    -- Compressed observation (written by compress())
+    obs_type TEXT,
+    title TEXT,
     subtitle TEXT,
     facts TEXT NOT NULL DEFAULT '[]',
     narrative TEXT NOT NULL DEFAULT '',
@@ -392,7 +386,6 @@ CREATE TABLE IF NOT EXISTS compressed_observations (
     files TEXT NOT NULL DEFAULT '[]',
     importance INTEGER NOT NULL DEFAULT 5,
     confidence REAL,
-    created_at TEXT NOT NULL,
     embedding BLOB
 );
 
@@ -460,16 +453,7 @@ CREATE INDEX IF NOT EXISTS idx_memories_usage
 CREATE INDEX IF NOT EXISTS idx_memories_parent
     ON memories(parent_id);
 
--- FTS5 virtual tables for full-text search
-CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(
-    tool_name, tool_input, tool_output,
-    title, narrative, facts,
-    concepts, files,
-    content='observations',
-    content_rowid='rowid',
-    tokenize='porter unicode61'
-);
-
+-- FTS5 virtual table for full-text search (memories only)
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
     title, content, tags, concepts, files,
     content='memories',
