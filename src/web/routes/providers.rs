@@ -277,6 +277,7 @@ pub async fn create_provider(
         base_url,
         api_type: None,
         models,
+        embedding_models: std::collections::BTreeMap::new(),
     };
 
     // Add to config

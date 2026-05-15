@@ -733,12 +733,24 @@ impl App {
         });
         self.register_selection_region(inner);
 
-        // Add sub-entry row for Memory tab
-        let memory_sub_height = if panel.is_memory_tab() { 1 } else { 0 };
+        if panel.is_memory_tab() {
+            self.render_model_panel_memory(frame, inner, panel);
+        } else {
+            self.render_model_panel_standard(frame, inner, panel);
+        }
+    }
+
+    /// Standard single-column layout for non-Memory tabs.
+    fn render_model_panel_standard(
+        &self,
+        frame: &mut Frame<'_>,
+        inner: Rect,
+        panel: &ModelPanelState,
+    ) {
+        let palette = self.palette();
 
         let sections = Layout::vertical([
             Constraint::Length(1), // tab bar
-            Constraint::Length(memory_sub_height), // memory sub-entries (optional)
             Constraint::Length(2), // instruction
             Constraint::Length(3), // search box
             Constraint::Min(8),    // model list
@@ -747,6 +759,114 @@ impl App {
         .split(inner);
 
         // --- Tab bar ---
+        self.render_model_panel_tab_bar(frame, sections[0], panel);
+
+        // --- Instruction ---
+        let instruction = "Select a model for this agent. Enter to save, Esc to close.";
+        frame.render_widget(
+            Paragraph::new(instruction)
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(palette.panel).fg(palette.muted)),
+            sections[1],
+        );
+
+        // --- Search box ---
+        self.render_input_block_with_composer(
+            frame,
+            sections[2],
+            "Search models",
+            &panel.query,
+            panel.query.placeholder(),
+            false,
+            false,
+        );
+
+        // --- Model list ---
+        self.render_model_panel_model_list(frame, sections[3], panel, true);
+
+        // --- Footer ---
+        self.render_model_panel_footer(frame, sections[4], panel);
+    }
+
+    /// Two-column layout for Memory tab (sidebar + model list).
+    fn render_model_panel_memory(
+        &self,
+        frame: &mut Frame<'_>,
+        inner: Rect,
+        panel: &ModelPanelState,
+    ) {
+        let palette = self.palette();
+
+        let sections = Layout::vertical([
+            Constraint::Length(1), // tab bar
+            Constraint::Min(8),    // main content area (sidebar | right)
+        ])
+        .split(inner);
+
+        // --- Tab bar ---
+        self.render_model_panel_tab_bar(frame, sections[0], panel);
+
+        // Split main area horizontally: left sidebar, separator, right content
+        let main = sections[1];
+        let cols = Layout::horizontal([
+            Constraint::Length(28), // sidebar
+            Constraint::Length(1),  // separator
+            Constraint::Min(30),    // model content (instruction + search + list + footer)
+        ])
+        .split(main);
+
+        // --- Left sidebar: sub-tab list ---
+        self.render_memory_sidebar(frame, cols[0], panel);
+
+        // --- Separator ---
+        frame.render_widget(
+            Block::default()
+                .style(Style::default().bg(palette.border)),
+            cols[1],
+        );
+
+        // --- Right content area ---
+        let right = cols[2];
+        let right_sections = Layout::vertical([
+            Constraint::Length(3), // search box
+            Constraint::Min(8),    // model list
+            Constraint::Length(1), // footer
+        ])
+        .split(right);
+
+        // --- Search box ---
+        self.render_input_block_with_composer(
+            frame,
+            right_sections[0],
+            "Search models",
+            &panel.query,
+            panel.query.placeholder(),
+            false,
+            false,
+        );
+
+        // --- Model list ---
+        let list_highlight = panel.memory_focus == crate::tui::model_panel::MemoryFocus::List;
+        self.render_model_panel_model_list(frame, right_sections[1], panel, list_highlight);
+
+        // --- Footer ---
+        let footer = "↑↓ navigate · ← → switch focus · Enter confirm · Esc close";
+        frame.render_widget(
+            Paragraph::new(footer)
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(palette.panel).fg(palette.muted)),
+            right_sections[2],
+        );
+    }
+
+    /// Render the tab bar at the top of the model panel.
+    fn render_model_panel_tab_bar(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        panel: &ModelPanelState,
+    ) {
+        let palette = self.palette();
         let tab_spans: Vec<Span> = panel
             .tabs
             .iter()
@@ -763,7 +883,6 @@ impl App {
                 };
                 let label = format!(" {} ", tab.display_name);
                 let mut spans = vec![Span::styled(label, tab_style)];
-                // Separator between tabs
                 if idx + 1 < panel.tabs.len() {
                     spans.push(Span::styled(" │ ", Style::default().fg(palette.border)));
                 }
@@ -775,109 +894,142 @@ impl App {
             Paragraph::new(Line::from(tab_spans))
                 .style(Style::default().bg(palette.panel))
                 .alignment(Alignment::Left),
-            sections[0],
+            area,
         );
+    }
 
-        // --- Memory sub-entries (for Memory tab) ---
-        if panel.is_memory_tab() {
-            use crate::tui::model_panel::MEMORY_ROLES;
-            let sub_spans: Vec<Span> = MEMORY_ROLES
-                .iter()
-                .enumerate()
-                .flat_map(|(idx, role)| {
-                    let is_active = idx == panel.memory_sub_selection;
-                    let label = self.config.memory_model_display(role);
-                    let display = format!("{}: {}", role, label);
-                    let role_style = if is_active {
-                        Style::default()
-                            .fg(palette.selection_fg)
-                            .bg(palette.selection_bg)
-                            .add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(palette.muted)
-                    };
-                    let mut spans = vec![Span::styled(format!(" {} ", display), role_style)];
-                    if idx + 1 < MEMORY_ROLES.len() {
-                        spans.push(Span::styled(" │ ", Style::default().fg(palette.border)));
-                    }
-                    spans
-                })
-                .collect();
+    /// Render the left sidebar for the Memory tab showing the sub-tab list.
+    fn render_memory_sidebar(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        panel: &ModelPanelState,
+    ) {
+        let palette = self.palette();
+        use crate::tui::model_panel::MEMORY_ROLES;
+
+        let sidebar_focused = panel.memory_focus == crate::tui::model_panel::MemoryFocus::Sidebar;
+
+        let rows: Vec<ListItem> = MEMORY_ROLES
+            .iter()
+            .enumerate()
+            .map(|(idx, role)| {
+                let is_selected = idx == panel.memory_sub_selection;
+                let label = self.config.memory_model_display(role);
+
+                let role_display = match *role {
+                    "compression" => "Compression",
+                    "summarization" => "Summarization",
+                    "embedding" => "Embedding",
+                    _ => role,
+                };
+
+                let indicator = if is_selected && sidebar_focused {
+                    "▸"
+                } else if is_selected {
+                    "✓"
+                } else {
+                    " "
+                };
+
+                let role_style = if is_selected && sidebar_focused {
+                    Style::default()
+                        .bg(palette.selection_bg)
+                        .fg(palette.selection_fg)
+                        .add_modifier(Modifier::BOLD)
+                } else if is_selected {
+                    Style::default()
+                        .fg(palette.selection_fg)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(palette.text)
+                };
+
+                let display = format!("{} {} ", indicator, role_display);
+                let spans = vec![
+                    Span::styled(display, role_style),
+                    Span::raw("\n"),
+                    Span::styled(
+                        format!("   {}", label),
+                        Style::default().fg(palette.muted),
+                    ),
+                ];
+                ListItem::new(Line::from(spans))
+            })
+            .collect();
+
+        if rows.is_empty() {
             frame.render_widget(
-                Paragraph::new(Line::from(sub_spans))
-                    .style(Style::default().bg(palette.panel))
-                    .alignment(Alignment::Left),
-                sections[1],
+                Paragraph::new("No memory roles")
+                    .alignment(Alignment::Center)
+                    .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                area,
             );
+            return;
         }
 
-        // --- Instruction ---
-        let instruction = if panel.is_general_tab() {
-            "Select a model for the main session. Enter to switch, Esc to close."
-        } else if panel.is_memory_tab() {
-            "Select a model for this memory role. ← → switch role, Enter to save, Esc to close."
-        } else {
-            "Select a model for this agent. Enter to save, Esc to close."
-        };
-        frame.render_widget(
-            Paragraph::new(instruction)
-                .alignment(Alignment::Center)
-                .style(Style::default().bg(palette.panel).fg(palette.muted)),
-            sections[2],
-        );
+        // Title
+        let header = Paragraph::new(" Roles ")
+            .style(Style::default().bg(palette.panel).fg(palette.accent));
+        let sidebar_layout = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Min(4),
+        ])
+        .split(area);
+        frame.render_widget(header, sidebar_layout[0]);
 
-        // --- Search box ---
-        self.render_input_block_with_composer(
-            frame,
-            sections[3],
-            "Search models",
-            &panel.query,
-            panel.query.placeholder(),
-            false,
-            false,
-        );
+        let mut state = ListState::default();
+        state.select(Some(panel.memory_sub_selection.min(rows.len().saturating_sub(1))));
+        let list = List::new(rows)
+            .style(Style::default().bg(palette.panel).fg(palette.text))
+            .highlight_style(
+                Style::default()
+                    .bg(palette.selection_bg)
+                    .fg(palette.selection_fg)
+                    .add_modifier(Modifier::BOLD),
+            );
+        frame.render_stateful_widget(list, sidebar_layout[1], &mut state);
+    }
 
-        // --- Model list ---
+    /// Render the model list (shared between standard and memory layouts).
+    /// `highlight` controls whether to show a selection highlight (false when sidebar has focus).
+    fn render_model_panel_model_list(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        panel: &ModelPanelState,
+        highlight: bool,
+    ) {
+        let palette = self.palette();
         let items = self.model_panel_items(panel);
 
         // Determine the "active" model index (the model currently in use / saved)
         let active_index = if panel.is_general_tab() {
-            // General tab: checkmark always tracks the authoritative self.active_model
             items.iter().position(|item| {
                 matches!(item, ModelPanelItem::Model { summary, .. }
                     if summary.provider_id == self.active_model.provider_id
                     && summary.model_id == self.active_model.model_id)
             })
-        } else {
-            panel.current_tab().and_then(|tab| {
-                let label = &tab.current_label;
-                if label == "<inherit>" || label.is_empty() {
-                    // For inherit, use the main session's active model
-                    items.iter().position(|item| {
-                        matches!(item, ModelPanelItem::Model { summary, .. }
-                            if summary.provider_id == self.active_model.provider_id
-                            && summary.model_id == self.active_model.model_id)
-                    })
-                } else if let Some(slash_pos) = label.find('/') {
-                    let p = &label[..slash_pos];
-                    let m = &label[slash_pos + 1..];
-                    items.iter().position(|item| {
-                        matches!(item, ModelPanelItem::Model { summary, .. }
-                            if summary.provider_id == p && summary.model_id == m)
-                    })
-                } else {
-                    None
-                }
+        } else if panel.is_memory_tab() {
+            // For memory tab, find the model currently saved for the active role
+            let role = panel.active_memory_role();
+            let current = self.config.memory_model_label(role);
+            current.and_then(|label| {
+                items.iter().position(|item| match item {
+                    ModelPanelItem::Model { summary } => summary.label() == label,
+                    ModelPanelItem::EmbeddingModel { summary } => summary.label() == label,
+                    _ => false,
+                })
             })
+        } else {
+            None
         };
 
-        let mut rows = Vec::new();
+        let mut rows: Vec<ListItem> = Vec::new();
+
         for (index, item) in items.iter().enumerate() {
             match item {
-                ModelPanelItem::ProviderHeader {
-                    provider_id,
-                    display_name,
-                } => {
+                ModelPanelItem::ProviderHeader { provider_id, display_name } => {
                     rows.push(ListItem::new(Line::from(vec![
                         Span::styled(
                             display_name.to_string(),
@@ -893,19 +1045,15 @@ impl App {
                     ])));
                 }
                 ModelPanelItem::Model { summary, .. } => {
-                    // Show checkmark for active model, space otherwise
                     let active_marker = if active_index == Some(index) {
                         Span::styled("✓ ", Style::default().fg(palette.accent))
                     } else {
                         Span::raw("  ")
                     };
 
-                    // Determine thinking level to show for this model
                     let is_selected = panel
                         .current_tab()
                         .is_some_and(|t| t.selected_index == index);
-                    // Directly check if this model is the session's active model
-                    // (active_index calculation may fail due to display-name vs id mismatch)
                     let is_active = summary.provider_id == self.active_model.provider_id
                         && summary.model_id == self.active_model.model_id
                         && panel.is_general_tab();
@@ -914,7 +1062,6 @@ impl App {
                             .current_tab()
                             .is_some_and(|t| t.thinking_level_expanded)
                     {
-                        // Show the in-progress thinking level selection
                         let tl_options = thinking_options_for_model(&items, index);
                         if !tl_options.is_empty() {
                             let tl_idx = panel
@@ -930,7 +1077,6 @@ impl App {
                     } else if is_active && self.thinking_level.is_supported() {
                         Some(self.thinking_level.display_name().to_string())
                     } else if !panel.is_general_tab() {
-                        // Check agent thinking level override
                         if let Some(tab) = panel.current_tab() {
                             if let Some(tl_str) =
                                 self.config.agent.thinking_levels.get(&tab.agent_type_str)
@@ -948,56 +1094,44 @@ impl App {
                         None
                     };
 
-                    let mut spans = vec![
-                        active_marker,
+                let mut spans = vec![                        active_marker,
                         Span::styled(
                             summary.model_display_name.clone(),
                             Style::default()
                                 .fg(palette.text)
                                 .add_modifier(Modifier::BOLD),
                         ),
-                    ];
-                    // Append thinking level tag
-                    if let Some(ref tl_tag) = thinking_level_tag {
-                        spans.push(Span::raw(" "));
-                        spans.push(Span::styled(
-                            format!("[{}]", tl_tag),
-                            Style::default().fg(palette.accent),
-                        ));
-                    }
-                    spans.extend_from_slice(&[
                         Span::raw("  "),
                         Span::styled(
                             format!("({})", summary.model_id),
                             Style::default().fg(palette.muted),
                         ),
-                        Span::raw("  "),
-                        Span::styled(
-                            format!(
-                                "{} · {}",
-                                summary.provider_display_name,
-                                format_window_size(summary.context_window)
-                            ),
+                    ];
+
+                    if let Some(tl) = &thinking_level_tag {
+                        spans.push(Span::raw("  "));
+                        spans.push(Span::styled(
+                            format!("[{}]", tl),
                             Style::default().fg(palette.accent_soft),
-                        ),
-                    ]);
+                        ));
+                    }
+
                     rows.push(ListItem::new(Line::from(spans)));
 
-                    // If this model is the selected one and thinking_level is expanded,
-                    // render thinking level sub-options
-                    let is_selected = panel
-                        .current_tab()
-                        .is_some_and(|t| t.selected_index == index && t.thinking_level_expanded);
-                    if is_selected {
+                    // If thinking level is expanded for this model, render sub-options
+                    if is_selected
+                        && panel
+                            .current_tab()
+                            .is_some_and(|t| t.thinking_level_expanded)
+                    {
                         let tl_options = thinking_options_for_model(&items, index);
                         if !tl_options.is_empty() {
-                            let tl_index = panel
+                            let tl_idx = panel
                                 .current_tab()
                                 .map(|t| t.thinking_level_index)
                                 .unwrap_or(0);
-                            for (i, opt) in tl_options.iter().enumerate() {
-                                let is_tl_selected = i == tl_index;
-                                // opt format: "deepseek:Off", "qwen:On", etc.
+                            for (oi, opt) in tl_options.iter().enumerate() {
+                                let is_tl_selected = oi == tl_idx % tl_options.len();
                                 let level_name =
                                     opt.rsplit_once(':').map(|(_, v)| v).unwrap_or(opt);
                                 let bullet = if is_tl_selected { " ● " } else { " ○ " };
@@ -1043,53 +1177,47 @@ impl App {
         }
 
         if rows.is_empty() {
-                frame.render_widget(
+            frame.render_widget(
                 Paragraph::new("No connected models match this search.")
                     .alignment(Alignment::Center)
                     .style(Style::default().bg(palette.panel).fg(palette.muted)),
-                sections[4],
+                area,
             );
         } else {
-            let tab = panel.current_tab();
-            let is_expanded = tab.is_some_and(|t| t.thinking_level_expanded);
-            let sel = if is_expanded {
-                // When thinking level is expanded, highlight the active sub-option:
-                // selected_index (model) + 1 (first sub-option) + thinking_level_index
-                let model_idx = tab
-                    .map(|t| t.selected_index)
-                    .unwrap_or(0)
-                    .min(items.len().saturating_sub(1));
-                let tl_idx = tab.map(|t| t.thinking_level_index).unwrap_or(0);
-                let tl_count = tab
-                    .map(|t| thinking_options_for_model(&items, t.selected_index).len())
-                    .unwrap_or(0);
-                // Only offset if there are thinking options
-                if tl_count > 0 {
-                    model_idx + 1 + tl_idx.min(tl_count.saturating_sub(1))
-                } else {
-                    model_idx
-                }
-            } else {
-                tab.map(|t| t.selected_index)
-                    .unwrap_or(0)
-                    .min(items.len().saturating_sub(1))
-            };
+            let sel = panel
+                .current_tab()
+                .map(|t| t.selected_index)
+                .unwrap_or(0)
+                .min(items.len().saturating_sub(1));
             let mut state = ListState::default();
             state.select(Some(sel.min(rows.len().saturating_sub(1))));
 
             let list = List::new(rows)
                 .style(Style::default().bg(palette.panel).fg(palette.text))
                 .highlight_style(
-                    Style::default()
-                        .bg(palette.selection_bg)
-                        .fg(palette.selection_fg)
-                        .add_modifier(Modifier::BOLD),
+                    if highlight {
+                        Style::default()
+                            .bg(palette.selection_bg)
+                            .fg(palette.selection_fg)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        // Transparent highlight when sidebar has focus
+                        Style::default().bg(palette.panel).fg(palette.text)
+                    },
                 );
 
-            frame.render_stateful_widget(list, sections[4], &mut state);
+            frame.render_stateful_widget(list, area, &mut state);
         }
+    }
 
-        // --- Footer ---
+    /// Render the footer help text.
+    fn render_model_panel_footer(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        panel: &ModelPanelState,
+    ) {
+        let palette = self.palette();
         let is_expanded = panel
             .current_tab()
             .is_some_and(|t| t.thinking_level_expanded);
@@ -1102,12 +1230,11 @@ impl App {
             Paragraph::new(footer)
                 .alignment(Alignment::Center)
                 .style(Style::default().bg(palette.panel).fg(palette.muted)),
-            sections[5],
+            area,
         );
     }
 
-    pub(crate) fn render_search_panel(
-        &self,
+    pub(crate) fn render_search_panel(        &self,
         frame: &mut Frame<'_>,
         area: Rect,
         panel: &SearchPanelState,
@@ -2268,19 +2395,3 @@ impl App {
     }
 }
 
-/// Format a token count into a human-readable window size string.
-/// e.g. 128000 → "128K", 8192 → "8K", 1000 → "1K"
-fn format_window_size(size: usize) -> String {
-    if size >= 1_000_000 {
-        format!("{:.1}M", size as f64 / 1_000_000.0)
-    } else if size >= 1000 {
-        let k = size / 1000;
-        if k >= 1000 {
-            format!("{}K", k)
-        } else {
-            format!("{}K", k)
-        }
-    } else {
-        size.to_string()
-    }
-}

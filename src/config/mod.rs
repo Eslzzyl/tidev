@@ -25,22 +25,11 @@ pub use auth::{
 pub use logging::LogConfig;
 pub use mcp::{McpConfig, McpServerConfig};
 pub use paths::ConfigPaths;
-pub use provider::{ApiType, ModelConfig, ProviderConfig, ProviderSource};
+pub use provider::{ApiType, EmbeddingModelConfig, ModelConfig, ProviderConfig, ProviderSource};
 pub use tmp::TmpConfig;
 pub use ui::UiConfig;
 
 pub use self::sandbox::SandboxConfig;
-
-/// A model entry in the `[[embedding_models]]` TOML section.
-/// Shares provider data (base_url, api_key, api_type) by provider name.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct EmbeddingModelEntry {
-    pub provider: String,
-    pub model_id: String,
-    pub display_name: String,
-    pub context_window: usize,
-    pub dimensions: usize,
-}
 
 /// Per-model overrides for memory operations.
 /// `None` = inherit from the session's active model (or compression model for summarization).
@@ -58,7 +47,7 @@ pub struct MemoryConfig {
     #[serde(default)]
     pub summarization_model: Option<String>,
     /// Optional override for embedding model. If not configured and no
-    /// [[embedding_models]] entries exist, vector search degrades to FTS5.
+    /// embedding models exist on any provider, vector search degrades to FTS5.
     #[serde(default)]
     pub embedding_model: Option<String>,
 }
@@ -152,8 +141,6 @@ pub struct AppConfig {
     #[serde(default)]
     pub websearch: WebSearchConfig,
     #[serde(default)]
-    pub embedding_models: Vec<EmbeddingModelEntry>,
-    #[serde(default)]
     pub memory: MemoryConfig,
     #[serde(skip)]
     pub bundled_providers: BTreeMap<String, ProviderConfig>,
@@ -184,7 +171,6 @@ impl Default for AppConfig {
             tmp: TmpConfig::default(),
             hooks: crate::hooks::HooksConfig::default(),
             websearch: WebSearchConfig::default(),
-            embedding_models: Vec::new(),
             memory: MemoryConfig::default(),
             bundled_providers: bundled_provider_catalog().unwrap_or_default(),
         }
@@ -786,27 +772,35 @@ default_provider = "exa"
 
     /// List all configured embedding models that have an API key available.
     pub fn available_embedding_models(&self, auth: &AuthStore) -> Vec<EmbeddingModelSummary> {
-        self.embedding_models
-            .iter()
-            .filter_map(|entry| {
-                let provider = self.provider(&entry.provider)?;
-                let api_type = provider
-                    .api_type
-                    .as_deref()
-                    .map(ApiType::parse)
-                    .unwrap_or_default();
-                Some(EmbeddingModelSummary {
-                    provider_id: entry.provider.clone(),
-                    model_id: entry.model_id.clone(),
-                    display_name: entry.display_name.clone(),
+        let mut result = Vec::new();
+
+        for (provider_id, provider) in
+            self.providers.iter().chain(self.bundled_providers.iter())
+        {
+            let api_type = provider
+                .api_type
+                .as_deref()
+                .map(ApiType::parse)
+                .unwrap_or_default();
+
+            if auth.api_key(provider_id).is_none() {
+                continue;
+            }
+
+            for (_name, model) in &provider.embedding_models {
+                result.push(EmbeddingModelSummary {
+                    provider_id: provider_id.clone(),
+                    model_id: model.model_id.clone(),
+                    display_name: model.display_name.clone(),
                     base_url: provider.base_url.clone(),
-                    api_type,
-                    dimensions: entry.dimensions,
-                    context_window: entry.context_window,
-                })
-            })
-            .filter(|summary| auth.api_key(&summary.provider_id).is_some())
-            .collect()
+                    api_type: api_type.clone(),
+                    dimensions: model.dimensions,
+                    context_window: model.context_window,
+                });
+            }
+        }
+
+        result
     }
 
     /// Resolve an embedding model by optional query, or use `memory.embedding_model`.
@@ -827,12 +821,12 @@ default_provider = "exa"
             let provider = self
                 .provider(&provider_id)
                 .with_context(|| format!("unknown provider '{provider_id}'"))?;
-            let entry = self
+            let config = provider
                 .embedding_models
-                .iter()
-                .find(|e| e.provider == provider_id && e.model_id == model_id)
+                .values()
+                .find(|e| e.model_id == model_id)
                 .with_context(|| {
-                    format!("embedding model '{q}' not found in [[embedding_models]]")
+                    format!("embedding model '{q}' not found in provider '{provider_id}'")
                 })?;
 
             let api_type = provider
@@ -845,12 +839,12 @@ default_provider = "exa"
             return Ok(EmbeddingActiveModel {
                 provider_id,
                 model_id,
-                display_name: entry.display_name.clone(),
+                display_name: config.display_name.clone(),
                 base_url: provider.base_url.clone(),
                 api_type,
                 api_key,
-                dimensions: entry.dimensions,
-                context_window: entry.context_window,
+                dimensions: config.dimensions,
+                context_window: config.context_window,
             });
         }
 
@@ -1039,9 +1033,17 @@ default_provider = "exa"
                 .embedding_model
                 .clone()
                 .or_else(|| {
-                    self.embedding_models
-                        .first()
-                        .map(|m| format!("{}/{}", m.provider, m.model_id))
+                    // Find the first embedding model across all providers
+                    for (pid, provider) in self
+                        .providers
+                        .iter()
+                        .chain(self.bundled_providers.iter())
+                    {
+                        if let Some((_name, _model)) = provider.embedding_models.iter().next() {
+                            return Some(format!("{}/{}", pid, _model.model_id));
+                        }
+                    }
+                    None
                 })
                 .unwrap_or_else(|| "<none>".to_string()),
             _ => self
@@ -1341,6 +1343,7 @@ mod tests {
                         request_model_id: None,
                     },
                 )]),
+                embedding_models: BTreeMap::new(),
             },
         );
 
@@ -1364,6 +1367,7 @@ mod tests {
                         request_model_id: None,
                     },
                 )]),
+                embedding_models: BTreeMap::new(),
             },
         );
 
@@ -1387,6 +1391,7 @@ mod tests {
                 base_url: "https://example.com/v1".to_string(),
                 api_type: None,
                 models: BTreeMap::new(),
+                embedding_models: BTreeMap::new(),
             },
         );
 

@@ -212,18 +212,44 @@ impl App {
 
         match key.code {
             KeyCode::Up => {
-                let items = self.model_panel_items(&panel);
-                let mut next_panel = panel;
-                next_panel.move_selection(&items, -1);
-                self.model_panel = Some(next_panel);
+                if panel.is_memory_tab() && panel.memory_focus == crate::tui::model_panel::MemoryFocus::Sidebar {
+                    let mut next_panel = panel;
+                    next_panel.move_memory_sub_selection(-1);
+                    let items = self.model_panel_items(&next_panel);
+                    next_panel.reset_selection(&items, None);
+                    self.model_panel = Some(next_panel);
+                } else {
+                    let items = self.model_panel_items(&panel);
+                    let mut next_panel = panel;
+                    next_panel.move_selection(&items, -1);
+                    self.model_panel = Some(next_panel);
+                }
             }
             KeyCode::Down => {
-                let items = self.model_panel_items(&panel);
-                let mut next_panel = panel;
-                next_panel.move_selection(&items, 1);
-                self.model_panel = Some(next_panel);
+                if panel.is_memory_tab() && panel.memory_focus == crate::tui::model_panel::MemoryFocus::Sidebar {
+                    let mut next_panel = panel;
+                    next_panel.move_memory_sub_selection(1);
+                    let items = self.model_panel_items(&next_panel);
+                    next_panel.reset_selection(&items, None);
+                    self.model_panel = Some(next_panel);
+                } else {
+                    let items = self.model_panel_items(&panel);
+                    let mut next_panel = panel;
+                    next_panel.move_selection(&items, 1);
+                    self.model_panel = Some(next_panel);
+                }
             }
             KeyCode::Enter => {
+                // In Memory tab sidebar: switch focus to the model list
+                if panel.is_memory_tab() && panel.memory_focus == crate::tui::model_panel::MemoryFocus::Sidebar {
+                    let mut next_panel = panel;
+                    next_panel.toggle_memory_focus();
+                    let items = self.model_panel_items(&next_panel);
+                    next_panel.reset_selection(&items, None);
+                    self.model_panel = Some(next_panel);
+                    return Ok(());
+                }
+
                 let items = self.model_panel_items(&panel);
 
                 // Check if thinking level is currently expanded
@@ -395,16 +421,12 @@ impl App {
             }
             KeyCode::Left if panel.is_memory_tab() => {
                 let mut next_panel = panel;
-                next_panel.move_memory_sub_selection(-1);
-                let items = self.model_panel_items(&next_panel);
-                next_panel.reset_selection(&items, None);
+                next_panel.toggle_memory_focus();
                 self.model_panel = Some(next_panel);
             }
             KeyCode::Right if panel.is_memory_tab() => {
                 let mut next_panel = panel;
-                next_panel.move_memory_sub_selection(1);
-                let items = self.model_panel_items(&next_panel);
-                next_panel.reset_selection(&items, None);
+                next_panel.toggle_memory_focus();
                 self.model_panel = Some(next_panel);
             }
             KeyCode::Tab if key.modifiers.is_empty() => {

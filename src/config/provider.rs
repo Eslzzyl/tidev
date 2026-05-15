@@ -42,6 +42,10 @@ pub struct ProviderConfig {
     pub api_type: Option<String>,
     #[serde(default)]
     pub models: BTreeMap<String, ModelConfig>,
+    /// Embedding models nested under this provider.
+    /// Configured as `[providers.<id>.embedding_models.<name>]` in TOML.
+    #[serde(default)]
+    pub embedding_models: BTreeMap<String, EmbeddingModelConfig>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -60,6 +64,19 @@ pub struct ModelConfig {
     pub extra_body: Option<serde_json::Value>,
     #[serde(default)]
     pub request_model_id: Option<String>,
+}
+
+/// Configuration for an embedding model nested under a provider.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EmbeddingModelConfig {
+    /// The model identifier sent to the `/embeddings` API.
+    pub model_id: String,
+    /// Display name shown in the TUI.
+    pub display_name: String,
+    /// Maximum input token length.
+    pub context_window: usize,
+    /// Output vector dimension (e.g. 1536 for text-embedding-3-small).
+    pub dimensions: usize,
 }
 
 fn default_true() -> bool {

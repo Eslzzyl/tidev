@@ -11,6 +11,13 @@ pub const MEMORY_ROLES: [&str; 3] = [
     MEMORY_ROLE_EMBEDDING,
 ];
 
+/// Which column has focus within the Memory tab's two-column layout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MemoryFocus {
+    Sidebar,
+    List,
+}
+
 #[derive(Clone, Debug)]
 pub struct ModelPanelTab {
     /// Agent type identifier, e.g. "general", "explorer", "librarian", etc.
@@ -50,6 +57,8 @@ pub struct ModelPanelState {
     pub selected_tab_index: usize,
     /// Within the Memory tab, which sub-entry is selected: 0=Compression, 1=Summarization, 2=Embedding.
     pub memory_sub_selection: usize,
+    /// Within the Memory tab, which column has focus.
+    pub memory_focus: MemoryFocus,
 }
 
 impl Default for ModelPanelState {
@@ -65,6 +74,7 @@ impl ModelPanelState {
             tabs: Vec::new(),
             selected_tab_index: 0,
             memory_sub_selection: 0,
+            memory_focus: MemoryFocus::Sidebar,
         }
     }
 
@@ -83,15 +93,26 @@ impl ModelPanelState {
         }
     }
 
-    /// Move memory sub-selection (left/right within Memory tab).
+    /// Move memory sub-selection (up/down within Memory tab sidebar).
     pub fn move_memory_sub_selection(&mut self, delta: isize) {
         if !self.is_memory_tab() {
             return;
         }
-        let len = MEMORY_ROLES.len();
-        self.memory_sub_selection = (self.memory_sub_selection + len + delta as usize) % len;
+        let len = MEMORY_ROLES.len() as isize;
+        self.memory_sub_selection = ((self.memory_sub_selection as isize + delta).rem_euclid(len)) as usize;
         // Reset search query when switching sub-entries
         self.query.set_text(String::new());
+    }
+
+    /// Toggle focus between sidebar and model list in the Memory tab.
+    pub fn toggle_memory_focus(&mut self) {
+        if !self.is_memory_tab() {
+            return;
+        }
+        self.memory_focus = match self.memory_focus {
+            MemoryFocus::Sidebar => MemoryFocus::List,
+            MemoryFocus::List => MemoryFocus::Sidebar,
+        };
     }
 
     /// Resolve the active tab's selected_index given a filtered item list.

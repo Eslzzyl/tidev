@@ -314,6 +314,7 @@ impl EditProviderDraft {
                 base_url: self.base_url,
                 api_type: None,
                 models: self.models,
+                embedding_models: BTreeMap::new(),
             },
             api_key,
         ))
