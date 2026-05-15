@@ -2,7 +2,7 @@
 
 > 基于对 [agentmemory](https://github.com/rohitg00/agentmemory) v0.9.12 的逆向分析，在 tidev 中以 Rust 复刻。
 >
-> 更新时间：2026-05-15（Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅, Phase 6 ✅, Phase 7 ✅, 表合并 ✅, 隐私过滤 ✅, Session 巡检 ✅, 整合管线 ✅, Embedding Provider 接入 ✅）
+> 更新时间：2026-05-15（Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅, Phase 6 ✅, Phase 7 ✅, 表合并 ✅, 隐私过滤 ✅, Session 巡检 ✅, 整合管线 ✅, Embedding Provider 接入 ✅, P1 三项 ✅）
 
 ---
 
@@ -177,8 +177,12 @@ search(query, workspace_root)
 | 知识图谱（DV11） | 高 | schema 中 `graph_nodes` / `graph_edges` 表已就绪，缺失实体抽取、图查询、图统计 |
 | 洞察/模式/教训反射 | 高 | 从概念聚类中合成 insight（参考 agentmemory 的 `mem::reflect`），依赖整合管线但尚未实现 |
 
-已实现：
-- 整合管线 ✅（`consolidate.rs`，2026-05-15）
+已实现（2026-05-15）：
+- 整合管线 ✅（`consolidate.rs`）
+- 自动注入语义搜索 ✅（P0，`search_hot_context()`）
+- Session 摘要 LLM 降级 ✅（P1，LLM 失败自动生成启发式摘要）
+- 压缩熔断器 ✅（P1，连续 3 次失败暂停 5 分钟）
+- `compression_enabled` 配置开关 ✅（P1，`[memory]` 段）
 
 ---
 
@@ -240,9 +244,9 @@ LLM client 可用?
 
 合成压缩（`compress_synthetic()`）是完整的启发式规则引擎：工具名推断、路径提取、重要性评分。
 
-**剩余问题**：
-1. 没有熔断器（连续 N 次失败后暂停 LLM 压缩一段时间）
-2. 没有 `isAutoCompressEnabled()` 配置开关
+**已修复（2026-05-15 P1）**：
+1. ✅ **熔断器**：连续 3 次 LLM 压缩失败后跳过 LLM 压缩 5 分钟，自动重置
+2. ✅ **`compression_enabled` 配置开关**：`[memory]` 段新增 `compression_enabled = true/false`，控制是否对 observation 进行压缩
 
 #### 4.7.2 Embedding 的降级 ✅ Provider 接入
 
@@ -256,10 +260,14 @@ LLM client 可用?
 
 Embedding 调用通过 `LlmClient::embed_with_retry()` 自动获得与 LLM 相同的重试/退避能力。
 
-#### 4.7.3 Session 摘要的降级
+#### 4.7.3 Session 摘要的降级 ✅ P1
 
-`summarize_session()` 在 LLM 不可用时：`llm.ok_or_else` → `anyhow::bail!` → 调用者 `log_warn`。
-不会崩溃但浪费了一次 LLM 检测的时间。
+已修复（2026-05-15 P1）：`summarize_session()` 在 LLM 失败时自动降级。
+LLM 调用失败后不再传播错误，而是直接从 observation 数据生成启发式摘要：
+- 从第一条 observation 提取标题
+- 按类型统计 observation 数量（如 "3×file_edit, 2×command_run"）
+- 收集唯一文件路径和概念标签
+- 空 decisions（无 LLM 无法提取）
 
 ---
 
@@ -448,31 +456,24 @@ CREATE TABLE IF NOT EXISTS sessions (
 - 每次压缩完成时 embedding 同时写入 DB + 内存索引
 - 语义搜索在重启后立即可用
 
-### 7.6 自动注入不含语义检索
+### 7.6 自动注入加入语义检索 ✅ P0
 
-`select_hot()` 使用复合排序公式：
-```
-score = importance * 0.5 + min(usage_count / 20, 1) * 0.3 + recency_bonus(7d) * 0.2
-```
+已修复（2026-05-15 P0）：`compose_system_prompt()` 改用 `search_hot_context()`
 
-```rust
-// src/memory/engine.rs:315-327
-ORDER BY
-    importance * 0.5 +
-    LEAST(usage_count / 20.0, 1.0) * 0.3 +
-    CASE WHEN updated_at >= datetime('now', '-7 days') THEN 0.2 ELSE 0.0 END
-DESC
+`search_hot_context()` 使用 workspace 目录名作为查询，走混合搜索链：
+```
+query = workspace_dir_name
+  → self.search() → hybrid(BM25+向量) → FTS5 → LIKE
+  → 无结果 → select_hot() 复合排序（保持原有行为）
 ```
 
-但仍不包含语义检索。自动注入仅包含：
-- 5 条按复合分数排序的高频/重要/近期记忆
+自动注入当前包含：
+- 5 条语义搜索找到的 workspace memories（P0）
 - 8 条当前 session 的压缩观察（Phase 1）
 - 5 条其他 session 的摘要（Phase 1）
 - 5 条 consolidated facts（整合管线）
 - 3 条 reusable procedures（整合管线）
 - pinned slots
-
-agentmemory 的 `mem::context` 在注入时做了语义搜索，tidev 暂时没有。
 
 ### 7.7 降级措施完善 ✅ Phase2
 
