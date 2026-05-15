@@ -295,6 +295,106 @@ impl MemoryStore {
         parts.join("\n")
     }
 
+    // ─── Phase 1: Context Injection Helpers ──────────────────────────
+
+    /// Load recent compressed observations for a session, ordered by
+    /// descending importance then recency.
+    pub fn load_recent_compressed_observations(
+        &self,
+        session_id: &Uuid,
+        limit: usize,
+        min_importance: u8,
+    ) -> Result<Vec<CompressedObservation>> {
+        let db = self.read_connection.lock().unwrap();
+        let mut stmt = db.prepare(
+            "SELECT id, observation_id, session_id, obs_type, title, subtitle,
+                    facts, narrative, concepts, files, importance, confidence, created_at
+             FROM compressed_observations
+             WHERE session_id = ?1 AND importance >= ?2
+             ORDER BY importance DESC, created_at DESC
+             LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![session_id.to_string(), min_importance as i64, limit as i64],
+            Self::map_compressed_observation_from_row,
+        )?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    /// Load session summaries from sessions other than the current one,
+    /// newest first.
+    pub fn load_other_session_summaries(
+        &self,
+        exclude_session_id: &Uuid,
+        limit: usize,
+    ) -> Result<Vec<SessionSummary>> {
+        let db = self.read_connection.lock().unwrap();
+        let mut stmt = db.prepare(
+            "SELECT session_id, project, created_at, title, narrative,
+                    key_decisions, files_modified, concepts, observation_count
+             FROM session_summaries
+             WHERE session_id != ?1 AND title IS NOT NULL
+             ORDER BY created_at DESC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![exclude_session_id.to_string(), limit as i64],
+            Self::map_session_summary_from_row,
+        )?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    fn map_compressed_observation_from_row(
+        row: &rusqlite::Row,
+    ) -> rusqlite::Result<CompressedObservation> {
+        Ok(CompressedObservation {
+            id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap_or(Uuid::nil()),
+            observation_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap_or(Uuid::nil()),
+            session_id: Uuid::parse_str(&row.get::<_, String>(2)?).unwrap_or(Uuid::nil()),
+            obs_type: ObservationType::parse_str(&row.get::<_, String>(3)?)
+                .unwrap_or(ObservationType::Other),
+            title: row.get(4)?,
+            subtitle: row.get(5)?,
+            facts: serde_json::from_str(&row.get::<_, String>(6)?).unwrap_or_default(),
+            narrative: row.get(7)?,
+            concepts: serde_json::from_str(&row.get::<_, String>(8)?).unwrap_or_default(),
+            files: serde_json::from_str(&row.get::<_, String>(9)?).unwrap_or_default(),
+            importance: row.get::<_, i64>(10)? as u8,
+            confidence: row.get(11)?,
+            created_at: row.get::<_, String>(12).ok()
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+                .map(|d| d.with_timezone(&chrono::Utc))
+                .unwrap_or_else(chrono::Utc::now),
+        })
+    }
+
+    fn map_session_summary_from_row(
+        row: &rusqlite::Row,
+    ) -> rusqlite::Result<SessionSummary> {
+        Ok(SessionSummary {
+            session_id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap_or(Uuid::nil()),
+            project: row.get(1)?,
+            created_at: row.get::<_, String>(2).ok()
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+                .map(|d| d.with_timezone(&chrono::Utc))
+                .unwrap_or_else(chrono::Utc::now),
+            title: row.get(3)?,
+            narrative: row.get(4)?,
+            key_decisions: serde_json::from_str(&row.get::<_, String>(5)?).unwrap_or_default(),
+            files_modified: serde_json::from_str(&row.get::<_, String>(6)?).unwrap_or_default(),
+            concepts: serde_json::from_str(&row.get::<_, String>(7)?).unwrap_or_default(),
+            observation_count: row.get(8)?,
+        })
+    }
+
     // ─── New AgentMemory-Style API ──────────────────────────────────
 
     /// Observe a tool hook and create a raw observation.

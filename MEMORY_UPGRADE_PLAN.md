@@ -2,7 +2,7 @@
 
 > 基于对 [agentmemory](https://github.com/rohitg00/agentmemory) v0.9.12 的逆向分析，在 tidev 中以 Rust 复刻。
 >
-> 更新时间：2026-05-15（已知问题梳理完毕 ✅）
+> 更新时间：2026-05-15（Phase 1 完成 ✅）
 
 ---
 
@@ -80,8 +80,6 @@ src/memory/
 │       ├─ 3. 解析 XML → SessionSummary                              │
 │       └─ 4. INSERT OR REPLACE session_summaries（每轮覆盖）       │
 │                                                                   │
-│  ⚠ 缺失：压缩观察和会话摘要从未被注入到 LLM                        │
-│  ⚠ 缺失：无跨 session 的 context 注入                             │
 │  ⚠ 缺失：无整合管线（SemanticMemory / ProceduralMemory）          │
 │                                                                   │
 │  ⑥ 每小时定时器                                                   │
@@ -129,6 +127,8 @@ search(query, workspace_root)
 | 记忆 CRUD | `engine.rs` | `src/functions/remember.ts`, `src/functions/forget.ts` | remember / search / list / read / forget |
 | 会话摘要 | `sessions.rs` | `src/functions/summarize.ts`, `src/prompts/summary.ts` | SUMMARY_SYSTEM, session 结束时自动触发 |
 | 审计日志 | `audit.rs` | `src/functions/audit.ts` | 不可变追加, add/update/delete 自动记录 |
+| 压缩观察注入 LLM ✅ Phase1 | `engine.rs`, `runtime.rs` | `src/functions/context.ts` | `compose_system_prompt()` 中读取 compressed_observations 注入 |
+| 会话摘要注入 LLM ✅ Phase1 | `engine.rs`, `runtime.rs` | `src/functions/context.ts` | `compose_system_prompt()` 中读取 session_summaries 注入 |
 
 ### Phase 2 — 语义搜索与记忆管理
 
@@ -343,9 +343,13 @@ mem:retention                   retention_scores              P2
 
 通过与 agentmemory 源码的对比分析，tidev 记忆系统存在以下问题。这些问题按照严重程度排列：
 
-### 7.1 压缩观察和会话摘要不被消费 [严重]
+### 7.1 压缩观察和会话摘要不被消费 [严重] ✅ Phase1
 
-这是最核心的问题。agentmemory 中有一条完整的数据消费链，tidev 只实现了写入端：
+已修复（2026-05-15）。`compose_system_prompt()` 现在在 `select_hot()` 后注入：
+- 当前 session 的压缩观察（importance ≥ 5，限 8 条）
+- 其他 session 的会话摘要（限 5 条）
+
+agentmemory 中有一条完整的数据消费链，tidev 之前只实现了写入端，现在写入和注入端已闭环：
 
 ```
 agentmemory:                            tidev:
@@ -354,22 +358,16 @@ observe → compress                        ✅ 相同
    ↓                                      ↓
 写入搜索索引 + 向量索引                    ✅ 相同
    ↓                                      ↓
-mem::context → 注入到 LLM system prompt    ❌ 缺失
+mem::context → 注入到 LLM system prompt    ✅ 已实现（Phase 1）
    ↓                                      ↓
 mem::summarize → session_summaries         ⚠ 每轮触发（见 7.3）
    ↓                                      ↓
-mem::context → 注入到 LLM                  ❌ 缺失
+mem::context → 注入到 LLM                  ✅ 已实现（Phase 1）
    ↓                                      ↓
 consolidation-pipeline → SemanticMemory    ❌ 缺失
 ```
 
-具体缺失的消费路径：
-
-**压缩观察不被注入**：agentmemory 的 `mem::context` 在无 session summary 时，会取 `importance >= 5` 的压缩观察注入 LLM prompt。tidev 的 `build_system_prompt()` 只调了 `select_hot()`（5 条按 usage_count 排序的记忆），完全不碰压缩观察。
-
-**会话摘要不被注入**：agentmemory 的有 summary 的 session 会被注入 `title + narrative + decisions + files`。tidev 的 `build_system_prompt()` 完全不读 `session_summaries` 表。
-
-**结果**：LLM API 调用花了大量成本生成的压缩和摘要数据，写进去之后就再也没有人读。
+**遗留问题**：会话摘要仍在每轮对话结束时触发（见 7.3），但至少摘要数据已被消费。
 
 ### 7.2 原始观察不应持久保留 [严重]
 
@@ -456,16 +454,18 @@ tidev 的 TUI 中，session 从创建后就一直存在，用户可以：
 
 **方案**：在 `compressed_observations` 表中增加 `embedding BLOB` 列，启动时从 DB 批量加载。
 
-### 7.6 搜索仅支持手动路径
+### 7.6 搜索仅支持手动路径 ✅ Phase1（部分）
+
+**Phase 1 已修复自动注入**：`compose_system_prompt()` 现在注入压缩观察（当前 session，重要性筛选）和会话摘要（其他 session）。但 `select_hot()` 仍仅按使用频率排序，不包含语义检索。
 
 agentmemory 有两条搜索路径：
 
 | 路径 | agentmemory | tidev |
 |------|-------------|-------|
-| 自动注入 | `mem::context` → 随 system prompt 注入 | ❌ 缺失 |
+| 自动注入 | `mem::context` → 随 system prompt 注入 | ✅ 已实现压缩观察 + 会话摘要注入（Phase 1） |
 | 手动调用 | MCP tools `memory_recall` / `memory_smart_search` | ✅ LLM 可调用 `memory search` |
 
-tidev 的 `build_system_prompt()` 只用 `select_hot()` 取了 5 条按使用频率排序的记忆注入 prompt：
+tidev 的 `build_system_prompt()` 仍只用 `select_hot()` 取了 5 条按使用频率排序的记忆注入 prompt：
 
 ```rust
 // src/agent/runtime.rs:209
@@ -572,11 +572,11 @@ session::stopped（客户端显式调用）:
 tidev 数据流（当前）:
 =====================
 
-build_system_prompt（每轮）:
+compose_system_prompt（每轮）:
   ├─ select_hot(5)  ← ORDER BY usage_count DESC，不含语义
+  ├─ load_recent_compressed_observations(importance≥5, limit=8) ✅ Phase1
+  ├─ load_other_session_summaries(limit=5) ✅ Phase1
   └─ render_pinned_slots()
-  ❌ 不读取 compressed_observations
-  ❌ 不读取 session_summaries
 
 每次工具调用:
   observe → INSERT INTO observations
@@ -589,7 +589,7 @@ build_system_prompt（每轮）:
 每轮对话结束:
   summarize_session() → INSERT OR REPLACE session_summaries
   // 每次覆盖，LLM 调用浪费
-  // 不读回
+  // ⚠ Phase1 修复了读回，但时机问题仍待解决
 
 手动（可选）:
   LLM 调用 memory search 或 memory remember 工具

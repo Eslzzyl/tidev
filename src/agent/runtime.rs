@@ -153,6 +153,7 @@ impl AgentRuntime {
         &mut self,
         base_prompt: &str,
         mode: Option<SessionMode>,
+        session_id: uuid::Uuid,
     ) -> (String, Vec<String>) {
         let base_prompt = base_prompt.trim();
 
@@ -209,9 +210,27 @@ impl AgentRuntime {
         if let Ok(memories) = memory_store.select_hot(&ws, 5, 800) {
             let memory_prompt = crate::memory::MemoryStore::format_for_prompt(&memories);
             if !memory_prompt.is_empty() {
+                prompt.push_str("\n\n");
                 prompt.push_str(&memory_prompt);
             }
         }
+
+        // ── Phase 1: Compressed observations (current session) ──────────
+        if let Ok(obs) = memory_store.load_recent_compressed_observations(&session_id, 8, 5)
+            && !obs.is_empty()
+        {
+            prompt.push_str("\n\n");
+            prompt.push_str(&Self::format_compressed_observations(&obs));
+        }
+
+        // ── Phase 1: Session summaries (other sessions) ─────────────────
+        if let Ok(summaries) = memory_store.load_other_session_summaries(&session_id, 5)
+            && !summaries.is_empty()
+        {
+            prompt.push_str("\n\n");
+            prompt.push_str(&Self::format_session_summaries(&summaries));
+        }
+
         // Memory slots (ensure defaults + render pinned)
         if let Ok(slot_content) = memory_store.render_pinned_slots(&ws) {
             if !slot_content.is_empty() {
@@ -221,6 +240,54 @@ impl AgentRuntime {
         }
 
         (prompt, sources)
+    }
+
+    /// Format compressed observations for prompt injection.
+    fn format_compressed_observations(obs: &[crate::memory::CompressedObservation]) -> String {
+        let mut parts = Vec::new();
+        parts.push("## Recent Key Observations\n".to_string());
+        for o in obs {
+            let files_str = if o.files.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", o.files.join(", "))
+            };
+            let concepts_str = if o.concepts.is_empty() {
+                String::new()
+            } else {
+                format!(" [concepts: {}]", o.concepts.join(", "))
+            };
+            parts.push(format!(
+                "- [importance={}] {}: {}{}{}",
+                o.importance, o.title, o.narrative, concepts_str, files_str,
+            ));
+        }
+        parts.join("\n")
+    }
+
+    /// Format session summaries for prompt injection.
+    fn format_session_summaries(summaries: &[crate::memory::SessionSummary]) -> String {
+        let mut parts = Vec::new();
+        parts.push("## Previous Session Summaries\n".to_string());
+        for s in summaries {
+            let title = s.title.as_deref().unwrap_or("Untitled");
+            let narrative = s.narrative.as_deref().unwrap_or("");
+            let decisions_str = if s.key_decisions.is_empty() {
+                String::new()
+            } else {
+                format!("\n    Decisions: {}", s.key_decisions.join(", "))
+            };
+            let files_str = if s.files_modified.is_empty() {
+                String::new()
+            } else {
+                format!("\n    Files: {}", s.files_modified.join(", "))
+            };
+            parts.push(format!(
+                "- **{}**: {}{}{}",
+                title, narrative, decisions_str, files_str,
+            ));
+        }
+        parts.join("\n")
     }
 
     /// Build request messages from stored session messages, preprocessed
@@ -1075,7 +1142,7 @@ impl AgentRuntime {
 
             // Compose + build
             let (system_prompt, _sources) =
-                self.compose_system_prompt(&child_model.system_prompt, None);
+                self.compose_system_prompt(&child_model.system_prompt, None, child_session_id);
             let mut model_for_turn = child_model.clone();
             model_for_turn.system_prompt = system_prompt;
             let request_messages =
@@ -1413,7 +1480,7 @@ impl AgentRuntime {
             };
 
             // 2. Compose system prompt
-            let (system_prompt, _sources) = self.compose_system_prompt(&model.system_prompt, Some(mode));
+            let (system_prompt, _sources) = self.compose_system_prompt(&model.system_prompt, Some(mode), session_id);
 
             // 3. Build request messages
             let request_messages = self.build_request_messages(&db_messages, context_manager, mode);
@@ -1507,7 +1574,7 @@ impl AgentRuntime {
                         session_id
                     );
                     let (system_prompt, _sources) =
-                        self.compose_system_prompt(&model.system_prompt, Some(mode));
+                        self.compose_system_prompt(&model.system_prompt, Some(mode), session_id);
                     let mut compact_model = model.clone();
                     compact_model.system_prompt = system_prompt;
                     let ctx_config = ContextManagerConfig {
