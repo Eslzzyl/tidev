@@ -203,10 +203,6 @@ impl SlotService {
 
     /// Append content to a slot (respects size limit).
     pub fn append(db: &Connection, label: &str, scope: SlotScope, project: &str, content: &str) -> Result<MemorySlot> {
-        let project_str = match scope {
-            SlotScope::Global => "",
-            SlotScope::Project => project,
-        };
         let existing = Self::get(db, label, scope, project)?
             .ok_or_else(|| anyhow::anyhow!("slot '{}' not found", label))?;
 

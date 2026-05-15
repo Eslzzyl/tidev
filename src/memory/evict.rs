@@ -1,6 +1,5 @@
 use anyhow::Result;
 use rusqlite::Connection;
-use chrono::Utc;
 
 /// Automatic eviction service.
 /// Replicates agentmemory's `mem::evict` and `mem::auto-forget`.

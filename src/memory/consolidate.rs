@@ -459,12 +459,10 @@ Content: {}",
 struct FactEntry {
     title: String,
     content: String,
-    confidence: f64,
 }
 
 struct ProcedureEntry {
     name: String,
-    trigger: String,
     steps: Vec<String>,
 }
 
@@ -480,7 +478,7 @@ fn parse_facts_xml(xml: &str) -> Vec<FactEntry> {
     };
     let inner = &xml[start..end];
 
-    // Parse individual <fact confidence="...">...</fact>
+    // Parse individual <fact>...</fact>
     let mut pos = 0;
     while let Some(fs) = inner[pos..].find("<fact") {
         let tag_end = inner[pos + fs..].find('>').map(|i| pos + fs + i + 1);
@@ -493,20 +491,6 @@ fn parse_facts_xml(xml: &str) -> Vec<FactEntry> {
             None => break,
         };
 
-        // Extract confidence attribute
-        let attr_section = &inner[pos + fs..pos + fs + 80.min(inner.len() - pos - fs)];
-        let confidence = attr_section
-            .find("confidence=\"")
-            .and_then(|c| {
-                let val_start = c + "confidence=\"".len();
-                attr_section[val_start..].find('"').map(|e| {
-                    attr_section[val_start..val_start + e]
-                        .parse::<f64>()
-                        .unwrap_or(0.5)
-                })
-            })
-            .unwrap_or(0.5);
-
         let content = inner[content_start..content_end].trim().to_string();
         if !content.is_empty() {
             // Use first 80 chars as title
@@ -515,11 +499,7 @@ fn parse_facts_xml(xml: &str) -> Vec<FactEntry> {
             } else {
                 content.clone()
             };
-            facts.push(FactEntry {
-                title,
-                content,
-                confidence,
-            });
+            facts.push(FactEntry { title, content });
         }
 
         pos = content_end + "</fact>".len();
@@ -554,7 +534,6 @@ fn parse_procedures_xml(xml: &str) -> Vec<ProcedureEntry> {
         // Extract attributes
         let attr_section = &inner[pos + ps..pos + ps + 200.min(inner.len() - pos - ps)];
         let name = extract_attr(attr_section, "name").unwrap_or_default();
-        let trigger = extract_attr(attr_section, "trigger").unwrap_or_default();
 
         // Parse steps
         let block = &inner[block_start..block_end];
@@ -577,11 +556,7 @@ fn parse_procedures_xml(xml: &str) -> Vec<ProcedureEntry> {
         }
 
         if !name.is_empty() && !steps.is_empty() {
-            procedures.push(ProcedureEntry {
-                name,
-                trigger,
-                steps,
-            });
+            procedures.push(ProcedureEntry { name, steps });
         }
 
         pos = block_end + "</procedure>".len();

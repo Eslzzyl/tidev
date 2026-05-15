@@ -595,7 +595,6 @@ impl MemoryStore {
                     self.bm25.write().unwrap().add(
                         &id.to_string(),
                         &search_text,
-                        &raw.session_id.to_string(),
                     );
                 }
                 Ok(Some(id))
@@ -651,7 +650,6 @@ impl MemoryStore {
         self.bm25.write().unwrap().add(
             &compressed.id.to_string(),
             &compressed.to_search_text(),
-            &compressed.session_id.to_string(),
         );
 
         // Add to vector index (async, best-effort) + persist to DB

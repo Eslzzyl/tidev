@@ -17,7 +17,6 @@ pub struct Bm25Index {
 #[derive(Debug)]
 struct Bm25Entry {
     doc_length: usize,
-    session_id: String,
 }
 
 impl Bm25Index {
@@ -33,7 +32,7 @@ impl Bm25Index {
     }
 
     #[allow(dead_code)]
-    pub fn add(&mut self, id: &str, text: &str, session_id: &str) {
+    pub fn add(&mut self, id: &str, text: &str) {
         let tokens = tokenize(text);
         let doc_length = tokens.len();
         self.total_docs += 1;
@@ -54,10 +53,7 @@ impl Bm25Index {
 
         self.entries.insert(
             id,
-            Bm25Entry {
-                doc_length,
-                session_id: session_id.to_string(),
-            },
+            Bm25Entry { doc_length },
         );
     }
 
