@@ -489,6 +489,15 @@ impl App {
         if let Some(token) = self.request_cancel_token.take() {
             token.cancel();
         }
+
+        // Give tasks a brief window to notice cancellation and clean up
+        // (e.g. bash execution loop checks cancel flag every 100ms).
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // Force-kill any remaining child processes (e.g. bash subprocesses
+        // whose tokio task was dropped before it could clean up).
+        crate::tooling::builtin::kill_all_children();
+
         self.pending_permission_rx = None;
         self.pending_permission_response = None;
 

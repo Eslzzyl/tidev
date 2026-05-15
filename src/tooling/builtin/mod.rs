@@ -268,3 +268,7 @@ pub fn execute_tool_call_streaming(
 
     Ok(result)
 }
+
+/// Kill any remaining tracked child processes. Called during program exit
+/// to prevent orphaned bash subprocesses.
+pub use exec::kill_all_children;

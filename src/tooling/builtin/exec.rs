@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::{
+    collections::HashSet,
     io::Read,
     path::Path,
     process::Stdio,
@@ -8,10 +9,12 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
         mpsc,
+        Mutex,
     },
     thread,
     time::Duration,
 };
+use std::sync::LazyLock;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use tokio::sync::mpsc::UnboundedSender;
@@ -22,6 +25,49 @@ use crate::session::{BackendEvent, tool_output_preview};
 use crate::tooling::tools::{BashArgs, decode_tool_args};
 use crate::tooling::{ToolDefinition, ToolPermission};
 use uuid::Uuid;
+
+/// Registry of active child process PIDs spawned by the bash tool.
+/// Used during program exit to prevent orphaned processes.
+static ACTIVE_CHILDREN: LazyLock<Mutex<HashSet<u32>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
+
+/// Register a child PID so it can be killed on program exit.
+pub fn register_child(pid: u32) {
+    ACTIVE_CHILDREN.lock().unwrap().insert(pid);
+}
+
+/// Unregister a child PID that has exited normally.
+pub fn unregister_child(pid: u32) {
+    ACTIVE_CHILDREN.lock().unwrap().remove(&pid);
+}
+
+/// Kill all tracked child processes. Two-phase: SIGTERM → brief wait → SIGKILL.
+#[cfg(unix)]
+pub fn kill_all_children() {
+    let pids: Vec<u32> = ACTIVE_CHILDREN.lock().unwrap().iter().copied().collect();
+    if pids.is_empty() {
+        return;
+    }
+
+    // Phase 1: SIGTERM — graceful shutdown
+    for &pid in &pids {
+        let _ = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+    }
+
+    // Give them a moment to exit cleanly
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    // Phase 2: SIGKILL — force kill survivors
+    for &pid in &pids {
+        let _ = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+    }
+}
+
+/// Kill all tracked child processes (no-op on non-Unix).
+#[cfg(not(unix))]
+pub fn kill_all_children() {
+    // Windows support could be added later using TerminateProcess
+}
 
 /// Result of bash tool execution, including sandbox and RTK metadata.
 #[derive(Debug)]
@@ -207,6 +253,10 @@ fn run_shell_inner(
         }
     };
 
+    // Register child PID so it can be killed on program exit if needed.
+    let child_pid = process.id();
+    register_child(child_pid);
+
     let mut stderr = process.stderr.take();
     let start_time = std::time::Instant::now();
     let timeout = Duration::from_millis(timeout_ms);
@@ -246,6 +296,7 @@ fn run_shell_inner(
         {
             let _ = process.kill();
             let _ = process.wait();
+            unregister_child(child_pid);
             return Err(anyhow::anyhow!("shell command cancelled"));
         }
 
@@ -253,6 +304,7 @@ fn run_shell_inner(
         if start_time.elapsed() > timeout {
             let _ = process.kill();
             let _ = process.wait();
+            unregister_child(child_pid);
             return Err(anyhow::anyhow!(
                 "bash tool terminated command after exceeding timeout {} ms. \
                  If this command is expected to take longer and is not waiting for interactive input, \
@@ -309,6 +361,7 @@ fn run_shell_inner(
 
     // ─── Process finished ──────────────────────────────────────────────
     let status = process.wait().context("failed to wait for shell command")?;
+    unregister_child(child_pid);
     let exit_code = status.code();
 
     // Merge stderr output
