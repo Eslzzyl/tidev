@@ -204,10 +204,14 @@ impl AgentRuntime {
         prompt.push_str(&system_info.format_env());
         prompt.push_str("\n</env>");
 
-        // Workspace memories
+        // Workspace memories — use semantic search when available
         let ws = self.workspace_root.display().to_string();
         let memory_store = self.tools.memory_store();
-        if let Ok(memories) = memory_store.select_hot(&ws, 5, 800) {
+        // Use workspace directory name as the query for semantic retrieval
+        let query = self.workspace_root
+            .file_name()
+            .and_then(|n| n.to_str());
+        if let Ok(memories) = memory_store.search_hot_context(query, &ws, 5, 800) {
             let memory_prompt = crate::memory::MemoryStore::format_for_prompt(&memories);
             if !memory_prompt.is_empty() {
                 prompt.push_str("\n\n");

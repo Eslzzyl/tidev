@@ -301,10 +301,10 @@ impl MemoryStore {
         // Final fallback: LIKE search
         let pattern = format!("%{}%", query);
         let mut stmt = db.prepare(
-            "SELECT id, workspace_root, memory_type, title, content, tags, source_session_id, created_at, updated_at, usage_count, active, concepts, files, strength, importance, version, parent_id, supersedes, related_ids, is_latest
-             FROM memories WHERE workspace_root = ?1 AND active = 1
-             AND (title LIKE ?2 OR content LIKE ?3 OR tags LIKE ?4)
-             ORDER BY usage_count DESC LIMIT 20",
+              "SELECT id, workspace_root, memory_type, title, content, tags, source_session_id, created_at, updated_at, usage_count, active, concepts, files, strength, importance, version, parent_id, supersedes, related_ids, is_latest
+               FROM memories WHERE workspace_root = ?1 AND active = 1 AND is_latest = 1
+               AND (title LIKE ?2 OR content LIKE ?3 OR tags LIKE ?4)
+               ORDER BY usage_count DESC LIMIT 20",
         )?;
         let entries = stmt.query_map(
             rusqlite::params![workspace_root, pattern, pattern, pattern],
@@ -376,6 +376,27 @@ impl MemoryStore {
             result.push(entry?);
         }
         Ok(result)
+    }
+
+    /// Search for context-relevant memories using semantic search when available.
+    ///
+    /// When `query` is provided and embedding is configured, uses hybrid
+    /// search (BM25 + vector) via `search_hybrid`. Falls back to FTS5,
+    /// then to compound scoring (`select_hot`) when nothing else succeeds.
+    pub fn search_hot_context(&self, query: Option<&str>, workspace_root: &str, limit: usize, min_chars: usize) -> Result<Vec<MemoryEntry>> {
+        if let Some(query) = query {
+            let q = query.trim();
+            if !q.is_empty() {
+                // Try search (hybrid → FTS5 → LIKE) with the query
+                if let Ok(entries) = self.search(workspace_root, q) {
+                    if !entries.is_empty() {
+                        return Ok(entries);
+                    }
+                }
+            }
+        }
+        // Fall back to compound sort (importance × frequency × recency)
+        self.select_hot(workspace_root, limit, min_chars)
     }
 
     /// Format memories for inclusion in the system prompt.
@@ -807,7 +828,7 @@ impl MemoryStore {
                             let _uuid = Uuid::parse_str(id).unwrap_or(Uuid::nil());
                             if let Ok(entry) = db.query_row(
                                 "SELECT id, workspace_root, memory_type, title, content, tags, source_session_id, created_at, updated_at, usage_count, active, concepts, files, strength, importance, version, parent_id, supersedes, related_ids, is_latest
-                                 FROM memories WHERE id = ?1 AND workspace_root = ?2 AND active = 1",
+                                  FROM memories WHERE id = ?1 AND workspace_root = ?2 AND active = 1 AND is_latest = 1",
                                 rusqlite::params![id, workspace_root],
                                 |row| super::remember::map_memory_entry_from_row(row),
                             ) {

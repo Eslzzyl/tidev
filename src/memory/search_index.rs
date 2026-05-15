@@ -179,13 +179,12 @@ pub fn fts5_search_memories(
     let safe_query = escape_fts5_query(query);
 
     let mut stmt = db.prepare(
-        "SELECT m.id, m.title, rank
-         FROM memories_fts f
-         JOIN memories m ON m.rowid = f.rowid
-         WHERE memories_fts MATCH ?1 AND m.workspace_root = ?2 AND m.active = 1
-         ORDER BY rank
-         LIMIT ?3",
-    )?;
+         "SELECT m.id, m.title, rank
+          FROM memories_fts f
+          JOIN memories m ON m.rowid = f.rowid
+          WHERE memories_fts MATCH ?1 AND m.workspace_root = ?2 AND m.active = 1 AND m.is_latest = 1
+          ORDER BY rank
+          LIMIT ?3",    )?;
 
     let results = stmt.query_map(
         rusqlite::params![safe_query, workspace_root, limit as i64],
