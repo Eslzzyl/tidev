@@ -125,7 +125,7 @@ impl App {
             ).with_memory_store(memory_store.clone()),
         };
         // Schedule periodic eviction (every 60 minutes)
-        {
+        if tokio::runtime::Handle::try_current().is_ok() {
             let evict_store = memory_store.clone();
             tokio::spawn(async move {
                 let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
@@ -150,7 +150,7 @@ impl App {
         // Sessions inactive for longer than `INACTIVITY_TIMEOUT_SECS` will be
         // auto-summarised.  (This could be made configurable in the future.)
         const INACTIVITY_TIMEOUT_SECS: i64 = 300;
-        {
+        if tokio::runtime::Handle::try_current().is_ok() {
             let check_store = store.clone();
             let check_mem_store = memory_store.clone();
             let check_ws = workspace_root.display().to_string();
@@ -196,7 +196,7 @@ impl App {
         }
 
         // Schedule periodic consolidation (every 30 minutes).
-        {
+        if tokio::runtime::Handle::try_current().is_ok() {
             let cons_store = memory_store.clone();
             let cons_ws = workspace_root.display().to_string();
             let cons_cancel = inactivity_check_cancel.clone();
@@ -218,7 +218,7 @@ impl App {
         }
 
         // Schedule periodic reflection (every 30 minutes, same as consolidation).
-        {
+        if tokio::runtime::Handle::try_current().is_ok() {
             let reflect_store = memory_store.clone();
             let reflect_ws = workspace_root.display().to_string();
             let reflect_cancel = inactivity_check_cancel.clone();
