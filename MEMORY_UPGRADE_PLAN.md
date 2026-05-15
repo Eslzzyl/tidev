@@ -2,7 +2,7 @@
 
 > 基于对 [agentmemory](https://github.com/rohitg00/agentmemory) v0.9.12 的逆向分析，在 tidev 中以 Rust 复刻。
 >
-> 更新时间：2026-05-15（Phase 1 ✅, Phase 2 ✅, Phase 3 ✅）
+> 更新时间：2026-05-15（Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅, Phase 6 ✅）
 
 ---
 
@@ -142,6 +142,8 @@ search(query, workspace_root)
 | 保存度评分 | `retention.rs` | `src/functions/retention.ts` | `importance * exp(-0.1 * age) + access_boost` |
 | 自动遗忘 | `evict.rs` | `src/functions/evict.ts`, `src/functions/auto-forget.ts` | 每小时定时器, 淘汰 stale + 旧版本 |
 | select_hot 复合排序 ✅ Phase3 | `engine.rs` | — | `importance*0.5 + usage_count*0.3 + recency_bonus*0.2` |
+| Retention 自动集成 ✅ Phase6 | `engine.rs` | `src/functions/retention.ts` | `remember()` + `record_usage()` 中自动计算 |
+| PostToolFailure 接入 ✅ Phase6 | `runtime.rs` | `src/functions/observe.ts` | 检测 `sandbox_denied` / `Error:` 前缀 |
 
 ---
 
@@ -484,22 +486,23 @@ ORDER BY usage_count DESC LIMIT 5
 
 **影响**：一个项目积累大量记忆后，高频使用的旧记忆会一直占据 hot memory 槽位，新写入的重要记忆可能长时间无法被自动注入。
 
-### 7.8 Retention scoring 未自动接入
+### 7.8 Retention scoring 未自动接入 ✅ Phase6
 
-`retention.rs:29` 实现了完整的指数衰减评分公式：
-```
-score = importance * exp(-0.1 * age_days) + 0.3 * min(access_count / 10, 1.0)
-```
+已修复（2026-05-15）：
+- `remember()` 写入新记忆时自动计算 retention score
+- `record_usage()` 更新使用计数时自动重新计算 retention score
 
-但 `compute_retention()` 从未在 `remember()`、`search()` 或 `select_hot()` 中自动调用。这个分数只在 eviction 时被动查询（`evict.rs:20`），不参与排序或筛选。
+仍然存在问题：
 
 ### 7.9 无自动跨 session 记忆整合（整合管线）
 
 agentmemory 的 `mem::consolidate-pipeline` 在累积 ≥5 个 session summaries 后调用 LLM 提取跨 session 的知识事实（SemanticMemory）和流程模式（ProceduralMemory）。tidev 完全没有此功能。
 
-### 7.10 PostToolFailure 未接入（已有 §4.6）
+### 7.10 PostToolFailure 未接入（已有 §4.6） ✅ Phase6
 
-`on_post_tool_failure()` 方法已定义但未在任何执行路径中调用。失败信息嵌在 `result.output` 中而非错误字段，可靠检测需要改造 `ToolExecutionResult`。
+已修复（2026-05-15）：`execute_tool_calls()` 在工具返回错误时调用 `on_post_tool_failure()`。
+- 检测条件：`sandbox_denied` 为 true，或 output 以 `"Error:"` / `"Tool task panicked"` 开头
+- 记录为 `HookType::PostToolFailure` 观察，供记忆系统学习
 
 ### 7.11 审计不完整（已有 §4.5）
 

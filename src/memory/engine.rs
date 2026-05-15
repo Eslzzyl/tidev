@@ -296,6 +296,18 @@ impl MemoryStore {
             "UPDATE memories SET usage_count = usage_count + 1 WHERE id = ?1 AND workspace_root = ?2",
             rusqlite::params![id.to_string(), workspace_root],
         )?;
+        // Auto-update retention score
+        if let Ok(entry) = self.read_by_id(&db, &id, workspace_root) {
+            let age_days = (chrono::Utc::now() - entry.created_at).num_days() as f64;
+            let _ = RetentionService::compute_and_store(
+                &db,
+                &id.to_string(),
+                "memory",
+                entry.importance as f64,
+                age_days,
+                entry.usage_count + 1,
+            );
+        }
         Ok(())
     }
 
@@ -579,6 +591,17 @@ impl MemoryStore {
             &entry.id.to_string(),
             None, None, source_session_id,
         )?;
+
+        // Auto-compute retention score for new memory
+        let age_days = (chrono::Utc::now() - entry.created_at).num_days() as f64;
+        let _ = RetentionService::compute_and_store(
+            &db,
+            &entry.id.to_string(),
+            "memory",
+            entry.importance as f64,
+            age_days,
+            entry.usage_count,
+        );
 
         Ok(entry)
     }

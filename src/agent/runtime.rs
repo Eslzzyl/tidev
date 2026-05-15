@@ -771,6 +771,18 @@ impl AgentRuntime {
                 ToolExecutionResult::new(format!("Tool task panicked/aborted: {join_err}"))
             });
 
+            // ─── PostToolFailure Observation ─────────────────────────────
+            // If the tool result indicates an error, record a PostToolFailure
+            // observation so the memory system can learn from failures.
+            if result.sandbox_denied
+                || result.output.starts_with("Error:")
+                || result.output.starts_with("Tool task panicked")
+                || result.output.starts_with("Tool execution returned no result")
+            {
+                self.hooks
+                    .on_post_tool_failure(tool_call, &result.output, Some(session_id));
+            }
+
             // ─── Sandbox elevation  ────────────────────────────────────
             // If the tool was denied by the OS sandbox, ask the user
             // whether to retry with full filesystem access.  The tool
