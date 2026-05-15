@@ -177,8 +177,6 @@ search(query, workspace_root)
 |------|--------|------|
 | 知识图谱（DV11） | 高 | schema 中 `graph_nodes` / `graph_edges` 表已就绪，缺失实体抽取、图查询、图统计 |
 | 洞察/模式/教训反射 | 高 | 从概念聚类中合成 insight（参考 agentmemory 的 `mem::reflect`），依赖整合管线但尚未实现 |
-| 导入导出 | 低 | `storage/mod.rs` 已有 session 级 SQLite export/import，但记忆系统级别的导出文件 `export.rs` 不存在 |
-| 评估系统 | 中 | agentmemory 的自我评估功能，对单进程工具来说需求不高 |
 
 已实现：
 - 整合管线 ✅（`consolidate.rs`，2026-05-15）
@@ -248,14 +246,9 @@ LLM client 可用?
 OpenAI API key 可用?
   ├─ Yes → OpenAIEmbedder（text-embedding-3-small, 1536维）
   └─ No  → embedder = None → search() 直接跳过 hybrid 走 FTS5
-           无本地 embedding 选项
 ```
 
 搜索降级链条：hybrid(BM25+向量) → FTS5 → LIKE
-
-**问题**：
-- 仅支持 OpenAI 一个 provider
-- 没有本地 embedding 选项（如 ONNX / llama.cpp 等 Rust 生态方案）
 
 #### 4.7.3 Session 摘要的降级
 
