@@ -16,8 +16,10 @@ pub mod graph_retrieval;
 pub mod lessons;
 pub mod reflect;
 pub mod patterns;
+pub mod compression_queue;
 
 pub use types::*;
 pub use dedup::DedupMap;
 pub use search_index::Bm25Index;
 pub use engine::MemoryStore;
+pub use compression_queue::{CompressionQueue, DEFAULT_COMPRESSION_CONCURRENCY};

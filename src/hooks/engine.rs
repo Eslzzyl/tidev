@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::hooks::config::{HooksConfig, PostToolUseHookConfig};
 use crate::hooks::matcher::matches_tool;
 use crate::hooks::runner::run_hook_command;
-use crate::memory::{HookPayload, HookType, MemoryStore};
+use crate::memory::{CompressionQueue, HookPayload, HookType, MemoryStore};
 use crate::session::{ToolCall, ToolExecutionResult};
 
 /// Outcome of running hooks for a single tool call.
@@ -68,6 +68,7 @@ pub struct HookEngine {
     config: HooksConfig,
     workspace_root: PathBuf,
     memory_store: Option<Arc<MemoryStore>>,
+    compression_queue: Option<Arc<CompressionQueue>>,
 }
 
 impl HookEngine {
@@ -76,12 +77,19 @@ impl HookEngine {
             config,
             workspace_root,
             memory_store: None,
+            compression_queue: None,
         }
     }
 
     /// Attach a MemoryStore for automatic observation capture.
     pub fn with_memory_store(mut self, store: Arc<MemoryStore>) -> Self {
         self.memory_store = Some(store);
+        self
+    }
+
+    /// Attach a CompressionQueue for async observation compression.
+    pub fn with_compression_queue(mut self, queue: Arc<CompressionQueue>) -> Self {
+        self.compression_queue = Some(queue);
         self
     }
 
@@ -175,21 +183,13 @@ impl HookEngine {
                 assistant_response: None,
             };
             if let Ok(Some(obs_id)) = store.observe(&payload) {
-                // Schedule compression on a blocking thread (rusqlite Connection is !Send)
-                let store = store.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                    let rt = tokio::runtime::Handle::current();
-                    match rt.block_on(store.compress(obs_id)) {
-                        Ok(compressed) => {
-                            // Extract graph entities from the compressed observation
-                            if let Err(e) = store.graph_extract_from_observation(&compressed) {
-                                crate::log_warn!("graph extraction failed: {}", e);
-                            }
-                        }
-                        Err(e) => crate::log_warn!("auto-compression failed: {}", e),
+                // Enqueue for async compression via the compression queue.
+                // The queue handles backpressure and concurrency.
+                if let Some(ref queue) = self.compression_queue {
+                    if let Err(e) = queue.enqueue(obs_id) {
+                        crate::log_warn!("failed to enqueue compression: {}", e);
                     }
-                });
+                }
             }
         }
 
@@ -212,7 +212,15 @@ impl HookEngine {
                 user_prompt: None,
                 assistant_response: None,
             };
-            let _ = store.observe(&payload);
+            // Observe and enqueue for compression (aligns with agentmemory
+            // which also compresses PreToolUse observations).
+            if let Ok(Some(obs_id)) = store.observe(&payload) {
+                if let Some(ref queue) = self.compression_queue {
+                    if let Err(e) = queue.enqueue(obs_id) {
+                        crate::log_warn!("failed to enqueue pre-tool compression: {}", e);
+                    }
+                }
+            }
         }
     }
 
@@ -229,7 +237,13 @@ impl HookEngine {
                 user_prompt: None,
                 assistant_response: None,
             };
-            let _ = store.observe(&payload);
+            if let Ok(Some(obs_id)) = store.observe(&payload) {
+                if let Some(ref queue) = self.compression_queue {
+                    if let Err(e) = queue.enqueue(obs_id) {
+                        crate::log_warn!("failed to enqueue failure observation: {}", e);
+                    }
+                }
+            }
         }
     }
 

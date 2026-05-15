@@ -100,7 +100,16 @@ impl App {
         if let Ok(embed_model) = config.resolve_embedding_model(&auth, None) {
             memory_store.set_embedding_model(embed_model);
         }
+        // Start the compression queue for async observation compression.
+        let compression_queue_shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let compression_queue = Arc::new(crate::memory::CompressionQueue::start(
+            memory_store.clone(),
+            crate::memory::DEFAULT_COMPRESSION_CONCURRENCY,
+            compression_queue_shutdown.clone(),
+        ));
+        memory_store.set_compression_sender(compression_queue.sender());
         // Recover any uncompressed observations from previous runs
+        // (runs after the queue is created so recovered jobs go through it).
         if let Err(e) = memory_store.recover_uncompressed(50) {
             crate::log_warn!("startup recovery of uncompressed observations failed: {}", e);
         }
@@ -126,7 +135,8 @@ impl App {
             hooks: crate::hooks::HookEngine::new(
                 config.hooks.clone(),
                 workspace_root.clone(),
-            ).with_memory_store(memory_store.clone()),
+            ).with_memory_store(memory_store.clone())
+             .with_compression_queue(compression_queue.clone()),
         };
         // Schedule periodic eviction (every 60 minutes)
         if tokio::runtime::Handle::try_current().is_ok() {
@@ -379,6 +389,7 @@ impl App {
             thinking_level: active_model.thinking_level.clone(),
             memory_store,
             memory_panel: None,
+            compression_queue: Some(compression_queue),
             terminal_session: None,
             force_full_redraw: false,
         };
@@ -497,6 +508,12 @@ impl App {
         // Force-kill any remaining child processes (e.g. bash subprocesses
         // whose tokio task was dropped before it could clean up).
         crate::tooling::builtin::kill_all_children();
+
+        // Shut down the compression queue: signal workers, drain in-flight
+        // compressions and embeddings.
+        if let Some(queue) = self.compression_queue.take() {
+            queue.shutdown();
+        }
 
         self.pending_permission_rx = None;
         self.pending_permission_response = None;

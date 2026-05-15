@@ -67,6 +67,7 @@ use crate::{
     llm::LlmClient,
     mcp::McpManager,
     memory::MemoryStore,
+    memory::CompressionQueue,
     notifications,
     prompts::{SessionMode, init_command},
     provider_setup::ConnectDialog,
@@ -279,6 +280,9 @@ struct App {
     memory_store: Arc<MemoryStore>,
     /// Memory management panel
     memory_panel: Option<MemoryPanelState>,
+    /// Compression queue for async observation compression.
+    /// Shutdown is called during program exit.
+    compression_queue: Option<Arc<CompressionQueue>>,
     /// TUI terminal session for raw mode / alternate screen management.
     /// Used to suspend/resume the TUI when launching external editors.
     terminal_session: Option<TerminalSession>,

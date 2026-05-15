@@ -752,9 +752,31 @@ impl AgentRuntime {
             }
 
             for (tool_call, handle) in handles {
+                // PreToolUse: only for file-operation read tools (read, grep)
+                // to match agentmemory's PreToolUse matcher (Edit|Write|Read|Glob|Grep).
+                if is_file_operation(&tool_call.name) {
+                    self.hooks.on_pre_tool_use(&tool_call, Some(session_id));
+                }
+
                 let result = handle.await.unwrap_or_else(|join_err| {
                     ToolExecutionResult::new(format!("Tool task panicked/aborted: {join_err}"))
                 });
+
+                // PostToolUse: ALL read tools fire observations (agentmemory
+                // has no matcher on PostToolUse).
+                if result.sandbox_denied
+                    || result.output.starts_with("Error:")
+                    || result.output.starts_with("Tool task panicked")
+                    || result.output.starts_with("Tool execution returned no result")
+                {
+                    self.hooks
+                        .on_post_tool_failure(&tool_call, &result.output, Some(session_id));
+                } else {
+                    self.hooks
+                        .on_post_tool_use(&tool_call, &result, Some(session_id))
+                        .await;
+                }
+
                 // Persist read-only results immediately (Phase 1.5)
                 self.persist_tool_result(session_id, request_id, &tool_call, &result, event_tx)
                     .await?;
@@ -817,8 +839,11 @@ impl AgentRuntime {
                     sensitive_file_approved,
                 )
             };
-            // Record pre-tool-use observation
-            self.hooks.on_pre_tool_use(tool_call, Some(session_id));
+            // Record pre-tool-use observation (file operations only,
+            // matching agentmemory's PreToolUse matcher).
+            if is_file_operation(&tool_call.name) {
+                self.hooks.on_pre_tool_use(tool_call, Some(session_id));
+            }
             let mut result = handle.await.unwrap_or_else(|join_err| {
                 ToolExecutionResult::new(format!("Tool task panicked/aborted: {join_err}"))
             });
@@ -2034,6 +2059,17 @@ async fn compact_in_background(
             });
         }
     }
+}
+
+/// Check whether a tool name corresponds to a file operation.
+///
+/// Matches agentmemory's PreToolUse matcher `"Edit|Write|Read|Glob|Grep"`
+/// plus tidev-specific tools (apply_patch).
+fn is_file_operation(tool_name: &str) -> bool {
+    matches!(
+        crate::tooling::canonical_tool_name(tool_name),
+        Some("read" | "write" | "edit" | "apply_patch" | "grep" | "glob")
+    )
 }
 
 #[cfg(test)]

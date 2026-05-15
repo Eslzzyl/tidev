@@ -4,6 +4,7 @@ use rusqlite::Connection;
 use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, Ordering},
+    mpsc,
     Mutex,
     Once,
     RwLock,
@@ -67,6 +68,9 @@ pub struct MemoryStore {
     compression_cb_failures: AtomicU32,
     /// When the circuit breaker was tripped (None = not tripped).
     compression_cb_tripped_at: RwLock<Option<std::time::Instant>>,
+    /// Sender to enqueue observations for async compression.
+    /// Set after `CompressionQueue::start()`; shared across all Arcs.
+    compression_sender: RwLock<Option<mpsc::SyncSender<Uuid>>>,
 }
 
 impl MemoryStore {
@@ -105,6 +109,7 @@ impl MemoryStore {
             compression_enabled: AtomicBool::new(true),
             compression_cb_failures: AtomicU32::new(0),
             compression_cb_tripped_at: RwLock::new(None),
+            compression_sender: RwLock::new(None),
         };
 
         Ok(store)
@@ -141,6 +146,12 @@ impl MemoryStore {
     /// Enable or disable automatic compression.
     pub fn set_compression_enabled(&self, enabled: bool) {
         self.compression_enabled.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Set the compression queue sender. Observations will be enqueued
+    /// for async compression instead of being scheduled inline.
+    pub fn set_compression_sender(&self, sender: mpsc::SyncSender<Uuid>) {
+        *self.compression_sender.write().unwrap() = Some(sender);
     }
 
     /// Check whether the compression circuit breaker is tripped.
@@ -773,10 +784,12 @@ impl MemoryStore {
         ).context("observation not found")
     }
 
-    fn schedule_compression(&self, _obs_id: Uuid) {
-        // In Phase 1, this is a placeholder.
-        // The hook system will call compress() explicitly from the runtime.
-        // In a full implementation, this would spawn a tokio task with 500ms delay.
+    fn schedule_compression(&self, obs_id: Uuid) {
+        // Send to the compression queue if one is configured.
+        // Otherwise this is a no-op (the old behaviour).
+        if let Some(ref sender) = *self.compression_sender.read().unwrap() {
+            let _ = sender.send(obs_id);
+        }
     }
 
     /// Recover uncompressed observations that may have been left behind
@@ -813,32 +826,39 @@ impl MemoryStore {
         crate::log_info!("recovering {} uncompressed observations", count);
 
         for id in ids {
-            let store = self.clone(); // each thread gets its own DB connection
-            std::thread::spawn(move || {
-                let rt = match tokio::runtime::Handle::try_current() {
-                    Ok(h) => h,
-                    Err(_) => {
-                        crate::log_warn!(
-                            "no tokio runtime available, skipping recovery of {}",
-                            id
-                        );
-                        return;
+            // Enqueue via the compression sender if available.
+            // If no queue is configured, fall back to a direct thread spawn
+            // (e.g. during early startup before the queue is created).
+            let has_sender = self.compression_sender.read().unwrap().is_some();
+            if has_sender {
+                self.schedule_compression(id);
+            } else {
+                let store = self.clone();
+                std::thread::spawn(move || {
+                    let rt = match tokio::runtime::Handle::try_current() {
+                        Ok(h) => h,
+                        Err(_) => {
+                            crate::log_warn!(
+                                "no tokio runtime available, skipping recovery of {}",
+                                id
+                            );
+                            return;
+                        }
+                    };
+                    match rt.block_on(store.compress(id)) {
+                        Ok(_) => {
+                            crate::log_info!("recovered uncompressed observation {}", id);
+                        }
+                        Err(e) => {
+                            crate::log_warn!(
+                                "recovery compression failed for {}: {}",
+                                id,
+                                e
+                            );
+                        }
                     }
-                };
-                // No sleep delay — this is recovery, not real-time observation
-                match rt.block_on(store.compress(id)) {
-                    Ok(_) => {
-                        crate::log_info!("recovered uncompressed observation {}", id);
-                    }
-                    Err(e) => {
-                        crate::log_warn!(
-                            "recovery compression failed for {}: {}",
-                            id,
-                            e
-                        );
-                    }
-                }
-            });
+                });
+            }
         }
 
         Ok(count)

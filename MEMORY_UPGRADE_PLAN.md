@@ -518,6 +518,84 @@ agentmemory 还有 `reflect`（洞察合成）未实现。
 - SSH private key blocks
 - 通用 `password`/`secret`/`api_key`/`token` 模式
 
+### 7.13 后台任务线程模式 —— `std::thread::spawn` vs `tokio::spawn`
+
+记忆系统共有 **8 个后台任务**，使用两种不同的线程模式：
+
+| # | 任务 | 位置 | 机制 | 间隔 | 取消 | 队列 |
+|---|------|------|------|------|------|------|
+| ① | Post-tool 自动压缩 | `hooks/engine.rs:180` | `std::thread::spawn` | 500ms 延迟 | ❌ | ❌ |
+| ② | 启动恢复压缩 | `memory/engine.rs:817` | `std::thread::spawn` | 启动时 | ❌ | ❌ |
+| ③ | Eviction（过期清理） | `run.rs:134` | `tokio::spawn` | 60 分钟 | ❌ | ❌ |
+| ④ | Inactivity 检查 + 摘要 | `run.rs:164` | `tokio::spawn` | 60 秒 | ✅ | ❌ |
+| ⑤ | Consolidation（语义整合） | `run.rs:208` | `tokio::spawn` | 30 分钟 | ✅ | ❌ |
+| ⑥ | Reflection（LLM 洞察） | `run.rs:230` | `tokio::spawn` | 30 分钟 | ✅ | ❌ |
+| ⑦ | Background compaction | `runtime.rs:1644` | `tokio::spawn` | 按需 | ❌ | ❌ |
+| ⑧ | Compaction streaming | `context.rs:314` | `tokio::spawn` | 按需 | ❌ | ❌ |
+
+**关键问题：**
+
+1. **①② 无并发上限**：每次工具调用 spawn 一个新 OS 线程，快速连续调用多个工具时线程数无上限。500ms 后这些线程并发调用 LLM compression + embedding API，可能触发速率限制。
+
+2. **①② 无队列**：每个线程独立打开 SQLite 连接（`store.clone()` 底层是 `Connection::open`），WAL 模式下并发读安全，但连接数膨胀。
+
+3. **③ 无取消令牌**：eviction 是唯一没有取消令牌的循环任务，退出时被 `runtime.shutdown_background()` 直接丢弃。
+
+4. **④⑤⑥ 共享同一取消令牌**：退出时同时 cancel，合理但三者之间无协调。可能在同一时间窗口内跑 consolidation 和 reflection，靠 SQLite 行锁排队。
+
+5. **⑦⑧ 无生命周期管理**：`JoinHandle` 直接丢弃，无法追踪完成状态。
+
+**与 agentmemory 的对比**：
+
+agentmemory 作为 Node.js 服务，所有后台操作（压缩、embedding、索引更新）通过异步事件循环和 `iii-sdk` 的 KV store 实现单线程非阻塞处理。tidev 使用 `std::thread::spawn` 是因为 rusqlite 的 `Connection: !Sync`，持有 `&Connection` 的 Future 是 `!Send`，无法直接在 `tokio::spawn` 中使用。
+
+### 7.14 读工具不产生 Observation —— 与 agentmemory 不一致
+
+**tidev 现状**：`execute_tool_calls()` 将工具分为两阶段：
+
+```
+Phase 1（并行）: Read-only 工具（read, grep, websearch 等）
+   └─ 不调用任何 hooks → 不产生 observation
+
+Phase 2（串行）: Write 工具（write, edit, bash, apply_patch 等）
+   └─ 每个调用: on_pre_tool_use → execute → on_post_tool_use
+      → 每次调用产生 1 个 PreToolUse + 1 个 PostToolUse observation
+```
+
+**agentmemory 的做法**（`plugin/hooks/hooks.json`）：
+
+```json
+"PreToolUse": {
+  "matcher": "Edit|Write|Read|Glob|Grep",  // ← 有过滤
+  "hooks": [...]
+},
+"PostToolUse": {
+  // ← 无 matcher! 所有工具调用都触发
+  "hooks": [...]
+}
+```
+
+- `PostToolUse` 没有 `matcher` 过滤，Claude Code 对所有工具（包括 Read、WebFetch 等）都触发 observation。
+- 每个工具调用独立产生 observation，**没有合并或批量处理**。
+
+**问题**：tidev 的读工具不产生 observation，导致：
+- 记忆系统无法感知"当前 session 读取了哪些文件"
+- 无法在 system prompt 注入读操作上下文（agentmemory 的 `mem::context` 依赖于已压缩的 observations）
+- 跨 session 的知识图谱无法关联读操作的文件路径
+
+**可能的修复方案**：在 Phase 1 的读工具结果处理中增加 hook 调用：
+
+```rust
+// Phase 1 当前代码（read-only tools）
+for (tool_call, handle) in handles {
+    let result = handle.await...;
+    self.hooks.on_post_tool_use(tool_call, &result, Some(session_id)).await;  // ← 新增
+    self.persist_tool_result(...)?;
+}
+```
+
+但需考虑：读工具数量多、频次高，会显著增加 observation 数量和 API 调用量。需要评估对存储和成本的影响。
+
 ---
 
 ## 8. 与 agentmemory 的数据流对比（完整版）
