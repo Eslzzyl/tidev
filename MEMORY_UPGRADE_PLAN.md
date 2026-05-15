@@ -2,7 +2,7 @@
 
 > 基于对 [agentmemory](https://github.com/rohitg00/agentmemory) v0.9.12 的逆向分析，在 tidev 中以 Rust 复刻。
 >
-> 更新时间：2026-05-15（Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅, Phase 6 ✅, 表合并 ✅）
+> 更新时间：2026-05-15（Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅, Phase 6 ✅, 表合并 ✅, 隐私过滤 ✅）
 
 ---
 
@@ -500,9 +500,15 @@ agentmemory 的 `mem::consolidate-pipeline` 在累积 ≥5 个 session summaries
 
 只在 `add()` / `update()` / `delete()` / `remember()` 时自动审计。slot 操作和 compress 未审计。
 
-### 7.12 无隐私过滤（已有 §4.4）
+### 7.12 无隐私过滤（已有 §4.4） ✅ 隐私过滤
 
-agentmemory 的 `observe.ts` 有 `stripPrivateData()` 过滤密码和 API key。tidev 未实现。敏感信息可能出现在 observation 记录中。
+已修复（2026-05-15）。`build_compression_prompt()` 新增 `strip_sensitive()` 函数，在 LLM 调用前过滤：
+- OpenAI / Anthropic API keys
+- GitHub tokens
+- Bearer tokens / Authorization headers
+- AWS access keys
+- SSH private key blocks
+- 通用 `password`/`secret`/`api_key`/`token` 模式
 
 ---
 

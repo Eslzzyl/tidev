@@ -42,6 +42,8 @@ Rules:
 - Strip any secrets, tokens, or credentials from the output";
 
 /// Build the compression user prompt from a raw observation.
+/// Sensitive data (API keys, tokens, credentials) is stripped before
+/// the text reaches the LLM.
 pub fn build_compression_prompt(raw: &RawObservation) -> String {
     let mut parts = Vec::new();
 
@@ -52,16 +54,61 @@ pub fn build_compression_prompt(raw: &RawObservation) -> String {
         parts.push(format!("Tool: {}", name));
     }
     if let Some(ref input) = raw.tool_input {
-        parts.push(format!("Input:\n{}", truncate(input, 4000)));
+        parts.push(format!("Input:\n{}", truncate(&strip_sensitive(input), 4000)));
     }
     if let Some(ref output) = raw.tool_output {
-        parts.push(format!("Output:\n{}", truncate(output, 4000)));
+        parts.push(format!("Output:\n{}", truncate(&strip_sensitive(output), 4000)));
     }
     if let Some(ref prompt) = raw.user_prompt {
-        parts.push(format!("User prompt:\n{}", truncate(prompt, 2000)));
+        parts.push(format!("User prompt:\n{}", truncate(&strip_sensitive(prompt), 2000)));
     }
 
     parts.join("\n\n")
+}
+
+/// Strip sensitive data patterns from text before it reaches the LLM.
+/// Covers common API keys, tokens, and credentials.
+fn strip_sensitive(s: &str) -> String {
+    let mut result = s.to_string();
+
+    // OpenAI: sk-... (51 chars typically)
+    if let Ok(re) = fancy_regex::Regex::new(r#"(?i)sk-[A-Za-z0-9]{20,}"#) {
+        result = re.replace_all(&result, "[REDACTED_API_KEY]").to_string();
+    }
+    // Anthropic: sk-ant-...
+    if let Ok(re) = fancy_regex::Regex::new(r#"(?i)sk-ant-[A-Za-z0-9]{20,}"#) {
+        result = re.replace_all(&result, "[REDACTED_API_KEY]").to_string();
+    }
+    // GitHub: ghp_, gho_, ghu_, ghs_, ghr_
+    if let Ok(re) = fancy_regex::Regex::new(r#"(?i)gh[pousr]_[A-Za-z0-9]{20,}"#) {
+        result = re.replace_all(&result, "[REDACTED_TOKEN]").to_string();
+    }
+    // Bearer tokens
+    if let Ok(re) = fancy_regex::Regex::new(r#"(?i)Bearer\s+[A-Za-z0-9._-]{20,}"#) {
+        result = re.replace_all(&result, "Bearer [REDACTED_TOKEN]").to_string();
+    }
+    // Authorization headers (generic)
+    if let Ok(re) = fancy_regex::Regex::new(r#"(?i)Authorization:\s*\S{20,}"#) {
+        result = re.replace_all(&result, "Authorization: [REDACTED]").to_string();
+    }
+    // AWS access keys: AKIA...
+    if let Ok(re) = fancy_regex::Regex::new(r#"(?i)AKIA[A-Z0-9]{16}"#) {
+        result = re.replace_all(&result, "[REDACTED_AWS_KEY]").to_string();
+    }
+    // SSH private key blocks
+    if let Ok(re) = fancy_regex::Regex::new(
+        r#"(?ms)-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----.+?-----END (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"#,
+    ) {
+        result = re.replace_all(&result, "[REDACTED_PRIVATE_KEY]").to_string();
+    }
+    // Generic password/key patterns
+    if let Ok(re) = fancy_regex::Regex::new(
+        r#"(?i)(password|passwd|secret|api_key|apikey|token)\s*[:=]\s*['""]?\S{8,}"#,
+    ) {
+        result = re.replace_all(&result, "${1}=[REDACTED]").to_string();
+    }
+
+    result
 }
 
 fn truncate(s: &str, max: usize) -> String {
