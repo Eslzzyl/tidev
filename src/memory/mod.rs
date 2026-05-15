@@ -8,7 +8,6 @@ pub mod sessions;
 pub mod engine;
 pub mod slots;
 pub mod consolidate;
-pub mod vector_index;
 pub mod hybrid_search;
 pub mod retention;
 pub mod evict;

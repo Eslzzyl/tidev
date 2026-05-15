@@ -368,6 +368,11 @@ CREATE INDEX IF NOT EXISTS idx_file_reads_session
 -- Merged table: raw observation → compressed observation in one row.
 -- observe() writes raw fields, compress() fills compressed fields
 -- and NULLs tool_input/tool_output (agentmemory's "KV overwrite" semantics).
+CREATE TABLE IF NOT EXISTS vec_obs_map (
+    rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+    observation_id TEXT UNIQUE NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS compressed_observations (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL REFERENCES sessions(id),

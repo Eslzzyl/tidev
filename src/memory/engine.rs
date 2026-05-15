@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, Ordering},
     Mutex,
+    Once,
     RwLock,
 };
 use uuid::Uuid;
@@ -23,9 +24,16 @@ use super::sessions::SessionService;
 use super::slots::SlotService;
 use super::retention::RetentionService;
 use super::evict::{EvictionService, EvictionReport};
-use super::vector_index::VectorIndex;
 use super::hybrid_search::HybridSearch;
 use super::{lessons::LessonService, reflect::{ReflectService, ReflectReport}};
+
+/// Global once guard for sqlite-vec auto-extension registration.
+static VEC_INIT: Once = Once::new();
+
+// Direct FFI declaration matching the SQLite C API.
+unsafe extern "C" {
+    fn sqlite3_auto_extension(xEntryPoint: Option<unsafe extern "C" fn()>) -> i32;
+}
 
 // ─── Compression circuit breaker ────────────────────────────────────
 
@@ -52,7 +60,6 @@ pub struct MemoryStore {
     summarization_model: RwLock<Option<ActiveModel>>,
     /// Configured embedding model for vector search.
     embedding_model: RwLock<Option<EmbeddingActiveModel>>,
-    vector_index: RwLock<VectorIndex>,
     hybrid_search: RwLock<HybridSearch>,
     /// Whether automatic compression is enabled.
     compression_enabled: AtomicBool,
@@ -65,6 +72,13 @@ pub struct MemoryStore {
 impl MemoryStore {
     /// Open or create the memory store.
     pub fn open(db_path: impl AsRef<std::path::Path>) -> Result<Self> {
+        // Register sqlite-vec auto-extension once (must happen before any connection opens)
+        VEC_INIT.call_once(|| {
+            unsafe {
+                sqlite3_auto_extension(Some(sqlite_vec::sqlite3_vec_init));
+            }
+        });
+
         let path = db_path.as_ref().to_path_buf();
         let connection = Connection::open(&path)?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
@@ -75,12 +89,6 @@ impl MemoryStore {
         read_connection.pragma_update(None, "foreign_keys", "ON")?;
         read_connection.pragma_update(None, "journal_mode", "WAL")?;
         read_connection.busy_timeout(std::time::Duration::from_secs(5))?;
-
-        // Phase 4: Add embedding column for existing databases
-        let _ = connection.execute(
-            "ALTER TABLE compressed_observations ADD COLUMN embedding BLOB",
-            [],
-        );
 
         let store = Self {
             db_path: path,
@@ -93,15 +101,11 @@ impl MemoryStore {
             compression_model: RwLock::new(None),
             summarization_model: RwLock::new(None),
             embedding_model: RwLock::new(None),
-            vector_index: RwLock::new(VectorIndex::new(0)),
             hybrid_search: RwLock::new(HybridSearch::new()),
             compression_enabled: AtomicBool::new(true),
             compression_cb_failures: AtomicU32::new(0),
             compression_cb_tripped_at: RwLock::new(None),
         };
-
-        // Phase 4: Load persisted embeddings into vector index on startup
-        store.load_embeddings_from_db();
 
         Ok(store)
     }
@@ -113,7 +117,6 @@ impl std::fmt::Debug for MemoryStore {
             .field("db_path", &self.db_path)
             .field("bm25", &self.bm25)
             .field("llm", &self.llm)
-            .field("vector_index", &self.vector_index)
             .finish()
     }
 }
@@ -164,13 +167,21 @@ impl MemoryStore {
     }
 
     /// Set the embedding model for vector search.
-    /// Re-loads persisted embeddings with the correct dimensions.
+    /// Ensures the vec0 virtual table exists with matching dimensions.
     pub fn set_embedding_model(&self, model: EmbeddingActiveModel) {
         let dims = model.dimensions;
         *self.embedding_model.write().unwrap() = Some(model);
-        // Re-create vector index with correct dimensions, then load persisted
-        *self.vector_index.write().unwrap() = VectorIndex::new(dims);
-        self.load_embeddings_from_db();
+
+        // Create vec0 virtual table for the given dimensions
+        if let Ok(db) = self.connection.lock() {
+            let sql = format!(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS vec_observations USING vec0(embedding float[{}])",
+                dims
+            );
+            if let Err(e) = db.execute_batch(&sql) {
+                crate::log_warn!("failed to create vec_observations table: {}", e);
+            }
+        }
     }
 
     /// Resolve the LLM and model to use for compression.
@@ -196,48 +207,6 @@ impl MemoryStore {
             .or_else(|| self.compression_model.read().unwrap().clone())
             .or_else(|| self.active_model.read().unwrap().clone())?;
         Some((llm, model))
-    }
-
-    /// Load persisted embeddings from DB into the in-memory vector index.
-    fn load_embeddings_from_db(&self) {
-        let db = match self.read_connection.lock() {
-            Ok(db) => db,
-            Err(_) => return,
-        };
-        let mut stmt = match db.prepare(
-            "SELECT id, session_id, embedding FROM compressed_observations WHERE embedding IS NOT NULL",
-        ) {
-            Ok(s) => s,
-            Err(_) => return, // column may not exist yet
-        };
-        let rows = match stmt.query_map([], |row| {
-            let id: String = row.get(0)?;
-            let session_id: String = row.get(1)?;
-            let blob: Vec<u8> = row.get(2)?;
-            Ok((id, session_id, blob))
-        }) {
-            Ok(r) => r,
-            Err(_) => return,
-        };
-        let mut count = 0;
-        let mut vi = self.vector_index.write().unwrap();
-        for row in rows.flatten() {
-            let (id, session_id, blob) = row;
-            // Each f32 is 4 bytes
-            if blob.len() % 4 != 0 {
-                continue;
-            }
-            let embedding: Vec<f32> = blob
-                .chunks_exact(4)
-                .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
-                .collect();
-            if vi.add(&id, &session_id, embedding).is_ok() {
-                count += 1;
-            }
-        }
-        if count > 0 {
-            crate::log_info!("loaded {} embeddings into vector index", count);
-        }
     }
 
     /// Clone for sharing — opens a new connection.
@@ -646,34 +615,42 @@ impl MemoryStore {
             CompressionService::compress_synthetic(&conn, observation_id)?
         };
 
-        // Update indexes (in-memory BM25 + vector)
+        // Update BM25 index
         self.bm25.write().unwrap().add(
             &compressed.id.to_string(),
             &compressed.to_search_text(),
         );
 
-        // Add to vector index (async, best-effort) + persist to DB
+        // Embed and store in vec0 (best-effort)
         let embed_llm = self.llm.read().unwrap().clone();
         let embed_model = self.embedding_model.read().unwrap().clone();
         if let (Some(llm), Some(model)) = (embed_llm, embed_model) {
             let id = compressed.id.to_string();
-            let session_id = compressed.session_id.to_string();
             let search_text = compressed.to_search_text();
             match llm.embed(&model, &search_text).await {
                 Ok(embedding) => {
-                    // 1. Add to in-memory index
-                    if let Err(e) = self.vector_index.write().unwrap().add(&id, &session_id, embedding.clone()) {
-                        crate::log_warn!("vector index add failed: {}", e);
-                    }
-                    // 2. Persist to DB
                     let blob: Vec<u8> = embedding.iter()
                         .flat_map(|f| f.to_le_bytes())
                         .collect();
                     if let Ok(db) = self.connection.lock() {
+                        // Ensure rowid mapping exists
                         let _ = db.execute(
-                            "UPDATE compressed_observations SET embedding = ?1 WHERE id = ?2",
-                            rusqlite::params![blob, &id],
+                            "INSERT OR IGNORE INTO vec_obs_map(observation_id) VALUES (?1)",
+                            rusqlite::params![&id],
                         );
+                        let rowid: i64 = db
+                            .query_row(
+                                "SELECT rowid FROM vec_obs_map WHERE observation_id = ?1",
+                                rusqlite::params![&id],
+                                |row| row.get(0),
+                            )
+                            .unwrap_or(0);
+                        if rowid > 0 {
+                            let _ = db.execute(
+                                "INSERT OR REPLACE INTO vec_observations(rowid, embedding) VALUES (?1, ?2)",
+                                rusqlite::params![rowid, blob],
+                            );
+                        }
                     }
                 }
                 Err(e) => crate::log_warn!("embedding failed: {}", e),
@@ -864,11 +841,6 @@ impl MemoryStore {
 
     // ─── Phase 2: Vector + Hybrid Search ───────────────────────────
 
-    /// Get a reference to the vector index.
-    pub fn vector_index(&self) -> &RwLock<VectorIndex> {
-        &self.vector_index
-    }
-
     /// Run hybrid search (BM25 + vector). Falls back to FTS5 if no embedding model.
     pub async fn search_hybrid(&self, query: &str, workspace_root: &str, limit: usize) -> Result<Vec<MemoryEntry>> {
         // If embedding model is available, try hybrid search
@@ -878,17 +850,42 @@ impl MemoryStore {
             let query_embedding = llm.embed(&model, query).await;
             match query_embedding {
                 Ok(emb) => {
+                    // Convert query embedding to raw bytes for vec0
+                    let emb_bytes: Vec<u8> = emb.iter()
+                        .flat_map(|f| f.to_le_bytes())
+                        .collect();
+
+                    // 1. BM25 search
+                    let bm25_results = self.bm25.read().unwrap().search(query, limit * 2);
+
+                    // 2. Vector search via vec0
+                    let db = self.read_connection.lock().unwrap();
+                    let vector_results: Vec<(String, f64)> = match db.prepare(
+                        "SELECT m.observation_id, v.distance
+                         FROM vec_observations v
+                         JOIN vec_obs_map m ON m.rowid = v.rowid
+                         WHERE v.embedding MATCH ?1
+                         ORDER BY v.distance
+                         LIMIT ?2",
+                    ) {
+                        Ok(mut stmt) => match stmt.query_map(
+                            rusqlite::params![emb_bytes.as_slice(), (limit * 2) as i64],
+                            |row| Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?)),
+                        ) {
+                            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                            Err(_) => vec![],
+                        },
+                        Err(_) => vec![],
+                    };
+
+                    // 3. RRF fusion
                     let hs = self.hybrid_search.read().unwrap();
-                    let bm25 = self.bm25.read().unwrap();
-                    let vector = self.vector_index.read().unwrap();
-                    let results = hs.search(query, limit, &bm25, &vector, Some(&emb));
+                    let results = hs.fuse(bm25_results, vector_results, limit);
 
                     if !results.is_empty() {
-                        let db = self.read_connection.lock().unwrap();
                         let ids: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
                         let mut entries = Vec::new();
                         for id in &ids {
-                            // Try to look up as a memory
                             let _uuid = Uuid::parse_str(id).unwrap_or(Uuid::nil());
                             if let Ok(entry) = db.query_row(
                                 "SELECT id, workspace_root, memory_type, title, content, tags, source_session_id, created_at, updated_at, usage_count, active, concepts, files, strength, importance, version, parent_id, supersedes, related_ids, is_latest

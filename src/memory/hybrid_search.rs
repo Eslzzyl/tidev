@@ -1,12 +1,9 @@
 use std::collections::HashMap;
 
 use crate::memory::types::HybridSearchResult;
-use crate::memory::search_index::Bm25Index;
-use crate::memory::vector_index::VectorIndex;
 
 /// Hybrid search using RRF (Reciprocal Rank Fusion) to merge
 /// BM25 and vector search results.
-/// Replicates agentmemory's `HybridSearch` with RRF.
 #[derive(Debug)]
 pub struct HybridSearch {
     bm25_weight: f64,
@@ -23,26 +20,14 @@ impl HybridSearch {
         }
     }
 
-    /// Run hybrid search with BM25 + vector embedding.
-    /// `bm25` and `vector` are the indexes; `query_embedding` is optional
-    /// (pass None for BM25-only search).
-    pub fn search(
+    /// Fuse pre-computed BM25 and vector search results using RRF.
+    /// Caller is responsible for fetching results from each index.
+    pub fn fuse(
         &self,
-        query: &str,
+        bm25_results: Vec<(String, f64)>,
+        vector_results: Vec<(String, f64)>,
         limit: usize,
-        bm25: &Bm25Index,
-        vector: &VectorIndex,
-        query_embedding: Option<&[f32]>,
     ) -> Vec<HybridSearchResult> {
-        // 1. BM25 search (fetch 2x limit for fusion)
-        let bm25_results = bm25.search(query, limit * 2);
-
-        // 2. Vector search (fetch 2x limit for fusion)
-        let vector_results = query_embedding
-            .map(|emb| vector.search(emb, limit * 2))
-            .unwrap_or_default();
-
-        // 3. RRF fusion
         let mut scores: HashMap<String, HybridScore> = HashMap::new();
 
         for (i, (id, score)) in bm25_results.iter().enumerate() {
