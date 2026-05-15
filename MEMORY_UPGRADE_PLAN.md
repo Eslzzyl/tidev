@@ -2,7 +2,7 @@
 
 > 基于对 [agentmemory](https://github.com/rohitg00/agentmemory) v0.9.12 的逆向分析，在 tidev 中以 Rust 复刻。
 >
-> 更新时间：2026-05-15（Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅, Phase 6 ✅）
+> 更新时间：2026-05-15（Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅, Phase 6 ✅, 表合并 ✅）
 
 ---
 
@@ -341,20 +341,12 @@ consolidation-pipeline → SemanticMemory    ❌ 缺失
 
 **遗留问题**：会话摘要仍在每轮对话结束时触发（见 7.3），但至少摘要数据已被消费。
 
-### 7.2 原始观察不应持久保留 [严重]
+### 7.2 原始观察不应持久保留 [严重] ✅ 表合并
 
-agentmemory 中，原始观察（RawObservation）在写入后被压缩版本覆盖：
-
-```
-observe.ts:154   kv.set(KV.observations(sessionId), obsId, raw)       // 写入原始
-compress.ts:168  kv.set(KV.observations(sessionId), obsId, compressed) // 覆盖！
-```
-
-tidev 把 `observations` 和 `compressed_observations` 分成两张表，两者都永久保留。原始观察中的 `tool_input` 和 `tool_output` 可能非常大（尤其 bash 命令的长输出），其内容已经被提炼到压缩观察中，保留原始数据是空间浪费。
-
-**SQLite 膨胀估算**：一次 `edit` 工具的调用可能产生 10-50KB 的原始输出。一个 session 上百次工具调用 → 数 MB 的冗余数据。
-
-**方案**：压缩成功后删除原始观察，或像 agentmemory 一样直接覆盖（不分两张表）。
+已修复（2026-05-15）。`observations` 表和 `observations_fts` 索引已删除，所有数据合并到单表 `compressed_observations`：
+- `observe()` INSERT 一行，含 raw 字段
+- `compress()` UPDATE 同一行，填充 compressed 字段，清空 `tool_input`/`tool_output`（NULL）
+- 与 agentmemory 的"KV 覆盖"语义完全一致
 
 ### 7.3 会话摘要时机错误——每轮触发 [严重]
 
