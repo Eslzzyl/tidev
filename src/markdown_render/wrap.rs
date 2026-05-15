@@ -465,6 +465,10 @@ where
     for (line_index, line) in textwrap::wrap(text, &opts).iter().enumerate() {
         match line {
             Cow::Borrowed(slice) => {
+                // SAFETY: textwrap::wrap() returns Cow::Borrowed only when the
+                // wrapped line is a subslice of the input `text`.  offset_from
+                // is valid only when both pointers point into the same
+                // allocation, which holds here.
                 let start = unsafe { slice.as_ptr().offset_from(text.as_ptr()) as usize };
                 let end = start + slice.len();
                 lines.push(start..end);
