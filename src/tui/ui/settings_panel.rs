@@ -20,6 +20,7 @@ pub enum SettingKey {
     LoggingEnabled,
     ScrollSpeed,
     RtkEnabled,
+    CompressionEnabled,
 }
 
 #[derive(Clone, Debug)]
@@ -66,6 +67,13 @@ impl SettingsPanelState {
             description: rtk_description,
             setting_type: SettingType::Toggle(config.rtk.enabled && config.rtk.installed),
             key: SettingKey::RtkEnabled,
+        });
+
+        items.push(SettingItem {
+            name: "Compression".to_string(),
+            description: "Enable automatic compression of observations".to_string(),
+            setting_type: SettingType::Toggle(config.memory.compression_enabled),
+            key: SettingKey::CompressionEnabled,
         });
 
         Self {
@@ -141,6 +149,11 @@ impl SettingsPanelState {
                     if let SettingType::Toggle(val) = item.setting_type {
                         // Only allow enabling RTK if it's installed
                         config.rtk.enabled = val && config.rtk.installed;
+                    }
+                }
+                SettingKey::CompressionEnabled => {
+                    if let SettingType::Toggle(val) = item.setting_type {
+                        config.memory.compression_enabled = val;
                     }
                 }
             }
