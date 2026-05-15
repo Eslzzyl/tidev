@@ -252,7 +252,11 @@ impl MemoryStore {
             "SELECT id, workspace_root, memory_type, title, content, tags, source_session_id, created_at, updated_at, usage_count, active, concepts, files, strength, importance, version, parent_id, supersedes, related_ids, is_latest
              FROM memories
              WHERE workspace_root = ?1 AND active = 1 AND is_latest = 1 AND LENGTH(content) >= ?2
-             ORDER BY usage_count DESC
+             ORDER BY
+                 importance * 0.5 +
+                 LEAST(usage_count / 20.0, 1.0) * 0.3 +
+                 CASE WHEN updated_at >= datetime('now', '-7 days') THEN 0.2 ELSE 0.0 END
+             DESC
              LIMIT ?3",
         )?;
 

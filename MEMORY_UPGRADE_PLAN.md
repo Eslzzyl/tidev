@@ -2,7 +2,7 @@
 
 > 基于对 [agentmemory](https://github.com/rohitg00/agentmemory) v0.9.12 的逆向分析，在 tidev 中以 Rust 复刻。
 >
-> 更新时间：2026-05-15（Phase 1 ✅, Phase 2 ✅）
+> 更新时间：2026-05-15（Phase 1 ✅, Phase 2 ✅, Phase 3 ✅）
 
 ---
 
@@ -141,6 +141,7 @@ search(query, workspace_root)
 | RRF 混合搜索 | `hybrid_search.rs` | `src/state/hybrid-search.ts`, `src/functions/smart-search.ts` | BM25 + 向量 RRF (k=60) 融合, 自动降级 FTS5 |
 | 保存度评分 | `retention.rs` | `src/functions/retention.ts` | `importance * exp(-0.1 * age) + access_boost` |
 | 自动遗忘 | `evict.rs` | `src/functions/evict.ts`, `src/functions/auto-forget.ts` | 每小时定时器, 淘汰 stale + 旧版本 |
+| select_hot 复合排序 ✅ Phase3 | `engine.rs` | — | `importance*0.5 + usage_count*0.3 + recency_bonus*0.2` |
 
 ---
 
@@ -462,9 +463,14 @@ memory_store.select_hot(&ws, 5, 800)
 
 详细分析见 §4.7。
 
-### 7.8 `select_hot()` 排序策略过于简单
+### 7.8 `select_hot()` 排序策略过于简单 ✅ Phase3
 
-`select_hot()` 仅按 `usage_count` 降序取前 N 条（`src/memory/engine.rs:252`）：
+已修复（2026-05-15）：`select_hot()` 改用复合排序公式：
+```
+score = importance * 0.5 + min(usage_count / 20, 1) * 0.3 + recency_bonus(7d) * 0.2
+```
+
+`select_hot()` 之前仅按 `usage_count` 降序取前 N 条（`src/memory/engine.rs:252`）：
 
 ```sql
 ORDER BY usage_count DESC LIMIT 5
