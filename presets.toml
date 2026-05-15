@@ -156,6 +156,12 @@ temperature = 0.7
 supports_streaming = true
 supports_images = false
 
+[providers.siliconflow-cn.embedding_models.bge-m3]
+model_id = "BAAI/bge-m3"
+display_name = "BGE-M3 (Free)"
+context_window = 8191
+dimensions = 1024
+
 [providers.longcat]
 display_name = "LongCat"
 base_url = "https://api.longcat.chat/openai/v1"
