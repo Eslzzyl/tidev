@@ -25,6 +25,7 @@ use super::retention::RetentionService;
 use super::evict::{EvictionService, EvictionReport};
 use super::vector_index::VectorIndex;
 use super::hybrid_search::HybridSearch;
+use super::{lessons::LessonService, reflect::{ReflectService, ReflectReport}};
 
 // ─── Compression circuit breaker ────────────────────────────────────
 
@@ -911,6 +912,114 @@ impl MemoryStore {
 
         // Fall back to FTS5
         self.search(workspace_root, query)
+    }
+
+    // ─── Graph: Knowledge Graph Extraction ─────────────────────────
+
+    /// Extract graph entities from a compressed observation.
+    ///
+    /// Opens its own DB connection (called from spawned threads where
+    /// `self.connection` is already held).
+    pub fn graph_extract_from_observation(&self, obs: &super::CompressedObservation) -> Result<()> {
+        let db_path = self.db_path.clone();
+        let db = Connection::open(&db_path)
+            .context("failed to open DB for graph extraction")?;
+        super::graph::extract_from_observation(&db, obs)
+    }
+
+    /// Search the knowledge graph for context related to the query.
+    ///
+    /// Synchronous, no LLM — safe to call from compose_system_prompt.
+    pub fn search_graph_context(
+        &self,
+        query: Option<&str>,
+        max_depth: usize,
+        max_results: usize,
+    ) -> Result<Vec<super::graph_retrieval::GraphEntityPath>> {
+        let q = query.unwrap_or("");
+        if q.is_empty() {
+            return Ok(Vec::new());
+        }
+        let db_path = self.db_path.clone();
+        let db = Connection::open(&db_path)
+            .context("failed to open DB for graph search")?;
+        super::graph_retrieval::GraphRetrieval::search_related(&db, q, max_depth, max_results)
+    }
+
+    // ─── Lessons ─────────────────────────────────────────────────────
+
+    /// Save a lesson.
+    pub fn save_lesson(
+        &self,
+        project: &str,
+        content: &str,
+        context: &str,
+        confidence: f64,
+        tags: &[String],
+    ) -> Result<MemoryEntry> {
+        let db = self.connection.lock().unwrap();
+        LessonService::save_lesson(&db, project, content, context, confidence, tags)
+    }
+
+    /// Recall lessons by query.
+    pub fn recall_lessons(
+        &self,
+        project: &str,
+        query: &str,
+        limit: usize,
+        min_confidence: f64,
+    ) -> Result<Vec<MemoryEntry>> {
+        let db = self.read_connection.lock().unwrap();
+        LessonService::recall_lessons(&db, project, query, limit, min_confidence)
+    }
+
+    /// List recent lessons.
+    pub fn list_lessons(&self, project: &str, limit: usize) -> Result<Vec<MemoryEntry>> {
+        let db = self.read_connection.lock().unwrap();
+        LessonService::list_lessons(&db, project, limit)
+    }
+
+    /// Reinforce a lesson.
+    pub fn reinforce_lesson(&self, id: &Uuid) -> Result<()> {
+        let db = self.connection.lock().unwrap();
+        LessonService::reinforce_lesson(&db, id)
+    }
+
+    /// Decay lessons (reduce strength over time).
+    pub fn decay_lessons(&self, project: &str) -> Result<usize> {
+        let db = self.connection.lock().unwrap();
+        LessonService::decay_lessons(&db, project)
+    }
+
+    /// Delete a lesson.
+    pub fn delete_lesson(&self, id: &Uuid) -> Result<()> {
+        let db = self.connection.lock().unwrap();
+        LessonService::delete_lesson(&db, id)
+    }
+
+    // ─── Reflect: Insight Synthesis ───────────────────────────────────
+
+    /// Run the reflection pipeline (clustering facts + LLM insight synthesis).
+    pub async fn run_reflect(&self, project: &str) -> Result<ReflectReport> {
+        let (llm, model) = self
+            .resolve_compression_llm()
+            .ok_or_else(|| anyhow::anyhow!("LLM client not configured for reflection"))?;
+
+        let db_path = self.db_path.clone();
+        let project = project.to_string();
+        ReflectService::run(&db_path, &llm, &model, &project).await
+    }
+
+    /// Load insights for prompt injection.
+    pub fn load_insights(&self, project: &str, limit: usize) -> Result<Vec<MemoryEntry>> {
+        let db = self.read_connection.lock().unwrap();
+        ReflectService::load_insights(&db, project, limit)
+    }
+
+    /// Reinforce an insight.
+    pub fn reinforce_insight(&self, id: &Uuid) -> Result<()> {
+        let db = self.connection.lock().unwrap();
+        ReflectService::reinforce_insight(&db, id)
     }
 }
 

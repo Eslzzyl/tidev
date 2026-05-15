@@ -478,6 +478,7 @@ CREATE TABLE IF NOT EXISTS graph_nodes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_graph_nodes_type ON graph_nodes(node_type);
+CREATE INDEX IF NOT EXISTS idx_graph_nodes_label ON graph_nodes(label);
 
 CREATE TABLE IF NOT EXISTS graph_edges (
     id TEXT PRIMARY KEY,

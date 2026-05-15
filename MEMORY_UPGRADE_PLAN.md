@@ -2,7 +2,7 @@
 
 > 基于对 [agentmemory](https://github.com/rohitg00/agentmemory) v0.9.12 的逆向分析，在 tidev 中以 Rust 复刻。
 >
-> 更新时间：2026-05-15（Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅, Phase 6 ✅, Phase 7 ✅, 表合并 ✅, 隐私过滤 ✅, Session 巡检 ✅, 整合管线 ✅, Embedding Provider 接入 ✅, P1 三项 ✅）
+> 更新时间：2026-05-15（全部已实现 ✅ — 知识图谱、Lessons、洞察合成、统计模式挖掘均已交付）
 
 ---
 
@@ -160,29 +160,14 @@ search(query, workspace_root)
 
 ---
 
-## 3. 未实现功能清单
+## 3. 已实现功能清单（全部已完成）
 
-### 知识图谱（DV11）
-
-最接近可用的未实现功能。schema 中 `graph_nodes` / `graph_edges` 表已就绪，缺失的是：
-
-- **实体/关系抽取**：在压缩阶段调用 LLM 提取实体和关系（参考 `agentmemory/src/prompts/graph-extraction.ts`）
-- **图查询**：BFS 遍历 + 排名
-- **图谱统计**：节点/边计数
-
-### 未实现功能
-
-| 功能 | 复杂度 | 说明 |
-|------|--------|------|
-| 知识图谱（DV11） | 高 | schema 中 `graph_nodes` / `graph_edges` 表已就绪，缺失实体抽取、图查询、图统计 |
-| 洞察/模式/教训反射 | 高 | 从概念聚类中合成 insight（参考 agentmemory 的 `mem::reflect`），依赖整合管线但尚未实现 |
-
-已实现（2026-05-15）：
-- 整合管线 ✅（`consolidate.rs`）
-- 自动注入语义搜索 ✅（P0，`search_hot_context()`）
-- Session 摘要 LLM 降级 ✅（P1，LLM 失败自动生成启发式摘要）
-- 压缩熔断器 ✅（P1，连续 3 次失败暂停 5 分钟）
-- `compression_enabled` 配置开关 ✅（P1，`[memory]` 段）
+| 功能 | 实现 | 说明 |
+|------|------|------|
+| 知识图谱 | `graph.rs` + `graph_retrieval.rs` | petgraph BFS，无额外 LLM |
+| Lessons 教训记录 | `lessons.rs` | 复用 MemoryEntry，含强化/衰减/搜索 |
+| 洞察合成（Reflect） | `reflect.rs` | Jaccard 聚类 + LLM 合成，cursor 去重 |
+| 统计模式挖掘 | `patterns.rs` | 文件共变 + 错误复现，纯统计无 LLM，作为 consolidate Tier 0 自动运行 |
 
 ---
 

@@ -236,7 +236,9 @@ impl MemoryPanelState {
             Some(MemoryType::Architecture) => Some(MemoryType::Bug),
             Some(MemoryType::Bug) => Some(MemoryType::Workflow),
             Some(MemoryType::Workflow) => Some(MemoryType::Fact),
-            Some(MemoryType::Fact) => None,
+            Some(MemoryType::Fact) => Some(MemoryType::Lesson),
+            Some(MemoryType::Lesson) => Some(MemoryType::Insight),
+            Some(MemoryType::Insight) => None,
         };
         self.selected_index = 0;
         self.preview_scroll = 0;
@@ -533,7 +535,9 @@ impl App {
                     MemoryType::Architecture => MemoryType::Bug,
                     MemoryType::Bug => MemoryType::Workflow,
                     MemoryType::Workflow => MemoryType::Fact,
-                    MemoryType::Fact => MemoryType::User,
+                    MemoryType::Fact => MemoryType::Lesson,
+                    MemoryType::Lesson => MemoryType::Insight,
+                    MemoryType::Insight => MemoryType::User,
                 };
                 self.memory_panel = Some(next);
             }

@@ -217,6 +217,28 @@ impl App {
             });
         }
 
+        // Schedule periodic reflection (every 30 minutes, same as consolidation).
+        {
+            let reflect_store = memory_store.clone();
+            let reflect_ws = workspace_root.display().to_string();
+            let reflect_cancel = inactivity_check_cancel.clone();
+
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(1800));
+                interval.tick().await; // skip immediate run
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            if let Err(e) = reflect_store.run_reflect(&reflect_ws).await {
+                                crate::log_warn!("reflection failed: {}", e);
+                            }
+                        }
+                        _ = reflect_cancel.cancelled() => break,
+                    }
+                }
+            });
+        }
+
         let last_notice = None;
         let retrying_hint = None;
 

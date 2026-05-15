@@ -12,6 +12,11 @@ pub mod vector_index;
 pub mod hybrid_search;
 pub mod retention;
 pub mod evict;
+pub mod graph;
+pub mod graph_retrieval;
+pub mod lessons;
+pub mod reflect;
+pub mod patterns;
 
 pub use types::*;
 pub use dedup::DedupMap;

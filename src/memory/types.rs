@@ -17,6 +17,8 @@ pub enum MemoryType {
     Bug,
     Workflow,
     Fact,
+    Lesson,
+    Insight,
 }
 
 impl MemoryType {
@@ -32,6 +34,8 @@ impl MemoryType {
             Self::Bug => "bug",
             Self::Workflow => "workflow",
             Self::Fact => "fact",
+            Self::Lesson => "lesson",
+            Self::Insight => "insight",
         }
     }
 
@@ -47,6 +51,8 @@ impl MemoryType {
             "bug" => Some(Self::Bug),
             "workflow" => Some(Self::Workflow),
             "fact" => Some(Self::Fact),
+            "lesson" => Some(Self::Lesson),
+            "insight" => Some(Self::Insight),
             _ => None,
         }
     }
@@ -63,6 +69,8 @@ impl MemoryType {
             Self::Bug => "bug",
             Self::Workflow => "flow",
             Self::Fact => "fact",
+            Self::Lesson => "less",
+            Self::Insight => "insight",
         }
     }
 }

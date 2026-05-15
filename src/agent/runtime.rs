@@ -263,6 +263,34 @@ impl AgentRuntime {
             }
         }
 
+        // ── Graph: Knowledge Graph Context ───────────────────────────
+        let query = self.workspace_root
+            .file_name()
+            .and_then(|n| n.to_str());
+        if let Ok(paths) = memory_store.search_graph_context(query, 3, 10) {
+            if !paths.is_empty() {
+                let graph_prompt = crate::memory::graph_retrieval::GraphRetrieval::format_for_prompt(&paths, 8);
+                if !graph_prompt.is_empty() {
+                    prompt.push_str("\n\n");
+                    prompt.push_str(&graph_prompt);
+                }
+            }
+        }
+
+        // ── Insights (cross-session synthesized knowledge) ────────────
+        if let Ok(insights) = memory_store.load_insights(&ws, 5)
+            && !insights.is_empty()
+        {
+            prompt.push_str("\n\n## Cross-Session Insights\n");
+            for insight in &insights {
+                let conf = insight.strength;
+                prompt.push_str(&format!(
+                    "- **{}** (confidence: {:.1}): {}\n",
+                    insight.title, conf, insight.content
+                ));
+            }
+        }
+
         (prompt, sources)
     }
 

@@ -10,6 +10,7 @@ use crate::session::{Message, MessageRole};
 use crate::memory::types::*;
 use crate::memory::remember::RememberService;
 use crate::memory::retention::RetentionService;
+use crate::memory::patterns::PatternMiningService;
 
 // ─── LLM Prompts ──────────────────────────────────────────────────────
 
@@ -52,6 +53,8 @@ Rules:
 pub struct ConsolidationReport {
     pub semantic_facts_added: usize,
     pub procedural_patterns_added: usize,
+    pub co_change_patterns: usize,
+    pub error_repeat_patterns: usize,
     pub skipped_reason: Option<String>,
 }
 
@@ -70,6 +73,17 @@ impl ConsolidationService {
         project: &str,
     ) -> Result<ConsolidationReport> {
         let mut report = ConsolidationReport::default();
+
+        // Tier 0: Statistical pattern mining (fast, no LLM)
+        if let Ok(db) = Connection::open(db_path) {
+            match PatternMiningService::run(&db, project) {
+                Ok(p_report) => {
+                    report.co_change_patterns = p_report.co_change_added;
+                    report.error_repeat_patterns = p_report.error_repeat_added;
+                }
+                Err(e) => crate::log_warn!("pattern mining failed: {}", e),
+            }
+        }
 
         // Tier 1
         match Self::consolidate_semantic(db_path, llm, model, project).await {

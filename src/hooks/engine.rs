@@ -180,8 +180,14 @@ impl HookEngine {
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_millis(500));
                     let rt = tokio::runtime::Handle::current();
-                    if let Err(e) = rt.block_on(store.compress(obs_id)) {
-                        crate::log_warn!("auto-compression failed: {}", e);
+                    match rt.block_on(store.compress(obs_id)) {
+                        Ok(compressed) => {
+                            // Extract graph entities from the compressed observation
+                            if let Err(e) = store.graph_extract_from_observation(&compressed) {
+                                crate::log_warn!("graph extraction failed: {}", e);
+                            }
+                        }
+                        Err(e) => crate::log_warn!("auto-compression failed: {}", e),
                     }
                 });
             }
