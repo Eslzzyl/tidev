@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::Utc;
 use rusqlite::Connection;
 use uuid::Uuid;
@@ -166,10 +166,51 @@ impl SessionService {
             Message::new(MessageRole::User, prompt),
         ];
 
-        let response = llm
+        let response = match llm
             .complete_with_messages(model.clone(), messages, vec![])
             .await
-            .context("LLM summarization failed")?;
+        {
+            Ok(r) => r,
+            Err(e) => {
+                crate::log_warn!("LLM summarization failed, using synthetic fallback: {}", e);
+                // Generate a synthetic summary from observation data
+                let title = views.first().map(|v| v.title.clone()).unwrap_or_default();
+                let mut file_set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+                let mut concept_set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+                let mut type_counts: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+                for v in &views {
+                    for f in &v.files { file_set.insert(f.clone()); }
+                    for c in &v.concepts { concept_set.insert(c.clone()); }
+                    *type_counts.entry(v.obs_type.clone()).or_default() += 1;
+                }
+                let obs_summary: String = {
+                    let mut parts: Vec<String> = type_counts.into_iter()
+                        .map(|(t, c)| format!("{}×{}", c, t))
+                        .collect();
+                    parts.sort();
+                    parts.join(", ")
+                };
+                let narrative = if !obs_summary.is_empty() {
+                    format!("Session with {} observations ({}).", views.len(), obs_summary)
+                } else {
+                    format!("Session with {} observations.", views.len())
+                };
+                let summary = SessionSummary {
+                    session_id,
+                    project: project.to_string(),
+                    created_at: Utc::now(),
+                    title: Some(title),
+                    narrative: Some(narrative),
+                    key_decisions: vec![],
+                    files_modified: file_set.into_iter().collect(),
+                    concepts: concept_set.into_iter().collect(),
+                    observation_count: views.len() as i64,
+                };
+                let db = Connection::open(db_path)?;
+                Self::store_summary(&db, &summary)?;
+                return Ok(summary);
+            }
+        };
 
         // 3. Parse XML response
         let title = get_xml_tag(&response, "title");

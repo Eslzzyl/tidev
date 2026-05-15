@@ -46,6 +46,10 @@ pub struct EmbeddingModelEntry {
 /// `None` = inherit from the session's active model (or compression model for summarization).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MemoryConfig {
+    /// Whether automatic compression of observations is enabled.
+    /// When disabled, observations are stored raw without compression.
+    #[serde(default = "default_compression_enabled")]
+    pub compression_enabled: bool,
     /// Optional override for compression model. Format: `"provider/model_id"`.
     #[serde(default)]
     pub compression_model: Option<String>,
@@ -59,9 +63,14 @@ pub struct MemoryConfig {
     pub embedding_model: Option<String>,
 }
 
+fn default_compression_enabled() -> bool {
+    true
+}
+
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
+            compression_enabled: true,
             compression_model: None,
             summarization_model: None,
             embedding_model: None,

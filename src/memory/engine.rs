@@ -3,6 +3,7 @@ use chrono::Utc;
 use rusqlite::Connection;
 use std::path::PathBuf;
 use std::sync::{
+    atomic::{AtomicBool, AtomicU32, Ordering},
     Mutex,
     RwLock,
 };
@@ -25,6 +26,14 @@ use super::evict::{EvictionService, EvictionReport};
 use super::vector_index::VectorIndex;
 use super::hybrid_search::HybridSearch;
 
+// ─── Compression circuit breaker ────────────────────────────────────
+
+/// Consecutive LLM compression failures before tripping the circuit breaker.
+const COMPRESSION_CB_THRESHOLD: u32 = 3;
+
+/// How long to pause LLM compression after tripping (seconds).
+const COMPRESSION_CB_COOLDOWN_SECS: u64 = 300; // 5 minutes
+
 // ─── MemoryStore ───────────────────────────────────────────────────
 
 /// Main memory store.
@@ -44,6 +53,12 @@ pub struct MemoryStore {
     embedding_model: RwLock<Option<EmbeddingActiveModel>>,
     vector_index: RwLock<VectorIndex>,
     hybrid_search: RwLock<HybridSearch>,
+    /// Whether automatic compression is enabled.
+    compression_enabled: AtomicBool,
+    /// Circuit breaker: consecutive LLM compression failures.
+    compression_cb_failures: AtomicU32,
+    /// When the circuit breaker was tripped (None = not tripped).
+    compression_cb_tripped_at: RwLock<Option<std::time::Instant>>,
 }
 
 impl MemoryStore {
@@ -77,8 +92,11 @@ impl MemoryStore {
             compression_model: RwLock::new(None),
             summarization_model: RwLock::new(None),
             embedding_model: RwLock::new(None),
-            vector_index: RwLock::new(VectorIndex::new(1536)),
+            vector_index: RwLock::new(VectorIndex::new(0)),
             hybrid_search: RwLock::new(HybridSearch::new()),
+            compression_enabled: AtomicBool::new(true),
+            compression_cb_failures: AtomicU32::new(0),
+            compression_cb_tripped_at: RwLock::new(None),
         };
 
         // Phase 4: Load persisted embeddings into vector index on startup
@@ -114,6 +132,34 @@ impl MemoryStore {
         *self.active_model.write().unwrap() = Some(active);
         *self.compression_model.write().unwrap() = compression;
         *self.summarization_model.write().unwrap() = summarization;
+    }
+
+    /// Enable or disable automatic compression.
+    pub fn set_compression_enabled(&self, enabled: bool) {
+        self.compression_enabled.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Check whether the compression circuit breaker is tripped.
+    /// When tripped and still within the cooldown window, LLM compression
+    /// is skipped in favour of synthetic compression.
+    fn is_compression_circuit_tripped(&self) -> bool {
+        let tripped_at = self.compression_cb_tripped_at.read().unwrap();
+        match *tripped_at {
+            Some(when) => {
+                let elapsed = when.elapsed().as_secs();
+                if elapsed >= COMPRESSION_CB_COOLDOWN_SECS {
+                    // Cooldown expired — auto-reset
+                    drop(tripped_at);
+                    *self.compression_cb_tripped_at.write().unwrap() = None;
+                    self.compression_cb_failures.store(0, Ordering::Relaxed);
+                    crate::log_info!("compression circuit breaker auto-reset after {}s", elapsed);
+                    false
+                } else {
+                    true
+                }
+            }
+            None => false,
+        }
     }
 
     /// Set the embedding model for vector search.
@@ -559,19 +605,38 @@ impl MemoryStore {
 
     /// Run compression on an observation. Uses LLM when available, falls
     /// back to synthetic (rule-based) compression otherwise.
+    /// Returns an error if compression is disabled via `set_compression_enabled(false)`.
     pub async fn compress(&self, observation_id: Uuid) -> Result<CompressedObservation> {
+        if !self.compression_enabled.load(std::sync::atomic::Ordering::Relaxed) {
+            anyhow::bail!("compression is disabled by configuration");
+        }
         let db_path = self.db_path.clone();
 
-        // Try LLM compression if configured
-        let llm_available = self.resolve_compression_llm().is_some();
+        // Circuit breaker: check if we should skip LLM compression
+        let use_llm = self.resolve_compression_llm().is_some()
+            && !self.is_compression_circuit_tripped();
 
-        let compressed = if llm_available {
+        let compressed = if use_llm {
             let (llm, model) = self.resolve_compression_llm().unwrap();
             let conn = Connection::open(&db_path)?;
             match CompressionService::compress(&conn, &llm, &model, observation_id).await {
-                Ok(c) => c,
+                Ok(c) => {
+                    // Success — reset circuit breaker
+                    self.compression_cb_failures.store(0, Ordering::Relaxed);
+                    *self.compression_cb_tripped_at.write().unwrap() = None;
+                    c
+                }
                 Err(e) => {
                     crate::log_warn!("LLM compression failed, falling back to synthetic: {}", e);
+                    // Increment failure counter and check threshold
+                    let failures = self.compression_cb_failures.fetch_add(1, Ordering::Relaxed) + 1;
+                    if failures >= COMPRESSION_CB_THRESHOLD {
+                        crate::log_warn!(
+                            "compression circuit breaker tripped after {} consecutive failures",
+                            failures,
+                        );
+                        *self.compression_cb_tripped_at.write().unwrap() = Some(std::time::Instant::now());
+                    }
                     let conn = Connection::open(&db_path)?;
                     CompressionService::compress_synthetic(&conn, observation_id)?
                 }
