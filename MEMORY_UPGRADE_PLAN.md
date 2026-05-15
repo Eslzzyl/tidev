@@ -2,7 +2,7 @@
 
 > 基于对 [agentmemory](https://github.com/rohitg00/agentmemory) v0.9.12 的逆向分析，在 tidev 中以 Rust 复刻。
 >
-> 更新时间：2026-05-15（Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅, Phase 6 ✅, Phase 7 ✅, 表合并 ✅, 隐私过滤 ✅, Session 巡检 ✅, 整合管线 ✅）
+> 更新时间：2026-05-15（Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅, Phase 6 ✅, Phase 7 ✅, 表合并 ✅, 隐私过滤 ✅, Session 巡检 ✅, 整合管线 ✅, Embedding Provider 接入 ✅）
 
 ---
 
@@ -35,7 +35,6 @@ src/memory/
 ├── sessions.rs       — LLM 会话摘要
 ├── slots.rs          — 记忆槽 CRUD + 8 默认槽 + 提示词渲染
 ├── consolidate.rs    — 跨 session 整合管线（语义事实 + 可复用流程）
-├── embed.rs          — OpenAI Embeddings API 客户端
 ├── vector_index.rs   — 内存余弦相似度索引
 ├── hybrid_search.rs  — RRF BM25 + 向量融合搜索
 ├── retention.rs      — 时间衰减保存度评分
@@ -70,7 +69,7 @@ src/memory/
 │  │   ├─ 3. 解析 XML 响应 → CompressedObservation               │  │
 │  │   ├─ 4. 写入 compressed_observations 表（原始观察保留！）    │  │
 │  │   ├─ 5. BM25 索引 add()                                      │  │
-│  │   └─ 6. OpenAI Embeddings → 向量索引 add()                   │  │
+│  │   └─ 6. LlmClient::embed() → 向量索引 add()                   │  │
 │  └─────────────────────────────────────────────────────────────┘  │
 │                                                                   │
 │  ⑤ 后台巡检（每 60 秒）                                            │
@@ -98,7 +97,7 @@ src/memory/
 ```
 search(query, workspace_root)
   │
-  ├─ embedder 可用 + 在 tokio context 中 ?
+  ├─ embedding model 可用 + 在 tokio context 中 ?
   │   ├─ Yes → block_on(search_hybrid())
   │   │           ├─ BM25 索引查询
   │   │           ├─ 向量索引查询（query embedding）
@@ -138,7 +137,7 @@ search(query, workspace_root)
 | 功能 | 文件 | agentmemory 参考 | 算法/依赖 |
 |------|------|-----------------|-----------|
 | 记忆槽 | `slots.rs` | `src/functions/slots.ts` (DEFAULT_SLOTS + 7 个操作) | 8 默认槽, CRUD, system prompt 注入 |
-| Embeddings API | `embed.rs` | `src/providers/embedding/index.ts` | OpenAI text-embedding-3-small, 复用 reqwest |
+| Embeddings API | `engine.rs` + `openai.rs` | `src/providers/embedding/index.ts` | 通过 `LlmClient::embed()` 接入 provider 系统，复用指数退避 + provider 路由。通过 `[[embedding_models]]` 配置 |
 | 向量索引 | `vector_index.rs` | `src/state/vector-index.ts` | 余弦相似度 + BinaryHeap Top-K, 纯内存 |
 | RRF 混合搜索 | `hybrid_search.rs` | `src/state/hybrid-search.ts`, `src/functions/smart-search.ts` | BM25 + 向量 RRF (k=60) 融合, 自动降级 FTS5 |
 | 保存度评分 | `retention.rs` | `src/functions/retention.ts` | `importance * exp(-0.1 * age) + access_boost` |
@@ -185,11 +184,16 @@ search(query, workspace_root)
 
 ## 4. 已知简化与妥协
 
-### 4.1 只实现了 OpenAI Embeddings
+### 4.1 Embedding 通过 Provider 体系接入 ✅ Provider 接入
 
-agentmemory 支持 6 种 provider（Anthropic/Gemini/MiniMax/OpenRouter），tidev 仅实现 OpenAI `text-embedding-3-small`。原因是 tidev 已有 OpenAI key 配置和 reqwest 客户端，其他 provider 需额外配置且短期内无明确使用场景。
+Embedding 模型调用不再使用独立的 `OpenAIEmbedder`，而是通过 `LlmClient::embed()` 接入现有 provider 体系：
 
-**影响**：无 OpenAI key 时向量搜索自动降级为 FTS5。
+- **复用 `reqwest::Client`**：与 LLM 共享 HTTP 连接池
+- **复用指数退避**：`backoff_delay()` / `classify_response_status()` — 与 `complete_with_retry()` 完全对称
+- **provider 路由**：通过 `model.api_type` 分派，目前仅 OpenAI（`/v1/embeddings`），Anthropic 不支持
+- **配置方式**：`[[embedding_models]]` — 独立于 LLM 模型的 TOML section，与 provider 共享 `base_url` / `api_key`
+
+**影响**：无 embedding 模型配置时向量搜索自动降级为 FTS5（行为不变）。
 
 ### 4.2 向量索引持久化 ✅ Phase 4
 
@@ -240,15 +244,17 @@ LLM client 可用?
 1. 没有熔断器（连续 N 次失败后暂停 LLM 压缩一段时间）
 2. 没有 `isAutoCompressEnabled()` 配置开关
 
-#### 4.7.2 Embedding 的降级
+#### 4.7.2 Embedding 的降级 ✅ Provider 接入
 
 ```
-OpenAI API key 可用?
-  ├─ Yes → OpenAIEmbedder（text-embedding-3-small, 1536维）
-  └─ No  → embedder = None → search() 直接跳过 hybrid 走 FTS5
+[[embedding_models]] 配置 + API key 可用?
+  ├─ Yes → LlmClient::embed()（复用退避/重试/路由）
+  └─ No  → embedding_model = None → search() 直接跳过 hybrid 走 FTS5
 ```
 
-搜索降级链条：hybrid(BM25+向量) → FTS5 → LIKE
+搜索降级链条：hybrid(BM25+向量) → FTS5 → LIKE（行为不变）
+
+Embedding 调用通过 `LlmClient::embed_with_retry()` 自动获得与 LLM 相同的重试/退避能力。
 
 #### 4.7.3 Session 摘要的降级
 
@@ -281,6 +287,26 @@ mem:retention                   retention_scores              P2
 sessions 表新增列：
 - `status TEXT DEFAULT 'active'` — `'active'` / `'completed'`
 - `ended_at TEXT` — session 结束时间戳
+
+### 新增配置项
+
+```toml
+# ~/.config/tidev/config.toml
+
+# Embedding 模型（独立于 LLM 模型，与 provider 共享 base_url/api_key）
+[[embedding_models]]
+provider = "openai"
+model_id = "text-embedding-3-small"
+display_name = "Text Embedding 3 Small"
+context_window = 8191
+dimensions = 1536
+
+# 记忆模型覆盖（可选，None = 继承 session 的活跃模型）
+[memory]
+compression_model = "openai/gpt-4o-mini"    # 可选
+summarization_model = ""                    # 空 = inherit
+embedding_model = "openai/text-embedding-3-small"
+```
 
 ---
 
@@ -527,9 +553,8 @@ session::started
      ↓（同步或异步）
   compress → kv.set(compressed)  // 覆盖 raw！
      ↓
-  bm25Index.add(compressed)
-  vectorIndex.add(embed(compressed))
-
+   bm25Index.add(compressed)
+   vectorIndex.add(embed(compressed))  // 使用 provider 体系
 session::stopped（客户端显式调用）:
   └─ mem::summarize
        ├─ 读取所有 compressed_observations
@@ -559,8 +584,7 @@ compose_system_prompt（每轮）:
      ↓（异步，std::thread::spawn）
   compress → UPDATE compressed_observations (compressed fields)
      ↓
-  bm25Index.add() + vectorIndex.add(embed())
-
+   bm25Index.add() + vectorIndex.add(embed())  // 通过 LlmClient::embed() → provider
 后台巡检（每 60s）✅ Phase7:
   find_inactive_sessions()
   ├─ 跳过 parent_session_id IS NOT NULL（subagent）

@@ -208,3 +208,58 @@ When the thinking level is toggled in the TUI or configured in
 `[agent.thinking_levels]`, the extra body from the config and the thinking
 configuration are merged together, with the thinking-level-generated fields
 taking precedence.
+
+## Embedding models
+
+tidev supports vector search for memory using embedding models. Embedding models
+are configured independently from LLM models via the `[[embedding_models]]`
+section. They share the provider's `base_url` and `api_key`.
+
+```toml
+[[embedding_models]]
+provider = "openai"
+model_id = "text-embedding-3-small"
+display_name = "Text Embedding 3 Small"
+context_window = 8191
+dimensions = 1536
+```
+
+| Key | Required | Description |
+|-----|----------|-------------|
+| `provider` | Yes | Provider identifier, must match a key under `[providers]` |
+| `model_id` | Yes | The model identifier sent to the `/embeddings` API |
+| `display_name` | Yes | Human-readable name shown in the UI |
+| `context_window` | Yes | Maximum number of input tokens the model can accept |
+| `dimensions` | Yes | Output vector dimension (e.g. 1536 for text-embedding-3-small) |
+
+When `[[embedding_models]]` is configured and the provider has an API key
+available, tidev uses the embedding model for vector search via
+`LlmClient::embed()`, which shares the same retry/backoff infrastructure as
+LLM completions. If no embedding model is configured, vector search degrades to
+FTS5 full-text search.
+
+Multiple embedding models can be configured. The first available one is used by
+default; a specific model can be selected in the model panel.
+
+## Memory model overrides
+
+By default, memory operations (compression, summarization) use the same active
+model as the chat session. You can override these with separate models via the
+`[memory]` section:
+
+```toml
+[memory]
+compression_model = "openai/gpt-4o-mini"     # Optional override for compression
+summarization_model = ""                      # Empty = inherit from compression_model
+embedding_model = "openai/text-embedding-3-small"  # Optional override for embedding
+```
+
+| Key | Description |
+|-----|-------------|
+| `compression_model` | Model used for compressing observations. Format: `"provider/model_id"`. Default: inherits from session model |
+| `summarization_model` | Model used for session summarization. Falls back to `compression_model`, then to session model |
+| `embedding_model` | Model used for generating embeddings. Must match a `[[embedding_models]]` entry. Default: first available embedding model |
+
+These overrides can also be configured through the model panel (open with `/model`
+or `Ctrl+M`) by navigating to the **Memory** tab and using `←`/`→` to select
+between Compression, Summarization, and Embedding sub-entries.

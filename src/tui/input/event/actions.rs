@@ -155,7 +155,7 @@ impl App {
         let mut panel = ModelPanelState::new();
         panel.query.set_text(initial_query);
 
-        // Build tabs: General first, then each agent type
+        // Build tabs: General first, then agent types, then Memory
         let mut tabs = Vec::new();
         // General tab — main session model
         tabs.push(crate::tui::model_panel::ModelPanelTab::new(
@@ -174,6 +174,15 @@ impl App {
                 ty,
                 agent_type.display_name(),
                 &label,
+            ));
+        }
+        // Memory tab — compression / summarization / embedding models
+        {
+            let display = self.config.memory_model_display("compression");
+            tabs.push(crate::tui::model_panel::ModelPanelTab::new(
+                "memory",
+                "Memory",
+                &display,
             ));
         }
         panel.tabs = tabs;

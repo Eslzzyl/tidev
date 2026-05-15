@@ -78,16 +78,26 @@ impl App {
                 crate::config::reasoning::ThinkingLevelType::from_string(&level_str);
         }
         tools.set_active_model(active_model.clone());
-        // Attach LLM to memory store for compression/summarization
-        memory_store.set_llm(llm.clone(), active_model.clone());
-        // Attach OpenAI embedder for vector search (if api key available)
-        if let Some(openai_key) = auth.api_key("openai") {
-            let embedder = crate::memory::OpenAIEmbedder::new(
-                llm.http().clone(),
-                openai_key.to_string(),
-                "text-embedding-3-small",
-            );
-            memory_store.set_embedder(embedder);
+        // Attach LLM to memory store with model overrides
+        let compression_override = config
+            .memory
+            .compression_model
+            .as_deref()
+            .and_then(|s| config.resolve_model(&auth, Some(s)).ok());
+        let summarization_override = config
+            .memory
+            .summarization_model
+            .as_deref()
+            .and_then(|s| config.resolve_model(&auth, Some(s)).ok());
+        memory_store.set_models(
+            llm.clone(),
+            active_model.clone(),
+            compression_override,
+            summarization_override,
+        );
+        // Attach embedding model for vector search (if configured)
+        if let Ok(embed_model) = config.resolve_embedding_model(&auth, None) {
+            memory_store.set_embedding_model(embed_model);
         }
         // Set sandbox policy based on session mode and config
         let sandbox_policy = mode.sandbox_policy(&config.sandbox);

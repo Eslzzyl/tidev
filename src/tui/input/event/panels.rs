@@ -263,6 +263,19 @@ impl App {
                                 t.current_label = summary.label();
                                 t.thinking_level_expanded = false;
                             }
+                        } else if next_panel.is_memory_tab() {
+                            // Memory tab: save model for the sub-entry role
+                            let role = next_panel.active_memory_role();
+                            let model_str = summary.label();
+                            self.config.set_memory_model(&self.paths, role, &model_str)?;
+                            if let Some(t) = next_panel.current_tab_mut() {
+                                t.current_label = model_str.clone();
+                                t.thinking_level_expanded = false;
+                            }
+                            self.last_notice = Some(format!(
+                                "Memory {} model set to {}",
+                                role, model_str
+                            ));
                         } else {
                             // Agent tab: save model + thinking level
                             let agent_type_str = next_panel
@@ -305,6 +318,19 @@ impl App {
                                     t.current_label = summary.label();
                                 }
                                 self.model_panel = Some(next_panel);
+                            } else if panel.is_memory_tab() {
+                                let role = panel.active_memory_role();
+                                let model_str = summary.label();
+                                self.config.set_memory_model(&self.paths, role, &model_str)?;
+                                let mut next_panel = panel;
+                                if let Some(t) = next_panel.current_tab_mut() {
+                                    t.current_label = model_str.clone();
+                                }
+                                self.model_panel = Some(next_panel);
+                                self.last_notice = Some(format!(
+                                    "Memory {} model set to {}",
+                                    role, model_str
+                                ));
                             } else {
                                 let agent_type_str = panel
                                     .current_tab()
@@ -367,6 +393,20 @@ impl App {
                     self.begin_provider_edit_for_model(summary.provider_id, summary.model_id)?;
                 }
             }
+            KeyCode::Left if panel.is_memory_tab() => {
+                let mut next_panel = panel;
+                next_panel.move_memory_sub_selection(-1);
+                let items = self.model_panel_items(&next_panel);
+                next_panel.reset_selection(&items, None);
+                self.model_panel = Some(next_panel);
+            }
+            KeyCode::Right if panel.is_memory_tab() => {
+                let mut next_panel = panel;
+                next_panel.move_memory_sub_selection(1);
+                let items = self.model_panel_items(&next_panel);
+                next_panel.reset_selection(&items, None);
+                self.model_panel = Some(next_panel);
+            }
             KeyCode::Tab if key.modifiers.is_empty() => {
                 let mut next_panel = panel;
                 next_panel.next_tab();
@@ -378,6 +418,8 @@ impl App {
                         &items,
                         Some((&self.active_model.provider_id, &self.active_model.model_id)),
                     );
+                } else if next_panel.is_memory_tab() {
+                    next_panel.reset_selection(&items, None);
                 } else {
                     let active = agent_tab_active_model(&next_panel, &self.active_model);
                     if let Some((p, m)) = active {
@@ -398,6 +440,8 @@ impl App {
                         &items,
                         Some((&self.active_model.provider_id, &self.active_model.model_id)),
                     );
+                } else if next_panel.is_memory_tab() {
+                    next_panel.reset_selection(&items, None);
                 } else {
                     let active = agent_tab_active_model(&next_panel, &self.active_model);
                     if let Some((p, m)) = active {

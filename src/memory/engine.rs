@@ -9,7 +9,7 @@ use std::sync::{
 use uuid::Uuid;
 
 use crate::llm::LlmClient;
-use crate::config::ActiveModel;
+use crate::config::{ActiveModel, EmbeddingActiveModel};
 
 use super::types::*;
 use super::dedup::DedupMap;
@@ -24,7 +24,6 @@ use super::retention::RetentionService;
 use super::evict::{EvictionService, EvictionReport};
 use super::vector_index::VectorIndex;
 use super::hybrid_search::HybridSearch;
-use super::embed::OpenAIEmbedder;
 
 // ─── MemoryStore ───────────────────────────────────────────────────
 
@@ -37,9 +36,14 @@ pub struct MemoryStore {
     bm25: RwLock<Bm25Index>,
     llm: RwLock<Option<LlmClient>>,
     active_model: RwLock<Option<ActiveModel>>,
+    /// Optional override for compression model (None = use active_model).
+    compression_model: RwLock<Option<ActiveModel>>,
+    /// Optional override for summarization model (None = use compression_model, then active_model).
+    summarization_model: RwLock<Option<ActiveModel>>,
+    /// Configured embedding model for vector search.
+    embedding_model: RwLock<Option<EmbeddingActiveModel>>,
     vector_index: RwLock<VectorIndex>,
     hybrid_search: RwLock<HybridSearch>,
-    embedder: RwLock<Option<OpenAIEmbedder>>,
 }
 
 impl MemoryStore {
@@ -70,9 +74,11 @@ impl MemoryStore {
             bm25: RwLock::new(Bm25Index::new()),
             llm: RwLock::new(None),
             active_model: RwLock::new(None),
+            compression_model: RwLock::new(None),
+            summarization_model: RwLock::new(None),
+            embedding_model: RwLock::new(None),
             vector_index: RwLock::new(VectorIndex::new(1536)),
             hybrid_search: RwLock::new(HybridSearch::new()),
-            embedder: RwLock::new(None),
         };
 
         // Phase 4: Load persisted embeddings into vector index on startup
@@ -94,18 +100,55 @@ impl std::fmt::Debug for MemoryStore {
 }
 
 impl MemoryStore {
-    pub fn set_llm(&self, llm: LlmClient, model: ActiveModel) {
+    /// Set the LLM client and models for memory operations.
+    /// `active` is the session's chat model; `compression` and `summarization` are optional
+    /// overrides (None = inherit from active). Call `set_embedding_model()` separately.
+    pub fn set_models(
+        &self,
+        llm: LlmClient,
+        active: ActiveModel,
+        compression: Option<ActiveModel>,
+        summarization: Option<ActiveModel>,
+    ) {
         *self.llm.write().unwrap() = Some(llm);
-        *self.active_model.write().unwrap() = Some(model);
+        *self.active_model.write().unwrap() = Some(active);
+        *self.compression_model.write().unwrap() = compression;
+        *self.summarization_model.write().unwrap() = summarization;
     }
 
-    /// Set the OpenAI embedder for vector search.
-    pub fn set_embedder(&self, embedder: OpenAIEmbedder) {
-        let dims = embedder.dimensions();
-        *self.embedder.write().unwrap() = Some(embedder);
+    /// Set the embedding model for vector search.
+    /// Re-loads persisted embeddings with the correct dimensions.
+    pub fn set_embedding_model(&self, model: EmbeddingActiveModel) {
+        let dims = model.dimensions;
+        *self.embedding_model.write().unwrap() = Some(model);
         // Re-create vector index with correct dimensions, then load persisted
         *self.vector_index.write().unwrap() = VectorIndex::new(dims);
         self.load_embeddings_from_db();
+    }
+
+    /// Resolve the LLM and model to use for compression.
+    fn resolve_compression_llm(&self) -> Option<(LlmClient, ActiveModel)> {
+        let llm = self.llm.read().unwrap().clone()?;
+        let model = self
+            .compression_model
+            .read()
+            .unwrap()
+            .clone()
+            .or_else(|| self.active_model.read().unwrap().clone())?;
+        Some((llm, model))
+    }
+
+    /// Resolve the LLM and model to use for summarization.
+    fn resolve_summarization_llm(&self) -> Option<(LlmClient, ActiveModel)> {
+        let llm = self.llm.read().unwrap().clone()?;
+        let model = self
+            .summarization_model
+            .read()
+            .unwrap()
+            .clone()
+            .or_else(|| self.compression_model.read().unwrap().clone())
+            .or_else(|| self.active_model.read().unwrap().clone())?;
+        Some((llm, model))
     }
 
     /// Load persisted embeddings from DB into the in-memory vector index.
@@ -225,8 +268,8 @@ impl MemoryStore {
     /// Search memories. Uses FTS5 for sync path.
     /// For hybrid search (BM25 + vector), use the async `search_hybrid` method.
     pub fn search(&self, workspace_root: &str, query: &str) -> Result<Vec<MemoryEntry>> {
-        // Try hybrid search if we're in a tokio context and embedder is available
-        if self.embedder.read().unwrap().is_some() {
+        // Try hybrid search if we're in a tokio context and embedding model is available
+        if self.embedding_model.read().unwrap().is_some() {
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 let future = self.search_hybrid(query, workspace_root, 20);
                 if let Ok(results) = handle.block_on(future) {
@@ -499,20 +542,12 @@ impl MemoryStore {
         let db_path = self.db_path.clone();
 
         // Try LLM compression if configured
-        let llm_available = {
-            let llm = self.llm.read().unwrap().is_some();
-            let model = self.active_model.read().unwrap().is_some();
-            llm && model
-        };
+        let llm_available = self.resolve_compression_llm().is_some();
 
         let compressed = if llm_available {
-            let (llm, model) = {
-                let llm = self.llm.read().unwrap().clone();
-                let model = self.active_model.read().unwrap().clone();
-                (llm, model)
-            };
+            let (llm, model) = self.resolve_compression_llm().unwrap();
             let conn = Connection::open(&db_path)?;
-            match CompressionService::compress(&conn, &llm.unwrap(), &model.unwrap(), observation_id).await {
+            match CompressionService::compress(&conn, &llm, &model, observation_id).await {
                 Ok(c) => c,
                 Err(e) => {
                     crate::log_warn!("LLM compression failed, falling back to synthetic: {}", e);
@@ -533,11 +568,13 @@ impl MemoryStore {
         );
 
         // Add to vector index (async, best-effort) + persist to DB
-        if let Some(ref embedder) = *self.embedder.read().unwrap() {
+        let embed_llm = self.llm.read().unwrap().clone();
+        let embed_model = self.embedding_model.read().unwrap().clone();
+        if let (Some(llm), Some(model)) = (embed_llm, embed_model) {
             let id = compressed.id.to_string();
             let session_id = compressed.session_id.to_string();
             let search_text = compressed.to_search_text();
-            match embedder.embed(&search_text).await {
+            match llm.embed(&model, &search_text).await {
                 Ok(embedding) => {
                     // 1. Add to in-memory index
                     if let Err(e) = self.vector_index.write().unwrap().add(&id, &session_id, embedding.clone()) {
@@ -605,13 +642,9 @@ impl MemoryStore {
         session_id: Uuid,
         project: &str,
     ) -> Result<SessionSummary> {
-        let (llm, model) = {
-            let llm = self.llm.read().unwrap().clone();
-            let model = self.active_model.read().unwrap().clone();
-            (llm, model)
-        };
-        let llm = llm.ok_or_else(|| anyhow::anyhow!("LLM client not configured for summarization"))?;
-        let model = model.ok_or_else(|| anyhow::anyhow!("Active model not configured for summarization"))?;
+        let (llm, model) = self
+            .resolve_summarization_llm()
+            .ok_or_else(|| anyhow::anyhow!("LLM client not configured for summarization"))?;
 
         let db_path = self.db_path.clone();
         SessionService::summarize_session(&db_path, &llm, &model, session_id, project).await
@@ -619,13 +652,9 @@ impl MemoryStore {
 
     /// Run the consolidation pipeline (semantic + procedural).
     pub async fn run_consolidation(&self, project: &str) -> Result<ConsolidationReport> {
-        let (llm, model) = {
-            let llm = self.llm.read().unwrap().clone();
-            let model = self.active_model.read().unwrap().clone();
-            (llm, model)
-        };
-        let llm = llm.ok_or_else(|| anyhow::anyhow!("LLM client not configured for consolidation"))?;
-        let model = model.ok_or_else(|| anyhow::anyhow!("Active model not configured for consolidation"))?;
+        let (llm, model) = self
+            .resolve_compression_llm()
+            .ok_or_else(|| anyhow::anyhow!("LLM client not configured for consolidation"))?;
 
         let db_path = self.db_path.clone();
         let project = project.to_string();
@@ -755,11 +784,13 @@ impl MemoryStore {
         &self.vector_index
     }
 
-    /// Run hybrid search (BM25 + vector). Falls back to FTS5 if no embedder.
+    /// Run hybrid search (BM25 + vector). Falls back to FTS5 if no embedding model.
     pub async fn search_hybrid(&self, query: &str, workspace_root: &str, limit: usize) -> Result<Vec<MemoryEntry>> {
-        // If embedder is available, try hybrid search
-        if let Some(embedder) = self.embedder.read().unwrap().as_ref() {
-            let query_embedding = embedder.embed(query).await;
+        // If embedding model is available, try hybrid search
+        let embed_llm = self.llm.read().unwrap().clone();
+        let embed_model = self.embedding_model.read().unwrap().clone();
+        if let (Some(llm), Some(model)) = (embed_llm, embed_model) {
+            let query_embedding = llm.embed(&model, query).await;
             match query_embedding {
                 Ok(emb) => {
                     let hs = self.hybrid_search.read().unwrap();

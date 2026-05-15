@@ -733,8 +733,12 @@ impl App {
         });
         self.register_selection_region(inner);
 
+        // Add sub-entry row for Memory tab
+        let memory_sub_height = if panel.is_memory_tab() { 1 } else { 0 };
+
         let sections = Layout::vertical([
             Constraint::Length(1), // tab bar
+            Constraint::Length(memory_sub_height), // memory sub-entries (optional)
             Constraint::Length(2), // instruction
             Constraint::Length(3), // search box
             Constraint::Min(8),    // model list
@@ -774,9 +778,44 @@ impl App {
             sections[0],
         );
 
+        // --- Memory sub-entries (for Memory tab) ---
+        if panel.is_memory_tab() {
+            use crate::tui::model_panel::MEMORY_ROLES;
+            let sub_spans: Vec<Span> = MEMORY_ROLES
+                .iter()
+                .enumerate()
+                .flat_map(|(idx, role)| {
+                    let is_active = idx == panel.memory_sub_selection;
+                    let label = self.config.memory_model_display(role);
+                    let display = format!("{}: {}", role, label);
+                    let role_style = if is_active {
+                        Style::default()
+                            .fg(palette.selection_fg)
+                            .bg(palette.selection_bg)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(palette.muted)
+                    };
+                    let mut spans = vec![Span::styled(format!(" {} ", display), role_style)];
+                    if idx + 1 < MEMORY_ROLES.len() {
+                        spans.push(Span::styled(" │ ", Style::default().fg(palette.border)));
+                    }
+                    spans
+                })
+                .collect();
+            frame.render_widget(
+                Paragraph::new(Line::from(sub_spans))
+                    .style(Style::default().bg(palette.panel))
+                    .alignment(Alignment::Left),
+                sections[1],
+            );
+        }
+
         // --- Instruction ---
         let instruction = if panel.is_general_tab() {
             "Select a model for the main session. Enter to switch, Esc to close."
+        } else if panel.is_memory_tab() {
+            "Select a model for this memory role. ← → switch role, Enter to save, Esc to close."
         } else {
             "Select a model for this agent. Enter to save, Esc to close."
         };
@@ -784,13 +823,13 @@ impl App {
             Paragraph::new(instruction)
                 .alignment(Alignment::Center)
                 .style(Style::default().bg(palette.panel).fg(palette.muted)),
-            sections[1],
+            sections[2],
         );
 
         // --- Search box ---
         self.render_input_block_with_composer(
             frame,
-            sections[2],
+            sections[3],
             "Search models",
             &panel.query,
             panel.query.placeholder(),
@@ -978,15 +1017,37 @@ impl App {
                         }
                     }
                 }
+                ModelPanelItem::EmbeddingModel { summary } => {
+                    let spans = vec![
+                        Span::raw("  "),
+                        Span::styled(
+                            summary.display_name.clone(),
+                            Style::default()
+                                .fg(palette.text)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw("  "),
+                        Span::styled(
+                            format!("({} · {}d)", summary.model_id, summary.dimensions),
+                            Style::default().fg(palette.muted),
+                        ),
+                        Span::raw("  "),
+                        Span::styled(
+                            format!("{}", summary.provider_id),
+                            Style::default().fg(palette.accent_soft),
+                        ),
+                    ];
+                    rows.push(ListItem::new(Line::from(spans)));
+                }
             }
         }
 
         if rows.is_empty() {
-            frame.render_widget(
+                frame.render_widget(
                 Paragraph::new("No connected models match this search.")
                     .alignment(Alignment::Center)
                     .style(Style::default().bg(palette.panel).fg(palette.muted)),
-                sections[3],
+                sections[4],
             );
         } else {
             let tab = panel.current_tab();
@@ -1025,7 +1086,7 @@ impl App {
                         .add_modifier(Modifier::BOLD),
                 );
 
-            frame.render_stateful_widget(list, sections[3], &mut state);
+            frame.render_stateful_widget(list, sections[4], &mut state);
         }
 
         // --- Footer ---
@@ -1041,7 +1102,7 @@ impl App {
             Paragraph::new(footer)
                 .alignment(Alignment::Center)
                 .style(Style::default().bg(palette.panel).fg(palette.muted)),
-            sections[4],
+            sections[5],
         );
     }
 
