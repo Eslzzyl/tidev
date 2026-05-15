@@ -2,7 +2,7 @@
 
 > 基于对 [agentmemory](https://github.com/rohitg00/agentmemory) v0.9.12 的逆向分析，在 tidev 中以 Rust 复刻。
 >
-> 更新时间：2026-05-15（Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅, Phase 6 ✅, 表合并 ✅, 隐私过滤 ✅）
+> 更新时间：2026-05-15（Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅, Phase 6 ✅, 表合并 ✅, 隐私过滤 ✅, Session 巡检 ✅）
 
 ---
 
@@ -73,12 +73,14 @@ src/memory/
 │  │   └─ 6. OpenAI Embeddings → 向量索引 add()                   │  │
 │  └─────────────────────────────────────────────────────────────┘  │
 │                                                                   │
-│  ⑤ 每轮对话结束                                                   │
-│     run_agent_loop_with_tools 返回 → summarize_session()          │
-│       ├─ 1. 加载 compressed_observations                           │
-│       ├─ 2. SUMMARY_SYSTEM + prompt → LLM API                     │
-│       ├─ 3. 解析 XML → SessionSummary                              │
-│       └─ 4. INSERT OR REPLACE session_summaries（每轮覆盖）       │
+│  ⑤ 后台巡检（每 60 秒）                                            │
+│     inactivity_check task → find_inactive_sessions()               │
+│       ├─ 查找 parent_session_id IS NULL（用户 session）             │
+│       ├─ 过滤 status = 'active' 且 updated_at < now - 300s        │
+│       ├─ 排除前台活跃 session                                       │
+│       ├─ 过滤有 compressed_observations 的 session                  │
+│       ├─ 标记 status = 'completed', ended_at = now                 │
+│       └─ 调用 summarize_session() → INSERT OR REPLACE              │
 │                                                                   │
 │  ⚠ 缺失：无整合管线（SemanticMemory / ProceduralMemory）          │
 │                                                                   │
@@ -144,6 +146,15 @@ search(query, workspace_root)
 | select_hot 复合排序 ✅ Phase3 | `engine.rs` | — | `importance*0.5 + usage_count*0.3 + recency_bonus*0.2` |
 | Retention 自动集成 ✅ Phase6 | `engine.rs` | `src/functions/retention.ts` | `remember()` + `record_usage()` 中自动计算 |
 | PostToolFailure 接入 ✅ Phase6 | `runtime.rs` | `src/functions/observe.ts` | 检测 `sandbox_denied` / `Error:` 前缀 |
+
+### Phase 7 — Session 生命周期管理
+
+| 功能 | 文件 | 说明 | 算法/依赖 |
+|------|------|------|-----------|
+| session status 字段 | `schema.rs` | sessions 表增加 `status` + `ended_at` | `'active'` / `'completed'` |
+| 后台不活跃巡检 | `run.rs` | 每 60s 检查是否有 inactive session 需 summarize | `find_inactive_sessions()`, 300s 超时 |
+| 退出零阻塞 | `run.rs` | 退出时只 cancel 巡检任务，不调用 LLM | `CancellationToken` |
+| web fork 修正 | `sessions.rs` | web fork 改用 `create_session()`（无 parent） | 与 TUI fork 行为一致 |
 
 ---
 
@@ -296,7 +307,11 @@ mem:slots                       memory_slots                  P2
 mem:retention                   retention_scores              P2
 ```
 
-详细列定义见 `src/storage/schema.rs`（当前版本 = 28）。
+详细列定义见 `src/storage/schema.rs`（当前版本 = 29）。
+
+sessions 表新增列：
+- `status TEXT DEFAULT 'active'` — `'active'` / `'completed'`
+- `ended_at TEXT` — session 结束时间戳
 
 ---
 
@@ -307,7 +322,9 @@ mem:retention                   retention_scores              P2
 - **单 binary 零外部依赖**：不需要 Docker / iii-engine / 额外数据库进程。
 - **blake3 而非 SHA256**：agentmemory 用 SHA256 做去重哈希。tidev 改用 blake3 — 性能更好、库更轻量。哈希仅用于本地去重，无兼容性问题。
 - **SQLite TEXT 替代 zstd BLOB**：旧 MemoryStore 对 content 做 zstd 压缩，新版直接存 TEXT，简化查询。
-- **无数据库迁移**：schema 从 v26→v27→v28，旧表被新表替换。用户需重建数据库。
+- **无数据库迁移**：schema 从 v26→v27→v28→v29，旧表被新表替换。用户需重建数据库。
+- **后台巡检替代 agentmemory 的 session::stopped event**：agentmemory 依赖客户端显式调用 session 结束事件，tidev 作为单进程 TUI 没有 HTTP 端点，改用后台定期巡检 + 不活跃超时（5 分钟）判定 session 结束。退出不阻塞 LLM 调用。
+- **`parent_session_id` 仅用于 subagent**：web fork 已修正为使用 `create_session()`（无 parent），与 TUI fork 一致。`parent_session_id IS NOT NULL` 等价于 subagent session，在巡检中自然排除。
 
 ---
 
@@ -339,7 +356,7 @@ mem::context → 注入到 LLM                  ✅ 已实现（Phase 1）
 consolidation-pipeline → SemanticMemory    ❌ 缺失
 ```
 
-**遗留问题**：会话摘要仍在每轮对话结束时触发（见 7.3），但至少摘要数据已被消费。
+**遗留问题**：会话摘要之前由每轮触发改为后台巡检（见 7.3 ✅），但摘要数据已被正确消费。
 
 ### 7.2 原始观察不应持久保留 [严重] ✅ 表合并
 
@@ -348,66 +365,94 @@ consolidation-pipeline → SemanticMemory    ❌ 缺失
 - `compress()` UPDATE 同一行，填充 compressed 字段，清空 `tool_input`/`tool_output`（NULL）
 - 与 agentmemory 的"KV 覆盖"语义完全一致
 
-### 7.3 会话摘要时机错误——每轮触发 [严重]
+### 7.3 会话摘要时机错误——每轮触发 [严重] ✅ Phase7
 
-`src/agent/runtime.rs:1376`：
+**已修复（2026-05-15）**。移除了 `run_agent_loop_with_tools()` 返回后的 `summarize_session()` 调用（`src/agent/runtime.rs:1451`）。
+
+新的触发机制：**后台巡检任务**（`src/tui/core/run.rs`）每 60 秒运行一次，查找满足以下条件的 session：
+- `parent_session_id IS NULL`（用户 session，不含 subagent）
+- `status = 'active'`
+- `updated_at < now - 300s`（超过 5 分钟无活动）
+- `id !=` 当前前台 session
+- 有 compressed_observations（确实有内容）
+
+找到后逐个标记 `status = 'completed'` + `ended_at = now`，然后调用 `summarize_session()`。
+
+**与 agentmemory 的对比**：
+
+| 方面 | agentmemory | tidev |
+|------|-------------|-------|
+| 触发时机 | 显式 `session::stopped` event | 后台巡检（不活跃超时） |
+| 调用次数 | 整个 session 生命周期一次 | 每次进入后台 + 超时后一次 |
+| 退出处理 | client 先发 end 再断开 | 不阻塞，下次启动巡检自动捡起 |
+| 子 session | 独立管理 | `parent_session_id IS NULL` 自然排除 |
+
 ```rust
-run_agent_loop_with_tools() 返回后 → summarize_session()
-// 每轮用户消息都调用！
+// src/tui/core/run.rs — 后台巡检任务
+tokio::spawn(async move {
+    let mut interval = tokio::time::interval(Duration::from_secs(60));
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {
+                let ids = store.find_inactive_sessions(&cutoff, current)?;
+                for id in ids {
+                    store.set_session_status(id, "completed")?;
+                    mem_store.summarize_session(id, &ws).await?;
+                }
+            }
+            _ = cancel_token.cancelled() => break,
+        }
+    }
+});
 ```
 
-agentmemory 只在 `session::stopped` 时调用一次 `mem::summarize`。tidev 每轮都重新生成全量摘要（`INSERT OR REPLACE` 覆盖）。
+### 7.4 缺少 session 结束标记 [严重] ✅ Phase7
 
-**问题**：
-1. **LLM 调用浪费**：如果一轮对话没有实质变化，仍然触发了一次 LLM 摘要
-2. **摘要不完整**：后续轮次生成的摘要覆盖前一轮，但前一轮的摘要永不可见
-3. **业务语义错误**：这本质上是"到目前为止的阶段性摘要"，不是"完整 session 的总结"
-
-**根因**：tidev 没有 session 结束的判定机制（见 7.4），所以退而求其次每轮都触发。
-
-### 7.4 缺少 session 结束标记 [严重]
-
-tidev 的 sessions 表没有 `status` 或 `ended_at` 字段：
+**已修复（2026-05-15）**。sessions 表增加了 `status` 和 `ended_at` 字段：
 
 ```sql
--- src/storage/schema.rs
+-- src/storage/schema.rs (SCHEMA_VERSION = 29)
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
-    parent_session_id TEXT,
-    title TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    -- 没有 status: "active" | "completed" | "abandoned"
-    -- 没有 ended_at
+    parent_session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+    ...
+    status TEXT NOT NULL DEFAULT 'active',
+    ended_at TEXT,
+    ...
 );
 ```
 
-agentmemory 有明确的生命周期：
+**判定策略**：不使用 agentmemory 的显式 `session::stopped` event 模型。改为**后台不活跃巡检**：
 
 ```
-HTTP POST /session/start → status: "active"
-  ↓
-（对话可能持续数小时、数百轮）
-  ↓
-HTTP POST /session/end   → status: "completed", endedAt: now
-  ↓
-触发 event::session::stopped → mem::summarize
+用户切换到 session B
+  → session A 进入后台
+  → background_check 每 60s 运行
+  → 发现 A 的 updated_at 超过 300s 未更新
+  → 且 A 不是当前前台 session
+  → 标记 A.status = 'completed' + ended_at = now
+  → summarize_session(A)
+
+用户切回 A（超时前）：
+  → A 仍然是 'active'
+  → 巡检排除当前 session，不会误触发
+
+用户切回 A（超时后）：
+  → A 已是 'completed'
+  → 可以继续发消息（与当前 TUI UX 一致）
+  → 再次离开时会重新触发 summarize
 ```
 
-tidev 的 TUI 中，session 从创建后就一直存在，用户可以：
-- 在当前 session 中不断发新消息（永久继续）
-- 切换到其他 session 再切回来
-- 重启程序后继续同一 session
+**边界情况处理**：
 
-**没有事件可以确定"这个 session 结束了"**。导致：
-- `summarize_session()` 无法等到合适的时机调用
-- 无法判断哪些 session 是"历史可引用的"（可能还在活跃编辑中）
-- eviction 无法区分正常关闭的 session 和废弃的 session
-
-**待设计方案**：
-- 是否引入 "fork on new conversation" 模型？每次新对话 fork 出一个子 session
-- 是否引入 `session.status` 字段，用户显式 close？
-- 是否用超时判定（如 30 分钟无新消息视为结束）？
+| 场景 | 行为 |
+|------|------|
+| 快速切换 A→B→A | 巡检跳过当前 session，A 不会被总结 |
+| 多个 session 陆续进入后台 | 每个独立检查，互不干扰 |
+| 应用退出 | cancel 巡检任务，不阻塞；重启后巡检捡起 |
+| 应用崩溃 | 下次启动后台捡起未总结的 session |
+| Subagent 子 session | `parent_session_id IS NOT NULL` 天然排除 |
+| 用户 fork session | 与 TUI 一致，用 `create_session()` 无 parent |
 
 ### 7.5 向量索引未持久化 [严重]（参见 §4.2）
 
@@ -564,10 +609,13 @@ compose_system_prompt（每轮）:
   bm25Index.add()
   vectorIndex.add(embed())
 
-每轮对话结束:
-  summarize_session() → INSERT OR REPLACE session_summaries
-  // 每次覆盖，LLM 调用浪费
-  // ⚠ Phase1 修复了读回，但时机问题仍待解决
+后台巡检（每 60s）✅ Phase7:
+  find_inactive_sessions()
+  ├─ 跳过 parent_session_id IS NOT NULL（subagent）
+  ├─ 跳过 status != 'active'
+  ├─ 跳过 updated_at 在超时时间内
+  ├─ 跳过当前前台 session
+  └─ 逐个: set_status('completed') + summarize_session()
 
 手动（可选）:
   LLM 调用 memory search 或 memory remember 工具

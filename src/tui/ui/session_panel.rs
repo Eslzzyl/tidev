@@ -597,6 +597,8 @@ impl App {
             return Ok(());
         }
 
+        *self.current_session_id.write().unwrap() = session_id;
+
         self.screen = if self.conversation.visible_messages().is_empty() {
             super::Screen::Welcome
         } else {

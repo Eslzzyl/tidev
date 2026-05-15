@@ -15,7 +15,7 @@ use std::{
     cell::{Cell, RefCell},
     env, io,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
     time::{Duration, Instant},
 };
 use tokio::{
@@ -176,6 +176,11 @@ struct App {
     /// double-presses Esc, causing the agent loop to stop at its next
     /// cancellation check point.
     request_cancel_token: Option<CancellationToken>,
+    /// Current foreground session ID, shared with the background inactivity
+    /// check task so it does not summarise the active session.
+    current_session_id: Arc<RwLock<Uuid>>,
+    /// Cancel token for the background inactivity check loop.
+    inactivity_check_cancel: CancellationToken,
     abort_confirmation_deadline: Option<Instant>,
     last_notice: Option<String>,
     toast: Option<(String, Instant)>,

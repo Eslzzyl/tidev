@@ -1,7 +1,8 @@
 use super::*;
 use crate::tui::panel_launcher::PanelLauncherState;
+use chrono::Utc;
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::{io, path::Path, time::Duration};
+use std::{io, path::Path, sync::RwLock, time::Duration};
 use tokio::runtime::Runtime;
 
 /// Find the git worktree root by looking for a .git directory,
@@ -129,6 +130,59 @@ impl App {
                 }
             });
         }
+
+        // Share current session ID for the background inactivity check.
+        let current_session_id: Arc<RwLock<Uuid>> = Arc::new(RwLock::new(session_id));
+        let inactivity_check_cancel = CancellationToken::new();
+
+        // Schedule periodic session inactivity check (every 60 seconds).
+        // Sessions inactive for longer than `INACTIVITY_TIMEOUT_SECS` will be
+        // auto-summarised.  (This could be made configurable in the future.)
+        const INACTIVITY_TIMEOUT_SECS: i64 = 300;
+        {
+            let check_store = store.clone();
+            let check_mem_store = memory_store.clone();
+            let check_ws = workspace_root.display().to_string();
+            let cancel_token = inactivity_check_cancel.clone();
+            let sid_ref = current_session_id.clone();
+
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+                interval.tick().await; // skip immediate run
+
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            let now = Utc::now();
+                            let cutoff = (now - chrono::Duration::seconds(INACTIVITY_TIMEOUT_SECS)).to_rfc3339();
+                            let current = *sid_ref.read().unwrap();
+
+                            let ids = match check_store.find_inactive_sessions(&cutoff, current) {
+                                Ok(ids) => ids,
+                                Err(e) => {
+                                    crate::log_warn!("inactivity check failed: {}", e);
+                                    continue;
+                                }
+                            };
+
+                            for id in ids {
+                                crate::log_info!("summarising inactive session: {}", id);
+                                if let Err(e) = check_store.set_session_status(id, "completed") {
+                                    crate::log_warn!("failed to mark session completed: {}", e);
+                                    continue;
+                                }
+                                if let Err(e) = check_mem_store.summarize_session(id, &check_ws).await {
+                                    crate::log_warn!("session summarisation failed: {}", e);
+                                }
+                            }
+                        }
+                        _ = cancel_token.cancelled() => {
+                            break;
+                        }
+                    }
+                }
+            });
+        }
         let last_notice = None;
         let retrying_hint = None;
 
@@ -158,6 +212,8 @@ impl App {
             commands,
             command_palette,
             panel_launcher: PanelLauncherState::default(),
+            current_session_id,
+            inactivity_check_cancel,
             connect_dialog: None,
             theme_panel: None,
             model_panel: None,
@@ -367,8 +423,9 @@ impl App {
         self.cleanup_cancel
             .store(true, std::sync::atomic::Ordering::SeqCst);
 
-        // Cancel the agent loop so it can exit promptly instead of
-        // blocking the tokio runtime shutdown.
+        // Cancel the inactivity check and agent loop so they exit
+        // promptly instead of blocking the tokio runtime shutdown.
+        self.inactivity_check_cancel.cancel();
         if let Some(token) = self.request_cancel_token.take() {
             token.cancel();
         }

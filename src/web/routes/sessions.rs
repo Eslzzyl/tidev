@@ -261,10 +261,9 @@ pub async fn fork_session(
         .title
         .unwrap_or_else(|| format!("Fork of {}", source_session.title));
 
-    // Create new session with parent reference
-    store.create_session_with_parent(
+    // Create new session (independent, no parent — same as TUI fork)
+    store.create_session(
         new_session_id,
-        source_session.session_id,
         std::path::Path::new(&source_session.workspace_root),
         &source_session.provider_id,
         &source_session.provider_display_name,

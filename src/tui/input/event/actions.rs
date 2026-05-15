@@ -355,6 +355,7 @@ impl App {
             .load_conversation(new_session_id)?
             .context("Failed to load forked conversation")?;
         self.conversation = conversation;
+        *self.current_session_id.write().unwrap() = new_session_id;
         self.reset_active_runtime();
 
         // 关闭所有面板和状态
@@ -532,6 +533,7 @@ impl App {
         )?;
 
         self.conversation = conversation;
+        *self.current_session_id.write().unwrap() = session_id;
         self.reset_active_runtime();
 
         // Reset thinking_level to the default auto-detected value for the current model,

@@ -52,6 +52,8 @@ pub struct SessionRecord {
     pub title: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub status: String,
+    pub ended_at: Option<DateTime<Utc>>,
     pub context_summary: Option<String>,
     pub context_retained_from: usize,
 }
@@ -278,7 +280,7 @@ impl SessionStore {
         let workspace_root = workspace_root.display().to_string();
 
         self.write_conn.execute(
-            "INSERT INTO sessions (id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at, context_summary, context_retained_from) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO sessions (id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at, status, context_summary, context_retained_from) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 session_id_text.clone(),
                 provider_id,
@@ -288,6 +290,7 @@ impl SessionStore {
                 title,
                 now_text,
                 now_text,
+                "active",
                 "",
                 0_i64,
             ],
@@ -309,6 +312,8 @@ impl SessionStore {
             title: title.to_string(),
             created_at: now,
             updated_at: now,
+            status: "active".to_string(),
+            ended_at: None,
             context_summary: None,
             context_retained_from: 0,
         })
@@ -333,7 +338,7 @@ impl SessionStore {
         let workspace_root = workspace_root.display().to_string();
 
         self.write_conn.execute(
-            "INSERT INTO sessions (id, parent_session_id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at, context_summary, context_retained_from) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO sessions (id, parent_session_id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at, status, context_summary, context_retained_from) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 session_id_text.clone(),
                 parent_session_id_text,
@@ -344,6 +349,7 @@ impl SessionStore {
                 title,
                 now_text,
                 now_text,
+                "active",
                 "",
                 0_i64,
             ],
@@ -365,6 +371,8 @@ impl SessionStore {
             title: title.to_string(),
             created_at: now,
             updated_at: now,
+            status: "active".to_string(),
+            ended_at: None,
             context_summary: None,
             context_retained_from: 0,
         })
@@ -1261,6 +1269,46 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Find user sessions (parent_session_id IS NULL) that have been inactive
+    /// long enough (updated_at < cutoff) and still have status 'active'.
+    /// Excludes the current foreground session.
+    pub fn find_inactive_sessions(&self, cutoff: &str, exclude_session_id: Uuid) -> Result<Vec<Uuid>> {
+        let mut stmt = self.read_conn.prepare(
+            "SELECT s.id FROM sessions s
+             WHERE s.parent_session_id IS NULL
+               AND s.status = 'active'
+               AND s.updated_at < ?1
+               AND s.id != ?2
+               AND EXISTS (
+                   SELECT 1 FROM compressed_observations co
+                   WHERE co.session_id = s.id
+                     AND co.obs_type IS NOT NULL
+               )
+             ORDER BY s.updated_at ASC"
+        )?;
+        let ids = stmt.query_map(
+            params![cutoff, exclude_session_id.to_string()],
+            |row| {
+                let id_str: String = row.get(0)?;
+                Uuid::parse_str(&id_str).map_err(|e| {
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(e))
+                })
+            },
+        )?.filter_map(|r| r.ok()).collect();
+        Ok(ids)
+    }
+
+    /// Set session status and optionally ended_at timestamp.
+    pub fn set_session_status(&self, session_id: Uuid, status: &str) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        let ended_at = if status == "completed" { Some(&now) } else { None };
+        self.write_conn.execute(
+            "UPDATE sessions SET status = ?1, ended_at = ?2, updated_at = ?3 WHERE id = ?4",
+            params![status, ended_at, now, session_id.to_string()],
+        )?;
+        Ok(())
+    }
+
     fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRecord> {
         let id = row.get::<_, String>(0)?;
         let parent_session_id = row.get::<_, Option<String>>(1)?;
@@ -1271,9 +1319,11 @@ impl SessionStore {
         let title = row.get::<_, String>(6)?;
         let created_at = row.get::<_, String>(7)?;
         let updated_at = row.get::<_, String>(8)?;
-        let context_summary = row.get::<_, String>(9)?;
-        let context_retained_from = row.get::<_, i64>(10)? as usize;
-        let workspace_root = row.get::<_, String>(11)?;
+        let status = row.get::<_, String>(9)?;
+        let ended_at = row.get::<_, Option<String>>(10)?;
+        let context_summary = row.get::<_, String>(11)?;
+        let context_retained_from = row.get::<_, i64>(12)? as usize;
+        let workspace_root = row.get::<_, String>(13)?;
 
         let parent_session_id = parent_session_id
             .map(|value| {
@@ -1300,6 +1350,15 @@ impl SessionStore {
             updated_at: parse_datetime(&updated_at).map_err(|error| {
                 rusqlite::Error::FromSqlConversionFailure(8, Type::Text, Box::new(error))
             })?,
+            status: if status.trim().is_empty() { "active".to_string() } else { status },
+            ended_at: match ended_at {
+                Some(ref v) if !v.trim().is_empty() => {
+                    Some(parse_datetime(v).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(10, Type::Text, Box::new(error))
+                    })?)
+                }
+                _ => None,
+            },
             context_summary: if context_summary.trim().is_empty() {
                 None
             } else {
@@ -1641,10 +1700,10 @@ impl SessionStore {
         // 2. sessions ── only the requested ones
         {
             let mut stmt = self.read_conn.prepare(
-                "SELECT id, parent_session_id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at, context_summary, context_retained_from FROM sessions WHERE id = ?1",
+                "SELECT id, parent_session_id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at, status, ended_at, context_summary, context_retained_from FROM sessions WHERE id = ?1",
             )?;
             let mut insert = tx.prepare(
-                "INSERT OR REPLACE INTO sessions (id, parent_session_id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at, context_summary, context_retained_from) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                "INSERT OR REPLACE INTO sessions (id, parent_session_id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at, status, ended_at, context_summary, context_retained_from) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             )?;
             for sid in &session_id_strs {
                 let row = stmt.query_row(params![sid], |row| {
@@ -1660,11 +1719,13 @@ impl SessionStore {
                         row.get::<_, String>(7)?,
                         row.get::<_, String>(8)?,
                         row.get::<_, String>(9)?,
-                        row.get::<_, i64>(10)?,
+                        row.get::<_, Option<String>>(10)?,
+                        row.get::<_, String>(11)?,
+                        row.get::<_, i64>(12)?,
                     ))
                 })?;
                 insert.execute(params![
-                    row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8, row.9, row.10
+                    row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8, row.9, row.10, row.11, row.12
                 ])?;
             }
         }

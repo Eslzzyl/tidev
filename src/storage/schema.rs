@@ -1,6 +1,6 @@
-pub const SCHEMA_VERSION: i64 = 28;
+pub const SCHEMA_VERSION: i64 = 29;
 
-pub const SESSION_SELECT_COLUMNS: &str = "s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, s.context_summary, s.context_retained_from, COALESCE(sw.workspace_root, '')";
+pub const SESSION_SELECT_COLUMNS: &str = "s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, s.status, s.ended_at, s.context_summary, s.context_retained_from, COALESCE(sw.workspace_root, '')";
 
 pub const SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS meta (
@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     title TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    ended_at TEXT,
     context_summary TEXT NOT NULL DEFAULT '',
     context_retained_from INTEGER NOT NULL DEFAULT 0
 );
@@ -213,6 +215,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     title TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    ended_at TEXT,
     context_summary TEXT NOT NULL DEFAULT '',
     context_retained_from INTEGER NOT NULL DEFAULT 0
 );

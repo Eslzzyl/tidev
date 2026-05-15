@@ -1448,15 +1448,6 @@ impl AgentRuntime {
             None,
         ).await;
 
-        // ── Auto-summarize session on exit ─────────────────────────────
-        if result.is_ok() {
-            let ws = self.workspace_root.display().to_string();
-            let memory_store = self.tools.memory_store();
-            if let Err(e) = memory_store.summarize_session(session_id, &ws).await {
-                crate::log_warn!("session summarization failed: {}", e);
-            }
-        }
-
         result
     }
 
