@@ -56,7 +56,13 @@ impl MemoryStore {
         read_connection.pragma_update(None, "journal_mode", "WAL")?;
         read_connection.busy_timeout(std::time::Duration::from_secs(5))?;
 
-        Ok(Self {
+        // Phase 4: Add embedding column for existing databases
+        let _ = connection.execute(
+            "ALTER TABLE compressed_observations ADD COLUMN embedding BLOB",
+            [],
+        );
+
+        let store = Self {
             db_path: path,
             connection: Mutex::new(connection),
             read_connection: Mutex::new(read_connection),
@@ -67,7 +73,12 @@ impl MemoryStore {
             vector_index: RwLock::new(VectorIndex::new(1536)),
             hybrid_search: RwLock::new(HybridSearch::new()),
             embedder: RwLock::new(None),
-        })
+        };
+
+        // Phase 4: Load persisted embeddings into vector index on startup
+        store.load_embeddings_from_db();
+
+        Ok(store)
     }
 }
 
@@ -92,8 +103,51 @@ impl MemoryStore {
     pub fn set_embedder(&self, embedder: OpenAIEmbedder) {
         let dims = embedder.dimensions();
         *self.embedder.write().unwrap() = Some(embedder);
-        // Re-create vector index with correct dimensions
+        // Re-create vector index with correct dimensions, then load persisted
         *self.vector_index.write().unwrap() = VectorIndex::new(dims);
+        self.load_embeddings_from_db();
+    }
+
+    /// Load persisted embeddings from DB into the in-memory vector index.
+    fn load_embeddings_from_db(&self) {
+        let db = match self.read_connection.lock() {
+            Ok(db) => db,
+            Err(_) => return,
+        };
+        let mut stmt = match db.prepare(
+            "SELECT id, session_id, embedding FROM compressed_observations WHERE embedding IS NOT NULL",
+        ) {
+            Ok(s) => s,
+            Err(_) => return, // column may not exist yet
+        };
+        let rows = match stmt.query_map([], |row| {
+            let id: String = row.get(0)?;
+            let session_id: String = row.get(1)?;
+            let blob: Vec<u8> = row.get(2)?;
+            Ok((id, session_id, blob))
+        }) {
+            Ok(r) => r,
+            Err(_) => return,
+        };
+        let mut count = 0;
+        let mut vi = self.vector_index.write().unwrap();
+        for row in rows.flatten() {
+            let (id, session_id, blob) = row;
+            // Each f32 is 4 bytes
+            if blob.len() % 4 != 0 {
+                continue;
+            }
+            let embedding: Vec<f32> = blob
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+                .collect();
+            if vi.add(&id, &session_id, embedding).is_ok() {
+                count += 1;
+            }
+        }
+        if count > 0 {
+            crate::log_info!("loaded {} embeddings into vector index", count);
+        }
     }
 
     /// Clone for sharing — opens a new connection.
@@ -470,15 +524,26 @@ impl MemoryStore {
             &compressed.session_id.to_string(),
         );
 
-        // Add to vector index (async, best-effort)
+        // Add to vector index (async, best-effort) + persist to DB
         if let Some(ref embedder) = *self.embedder.read().unwrap() {
             let id = compressed.id.to_string();
             let session_id = compressed.session_id.to_string();
             let search_text = compressed.to_search_text();
             match embedder.embed(&search_text).await {
                 Ok(embedding) => {
-                    if let Err(e) = self.vector_index.write().unwrap().add(&id, &session_id, embedding) {
+                    // 1. Add to in-memory index
+                    if let Err(e) = self.vector_index.write().unwrap().add(&id, &session_id, embedding.clone()) {
                         crate::log_warn!("vector index add failed: {}", e);
+                    }
+                    // 2. Persist to DB
+                    let blob: Vec<u8> = embedding.iter()
+                        .flat_map(|f| f.to_le_bytes())
+                        .collect();
+                    if let Ok(db) = self.connection.lock() {
+                        let _ = db.execute(
+                            "UPDATE compressed_observations SET embedding = ?1 WHERE id = ?2",
+                            rusqlite::params![blob, &id],
+                        );
                     }
                 }
                 Err(e) => crate::log_warn!("embedding failed: {}", e),

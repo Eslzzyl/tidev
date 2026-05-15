@@ -392,7 +392,8 @@ CREATE TABLE IF NOT EXISTS compressed_observations (
     files TEXT NOT NULL DEFAULT '[]',
     importance INTEGER NOT NULL DEFAULT 5,
     confidence REAL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    embedding BLOB
 );
 
 CREATE INDEX IF NOT EXISTS idx_compressed_obs_session ON compressed_observations(session_id);
