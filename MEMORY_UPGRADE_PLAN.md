@@ -2,7 +2,7 @@
 
 > 基于对 [agentmemory](https://github.com/rohitg00/agentmemory) v0.9.12 的逆向分析，在 tidev 中以 Rust 复刻。
 >
-> 更新时间：2026-05-15（Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅, Phase 6 ✅, Phase 7 ✅, 表合并 ✅, 隐私过滤 ✅, Session 巡检 ✅）
+> 更新时间：2026-05-15（Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅, Phase 6 ✅, Phase 7 ✅, 表合并 ✅, 隐私过滤 ✅, Session 巡检 ✅, 整合管线 ✅）
 
 ---
 
@@ -33,8 +33,8 @@ src/memory/
 ├── dedup.rs          — blake3 去重映射（LRU + 5 分钟 TTL）
 ├── remember.rs       — Jaccard 去重 + 版本链管理
 ├── sessions.rs       — LLM 会话摘要
-├── audit.rs          — 不可变审计日志
 ├── slots.rs          — 记忆槽 CRUD + 8 默认槽 + 提示词渲染
+├── consolidate.rs    — 跨 session 整合管线（语义事实 + 可复用流程）
 ├── embed.rs          — OpenAI Embeddings API 客户端
 ├── vector_index.rs   — 内存余弦相似度索引
 ├── hybrid_search.rs  — RRF BM25 + 向量融合搜索
@@ -147,14 +147,17 @@ search(query, workspace_root)
 | Retention 自动集成 ✅ Phase6 | `engine.rs` | `src/functions/retention.ts` | `remember()` + `record_usage()` 中自动计算 |
 | PostToolFailure 接入 ✅ Phase6 | `runtime.rs` | `src/functions/observe.ts` | 检测 `sandbox_denied` / `Error:` 前缀 |
 
-### Phase 7 — Session 生命周期管理
+### Phase 7 — Session 生命周期管理 + 整合管线
 
-| 功能 | 文件 | 说明 | 算法/依赖 |
-|------|------|------|-----------|
-| session status 字段 | `schema.rs` | sessions 表增加 `status` + `ended_at` | `'active'` / `'completed'` |
-| 后台不活跃巡检 | `run.rs` | 每 60s 检查是否有 inactive session 需 summarize | `find_inactive_sessions()`, 300s 超时 |
-| 退出零阻塞 | `run.rs` | 退出时只 cancel 巡检任务，不调用 LLM | `CancellationToken` |
-| web fork 修正 | `sessions.rs` | web fork 改用 `create_session()`（无 parent） | 与 TUI fork 行为一致 |
+| 功能 | 文件 | 说明 |
+|------|------|------|
+| session status 字段 | `schema.rs` | sessions 表增加 `status` + `ended_at` |
+| 后台不活跃巡检 | `run.rs` | 每 60s 检查 inactive session 并 summarize |
+| 退出零阻塞 | `run.rs` | 退出时只 cancel 任务，不调用 LLM |
+| web fork 修正 | `sessions.rs` | web fork 改用 `create_session()`（无 parent） |
+| 整合管线 | `consolidate.rs` | 从 summaries 提取跨 session 事实，从 patterns 提取可复用流程 |
+| 后台整合调度 | `run.rs` | 每 30 分钟运行一次整合管线 |
+| Facts + Procedures 注入 | `runtime.rs` | `compose_system_prompt()` 中注入 consolidated knowledge |
 
 ---
 
@@ -168,16 +171,17 @@ search(query, workspace_root)
 - **图查询**：BFS 遍历 + 排名
 - **图谱统计**：节点/边计数
 
-### Phase 3 功能（按优先级排列）
+### 未实现功能
 
-| 功能 | 文件 | 行数估计 | 复杂度 |
-|------|------|---------|--------|
-| 整合管线 | `consolidate.rs` | ~200 | 高 |
-| 洞察/模式/教训 | `insights.rs` | ~200 | 高 |
-| 导入导出 | `export.rs` | ~150 | 低 |
-| 评估系统 | `eval/` | ~150 | 中 |
+| 功能 | 复杂度 | 说明 |
+|------|--------|------|
+| 知识图谱（DV11） | 高 | schema 中 `graph_nodes` / `graph_edges` 表已就绪，缺失实体抽取、图查询、图统计 |
+| 洞察/模式/教训反射 | 高 | 从概念聚类中合成 insight（参考 agentmemory 的 `mem::reflect`），依赖整合管线但尚未实现 |
+| 导入导出 | 低 | `storage/mod.rs` 已有 session 级 SQLite export/import，但记忆系统级别的导出文件 `export.rs` 不存在 |
+| 评估系统 | 中 | agentmemory 的自我评估功能，对单进程工具来说需求不高 |
 
-这些功能来自 agentmemory 但 tidev 目前无迫切需求。整合管线需要跨会话的模式检测 LLM 调用，洞察/模式/教训需要多次 LLM 分析和汇总。
+已实现：
+- 整合管线 ✅（`consolidate.rs`，2026-05-15）
 
 ---
 
@@ -219,71 +223,44 @@ agentmemory 的 `observe.ts` 有 `stripPrivateData()` 过滤密码和 API key。
 
 `on_post_tool_failure()` 方法已定义但未接入执行路径。`ToolExecutionResult` 没有 error 字段，失败信息嵌在 `output` 中。可靠检测需要改造 `ToolExecutionResult` 结构体，属跨模块改动。
 
-### 4.7 缺乏完善的降级措施 [待实现] ✅ Phase2（LLM 压缩降级已修复）
+### 4.7 降级措施 ✅ Phase2
 
 #### 4.7.1 LLM 压缩的降级 ✅ Phase2
 
-已修复（2026-05-15）：`MemoryStore::compress()` 现在自动判断 LLM 可用性，不可用时走合成压缩路径。完整启发式规则已实现（类型推断、路径提取、重要性评分）。
-
-tidev 的现状：
+`MemoryStore::compress()` 自动判断 LLM 可用性：
 
 ```
-tidev:
-  LLM client 可用?
-    ├─ Yes → LLM 压缩（compress.rs:compress()）
-    │    如果 LLM 调用失败 → log_warn + 自动降级到合成压缩
-    │
-    └─ No  → 合成压缩（compress_synthetic()），全功能可用
+LLM client 可用?
+  ├─ Yes → LLM 压缩（compress.rs:compress()）
+  │    如果 LLM 调用失败 → log_warn + 自动降级到合成压缩
+  └─ No  → 合成压缩（compress_synthetic()），全功能可用
 ```
+
+合成压缩（`compress_synthetic()`）是完整的启发式规则引擎：工具名推断、路径提取、重要性评分。
 
 **剩余问题**：
-1. 没有熔断器（连续 N 次失败后暂停 LLM 压缩一段时间）—— 可后续补
-2. 没有 `isAutoCompressEnabled()` 配置开关 —— 当前行为等价于始终开启
+1. 没有熔断器（连续 N 次失败后暂停 LLM 压缩一段时间）
+2. 没有 `isAutoCompressEnabled()` 配置开关
 
 #### 4.7.2 Embedding 的降级
 
-agentmemory 的 embedding 降级：
-
 ```
-agentmemory:
-  createEmbeddingProvider() → detectEmbeddingProvider()
-    ├─ 有 API key → 对应 provider（Gemini / OpenAI / Voyage / Cohere / OpenRouter）
-    ├─ 无 API key 但有 @xenova/transformers → LocalEmbeddingProvider
-    │    (Xenova/all-MiniLM-L6-v2, 384维, 纯本地)
-    └─ 完全无 → null → HybridSearch 仅用 BM25
-        搜索降级: hybrid(BM25+向量) → BM25 only → (无进一步降级)
+OpenAI API key 可用?
+  ├─ Yes → OpenAIEmbedder（text-embedding-3-small, 1536维）
+  └─ No  → embedder = None → search() 直接跳过 hybrid 走 FTS5
+           无本地 embedding 选项
 ```
 
-tidev 的现状：
-
-```
-tidev:
-  OpenAI API key 可用?
-    ├─ Yes → OpenAIEmbedder（text-embedding-3-small, 1536维）
-    └─ No  → embedder = None → search() 直接跳过 hybrid 走 FTS5
-             无本地 embedding 选项
-```
+搜索降级链条：hybrid(BM25+向量) → FTS5 → LIKE
 
 **问题**：
-- 仅支持 OpenAI 一个 provider（已在 §4.1 记录）
+- 仅支持 OpenAI 一个 provider
 - 没有本地 embedding 选项（如 ONNX / llama.cpp 等 Rust 生态方案）
-- 但 tidev 的搜索降级链条本身是合理的：hybrid → FTS5 → LIKE
 
 #### 4.7.3 Session 摘要的降级
 
-agentmemory 在 `summarize.ts:75` 检测到 `provider.name === "noop"` 时直接跳过摘要生成。
-
-tidev 的 `summarize_session()` 在 LLM 不可用时：`llm.ok_or_else` → `anyhow::bail!` → 调用者 `log_warn`。不会崩溃但浪费了一次 LLM 检测的时间。
-
-#### 4.7.4 需要实现的降级措施清单
-
-| 降级场景 | agentmemory | tidev | 优先级 |
-|----------|-------------|-------|--------|
-| 无 LLM API key | 合成压缩（规则驱动） | ✅ 合成压缩（Phase 2） | 已修复 |
-| LLM API 调用失败 | 熔断器（3次→30秒） + FallbackChain | ✅ 自动降级到合成压缩 | 已修复 |
-| 无 embedding API key | 本地 ONNX 模型（384维） | ⚠ 降级 FTS5（可接受） | 中 |
-| embedding API 调用失败 | 忽略（不影响上游写入） | ✅ log_warn，不影响写入 | 中 |
-| 摘要时无 LLM | 跳过 | ⚠ 报错但无害 | 低 |
+`summarize_session()` 在 LLM 不可用时：`llm.ok_or_else` → `anyhow::bail!` → 调用者 `log_warn`。
+不会崩溃但浪费了一次 LLM 检测的时间。
 
 ---
 
@@ -331,40 +308,32 @@ sessions 表新增列：
 
 通过与 agentmemory 源码的对比分析，tidev 记忆系统存在以下问题。这些问题按照严重程度排列：
 
-### 7.1 压缩观察和会话摘要不被消费 [严重] ✅ Phase1
+### 7.1 压缩观察和会话摘要已注入 LLM System Prompt ✅ Phase1
 
-已修复（2026-05-15）。`compose_system_prompt()` 现在在 `select_hot()` 后注入：
+`compose_system_prompt()` 在 `select_hot()` 后注入：
 - 当前 session 的压缩观察（importance ≥ 5，限 8 条）
 - 其他 session 的会话摘要（限 5 条）
 
-agentmemory 中有一条完整的数据消费链，tidev 之前只实现了写入端，现在写入和注入端已闭环：
+数据消费链完整闭环：
 
 ```
-agentmemory:                            tidev:
-─────────────                            ─────
-observe → compress                        ✅ 相同
-   ↓                                      ↓
-写入搜索索引 + 向量索引                    ✅ 相同
-   ↓                                      ↓
-mem::context → 注入到 LLM system prompt    ✅ 已实现（Phase 1）
-   ↓                                      ↓
-mem::summarize → session_summaries         ⚠ 每轮触发（见 7.3）
-   ↓                                      ↓
-mem::context → 注入到 LLM                  ✅ 已实现（Phase 1）
-   ↓                                      ↓
-consolidation-pipeline → SemanticMemory    ❌ 缺失
+observe → compress → 写入搜索索引 + 向量索引
+  ↓
+mem::context → 注入到 LLM system prompt
+  ↓
+后台巡检 → summarize_session → session_summaries
+  ↓
+mem::context → 注入到 LLM
 ```
 
-**遗留问题**：会话摘要之前由每轮触发改为后台巡检（见 7.3 ✅），但摘要数据已被正确消费。
+### 7.2 原始观察不持久保留——与 compressed_observations 表合并 ✅ 表合并
 
-### 7.2 原始观察不应持久保留 [严重] ✅ 表合并
-
-已修复（2026-05-15）。`observations` 表和 `observations_fts` 索引已删除，所有数据合并到单表 `compressed_observations`：
+`observations` 表和 `observations_fts` 索引已删除，所有数据合并到单表 `compressed_observations`：
 - `observe()` INSERT 一行，含 raw 字段
 - `compress()` UPDATE 同一行，填充 compressed 字段，清空 `tool_input`/`tool_output`（NULL）
 - 与 agentmemory 的"KV 覆盖"语义完全一致
 
-### 7.3 会话摘要时机错误——每轮触发 [严重] ✅ Phase7
+### 7.3 会话摘要时机——后台巡检触发 ✅ Phase7
 
 **已修复（2026-05-15）**。移除了 `run_agent_loop_with_tools()` 返回后的 `summarize_session()` 调用（`src/agent/runtime.rs:1451`）。
 
@@ -405,7 +374,7 @@ tokio::spawn(async move {
 });
 ```
 
-### 7.4 缺少 session 结束标记 [严重] ✅ Phase7
+### 7.4 缺少 session 结束标记 ✅ Phase7
 
 **已修复（2026-05-15）**。sessions 表增加了 `status` 和 `ended_at` 字段：
 
@@ -460,9 +429,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 - 每次压缩完成时 embedding 同时写入 DB + 内存索引
 - 语义搜索在重启后立即可用
 
-### 7.6 自动注入不含语义检索 ✅ Phase3（select_hot 已改进）
+### 7.6 自动注入不含语义检索
 
-`select_hot()` 已改为复合排序公式（Phase 3）：
+`select_hot()` 使用复合排序公式：
 ```
 score = importance * 0.5 + min(usage_count / 20, 1) * 0.3 + recency_bonus(7d) * 0.2
 ```
@@ -476,67 +445,57 @@ ORDER BY
 DESC
 ```
 
-但问题仍在：`select_hot()` 不包含任何语义检索。如果 LLM 不主动调用 `memory search` 工具，自动注入只看到：
+但仍不包含语义检索。自动注入仅包含：
 - 5 条按复合分数排序的高频/重要/近期记忆
 - 8 条当前 session 的压缩观察（Phase 1）
 - 5 条其他 session 的摘要（Phase 1）
+- 5 条 consolidated facts（整合管线）
+- 3 条 reusable procedures（整合管线）
 - pinned slots
 
-这些都不包含与当前用户问题的语义相关性。agentmemory 的 `mem::context` 在 system prompt 注入时做了语义搜索。
+agentmemory 的 `mem::context` 在注入时做了语义搜索，tidev 暂时没有。
 
-### 7.7 缺乏完善的降级措施 [中]（参见 §4.7）✅ Phase2
+### 7.7 降级措施完善 ✅ Phase2
 
-已修复（2026-05-15）：
-- `compress_synthetic()` 已完整实现：从骨架代码升级为完整的启发式规则引擎，含工具名推断、重要性评分、文件路径提取、概念推断
-- `MemoryStore::compress()` 添加降级路径：LLM 不可用时自动走合成压缩，LLM 失败时自动降级
+LLM 压缩不可用时自动走合成压缩：
+- 无 LLM API key → 合成压缩（规则驱动，全功能可用）
+- LLM API 临时故障 → 自动降级到合成压缩，log_warn
 
-对比：
+| 场景 | 行为 |
+|------|------|
+| 无 LLM API key | 合成压缩（主动降级） |
+| LLM API 临时故障 | 自动降级到合成压缩 |
+| 无 Embedding API key | 降级 FTS5（可接受） |
+| Embedding 故障 | log_warn，不影响写入 |
 
-| 场景 | agentmemory | tidev |
-|------|-------------|-------|
-| 无 LLM API key | 合成压缩（自动降级，全功能可用） | ✅ 合成压缩（主动降级） |
-| LLM API 临时故障 | 熔断 + 自动恢复 + 可选 FallbackChain | ✅ 自动降级到合成压缩 |
-| 无 Embedding API key | 可装本地 ONNX 模型 | 降级 FTS5（可接受） |
-| Embedding 故障 | 忽略错误，不影响写入 | 写入路径上 `embedder.embed()` 失败 → log_warn（可接受） |
+### 7.8 `select_hot()` 复合排序 + Retention 自动集成 ✅ Phase3 + Phase6
 
-详细分析见 §4.7。
-
-### 7.8 `select_hot()` 排序策略过于简单 ✅ Phase3
-
-已修复（2026-05-15）：`select_hot()` 改用复合排序公式：
+`select_hot()` 使用复合排序公式（Phase 3）：
 ```
 score = importance * 0.5 + min(usage_count / 20, 1) * 0.3 + recency_bonus(7d) * 0.2
 ```
 
-`select_hot()` 之前仅按 `usage_count` 降序取前 N 条（`src/memory/engine.rs:252`）：
+Retention scoring 在以下时机自动计算（Phase 6）：
+- `remember()` 写入新记忆时
+- `record_usage()` 更新使用计数时
 
-```sql
-ORDER BY usage_count DESC LIMIT 5
-```
+### 7.9 整合管线 ✅ Consolidation
 
-没有考虑：
-- **recency**（最近访问时间）
-- **importance**（由压缩 LLM 评分，1-10）
-- **semantic relevance**（与当前任务的语义相关性）
-- **retention score**（虽然 retention.rs 定义了评分公式但从未自动调用）
+`ConsolidationService`（`src/memory/consolidate.rs`）每 30 分钟后台运行：
 
-**影响**：一个项目积累大量记忆后，高频使用的旧记忆会一直占据 hot memory 槽位，新写入的重要记忆可能长时间无法被自动注入。
+- **Tier 1 语义整合**：从 ≥5 个 session summaries 调用 LLM 提取跨 session 事实，存入 `memories` 表（`memory_type = fact`, `tags` 含 `consolidated`）
+- **Tier 2 流程提取**：从 ≥3 个 pattern/workflow 记忆中提取可复用流程，存入 `memories` 表（`memory_type = pattern`, `tags` 含 `procedure`）
+- **Cursor 机制**：通过 `meta` 表记录已处理的最后 summary/memory ID，避免重复提取
 
-### 7.8 Retention scoring 未自动接入 ✅ Phase6
+注入到 `compose_system_prompt()`：
+- `## Consolidated Project Knowledge` — facts（limit 5）
+- `## Reusable Procedures` — procedures（limit 3）
 
-已修复（2026-05-15）：
-- `remember()` 写入新记忆时自动计算 retention score
-- `record_usage()` 更新使用计数时自动重新计算 retention score
+agentmemory 还有 `reflect`（洞察合成）未实现。
 
-仍然存在问题：
+### 7.10 PostToolFailure 接入 ✅ Phase6
 
-### 7.9 无自动跨 session 记忆整合（整合管线）
-
-agentmemory 的 `mem::consolidate-pipeline` 在累积 ≥5 个 session summaries 后调用 LLM 提取跨 session 的知识事实（SemanticMemory）和流程模式（ProceduralMemory）。tidev 完全没有此功能。
-
-### 7.10 PostToolFailure 未接入（已有 §4.6） ✅ Phase6
-
-已修复（2026-05-15）：`execute_tool_calls()` 在工具返回错误时调用 `on_post_tool_failure()`。
+`execute_tool_calls()` 在工具返回错误时调用 `on_post_tool_failure()`：
 - 检测条件：`sandbox_denied` 为 true，或 output 以 `"Error:"` / `"Tool task panicked"` 开头
 - 记录为 `HookType::PostToolFailure` 观察，供记忆系统学习
 
@@ -544,9 +503,9 @@ agentmemory 的 `mem::consolidate-pipeline` 在累积 ≥5 个 session summaries
 
 审计模块已于 2026-05-15 移除。所有 `AuditService::record()` 调用使用 `let _ = ` 静默忽略错误，且 `audit_query()` 无任何调用者。`audit_log` 表甚至不在主 `SCHEMA_SQL` 中，从未被正确创建过。移除后减少 ~130 行死代码和 1 张 DB 表。
 
-### 7.12 无隐私过滤（已有 §4.4） ✅ 隐私过滤
+### 7.12 隐私过滤 ✅ 隐私过滤
 
-已修复（2026-05-15）。`build_compression_prompt()` 新增 `strip_sensitive()` 函数，在 LLM 调用前过滤：
+`build_compression_prompt()` 在 LLM 调用前过滤敏感信息：
 - OpenAI / Anthropic API keys
 - GitHub tokens
 - Bearer tokens / Authorization headers
@@ -595,18 +554,19 @@ tidev 数据流（当前）:
 =====================
 
 compose_system_prompt（每轮）:
-  ├─ select_hot(5)  ← ORDER BY usage_count DESC，不含语义
-  ├─ load_recent_compressed_observations(importance≥5, limit=8) ✅ Phase1
-  ├─ load_other_session_summaries(limit=5) ✅ Phase1
+  ├─ select_hot(5)  ← 复合排序（重要+高频+近期）
+  ├─ load_recent_compressed_observations(importance≥5, limit=8)
+  ├─ load_other_session_summaries(limit=5)
+  ├─ load_consolidated_facts(limit=5) ✅ Consolidation
+  ├─ load_consolidated_procedures(limit=3) ✅ Consolidation
   └─ render_pinned_slots()
 
 每次工具调用:
-  observe → INSERT INTO observations
-     ↓（异步）
-  compress → INSERT INTO compressed_observations  // raw 保留！
+  observe → INSERT INTO compressed_observations (raw)
+     ↓（异步，std::thread::spawn）
+  compress → UPDATE compressed_observations (compressed fields)
      ↓
-  bm25Index.add()
-  vectorIndex.add(embed())
+  bm25Index.add() + vectorIndex.add(embed())
 
 后台巡检（每 60s）✅ Phase7:
   find_inactive_sessions()
@@ -616,8 +576,10 @@ compose_system_prompt（每轮）:
   ├─ 跳过当前前台 session
   └─ 逐个: set_status('completed') + summarize_session()
 
+整合管线（每 1800s）✅ Consolidation:
+  Tier 1: ≥5 summaries → LLM → <fact> → memories(type=fact)
+  Tier 2: ≥3 patterns  → LLM → <procedure> → memories(type=pattern)
+
 手动（可选）:
   LLM 调用 memory search 或 memory remember 工具
-  ❌ 无整合管线
-  ❌ retention scoring 定义了但从未自动调用
 ```
