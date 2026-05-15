@@ -779,6 +779,71 @@ impl MemoryStore {
         // In a full implementation, this would spawn a tokio task with 500ms delay.
     }
 
+    /// Recover uncompressed observations that may have been left behind
+    /// after a previous crash or fast exit (where the async compression
+    /// thread was killed before it could run).
+    ///
+    /// Finds observations where `obs_type IS NULL` (not yet compressed)
+    /// and schedules async compression + embedding for each one.
+    /// Returns the number of observations scheduled.
+    pub fn recover_uncompressed(&self, limit: usize) -> Result<usize> {
+        let ids: Vec<Uuid> = {
+            let db = self.connection.lock().unwrap();
+            let mut stmt = db.prepare(
+                "SELECT id FROM compressed_observations
+                 WHERE obs_type IS NULL
+                 ORDER BY created_at ASC
+                 LIMIT ?1"
+            )?;
+            stmt
+                .query_map(rusqlite::params![limit as i64], |row| {
+                    row.get::<_, String>(0)
+                })?
+                .filter_map(|r| r.ok())
+                .filter_map(|s| Uuid::parse_str(&s).ok())
+                .collect()
+            // db and stmt dropped here → lock released
+        };
+
+        let count = ids.len();
+        if count == 0 {
+            return Ok(0);
+        }
+
+        crate::log_info!("recovering {} uncompressed observations", count);
+
+        for id in ids {
+            let store = self.clone(); // each thread gets its own DB connection
+            std::thread::spawn(move || {
+                let rt = match tokio::runtime::Handle::try_current() {
+                    Ok(h) => h,
+                    Err(_) => {
+                        crate::log_warn!(
+                            "no tokio runtime available, skipping recovery of {}",
+                            id
+                        );
+                        return;
+                    }
+                };
+                // No sleep delay — this is recovery, not real-time observation
+                match rt.block_on(store.compress(id)) {
+                    Ok(_) => {
+                        crate::log_info!("recovered uncompressed observation {}", id);
+                    }
+                    Err(e) => {
+                        crate::log_warn!(
+                            "recovery compression failed for {}: {}",
+                            id,
+                            e
+                        );
+                    }
+                }
+            });
+        }
+
+        Ok(count)
+    }
+
     // ─── Phase 2: Slots ────────────────────────────────────────────
 
     /// Ensure default slots exist.

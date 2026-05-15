@@ -100,6 +100,10 @@ impl App {
         if let Ok(embed_model) = config.resolve_embedding_model(&auth, None) {
             memory_store.set_embedding_model(embed_model);
         }
+        // Recover any uncompressed observations from previous runs
+        if let Err(e) = memory_store.recover_uncompressed(50) {
+            crate::log_warn!("startup recovery of uncompressed observations failed: {}", e);
+        }
         // Set sandbox policy based on session mode and config
         let sandbox_policy = mode.sandbox_policy(&config.sandbox);
         tools.set_sandbox_policy(Some(sandbox_policy));
