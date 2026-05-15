@@ -18,7 +18,6 @@ use super::observe::ObservationService;
 use super::compress::CompressionService;
 use super::remember::RememberService;
 use super::sessions::SessionService;
-use super::audit::{AuditService, AuditQuery};
 use super::slots::SlotService;
 use super::retention::RetentionService;
 use super::evict::{EvictionService, EvictionReport};
@@ -186,7 +185,6 @@ impl MemoryStore {
                 entry.is_latest as i64,
             ],
         )?;
-        let _ = AuditService::record(&db, "add", "memory", &entry.id.to_string(), None, None, None);
         Ok(())
     }
 
@@ -210,7 +208,6 @@ impl MemoryStore {
                 entry.id.to_string(),
             ],
         )?;
-        let _ = AuditService::record(&db, "update", "memory", &entry.id.to_string(), None, None, None);
         Ok(())
     }
 
@@ -221,7 +218,6 @@ impl MemoryStore {
             "UPDATE memories SET active = 0 WHERE id = ?1 AND workspace_root = ?2",
             rusqlite::params![id.to_string(), workspace_root],
         )?;
-        let _ = AuditService::record(&db, "delete", "memory", &id.to_string(), None, None, None);
         Ok(())
     }
 
@@ -582,15 +578,6 @@ impl MemoryStore {
             concepts, files, tags, source_session_id,
         )?;
 
-        // Audit log
-        AuditService::record(
-            &db,
-            "remember",
-            "memory",
-            &entry.id.to_string(),
-            None, None, source_session_id,
-        )?;
-
         // Auto-compute retention score for new memory
         let age_days = (chrono::Utc::now() - entry.created_at).num_days() as f64;
         let _ = RetentionService::compute_and_store(
@@ -627,12 +614,6 @@ impl MemoryStore {
 
         let db_path = self.db_path.clone();
         SessionService::summarize_session(&db_path, &llm, &model, session_id, project).await
-    }
-
-    /// Query audit log.
-    pub fn audit_query(&self, query: &AuditQuery) -> Result<Vec<AuditEntry>> {
-        let db = self.read_connection.lock().unwrap();
-        AuditService::query(&db, query)
     }
 
     // ─── Internal Helpers ───────────────────────────────────────────

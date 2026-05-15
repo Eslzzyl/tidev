@@ -327,19 +327,6 @@ pub struct SessionSummary {
     pub observation_count: i64,
 }
 
-/// Audit entry — immutable operation log.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuditEntry {
-    pub id: Uuid,
-    pub timestamp: DateTime<Utc>,
-    pub operation: String,
-    pub entity_type: String,
-    pub entity_id: String,
-    pub actor: Option<String>,
-    pub details: Option<serde_json::Value>,
-    pub session_id: Option<Uuid>,
-}
-
 /// Search result — from BM25 / FTS5.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {

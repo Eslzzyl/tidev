@@ -5,7 +5,6 @@ pub mod observe;
 pub mod compress;
 pub mod remember;
 pub mod sessions;
-pub mod audit;
 pub mod engine;
 pub mod slots;
 pub mod embed;

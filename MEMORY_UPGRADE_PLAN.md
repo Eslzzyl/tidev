@@ -2,7 +2,7 @@
 
 > 基于对 [agentmemory](https://github.com/rohitg00/agentmemory) v0.9.12 的逆向分析，在 tidev 中以 Rust 复刻。
 >
-> 更新时间：2026-05-15（Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅, Phase 6 ✅, 表合并 ✅, 隐私过滤 ✅, Session 巡检 ✅）
+> 更新时间：2026-05-15（Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅, Phase 6 ✅, Phase 7 ✅, 表合并 ✅, 隐私过滤 ✅, Session 巡检 ✅）
 
 ---
 
@@ -189,18 +189,15 @@ agentmemory 支持 6 种 provider（Anthropic/Gemini/MiniMax/OpenRouter），tid
 
 **影响**：无 OpenAI key 时向量搜索自动降级为 FTS5。
 
-### 4.2 向量索引未持久化 [必须修复]
+### 4.2 向量索引持久化 ✅ Phase 4
 
-`VectorIndex` 纯内存，重启后清空。agentmemory 会将向量序列化到 KV 存储。
+`compressed_observations` 表包含 `embedding BLOB` 列，持久化存储 OpenAI embedding 向量：
 
-**影响**：重启后向量索引为空，且**不会重新 embedding 历史数据**（仅新产生的 `CompressedObservation` 会填充索引）。这意味着历史记忆的 embedding 表示永久丢失，向量搜索退化为纯 FTS5 搜索，embedding 基础设施形同虚设。
+- **启动时**：`MemoryStore::load_embeddings_from_db()` 从 DB 批量加载所有 embedding → 内存 `VectorIndex`
+- **写入时**：每次压缩完成，embedding 同时写入 DB + 索引
+- **无丢失风险**：重启后向量索引从 DB 重建，历史数据仍然可被语义搜索
 
-**此简化不可接受，必须解决。** 改造方案：
-1. 在 `compressed_observations` 表中增加 `embedding BLOB` 列，持久化存储 embedding 向量
-2. `MemoryStore` 启动时从数据库加载所有 embedding → `VectorIndex`（初始加载 ~2-5 秒）
-3. 后续每次压缩完成时同时写入 DB + 内存索引
-
-（agentmemory 的做法是将向量序列化到独立 KV 存储；tidev 直接复用 SQLite BLOB 列更简单。）
+agentmemory 的做法是将向量序列化到独立 KV 存储；tidev 直接复用 SQLite BLOB 列更简单。
 
 ### 4.3 使用 std::thread::spawn 而非 tokio::spawn
 
@@ -212,9 +209,11 @@ rusqlite 的 bundled SQLite 内部使用 `RefCell` 做 statement cache，导致 
 
 agentmemory 的 `observe.ts` 有 `stripPrivateData()` 过滤密码和 API key。tidev 未实现。敏感信息可能出现在 observation 记录中，但不会进入 system prompt。
 
-### 4.5 审计不完整
+### 4.5 审计日志已移除
 
-只在 `add()` / `update()` / `delete()` 时自动审计。slot 操作和 compress 未审计。
+审计模块（`AuditService`）在 agentmemory 中用于 WebSocket IPC 调试，tidev 为单进程 binary 无此需求。2026-05-15 已移除：
+- `AuditEntry` 类型、`AuditService`、`audit_query()`、`audit_log` 表全部删除
+- 共移除约 130 行代码 + 1 张 DB 表 + 2 个索引
 
 ### 4.6 PostToolFailure 未接入
 
@@ -454,36 +453,36 @@ CREATE TABLE IF NOT EXISTS sessions (
 | Subagent 子 session | `parent_session_id IS NOT NULL` 天然排除 |
 | 用户 fork session | 与 TUI 一致，用 `create_session()` 无 parent |
 
-### 7.5 向量索引未持久化 [严重]（参见 §4.2）
+### 7.5 向量索引持久化 [已修复] ✅ Phase 4（参见 §4.2）
 
-重启后向量索引清空，且**历史数据不会被重新 embedding**。只有新产生的压缩观察会进入索引。这意味着：
-- 重启后的前一段时间内向量搜索无结果
-- 历史记忆永远丢失了向量表示
-- FTS5 虽然可用，但语义搜索能力形同虚设
+重启后向量索引从 DB 的 `embedding BLOB` 列重建，历史 embedding 不会丢失。
+- 启动时 `load_embeddings_from_db()` 批量加载 ~2-5 秒
+- 每次压缩完成时 embedding 同时写入 DB + 内存索引
+- 语义搜索在重启后立即可用
 
-**方案**：在 `compressed_observations` 表中增加 `embedding BLOB` 列，启动时从 DB 批量加载。
+### 7.6 自动注入不含语义检索 ✅ Phase3（select_hot 已改进）
 
-### 7.6 搜索仅支持手动路径 ✅ Phase1（部分）
-
-**Phase 1 已修复自动注入**：`compose_system_prompt()` 现在注入压缩观察（当前 session，重要性筛选）和会话摘要（其他 session）。但 `select_hot()` 仍仅按使用频率排序，不包含语义检索。
-
-agentmemory 有两条搜索路径：
-
-| 路径 | agentmemory | tidev |
-|------|-------------|-------|
-| 自动注入 | `mem::context` → 随 system prompt 注入 | ✅ 已实现压缩观察 + 会话摘要注入（Phase 1） |
-| 手动调用 | MCP tools `memory_recall` / `memory_smart_search` | ✅ LLM 可调用 `memory search` |
-
-tidev 的 `build_system_prompt()` 仍只用 `select_hot()` 取了 5 条按使用频率排序的记忆注入 prompt：
-
-```rust
-// src/agent/runtime.rs:209
-memory_store.select_hot(&ws, 5, 800)
-// SQL: ORDER BY usage_count DESC LIMIT 5
-// 条件：LENGTH(content) >= 800
+`select_hot()` 已改为复合排序公式（Phase 3）：
+```
+score = importance * 0.5 + min(usage_count / 20, 1) * 0.3 + recency_bonus(7d) * 0.2
 ```
 
-这不包含任何语义检索。如果 LLM 不主动调用 `memory search` 工具，它只能看到 5 条高频记忆 + pinned slots。agentmemory 的自动注入能提供跨 session、带重要性筛选的上下文。
+```rust
+// src/memory/engine.rs:315-327
+ORDER BY
+    importance * 0.5 +
+    LEAST(usage_count / 20.0, 1.0) * 0.3 +
+    CASE WHEN updated_at >= datetime('now', '-7 days') THEN 0.2 ELSE 0.0 END
+DESC
+```
+
+但问题仍在：`select_hot()` 不包含任何语义检索。如果 LLM 不主动调用 `memory search` 工具，自动注入只看到：
+- 5 条按复合分数排序的高频/重要/近期记忆
+- 8 条当前 session 的压缩观察（Phase 1）
+- 5 条其他 session 的摘要（Phase 1）
+- pinned slots
+
+这些都不包含与当前用户问题的语义相关性。agentmemory 的 `mem::context` 在 system prompt 注入时做了语义搜索。
 
 ### 7.7 缺乏完善的降级措施 [中]（参见 §4.7）✅ Phase2
 
@@ -541,9 +540,9 @@ agentmemory 的 `mem::consolidate-pipeline` 在累积 ≥5 个 session summaries
 - 检测条件：`sandbox_denied` 为 true，或 output 以 `"Error:"` / `"Tool task panicked"` 开头
 - 记录为 `HookType::PostToolFailure` 观察，供记忆系统学习
 
-### 7.11 审计不完整（已有 §4.5）
+### 7.11 审计日志已移除（§4.5）
 
-只在 `add()` / `update()` / `delete()` / `remember()` 时自动审计。slot 操作和 compress 未审计。
+审计模块已于 2026-05-15 移除。所有 `AuditService::record()` 调用使用 `let _ = ` 静默忽略错误，且 `audit_query()` 无任何调用者。`audit_log` 表甚至不在主 `SCHEMA_SQL` 中，从未被正确创建过。移除后减少 ~130 行死代码和 1 张 DB 表。
 
 ### 7.12 无隐私过滤（已有 §4.4） ✅ 隐私过滤
 
