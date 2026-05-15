@@ -183,6 +183,29 @@ impl App {
                 }
             });
         }
+
+        // Schedule periodic consolidation (every 30 minutes).
+        {
+            let cons_store = memory_store.clone();
+            let cons_ws = workspace_root.display().to_string();
+            let cons_cancel = inactivity_check_cancel.clone();
+
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(1800));
+                interval.tick().await; // skip immediate run
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            if let Err(e) = cons_store.run_consolidation(&cons_ws).await {
+                                crate::log_warn!("consolidation failed: {}", e);
+                            }
+                        }
+                        _ = cons_cancel.cancelled() => break,
+                    }
+                }
+            });
+        }
+
         let last_notice = None;
         let retrying_hint = None;
 

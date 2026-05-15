@@ -7,6 +7,7 @@ pub mod remember;
 pub mod sessions;
 pub mod engine;
 pub mod slots;
+pub mod consolidate;
 pub mod embed;
 pub mod vector_index;
 pub mod hybrid_search;

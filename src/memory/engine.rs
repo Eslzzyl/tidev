@@ -16,6 +16,7 @@ use super::dedup::DedupMap;
 use super::search_index::{Bm25Index, fts5_search_memories};
 use super::observe::ObservationService;
 use super::compress::CompressionService;
+use super::consolidate::{ConsolidationReport, ConsolidationService};
 use super::remember::RememberService;
 use super::sessions::SessionService;
 use super::slots::SlotService;
@@ -614,6 +615,33 @@ impl MemoryStore {
 
         let db_path = self.db_path.clone();
         SessionService::summarize_session(&db_path, &llm, &model, session_id, project).await
+    }
+
+    /// Run the consolidation pipeline (semantic + procedural).
+    pub async fn run_consolidation(&self, project: &str) -> Result<ConsolidationReport> {
+        let (llm, model) = {
+            let llm = self.llm.read().unwrap().clone();
+            let model = self.active_model.read().unwrap().clone();
+            (llm, model)
+        };
+        let llm = llm.ok_or_else(|| anyhow::anyhow!("LLM client not configured for consolidation"))?;
+        let model = model.ok_or_else(|| anyhow::anyhow!("Active model not configured for consolidation"))?;
+
+        let db_path = self.db_path.clone();
+        let project = project.to_string();
+        ConsolidationService::run(&db_path, &llm, &model, &project).await
+    }
+
+    /// Load consolidated facts for prompt injection.
+    pub fn load_consolidated_facts(&self, project: &str, limit: usize) -> Result<Vec<MemoryEntry>> {
+        let db = self.read_connection.lock().unwrap();
+        ConsolidationService::load_consolidated_facts(&db, project, limit)
+    }
+
+    /// Load consolidated procedures for prompt injection.
+    pub fn load_consolidated_procedures(&self, project: &str, limit: usize) -> Result<Vec<MemoryEntry>> {
+        let db = self.read_connection.lock().unwrap();
+        ConsolidationService::load_consolidated_procedures(&db, project, limit)
     }
 
     // ─── Internal Helpers ───────────────────────────────────────────

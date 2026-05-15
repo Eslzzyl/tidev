@@ -231,6 +231,26 @@ impl AgentRuntime {
             prompt.push_str(&Self::format_session_summaries(&summaries));
         }
 
+        // ── Phase 7: Consolidated knowledge (cross-session facts) ──────
+        if let Ok(facts) = memory_store.load_consolidated_facts(&ws, 5)
+            && !facts.is_empty()
+        {
+            prompt.push_str("\n\n## Consolidated Project Knowledge\n");
+            for fact in &facts {
+                prompt.push_str(&format!("- {} (confidence: {:.1})\n", fact.content, fact.strength));
+            }
+        }
+
+        // ── Phase 7: Consolidated procedures ───────────────────────────
+        if let Ok(procs) = memory_store.load_consolidated_procedures(&ws, 3)
+            && !procs.is_empty()
+        {
+            prompt.push_str("\n\n## Reusable Procedures\n");
+            for proc in &procs {
+                prompt.push_str(&format!("- **{}**: {}\n", proc.title, proc.content));
+            }
+        }
+
         // Memory slots (ensure defaults + render pinned)
         if let Ok(slot_content) = memory_store.render_pinned_slots(&ws) {
             if !slot_content.is_empty() {
