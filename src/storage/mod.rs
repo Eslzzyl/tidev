@@ -1,4 +1,5 @@
 pub mod compression;
+pub mod database;
 pub mod schema;
 #[cfg(test)]
 mod tests;
@@ -9,6 +10,7 @@ use rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::T
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 use uuid::Uuid;
@@ -24,8 +26,8 @@ use rayon::prelude::*;
 use self::compression::{compress_text, decompress_text};
 use schema::{EXPORT_SCHEMA_SQL, SCHEMA_SQL, SCHEMA_VERSION, SESSION_SELECT_COLUMNS};
 pub struct SessionStore {
-    /// Connection for write operations (INSERT/UPDATE/DELETE).
-    write_conn: Connection,
+    /// Shared write connection (behind Mutex for thread-safety).
+    write_conn: Arc<Mutex<Connection>>,
     /// Connection for read operations (SELECT).
     /// A separate connection avoids WAL contention and prepares for
     /// a future RwLock / connection-pool migration.
@@ -35,8 +37,12 @@ pub struct SessionStore {
 
 impl Clone for SessionStore {
     fn clone(&self) -> Self {
-        // Re-open the database to get fresh connections
-        Self::open(&self.path).expect("failed to clone SessionStore")
+        Self {
+            write_conn: Arc::clone(&self.write_conn),
+            read_conn: Connection::open(&self.path)
+                .expect("failed to clone SessionStore read_conn"),
+            path: self.path.clone(),
+        }
     }
 }
 
@@ -202,7 +208,26 @@ impl RawMessageRow {
 }
 
 impl SessionStore {
+    /// Open (or create) the database, run schema initialisation, and return a
+    /// fully initialised store.
+    ///
+    /// This is the backward-compatible public API.  New code should prefer
+    /// [`Database::open`](super::database::Database::open) followed by
+    /// [`Database::create_session_store`].
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let store = Self::open_existing(path)?;
+        store.write_conn.lock().unwrap().execute_batch(SCHEMA_SQL)?;
+        store.write_conn.lock().unwrap().execute(
+            "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?1)",
+            params![SCHEMA_VERSION.to_string()],
+        )?;
+        Ok(store)
+    }
+
+    /// Open connections to an existing database **without** running schema
+    /// initialisation.  The caller guarantees that the schema already exists
+    /// (e.g. because [`Database::open`] was called first).
+    pub(crate) fn open_existing(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
 
         if let Some(parent) = path.parent() {
@@ -223,24 +248,6 @@ impl SessionStore {
         write_conn.pragma_update(None, "synchronous", "NORMAL")?; // WAL-safe
         write_conn.pragma_update(None, "temp_store", "MEMORY")?; // in-memory temp
 
-        // Register zstd_decode(blob) → text for CLI debugging
-        write_conn.create_scalar_function(
-            "zstd_decode",
-            1,
-            rusqlite::functions::FunctionFlags::SQLITE_UTF8,
-            |ctx| {
-                let blob = ctx.get::<Vec<u8>>(0)?;
-                let text = decompress_text(&blob);
-                Ok(text)
-            },
-        )?;
-
-        write_conn.execute_batch(SCHEMA_SQL)?;
-        write_conn.execute(
-            "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?1)",
-            params![SCHEMA_VERSION.to_string()],
-        )?;
-
         // ── Read connection ──────────────────────────────────────────────
         let read_conn = Connection::open(&path)
             .with_context(|| format!("failed to open {} for reads", path.display()))?;
@@ -249,8 +256,30 @@ impl SessionStore {
         read_conn.pragma_update(None, "mmap_size", "268435456")?;
         read_conn.pragma_update(None, "cache_size", "-64000")?;
         read_conn.pragma_update(None, "temp_store", "MEMORY")?;
-        // Read-only connection doesn't need synchronous=NORMAL since it doesn't write
-        // But we keep it for consistency with the caching layer
+
+        Ok(Self {
+            write_conn: Arc::new(Mutex::new(write_conn)),
+            read_conn,
+            path,
+        })
+    }
+
+    /// Open connections reusing a shared write connection (provided by
+    /// [`Database`](super::database::Database)).
+    /// Only opens a new read connection; the write connection is shared.
+    pub(crate) fn open_with_shared_write(
+        path: impl AsRef<Path>,
+        write_conn: Arc<Mutex<Connection>>,
+    ) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
+
+        let read_conn = Connection::open(&path)
+            .with_context(|| format!("failed to open {} for reads", path.display()))?;
+        read_conn.pragma_update(None, "journal_mode", "WAL")?;
+        read_conn.busy_timeout(Duration::from_secs(5))?;
+        read_conn.pragma_update(None, "mmap_size", "268435456")?;
+        read_conn.pragma_update(None, "cache_size", "-64000")?;
+        read_conn.pragma_update(None, "temp_store", "MEMORY")?;
 
         Ok(Self {
             write_conn,
@@ -279,7 +308,7 @@ impl SessionStore {
         let session_id_text = session_id.to_string();
         let workspace_root = workspace_root.display().to_string();
 
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "INSERT INTO sessions (id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at, status, context_summary, context_retained_from) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 session_id_text.clone(),
@@ -296,7 +325,7 @@ impl SessionStore {
             ],
         )?;
 
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "INSERT INTO session_workspaces (session_id, workspace_root) VALUES (?1, ?2)",
             params![session_id_text, workspace_root.clone()],
         )?;
@@ -337,7 +366,7 @@ impl SessionStore {
         let parent_session_id_text = parent_session_id.to_string();
         let workspace_root = workspace_root.display().to_string();
 
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "INSERT INTO sessions (id, parent_session_id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at, status, context_summary, context_retained_from) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 session_id_text.clone(),
@@ -355,7 +384,7 @@ impl SessionStore {
             ],
         )?;
 
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "INSERT INTO session_workspaces (session_id, workspace_root) VALUES (?1, ?2)",
             params![session_id_text, workspace_root.clone()],
         )?;
@@ -385,7 +414,7 @@ impl SessionStore {
         retained_from: usize,
     ) -> Result<()> {
         let now = Utc::now().to_rfc3339();
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "UPDATE sessions SET context_summary = ?1, context_retained_from = ?2, updated_at = ?3 WHERE id = ?4",
             params![
                 summary.unwrap_or(""),
@@ -399,7 +428,7 @@ impl SessionStore {
 
     pub fn update_session_title(&self, session_id: Uuid, title: &str) -> Result<()> {
         let now = Utc::now().to_rfc3339();
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "UPDATE sessions SET title = ?1, updated_at = ?2 WHERE id = ?3",
             params![title, now, session_id.to_string()],
         )?;
@@ -415,7 +444,7 @@ impl SessionStore {
         model_display_name: &str,
     ) -> Result<()> {
         let now = Utc::now().to_rfc3339();
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "UPDATE sessions SET provider_id = ?1, provider_display_name = ?2, model_id = ?3, model_display_name = ?4, updated_at = ?5 WHERE id = ?6",
             params![
                 provider_id,
@@ -430,7 +459,7 @@ impl SessionStore {
     }
 
     pub fn append_instruction_source(&self, session_id: Uuid, source: &str) -> Result<()> {
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "INSERT OR IGNORE INTO session_instruction_sources (session_id, source) VALUES (?1, ?2)",
             params![session_id.to_string(), source],
         )?;
@@ -438,9 +467,7 @@ impl SessionStore {
     }
 
     pub fn load_instruction_sources(&self, session_id: Uuid) -> Result<Vec<String>> {
-        let mut stmt = self
-            .write_conn
-            .prepare("SELECT source FROM session_instruction_sources WHERE session_id = ?1")?;
+        let mut stmt = self.read_conn.prepare("SELECT source FROM session_instruction_sources WHERE session_id = ?1")?;
         let sources = stmt
             .query_map(params![session_id.to_string()], |row| row.get(0))?
             .collect::<rusqlite::Result<Vec<String>>>()?;
@@ -467,7 +494,7 @@ impl SessionStore {
         } else {
             Some(compress_text(&message.reasoning))
         };
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
             params![
                 message.id.to_string(),
@@ -517,15 +544,18 @@ impl SessionStore {
         // Use execute_batch for transaction control since rusqlite's
         // Transaction requires &mut self.
         self.write_conn
+            .lock()
+            .unwrap()
             .execute_batch("BEGIN TRANSACTION")
             .context("failed to begin transaction")?;
 
         let rollback = || {
-            let _ = self.write_conn.execute_batch("ROLLBACK");
+            let _ = self.write_conn.lock().unwrap().execute_batch("ROLLBACK");
         };
 
         let result = (|| -> Result<()> {
-            let mut stmt = self.write_conn.prepare(
+            let guard = self.write_conn.lock().unwrap();
+            let mut stmt = guard.prepare(
                 "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
             ).context("failed to prepare batch insert statement")?;
 
@@ -584,6 +614,8 @@ impl SessionStore {
 
             drop(stmt);
             self.write_conn
+                .lock()
+                .unwrap()
                 .execute_batch("COMMIT")
                 .context("failed to commit batch insert transaction")?;
             Ok(())
@@ -607,7 +639,7 @@ impl SessionStore {
         }
 
         for message_id in message_ids {
-            self.write_conn.execute(
+            self.write_conn.lock().unwrap().execute(
                 "DELETE FROM messages WHERE session_id = ?1 AND id = ?2",
                 params![session_id.to_string(), message_id.to_string()],
             )?;
@@ -626,7 +658,7 @@ impl SessionStore {
         session_id: Uuid,
         tool_call_id: &str,
     ) -> Result<()> {
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "DELETE FROM messages WHERE session_id = ?1 AND tool_call_id = ?2",
             params![session_id.to_string(), tool_call_id],
         )?;
@@ -640,7 +672,7 @@ impl SessionStore {
         tool_name: &str,
         allowed: bool,
     ) -> Result<()> {
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "INSERT INTO tool_permissions (session_id, tool_name, allowed, created_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(session_id, tool_name) DO UPDATE SET allowed = excluded.allowed, created_at = excluded.created_at",
             params![
                 session_id.to_string(),
@@ -669,7 +701,7 @@ impl SessionStore {
     }
 
     pub fn copy_tool_permissions(&self, from_session_id: Uuid, to_session_id: Uuid) -> Result<()> {
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "INSERT INTO tool_permissions (session_id, tool_name, allowed, created_at)
              SELECT ?1, tool_name, allowed, ?2
              FROM tool_permissions
@@ -688,13 +720,14 @@ impl SessionStore {
     }
 
     pub fn replace_todos(&self, session_id: Uuid, todos: &[TodoItem]) -> Result<()> {
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "DELETE FROM todos WHERE session_id = ?1",
             params![session_id.to_string()],
         )?;
 
         if !todos.is_empty() {
-            let mut stmt = self.write_conn.prepare(
+            let guard = self.write_conn.lock().unwrap();
+            let mut stmt = guard.prepare(
                 "INSERT INTO todos (session_id, position, content, status, priority) VALUES (?1, ?2, ?3, ?4, ?5)"
             )?;
 
@@ -773,9 +806,7 @@ impl SessionStore {
     }
 
     pub fn load_revert_message_id(&self, session_id: Uuid) -> Result<Option<Uuid>> {
-        let mut statement = self
-            .write_conn
-            .prepare("SELECT message_id FROM session_reverts WHERE session_id = ?1 LIMIT 1")?;
+        let mut statement = self.read_conn.prepare("SELECT message_id FROM session_reverts WHERE session_id = ?1 LIMIT 1")?;
 
         let message_id = statement
             .query_row(params![session_id.to_string()], |row| {
@@ -801,7 +832,7 @@ impl SessionStore {
         let compressed_snapshot = redo_snapshot.map(compress_text);
         match message_id {
             Some(message_id) => {
-                self.write_conn.execute(
+                self.write_conn.lock().unwrap().execute(
                     "INSERT INTO session_reverts (session_id, message_id, redo_snapshot, created_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(session_id) DO UPDATE SET message_id = excluded.message_id, redo_snapshot = excluded.redo_snapshot, created_at = excluded.created_at",
                     params![
                         session_id.to_string(),
@@ -812,7 +843,7 @@ impl SessionStore {
                 )?;
             }
             None => {
-                self.write_conn.execute(
+                self.write_conn.lock().unwrap().execute(
                     "DELETE FROM session_reverts WHERE session_id = ?1",
                     params![session_id.to_string()],
                 )?;
@@ -828,9 +859,7 @@ impl SessionStore {
     }
 
     pub fn load_redo_snapshot(&self, session_id: Uuid) -> Result<Option<String>> {
-        let mut statement = self
-            .write_conn
-            .prepare("SELECT redo_snapshot FROM session_reverts WHERE session_id = ?1 LIMIT 1")?;
+        let mut statement = self.read_conn.prepare("SELECT redo_snapshot FROM session_reverts WHERE session_id = ?1 LIMIT 1")?;
 
         let snapshot = statement
             .query_row(params![session_id.to_string()], |row| {
@@ -871,7 +900,7 @@ impl SessionStore {
         message_id: Uuid,
         snapshot_hash: &str,
     ) -> Result<()> {
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "UPDATE messages SET snapshot_hash = ?1 WHERE session_id = ?2 AND id = ?3",
             params![
                 snapshot_hash,
@@ -889,7 +918,7 @@ impl SessionStore {
         patch_files: &str,
     ) -> Result<()> {
         let compressed = compress_text(patch_files);
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "UPDATE messages SET patch_files = ?1 WHERE session_id = ?2 AND id = ?3",
             params![compressed, session_id.to_string(), message_id.to_string()],
         )?;
@@ -903,7 +932,7 @@ impl SessionStore {
         file_diffs: &str,
     ) -> Result<()> {
         let compressed = compress_text(file_diffs);
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "UPDATE messages SET file_diffs = ?1 WHERE session_id = ?2 AND id = ?3",
             params![compressed, session_id.to_string(), message_id.to_string()],
         )?;
@@ -931,7 +960,7 @@ impl SessionStore {
         chat_key: &str,
         session_id: Uuid,
     ) -> Result<()> {
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "INSERT INTO gateway_chat_sessions (platform, chat_key, session_id, updated_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(platform, chat_key) DO UPDATE SET session_id = excluded.session_id, updated_at = excluded.updated_at",
             params![
                 platform,
@@ -962,7 +991,7 @@ impl SessionStore {
     }
 
     pub fn clear_gateway_chat_session(&self, platform: &str, chat_key: &str) -> Result<()> {
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "DELETE FROM gateway_chat_sessions WHERE platform = ?1 AND chat_key = ?2",
             params![platform, chat_key],
         )?;
@@ -976,7 +1005,7 @@ impl SessionStore {
         provider_id: &str,
         model_id: &str,
     ) -> Result<()> {
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "INSERT INTO gateway_chat_models (platform, chat_key, provider_id, model_id, updated_at) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(platform, chat_key) DO UPDATE SET provider_id = excluded.provider_id, model_id = excluded.model_id, updated_at = excluded.updated_at",
             params![
                 platform,
@@ -1008,7 +1037,7 @@ impl SessionStore {
     }
 
     pub fn clear_gateway_chat_model(&self, platform: &str, chat_key: &str) -> Result<()> {
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "DELETE FROM gateway_chat_models WHERE platform = ?1 AND chat_key = ?2",
             params![platform, chat_key],
         )?;
@@ -1126,7 +1155,7 @@ impl SessionStore {
     }
 
     pub fn delete_session(&self, session_id: Uuid) -> Result<()> {
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "DELETE FROM sessions WHERE id = ?1",
             params![session_id.to_string()],
         )?;
@@ -1154,7 +1183,7 @@ impl SessionStore {
         );
 
         let params: Vec<String> = session_ids.to_vec();
-        self.write_conn.execute(&sql, params_from_iter(params))?;
+        self.write_conn.lock().unwrap().execute(&sql, params_from_iter(params))?;
 
         Ok(())
     }
@@ -1262,7 +1291,7 @@ impl SessionStore {
 
     fn touch_session(&self, session_id: Uuid) -> Result<()> {
         let now = Utc::now().to_rfc3339();
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
             params![now, session_id.to_string()],
         )?;
@@ -1309,7 +1338,7 @@ impl SessionStore {
         } else {
             None
         };
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "UPDATE sessions SET status = ?1, ended_at = ?2, updated_at = ?3 WHERE id = ?4",
             params![status, ended_at, now, session_id.to_string()],
         )?;
@@ -1407,7 +1436,7 @@ impl SessionStore {
         let now_text = now.to_rfc3339();
         let total_tokens = input_tokens as i64 + output_tokens as i64;
 
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             r#"
             INSERT INTO usage_stats (
                 provider_id, model_id, time_bucket, granularity,
@@ -1447,7 +1476,7 @@ impl SessionStore {
         thinking_level: &str,
     ) -> Result<()> {
         let now = Utc::now().to_rfc3339();
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "INSERT OR REPLACE INTO model_thinking_levels (provider_id, model_id, thinking_level, updated_at) VALUES (?1, ?2, ?3, ?4)",
             params![provider_id, model_id, thinking_level, now],
         )?;
@@ -1460,7 +1489,7 @@ impl SessionStore {
         provider_id: &str,
         model_id: &str,
     ) -> Result<Option<String>> {
-        let mut statement = self.write_conn.prepare(
+        let mut statement = self.read_conn.prepare(
             "SELECT thinking_level FROM model_thinking_levels WHERE provider_id = ?1 AND model_id = ?2",
         )?;
         let result = statement
@@ -1621,7 +1650,7 @@ impl SessionStore {
         mtime: Option<i64>,
         size: Option<i64>,
     ) -> Result<()> {
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             r#"INSERT OR REPLACE INTO file_reads (session_id, file_path, read_at, mtime, size)
                VALUES (?1, ?2, ?3, ?4, ?5)"#,
             params![
@@ -1661,7 +1690,7 @@ impl SessionStore {
 
     /// Delete all file reads for a session
     pub fn clear_file_reads(&self, session_id: Uuid) -> Result<()> {
-        self.write_conn.execute(
+        self.write_conn.lock().unwrap().execute(
             "DELETE FROM file_reads WHERE session_id = ?1",
             params![session_id.to_string()],
         )?;

@@ -3,7 +3,7 @@ use chrono::Utc;
 use rusqlite::Connection;
 use std::path::PathBuf;
 use std::sync::{
-    Mutex, Once, RwLock,
+    Arc, Mutex, Once, RwLock,
     atomic::{AtomicBool, AtomicU32, Ordering},
     mpsc,
 };
@@ -50,7 +50,7 @@ const COMPRESSION_CB_COOLDOWN_SECS: u64 = 300; // 5 minutes
 /// Main memory store.
 pub struct MemoryStore {
     db_path: PathBuf,
-    connection: Mutex<Connection>,
+    connection: Arc<Mutex<Connection>>,
     read_connection: Mutex<Connection>,
     dedup: Mutex<DedupMap>,
     bm25: RwLock<Bm25Index>,
@@ -86,16 +86,64 @@ impl MemoryStore {
         let connection = Connection::open(&path)?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
+        connection.pragma_update(None, "synchronous", "NORMAL")?;
+        connection.pragma_update(None, "mmap_size", "268435456")?;
+        connection.pragma_update(None, "cache_size", "-64000")?;
+        connection.pragma_update(None, "temp_store", "MEMORY")?;
         connection.busy_timeout(std::time::Duration::from_secs(5))?;
 
         let read_connection = Connection::open(&path)?;
-        read_connection.pragma_update(None, "foreign_keys", "ON")?;
         read_connection.pragma_update(None, "journal_mode", "WAL")?;
+        read_connection.pragma_update(None, "mmap_size", "268435456")?;
+        read_connection.pragma_update(None, "cache_size", "-64000")?;
+        read_connection.pragma_update(None, "temp_store", "MEMORY")?;
         read_connection.busy_timeout(std::time::Duration::from_secs(5))?;
 
         let store = Self {
             db_path: path,
-            connection: Mutex::new(connection),
+            connection: Arc::new(Mutex::new(connection)),
+            read_connection: Mutex::new(read_connection),
+            dedup: Mutex::new(DedupMap::new()),
+            bm25: RwLock::new(Bm25Index::new()),
+            llm: RwLock::new(None),
+            active_model: RwLock::new(None),
+            compression_model: RwLock::new(None),
+            summarization_model: RwLock::new(None),
+            embedding_model: RwLock::new(None),
+            hybrid_search: RwLock::new(HybridSearch::new()),
+            compression_enabled: AtomicBool::new(true),
+            compression_cb_failures: AtomicU32::new(0),
+            compression_cb_tripped_at: RwLock::new(None),
+            compression_sender: RwLock::new(None),
+        };
+
+        Ok(store)
+    }
+
+    /// Open connections reusing a shared write connection (provided by
+    /// [`Database`](crate::storage::database::Database)).
+    /// Only opens a new read connection; the write connection is shared.
+    pub(crate) fn open_with_shared_write(
+        db_path: impl AsRef<std::path::Path>,
+        connection: Arc<Mutex<Connection>>,
+    ) -> Result<Self> {
+        // Register sqlite-vec auto-extension once
+        VEC_INIT.call_once(|| unsafe {
+            sqlite3_auto_extension(Some(sqlite_vec::sqlite3_vec_init));
+        });
+
+        let path = db_path.as_ref().to_path_buf();
+
+        let read_connection = Connection::open(&path)?;
+        read_connection.pragma_update(None, "journal_mode", "WAL")?;
+        read_connection.pragma_update(None, "mmap_size", "268435456")?;
+        read_connection.pragma_update(None, "cache_size", "-64000")?;
+        read_connection.pragma_update(None, "temp_store", "MEMORY")?;
+        read_connection.busy_timeout(std::time::Duration::from_secs(5))?;
+
+        let store = Self {
+            db_path: path,
+            connection,
             read_connection: Mutex::new(read_connection),
             dedup: Mutex::new(DedupMap::new()),
             bm25: RwLock::new(Bm25Index::new()),

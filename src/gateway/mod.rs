@@ -17,7 +17,7 @@ use crate::{
     config::{AppConfig, AuthStore, ConfigPaths},
     llm::LlmClient,
     mcp::McpManager,
-    storage::SessionStore,
+    storage::database::Database,
     tooling::{FileReadTracker, ToolRegistry},
 };
 
@@ -57,7 +57,7 @@ async fn run_async() -> Result<()> {
 
     let default_model = config.resolve_active_model_for_gateway(&auth)?;
     let instruction_prompt = compose_instruction_prompt(&workspace_root, &paths, &config);
-    let db_path = paths.default_database_path();
+    let db = Database::open(paths.default_database_path())?;
 
     // Build orchestrator with enabled channels
     let mut orchestrator = ChannelOrchestrator::new();
@@ -89,8 +89,8 @@ async fn run_async() -> Result<()> {
         );
 
         // Each channel gets its own resources
-        let store = SessionStore::open(db_path)?;
-        let memory_store = Arc::new(crate::memory::MemoryStore::open(db_path).unwrap());
+        let store = db.create_session_store()?;
+        let memory_store = Arc::new(db.create_memory_store()?);
         let llm = LlmClient::new()?;
         let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
         let file_read_tracker = Arc::new(FileReadTracker::new());
@@ -155,8 +155,8 @@ async fn run_async() -> Result<()> {
         crate::log_info!("QQ channel enabled, allowlist: {} entries", allowlist.len());
 
         // Each channel gets its own resources
-        let store = SessionStore::open(db_path)?;
-        let memory_store2 = Arc::new(crate::memory::MemoryStore::open(db_path).unwrap());
+        let store = db.create_session_store()?;
+        let memory_store2 = Arc::new(db.create_memory_store()?);
         let llm = LlmClient::new()?;
         let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
         let file_read_tracker = Arc::new(FileReadTracker::new());

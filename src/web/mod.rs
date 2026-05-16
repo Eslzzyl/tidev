@@ -18,7 +18,7 @@ use crate::{
     config::{AppConfig, AuthStore, ConfigPaths},
     llm::LlmClient,
     mcp::McpManager,
-    storage::SessionStore,
+    storage::database::Database,
     tooling::{FileReadTracker, ToolRegistry},
 };
 
@@ -76,12 +76,13 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     // Initialize logging (console enabled for web mode)
     let mut logging_config = config.logging.clone();
     logging_config.console = true;
+    std::fs::create_dir_all(&paths.data_dir)?;
     crate::logging::init(&paths.data_dir, logging_config);
     crate::log_info!("Starting TiDev web server...");
 
     // Open database (use same path as TUI mode via ConfigPaths)
-    std::fs::create_dir_all(&paths.data_dir)?;
-    let store = SessionStore::open(&paths.database_file)?;
+    let db = Database::open(&paths.database_file)?;
+    let store = db.create_session_store()?;
 
     // Create LLM client
     let llm_client = LlmClient::new()?;
@@ -96,7 +97,7 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     crate::log_info!("Auth store loaded");
 
     // Create shared agent runtime (ToolRegistry, MemoryStore, etc.)
-    let memory_store = Arc::new(crate::memory::MemoryStore::open(&paths.database_file)?);
+    let memory_store = Arc::new(db.create_memory_store()?);
     let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
     let file_read_tracker = Arc::new(FileReadTracker::new());
     let worktree = find_git_worktree(&workspace_root);

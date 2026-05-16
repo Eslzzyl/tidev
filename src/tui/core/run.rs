@@ -1,4 +1,5 @@
 use super::*;
+use crate::storage::database::Database;
 use crate::tui::panel_launcher::PanelLauncherState;
 use chrono::Utc;
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -28,8 +29,9 @@ impl App {
         crate::logging::init(&paths.data_dir, config.logging.clone());
         crate::log_info!("App initializing, workspace={}", workspace_root.display());
         let auth = AuthStore::load_or_create(&paths)?;
-        let store = SessionStore::open(paths.default_database_path())?;
-        let memory_store = Arc::new(MemoryStore::open(paths.default_database_path())?);
+        let db = Database::open(paths.default_database_path())?;
+        let store = db.create_session_store()?;
+        let memory_store = Arc::new(db.create_memory_store()?);
         let llm = LlmClient::new()?;
         let http_client = Arc::new(llm.http().clone());
         let theme = ThemeManager::new(&config.theme);
