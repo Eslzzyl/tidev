@@ -374,7 +374,7 @@ fn build_openai_request(
     Ok(ChatCompletionRequest {
         model: model.request_model_id.clone(),
         messages: request_messages,
-        temperature: Some(model.temperature),
+        temperature: model.temperature,
         max_tokens: Some(model.max_output_tokens as u32),
         stream,
         stream_options: if stream {
@@ -553,7 +553,7 @@ mod tests {
             display_name: "gpt-4".to_string(),
             context_window: 8192,
             max_output_tokens: 1024,
-            temperature: 0.7,
+            temperature: Some(0.7),
             supports_images: false,
             system_prompt: "base system prompt".to_string(),
             api_key: None,
@@ -604,7 +604,7 @@ mod tests {
             display_name: "gpt-4".to_string(),
             context_window: 8192,
             max_output_tokens: 1024,
-            temperature: 0.7,
+            temperature: Some(0.7),
             supports_images: false,
             system_prompt: "base system prompt".to_string(),
             api_key: None,

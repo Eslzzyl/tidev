@@ -127,7 +127,7 @@ impl NewModelDraft {
             model_display_name: model.display_name.clone(),
             context_window: model.context_window,
             max_output_tokens: model.max_output_tokens,
-            temperature: model.temperature,
+            temperature: model.temperature.unwrap_or(0.7),
         }
     }
 
@@ -234,7 +234,7 @@ impl NewModelDraft {
                 display_name: self.model_display_name,
                 context_window: self.context_window,
                 max_output_tokens: self.max_output_tokens,
-                temperature: self.temperature,
+                temperature: Some(self.temperature),
                 system_prompt: None,
                 supports_streaming: true,
                 supports_images: false,

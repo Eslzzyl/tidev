@@ -2107,7 +2107,7 @@ mod tests {
             display_name: "Test Model".into(),
             context_window: 4096,
             max_output_tokens: 1024,
-            temperature: 0.0,
+            temperature: Some(0.0),
             supports_images: false,
             system_prompt: String::new(),
             api_key: None,

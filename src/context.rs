@@ -480,7 +480,7 @@ mod tests {
             display_name: "Model".to_string(),
             context_window,
             max_output_tokens,
-            temperature: 0.0,
+            temperature: Some(0.0),
             supports_images: false,
             system_prompt: String::new(),
             api_key: None,

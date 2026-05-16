@@ -18,7 +18,7 @@ pub struct ProviderModelInfo {
     pub display_name: String,
     pub context_window: usize,
     pub max_output_tokens: usize,
-    pub temperature: f32,
+    pub temperature: Option<f32>,
     pub supports_images: bool,
     pub supports_streaming: bool,
 }
@@ -53,7 +53,8 @@ pub struct CreateModelRequest {
     pub display_name: String,
     pub context_window: usize,
     pub max_output_tokens: usize,
-    pub temperature: f32,
+    #[serde(default)]
+    pub temperature: Option<f32>,
     #[serde(default)]
     pub supports_images: bool,
 }
@@ -249,10 +250,9 @@ pub async fn create_provider(
             model_req.display_name.trim().to_string()
         };
 
-        let temperature = if model_req.temperature < 0.0 || model_req.temperature > 2.0 {
-            1.0 // Default to 1.0 if out of range
-        } else {
-            model_req.temperature
+        let temperature = match model_req.temperature {
+            Some(t) if t < 0.0 || t > 2.0 => Some(1.0),
+            other => other,
         };
 
         models.insert(

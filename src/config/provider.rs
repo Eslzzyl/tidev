@@ -53,7 +53,8 @@ pub struct ModelConfig {
     pub display_name: String,
     pub context_window: usize,
     pub max_output_tokens: usize,
-    pub temperature: f32,
+    #[serde(default)]
+    pub temperature: Option<f32>,
     #[serde(default)]
     pub system_prompt: Option<String>,
     #[serde(default = "default_true")]

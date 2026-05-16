@@ -417,7 +417,8 @@ struct AnthropicRequest {
     system: Option<String>,
     messages: Vec<AnthropicMessage>,
     stream: bool,
-    temperature: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<AnthropicTool>>,
     #[serde(flatten)]

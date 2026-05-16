@@ -96,7 +96,7 @@ mod tests {
             display_name: "GPT-4o".to_string(),
             context_window: 128_000,
             max_output_tokens: 4096,
-            temperature: 0.1,
+            temperature: Some(0.1),
             supports_images: true,
             system_prompt: String::new(),
             api_key: None,
