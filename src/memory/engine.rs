@@ -1015,64 +1015,55 @@ impl MemoryStore {
         let llm = embed_llm.unwrap();
         let model = embed_model.unwrap();
 
+        let worker_rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                crate::log_warn!("failed to create runtime for embedding backfill: {}", e);
+                return Ok(count);
+            }
+        };
+
         for (id, title, narrative, facts, concepts, files) in entries {
-            let db_path = db_path.clone();
-            let llm = llm.clone();
-            let model = model.clone();
-            std::thread::spawn(move || {
-                let worker_rt = match tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                {
-                    Ok(rt) => rt,
-                    Err(e) => {
-                        crate::log_warn!(
-                            "failed to create runtime for embedding backfill of {}: {}",
-                            id,
-                            e
+            let search_text = format!(
+                "{} {} {} {} {}",
+                title,
+                narrative,
+                facts.join(" "),
+                concepts.join(" "),
+                files.join(" ")
+            );
+
+            match worker_rt.block_on(llm.embed(&model, &search_text)) {
+                Ok(embedding) => {
+                    let blob: Vec<u8> =
+                        embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
+                    if let Ok(conn) = Connection::open(&db_path) {
+                        let id_str = id.to_string();
+                        let _ = conn.execute(
+                            "INSERT OR IGNORE INTO vec_obs_map(observation_id) VALUES (?1)",
+                            rusqlite::params![&id_str],
                         );
-                        return;
-                    }
-                };
-
-                let search_text = format!(
-                    "{} {} {} {} {}",
-                    title,
-                    narrative,
-                    facts.join(" "),
-                    concepts.join(" "),
-                    files.join(" ")
-                );
-
-                match worker_rt.block_on(llm.embed(&model, &search_text)) {
-                    Ok(embedding) => {
-                        let blob: Vec<u8> =
-                            embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
-                        if let Ok(conn) = Connection::open(&db_path) {
-                            let id_str = id.to_string();
-                            let _ = conn.execute(
-                                "INSERT OR IGNORE INTO vec_obs_map(observation_id) VALUES (?1)",
+                        let rowid: i64 = conn
+                            .query_row(
+                                "SELECT rowid FROM vec_obs_map WHERE observation_id = ?1",
                                 rusqlite::params![&id_str],
+                                |row| row.get(0),
+                            )
+                            .unwrap_or(0);
+                        if rowid > 0 {
+                            let _ = conn.execute(
+                                "INSERT OR REPLACE INTO vec_observations(rowid, embedding) VALUES (?1, ?2)",
+                                rusqlite::params![rowid, blob],
                             );
-                            let rowid: i64 = conn
-                                .query_row(
-                                    "SELECT rowid FROM vec_obs_map WHERE observation_id = ?1",
-                                    rusqlite::params![&id_str],
-                                    |row| row.get(0),
-                                )
-                                .unwrap_or(0);
-                            if rowid > 0 {
-                                let _ = conn.execute(
-                                    "INSERT OR REPLACE INTO vec_observations(rowid, embedding) VALUES (?1, ?2)",
-                                    rusqlite::params![rowid, blob],
-                                );
-                            }
                         }
-                        crate::log_info!("backfilled embedding for observation {}", id);
                     }
-                    Err(e) => crate::log_warn!("backfill: embedding failed for {}: {}", id, e),
+                    crate::log_info!("backfilled embedding for observation {}", id);
                 }
-            });
+                Err(e) => crate::log_warn!("backfill: embedding failed for {}: {}", id, e),
+            }
         }
 
         Ok(count)
