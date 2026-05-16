@@ -3,7 +3,7 @@ use crate::tui::render::render::{centered_rect, render_scrollbar, shorten};
 use crate::{
     tui::mcp_panel::McpPanelState,
     tui::mcp_panel::McpServerEditorState,
-    tui::memory_panel::{MemoryPanelMode, MemoryPanelState, PanelFocus},
+    tui::memory_panel::{EditField, MemoryPanelMode, MemoryPanelState, PanelFocus},
     tui::message_panel::MessagePanelState,
     tui::model_panel::{ModelPanelItem, ModelPanelState, thinking_options_for_model},
     tui::session_panel::{SessionPanelState, SessionViewMode},
@@ -1546,7 +1546,6 @@ impl App {
         panel: &MemoryPanelState,
     ) {
         let palette = self.palette();
-        let filtered = panel.filtered_indices();
 
         // Larger overlay like skills panel
         let overlay = centered_rect(85, 80, area);
@@ -1554,11 +1553,19 @@ impl App {
         self.memory_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
 
-        let title = format!(
-            " Memories · {}/{} ",
-            filtered.len(),
-            panel.memories.len()
-        );
+        let title = if panel.show_observations {
+            format!(
+                " Observations · {} ",
+                panel.observations.len()
+            )
+        } else {
+            let count = panel.filtered_indices().len();
+            format!(
+                " Memories · {}/{} ",
+                count,
+                panel.memories.len()
+            )
+        };
 
         let panel_block = Block::default()
             .style(Style::default().bg(palette.panel))
@@ -1581,7 +1588,179 @@ impl App {
                 ])
                 .split(inner);
 
-                if filtered.is_empty() {
+                if panel.show_observations {
+                    // ── Observations Mode ──
+                    if panel.observations.is_empty() {
+                        frame.render_widget(
+                            Paragraph::new("No observations yet.")
+                                .alignment(Alignment::Center)
+                                .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                            sections[0],
+                        );
+                    } else {
+                        let panes = Layout::horizontal([
+                            Constraint::Percentage(40),
+                            Constraint::Percentage(60),
+                        ])
+                        .split(sections[0]);
+
+                        // ── Left: Observations List ──
+                        let list_area = panes[0];
+                        let total_obs = panel.observations.len();
+                        let visible_height = list_area.height.saturating_sub(3) as usize;
+
+                        // Header
+                        frame.render_widget(
+                            Paragraph::new(Line::from(Span::styled(
+                                " Observations  (o: toggle back) ",
+                                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                            )))
+                            .style(Style::default().bg(palette.panel)),
+                            Rect::new(list_area.x, list_area.y, list_area.width, 1),
+                        );
+
+                        // Divider
+                        frame.render_widget(
+                            Paragraph::new(Line::from(Span::styled(
+                                "─".repeat(list_area.width as usize),
+                                Style::default().fg(palette.muted),
+                            )))
+                            .style(Style::default().bg(palette.panel)),
+                            Rect::new(list_area.x, list_area.y + 1, list_area.width, 1),
+                        );
+
+                        // List content
+                        let list_start_y = list_area.y + 2;
+                        let selected_obs = panel.selected_observation_index;
+
+                        // Compute scroll offset
+                        let scroll_offset = if visible_height >= total_obs || selected_obs < visible_height / 2 {
+                            0
+                        } else if selected_obs + visible_height / 2 >= total_obs {
+                            total_obs.saturating_sub(visible_height)
+                        } else {
+                            selected_obs.saturating_sub(visible_height / 2)
+                        };
+
+                        let mut obs_lines: Vec<Line<'_>> = Vec::new();
+                        let end = (scroll_offset + visible_height).min(total_obs);
+                        for i in scroll_offset..end {
+                            let obs = &panel.observations[i];
+                            let is_selected = i == selected_obs;
+                            let type_str = obs.obs_type.as_str();
+                            let title = if obs.title.is_empty() { "(no title)" } else { &obs.title };
+                            let display = format!(" [{}] {} (imp:{})", type_str, title, obs.importance);
+
+                            let style = if is_selected {
+                                Style::default()
+                                    .bg(palette.selection_bg)
+                                    .fg(palette.selection_fg)
+                                    .add_modifier(Modifier::BOLD)
+                            } else {
+                                Style::default().fg(palette.text)
+                            };
+                            obs_lines.push(Line::from(Span::styled(display, style)));
+                        }
+
+                        frame.render_widget(
+                            Paragraph::new(obs_lines)
+                                .style(Style::default().bg(palette.panel)),
+                            Rect::new(list_area.x, list_start_y, list_area.width, list_area.height.saturating_sub(2)),
+                        );
+
+                        // Scrollbar
+                        if total_obs > visible_height {
+                            let sb_area = Rect::new(
+                                list_area.x + list_area.width.saturating_sub(1),
+                                list_start_y,
+                                1,
+                                list_area.height.saturating_sub(2),
+                            );
+                            render_scrollbar(frame, sb_area, scroll_offset, total_obs, palette);
+                        }
+
+                        // ── Right: Observation Detail ──
+                        let preview_area = panes[1];
+                        let idx = selected_obs.min(total_obs.saturating_sub(1));
+                        let obs = &panel.observations[idx];
+
+                        let mut detail_lines: Vec<Line<'_>> = Vec::new();
+
+                        // Title line
+                        detail_lines.push(Line::from(vec![
+                            Span::styled(
+                                format!(" [{}] ", obs.obs_type.as_str()),
+                                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                &obs.title,
+                                Style::default().fg(palette.text).add_modifier(Modifier::BOLD),
+                            ),
+                        ]));
+
+                        // Subtitle
+                        if let Some(sub) = &obs.subtitle {
+                            if !sub.is_empty() {
+                                detail_lines.push(Line::from(Span::styled(
+                                    format!(" {}", sub),
+                                    Style::default().fg(palette.muted),
+                                )));
+                            }
+                        }
+
+                        // Importance
+                        detail_lines.push(Line::from(Span::styled(
+                            format!(" Importance: {}/10", obs.importance),
+                            Style::default().fg(palette.accent_soft),
+                        )));
+
+                        // Concepts
+                        if !obs.concepts.is_empty() {
+                            detail_lines.push(Line::from(Span::styled(
+                                format!(" Concepts: {}", obs.concepts.join(", ")),
+                                Style::default().fg(palette.muted),
+                            )));
+                        }
+
+                        // Files
+                        if !obs.files.is_empty() {
+                            detail_lines.push(Line::from(Span::styled(
+                                format!(" Files: {}", obs.files.join(", ")),
+                                Style::default().fg(palette.muted),
+                            )));
+                        }
+
+                        // Facts
+                        if !obs.facts.is_empty() {
+                            detail_lines.push(Line::from(Span::styled(
+                                format!(" Facts: {}", obs.facts.join("; ")),
+                                Style::default().fg(palette.muted),
+                            )));
+                        }
+
+                        // Narrative
+                        if !obs.narrative.is_empty() {
+                            let sep_w = preview_area.width.saturating_sub(4).max(10).min(80) as usize;
+                            detail_lines.push(Line::from(Span::styled(
+                                format!(" {}", "─".repeat(sep_w)),
+                                Style::default().fg(palette.border),
+                            )));
+                            detail_lines.push(Line::from(Span::styled(
+                                format!(" {}", obs.narrative),
+                                Style::default().fg(palette.text),
+                            )));
+                        }
+
+                        frame.render_widget(
+                            Paragraph::new(detail_lines)
+                                .style(Style::default().bg(palette.panel)),
+                            preview_area,
+                        );
+                    }
+                } else {
+                    // ── Memories Mode ──
+                    let filtered = panel.filtered_indices();
+                    if filtered.is_empty() {
                     // Empty state centered in main area
                     frame.render_widget(
                         Paragraph::new("No memories yet. Press 'a' to add one.")
@@ -1785,18 +1964,117 @@ impl App {
                                 use crate::markdown_render::render_markdown_text_with_width_and_cwd;
                                 let content_width =
                                     preview_content_area.width.saturating_sub(2) as usize;
+
+                                // Build metadata header lines
+                                let mut header_lines: Vec<Line<'_>> = Vec::new();
+
+                                // Line 1: [type] Title (with RO marker for system types)
+                                let is_system = matches!(entry.memory_type,
+                                    crate::memory::MemoryType::Fact
+                                    | crate::memory::MemoryType::Pattern
+                                    | crate::memory::MemoryType::Insight
+                                    | crate::memory::MemoryType::Lesson);
+                                let title_prefix = if is_system { " [RO]" } else { "" };
+                                header_lines.push(Line::from(vec![
+                                    Span::styled(
+                                        format!(" [{}]{} ", entry.memory_type.as_str(), title_prefix),
+                                        Style::default().fg(palette.accent)
+                                            .add_modifier(Modifier::BOLD),
+                                    ),
+                                    Span::styled(
+                                        &entry.title,
+                                        Style::default().fg(palette.text)
+                                            .add_modifier(Modifier::BOLD),
+                                    ),
+                                ]));
+
+                                // Line 2: tags
+                                if !entry.tags.is_empty() {
+                                    header_lines.push(Line::from(Span::styled(
+                                        format!(" Tags: {}", entry.tags.join(", ")),
+                                        Style::default().fg(palette.muted),
+                                    )));
+                                }
+
+                                // Line 3: concepts
+                                if !entry.concepts.is_empty() {
+                                    header_lines.push(Line::from(Span::styled(
+                                        format!(" Concepts: {}", entry.concepts.join(", ")),
+                                        Style::default().fg(palette.muted),
+                                    )));
+                                }
+
+                                // Line 4: files
+                                if !entry.files.is_empty() {
+                                    header_lines.push(Line::from(Span::styled(
+                                        format!(" Files: {}", entry.files.join(", ")),
+                                        Style::default().fg(palette.muted),
+                                    )));
+                                }
+
+                                // Line 5: importance, strength, version
+                                let mut meta_parts = Vec::new();
+                                meta_parts.push(format!("Importance: {}/10", entry.importance));
+                                if entry.strength > 0.0 {
+                                    meta_parts.push(format!("Strength: {:.2}", entry.strength));
+                                }
+                                meta_parts.push(format!("v{}", entry.version));
+                                header_lines.push(Line::from(Span::styled(
+                                    format!(" {}", meta_parts.join("  ")),
+                                    Style::default().fg(palette.accent_soft),
+                                )));
+
+                                // Line 6: created / updated timestamps
+                                header_lines.push(Line::from(Span::styled(
+                                    format!(" Created: {}  Updated: {}",
+                                        entry.created_at.format("%Y-%m-%d %H:%M"),
+                                        entry.updated_at.format("%Y-%m-%d %H:%M")),
+                                    Style::default().fg(palette.muted),
+                                )));
+
+                                // Line 7: version chain info
+                                let mut chain_parts: Vec<String> = Vec::new();
+                                if let Some(pid) = entry.parent_id {
+                                    chain_parts.push(format!("Parent: {}", pid));
+                                }
+                                if !entry.supersedes.is_empty() {
+                                    chain_parts.push(format!("Supersedes: {} version(s)", entry.supersedes.len()));
+                                }
+                                if !entry.related_ids.is_empty() {
+                                    chain_parts.push(format!("Related: {} memory(ies)", entry.related_ids.len()));
+                                }
+                                if !chain_parts.is_empty() {
+                                    header_lines.push(Line::from(Span::styled(
+                                        format!(" {}", chain_parts.join("  ")),
+                                        Style::default().fg(palette.warning),
+                                    )));
+                                }
+
+                                // Separator
+                                let sep_w = content_width.max(10).min(80);
+                                header_lines.push(Line::from(Span::styled(
+                                    format!(" {}", "─".repeat(sep_w)),
+                                    Style::default().fg(palette.border),
+                                )));
+
+                                // Render markdown content
                                 let rendered = render_markdown_text_with_width_and_cwd(
                                     &entry.content,
                                     Some(content_width),
                                     None,
                                 );
-                                let total_preview_lines = rendered.lines.len();
 
+                                // Combine header + markdown content
+                                let mut all_lines: Vec<Line<'_>> = Vec::new();
+                                all_lines.extend(header_lines);
+                                all_lines.extend(rendered.into_iter());
+
+                                let total_lines = all_lines.len();
                                 let scroll = panel
                                     .preview_scroll
-                                    .min(total_preview_lines.saturating_sub(1));
+                                    .min(total_lines.saturating_sub(1));
 
-                                let visible_lines: Vec<Line<'_>> = rendered
+                                let visible_lines: Vec<Line<'_>> = all_lines
                                     .into_iter()
                                     .skip(scroll)
                                     .take(preview_content_area.height as usize)
@@ -1813,7 +2091,7 @@ impl App {
                                         frame,
                                         sb_area,
                                         panel.preview_scroll,
-                                        total_preview_lines,
+                                        total_lines,
                                         palette,
                                     );
                                 }
@@ -1874,6 +2152,52 @@ impl App {
                                     header_lines.push(Line::from(Span::styled(
                                         format!("  Tags: {}", entry.tags.join(", ")),
                                         Style::default().fg(palette.muted),
+                                    )));
+                                }
+
+                                // Concepts
+                                if !entry.concepts.is_empty() {
+                                    header_lines.push(Line::from(Span::styled(
+                                        format!("  Concepts: {}", entry.concepts.join(", ")),
+                                        Style::default().fg(palette.muted),
+                                    )));
+                                }
+
+                                // Files
+                                if !entry.files.is_empty() {
+                                    header_lines.push(Line::from(Span::styled(
+                                        format!("  Files: {}", entry.files.join(", ")),
+                                        Style::default().fg(palette.muted),
+                                    )));
+                                }
+
+                                // Importance / strength / version
+                                let mut meta_parts = Vec::new();
+                                meta_parts.push(format!("Importance: {}/10", entry.importance));
+                                if entry.strength > 0.0 {
+                                    meta_parts.push(format!("Strength: {:.2}", entry.strength));
+                                }
+                                meta_parts.push(format!("v{}", entry.version));
+                                header_lines.push(Line::from(Span::styled(
+                                    format!("  {}", meta_parts.join("  ")),
+                                    Style::default().fg(palette.accent_soft),
+                                )));
+
+                                // Version chain info
+                                let mut chain_parts: Vec<String> = Vec::new();
+                                if let Some(pid) = entry.parent_id {
+                                    chain_parts.push(format!("Parent: {}", pid));
+                                }
+                                if !entry.supersedes.is_empty() {
+                                    chain_parts.push(format!("Supersedes: {} version(s)", entry.supersedes.len()));
+                                }
+                                if !entry.related_ids.is_empty() {
+                                    chain_parts.push(format!("Related: {} memory(ies)", entry.related_ids.len()));
+                                }
+                                if !chain_parts.is_empty() {
+                                    header_lines.push(Line::from(Span::styled(
+                                        format!("  {}", chain_parts.join("  ")),
+                                        Style::default().fg(palette.warning),
                                     )));
                                 }
 
@@ -1971,17 +2295,23 @@ impl App {
                     }
                 }
 
+                }
+
                 // Footer help
                 let footer_y = sections[1].y;
-                let help_text = match panel.focus {
-                    PanelFocus::List if panel.search_active => {
-                        "  Type to search · Esc: clear/exit · Enter: confirm · ↑↓: navigate"
-                    }
-                    PanelFocus::List => {
-                        "  ↑↓: navigate · ←→: scroll preview · /: search · Enter: edit · a: add · e: edit overlay · d: delete · r: filter · Esc: close"
-                    }
-                    PanelFocus::ContentEdit => {
-                        "  ↑↓←→: move cursor · Enter: save · Esc: cancel · Shift+Enter: newline"
+                let help_text = if panel.show_observations {
+                    "  Up/Down: navigate  o: toggle back  Esc: close"
+                } else {
+                    match panel.focus {
+                        PanelFocus::List if panel.search_active => {
+                            "  Type to search  Esc: clear/exit  Enter: confirm  Up/Down: navigate"
+                        }
+                        PanelFocus::List => {
+                            "  Up/Down: navigate  Left/Right: scroll  /: search  Enter: edit  a: add  e: edit content  d: delete  r: filter  o: observations  Esc: close"
+                        }
+                        PanelFocus::ContentEdit => {
+                            "  Arrow keys: move cursor  Enter: save  Esc: cancel  Shift+Enter: newline"
+                        }
                     }
                 };
                 frame.render_widget(
@@ -1996,21 +2326,25 @@ impl App {
 
             MemoryPanelMode::Add | MemoryPanelMode::Edit => {
                 let label = match panel.mode {
-                    MemoryPanelMode::Add => "Add Memory",
-                    MemoryPanelMode::Edit => "Edit Memory",
+                    MemoryPanelMode::Add => " Add Memory ",
+                    MemoryPanelMode::Edit => " Edit Memory ",
                     _ => unreachable!(),
                 };
 
                 let sections = Layout::vertical([
                     Constraint::Length(1), // label
                     Constraint::Length(1), // type
-                    Constraint::Length(3), // title
-                    Constraint::Min(8),    // content
+                    Constraint::Length(1), // title
+                    Constraint::Min(6),    // content
                     Constraint::Length(1), // tags
+                    Constraint::Length(1), // concepts
+                    Constraint::Length(1), // files
+                    Constraint::Length(1), // importance
                     Constraint::Length(1), // hints
                 ])
                 .split(inner);
 
+                // Label
                 frame.render_widget(
                     Paragraph::new(label)
                         .alignment(Alignment::Center)
@@ -2018,46 +2352,106 @@ impl App {
                     sections[0],
                 );
 
+                // Helper: style a field line with active highlight
+                let field_style = |is_active: bool| -> Style {
+                    if is_active {
+                        Style::default()
+                            .bg(palette.selection_bg)
+                            .fg(palette.selection_fg)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().bg(palette.panel).fg(palette.text)
+                    }
+                };
+
+                let active_field = panel.edit_field.as_ref();
+
                 // Type
                 frame.render_widget(
-                    Paragraph::new(format!("Type: {}", panel.edit_type.as_str()))
-                        .style(Style::default().bg(palette.panel).fg(palette.text)),
+                    Paragraph::new(format!("Type: {}   (Tab to change)", panel.edit_type.as_str()))
+                        .style(field_style(active_field == Some(&EditField::Type))),
                     sections[1],
                 );
 
-                // Title edit area
+                // Title
+                let title_display = if panel.edit_title.is_empty() {
+                    "Title: (type here)".to_string()
+                } else {
+                    format!("Title: {}", panel.edit_title)
+                };
                 frame.render_widget(
-                    Paragraph::new(format!("Title: {}", panel.edit_title))
-                        .style(Style::default().bg(palette.panel).fg(palette.text))
-                        .wrap(Wrap { trim: false }),
+                    Paragraph::new(title_display)
+                        .style(field_style(active_field == Some(&EditField::Title))),
                     sections[2],
                 );
 
-                // Content edit area
+                // Content
+                let content_display = if panel.edit_content.is_empty() {
+                    "Content: (type here)".to_string()
+                } else {
+                    format!("Content: {}", panel.edit_content)
+                };
                 frame.render_widget(
-                    Paragraph::new(if panel.edit_content.is_empty() {
-                        "Content: (type in input box below)"
-                    } else {
-                        &panel.edit_content
-                    })
-                    .style(Style::default().bg(palette.panel).fg(palette.text))
-                    .wrap(Wrap { trim: false }),
+                    Paragraph::new(content_display)
+                        .style(field_style(active_field == Some(&EditField::Content)))
+                        .wrap(Wrap { trim: false }),
                     sections[3],
                 );
 
                 // Tags
+                let tags_display = if panel.edit_tags.is_empty() {
+                    "Tags: (comma separated)".to_string()
+                } else {
+                    format!("Tags: {}", panel.edit_tags)
+                };
                 frame.render_widget(
-                    Paragraph::new(format!("Tags: {}", panel.edit_tags))
-                        .style(Style::default().bg(palette.panel).fg(palette.text)),
+                    Paragraph::new(tags_display)
+                        .style(field_style(active_field == Some(&EditField::Tags))),
                     sections[4],
                 );
 
-                // Hints
+                // Concepts
+                let concepts_display = if panel.edit_concepts.is_empty() {
+                    "Concepts: (comma separated)".to_string()
+                } else {
+                    format!("Concepts: {}", panel.edit_concepts)
+                };
                 frame.render_widget(
-                    Paragraph::new("Tab: cycle type · Enter: save · Esc: cancel")
+                    Paragraph::new(concepts_display)
+                        .style(field_style(active_field == Some(&EditField::Concepts))),
+                    sections[5],
+                );
+
+                // Files
+                let files_display = if panel.edit_files.is_empty() {
+                    "Files: (comma separated paths)".to_string()
+                } else {
+                    format!("Files: {}", panel.edit_files)
+                };
+                frame.render_widget(
+                    Paragraph::new(files_display)
+                        .style(field_style(active_field == Some(&EditField::Files))),
+                    sections[6],
+                );
+
+                // Importance
+                frame.render_widget(
+                    Paragraph::new(format!("Importance: {} /10   (type a digit 1-9)", panel.edit_importance))
+                        .style(field_style(active_field == Some(&EditField::Importance))),
+                    sections[7],
+                );
+
+                // Hints
+                let hint_text = if active_field.is_none() {
+                    "Tab: cycle fields  Enter: save  Esc: cancel"
+                } else {
+                    "Tab: cycle fields  Type to edit  Enter: save  Esc: cancel"
+                };
+                frame.render_widget(
+                    Paragraph::new(hint_text)
                         .alignment(Alignment::Center)
                         .style(Style::default().bg(palette.panel).fg(palette.muted)),
-                    sections[5],
+                    sections[8],
                 );
             }
 

@@ -5,7 +5,7 @@ use ratatui::layout::Rect;
 use std::cell::Cell;
 use uuid::Uuid;
 
-use crate::memory::{MemoryEntry, MemoryStore, MemoryType};
+use crate::memory::{CompressedObservation, MemoryEntry, MemoryStore, MemoryType};
 use crate::tui::input::Composer;
 
 use super::App;
@@ -25,17 +25,57 @@ pub enum MemoryPanelMode {
 /// Which part of the Browse two-pane layout has keyboard focus.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PanelFocus {
-    /// Left list is active. ↑/↓ navigates items. Right shows markdown preview.
+    /// Left list is active. Up/Down navigates items. Right shows markdown preview.
     List,
     /// Right pane shows raw content text for editing. Arrow keys move cursor.
     ContentEdit,
 }
+
+/// Which field is currently being edited in Add/Edit form mode.
+#[derive(Clone, Debug, PartialEq)]
+pub enum EditField {
+    Title,
+    Content,
+    Tags,
+    Concepts,
+    Files,
+    Importance,
+    Type,
+}
+
+impl EditField {
+    /// Cycle to the next field in order.
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Title => Self::Content,
+            Self::Content => Self::Tags,
+            Self::Tags => Self::Concepts,
+            Self::Concepts => Self::Files,
+            Self::Files => Self::Importance,
+            Self::Importance => Self::Type,
+            Self::Type => Self::Title,
+        }
+    }
+}
+
+/// System-generated memory types that should not be edited directly.
+const SYSTEM_MEMORY_TYPES: &[MemoryType] = &[
+    MemoryType::Fact,
+    MemoryType::Pattern,
+    MemoryType::Insight,
+    MemoryType::Lesson,
+];
 
 #[derive(Clone, Debug)]
 pub struct MemoryPanelState {
     pub mode: MemoryPanelMode,
     pub selected_index: usize,
     pub memories: Vec<MemoryEntry>,
+    /// Observations mode
+    pub observations: Vec<CompressedObservation>,
+    /// Whether to show observations panel instead of memories
+    pub show_observations: bool,
+    pub selected_observation_index: usize,
     pub filter_type: Option<MemoryType>,
     /// Scroll offset for the right-side content preview (browse mode)
     pub preview_scroll: usize,
@@ -51,11 +91,15 @@ pub struct MemoryPanelState {
     pub panel_rect: Option<Rect>,
     pub left_rect: Option<Rect>,
     pub right_rect: Option<Rect>,
-    /// For Add/Edit mode
+    /// For Add/Edit mode — tracking which form field is active
+    pub edit_field: Option<EditField>,
     pub edit_title: String,
     pub edit_content: String,
     pub edit_type: MemoryType,
     pub edit_tags: String,
+    pub edit_concepts: String,
+    pub edit_files: String,
+    pub edit_importance: u8,
     pub edit_id: Option<Uuid>,
     /// Search query text (empty = no search filter). Typed when search is active.
     pub query: String,
@@ -75,6 +119,9 @@ impl MemoryPanelState {
             mode: MemoryPanelMode::Browse,
             selected_index: 0,
             memories: Vec::new(),
+            observations: Vec::new(),
+            show_observations: false,
+            selected_observation_index: 0,
             filter_type: None,
             preview_scroll: 0,
             focus: PanelFocus::List,
@@ -84,10 +131,14 @@ impl MemoryPanelState {
             panel_rect: None,
             left_rect: None,
             right_rect: None,
+            edit_field: None,
             edit_title: String::new(),
             edit_content: String::new(),
             edit_type: MemoryType::Project,
             edit_tags: String::new(),
+            edit_concepts: String::new(),
+            edit_files: String::new(),
+            edit_importance: 5,
             edit_id: None,
             query: String::new(),
             search_active: false,
@@ -96,9 +147,15 @@ impl MemoryPanelState {
 
     pub fn load(&mut self, store: &MemoryStore, workspace_root: &str) -> Result<()> {
         self.memories = store.get_or_load(workspace_root)?;
+        self.observations = store
+            .list_recent_observations(100, 1)
+            .unwrap_or_default();
         self.selected_index = self
             .selected_index
             .min(self.memories.len().saturating_sub(1));
+        self.selected_observation_index = self
+            .selected_observation_index
+            .min(self.observations.len().saturating_sub(1));
         Ok(())
     }
 
@@ -140,11 +197,33 @@ impl MemoryPanelState {
 
     pub fn start_add(&mut self) {
         self.mode = MemoryPanelMode::Add;
+        self.edit_field = Some(EditField::Title);
         self.edit_title.clear();
         self.edit_content.clear();
         self.edit_type = MemoryType::Project;
         self.edit_tags.clear();
+        self.edit_concepts.clear();
+        self.edit_files.clear();
+        self.edit_importance = 5;
         self.edit_id = None;
+    }
+
+    /// Start editing an existing memory. Returns false if the memory is read-only.
+    pub fn start_edit(&mut self, entry: &MemoryEntry) -> bool {
+        if SYSTEM_MEMORY_TYPES.contains(&entry.memory_type) {
+            return false;
+        }
+        self.mode = MemoryPanelMode::Edit;
+        self.edit_field = Some(EditField::Title);
+        self.edit_id = Some(entry.id);
+        self.edit_title = entry.title.clone();
+        self.edit_content = entry.content.clone();
+        self.edit_type = entry.memory_type;
+        self.edit_tags = entry.tags.join(", ");
+        self.edit_concepts = entry.concepts.join(", ");
+        self.edit_files = entry.files.join(", ");
+        self.edit_importance = entry.importance;
+        true
     }
 
     pub fn confirm_save(&mut self, store: &MemoryStore, workspace_root: &str) -> Result<()> {
@@ -155,6 +234,19 @@ impl MemoryPanelState {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
+        let concepts: Vec<String> = self
+            .edit_concepts
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let files: Vec<String> = self
+            .edit_files
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let importance = self.edit_importance.clamp(1, 10);
 
         if let Some(id) = self.edit_id {
             let mut entry = MemoryEntry {
@@ -164,15 +256,15 @@ impl MemoryPanelState {
                 title: self.edit_title.clone(),
                 content: self.edit_content.clone(),
                 tags,
+                concepts,
+                files,
                 source_session_id: None,
                 created_at: now,
                 updated_at: now,
                 usage_count: 0,
                 active: true,
-                concepts: vec![],
-                files: vec![],
                 strength: 0.0,
-                importance: 5,
+                importance,
                 version: 1,
                 parent_id: None,
                 supersedes: vec![],
@@ -192,15 +284,15 @@ impl MemoryPanelState {
                 title: self.edit_title.clone(),
                 content: self.edit_content.clone(),
                 tags,
+                concepts,
+                files,
                 source_session_id: None,
                 created_at: now,
                 updated_at: now,
                 usage_count: 0,
                 active: true,
-                concepts: vec![],
-                files: vec![],
                 strength: 0.0,
-                importance: 5,
+                importance,
                 version: 1,
                 parent_id: None,
                 supersedes: vec![],
@@ -245,11 +337,18 @@ impl MemoryPanelState {
     }
 
     /// Enter inline content edit mode for the selected memory entry.
-    pub fn enter_content_edit(&mut self) {
+    /// Returns false if the memory is read-only.
+    pub fn enter_content_edit(&mut self) -> bool {
         if let Some(entry) = self.selected_entry().cloned() {
+            if SYSTEM_MEMORY_TYPES.contains(&entry.memory_type) {
+                return false;
+            }
             self.content_edit_snapshot = entry.content.clone();
             self.content_editor.set_text(entry.content);
             self.focus = PanelFocus::ContentEdit;
+            true
+        } else {
+            false
         }
     }
 
@@ -314,6 +413,38 @@ impl App {
         panel: MemoryPanelState,
         key: KeyEvent,
     ) -> Result<()> {
+        // Observations mode: simplified navigation
+        if panel.show_observations {
+            match key.code {
+                KeyCode::Up => {
+                    let mut next = panel;
+                    if next.selected_observation_index > 0 {
+                        next.selected_observation_index -= 1;
+                    }
+                    self.memory_panel = Some(next);
+                }
+                KeyCode::Down => {
+                    let mut next = panel;
+                    if next.selected_observation_index + 1 < next.observations.len() {
+                        next.selected_observation_index += 1;
+                    }
+                    self.memory_panel = Some(next);
+                }
+                KeyCode::Char('o') | KeyCode::Char('O') => {
+                    let mut next = panel;
+                    next.show_observations = false;
+                    next.selected_index = 0;
+                    next.preview_scroll = 0;
+                    self.memory_panel = Some(next);
+                }
+                KeyCode::Esc => {
+                    self.close_memory_panel();
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         // If search is active, intercept printable keys and special keys
         if panel.search_active {
             match key.code {
@@ -374,9 +505,13 @@ impl App {
                 self.memory_panel = Some(next);
             }
             KeyCode::Enter => {
+                // Open full edit form for selected memory
                 let mut next = panel;
-                next.enter_content_edit();
-                self.memory_panel = Some(next);
+                if let Some(entry) = next.selected_entry().cloned()
+                    && next.start_edit(&entry)
+                {
+                    self.memory_panel = Some(next);
+                }
             }
             KeyCode::Esc => {
                 self.close_memory_panel();
@@ -394,13 +529,19 @@ impl App {
                 self.memory_panel = Some(next);
             }
             KeyCode::Char('e') | KeyCode::Char('E') => {
+                // Inline content edit (right pane)
                 let mut next = panel;
                 next.enter_content_edit();
                 self.memory_panel = Some(next);
             }
-            KeyCode::Char('d') | KeyCode::Char('D') if panel.selected_entry().is_some() => {
+            KeyCode::Char('d') | KeyCode::Char('D') => {
+                // Check for read-only before delete
                 let mut next = panel;
-                next.mode = MemoryPanelMode::DeleteConfirm;
+                if let Some(entry) = next.selected_entry()
+                    && !SYSTEM_MEMORY_TYPES.contains(&entry.memory_type)
+                {
+                    next.mode = MemoryPanelMode::DeleteConfirm;
+                }
                 self.memory_panel = Some(next);
             }
             KeyCode::Char('r') | KeyCode::Char('R') => {
@@ -408,15 +549,19 @@ impl App {
                 next.cycle_filter_type();
                 self.memory_panel = Some(next);
             }
-            KeyCode::Char('t') | KeyCode::Char('T') => {
+            KeyCode::Char('o') | KeyCode::Char('O') => {
+                // Toggle observations mode
                 let mut next = panel;
-                next.mode = MemoryPanelMode::Add;
-                next.edit_type = MemoryType::Project;
-                next.edit_title.clear();
-                next.edit_content.clear();
-                next.edit_tags.clear();
-                next.edit_id = None;
-                // Pre-fill with selected memory's type
+                next.show_observations = !next.show_observations;
+                next.selected_index = 0;
+                next.selected_observation_index = 0;
+                next.preview_scroll = 0;
+                self.memory_panel = Some(next);
+            }
+            KeyCode::Char('t') | KeyCode::Char('T') => {
+                // Quick add with selected type
+                let mut next = panel;
+                next.start_add();
                 if let Some(entry) = next.selected_entry() {
                     next.edit_type = entry.memory_type;
                 }
@@ -523,22 +668,46 @@ impl App {
                 self.memory_panel = Some(next);
             }
             KeyCode::Tab => {
-                // Cycle memory type
+                // Cycle through form fields
                 let mut next = panel;
-                next.edit_type = match next.edit_type {
-                    MemoryType::User => MemoryType::Project,
-                    MemoryType::Project => MemoryType::Feedback,
-                    MemoryType::Feedback => MemoryType::Reference,
-                    MemoryType::Reference => MemoryType::Pattern,
-                    MemoryType::Pattern => MemoryType::Preference,
-                    MemoryType::Preference => MemoryType::Architecture,
-                    MemoryType::Architecture => MemoryType::Bug,
-                    MemoryType::Bug => MemoryType::Workflow,
-                    MemoryType::Workflow => MemoryType::Fact,
-                    MemoryType::Fact => MemoryType::Lesson,
-                    MemoryType::Lesson => MemoryType::Insight,
-                    MemoryType::Insight => MemoryType::User,
-                };
+                if next.edit_field.is_none() {
+                    next.edit_field = Some(EditField::Title);
+                } else {
+                    next.edit_field = Some(next.edit_field.as_ref().unwrap().next());
+                }
+                self.memory_panel = Some(next);
+            }
+            KeyCode::Backspace => {
+                let mut next = panel;
+                match next.edit_field {
+                    Some(EditField::Title) => { next.edit_title.pop(); }
+                    Some(EditField::Content) => { next.edit_content.pop(); }
+                    Some(EditField::Tags) => { next.edit_tags.pop(); }
+                    Some(EditField::Concepts) => { next.edit_concepts.pop(); }
+                    Some(EditField::Files) => { next.edit_files.pop(); }
+                    Some(EditField::Importance) => { next.edit_importance = 5; }
+                    Some(EditField::Type) => {} // type is cycled by Tab, no backspace
+                    None => {}
+                }
+                self.memory_panel = Some(next);
+            }
+            KeyCode::Char(ch) if panel.edit_field == Some(EditField::Importance) => {
+                let mut next = panel;
+                if let Some(digit) = ch.to_digit(10) {
+                    next.edit_importance = digit as u8;
+                }
+                self.memory_panel = Some(next);
+            }
+            KeyCode::Char(ch) => {
+                let mut next = panel;
+                match next.edit_field {
+                    Some(EditField::Title) => next.edit_title.push(ch),
+                    Some(EditField::Content) => next.edit_content.push(ch),
+                    Some(EditField::Tags) => next.edit_tags.push(ch),
+                    Some(EditField::Concepts) => next.edit_concepts.push(ch),
+                    Some(EditField::Files) => next.edit_files.push(ch),
+                    _ => {} // Type handled by Tab, Importance handled above
+                }
                 self.memory_panel = Some(next);
             }
             _ => {}

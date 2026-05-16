@@ -533,6 +533,29 @@ impl MemoryStore {
         })
     }
 
+    /// List recent compressed observations across all sessions, newest first.
+    /// Only returns observations that have been compressed (have obs_type set).
+    pub fn list_recent_observations(&self, limit: usize, min_importance: u8) -> Result<Vec<CompressedObservation>> {
+        let db = self.read_connection.lock().unwrap();
+        let mut stmt = db.prepare(
+            "SELECT id, session_id, obs_type, title, subtitle,
+                    facts, narrative, concepts, files, importance, confidence, created_at
+             FROM compressed_observations
+             WHERE obs_type IS NOT NULL AND importance >= ?1
+             ORDER BY importance DESC, created_at DESC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![min_importance as i64, limit as i64],
+            Self::map_compressed_observation_from_row,
+        )?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
     fn map_session_summary_from_row(
         row: &rusqlite::Row,
     ) -> rusqlite::Result<SessionSummary> {
