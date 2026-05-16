@@ -234,6 +234,9 @@ struct App {
     backend_tx: UnboundedSender<BackendEvent>,
     backend_rx: UnboundedReceiver<BackendEvent>,
     spinner_start: Instant,
+    /// Last rendered spinner frame index (increments every 100ms).
+    /// Used for lazy rendering: only redraw when the spinner visually changes.
+    last_spinner_frame: u64,
     context_usage: Option<state::ContextUsage>,
     snapshot: SnapshotService,
     cleanup_cancel: Arc<std::sync::atomic::AtomicBool>,

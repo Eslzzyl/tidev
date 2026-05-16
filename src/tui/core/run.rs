@@ -374,6 +374,7 @@ impl App {
             backend_tx,
             backend_rx,
             spinner_start: Instant::now(),
+            last_spinner_frame: 0,
             context_usage: None,
             snapshot,
             cleanup_cancel,
@@ -445,6 +446,14 @@ impl App {
             let elapsed = now.duration_since(self.last_render_time);
             let frame_budget = Duration::from_millis(16); // 60fps
 
+            // Lazy spinner: during active requests, only wake the renderer
+            // when the spinner frame actually changes (every 100ms).
+            // This avoids fixed-rate polling during quiet tool execution.
+            let spinner_frame = (self.spinner_start.elapsed().as_millis() / 100) as u64;
+            if !self.dirty && self.pending_request && spinner_frame != self.last_spinner_frame {
+                self.dirty = true;
+            }
+
             // After TUI suspend/resume (external editor), ratatui's frame
             // buffer is stale — force a full clear + redraw.
             if self.force_full_redraw {
@@ -459,6 +468,7 @@ impl App {
                 self.last_render_time = now;
                 self.render_throttled = true;
                 self.dirty = false;
+                self.last_spinner_frame = spinner_frame;
             }
 
             if self.should_quit {
