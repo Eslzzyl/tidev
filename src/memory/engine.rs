@@ -681,16 +681,34 @@ impl MemoryStore {
         let compressed = if use_llm {
             let (llm, model) = self.resolve_compression_llm().unwrap();
             let conn = Connection::open(&db_path)?;
-            match CompressionService::compress(&conn, &llm, &model, observation_id).await {
-                Ok(c) => {
+            let compress_result = tokio::time::timeout(
+                std::time::Duration::from_secs(120),
+                CompressionService::compress(&conn, &llm, &model, observation_id),
+            )
+            .await;
+            match compress_result {
+                Ok(Ok(c)) => {
                     // Success — reset circuit breaker
                     self.compression_cb_failures.store(0, Ordering::Relaxed);
                     *self.compression_cb_tripped_at.write().unwrap() = None;
                     c
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     crate::log_warn!("LLM compression failed, falling back to synthetic: {}", e);
-                    // Increment failure counter and check threshold
+                    let failures = self.compression_cb_failures.fetch_add(1, Ordering::Relaxed) + 1;
+                    if failures >= COMPRESSION_CB_THRESHOLD {
+                        crate::log_warn!(
+                            "compression circuit breaker tripped after {} consecutive failures",
+                            failures,
+                        );
+                        *self.compression_cb_tripped_at.write().unwrap() =
+                            Some(std::time::Instant::now());
+                    }
+                    let conn = Connection::open(&db_path)?;
+                    CompressionService::compress_synthetic(&conn, observation_id)?
+                }
+                Err(_) => {
+                    crate::log_warn!("LLM compression timed out, falling back to synthetic");
                     let failures = self.compression_cb_failures.fetch_add(1, Ordering::Relaxed) + 1;
                     if failures >= COMPRESSION_CB_THRESHOLD {
                         crate::log_warn!(
@@ -1056,7 +1074,16 @@ impl MemoryStore {
             files.join(" ")
         );
 
-        let embedding = llm.embed(&model, &search_text).await?;
+        let embedding = match tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            llm.embed(&model, &search_text),
+        )
+        .await
+        {
+            Ok(Ok(emb)) => emb,
+            Ok(Err(e)) => anyhow::bail!("embedding API error: {}", e),
+            Err(_) => anyhow::bail!("embedding timed out after 30s"),
+        };
         let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
 
         if let Ok(conn) = Connection::open(&self.db_path) {
