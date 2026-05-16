@@ -1,5 +1,5 @@
-use ratatui::style::Color;
 use crate::theme::{ThemeName, ThemePalette};
+use ratatui::style::Color;
 
 impl ThemePalette {
     pub fn nord() -> Self {

@@ -19,8 +19,8 @@ use crate::tooling::ToolPermission;
 use self::reasoning::{ThinkingLevelType, ThinkingMatcher};
 
 pub use auth::{
-    ActiveModel, AuthStore, EmbeddingActiveModel, EmbeddingModelSummary, ModelSummary, ProviderAuth,
-    WebAuth,
+    ActiveModel, AuthStore, EmbeddingActiveModel, EmbeddingModelSummary, ModelSummary,
+    ProviderAuth, WebAuth,
 };
 pub use logging::LogConfig;
 pub use mcp::{McpConfig, McpServerConfig};
@@ -504,10 +504,7 @@ impl AppConfig {
     /// - `hooks.disable_all_hooks`: project wins (project can opt out of all hooks).
     /// - Sub-config sections (`[ui]`, `[logging]`, etc.) are replaced only
     ///   when the project config explicitly contains that section.
-    pub fn load_with_project_overlay(
-        paths: &ConfigPaths,
-        workspace_root: &Path,
-    ) -> Result<Self> {
+    pub fn load_with_project_overlay(paths: &ConfigPaths, workspace_root: &Path) -> Result<Self> {
         let mut config = Self::load_or_create(paths)?;
 
         let project_config_path = workspace_root.join(".tidev/config.toml");
@@ -774,9 +771,7 @@ default_provider = "exa"
     pub fn available_embedding_models(&self, auth: &AuthStore) -> Vec<EmbeddingModelSummary> {
         let mut result = Vec::new();
 
-        for (provider_id, provider) in
-            self.providers.iter().chain(self.bundled_providers.iter())
-        {
+        for (provider_id, provider) in self.providers.iter().chain(self.bundled_providers.iter()) {
             let api_type = provider
                 .api_type
                 .as_deref()
@@ -1034,10 +1029,8 @@ default_provider = "exa"
                 .clone()
                 .or_else(|| {
                     // Find the first embedding model across all providers
-                    for (pid, provider) in self
-                        .providers
-                        .iter()
-                        .chain(self.bundled_providers.iter())
+                    for (pid, provider) in
+                        self.providers.iter().chain(self.bundled_providers.iter())
                     {
                         if let Some((_name, _model)) = provider.embedding_models.iter().next() {
                             return Some(format!("{}/{}", pid, _model.model_id));

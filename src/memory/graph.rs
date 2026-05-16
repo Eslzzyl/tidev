@@ -98,9 +98,8 @@ pub fn search_nodes(db: &Connection, query: &str, limit: usize) -> Result<Vec<Gr
 
 /// Load ALL nodes from DB (used by graph retrieval to build in-memory graph).
 pub fn load_all_nodes(db: &Connection) -> Result<Vec<GraphNode>> {
-    let mut stmt = db.prepare(
-        "SELECT id, node_type, label, properties, created_at FROM graph_nodes",
-    )?;
+    let mut stmt =
+        db.prepare("SELECT id, node_type, label, properties, created_at FROM graph_nodes")?;
     let rows = stmt.query_map([], map_node_row)?;
     let mut nodes = Vec::new();
     for row in rows {

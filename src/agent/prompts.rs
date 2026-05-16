@@ -71,7 +71,8 @@ fn general_prompt() -> String {
          - \"Should I adjust the plan?\"\n\
          - \"Does this look good to proceed?\"\n\n\
          For confirmation questions, simply ask them directly in your response text. \
-         The user will reply naturally.",        base_instruction()
+         The user will reply naturally.",
+        base_instruction()
     )
 }
 

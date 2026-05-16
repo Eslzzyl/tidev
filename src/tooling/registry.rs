@@ -1,9 +1,6 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
-use std::sync::{
-    atomic::AtomicBool,
-    Arc,
-};
+use std::sync::{Arc, atomic::AtomicBool};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 

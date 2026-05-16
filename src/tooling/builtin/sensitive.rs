@@ -42,11 +42,7 @@ pub fn load_sensitive_patterns(workspace_root: &Path) -> Vec<String> {
 /// `resolve_workspace_path`), without canonicalization, to avoid
 /// symlink-resolution differences (e.g. `/var` → `/private/var` on macOS)
 /// that would break matching against patterns joined to `workspace_root`.
-pub fn is_path_sensitive(
-    workspace_root: &Path,
-    resolved_path: &Path,
-    patterns: &[String],
-) -> bool {
+pub fn is_path_sensitive(workspace_root: &Path, resolved_path: &Path, patterns: &[String]) -> bool {
     if patterns.is_empty() {
         return false;
     }

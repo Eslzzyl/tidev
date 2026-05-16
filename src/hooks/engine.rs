@@ -50,7 +50,10 @@ impl PostToolUseHookOutcome {
             } else {
                 format!(": {}", hook.output)
             };
-            lines.push(format!("[{action} {hook_command}]{details}", hook_command=hook.command));
+            lines.push(format!(
+                "[{action} {hook_command}]{details}",
+                hook_command = hook.command
+            ));
         }
 
         if lines.is_empty() {
@@ -126,11 +129,7 @@ impl HookEngine {
             }
 
             // Resolve template variables
-            let filepath: &str = result
-                .metadata
-                .filepath
-                .as_deref()
-                .unwrap_or_default();
+            let filepath: &str = result.metadata.filepath.as_deref().unwrap_or_default();
 
             let filepath_abs = if filepath.is_empty() {
                 String::new()
@@ -225,7 +224,12 @@ impl HookEngine {
     }
 
     /// Record a memory observation after tool failure.
-    pub fn on_post_tool_failure(&self, tool_call: &ToolCall, error: &str, session_id: Option<uuid::Uuid>) {
+    pub fn on_post_tool_failure(
+        &self,
+        tool_call: &ToolCall,
+        error: &str,
+        session_id: Option<uuid::Uuid>,
+    ) {
         if let (Some(store), Some(sid)) = (&self.memory_store, session_id) {
             let payload = HookPayload {
                 session_id: sid,
@@ -248,7 +252,14 @@ impl HookEngine {
     }
 
     /// Record a generic memory observation (for session_end, subagent, etc.)
-    pub fn record_observation(&self, hook_type: HookType, tool_name: Option<String>, tool_input: Option<String>, tool_output: Option<String>, session_id: Option<uuid::Uuid>) {
+    pub fn record_observation(
+        &self,
+        hook_type: HookType,
+        tool_name: Option<String>,
+        tool_input: Option<String>,
+        tool_output: Option<String>,
+        session_id: Option<uuid::Uuid>,
+    ) {
         if let (Some(store), Some(sid)) = (&self.memory_store, session_id) {
             let payload = HookPayload {
                 session_id: sid,
@@ -272,8 +283,8 @@ impl HookEngine {
         result: &ToolExecutionResult,
     ) -> bool {
         // 1. Check matcher pattern against tool name (use canonical name)
-        let canonical = crate::tooling::canonical_tool_name(&tool_call.name)
-            .unwrap_or(&tool_call.name);
+        let canonical =
+            crate::tooling::canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
         if !matches_tool(&hook.matcher, canonical) {
             return false;
         }

@@ -33,25 +33,21 @@ impl SearchProvider for GoogleProvider {
         num_results: Option<i64>,
         search_type: Option<&str>,
     ) -> Result<String> {
-        let api_key = auth
-            .search_api_key("google")
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Google Custom Search requires an API key. \
+        let api_key = auth.search_api_key("google").ok_or_else(|| {
+            anyhow::anyhow!(
+                "Google Custom Search requires an API key. \
                      Set it in ~/.local/share/tidev/auth.json under \
                      `web.search_api_keys.google`."
-                )
-            })?;
+            )
+        })?;
 
-        let cx = auth
-            .google_cx()
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Google Custom Search requires a Search Engine ID (cx). \
+        let cx = auth.google_cx().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Google Custom Search requires a Search Engine ID (cx). \
                      Set it in ~/.local/share/tidev/auth.json under \
                      `web.google_cx`."
-                )
-            })?;
+            )
+        })?;
 
         // Google allows max 10 results per request.
         let num = num_results.unwrap_or(8).min(10).max(1);
@@ -106,17 +102,15 @@ fn format_google_results(body: &serde_json::Value) -> Result<String> {
     // Include search metadata if present
     let mut output = String::new();
     if let Some(info) = body.get("searchInformation")
-        && let Some(total) = info.get("totalResults").and_then(|v| v.as_str()) {
-            output.push_str(&format!("Total results: {}\n\n", total));
-        }
+        && let Some(total) = info.get("totalResults").and_then(|v| v.as_str())
+    {
+        output.push_str(&format!("Total results: {}\n\n", total));
+    }
 
     for (i, item) in items.iter().enumerate() {
         let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("");
         let link = item.get("link").and_then(|v| v.as_str()).unwrap_or("");
-        let snippet = item
-            .get("snippet")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let snippet = item.get("snippet").and_then(|v| v.as_str()).unwrap_or("");
 
         output.push_str(&format!(
             "{}. [{}]({})\n   {}\n\n",

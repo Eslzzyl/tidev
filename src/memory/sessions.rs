@@ -3,11 +3,11 @@ use chrono::Utc;
 use rusqlite::Connection;
 use uuid::Uuid;
 
-use crate::llm::LlmClient;
 use crate::config::ActiveModel;
+use crate::llm::LlmClient;
 use crate::session::{Message, MessageRole};
 
-use crate::memory::types::{SessionSummary};
+use crate::memory::types::SessionSummary;
 
 // ─── LLM Prompts (translated from agentmemory/src/prompts/summary.ts) ──
 
@@ -52,7 +52,11 @@ fn build_summary_prompt(observations: &[CompressedView]) -> String {
         })
         .collect();
 
-    format!("Session observations ({} total):\n\n{}", observations.len(), lines.join("\n\n---\n\n"))
+    format!(
+        "Session observations ({} total):\n\n{}",
+        observations.len(),
+        lines.join("\n\n---\n\n")
+    )
 }
 
 struct CompressedView {
@@ -93,10 +97,16 @@ fn get_xml_children(xml: &str, parent: &str, child: &str) -> Vec<String> {
     while let Some(cs) = section[pos..].find(&child_start) {
         let content_start = pos + cs + child_start.len();
         if let Some(ce) = section[content_start..].find(&child_end) {
-            let value = section[content_start..content_start + ce].trim().to_string();
-            if !value.is_empty() { result.push(value); }
+            let value = section[content_start..content_start + ce]
+                .trim()
+                .to_string();
+            if !value.is_empty() {
+                result.push(value);
+            }
             pos = content_start + ce + child_end.len();
-        } else { break; }
+        } else {
+            break;
+        }
     }
     result
 }
@@ -124,9 +134,8 @@ impl SessionService {
                  ORDER BY created_at ASC",
             )?;
 
-            let views: Vec<CompressedView> = stmt.query_map(
-                rusqlite::params![session_id.to_string()],
-                |row| {
+            let views: Vec<CompressedView> = stmt
+                .query_map(rusqlite::params![session_id.to_string()], |row| {
                     let files_json: String = row.get(3)?;
                     let concepts_json: String = row.get(4)?;
                     Ok(CompressedView {
@@ -136,8 +145,9 @@ impl SessionService {
                         files: serde_json::from_str(&files_json).unwrap_or_default(),
                         concepts: serde_json::from_str(&concepts_json).unwrap_or_default(),
                     })
-                },
-            )?.filter_map(|r| r.ok()).collect();
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
             views
         };
 
@@ -175,23 +185,35 @@ impl SessionService {
                 crate::log_warn!("LLM summarization failed, using synthetic fallback: {}", e);
                 // Generate a synthetic summary from observation data
                 let title = views.first().map(|v| v.title.clone()).unwrap_or_default();
-                let mut file_set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-                let mut concept_set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-                let mut type_counts: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+                let mut file_set: std::collections::BTreeSet<String> =
+                    std::collections::BTreeSet::new();
+                let mut concept_set: std::collections::BTreeSet<String> =
+                    std::collections::BTreeSet::new();
+                let mut type_counts: std::collections::BTreeMap<String, usize> =
+                    std::collections::BTreeMap::new();
                 for v in &views {
-                    for f in &v.files { file_set.insert(f.clone()); }
-                    for c in &v.concepts { concept_set.insert(c.clone()); }
+                    for f in &v.files {
+                        file_set.insert(f.clone());
+                    }
+                    for c in &v.concepts {
+                        concept_set.insert(c.clone());
+                    }
                     *type_counts.entry(v.obs_type.clone()).or_default() += 1;
                 }
                 let obs_summary: String = {
-                    let mut parts: Vec<String> = type_counts.into_iter()
+                    let mut parts: Vec<String> = type_counts
+                        .into_iter()
                         .map(|(t, c)| format!("{}×{}", c, t))
                         .collect();
                     parts.sort();
                     parts.join(", ")
                 };
                 let narrative = if !obs_summary.is_empty() {
-                    format!("Session with {} observations ({}).", views.len(), obs_summary)
+                    format!(
+                        "Session with {} observations ({}).",
+                        views.len(),
+                        obs_summary
+                    )
                 } else {
                     format!("Session with {} observations.", views.len())
                 };
@@ -265,28 +287,27 @@ impl SessionService {
              FROM session_summaries WHERE session_id = ?1",
         )?;
 
-        let result = stmt.query_row(
-            rusqlite::params![session_id.to_string()],
-            |row| {
-                let decisions_json: String = row.get(5)?;
-                let files_json: String = row.get(6)?;
-                let concepts_json: String = row.get(7)?;
-                Ok(SessionSummary {
-                    session_id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap_or(session_id),
-                    project: row.get(1)?,
-                    created_at: row.get::<_, String>(2).ok()
-                        .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
-                        .map(|d| d.with_timezone(&chrono::Utc))
-                        .unwrap_or_else(chrono::Utc::now),
-                    title: row.get(3)?,
-                    narrative: row.get(4)?,
-                    key_decisions: serde_json::from_str(&decisions_json).unwrap_or_default(),
-                    files_modified: serde_json::from_str(&files_json).unwrap_or_default(),
-                    concepts: serde_json::from_str(&concepts_json).unwrap_or_default(),
-                    observation_count: row.get(8)?,
-                })
-            },
-        );
+        let result = stmt.query_row(rusqlite::params![session_id.to_string()], |row| {
+            let decisions_json: String = row.get(5)?;
+            let files_json: String = row.get(6)?;
+            let concepts_json: String = row.get(7)?;
+            Ok(SessionSummary {
+                session_id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap_or(session_id),
+                project: row.get(1)?,
+                created_at: row
+                    .get::<_, String>(2)
+                    .ok()
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+                    .map(|d| d.with_timezone(&chrono::Utc))
+                    .unwrap_or_else(chrono::Utc::now),
+                title: row.get(3)?,
+                narrative: row.get(4)?,
+                key_decisions: serde_json::from_str(&decisions_json).unwrap_or_default(),
+                files_modified: serde_json::from_str(&files_json).unwrap_or_default(),
+                concepts: serde_json::from_str(&concepts_json).unwrap_or_default(),
+                observation_count: row.get(8)?,
+            })
+        });
 
         match result {
             Ok(s) => Ok(Some(s)),

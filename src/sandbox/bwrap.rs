@@ -106,9 +106,7 @@ fn compute_writable_dirs(
         | SandboxPolicy::DangerFullAccess
         | SandboxPolicy::ExternalSandbox => vec![],
 
-        SandboxPolicy::WorkspaceWrite {
-            writable_roots: _,
-        } => {
+        SandboxPolicy::WorkspaceWrite { writable_roots: _ } => {
             let mut dirs = Vec::new();
 
             // cwd is always writable
@@ -257,7 +255,8 @@ mod tests {
         let policy = SandboxPolicy::WorkspaceWrite {
             writable_roots: vec![PathBuf::from("/extra")],
         };
-        let dirs = compute_writable_dirs(&policy, Path::new("/workspace"), &[PathBuf::from("/extra")]);
+        let dirs =
+            compute_writable_dirs(&policy, Path::new("/workspace"), &[PathBuf::from("/extra")]);
         assert!(dirs.contains(&PathBuf::from("/workspace")));
         assert!(dirs.contains(&PathBuf::from("/tmp")));
         assert!(dirs.contains(&PathBuf::from("/extra")));

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::memory::{MemoryStore, MemoryType, MemorySlot, SlotScope};
+use crate::memory::{MemorySlot, MemoryStore, MemoryType, SlotScope};
 
 /// Execute a memory tool call.
 ///
@@ -54,15 +54,18 @@ fn parse_tags(value: &Value) -> Vec<String> {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect(),
-        Value::Array(arr) => arr.iter().filter_map(|v| v.as_str().map(String::from)).collect(),
+        Value::Array(arr) => arr
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect(),
         _ => Vec::new(),
     }
 }
 
-
 // ─── New API (agentmemory-style) ────────────────────────────────────
 
-fn execute_remember(    memory_store: &Arc<MemoryStore>,
+fn execute_remember(
+    memory_store: &Arc<MemoryStore>,
     workspace_root: &str,
     arguments: &Value,
 ) -> Result<String> {
@@ -83,20 +86,14 @@ fn execute_remember(    memory_store: &Arc<MemoryStore>,
         .and_then(|v| v.as_str())
         .unwrap_or(&content[..content.len().min(80)]);
 
-    let tags: Vec<String> = arguments
-        .get("tags")
-        .map(parse_tags)
-        .unwrap_or_default();
+    let tags: Vec<String> = arguments.get("tags").map(parse_tags).unwrap_or_default();
 
     let concepts: Vec<String> = arguments
         .get("concepts")
         .map(parse_tags)
         .unwrap_or_default();
 
-    let files: Vec<String> = arguments
-        .get("files")
-        .map(parse_tags)
-        .unwrap_or_default();
+    let files: Vec<String> = arguments.get("files").map(parse_tags).unwrap_or_default();
 
     let source_session_id = arguments
         .get("source_session_id")
@@ -225,12 +222,19 @@ fn execute_read(
             parts.push(format!("Files: {}", entry.files.join(", ")));
         }
         if entry.version > 1 {
-            parts.push(format!("Version: v{} (latest: {})", entry.version, entry.is_latest));
+            parts.push(format!(
+                "Version: v{} (latest: {})",
+                entry.version, entry.is_latest
+            ));
         }
         if let Some(pid) = entry.parent_id {
             parts.push(format!("Supersedes: {}", pid));
         }
-        if parts.is_empty() { String::new() } else { format!("\n{}", parts.join("\n")) }
+        if parts.is_empty() {
+            String::new()
+        } else {
+            format!("\n{}", parts.join("\n"))
+        }
     };
 
     Ok(format!(
@@ -264,22 +268,26 @@ fn execute_forget(
 }
 
 /// observations: List raw observations for a session.
-fn execute_observations(
-    _memory_store: &Arc<MemoryStore>,
-    arguments: &Value,
-) -> Result<String> {
+fn execute_observations(_memory_store: &Arc<MemoryStore>, arguments: &Value) -> Result<String> {
     let session_id = arguments
         .get("session_id")
         .and_then(|v| v.as_str())
         .context("session_id is required for observations operation")?;
 
     // This would query observations table - for Phase 1 return placeholder
-    Ok(format!("Observations for session {}: (Phase 1 - query via storage layer)", session_id))
+    Ok(format!(
+        "Observations for session {}: (Phase 1 - query via storage layer)",
+        session_id
+    ))
 }
 
 // ─── Slot Operations ──────────────────────────────────────────────
 
-fn execute_slot_list(memory_store: &Arc<MemoryStore>, workspace_root: &str, _args: &Value) -> Result<String> {
+fn execute_slot_list(
+    memory_store: &Arc<MemoryStore>,
+    workspace_root: &str,
+    _args: &Value,
+) -> Result<String> {
     let slots = memory_store.list_slots(None, Some(workspace_root))?;
     if slots.is_empty() {
         return Ok("No slots found.".to_string());
@@ -301,27 +309,63 @@ fn execute_slot_list(memory_store: &Arc<MemoryStore>, workspace_root: &str, _arg
     Ok(lines.join("\n"))
 }
 
-fn execute_slot_get(memory_store: &Arc<MemoryStore>, workspace_root: &str, args: &Value) -> Result<String> {
-    let label = args.get("label").and_then(|v| v.as_str()).context("label is required")?;
+fn execute_slot_get(
+    memory_store: &Arc<MemoryStore>,
+    workspace_root: &str,
+    args: &Value,
+) -> Result<String> {
+    let label = args
+        .get("label")
+        .and_then(|v| v.as_str())
+        .context("label is required")?;
     let scope = parse_slot_scope(args)?;
-    let slot = memory_store.get_slot(label, scope, workspace_root)?
+    let slot = memory_store
+        .get_slot(label, scope, workspace_root)?
         .context("slot not found")?;
     let pinned = if slot.pinned { " [pinned]" } else { "" };
-    let scope_str = match slot.scope { SlotScope::Global => "global", SlotScope::Project => "project" };
+    let scope_str = match slot.scope {
+        SlotScope::Global => "global",
+        SlotScope::Project => "project",
+    };
     Ok(format!(
         "Slot: {} ({}, {}{})\nDescription: {}\nSize limit: {}\n---\n{}",
-        slot.label, scope_str, slot.size_limit, pinned, slot.description, slot.size_limit, slot.content,
+        slot.label,
+        scope_str,
+        slot.size_limit,
+        pinned,
+        slot.description,
+        slot.size_limit,
+        slot.content,
     ))
 }
 
-fn execute_slot_set(memory_store: &Arc<MemoryStore>, workspace_root: &str, args: &Value) -> Result<String> {
-    let label = args.get("label").and_then(|v| v.as_str()).context("label is required")?;
+fn execute_slot_set(
+    memory_store: &Arc<MemoryStore>,
+    workspace_root: &str,
+    args: &Value,
+) -> Result<String> {
+    let label = args
+        .get("label")
+        .and_then(|v| v.as_str())
+        .context("label is required")?;
     let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
     let scope = parse_slot_scope(args)?;
-    let description = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
-    let size_limit = args.get("size_limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
-    let pinned = args.get("pinned").and_then(|v| v.as_bool()).unwrap_or(false);
-    let project_str = match scope { SlotScope::Global => "", SlotScope::Project => workspace_root };
+    let description = args
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let size_limit = args
+        .get("size_limit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(2000) as usize;
+    let pinned = args
+        .get("pinned")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let project_str = match scope {
+        SlotScope::Global => "",
+        SlotScope::Project => workspace_root,
+    };
 
     let now = chrono::Utc::now();
     let slot = MemorySlot {
@@ -340,16 +384,37 @@ fn execute_slot_set(memory_store: &Arc<MemoryStore>, workspace_root: &str, args:
     Ok(format!("Slot '{}' saved ({} chars).", label, content.len()))
 }
 
-fn execute_slot_append(memory_store: &Arc<MemoryStore>, workspace_root: &str, args: &Value) -> Result<String> {
-    let label = args.get("label").and_then(|v| v.as_str()).context("label is required")?;
-    let content = args.get("content").and_then(|v| v.as_str()).context("content is required")?;
+fn execute_slot_append(
+    memory_store: &Arc<MemoryStore>,
+    workspace_root: &str,
+    args: &Value,
+) -> Result<String> {
+    let label = args
+        .get("label")
+        .and_then(|v| v.as_str())
+        .context("label is required")?;
+    let content = args
+        .get("content")
+        .and_then(|v| v.as_str())
+        .context("content is required")?;
     let scope = parse_slot_scope(args)?;
     let slot = memory_store.append_slot(label, scope, workspace_root, content)?;
-    Ok(format!("Slot '{}' appended (total {} chars).", label, slot.content.len()))
+    Ok(format!(
+        "Slot '{}' appended (total {} chars).",
+        label,
+        slot.content.len()
+    ))
 }
 
-fn execute_slot_delete(memory_store: &Arc<MemoryStore>, workspace_root: &str, args: &Value) -> Result<String> {
-    let label = args.get("label").and_then(|v| v.as_str()).context("label is required")?;
+fn execute_slot_delete(
+    memory_store: &Arc<MemoryStore>,
+    workspace_root: &str,
+    args: &Value,
+) -> Result<String> {
+    let label = args
+        .get("label")
+        .and_then(|v| v.as_str())
+        .context("label is required")?;
     let scope = parse_slot_scope(args)?;
     memory_store.delete_slot(label, scope, workspace_root)?;
     Ok(format!("Slot '{}' deleted.", label))
@@ -369,7 +434,6 @@ fn execute_evict(memory_store: &Arc<MemoryStore>) -> Result<String> {
     let report = memory_store.run_eviction()?;
     Ok(format!(
         "Eviction complete:\n  Stale memories removed: {}\n  Old versions removed: {}",
-        report.stale_memories_removed,
-        report.old_versions_removed,
+        report.stale_memories_removed, report.old_versions_removed,
     ))
 }

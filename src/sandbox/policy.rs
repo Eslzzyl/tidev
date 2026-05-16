@@ -73,9 +73,10 @@ impl SandboxPolicy {
                     return true;
                 }
                 if let Ok(tmpdir) = std::env::var("TMPDIR")
-                    && path.starts_with(&tmpdir) {
-                        return true;
-                    }
+                    && path.starts_with(&tmpdir)
+                {
+                    return true;
+                }
                 false
             }
         }
@@ -84,9 +85,7 @@ impl SandboxPolicy {
     /// Convert a policy name string to the enum.
     pub fn from_name(name: &str) -> Option<Self> {
         match name.trim().to_ascii_lowercase().as_str() {
-            "danger-full-access" | "full_access" | "full" => {
-                Some(SandboxPolicy::DangerFullAccess)
-            }
+            "danger-full-access" | "full_access" | "full" => Some(SandboxPolicy::DangerFullAccess),
             "read-only" | "read_only" | "readonly" | "read" => Some(SandboxPolicy::ReadOnly),
             "external-sandbox" | "external_sandbox" | "external" => {
                 Some(SandboxPolicy::ExternalSandbox)

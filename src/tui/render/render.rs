@@ -273,7 +273,12 @@ impl App {
             .map(|p| p.label())
             .unwrap_or_else(|| self.mode.sandbox_policy(&self.config.sandbox).label());
         let model_display = if self.thinking_level.is_supported() {
-            format!("{} [{}]  Sandbox: {}", model_label, self.thinking_level.display_name(), sandbox_label)
+            format!(
+                "{} [{}]  Sandbox: {}",
+                model_label,
+                self.thinking_level.display_name(),
+                sandbox_label
+            )
         } else {
             format!("{}  Sandbox: {}", model_label, sandbox_label)
         };
@@ -529,10 +534,10 @@ impl App {
         panel: &crate::tui::ui::sandbox_panel::SandboxPanelState,
     ) {
         use crate::tui::ui::sandbox_panel::SandboxPanelState as S;
-        use ratatui::widgets::{Block, Borders, List, Clear};
-        use ratatui::text::{Line, Span};
-        use ratatui::style::{Style, Modifier};
         use ratatui::layout::Margin;
+        use ratatui::style::{Modifier, Style};
+        use ratatui::text::{Line, Span};
+        use ratatui::widgets::{Block, Borders, Clear, List};
 
         let palette = self.palette();
 
@@ -557,14 +562,17 @@ impl App {
         let list_items: Vec<ratatui::widgets::ListItem> = items
             .iter()
             .map(|item| {
-                ratatui::widgets::ListItem::new(Line::from(vec![
-                    Span::styled(item.label, Style::default().add_modifier(Modifier::BOLD)),
-                ]))
+                ratatui::widgets::ListItem::new(Line::from(vec![Span::styled(
+                    item.label,
+                    Style::default().add_modifier(Modifier::BOLD),
+                )]))
             })
             .collect();
 
         let mut list_state = ratatui::widgets::ListState::default();
-        list_state.select(Some(panel.selected_index.min(items.len().saturating_sub(1))));
+        list_state.select(Some(
+            panel.selected_index.min(items.len().saturating_sub(1)),
+        ));
 
         let list = List::new(list_items)
             .highlight_style(
@@ -578,10 +586,10 @@ impl App {
 
     /// Render the sandbox elevation dialog.
     pub(super) fn render_sandbox_elevation_dialog(&self, frame: &mut Frame<'_>, area: Rect) {
-        use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-        use ratatui::text::{Line, Span};
+        use ratatui::layout::{Constraint, Layout, Margin};
         use ratatui::style::Style;
-        use ratatui::layout::{Layout, Constraint, Margin};
+        use ratatui::text::{Line, Span};
+        use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
         let palette = self.palette();
         let overlay = centered_rect(56, 8, area);
@@ -618,7 +626,10 @@ impl App {
 
         // Options
         let options = Line::from(vec![
-            Span::styled("  [Y] Retry with full access  ", Style::default().fg(palette.success)),
+            Span::styled(
+                "  [Y] Retry with full access  ",
+                Style::default().fg(palette.success),
+            ),
             Span::styled("[N] Cancel  ", Style::default().fg(palette.error)),
         ]);
         frame.render_widget(
@@ -654,7 +665,12 @@ impl App {
 
         let model_label = self.active_model.label();
         let full_label = if self.thinking_level.is_supported() {
-            format!("{} [{}]  Sandbox: {}", model_label, self.thinking_level.display_name(), sandbox_label)
+            format!(
+                "{} [{}]  Sandbox: {}",
+                model_label,
+                self.thinking_level.display_name(),
+                sandbox_label
+            )
         } else {
             format!("{}  Sandbox: {}", model_label, sandbox_label)
         };
@@ -740,15 +756,8 @@ impl App {
                 format!("{} Thinking...", spinner)
             } else if !self.running_subagent_executions.is_empty() {
                 let count = self.running_subagent_executions.len();
-                let label = if count == 1 {
-                    "subagent"
-                } else {
-                    "subagents"
-                };
-                format!(
-                    "{} Waiting for {} {}",
-                    spinner, count, label
-                )
+                let label = if count == 1 { "subagent" } else { "subagents" };
+                format!("{} Waiting for {} {}", spinner, count, label)
             } else if !self.running_tool_executions.is_empty() {
                 let tool_names: Vec<_> = self
                     .running_tool_executions

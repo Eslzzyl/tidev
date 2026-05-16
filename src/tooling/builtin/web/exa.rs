@@ -72,7 +72,10 @@ impl SearchProvider for ExaProvider {
                 .context("failed to send Exa search request")?;
 
             if !response.status().is_success() {
-                bail!("Exa search request failed with status {}", response.status());
+                bail!(
+                    "Exa search request failed with status {}",
+                    response.status()
+                );
             }
 
             response

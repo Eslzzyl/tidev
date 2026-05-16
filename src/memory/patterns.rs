@@ -1,9 +1,9 @@
-use std::collections::HashMap;
 use anyhow::Result;
 use rusqlite::Connection;
+use std::collections::HashMap;
 
-use crate::memory::types::MemoryType;
 use crate::memory::remember::RememberService;
+use crate::memory::types::MemoryType;
 
 // ─── Pattern Types ────────────────────────────────────────────────────
 
@@ -123,9 +123,15 @@ impl PatternMiningService {
             ];
 
             if let Err(e) = RememberService::remember(
-                db, project, MemoryType::Pattern,
-                &title, &content, &[], &[file_a.clone(), file_b.clone()],
-                &tags, None,
+                db,
+                project,
+                MemoryType::Pattern,
+                &title,
+                &content,
+                &[],
+                &[file_a.clone(), file_b.clone()],
+                &tags,
+                None,
             ) {
                 crate::log_warn!("failed to save co-change pattern: {}", e);
                 continue;
@@ -207,9 +213,15 @@ impl PatternMiningService {
             ];
 
             if let Err(e) = RememberService::remember(
-                db, project, MemoryType::Pattern,
-                &title, &content, &[], &[],
-                &tags, None,
+                db,
+                project,
+                MemoryType::Pattern,
+                &title,
+                &content,
+                &[],
+                &[],
+                &tags,
+                None,
             ) {
                 crate::log_warn!("failed to save error-repeat pattern: {}", e);
                 continue;

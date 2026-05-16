@@ -111,7 +111,10 @@ impl App {
         // Recover any uncompressed observations from previous runs
         // (runs after the queue is created so recovered jobs go through it).
         if let Err(e) = memory_store.recover_uncompressed(50) {
-            crate::log_warn!("startup recovery of uncompressed observations failed: {}", e);
+            crate::log_warn!(
+                "startup recovery of uncompressed observations failed: {}",
+                e
+            );
         }
         // Set sandbox policy based on session mode and config
         let sandbox_policy = mode.sandbox_policy(&config.sandbox);
@@ -132,11 +135,9 @@ impl App {
                 std::collections::VecDeque::new(),
             )),
             auto_approve_permissions: true, // TUI handles permissions via channel
-            hooks: crate::hooks::HookEngine::new(
-                config.hooks.clone(),
-                workspace_root.clone(),
-            ).with_memory_store(memory_store.clone())
-             .with_compression_queue(compression_queue.clone()),
+            hooks: crate::hooks::HookEngine::new(config.hooks.clone(), workspace_root.clone())
+                .with_memory_store(memory_store.clone())
+                .with_compression_queue(compression_queue.clone()),
         };
         // Schedule periodic eviction (every 60 minutes)
         if tokio::runtime::Handle::try_current().is_ok() {
@@ -966,7 +967,9 @@ impl App {
             crate::prompts::SessionMode::Build
         };
         if is_active {
-            let (system_prompt, _) = self.agent.compose_system_prompt(&model.system_prompt, Some(mode), session_id);
+            let (system_prompt, _) =
+                self.agent
+                    .compose_system_prompt(&model.system_prompt, Some(mode), session_id);
             model.system_prompt = system_prompt;
         }
         // For cached sessions we don't have the mode readily available;

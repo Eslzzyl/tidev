@@ -172,7 +172,8 @@ fn child_session_round_trip_records_parent() {
 }
 
 #[test]
-fn copy_tool_permissions_inherits_parent_permissions() {    let path = std::env::temp_dir().join(format!(
+fn copy_tool_permissions_inherits_parent_permissions() {
+    let path = std::env::temp_dir().join(format!(
         "tidev-session-store-permissions-{}.sqlite3",
         uuid::Uuid::new_v4()
     ));

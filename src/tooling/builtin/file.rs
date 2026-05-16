@@ -7,9 +7,7 @@ use std::{fs, io::BufRead, path::Path};
 use super::utils::{display_workspace_relative, read_existing_text, resolve_workspace_path};
 use crate::instructions::resolve_nearby_instructions;
 use crate::session::{MessageAttachment, ToolExecutionResult, ToolMetadata};
-use crate::tooling::tools::{
-    ApplyPatchArgs, EditArgs, ReadArgs, WriteArgs, decode_tool_args,
-};
+use crate::tooling::tools::{ApplyPatchArgs, EditArgs, ReadArgs, WriteArgs, decode_tool_args};
 use crate::tooling::{ToolDefinition, ToolPermission};
 
 const MAX_LINE_LENGTH: usize = 2000;
@@ -73,7 +71,12 @@ pub fn execute_tool_call(
                 String::new()
             };
 
-            write_file(workspace_root, &args.file_path, &args.content, allow_outside)?;
+            write_file(
+                workspace_root,
+                &args.file_path,
+                &args.content,
+                allow_outside,
+            )?;
             Ok(file_change_output(
                 workspace_root,
                 &absolute_path,

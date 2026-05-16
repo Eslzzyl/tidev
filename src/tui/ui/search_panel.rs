@@ -87,20 +87,18 @@ impl SearchPanelState {
 
     /// Whether the selected provider needs an API key and is missing it.
     pub fn selected_provider_missing_key(&self, auth: &AuthStore) -> bool {
-        self.selected_index < BUILTIN_PROVIDERS.len()
-            && {
-                let info = &BUILTIN_PROVIDERS[self.selected_index];
-                info.needs_api_key && auth.search_api_key(info.id).is_none()
-            }
+        self.selected_index < BUILTIN_PROVIDERS.len() && {
+            let info = &BUILTIN_PROVIDERS[self.selected_index];
+            info.needs_api_key && auth.search_api_key(info.id).is_none()
+        }
     }
 
     /// Whether the selected provider needs a Google CX and is missing it.
     pub fn selected_provider_missing_cx(&self, auth: &AuthStore) -> bool {
-        self.selected_index < BUILTIN_PROVIDERS.len()
-            && {
-                let info = &BUILTIN_PROVIDERS[self.selected_index];
-                info.needs_cx && auth.google_cx().is_none()
-            }
+        self.selected_index < BUILTIN_PROVIDERS.len() && {
+            let info = &BUILTIN_PROVIDERS[self.selected_index];
+            info.needs_cx && auth.google_cx().is_none()
+        }
     }
 
     /// Start editing the API key for the selected provider.
@@ -120,7 +118,8 @@ impl SearchPanelState {
         self.editing_api_key = Some("google".to_string());
         self.editing_cx = true;
         self.input_buffer.clear();
-        self.input_buffer.set_placeholder("Enter Google Search Engine ID (cx): ");
+        self.input_buffer
+            .set_placeholder("Enter Google Search Engine ID (cx): ");
     }
 
     /// Get the status string for a provider (used in rendering).

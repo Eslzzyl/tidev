@@ -20,15 +20,15 @@
 //!    (e.g., `sandbox-exec` on macOS, `bwrap` on Linux)
 //! 4. The caller spawns the command from `ExecEnv`
 
-pub mod policy;
-#[cfg(target_os = "macos")]
-pub mod seatbelt;
-#[cfg(target_os = "linux")]
-pub mod launcher;
 #[cfg(target_os = "linux")]
 pub mod bwrap;
 #[cfg(target_os = "linux")]
 pub mod landlock;
+#[cfg(target_os = "linux")]
+pub mod launcher;
+pub mod policy;
+#[cfg(target_os = "macos")]
+pub mod seatbelt;
 
 mod process_hardening;
 
@@ -366,7 +366,8 @@ impl SandboxManager {
         let mut command = vec![spec.program.clone()];
         command.extend(spec.args.clone());
 
-        let seatbelt_args = seatbelt::create_seatbelt_args(command, &spec.sandbox_policy, &spec.cwd);
+        let seatbelt_args =
+            seatbelt::create_seatbelt_args(command, &spec.sandbox_policy, &spec.cwd);
 
         let env = spec.env.clone();
 
@@ -472,16 +473,15 @@ mod tests {
 
     #[test]
     fn test_command_spec_shell() {
-        let spec = CommandSpec::shell(
-            "echo hello",
-            PathBuf::from("/tmp"),
-            Duration::from_secs(30),
-        );
+        let spec = CommandSpec::shell("echo hello", PathBuf::from("/tmp"), Duration::from_secs(30));
         assert_eq!(spec.program, "sh");
         assert_eq!(spec.args, vec!["-c", "echo hello"]);
         assert_eq!(spec.cwd, PathBuf::from("/tmp"));
         assert_eq!(spec.timeout, Duration::from_secs(30));
-        assert!(matches!(spec.sandbox_policy, SandboxPolicy::WorkspaceWrite { .. }));
+        assert!(matches!(
+            spec.sandbox_policy,
+            SandboxPolicy::WorkspaceWrite { .. }
+        ));
     }
 
     #[test]
@@ -562,11 +562,7 @@ mod tests {
     #[test]
     fn test_exec_env_program_and_args() {
         let env = ExecEnv {
-            command: vec![
-                "sh".to_string(),
-                "-c".to_string(),
-                "echo test".to_string(),
-            ],
+            command: vec!["sh".to_string(), "-c".to_string(), "echo test".to_string()],
             cwd: PathBuf::from("/tmp"),
             env: HashMap::new(),
             timeout: Duration::from_secs(30),

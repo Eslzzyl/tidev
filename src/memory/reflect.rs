@@ -6,10 +6,10 @@ use uuid::Uuid;
 
 use crate::config::ActiveModel;
 use crate::llm::LlmClient;
-use crate::session::{Message, MessageRole};
-use crate::memory::types::{MemoryEntry, MemoryType};
 use crate::memory::remember::RememberService;
 use crate::memory::remember::map_memory_entry_from_row;
+use crate::memory::types::{MemoryEntry, MemoryType};
+use crate::session::{Message, MessageRole};
 
 // ─── Prompts ──────────────────────────────────────────────────────────
 
@@ -38,7 +38,10 @@ fn build_reflect_prompt(cluster_concepts: &[String], facts: &[MemoryEntry]) -> S
     let mut parts = Vec::new();
 
     if !cluster_concepts.is_empty() {
-        parts.push(format!("## Concept Cluster\n{}", cluster_concepts.join(", ")));
+        parts.push(format!(
+            "## Concept Cluster\n{}",
+            cluster_concepts.join(", ")
+        ));
     }
 
     parts.push("\n## Related Facts".to_string());
@@ -155,7 +158,7 @@ impl ReflectService {
                     &insight.title,
                     &insight.content,
                     &concepts,
-                    &[],  // files
+                    &[], // files
                     &tags,
                     None, // source_session_id
                 ) {
@@ -179,11 +182,7 @@ impl ReflectService {
     }
 
     /// Load insights for prompt injection.
-    pub fn load_insights(
-        db: &Connection,
-        project: &str,
-        limit: usize,
-    ) -> Result<Vec<MemoryEntry>> {
+    pub fn load_insights(db: &Connection, project: &str, limit: usize) -> Result<Vec<MemoryEntry>> {
         let mut stmt = db.prepare(
             "SELECT id, workspace_root, memory_type, title, content, tags,
                     source_session_id, created_at, updated_at, usage_count, active,
@@ -196,10 +195,9 @@ impl ReflectService {
              ORDER BY created_at DESC
              LIMIT ?2",
         )?;
-        let rows = stmt.query_map(
-            rusqlite::params![project, limit as i64],
-            |row| map_memory_entry_from_row(row),
-        )?;
+        let rows = stmt.query_map(rusqlite::params![project, limit as i64], |row| {
+            map_memory_entry_from_row(row)
+        })?;
         let mut result = Vec::new();
         for row in rows {
             result.push(row?);
@@ -235,10 +233,9 @@ impl ReflectService {
                AND active = 1 AND is_latest = 1
              ORDER BY created_at DESC",
         )?;
-        let rows = stmt.query_map(
-            rusqlite::params![project],
-            |row| map_memory_entry_from_row(row),
-        )?;
+        let rows = stmt.query_map(rusqlite::params![project], |row| {
+            map_memory_entry_from_row(row)
+        })?;
         let mut result = Vec::new();
         for row in rows {
             result.push(row?);
@@ -266,10 +263,17 @@ impl ReflectService {
             }
         }
 
-        fn union(parent: &mut HashMap<usize, usize>, rank: &mut HashMap<usize, usize>, a: usize, b: usize) {
+        fn union(
+            parent: &mut HashMap<usize, usize>,
+            rank: &mut HashMap<usize, usize>,
+            a: usize,
+            b: usize,
+        ) {
             let ra = find(parent, a);
             let rb = find(parent, b);
-            if ra == rb { return; }
+            if ra == rb {
+                return;
+            }
             let rank_a = *rank.get(&ra).unwrap_or(&0);
             let rank_b = *rank.get(&rb).unwrap_or(&0);
             if rank_a < rank_b {
@@ -295,14 +299,17 @@ impl ReflectService {
                     &facts[j].content.to_lowercase(),
                 );
                 // Also check concept overlap
-                let concept_overlap = if facts[i].concepts.is_empty() || facts[j].concepts.is_empty() {
-                    0.0
-                } else {
-                    let set_i: std::collections::HashSet<&str> = facts[i].concepts.iter().map(|s| s.as_str()).collect();
-                    let set_j: std::collections::HashSet<&str> = facts[j].concepts.iter().map(|s| s.as_str()).collect();
-                    let intersection = set_i.intersection(&set_j).count();
-                    intersection as f64 / (set_i.len() + set_j.len() - intersection) as f64
-                };
+                let concept_overlap =
+                    if facts[i].concepts.is_empty() || facts[j].concepts.is_empty() {
+                        0.0
+                    } else {
+                        let set_i: std::collections::HashSet<&str> =
+                            facts[i].concepts.iter().map(|s| s.as_str()).collect();
+                        let set_j: std::collections::HashSet<&str> =
+                            facts[j].concepts.iter().map(|s| s.as_str()).collect();
+                        let intersection = set_i.intersection(&set_j).count();
+                        intersection as f64 / (set_i.len() + set_j.len() - intersection) as f64
+                    };
 
                 if sim.max(concept_overlap) >= threshold {
                     union(&mut parent, &mut rank, i, j);
@@ -345,10 +352,12 @@ impl ReflectService {
         ) {
             for cap_result in re.captures_iter(response) {
                 if let Ok(c) = cap_result {
-                    let title = c.get(2)
+                    let title = c
+                        .get(2)
                         .map(|m| m.as_str().trim().to_string())
                         .unwrap_or_default();
-                    let content = c.get(3)
+                    let content = c
+                        .get(3)
                         .map(|m| m.as_str().trim().to_string())
                         .unwrap_or_default();
 

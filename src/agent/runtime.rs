@@ -20,11 +20,7 @@ use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::{
-    atomic::AtomicBool,
-    Arc,
-    Mutex as StdMutex,
-};
+use std::sync::{Arc, Mutex as StdMutex, atomic::AtomicBool};
 
 use anyhow::Result;
 use chrono::Utc;
@@ -208,9 +204,7 @@ impl AgentRuntime {
         let ws = self.workspace_root.display().to_string();
         let memory_store = self.tools.memory_store();
         // Use workspace directory name as the query for semantic retrieval
-        let query = self.workspace_root
-            .file_name()
-            .and_then(|n| n.to_str());
+        let query = self.workspace_root.file_name().and_then(|n| n.to_str());
         if let Ok(memories) = memory_store.search_hot_context(query, &ws, 5, 800) {
             let memory_prompt = crate::memory::MemoryStore::format_for_prompt(&memories);
             if !memory_prompt.is_empty() {
@@ -241,7 +235,10 @@ impl AgentRuntime {
         {
             prompt.push_str("\n\n## Consolidated Project Knowledge\n");
             for fact in &facts {
-                prompt.push_str(&format!("- {} (confidence: {:.1})\n", fact.content, fact.strength));
+                prompt.push_str(&format!(
+                    "- {} (confidence: {:.1})\n",
+                    fact.content, fact.strength
+                ));
             }
         }
 
@@ -264,12 +261,11 @@ impl AgentRuntime {
         }
 
         // ── Graph: Knowledge Graph Context ───────────────────────────
-        let query = self.workspace_root
-            .file_name()
-            .and_then(|n| n.to_str());
+        let query = self.workspace_root.file_name().and_then(|n| n.to_str());
         if let Ok(paths) = memory_store.search_graph_context(query, 3, 10) {
             if !paths.is_empty() {
-                let graph_prompt = crate::memory::graph_retrieval::GraphRetrieval::format_for_prompt(&paths, 8);
+                let graph_prompt =
+                    crate::memory::graph_retrieval::GraphRetrieval::format_for_prompt(&paths, 8);
                 if !graph_prompt.is_empty() {
                     prompt.push_str("\n\n");
                     prompt.push_str(&graph_prompt);
@@ -738,7 +734,9 @@ impl AgentRuntime {
 
             let mut handles: Vec<(ToolCall, tokio::task::JoinHandle<ToolExecutionResult>)> =
                 Vec::with_capacity(read_only.len());
-            for ((tool_call, allow_outside, sensitive_file_approved), store) in read_only.into_iter().zip(stores) {
+            for ((tool_call, allow_outside, sensitive_file_approved), store) in
+                read_only.into_iter().zip(stores)
+            {
                 let handle = self.tools.execute_call_spawned(
                     runtime.clone(),
                     store,
@@ -767,7 +765,9 @@ impl AgentRuntime {
                 if result.sandbox_denied
                     || result.output.starts_with("Error:")
                     || result.output.starts_with("Tool task panicked")
-                    || result.output.starts_with("Tool execution returned no result")
+                    || result
+                        .output
+                        .starts_with("Tool execution returned no result")
                 {
                     self.hooks
                         .on_post_tool_failure(&tool_call, &result.output, Some(session_id));
@@ -854,7 +854,9 @@ impl AgentRuntime {
             if result.sandbox_denied
                 || result.output.starts_with("Error:")
                 || result.output.starts_with("Tool task panicked")
-                || result.output.starts_with("Tool execution returned no result")
+                || result
+                    .output
+                    .starts_with("Tool execution returned no result")
             {
                 self.hooks
                     .on_post_tool_failure(tool_call, &result.output, Some(session_id));
@@ -898,9 +900,7 @@ impl AgentRuntime {
                         cancelled_flag.clone(),
                     );
                     let retry_result = retry_handle.await.unwrap_or_else(|join_err| {
-                        ToolExecutionResult::new(format!(
-                            "Tool task panicked/aborted: {join_err}"
-                        ))
+                        ToolExecutionResult::new(format!("Tool task panicked/aborted: {join_err}"))
                     });
                     // Restore the original sandbox policy for subsequent commands
                     self.tools.set_sandbox_policy(original_policy);
@@ -937,12 +937,13 @@ impl AgentRuntime {
             // write/edit/apply_patch).  Hooks modify the file on disk, so
             // we read the pre-hook content first, run hooks, then append a
             // formatting notification to the result output.
-            let hook_outcome = self.hooks.on_post_tool_use(tool_call, &result, Some(session_id)).await;
+            let hook_outcome = self
+                .hooks
+                .on_post_tool_use(tool_call, &result, Some(session_id))
+                .await;
 
             if let Some(formatted_msg) = hook_outcome.format_for_result() {
-                result
-                    .output
-                    .push_str(&format!("\n\n{}", formatted_msg));
+                result.output.push_str(&format!("\n\n{}", formatted_msg));
             }
 
             // Persist write result immediately so diffs render one at a time
@@ -1512,18 +1513,20 @@ impl AgentRuntime {
         cancel_token: Option<CancellationToken>,
     ) -> Result<()> {
         let request_id: u64 = rand::random();
-        let result = self.run_agent_loop_with_tools_inner(
-            request_id,
-            session_id,
-            model,
-            context_manager,
-            mode,
-            thinking_level,
-            tools,
-            event_tx,
-            cancel_token,
-            None,
-        ).await;
+        let result = self
+            .run_agent_loop_with_tools_inner(
+                request_id,
+                session_id,
+                model,
+                context_manager,
+                mode,
+                thinking_level,
+                tools,
+                event_tx,
+                cancel_token,
+                None,
+            )
+            .await;
 
         result
     }
@@ -1560,7 +1563,8 @@ impl AgentRuntime {
             };
 
             // 2. Compose system prompt
-            let (system_prompt, _sources) = self.compose_system_prompt(&model.system_prompt, Some(mode), session_id);
+            let (system_prompt, _sources) =
+                self.compose_system_prompt(&model.system_prompt, Some(mode), session_id);
 
             // 3. Build request messages
             let request_messages = self.build_request_messages(&db_messages, context_manager, mode);
@@ -1721,7 +1725,11 @@ impl AgentRuntime {
                             } else if approved.tool_call.name == "task" {
                                 task_calls.push((approved.tool_call, approved.child_session_id));
                             } else {
-                                other_calls.push((approved.tool_call, approved.allow_outside, approved.sensitive_file_approved));
+                                other_calls.push((
+                                    approved.tool_call,
+                                    approved.allow_outside,
+                                    approved.sensitive_file_approved,
+                                ));
                             }
                         }
                     }
@@ -2151,10 +2159,7 @@ mod tests {
                 std::collections::VecDeque::new(),
             )),
             auto_approve_permissions: false,
-            hooks: crate::hooks::HookEngine::new(
-                Default::default(),
-                tmp.path().join("workspace"),
-            ),
+            hooks: crate::hooks::HookEngine::new(Default::default(), tmp.path().join("workspace")),
         };
         (agent, tmp)
     }

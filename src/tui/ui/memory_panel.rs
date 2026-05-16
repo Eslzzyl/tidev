@@ -147,9 +147,7 @@ impl MemoryPanelState {
 
     pub fn load(&mut self, store: &MemoryStore, workspace_root: &str) -> Result<()> {
         self.memories = store.get_or_load(workspace_root)?;
-        self.observations = store
-            .list_recent_observations(100, 1)
-            .unwrap_or_default();
+        self.observations = store.list_recent_observations(100, 1).unwrap_or_default();
         self.selected_index = self
             .selected_index
             .min(self.memories.len().saturating_sub(1));
@@ -367,7 +365,8 @@ impl MemoryPanelState {
 
     /// Cancel editing and restore the original content.
     pub fn cancel_content_edit(&mut self) {
-        self.content_editor.set_text(self.content_edit_snapshot.clone());
+        self.content_editor
+            .set_text(self.content_edit_snapshot.clone());
         self.focus = PanelFocus::List;
     }
 }
@@ -408,11 +407,7 @@ impl App {
     }
 
     /// Keys active when the left list is focused.
-    fn handle_browse_list_key(
-        &mut self,
-        panel: MemoryPanelState,
-        key: KeyEvent,
-    ) -> Result<()> {
+    fn handle_browse_list_key(&mut self, panel: MemoryPanelState, key: KeyEvent) -> Result<()> {
         // Observations mode: simplified navigation
         if panel.show_observations {
             match key.code {
@@ -583,11 +578,7 @@ impl App {
     }
 
     /// Keys active when the right content pane is in edit mode.
-    fn handle_browse_edit_key(
-        &mut self,
-        panel: MemoryPanelState,
-        key: KeyEvent,
-    ) -> Result<()> {
+    fn handle_browse_edit_key(&mut self, panel: MemoryPanelState, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Esc => {
                 let mut next = panel;
@@ -614,8 +605,7 @@ impl App {
                 // Move cursor up one visual line
                 let mut next = panel;
                 let width = next.editor_width.get().max(1);
-                let (current_line, current_col) =
-                    next.content_editor.cursor_position(width);
+                let (current_line, current_col) = next.content_editor.cursor_position(width);
                 if current_line > 0 {
                     next.content_editor.set_cursor_at_visual_position(
                         width,
@@ -630,8 +620,7 @@ impl App {
                 let mut next = panel;
                 let width = next.editor_width.get().max(1);
                 let lines = next.content_editor.visual_lines(width as usize);
-                let (current_line, current_col) =
-                    next.content_editor.cursor_position(width);
+                let (current_line, current_col) = next.content_editor.cursor_position(width);
                 if (current_line as usize) + 1 < lines.len() {
                     next.content_editor.set_cursor_at_visual_position(
                         width,
@@ -680,12 +669,24 @@ impl App {
             KeyCode::Backspace => {
                 let mut next = panel;
                 match next.edit_field {
-                    Some(EditField::Title) => { next.edit_title.pop(); }
-                    Some(EditField::Content) => { next.edit_content.pop(); }
-                    Some(EditField::Tags) => { next.edit_tags.pop(); }
-                    Some(EditField::Concepts) => { next.edit_concepts.pop(); }
-                    Some(EditField::Files) => { next.edit_files.pop(); }
-                    Some(EditField::Importance) => { next.edit_importance = 5; }
+                    Some(EditField::Title) => {
+                        next.edit_title.pop();
+                    }
+                    Some(EditField::Content) => {
+                        next.edit_content.pop();
+                    }
+                    Some(EditField::Tags) => {
+                        next.edit_tags.pop();
+                    }
+                    Some(EditField::Concepts) => {
+                        next.edit_concepts.pop();
+                    }
+                    Some(EditField::Files) => {
+                        next.edit_files.pop();
+                    }
+                    Some(EditField::Importance) => {
+                        next.edit_importance = 5;
+                    }
                     Some(EditField::Type) => {} // type is cycled by Tab, no backspace
                     None => {}
                 }

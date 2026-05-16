@@ -11,7 +11,6 @@ use super::input::SnippetState;
 use super::mcp_panel::McpPanelState;
 use super::message_panel::MessagePanelState;
 use super::model_panel::ModelPanelState;
-use crate::tui::ui::search_panel::SearchPanelState;
 use super::mouse_selection::MouseSelectionState;
 use super::permission::{
     PendingToolExecution, PermissionDialogState, RunningSubagentExecution, RunningToolExecution,
@@ -21,6 +20,7 @@ use super::session_panel::SessionPanelState;
 use super::theme_panel::ThemePanelState;
 use crate::tui::ui::agents_panel::AgentsPanelState;
 use crate::tui::ui::rename::RenameSessionDialogState;
+use crate::tui::ui::search_panel::SearchPanelState;
 use crate::tui::ui::skills_panel::SkillsPanelState;
 use crate::tui::ui::workspace_boundary::WorkspaceBoundaryDialogState;
 use crate::{
@@ -32,8 +32,8 @@ use crate::{
     session::{Conversation, MessageAttachment},
     tooling::TodoItem,
     tui::commands::CommandPaletteState,
-    tui::panel_launcher::PanelLauncherState,
     tui::input::Composer,
+    tui::panel_launcher::PanelLauncherState,
 };
 
 pub(crate) const MESSAGE_RENDER_CACHE_MAX_ENTRIES: usize = 1200;

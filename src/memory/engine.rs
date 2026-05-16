@@ -3,30 +3,31 @@ use chrono::Utc;
 use rusqlite::Connection;
 use std::path::PathBuf;
 use std::sync::{
+    Mutex, Once, RwLock,
     atomic::{AtomicBool, AtomicU32, Ordering},
     mpsc,
-    Mutex,
-    Once,
-    RwLock,
 };
 use uuid::Uuid;
 
-use crate::llm::LlmClient;
 use crate::config::{ActiveModel, EmbeddingActiveModel};
+use crate::llm::LlmClient;
 
-use super::types::*;
-use super::dedup::DedupMap;
-use super::search_index::{Bm25Index, fts5_search_memories};
-use super::observe::ObservationService;
 use super::compress::CompressionService;
 use super::consolidate::{ConsolidationReport, ConsolidationService};
+use super::dedup::DedupMap;
+use super::evict::{EvictionReport, EvictionService};
+use super::hybrid_search::HybridSearch;
+use super::observe::ObservationService;
 use super::remember::RememberService;
+use super::retention::RetentionService;
+use super::search_index::{Bm25Index, fts5_search_memories};
 use super::sessions::SessionService;
 use super::slots::SlotService;
-use super::retention::RetentionService;
-use super::evict::{EvictionService, EvictionReport};
-use super::hybrid_search::HybridSearch;
-use super::{lessons::LessonService, reflect::{ReflectService, ReflectReport}};
+use super::types::*;
+use super::{
+    lessons::LessonService,
+    reflect::{ReflectReport, ReflectService},
+};
 
 /// Global once guard for sqlite-vec auto-extension registration.
 static VEC_INIT: Once = Once::new();
@@ -77,10 +78,8 @@ impl MemoryStore {
     /// Open or create the memory store.
     pub fn open(db_path: impl AsRef<std::path::Path>) -> Result<Self> {
         // Register sqlite-vec auto-extension once (must happen before any connection opens)
-        VEC_INIT.call_once(|| {
-            unsafe {
-                sqlite3_auto_extension(Some(sqlite_vec::sqlite3_vec_init));
-            }
+        VEC_INIT.call_once(|| unsafe {
+            sqlite3_auto_extension(Some(sqlite_vec::sqlite3_vec_init));
         });
 
         let path = db_path.as_ref().to_path_buf();
@@ -145,7 +144,8 @@ impl MemoryStore {
 
     /// Enable or disable automatic compression.
     pub fn set_compression_enabled(&self, enabled: bool) {
-        self.compression_enabled.store(enabled, std::sync::atomic::Ordering::Relaxed);
+        self.compression_enabled
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Set the compression queue sender. Observations will be enqueued
@@ -321,8 +321,7 @@ impl MemoryStore {
             // Just return latest memories
             return self.get_or_load(workspace_root);
         }
-        let fts_results = fts5_search_memories(&db, query, workspace_root, 20)
-            .unwrap_or_default();
+        let fts_results = fts5_search_memories(&db, query, workspace_root, 20).unwrap_or_default();
         if !fts_results.is_empty() {
             let mut entries = Vec::new();
             for (id, _title, _score) in &fts_results {
@@ -388,7 +387,12 @@ impl MemoryStore {
     }
 
     /// Select hot (frequently used) memories.
-    pub fn select_hot(&self, workspace_root: &str, limit: usize, min_chars: usize) -> Result<Vec<MemoryEntry>> {
+    pub fn select_hot(
+        &self,
+        workspace_root: &str,
+        limit: usize,
+        min_chars: usize,
+    ) -> Result<Vec<MemoryEntry>> {
         let db = self.read_connection.lock().unwrap();
         let mut stmt = db.prepare(
             "SELECT id, workspace_root, memory_type, title, content, tags, source_session_id, created_at, updated_at, usage_count, active, concepts, files, strength, importance, version, parent_id, supersedes, related_ids, is_latest
@@ -419,7 +423,13 @@ impl MemoryStore {
     /// When `query` is provided and embedding is configured, uses hybrid
     /// search (BM25 + vector) via `search_hybrid`. Falls back to FTS5,
     /// then to compound scoring (`select_hot`) when nothing else succeeds.
-    pub fn search_hot_context(&self, query: Option<&str>, workspace_root: &str, limit: usize, min_chars: usize) -> Result<Vec<MemoryEntry>> {
+    pub fn search_hot_context(
+        &self,
+        query: Option<&str>,
+        workspace_root: &str,
+        limit: usize,
+        min_chars: usize,
+    ) -> Result<Vec<MemoryEntry>> {
         if let Some(query) = query {
             let q = query.trim();
             if !q.is_empty() {
@@ -535,7 +545,9 @@ impl MemoryStore {
             files: serde_json::from_str(&row.get::<_, String>(8)?).unwrap_or_default(),
             importance: row.get::<_, i64>(9)? as u8,
             confidence: row.get(10)?,
-            created_at: row.get::<_, String>(11).ok()
+            created_at: row
+                .get::<_, String>(11)
+                .ok()
                 .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
                 .map(|d| d.with_timezone(&chrono::Utc))
                 .unwrap_or_else(chrono::Utc::now),
@@ -544,7 +556,11 @@ impl MemoryStore {
 
     /// List recent compressed observations across all sessions, newest first.
     /// Only returns observations that have been compressed (have obs_type set).
-    pub fn list_recent_observations(&self, limit: usize, min_importance: u8) -> Result<Vec<CompressedObservation>> {
+    pub fn list_recent_observations(
+        &self,
+        limit: usize,
+        min_importance: u8,
+    ) -> Result<Vec<CompressedObservation>> {
         let db = self.read_connection.lock().unwrap();
         let mut stmt = db.prepare(
             "SELECT id, session_id, obs_type, title, subtitle,
@@ -565,13 +581,13 @@ impl MemoryStore {
         Ok(result)
     }
 
-    fn map_session_summary_from_row(
-        row: &rusqlite::Row,
-    ) -> rusqlite::Result<SessionSummary> {
+    fn map_session_summary_from_row(row: &rusqlite::Row) -> rusqlite::Result<SessionSummary> {
         Ok(SessionSummary {
             session_id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap_or(Uuid::nil()),
             project: row.get(1)?,
-            created_at: row.get::<_, String>(2).ok()
+            created_at: row
+                .get::<_, String>(2)
+                .ok()
                 .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
                 .map(|d| d.with_timezone(&chrono::Utc))
                 .unwrap_or_else(chrono::Utc::now),
@@ -604,10 +620,10 @@ impl MemoryStore {
                         raw.tool_output.unwrap_or_default(),
                         raw.user_prompt.unwrap_or_default(),
                     );
-                    self.bm25.write().unwrap().add(
-                        &id.to_string(),
-                        &search_text,
-                    );
+                    self.bm25
+                        .write()
+                        .unwrap()
+                        .add(&id.to_string(), &search_text);
                 }
                 Ok(Some(id))
             }
@@ -619,14 +635,17 @@ impl MemoryStore {
     /// back to synthetic (rule-based) compression otherwise.
     /// Returns an error if compression is disabled via `set_compression_enabled(false)`.
     pub async fn compress(&self, observation_id: Uuid) -> Result<CompressedObservation> {
-        if !self.compression_enabled.load(std::sync::atomic::Ordering::Relaxed) {
+        if !self
+            .compression_enabled
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
             anyhow::bail!("compression is disabled by configuration");
         }
         let db_path = self.db_path.clone();
 
         // Circuit breaker: check if we should skip LLM compression
-        let use_llm = self.resolve_compression_llm().is_some()
-            && !self.is_compression_circuit_tripped();
+        let use_llm =
+            self.resolve_compression_llm().is_some() && !self.is_compression_circuit_tripped();
 
         let compressed = if use_llm {
             let (llm, model) = self.resolve_compression_llm().unwrap();
@@ -647,7 +666,8 @@ impl MemoryStore {
                             "compression circuit breaker tripped after {} consecutive failures",
                             failures,
                         );
-                        *self.compression_cb_tripped_at.write().unwrap() = Some(std::time::Instant::now());
+                        *self.compression_cb_tripped_at.write().unwrap() =
+                            Some(std::time::Instant::now());
                     }
                     let conn = Connection::open(&db_path)?;
                     CompressionService::compress_synthetic(&conn, observation_id)?
@@ -659,10 +679,10 @@ impl MemoryStore {
         };
 
         // Update BM25 index
-        self.bm25.write().unwrap().add(
-            &compressed.id.to_string(),
-            &compressed.to_search_text(),
-        );
+        self.bm25
+            .write()
+            .unwrap()
+            .add(&compressed.id.to_string(), &compressed.to_search_text());
 
         // Embed and store in vec0 (best-effort)
         let embed_llm = self.llm.read().unwrap().clone();
@@ -672,9 +692,7 @@ impl MemoryStore {
             let search_text = compressed.to_search_text();
             match llm.embed(&model, &search_text).await {
                 Ok(embedding) => {
-                    let blob: Vec<u8> = embedding.iter()
-                        .flat_map(|f| f.to_le_bytes())
-                        .collect();
+                    let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
                     if let Ok(db) = self.connection.lock() {
                         // Ensure rowid mapping exists
                         let _ = db.execute(
@@ -717,8 +735,15 @@ impl MemoryStore {
     ) -> Result<MemoryEntry> {
         let db = self.connection.lock().unwrap();
         let entry = RememberService::remember(
-            &db, workspace_root, memory_type, title, content,
-            concepts, files, tags, source_session_id,
+            &db,
+            workspace_root,
+            memory_type,
+            title,
+            content,
+            concepts,
+            files,
+            tags,
+            source_session_id,
         )?;
 
         // Auto-compute retention score for new memory
@@ -773,7 +798,11 @@ impl MemoryStore {
     }
 
     /// Load consolidated procedures for prompt injection.
-    pub fn load_consolidated_procedures(&self, project: &str, limit: usize) -> Result<Vec<MemoryEntry>> {
+    pub fn load_consolidated_procedures(
+        &self,
+        project: &str,
+        limit: usize,
+    ) -> Result<Vec<MemoryEntry>> {
         let db = self.read_connection.lock().unwrap();
         ConsolidationService::load_consolidated_procedures(&db, project, limit)
     }
@@ -838,15 +867,14 @@ impl MemoryStore {
                 "SELECT id FROM compressed_observations
                  WHERE obs_type IS NULL
                  ORDER BY created_at ASC
-                 LIMIT ?1"
+                 LIMIT ?1",
             )?;
-            stmt
-                .query_map(rusqlite::params![limit as i64], |row| {
-                    row.get::<_, String>(0)
-                })?
-                .filter_map(|r| r.ok())
-                .filter_map(|s| Uuid::parse_str(&s).ok())
-                .collect()
+            stmt.query_map(rusqlite::params![limit as i64], |row| {
+                row.get::<_, String>(0)
+            })?
+            .filter_map(|r| r.ok())
+            .filter_map(|s| Uuid::parse_str(&s).ok())
+            .collect()
             // db and stmt dropped here → lock released
         };
 
@@ -882,11 +910,7 @@ impl MemoryStore {
                             crate::log_info!("recovered uncompressed observation {}", id);
                         }
                         Err(e) => {
-                            crate::log_warn!(
-                                "recovery compression failed for {}: {}",
-                                id,
-                                e
-                            );
+                            crate::log_warn!("recovery compression failed for {}: {}", id, e);
                         }
                     }
                 });
@@ -905,13 +929,22 @@ impl MemoryStore {
     }
 
     /// List memory slots.
-    pub fn list_slots(&self, scope: Option<SlotScope>, project: Option<&str>) -> Result<Vec<MemorySlot>> {
+    pub fn list_slots(
+        &self,
+        scope: Option<SlotScope>,
+        project: Option<&str>,
+    ) -> Result<Vec<MemorySlot>> {
         let db = self.read_connection.lock().unwrap();
         SlotService::list(&db, scope, project)
     }
 
     /// Get a single slot.
-    pub fn get_slot(&self, label: &str, scope: SlotScope, project: &str) -> Result<Option<MemorySlot>> {
+    pub fn get_slot(
+        &self,
+        label: &str,
+        scope: SlotScope,
+        project: &str,
+    ) -> Result<Option<MemorySlot>> {
         let db = self.read_connection.lock().unwrap();
         SlotService::get(&db, label, scope, project)
     }
@@ -923,7 +956,13 @@ impl MemoryStore {
     }
 
     /// Append content to a slot.
-    pub fn append_slot(&self, label: &str, scope: SlotScope, project: &str, content: &str) -> Result<MemorySlot> {
+    pub fn append_slot(
+        &self,
+        label: &str,
+        scope: SlotScope,
+        project: &str,
+        content: &str,
+    ) -> Result<MemorySlot> {
         let db = self.connection.lock().unwrap();
         SlotService::append(&db, label, scope, project, content)
     }
@@ -943,9 +982,23 @@ impl MemoryStore {
     // ─── Phase 2: Retention ────────────────────────────────────────
 
     /// Compute and store retention score for a memory.
-    pub fn compute_retention(&self, entity_id: &str, entity_type: &str, importance: f64, age_days: f64, access_count: i64) -> Result<RetentionScore> {
+    pub fn compute_retention(
+        &self,
+        entity_id: &str,
+        entity_type: &str,
+        importance: f64,
+        age_days: f64,
+        access_count: i64,
+    ) -> Result<RetentionScore> {
         let db = self.connection.lock().unwrap();
-        RetentionService::compute_and_store(&db, entity_id, entity_type, importance, age_days, access_count)
+        RetentionService::compute_and_store(
+            &db,
+            entity_id,
+            entity_type,
+            importance,
+            age_days,
+            access_count,
+        )
     }
 
     // ─── Phase 2: Eviction ─────────────────────────────────────────
@@ -959,7 +1012,12 @@ impl MemoryStore {
     // ─── Phase 2: Vector + Hybrid Search ───────────────────────────
 
     /// Run hybrid search (BM25 + vector). Falls back to FTS5 if no embedding model.
-    pub async fn search_hybrid(&self, query: &str, workspace_root: &str, limit: usize) -> Result<Vec<MemoryEntry>> {
+    pub async fn search_hybrid(
+        &self,
+        query: &str,
+        workspace_root: &str,
+        limit: usize,
+    ) -> Result<Vec<MemoryEntry>> {
         // If embedding model is available, try hybrid search
         let embed_llm = self.llm.read().unwrap().clone();
         let embed_model = self.embedding_model.read().unwrap().clone();
@@ -968,9 +1026,7 @@ impl MemoryStore {
             match query_embedding {
                 Ok(emb) => {
                     // Convert query embedding to raw bytes for vec0
-                    let emb_bytes: Vec<u8> = emb.iter()
-                        .flat_map(|f| f.to_le_bytes())
-                        .collect();
+                    let emb_bytes: Vec<u8> = emb.iter().flat_map(|f| f.to_le_bytes()).collect();
 
                     // 1. BM25 search
                     let bm25_results = self.bm25.read().unwrap().search(query, limit * 2);
@@ -1034,8 +1090,7 @@ impl MemoryStore {
     /// `self.connection` is already held).
     pub fn graph_extract_from_observation(&self, obs: &super::CompressedObservation) -> Result<()> {
         let db_path = self.db_path.clone();
-        let db = Connection::open(&db_path)
-            .context("failed to open DB for graph extraction")?;
+        let db = Connection::open(&db_path).context("failed to open DB for graph extraction")?;
         super::graph::extract_from_observation(&db, obs)
     }
 
@@ -1053,8 +1108,7 @@ impl MemoryStore {
             return Ok(Vec::new());
         }
         let db_path = self.db_path.clone();
-        let db = Connection::open(&db_path)
-            .context("failed to open DB for graph search")?;
+        let db = Connection::open(&db_path).context("failed to open DB for graph search")?;
         super::graph_retrieval::GraphRetrieval::search_related(&db, q, max_depth, max_results)
     }
 

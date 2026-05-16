@@ -3,8 +3,8 @@ use chrono::Utc;
 use rusqlite::Connection;
 use uuid::Uuid;
 
-use crate::llm::LlmClient;
 use crate::config::ActiveModel;
+use crate::llm::LlmClient;
 use crate::session::{Message, MessageRole};
 
 use crate::memory::types::{CompressedObservation, ObservationType, RawObservation};
@@ -54,13 +54,22 @@ pub fn build_compression_prompt(raw: &RawObservation) -> String {
         parts.push(format!("Tool: {}", name));
     }
     if let Some(ref input) = raw.tool_input {
-        parts.push(format!("Input:\n{}", truncate(&strip_sensitive(input), 4000)));
+        parts.push(format!(
+            "Input:\n{}",
+            truncate(&strip_sensitive(input), 4000)
+        ));
     }
     if let Some(ref output) = raw.tool_output {
-        parts.push(format!("Output:\n{}", truncate(&strip_sensitive(output), 4000)));
+        parts.push(format!(
+            "Output:\n{}",
+            truncate(&strip_sensitive(output), 4000)
+        ));
     }
     if let Some(ref prompt) = raw.user_prompt {
-        parts.push(format!("User prompt:\n{}", truncate(&strip_sensitive(prompt), 2000)));
+        parts.push(format!(
+            "User prompt:\n{}",
+            truncate(&strip_sensitive(prompt), 2000)
+        ));
     }
 
     parts.join("\n\n")
@@ -85,11 +94,15 @@ fn strip_sensitive(s: &str) -> String {
     }
     // Bearer tokens
     if let Ok(re) = fancy_regex::Regex::new(r#"(?i)Bearer\s+[A-Za-z0-9._-]{20,}"#) {
-        result = re.replace_all(&result, "Bearer [REDACTED_TOKEN]").to_string();
+        result = re
+            .replace_all(&result, "Bearer [REDACTED_TOKEN]")
+            .to_string();
     }
     // Authorization headers (generic)
     if let Ok(re) = fancy_regex::Regex::new(r#"(?i)Authorization:\s*\S{20,}"#) {
-        result = re.replace_all(&result, "Authorization: [REDACTED]").to_string();
+        result = re
+            .replace_all(&result, "Authorization: [REDACTED]")
+            .to_string();
     }
     // AWS access keys: AKIA...
     if let Ok(re) = fancy_regex::Regex::new(r#"(?i)AKIA[A-Z0-9]{16}"#) {
@@ -99,7 +112,9 @@ fn strip_sensitive(s: &str) -> String {
     if let Ok(re) = fancy_regex::Regex::new(
         r#"(?ms)-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----.+?-----END (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"#,
     ) {
-        result = re.replace_all(&result, "[REDACTED_PRIVATE_KEY]").to_string();
+        result = re
+            .replace_all(&result, "[REDACTED_PRIVATE_KEY]")
+            .to_string();
     }
     // Generic password/key patterns
     if let Ok(re) = fancy_regex::Regex::new(
@@ -123,10 +138,21 @@ fn truncate(s: &str, max: usize) -> String {
 
 /// Valid observation types (from agentmemory's VALID_TYPES set).
 const VALID_TYPES: &[&str] = &[
-    "file_read", "file_write", "file_edit", "command_run",
-    "search", "web_fetch", "conversation", "error",
-    "decision", "discovery", "subagent", "notification",
-    "task", "image", "other",
+    "file_read",
+    "file_write",
+    "file_edit",
+    "command_run",
+    "search",
+    "web_fetch",
+    "conversation",
+    "error",
+    "decision",
+    "discovery",
+    "subagent",
+    "notification",
+    "task",
+    "image",
+    "other",
 ];
 
 fn get_xml_tag(xml: &str, tag: &str) -> Option<String> {
@@ -160,7 +186,9 @@ fn get_xml_children(xml: &str, parent: &str, child: &str) -> Vec<String> {
     while let Some(cs) = section[pos..].find(&child_start) {
         let content_start = pos + cs + child_start.len();
         if let Some(ce) = section[content_start..].find(&child_end) {
-            let value = section[content_start..content_start + ce].trim().to_string();
+            let value = section[content_start..content_start + ce]
+                .trim()
+                .to_string();
             if !value.is_empty() {
                 result.push(value);
             }
@@ -174,7 +202,18 @@ fn get_xml_children(xml: &str, parent: &str, child: &str) -> Vec<String> {
 }
 
 /// Parse compressed observation from LLM XML response.
-fn parse_compression_xml(xml: &str) -> Result<(ObservationType, String, Option<String>, Vec<String>, String, Vec<String>, Vec<String>, u8)> {
+fn parse_compression_xml(
+    xml: &str,
+) -> Result<(
+    ObservationType,
+    String,
+    Option<String>,
+    Vec<String>,
+    String,
+    Vec<String>,
+    Vec<String>,
+    u8,
+)> {
     let raw_type = get_xml_tag(xml, "type")
         .ok_or_else(|| anyhow::anyhow!("missing <type> in compression XML"))?;
     let title = get_xml_tag(xml, "title")
@@ -196,7 +235,9 @@ fn parse_compression_xml(xml: &str) -> Result<(ObservationType, String, Option<S
         .map(|v| v.max(1).min(10))
         .unwrap_or(5);
 
-    Ok((obs_type, title, subtitle, facts, narrative, concepts, files, importance))
+    Ok((
+        obs_type, title, subtitle, facts, narrative, concepts, files, importance,
+    ))
 }
 
 // ─── Compression Service ──────────────────────────────────────────────
@@ -379,7 +420,8 @@ fn extract_path_from_input(input: &str) -> Option<String> {
                 .or_else(|| trimmed.strip_prefix(&format!("{}: ", prefix)))
             {
                 let val = val.trim().trim_matches('"').trim_matches(',').trim();
-                if !val.is_empty() && (val.contains('/') || val.contains('\\') || val.contains('.')) {
+                if !val.is_empty() && (val.contains('/') || val.contains('\\') || val.contains('.'))
+                {
                     return Some(val.to_string());
                 }
             }
@@ -561,7 +603,9 @@ fn infer_importance(tool_name: &str, raw: &RawObservation) -> u8 {
         // Bash commands vary
         "bash" | "run" => {
             // If there's an error in the output, higher importance
-            if output.contains("error") || output.contains("Error") || output.contains("failed")
+            if output.contains("error")
+                || output.contains("Error")
+                || output.contains("failed")
                 || output.contains("FAILED")
             {
                 7

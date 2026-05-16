@@ -11,22 +11,24 @@ impl App {
                         if let Some(tx) = dialog.response_tx.lock().unwrap().take() {
                             let _ = tx.send(true);
                         }
-                        self.tools
-                            .set_sandbox_policy(Some(crate::sandbox::SandboxPolicy::DangerFullAccess));
+                        self.tools.set_sandbox_policy(Some(
+                            crate::sandbox::SandboxPolicy::DangerFullAccess,
+                        ));
                         // Also sync to the agent's ToolRegistry (separate copy at init)
-                        self.agent.tools
-                            .set_sandbox_policy(Some(crate::sandbox::SandboxPolicy::DangerFullAccess));
-                        self.last_notice = Some(
-                            "Sandbox policy elevated to full access for retry".to_string(),
-                        );
+                        self.agent.tools.set_sandbox_policy(Some(
+                            crate::sandbox::SandboxPolicy::DangerFullAccess,
+                        ));
+                        self.last_notice =
+                            Some("Sandbox policy elevated to full access for retry".to_string());
                     }
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc | KeyCode::Char('q') => {
                     // User cancelled: pass the denial through
                     if let Some(dialog) = self.sandbox_elevation.take()
-                        && let Some(tx) = dialog.response_tx.lock().unwrap().take() {
-                            let _ = tx.send(false);
-                        }
+                        && let Some(tx) = dialog.response_tx.lock().unwrap().take()
+                    {
+                        let _ = tx.send(false);
+                    }
                 }
                 _ => {}
             }
@@ -212,7 +214,9 @@ impl App {
 
         match key.code {
             KeyCode::Up => {
-                if panel.is_memory_tab() && panel.memory_focus == crate::tui::model_panel::MemoryFocus::Sidebar {
+                if panel.is_memory_tab()
+                    && panel.memory_focus == crate::tui::model_panel::MemoryFocus::Sidebar
+                {
                     let mut next_panel = panel;
                     next_panel.move_memory_sub_selection(-1);
                     let items = self.model_panel_items(&next_panel);
@@ -226,7 +230,9 @@ impl App {
                 }
             }
             KeyCode::Down => {
-                if panel.is_memory_tab() && panel.memory_focus == crate::tui::model_panel::MemoryFocus::Sidebar {
+                if panel.is_memory_tab()
+                    && panel.memory_focus == crate::tui::model_panel::MemoryFocus::Sidebar
+                {
                     let mut next_panel = panel;
                     next_panel.move_memory_sub_selection(1);
                     let items = self.model_panel_items(&next_panel);
@@ -241,7 +247,9 @@ impl App {
             }
             KeyCode::Enter => {
                 // In Memory tab sidebar: switch focus to the model list
-                if panel.is_memory_tab() && panel.memory_focus == crate::tui::model_panel::MemoryFocus::Sidebar {
+                if panel.is_memory_tab()
+                    && panel.memory_focus == crate::tui::model_panel::MemoryFocus::Sidebar
+                {
                     let mut next_panel = panel;
                     next_panel.toggle_memory_focus();
                     let items = self.model_panel_items(&next_panel);
@@ -293,15 +301,14 @@ impl App {
                             // Memory tab: save model for the sub-entry role
                             let role = next_panel.active_memory_role();
                             let model_str = summary.label();
-                            self.config.set_memory_model(&self.paths, role, &model_str)?;
+                            self.config
+                                .set_memory_model(&self.paths, role, &model_str)?;
                             if let Some(t) = next_panel.current_tab_mut() {
                                 t.current_label = model_str.clone();
                                 t.thinking_level_expanded = false;
                             }
-                            self.last_notice = Some(format!(
-                                "Memory {} model set to {}",
-                                role, model_str
-                            ));
+                            self.last_notice =
+                                Some(format!("Memory {} model set to {}", role, model_str));
                         } else {
                             // Agent tab: save model + thinking level
                             let agent_type_str = next_panel
@@ -347,16 +354,15 @@ impl App {
                             } else if panel.is_memory_tab() {
                                 let role = panel.active_memory_role();
                                 let model_str = summary.label();
-                                self.config.set_memory_model(&self.paths, role, &model_str)?;
+                                self.config
+                                    .set_memory_model(&self.paths, role, &model_str)?;
                                 let mut next_panel = panel;
                                 if let Some(t) = next_panel.current_tab_mut() {
                                     t.current_label = model_str.clone();
                                 }
                                 self.model_panel = Some(next_panel);
-                                self.last_notice = Some(format!(
-                                    "Memory {} model set to {}",
-                                    role, model_str
-                                ));
+                                self.last_notice =
+                                    Some(format!("Memory {} model set to {}", role, model_str));
                             } else {
                                 let agent_type_str = panel
                                     .current_tab()
@@ -538,17 +544,15 @@ impl App {
                     self.search_panel = Some(panel);
                 }
                 KeyCode::Char(c) => {
-                    panel.input_buffer.handle_key(KeyEvent::new(
-                        KeyCode::Char(c),
-                        KeyModifiers::empty(),
-                    ));
+                    panel
+                        .input_buffer
+                        .handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::empty()));
                     self.search_panel = Some(panel);
                 }
                 KeyCode::Backspace => {
-                    panel.input_buffer.handle_key(KeyEvent::new(
-                        KeyCode::Backspace,
-                        KeyModifiers::empty(),
-                    ));
+                    panel
+                        .input_buffer
+                        .handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::empty()));
                     self.search_panel = Some(panel);
                 }
                 _ => {}

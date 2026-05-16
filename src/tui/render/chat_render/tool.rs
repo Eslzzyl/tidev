@@ -46,14 +46,15 @@ pub(super) fn render_tool_call_with_result(
     } else {
         0
     };
-    let (edit_old_lines, edit_new_lines) = if matches!(canonical_name, "edit") && tool_result.is_none() {
-        (
-            count_lines_in_partial_json(&tool_call.arguments, "old_text"),
-            count_lines_in_partial_json(&tool_call.arguments, "new_text"),
-        )
-    } else {
-        (0, 0)
-    };
+    let (edit_old_lines, edit_new_lines) =
+        if matches!(canonical_name, "edit") && tool_result.is_none() {
+            (
+                count_lines_in_partial_json(&tool_call.arguments, "old_text"),
+                count_lines_in_partial_json(&tool_call.arguments, "new_text"),
+            )
+        } else {
+            (0, 0)
+        };
 
     // For write/edit, also show progress when arguments are complete but
     // the tool hasn't executed yet (covers rapid chunks that skip is_pending).
@@ -100,7 +101,10 @@ pub(super) fn render_tool_call_with_result(
         let progress_text = match canonical_name {
             "write" if write_lines > 0 => format!("Writing {} lines...", write_lines),
             "edit" if edit_old_lines > 0 && edit_new_lines > 0 => {
-                format!("Replacing {} lines with {} lines...", edit_old_lines, edit_new_lines)
+                format!(
+                    "Replacing {} lines with {} lines...",
+                    edit_old_lines, edit_new_lines
+                )
             }
             "edit" if edit_old_lines > 0 => format!("Replacing {} lines...", edit_old_lines),
             "edit" if edit_new_lines > 0 => format!("Writing {} lines...", edit_new_lines),
@@ -609,10 +613,8 @@ pub(super) fn render_tool_call_lines(
             if let Some(d) = desc {
                 let desc_line = Line::from(d.to_string());
                 let wrap_width = body_width.saturating_sub(4);
-                let wrapped = word_wrap_line(
-                    &desc_line,
-                    WrapOptions::new(wrap_width).break_words(true),
-                );
+                let wrapped =
+                    word_wrap_line(&desc_line, WrapOptions::new(wrap_width).break_words(true));
                 for (i, wrapped_line) in wrapped.iter().enumerate() {
                     let mut spans = if i == 0 {
                         vec![Span::styled(
@@ -620,10 +622,7 @@ pub(super) fn render_tool_call_lines(
                             Style::default().fg(palette.muted),
                         )]
                     } else {
-                        vec![Span::styled(
-                            "                ",
-                            Style::default(),
-                        )]
+                        vec![Span::styled("                ", Style::default())]
                     };
                     spans.extend(wrapped_line.spans.iter().map(|s| {
                         Span::styled(s.content.to_string(), Style::default().fg(palette.text))
@@ -972,13 +971,21 @@ pub(super) fn render_websearch_result_lines(
     }
 
     if is_error {
-        return render_output_preview_lines(output, body_width, true, message_id, expanded_tool_results, palette);
+        return render_output_preview_lines(
+            output,
+            body_width,
+            true,
+            message_id,
+            expanded_tool_results,
+            palette,
+        );
     }
 
     // Title header
-    lines.push(Line::from(vec![
-        Span::styled("Search Results", Style::default().fg(palette.accent_soft)),
-    ]));
+    lines.push(Line::from(vec![Span::styled(
+        "Search Results",
+        Style::default().fg(palette.accent_soft),
+    )]));
     lines.push(Line::from(""));
 
     // Render the output as markdown
@@ -1048,13 +1055,21 @@ pub(super) fn render_webfetch_result_lines(
     }
 
     if is_error {
-        return render_output_preview_lines(output, body_width, true, message_id, expanded_tool_results, palette);
+        return render_output_preview_lines(
+            output,
+            body_width,
+            true,
+            message_id,
+            expanded_tool_results,
+            palette,
+        );
     }
 
     // Title header
-    lines.push(Line::from(vec![
-        Span::styled("Page Content", Style::default().fg(palette.accent_soft)),
-    ]));
+    lines.push(Line::from(vec![Span::styled(
+        "Page Content",
+        Style::default().fg(palette.accent_soft),
+    )]));
     lines.push(Line::from(""));
 
     // Render the content as markdown
@@ -1126,17 +1141,26 @@ pub(super) fn render_memory_result_lines(
 
     if is_error {
         return render_output_preview_lines(
-            output, body_width, true, message_id, expanded_tool_results, palette,
+            output,
+            body_width,
+            true,
+            message_id,
+            expanded_tool_results,
+            palette,
         );
     }
 
     // Store / Update / Delete: simple confirmation
-    if trimmed.starts_with("Memory saved:") || trimmed.starts_with("Memory updated:") || (trimmed.starts_with("Memory ") && trimmed.ends_with(" deleted.")) {
-        let style = if trimmed.starts_with("Memory saved:") || trimmed.starts_with("Memory updated:") {
-            Style::default().fg(palette.success)
-        } else {
-            Style::default().fg(palette.muted)
-        };
+    if trimmed.starts_with("Memory saved:")
+        || trimmed.starts_with("Memory updated:")
+        || (trimmed.starts_with("Memory ") && trimmed.ends_with(" deleted."))
+    {
+        let style =
+            if trimmed.starts_with("Memory saved:") || trimmed.starts_with("Memory updated:") {
+                Style::default().fg(palette.success)
+            } else {
+                Style::default().fg(palette.muted)
+            };
         // Show only the first line as the confirmation; hints/footnotes follow below
         let first_line = trimmed.lines().next().unwrap_or(trimmed);
         lines.push(Line::from(vec![
@@ -1157,13 +1181,21 @@ pub(super) fn render_memory_result_lines(
 
     // Read: metadata header + markdown content
     if trimmed.starts_with("# [") {
-        return render_memory_read_lines(trimmed, body_width, palette, is_expanded, message_id, expanded_tool_results);
+        return render_memory_read_lines(
+            trimmed,
+            body_width,
+            palette,
+            is_expanded,
+            message_id,
+            expanded_tool_results,
+        );
     }
 
     // Search / List: parse result lines
     let all_lines: Vec<&str> = trimmed.lines().collect();
     let is_search = trimmed.starts_with("Found ") || trimmed.starts_with("No memories found");
-    let is_list = trimmed.starts_with("Workspace memories") || trimmed.starts_with("No memories yet");
+    let is_list =
+        trimmed.starts_with("Workspace memories") || trimmed.starts_with("No memories yet");
 
     if is_search || is_list {
         let data_lines: Vec<&str> = all_lines
@@ -1184,7 +1216,11 @@ pub(super) fn render_memory_result_lines(
             (TOOL_OUTPUT_PREVIEW_LINES / 2).max(2)
         };
         let total = data_lines.len();
-        let shown = data_lines.iter().take(max_items).copied().collect::<Vec<_>>();
+        let shown = data_lines
+            .iter()
+            .take(max_items)
+            .copied()
+            .collect::<Vec<_>>();
 
         for (i, line) in shown.iter().enumerate() {
             if i > 0 {
@@ -1224,7 +1260,11 @@ pub(super) fn render_memory_result_lines(
 
         if total > max_items {
             lines.push(Line::from(vec![Span::styled(
-                if is_expanded { "▲ Click to collapse" } else { "▼ Click to expand" },
+                if is_expanded {
+                    "▲ Click to collapse"
+                } else {
+                    "▼ Click to expand"
+                },
                 Style::default().fg(palette.muted),
             )]));
         }
@@ -1233,25 +1273,32 @@ pub(super) fn render_memory_result_lines(
     }
 
     // Fallback: plain preview
-    render_output_preview_lines(output, body_width, false, message_id, expanded_tool_results, palette)
+    render_output_preview_lines(
+        output,
+        body_width,
+        false,
+        message_id,
+        expanded_tool_results,
+        palette,
+    )
 }
 
 /// Render a single memory card title line: "  ◉ [proj] Title"
-fn render_memory_card_line(
-    label: &str,
-    title: &str,
-    palette: ThemePalette,
-) -> Line<'static> {
+fn render_memory_card_line(label: &str, title: &str, palette: ThemePalette) -> Line<'static> {
     let badge_color = memory_type_color(label, palette);
     Line::from(vec![
         Span::styled("  ◉ ", Style::default().fg(badge_color)),
         Span::styled(
             format!("[{}] ", label),
-            Style::default().fg(badge_color).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(badge_color)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             title.to_string(),
-            Style::default().fg(palette.text).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(palette.text)
+                .add_modifier(Modifier::BOLD),
         ),
     ])
 }
@@ -1281,7 +1328,14 @@ fn render_memory_read_lines(
     };
 
     if type_label.is_empty() {
-        return render_output_preview_lines(output, body_width, false, message_id, expanded_tool_results, palette);
+        return render_output_preview_lines(
+            output,
+            body_width,
+            false,
+            message_id,
+            expanded_tool_results,
+            palette,
+        );
     }
 
     let badge_color = memory_type_color(type_label, palette);
@@ -1290,11 +1344,15 @@ fn render_memory_read_lines(
     lines.push(Line::from(vec![
         Span::styled(
             format!("  [{}] ", type_label),
-            Style::default().fg(badge_color).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(badge_color)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             entry_title.to_string(),
-            Style::default().fg(palette.text).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(palette.text)
+                .add_modifier(Modifier::BOLD),
         ),
     ]));
 
@@ -1303,8 +1361,10 @@ fn render_memory_read_lines(
     let mut content_start = all_lines.len();
     for (i, line) in all_lines.iter().enumerate().skip(1) {
         if in_metadata {
-            if line.starts_with("**Type**:") || line.starts_with("**Created**:")
-                || line.starts_with("**Updated**:") || line.starts_with("**Used**:")
+            if line.starts_with("**Type**:")
+                || line.starts_with("**Created**:")
+                || line.starts_with("**Updated**:")
+                || line.starts_with("**Used**:")
                 || line.starts_with("Tags:")
             {
                 lines.push(Line::from(Span::styled(
@@ -1328,11 +1388,15 @@ fn render_memory_read_lines(
 
     let content_text: String = all_lines[content_start..].join("\n");
     if content_text.trim().is_empty() {
-        lines.push(Line::from(Span::styled("  (no content)", Style::default().fg(palette.muted))));
+        lines.push(Line::from(Span::styled(
+            "  (no content)",
+            Style::default().fg(palette.muted),
+        )));
         return lines;
     }
 
-    let rendered = render_markdown_text_with_width_and_cwd(&content_text, Some(content_width), None);
+    let rendered =
+        render_markdown_text_with_width_and_cwd(&content_text, Some(content_width), None);
     let md_lines: Vec<Line<'static>> = rendered.lines;
     let prefix = Span::styled("  ", Style::default());
 
@@ -1376,7 +1440,10 @@ fn render_memory_read_lines(
                 lines.push(Line::from(spans));
             }
             lines.push(Line::from(vec![Span::styled(
-                format!("  ▼ {} more line(s) — Click to expand", line_count - max_preview),
+                format!(
+                    "  ▼ {} more line(s) — Click to expand",
+                    line_count - max_preview
+                ),
                 Style::default().fg(palette.muted),
             )]));
         }
@@ -1568,9 +1635,7 @@ pub(super) fn render_question_result_pairs(
             // Style content parts (after prefix) with answer text styling
             for span in owned_spans.iter_mut().skip(1) {
                 if span.style.fg.is_none() {
-                    span.style = span.style
-                        .fg(palette.success)
-                        .add_modifier(Modifier::BOLD);
+                    span.style = span.style.fg(palette.success).add_modifier(Modifier::BOLD);
                 }
             }
             lines.push(Line::from(owned_spans));

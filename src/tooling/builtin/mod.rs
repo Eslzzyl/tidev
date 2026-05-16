@@ -1,10 +1,7 @@
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::path::Path;
-use std::sync::{
-    atomic::AtomicBool,
-    Arc,
-};
+use std::sync::{Arc, atomic::AtomicBool};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::tools::{MemoryArgs, QuestionArgs, SkillArgs};

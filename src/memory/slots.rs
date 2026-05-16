@@ -125,7 +125,11 @@ impl SlotService {
     }
 
     /// List slots, optionally filtered by scope and project.
-    pub fn list(db: &Connection, scope: Option<SlotScope>, project: Option<&str>) -> Result<Vec<MemorySlot>> {
+    pub fn list(
+        db: &Connection,
+        scope: Option<SlotScope>,
+        project: Option<&str>,
+    ) -> Result<Vec<MemorySlot>> {
         let mut sql = String::from(
             "SELECT label, scope, project, content, size_limit, description, pinned, read_only, created_at, updated_at
              FROM memory_slots WHERE 1=1"
@@ -144,7 +148,8 @@ impl SlotService {
         sql.push_str(" ORDER BY label");
 
         let mut stmt = db.prepare(&sql)?;
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
         let rows = stmt.query_map(param_refs.as_slice(), |row| map_slot(row))?;
 
         let mut result = Vec::new();
@@ -155,7 +160,12 @@ impl SlotService {
     }
 
     /// Get a single slot.
-    pub fn get(db: &Connection, label: &str, scope: SlotScope, project: &str) -> Result<Option<MemorySlot>> {
+    pub fn get(
+        db: &Connection,
+        label: &str,
+        scope: SlotScope,
+        project: &str,
+    ) -> Result<Option<MemorySlot>> {
         let project_str = match scope {
             SlotScope::Global => "",
             SlotScope::Project => project,
@@ -202,7 +212,13 @@ impl SlotService {
     }
 
     /// Append content to a slot (respects size limit).
-    pub fn append(db: &Connection, label: &str, scope: SlotScope, project: &str, content: &str) -> Result<MemorySlot> {
+    pub fn append(
+        db: &Connection,
+        label: &str,
+        scope: SlotScope,
+        project: &str,
+        content: &str,
+    ) -> Result<MemorySlot> {
         let existing = Self::get(db, label, scope, project)?
             .ok_or_else(|| anyhow::anyhow!("slot '{}' not found", label))?;
 
@@ -250,7 +266,10 @@ impl SlotService {
         Self::ensure_defaults(db, project)?;
 
         let slots = Self::list(db, None, Some(project))?;
-        let pinned: Vec<&MemorySlot> = slots.iter().filter(|s| s.pinned && !s.content.is_empty()).collect();
+        let pinned: Vec<&MemorySlot> = slots
+            .iter()
+            .filter(|s| s.pinned && !s.content.is_empty())
+            .collect();
 
         if pinned.is_empty() {
             return Ok(String::new());
@@ -282,11 +301,15 @@ fn map_slot(row: &rusqlite::Row) -> rusqlite::Result<MemorySlot> {
         description: row.get(5)?,
         pinned: row.get::<_, i64>(6)? != 0,
         read_only: row.get::<_, i64>(7)? != 0,
-        created_at: row.get::<_, String>(8).ok()
+        created_at: row
+            .get::<_, String>(8)
+            .ok()
             .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
             .map(|d| d.with_timezone(&chrono::Utc))
             .unwrap_or_else(chrono::Utc::now),
-        updated_at: row.get::<_, String>(9).ok()
+        updated_at: row
+            .get::<_, String>(9)
+            .ok()
             .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
             .map(|d| d.with_timezone(&chrono::Utc))
             .unwrap_or_else(chrono::Utc::now),

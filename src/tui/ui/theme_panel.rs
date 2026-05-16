@@ -54,7 +54,10 @@ impl ThemePanelState {
         let mut items = Vec::new();
 
         // Light themes section
-        let light: Vec<_> = all.iter().filter(|t| !t.is_dark() && matches_query(t)).collect();
+        let light: Vec<_> = all
+            .iter()
+            .filter(|t| !t.is_dark() && matches_query(t))
+            .collect();
         if !light.is_empty() {
             items.push(DisplayItem::Header("Light"));
             for t in light {
@@ -63,7 +66,10 @@ impl ThemePanelState {
         }
 
         // Dark themes section
-        let dark: Vec<_> = all.iter().filter(|t| t.is_dark() && matches_query(t)).collect();
+        let dark: Vec<_> = all
+            .iter()
+            .filter(|t| t.is_dark() && matches_query(t))
+            .collect();
         if !dark.is_empty() {
             items.push(DisplayItem::Header("Dark"));
             for t in dark {

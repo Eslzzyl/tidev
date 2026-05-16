@@ -14,11 +14,7 @@ impl RetentionService {
     /// Where:
     ///   - lambda = 0.1 (decay rate, from agentmemory)
     ///   - access_boost = 0.3 * min(access_count / 10, 1.0)
-    pub fn compute(
-        importance: f64,
-        age_days: f64,
-        access_count: i64,
-    ) -> f64 {
+    pub fn compute(importance: f64, age_days: f64, access_count: i64) -> f64 {
         let lambda = 0.1;
         let base = importance * (-lambda * age_days).exp();
         let access_boost = 0.3 * (access_count as f64 / 10.0).min(1.0);

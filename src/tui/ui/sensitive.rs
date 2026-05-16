@@ -30,7 +30,10 @@ pub(crate) struct SensitiveFileDialogState {
 
 impl SensitiveFileDialogState {
     pub(crate) fn title(&self) -> String {
-        format!("Sensitive File Warning {} of {}", self.current_index, self.total)
+        format!(
+            "Sensitive File Warning {} of {}",
+            self.current_index, self.total
+        )
     }
 
     pub(crate) fn path_display(&self) -> String {
@@ -67,11 +70,7 @@ impl App {
     }
 
     /// Store a sensitive file permission in memory.
-    pub(crate) fn remember_sensitive_file_permission(
-        &mut self,
-        path: String,
-        allowed: bool,
-    ) {
+    pub(crate) fn remember_sensitive_file_permission(&mut self, path: String, allowed: bool) {
         self.sensitive_file_permissions.insert(path, allowed);
     }
 

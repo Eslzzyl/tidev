@@ -32,23 +32,18 @@ impl SearchProvider for BraveProvider {
         num_results: Option<i64>,
         search_type: Option<&str>,
     ) -> Result<String> {
-        let api_key = auth
-            .search_api_key("brave")
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Brave Search requires an API key. \
+        let api_key = auth.search_api_key("brave").ok_or_else(|| {
+            anyhow::anyhow!(
+                "Brave Search requires an API key. \
                      Set it in ~/.local/share/tidev/auth.json under \
                      `web.search_api_keys.brave`."
-                )
-            })?;
+            )
+        })?;
 
         // Map our generic search_type to Brave parameters
         let count = num_results.unwrap_or(8).min(20).max(1);
 
-        let mut params = vec![
-            ("q", query.to_string()),
-            ("count", count.to_string()),
-        ];
+        let mut params = vec![("q", query.to_string()), ("count", count.to_string())];
 
         if let Some("fast") = search_type {
             params.push(("freshness", "pw".to_string())); // past week
@@ -100,13 +95,7 @@ fn format_brave_results(body: &serde_json::Value) -> Result<String> {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        output.push_str(&format!(
-            "{}. [{}]({})\n   {}\n\n",
-            i + 1,
-            title,
-            url,
-            desc
-        ));
+        output.push_str(&format!("{}. [{}]({})\n   {}\n\n", i + 1, title, url, desc));
     }
 
     if output.is_empty() {

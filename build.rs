@@ -177,17 +177,17 @@ fn collect_asset_paths(base: &Path, dir: &Path, paths: &mut Vec<String>) {
             if path.is_dir() {
                 collect_asset_paths(base, &path, paths);
             } else if path.is_file()
-                && let Ok(rel) = path.strip_prefix(base) {
-                    paths.push(rel.to_str().unwrap_or("").replace('\\', "/"));
-                }
+                && let Ok(rel) = path.strip_prefix(base)
+            {
+                paths.push(rel.to_str().unwrap_or("").replace('\\', "/"));
+            }
         }
     }
 }
 
 /// Escape special characters for use in a Rust string literal.
 fn escape_rust_string(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
+    s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 /// Generate `web_assets_generated.rs` in `OUT_DIR`.

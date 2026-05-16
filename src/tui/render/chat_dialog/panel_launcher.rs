@@ -1,5 +1,5 @@
-use crate::tui::render::render::centered_rect;
 use crate::tui::App;
+use crate::tui::render::render::centered_rect;
 use ratatui::{
     layout::{Margin, Rect},
     prelude::{Frame, Modifier, Style},
@@ -65,9 +65,7 @@ impl App {
             .panel_launcher
             .filtered
             .iter()
-            .map(|entry| {
-                ListItem::new(Line::from(ratatui::text::Span::raw(entry.description)))
-            })
+            .map(|entry| ListItem::new(Line::from(ratatui::text::Span::raw(entry.description))))
             .collect();
 
         let mut state = ListState::default();

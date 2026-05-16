@@ -33,15 +33,13 @@ impl SearchProvider for TavilyProvider {
         num_results: Option<i64>,
         search_type: Option<&str>,
     ) -> Result<String> {
-        let api_key = auth
-            .search_api_key("tavily")
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Tavily Search requires an API key. \
+        let api_key = auth.search_api_key("tavily").ok_or_else(|| {
+            anyhow::anyhow!(
+                "Tavily Search requires an API key. \
                      Set it in ~/.local/share/tidev/auth.json under \
                      `web.search_api_keys.tavily`."
-                )
-            })?;
+            )
+        })?;
 
         // "fast" → basic depth, otherwise advanced
         let depth = match search_type {
@@ -86,9 +84,10 @@ fn format_tavily_results(body: &serde_json::Value) -> Result<String> {
 
     // Tavily includes a human-readable answer
     if let Some(answer) = body.get("answer").and_then(|v| v.as_str())
-        && !answer.is_empty() {
-            output.push_str(&format!("Summary: {}\n\n", answer));
-        }
+        && !answer.is_empty()
+    {
+        output.push_str(&format!("Summary: {}\n\n", answer));
+    }
 
     let results = body
         .get("results")
@@ -103,10 +102,7 @@ fn format_tavily_results(body: &serde_json::Value) -> Result<String> {
     for (i, item) in results.iter().enumerate() {
         let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("");
         let url = item.get("url").and_then(|v| v.as_str()).unwrap_or("");
-        let content = item
-            .get("content")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let content = item.get("content").and_then(|v| v.as_str()).unwrap_or("");
         let score = item
             .get("score")
             .and_then(|v| v.as_f64())

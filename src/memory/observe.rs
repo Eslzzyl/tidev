@@ -3,9 +3,7 @@ use chrono::Utc;
 use rusqlite::Connection;
 use uuid::Uuid;
 
-use crate::memory::types::{
-    HookPayload, HookType, ObservationResult,
-};
+use crate::memory::types::{HookPayload, HookType, ObservationResult};
 
 use super::DedupMap;
 
@@ -31,11 +29,7 @@ impl ObservationService {
         // 2. SHA256 dedup check
         let tool_name = payload.tool_name.as_deref().unwrap_or("");
         let tool_input = payload.tool_input.as_deref().unwrap_or("");
-        let hash = dedup.compute_hash(
-            &payload.session_id.to_string(),
-            tool_name,
-            tool_input,
-        );
+        let hash = dedup.compute_hash(&payload.session_id.to_string(), tool_name, tool_input);
 
         if dedup.is_duplicate(&hash) {
             return Ok(ObservationResult::Deduplicated);

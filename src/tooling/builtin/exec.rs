@@ -1,26 +1,28 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+use std::sync::LazyLock;
 use std::{
     collections::HashSet,
     io::Read,
     path::Path,
     process::Stdio,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
         mpsc,
-        Mutex,
     },
     thread,
     time::Duration,
 };
-use std::sync::LazyLock;
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::utils::truncate_in_place;
-use crate::sandbox::{CommandSpec, SandboxManager, SandboxPolicy, pre_exec_hardening, remove_dangerous_env_vars_parent};
+use crate::sandbox::{
+    CommandSpec, SandboxManager, SandboxPolicy, pre_exec_hardening,
+    remove_dangerous_env_vars_parent,
+};
 use crate::session::{BackendEvent, tool_output_preview};
 use crate::tooling::tools::{BashArgs, decode_tool_args};
 use crate::tooling::{ToolDefinition, ToolPermission};
@@ -210,10 +212,9 @@ fn run_shell_inner(
                     #[cfg(target_os = "linux")]
                     if use_landlock {
                         let cwd = std::path::Path::new(".");
-                        if let Err(e) = crate::sandbox::landlock::apply_landlock_policy(
-                            &sandbox_policy,
-                            cwd,
-                        ) {
+                        if let Err(e) =
+                            crate::sandbox::landlock::apply_landlock_policy(&sandbox_policy, cwd)
+                        {
                             // If Landlock fails, abort the child process
                             let _ = std::io::Write::write(
                                 &mut std::io::stderr(),

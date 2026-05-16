@@ -99,7 +99,8 @@ impl ModelPanelState {
             return;
         }
         let len = MEMORY_ROLES.len() as isize;
-        self.memory_sub_selection = ((self.memory_sub_selection as isize + delta).rem_euclid(len)) as usize;
+        self.memory_sub_selection =
+            ((self.memory_sub_selection as isize + delta).rem_euclid(len)) as usize;
         // Reset search query when switching sub-entries
         self.query.set_text(String::new());
     }

@@ -58,9 +58,10 @@ impl GraphRetrieval {
         }
 
         for edge in &all_edges {
-            if let (Some(&src), Some(&tgt)) =
-                (node_index_map.get(edge.source_id.as_str()), node_index_map.get(edge.target_id.as_str()))
-            {
+            if let (Some(&src), Some(&tgt)) = (
+                node_index_map.get(edge.source_id.as_str()),
+                node_index_map.get(edge.target_id.as_str()),
+            ) {
                 pet.add_edge(src, tgt, edge);
                 // Add reverse edge for undirected traversal
                 pet.add_edge(tgt, src, edge);
@@ -118,11 +119,12 @@ impl GraphRetrieval {
 
             // Reconstruct paths for all visited nodes
             for (&node_idx, &depth) in &depth_map {
-            if node_idx == seed_idx || depth == 0 {
-                continue;
-            }
+                if node_idx == seed_idx || depth == 0 {
+                    continue;
+                }
 
-            let mut node_labels = Vec::new();                let mut relations = Vec::new();
+                let mut node_labels = Vec::new();
+                let mut relations = Vec::new();
                 let mut score = 1.0;
 
                 // Walk back to seed
@@ -153,7 +155,11 @@ impl GraphRetrieval {
         }
 
         // 5. Sort by score descending, deduplicate by target label, take top N
-        all_paths.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        all_paths.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         let mut seen_targets = std::collections::HashSet::new();
         let paths: Vec<GraphEntityPath> = all_paths
@@ -191,7 +197,11 @@ impl GraphRetrieval {
         for path in &paths[..count] {
             let label = &path.seed_label;
             let target = path.node_labels.last().map(|s| s.as_str()).unwrap_or("?");
-            let relation = path.relations.last().map(|s| s.as_str()).unwrap_or("related_to");
+            let relation = path
+                .relations
+                .last()
+                .map(|s| s.as_str())
+                .unwrap_or("related_to");
 
             if label == target {
                 // Single-node path: just mention the entity
@@ -203,7 +213,12 @@ impl GraphRetrieval {
                     let hops: Vec<&str> = path.node_labels.iter().map(|s| s.as_str()).collect();
                     lines.push(format!("- {}", hops.join(" → ")));
                 } else {
-                    lines.push(format!("- {} → ... → {} ({} hops)", label, target, path.node_labels.len() - 1));
+                    lines.push(format!(
+                        "- {} → ... → {} ({} hops)",
+                        label,
+                        target,
+                        path.node_labels.len() - 1
+                    ));
                 }
             }
         }

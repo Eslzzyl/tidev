@@ -55,7 +55,10 @@ impl SessionMode {
     /// Both Plan and Build mode use the user-configured sandbox policy.
     /// Plan mode's write protection relies on system prompt + tool
     /// permissions, not on OS-level sandbox restrictions.
-    pub fn sandbox_policy(self, config: &crate::config::SandboxConfig) -> crate::sandbox::SandboxPolicy {
+    pub fn sandbox_policy(
+        self,
+        config: &crate::config::SandboxConfig,
+    ) -> crate::sandbox::SandboxPolicy {
         config.to_policy()
     }
 }

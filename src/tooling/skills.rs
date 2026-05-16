@@ -148,10 +148,7 @@ fn discover_inner(
             );
             continue;
         }
-        crate::log_info!(
-            "discover_inner: loaded bundled skill '{}'",
-            skill.name
-        );
+        crate::log_info!("discover_inner: loaded bundled skill '{}'", skill.name);
         skills.push(skill);
     }
     let bundled_count = skills.len() - bundled_count_before;

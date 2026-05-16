@@ -17,11 +17,7 @@ pub struct HookCommandOutput {
 /// redirects, and compound statements work as expected.
 ///
 /// Returns `HookCommandOutput` — this function never panics.
-pub async fn run_hook_command(
-    command: &str,
-    cwd: &Path,
-    timeout_sec: u64,
-) -> HookCommandOutput {
+pub async fn run_hook_command(command: &str, cwd: &Path, timeout_sec: u64) -> HookCommandOutput {
     let child = match Command::new("sh")
         .arg("-c")
         .arg(command)
@@ -40,8 +36,8 @@ pub async fn run_hook_command(
         }
     };
 
-    let result = tokio::time::timeout(Duration::from_secs(timeout_sec), child.wait_with_output())
-        .await;
+    let result =
+        tokio::time::timeout(Duration::from_secs(timeout_sec), child.wait_with_output()).await;
 
     match result {
         Ok(Ok(output)) => {

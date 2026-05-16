@@ -91,9 +91,7 @@ pub(crate) struct SandboxElevationDialog {
 }
 
 impl SandboxElevationDialog {
-    pub(crate) fn new(
-        response_tx: Option<tokio::sync::oneshot::Sender<bool>>,
-    ) -> Self {
+    pub(crate) fn new(response_tx: Option<tokio::sync::oneshot::Sender<bool>>) -> Self {
         Self {
             response_tx: Arc::new(Mutex::new(response_tx)),
         }
@@ -107,10 +105,7 @@ pub(crate) struct RunningToolExecution {
 }
 
 impl RunningToolExecution {
-    pub(crate) fn new(
-        request_id: u64,
-        tool_call: ToolCall,
-    ) -> Self {
+    pub(crate) fn new(request_id: u64, tool_call: ToolCall) -> Self {
         Self {
             request_id,
             tool_call,
@@ -347,62 +342,65 @@ impl App {
             // Check for sensitive file reads (only for the read tool)
             if crate::tooling::canonical_tool_name(&tool_call.name) == Some("read") {
                 // Extract the file path from arguments
-                let file_path: Option<String> = serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
-                    .ok()
-                    .and_then(|v| v.get("file_path")?.as_str().map(|s| s.to_string()));
+                let file_path: Option<String> =
+                    serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
+                        .ok()
+                        .and_then(|v| v.get("file_path")?.as_str().map(|s| s.to_string()));
 
                 if let Some(ref path_str) = file_path
-                    && let Ok(resolved_path) = crate::tooling::builtin::utils::resolve_workspace_path(
-                        &self.workspace_root,
-                        std::path::Path::new(path_str),
-                        false,
-                    ) {
-                        let patterns = crate::tooling::builtin::sensitive::load_sensitive_patterns(&self.workspace_root);
-                        if crate::tooling::builtin::sensitive::is_path_sensitive(
+                    && let Ok(resolved_path) =
+                        crate::tooling::builtin::utils::resolve_workspace_path(
                             &self.workspace_root,
-                            &resolved_path,
-                            &patterns,
-                        ) {
-                            let path_str = resolved_path.display().to_string();
+                            std::path::Path::new(path_str),
+                            false,
+                        )
+                {
+                    let patterns = crate::tooling::builtin::sensitive::load_sensitive_patterns(
+                        &self.workspace_root,
+                    );
+                    if crate::tooling::builtin::sensitive::is_path_sensitive(
+                        &self.workspace_root,
+                        &resolved_path,
+                        &patterns,
+                    ) {
+                        let path_str = resolved_path.display().to_string();
 
-                            // Check stored permissions in memory
-                            if let Some(allowed) = self.is_sensitive_file_allowed(&path_str) {
-                                if !allowed {
-                                    let output = format!(
-                                        "[User denied access] The path '{}' is listed in sensitive.txt.",
-                                        path_str
-                                    );
-                                    rejected.push((tool_call, ToolExecutionResult::new(output)));
-                                    self.advance_pending_tool_execution();
-                                    continue;
-                                }
-                                // Previously allowed — execute with sensitive_file_approved=true
-                                self.sensitive_file_approved
-                                    .insert(tool_call.id.clone(), true);
-                                self.pending_tool_execution
-                                    .as_mut()
-                                    .unwrap()
-                                    .add_ready(tool_call);
+                        // Check stored permissions in memory
+                        if let Some(allowed) = self.is_sensitive_file_allowed(&path_str) {
+                            if !allowed {
+                                let output = format!(
+                                    "[User denied access] The path '{}' is listed in sensitive.txt.",
+                                    path_str
+                                );
+                                rejected.push((tool_call, ToolExecutionResult::new(output)));
                                 self.advance_pending_tool_execution();
                                 continue;
-                            } else {
-                                // No stored permission - show dialog
-                                self.sensitive_file_dialog = Some(
-                                    crate::tui::ui::sensitive::SensitiveFileDialogState {
-                                        pending:
-                                            crate::tui::ui::sensitive::PendingSensitiveFileCheck {
-                                                tool_call: tool_call.clone(),
-                                                sensitive_path: resolved_path,
-                                                workspace_root: self.workspace_root.clone(),
-                                            },
-                                        current_index,
-                                        total,
-                                    },
-                                );
-                                return Ok(());
                             }
+                            // Previously allowed — execute with sensitive_file_approved=true
+                            self.sensitive_file_approved
+                                .insert(tool_call.id.clone(), true);
+                            self.pending_tool_execution
+                                .as_mut()
+                                .unwrap()
+                                .add_ready(tool_call);
+                            self.advance_pending_tool_execution();
+                            continue;
+                        } else {
+                            // No stored permission - show dialog
+                            self.sensitive_file_dialog =
+                                Some(crate::tui::ui::sensitive::SensitiveFileDialogState {
+                                    pending: crate::tui::ui::sensitive::PendingSensitiveFileCheck {
+                                        tool_call: tool_call.clone(),
+                                        sensitive_path: resolved_path,
+                                        workspace_root: self.workspace_root.clone(),
+                                    },
+                                    current_index,
+                                    total,
+                                });
+                            return Ok(());
                         }
                     }
+                }
             }
 
             if tool_call.name == "question" {
@@ -533,10 +531,8 @@ impl App {
                 .workspace_boundary_approved
                 .remove(&tc.id)
                 .unwrap_or(false);
-            let sensitive_file_approved = self
-                .sensitive_file_approved
-                .remove(&tc.id)
-                .unwrap_or(false);
+            let sensitive_file_approved =
+                self.sensitive_file_approved.remove(&tc.id).unwrap_or(false);
             approvals.push(ApprovedTool {
                 tool_call: tc,
                 rejection: None,

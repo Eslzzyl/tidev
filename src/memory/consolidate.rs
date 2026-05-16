@@ -6,11 +6,11 @@ use uuid::Uuid;
 
 use crate::config::ActiveModel;
 use crate::llm::LlmClient;
-use crate::session::{Message, MessageRole};
-use crate::memory::types::*;
+use crate::memory::patterns::PatternMiningService;
 use crate::memory::remember::RememberService;
 use crate::memory::retention::RetentionService;
-use crate::memory::patterns::PatternMiningService;
+use crate::memory::types::*;
+use crate::session::{Message, MessageRole};
 
 // ─── LLM Prompts ──────────────────────────────────────────────────────
 
@@ -161,8 +161,8 @@ impl ConsolidationService {
                 MemoryType::Fact,
                 &fact.title,
                 &fact.content,
-                &[],  // concepts — empty to save tokens; could be populated later
-                &[],  // files
+                &[], // concepts — empty to save tokens; could be populated later
+                &[], // files
                 &tags,
                 None, // source_session_id — multiple sources, leave generic
             ) {
@@ -224,7 +224,10 @@ impl ConsolidationService {
         // 3. Call LLM (no DB connection held)
         let prompt = build_procedural_prompt(&new_patterns);
         let messages = vec![
-            Message::new(MessageRole::System, PROCEDURAL_EXTRACTION_SYSTEM.to_string()),
+            Message::new(
+                MessageRole::System,
+                PROCEDURAL_EXTRACTION_SYSTEM.to_string(),
+            ),
             Message::new(MessageRole::User, prompt),
         ];
         let response = llm
@@ -305,7 +308,9 @@ impl ConsolidationService {
             Ok(SessionSummary {
                 session_id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap_or(Uuid::nil()),
                 project: row.get(1)?,
-                created_at: row.get::<_, String>(2).ok()
+                created_at: row
+                    .get::<_, String>(2)
+                    .ok()
                     .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
                     .map(|d| d.with_timezone(&chrono::Utc))
                     .unwrap_or_else(chrono::Utc::now),
@@ -338,9 +343,7 @@ impl ConsolidationService {
              ORDER BY created_at DESC",
         )?;
 
-        let rows = stmt.query_map(rusqlite::params![project], |row| {
-            map_memory_entry(row)
-        })?;
+        let rows = stmt.query_map(rusqlite::params![project], |row| map_memory_entry(row))?;
 
         let mut result = Vec::new();
         for row in rows {
@@ -350,7 +353,11 @@ impl ConsolidationService {
     }
 
     /// Load consolidated facts for prompt injection.
-    pub fn load_consolidated_facts(db: &Connection, project: &str, limit: usize) -> Result<Vec<MemoryEntry>> {
+    pub fn load_consolidated_facts(
+        db: &Connection,
+        project: &str,
+        limit: usize,
+    ) -> Result<Vec<MemoryEntry>> {
         let mut stmt = db.prepare(
             "SELECT id, workspace_root, memory_type, title, content, tags,
                     source_session_id, created_at, updated_at, usage_count, active,
@@ -377,7 +384,11 @@ impl ConsolidationService {
     }
 
     /// Load consolidated procedures for prompt injection.
-    pub fn load_consolidated_procedures(db: &Connection, project: &str, limit: usize) -> Result<Vec<MemoryEntry>> {
+    pub fn load_consolidated_procedures(
+        db: &Connection,
+        project: &str,
+        limit: usize,
+    ) -> Result<Vec<MemoryEntry>> {
         let mut stmt = db.prepare(
             "SELECT id, workspace_root, memory_type, title, content, tags,
                     source_session_id, created_at, updated_at, usage_count, active,

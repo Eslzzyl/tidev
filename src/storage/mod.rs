@@ -1272,7 +1272,11 @@ impl SessionStore {
     /// Find user sessions (parent_session_id IS NULL) that have been inactive
     /// long enough (updated_at < cutoff) and still have status 'active'.
     /// Excludes the current foreground session.
-    pub fn find_inactive_sessions(&self, cutoff: &str, exclude_session_id: Uuid) -> Result<Vec<Uuid>> {
+    pub fn find_inactive_sessions(
+        &self,
+        cutoff: &str,
+        exclude_session_id: Uuid,
+    ) -> Result<Vec<Uuid>> {
         let mut stmt = self.read_conn.prepare(
             "SELECT s.id FROM sessions s
              WHERE s.parent_session_id IS NULL
@@ -1284,24 +1288,27 @@ impl SessionStore {
                    WHERE co.session_id = s.id
                      AND co.obs_type IS NOT NULL
                )
-             ORDER BY s.updated_at ASC"
+             ORDER BY s.updated_at ASC",
         )?;
-        let ids = stmt.query_map(
-            params![cutoff, exclude_session_id.to_string()],
-            |row| {
+        let ids = stmt
+            .query_map(params![cutoff, exclude_session_id.to_string()], |row| {
                 let id_str: String = row.get(0)?;
-                Uuid::parse_str(&id_str).map_err(|e| {
-                    rusqlite::Error::ToSqlConversionFailure(Box::new(e))
-                })
-            },
-        )?.filter_map(|r| r.ok()).collect();
+                Uuid::parse_str(&id_str)
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
         Ok(ids)
     }
 
     /// Set session status and optionally ended_at timestamp.
     pub fn set_session_status(&self, session_id: Uuid, status: &str) -> Result<()> {
         let now = Utc::now().to_rfc3339();
-        let ended_at = if status == "completed" { Some(&now) } else { None };
+        let ended_at = if status == "completed" {
+            Some(&now)
+        } else {
+            None
+        };
         self.write_conn.execute(
             "UPDATE sessions SET status = ?1, ended_at = ?2, updated_at = ?3 WHERE id = ?4",
             params![status, ended_at, now, session_id.to_string()],
@@ -1350,7 +1357,11 @@ impl SessionStore {
             updated_at: parse_datetime(&updated_at).map_err(|error| {
                 rusqlite::Error::FromSqlConversionFailure(8, Type::Text, Box::new(error))
             })?,
-            status: if status.trim().is_empty() { "active".to_string() } else { status },
+            status: if status.trim().is_empty() {
+                "active".to_string()
+            } else {
+                status
+            },
             ended_at: match ended_at {
                 Some(ref v) if !v.trim().is_empty() => {
                     Some(parse_datetime(v).map_err(|error| {
@@ -1725,7 +1736,8 @@ impl SessionStore {
                     ))
                 })?;
                 insert.execute(params![
-                    row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8, row.9, row.10, row.11, row.12
+                    row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8, row.9, row.10,
+                    row.11, row.12
                 ])?;
             }
         }

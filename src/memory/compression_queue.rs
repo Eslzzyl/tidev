@@ -1,8 +1,8 @@
 use anyhow::Result;
 use std::sync::{
+    Arc, Mutex,
     atomic::{AtomicBool, Ordering},
     mpsc::{self, TryRecvError},
-    Arc, Mutex,
 };
 use std::thread;
 use std::time::Duration;
@@ -33,11 +33,7 @@ impl CompressionQueue {
     /// Each worker polls the shared channel via `try_recv()` (without
     /// blocking other workers) and calls `store.compress()` on each
     /// observation ID received.
-    pub fn start(
-        store: Arc<MemoryStore>,
-        concurrency: usize,
-        shutdown: Arc<AtomicBool>,
-    ) -> Self {
+    pub fn start(store: Arc<MemoryStore>, concurrency: usize, shutdown: Arc<AtomicBool>) -> Self {
         let (tx, rx) = mpsc::sync_channel::<Uuid>(256);
         let rx = Arc::new(Mutex::new(rx));
         let mut workers = Vec::with_capacity(concurrency);
@@ -52,10 +48,7 @@ impl CompressionQueue {
                     let rt = match tokio::runtime::Handle::try_current() {
                         Ok(h) => h,
                         Err(_) => {
-                            crate::log_warn!(
-                                "compression worker {}: no tokio runtime, exiting",
-                                i
-                            );
+                            crate::log_warn!("compression worker {}: no tokio runtime, exiting", i);
                             return;
                         }
                     };

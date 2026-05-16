@@ -8,9 +8,7 @@ pub fn matches_tool(matcher: &str, tool_name: &str) -> bool {
     if matcher == "*" {
         return true;
     }
-    matcher
-        .split('|')
-        .any(|part| part.trim() == tool_name)
+    matcher.split('|').any(|part| part.trim() == tool_name)
 }
 
 #[cfg(test)]

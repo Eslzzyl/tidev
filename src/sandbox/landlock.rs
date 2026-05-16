@@ -96,8 +96,7 @@ const LANDLOCK_ACCESS_FS_MAKE_SYM: u64 = 1 << 12;
 const LANDLOCK_ACCESS_FS_TRUNCATE: u64 = 1 << 14;
 
 // Useful combinations
-const LANDLOCK_ACCESS_FS_READ: u64 =
-    LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR;
+const LANDLOCK_ACCESS_FS_READ: u64 = LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR;
 
 const LANDLOCK_ACCESS_FS_WRITE: u64 = LANDLOCK_ACCESS_FS_WRITE_FILE
     | LANDLOCK_ACCESS_FS_REMOVE_DIR
@@ -146,9 +145,8 @@ pub unsafe fn apply_landlock_policy(policy: &SandboxPolicy, cwd: &Path) -> Resul
     }
 
     // Determine which operations to handle (restrict)
-    let handled_access = LANDLOCK_ACCESS_FS_EXECUTE
-        | LANDLOCK_ACCESS_FS_READ
-        | LANDLOCK_ACCESS_FS_WRITE;
+    let handled_access =
+        LANDLOCK_ACCESS_FS_EXECUTE | LANDLOCK_ACCESS_FS_READ | LANDLOCK_ACCESS_FS_WRITE;
 
     let attr = LandlockRulesetAttr {
         handled_access_fs: handled_access,
@@ -236,11 +234,7 @@ pub unsafe fn apply_landlock_policy(policy: &SandboxPolicy, cwd: &Path) -> Resul
     // Step 5: Restrict the process
     // SAFETY: The ruleset_fd is valid and we've added all rules.
     unsafe {
-        let ret = libc::syscall(
-            libc::SYS_landlock_restrict_self,
-            ruleset_fd,
-            0u32,
-        );
+        let ret = libc::syscall(libc::SYS_landlock_restrict_self, ruleset_fd, 0u32);
 
         if ret != 0 {
             return Err(format!(
@@ -259,22 +253,13 @@ pub unsafe fn apply_landlock_policy(policy: &SandboxPolicy, cwd: &Path) -> Resul
 ///
 /// `ruleset_fd` must be a valid file descriptor from a successful
 /// `landlock_create_ruleset` call.
-unsafe fn add_path_rule(
-    ruleset_fd: i32,
-    path: &Path,
-    allowed_access: u64,
-) -> Result<(), String> {
+unsafe fn add_path_rule(ruleset_fd: i32, path: &Path, allowed_access: u64) -> Result<(), String> {
     let path_cstr = CString::new(path.to_string_lossy().as_bytes())
         .map_err(|_| format!("invalid path: {}", path.display()))?;
 
     // Open the path to get a file descriptor
     // SAFETY: path_cstr is NUL-terminated. O_PATH + O_CLOEXEC is safe.
-    let fd = unsafe {
-        libc::open(
-            path_cstr.as_ptr(),
-            libc::O_PATH | libc::O_CLOEXEC,
-        )
-    };
+    let fd = unsafe { libc::open(path_cstr.as_ptr(), libc::O_PATH | libc::O_CLOEXEC) };
 
     if fd < 0 {
         return Err(format!(
@@ -301,7 +286,9 @@ unsafe fn add_path_rule(
     };
 
     // Close the file descriptor
-    unsafe { libc::close(fd); }
+    unsafe {
+        libc::close(fd);
+    }
 
     if ret != 0 {
         Err(format!(
@@ -319,7 +306,8 @@ fn should_allow_writes(policy: &SandboxPolicy) -> bool {
     matches!(policy, SandboxPolicy::WorkspaceWrite { .. })
 }
 
-#[cfg(test)]mod tests {
+#[cfg(test)]
+mod tests {
     use super::*;
 
     #[test]

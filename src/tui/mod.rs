@@ -33,7 +33,6 @@ mod render;
 mod ui;
 
 pub use commands::{CommandAction, CommandPaletteState, CommandRegistry};
-pub(crate) use panel_launcher::PanelAction;
 pub use core::run;
 pub use core::state;
 pub use core::undo;
@@ -41,6 +40,7 @@ pub use input::Composer;
 pub use input::at_mention;
 pub use input::event;
 pub use input::mouse_selection;
+pub(crate) use panel_launcher::PanelAction;
 pub use render::chat_dialog;
 pub use render::chat_render;
 pub use render::diff_render;
@@ -66,8 +66,8 @@ use crate::{
     context::ContextManager,
     llm::LlmClient,
     mcp::McpManager,
-    memory::MemoryStore,
     memory::CompressionQueue,
+    memory::MemoryStore,
     notifications,
     prompts::{SessionMode, init_command},
     provider_setup::ConnectDialog,
@@ -89,8 +89,8 @@ use crate::{
     tui::model_panel::ModelPanelState,
     tui::mouse_selection::{ClipboardLease, MouseSelectionState},
     tui::permission::{
-        PendingToolExecution, PermissionDialogState, RunningSubagentExecution, RunningToolExecution,
-        SandboxElevationDialog,
+        PendingToolExecution, PermissionDialogState, RunningSubagentExecution,
+        RunningToolExecution, SandboxElevationDialog,
     },
     tui::question::QuestionDialogState,
     tui::session_panel::SessionPanelState,
@@ -714,11 +714,7 @@ impl App {
         // Sandbox elevation requests are handled here, outside the per-session
         // dispatch, because they carry a oneshot sender that must not be moved
         // into the event handler's match.
-        if let BackendEvent::SandboxElevationRequest {
-            response_tx,
-            ..
-        } = event
-        {
+        if let BackendEvent::SandboxElevationRequest { response_tx, .. } = event {
             // Extract the sender from the Arc wrapper
             let sender = response_tx.lock().unwrap().take();
             self.sandbox_elevation = Some(SandboxElevationDialog::new(sender));
@@ -1201,15 +1197,8 @@ impl App {
                     self.last_notice = None;
                 } else {
                     let count = self.running_subagent_executions.len();
-                    let label = if count == 1 {
-                        "subagent"
-                    } else {
-                        "subagents"
-                    };
-                    self.last_notice = Some(format!(
-                        "Waiting for {} {}...",
-                        count, label
-                    ));
+                    let label = if count == 1 { "subagent" } else { "subagents" };
+                    self.last_notice = Some(format!("Waiting for {} {}...", count, label));
                 }
 
                 self.notifications.notify("Subagent finished");

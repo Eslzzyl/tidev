@@ -157,26 +157,20 @@ fn generate_write_policy(policy: &SandboxPolicy) -> String {
         | SandboxPolicy::ExternalSandbox
         | SandboxPolicy::DangerFullAccess => String::new(),
 
-        SandboxPolicy::WorkspaceWrite {
-            writable_roots,
-        } => {
+        SandboxPolicy::WorkspaceWrite { writable_roots } => {
             let mut write_rules = String::new();
 
             // Allow write to /tmp
-            write_rules.push_str(
-                r#"(allow file-write* (subpath "/tmp"))"#,
-            );
+            write_rules.push_str(r#"(allow file-write* (subpath "/tmp"))"#);
             write_rules.push('\n');
 
             // Allow write to TMPDIR if set
             if let Ok(tmpdir) = std::env::var("TMPDIR")
-                && !tmpdir.is_empty() {
-                    write_rules.push_str(&format!(
-                        r#"(allow file-write* (subpath "{}"))"#,
-                        tmpdir
-                    ));
-                    write_rules.push('\n');
-                }
+                && !tmpdir.is_empty()
+            {
+                write_rules.push_str(&format!(r#"(allow file-write* (subpath "{}"))"#, tmpdir));
+                write_rules.push('\n');
+            }
 
             if writable_roots.is_empty() {
                 return write_rules;
@@ -185,10 +179,7 @@ fn generate_write_policy(policy: &SandboxPolicy) -> String {
             // Add write rules for each writable root
             for root in writable_roots {
                 let root_str = root.to_string_lossy();
-                write_rules.push_str(&format!(
-                    r#"(allow file-write* (subpath "{}"))"#,
-                    root_str
-                ));
+                write_rules.push_str(&format!(r#"(allow file-write* (subpath "{}"))"#, root_str));
                 write_rules.push('\n');
             }
 
@@ -232,11 +223,7 @@ mod tests {
     #[test]
     fn test_create_seatbelt_args() {
         let policy = SandboxPolicy::ReadOnly;
-        let command = vec![
-            "sh".to_string(),
-            "-c".to_string(),
-            "ls -la".to_string(),
-        ];
+        let command = vec!["sh".to_string(), "-c".to_string(), "ls -la".to_string()];
 
         let args = create_seatbelt_args(command.clone(), &policy, Path::new("/tmp"));
 

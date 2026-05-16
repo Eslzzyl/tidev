@@ -51,10 +51,7 @@ impl Bm25Index {
                 .insert(id.clone(), tf);
         }
 
-        self.entries.insert(
-            id,
-            Bm25Entry { doc_length },
-        );
+        self.entries.insert(id, Bm25Entry { doc_length });
     }
 
     #[allow(dead_code)]
@@ -91,9 +88,9 @@ impl Bm25Index {
                 for (doc_id, tf) in postings {
                     if let Some(entry) = self.entries.get(doc_id) {
                         let doc_len = entry.doc_length as f64;
-                        let bm25 = idf
-                            * (*tf as f64 * (self.k1 + 1.0))
-                            / (*tf as f64 + self.k1 * (1.0 - self.b + self.b * doc_len / avg_doc_len));
+                        let bm25 = idf * (*tf as f64 * (self.k1 + 1.0))
+                            / (*tf as f64
+                                + self.k1 * (1.0 - self.b + self.b * doc_len / avg_doc_len));
                         *scores.entry(doc_id.clone()).or_insert(0.0) += bm25;
                     }
                 }
@@ -107,16 +104,11 @@ impl Bm25Index {
     }
 
     fn idf(&self, term: &str) -> f64 {
-        let docs_with_term = self
-            .inverted_index
-            .get(term)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let docs_with_term = self.inverted_index.get(term).map(|m| m.len()).unwrap_or(0);
         if docs_with_term == 0 {
             return 0.0;
         }
-        ((self.total_docs as f64 - docs_with_term as f64 + 0.5)
-            / (docs_with_term as f64 + 0.5)
+        ((self.total_docs as f64 - docs_with_term as f64 + 0.5) / (docs_with_term as f64 + 0.5)
             + 1.0)
             .ln()
     }
@@ -175,12 +167,13 @@ pub fn fts5_search_memories(
     let safe_query = escape_fts5_query(query);
 
     let mut stmt = db.prepare(
-         "SELECT m.id, m.title, rank
+        "SELECT m.id, m.title, rank
           FROM memories_fts f
           JOIN memories m ON m.rowid = f.rowid
           WHERE memories_fts MATCH ?1 AND m.workspace_root = ?2 AND m.active = 1 AND m.is_latest = 1
           ORDER BY rank
-          LIMIT ?3",    )?;
+          LIMIT ?3",
+    )?;
 
     let results = stmt.query_map(
         rusqlite::params![safe_query, workspace_root, limit as i64],

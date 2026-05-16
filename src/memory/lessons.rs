@@ -3,8 +3,8 @@ use chrono::Utc;
 use rusqlite::Connection;
 use uuid::Uuid;
 
-use crate::memory::types::{MemoryEntry, MemoryType};
 use crate::memory::remember::RememberService;
+use crate::memory::types::{MemoryEntry, MemoryType};
 
 use super::remember::map_memory_entry_from_row;
 
@@ -38,12 +38,12 @@ impl LessonService {
             db,
             project,
             MemoryType::Lesson,
-            context,      // title = context/trigger
+            context, // title = context/trigger
             content,
-            &[],          // concepts
-            &[],          // files
+            &[], // concepts
+            &[], // files
             &all_tags,
-            None,          // source_session_id
+            None, // source_session_id
         )?;
 
         // Overwrite strength with confidence
@@ -91,11 +91,7 @@ impl LessonService {
     }
 
     /// List recent lessons, most reinforced first.
-    pub fn list_lessons(
-        db: &Connection,
-        project: &str,
-        limit: usize,
-    ) -> Result<Vec<MemoryEntry>> {
+    pub fn list_lessons(db: &Connection, project: &str, limit: usize) -> Result<Vec<MemoryEntry>> {
         let mut stmt = db.prepare(
             "SELECT id, workspace_root, memory_type, title, content, tags,
                     source_session_id, created_at, updated_at, usage_count, active,
@@ -108,10 +104,9 @@ impl LessonService {
              ORDER BY usage_count DESC, strength DESC, updated_at DESC
              LIMIT ?2",
         )?;
-        let rows = stmt.query_map(
-            rusqlite::params![project, limit as i64],
-            |row| map_memory_entry_from_row(row),
-        )?;
+        let rows = stmt.query_map(rusqlite::params![project, limit as i64], |row| {
+            map_memory_entry_from_row(row)
+        })?;
         let mut result = Vec::new();
         for row in rows {
             result.push(row?);

@@ -69,11 +69,17 @@ impl SearchRegistry {
         self.providers
             .get(&self.default[..])
             .map(|p| p.as_ref())
-            .ok_or_else(|| anyhow::anyhow!("unknown search provider '{}'; available: {}", {
-                let mut names: Vec<&str> = self.providers.keys().copied().collect();
-                names.sort();
-                names.join(", ")
-            }, self.default))
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "unknown search provider '{}'; available: {}",
+                    {
+                        let mut names: Vec<&str> = self.providers.keys().copied().collect();
+                        names.sort();
+                        names.join(", ")
+                    },
+                    self.default
+                )
+            })
     }
 }
 
@@ -124,25 +130,15 @@ pub fn execute_tool_call(
 
     match crate::tooling::canonical_tool_name(tool_name) {
         Some("websearch") => {
-            let args =
-                serde_json::from_value::<WebSearchToolArgs>(arguments).map_err(|e| {
-                    anyhow::anyhow!(
-                        "failed to decode arguments for tool '{}': {}",
-                        tool_name,
-                        e
-                    )
-                })?;
+            let args = serde_json::from_value::<WebSearchToolArgs>(arguments).map_err(|e| {
+                anyhow::anyhow!("failed to decode arguments for tool '{}': {}", tool_name, e)
+            })?;
             runtime.block_on(execute_search(args, web_search_config, auth_store))
         }
         Some("webfetch") => {
-            let args =
-                serde_json::from_value::<WebFetchToolArgs>(arguments).map_err(|e| {
-                    anyhow::anyhow!(
-                        "failed to decode arguments for tool '{}': {}",
-                        tool_name,
-                        e
-                    )
-                })?;
+            let args = serde_json::from_value::<WebFetchToolArgs>(arguments).map_err(|e| {
+                anyhow::anyhow!("failed to decode arguments for tool '{}': {}", tool_name, e)
+            })?;
             runtime.block_on(fetch::fetch(args))
         }
         Some(other) => bail!("unsupported web tool '{}'", other),
@@ -171,6 +167,13 @@ async fn execute_search(
         .context("failed to construct web tools HTTP client")?;
 
     provider
-        .search(&http, auth, provider_config, query, args.num_results, args.search_type.as_deref())
+        .search(
+            &http,
+            auth,
+            provider_config,
+            query,
+            args.num_results,
+            args.search_type.as_deref(),
+        )
         .await
 }

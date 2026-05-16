@@ -82,7 +82,11 @@ impl App {
                     self.execute_panel_action(action, runtime);
                 }
             }
-            KeyCode::Char(c) if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
+            KeyCode::Char(c)
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
                 self.panel_launcher.query.push(c);
                 self.panel_launcher.sync();
             }
@@ -180,9 +184,7 @@ impl App {
         {
             let display = self.config.memory_model_display("compression");
             tabs.push(crate::tui::model_panel::ModelPanelTab::new(
-                "memory",
-                "Memory",
-                &display,
+                "memory", "Memory", &display,
             ));
         }
         panel.tabs = tabs;

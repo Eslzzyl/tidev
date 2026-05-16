@@ -113,7 +113,9 @@ pub fn remove_dangerous_env_vars_parent() {
         .collect();
 
     for key in &keys_to_remove {
-        unsafe { std::env::remove_var(key); }
+        unsafe {
+            std::env::remove_var(key);
+        }
     }
 
     // Also remove common injection variables on all platforms
@@ -129,10 +131,18 @@ mod tests {
 
     #[test]
     fn test_remove_dangerous_env_vars() {
-        unsafe { std::env::set_var("LD_PRELOAD", "/evil.so"); }
-        unsafe { std::env::set_var("LD_LIBRARY_PATH", "/evil"); }
-        unsafe { std::env::set_var("PATH", "/usr/bin"); }
-        unsafe { std::env::set_var("DYLD_INSERT_LIBRARIES", "/evil.dylib"); }
+        unsafe {
+            std::env::set_var("LD_PRELOAD", "/evil.so");
+        }
+        unsafe {
+            std::env::set_var("LD_LIBRARY_PATH", "/evil");
+        }
+        unsafe {
+            std::env::set_var("PATH", "/usr/bin");
+        }
+        unsafe {
+            std::env::set_var("DYLD_INSERT_LIBRARIES", "/evil.dylib");
+        }
 
         remove_dangerous_env_vars_parent();
 

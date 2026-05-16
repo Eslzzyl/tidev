@@ -4,8 +4,8 @@
 
 use anyhow::{Context, Result, bail};
 use pulldown_cmark::{Event, Options as MarkdownOptions, Parser as MarkdownParser, Tag, TagEnd};
-use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
 use reqwest::Client;
+use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
 use std::time::Duration;
 use tokio::time::timeout;
 use url::Url;
@@ -181,10 +181,9 @@ fn markdown_to_text(markdown: &str) -> String {
             Event::SoftBreak | Event::HardBreak => {
                 output.push('\n');
             }
-            Event::Start(Tag::Paragraph)
-                if !output.is_empty() && !output.ends_with('\n') => {
-                    output.push('\n');
-                }
+            Event::Start(Tag::Paragraph) if !output.is_empty() && !output.ends_with('\n') => {
+                output.push('\n');
+            }
             Event::End(TagEnd::Paragraph) => {
                 output.push('\n');
             }

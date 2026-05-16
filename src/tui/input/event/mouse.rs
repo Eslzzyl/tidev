@@ -1,8 +1,8 @@
 use super::*;
+use crate::mcp::McpConnectionStatus;
 use crate::tui::memory_panel::PanelFocus;
 use crate::tui::model_panel::{ModelPanelItem, selectable_indices, thinking_options_for_model};
 use crate::tui::theme_panel::DisplayItem;
-use crate::mcp::McpConnectionStatus;
 use ratatui::layout::Margin;
 
 /// Helper: check if a position is within an overlay rect (including border).
@@ -210,7 +210,10 @@ impl App {
             return false;
         };
         let overlay = overlay.unwrap();
-        let inner = overlay.inner(Margin { horizontal: 1, vertical: 1 });
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
 
         match mouse.kind {
             MouseEventKind::ScrollUp => {
@@ -310,7 +313,10 @@ impl App {
             return false;
         };
         let overlay = overlay.unwrap();
-        let inner = overlay.inner(Margin { horizontal: 1, vertical: 1 });
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
 
         // Determine left (35%) vs right (65%) pane
         let inner_w = inner.width as usize;
@@ -374,7 +380,10 @@ impl App {
             return false;
         };
         let overlay = overlay.unwrap();
-        let inner = overlay.inner(Margin { horizontal: 1, vertical: 1 });
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
 
         // MCP panel layout (non-editor mode):
         // sections[0]: instruction (2 lines)
@@ -446,7 +455,10 @@ impl App {
             return false;
         };
         let overlay = overlay.unwrap();
-        let inner = overlay.inner(Margin { horizontal: 1, vertical: 1 });
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
 
         match mouse.kind {
             MouseEventKind::ScrollUp => {
@@ -476,7 +488,7 @@ impl App {
         }
     }
 
-            // ── Model Panel ──────────────────────────────────────────────────────────
+    // ── Model Panel ──────────────────────────────────────────────────────────
 
     fn handle_model_panel_mouse(&mut self, mouse: MouseEvent, _runtime: &Runtime) -> bool {
         let overlay = self.model_panel_overlay.get();
@@ -488,7 +500,10 @@ impl App {
             return false;
         };
         let overlay = overlay.unwrap();
-        let inner = overlay.inner(Margin { horizontal: 1, vertical: 1 });
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
 
         // Layout sections:
         // [0] tab bar: 1 line
@@ -528,7 +543,10 @@ impl App {
                                     // General tab: use self.active_model directly
                                     next_panel.reset_selection(
                                         &items,
-                                        Some((&self.active_model.provider_id, &self.active_model.model_id)),
+                                        Some((
+                                            &self.active_model.provider_id,
+                                            &self.active_model.model_id,
+                                        )),
                                     );
                                 } else {
                                     let active = super::panels::agent_tab_active_model(
@@ -559,8 +577,16 @@ impl App {
                     let row = (local_y - header_rows) as usize;
                     let items = self.model_panel_items(&panel);
                     let tab_index = panel.selected_tab_index;
-                    let is_expanded = panel.tabs.get(tab_index).map(|t| t.thinking_level_expanded).unwrap_or(false);
-                    let model_idx = panel.tabs.get(tab_index).map(|t| t.selected_index).unwrap_or(0);
+                    let is_expanded = panel
+                        .tabs
+                        .get(tab_index)
+                        .map(|t| t.thinking_level_expanded)
+                        .unwrap_or(false);
+                    let model_idx = panel
+                        .tabs
+                        .get(tab_index)
+                        .map(|t| t.selected_index)
+                        .unwrap_or(0);
 
                     if is_expanded {
                         // ── Expanded thinking level mode ──
@@ -587,7 +613,9 @@ impl App {
                                 tab.selected_index = model_idx;
                                 tab.thinking_level_index = tl_click;
                             }
-                            self.confirm_after_thinking_click(&items, next_panel, tab_index, model_idx);
+                            self.confirm_after_thinking_click(
+                                &items, next_panel, tab_index, model_idx,
+                            );
                             return true;
                         } else if row < model_idx {
                             // Click above the expanded model: no offset adjustment needed
@@ -595,7 +623,9 @@ impl App {
                         } else {
                             // Click below the expanded thinking area: adjust for extra rows
                             let real_row = row.saturating_sub(tl_count);
-                            self.handle_model_click_normal(panel, &items, real_row, tab_index, false);
+                            self.handle_model_click_normal(
+                                panel, &items, real_row, tab_index, false,
+                            );
                         }
                     } else {
                         // ── Normal (non-expanded) mode ──
@@ -635,7 +665,10 @@ impl App {
                 self.model_panel = Some(panel);
                 return;
             }
-            *selectable.iter().min_by_key(|&&idx| (idx as isize - row as isize).abs()).unwrap()
+            *selectable
+                .iter()
+                .min_by_key(|&&idx| (idx as isize - row as isize).abs())
+                .unwrap()
         };
 
         let is_general = panel.is_general_tab();
@@ -662,15 +695,24 @@ impl App {
                         tab.thinking_level_expanded = false;
                     }
                 } else {
-                    let agent_type_str = next_panel.tabs.get(tab_index).map(|t| t.agent_type_str.clone()).unwrap_or_default();
+                    let agent_type_str = next_panel
+                        .tabs
+                        .get(tab_index)
+                        .map(|t| t.agent_type_str.clone())
+                        .unwrap_or_default();
                     let model_str = summary.label();
-                    self.config.set_agent_model(&self.paths, &agent_type_str, &model_str).ok();
+                    self.config
+                        .set_agent_model(&self.paths, &agent_type_str, &model_str)
+                        .ok();
                     if let Some(tab) = next_panel.tabs.get_mut(tab_index) {
                         tab.selected_index = model_idx;
                         tab.current_label = model_str.clone();
                         tab.thinking_level_expanded = false;
                     }
-                    self.last_notice = Some(format!("Agent '{}' model set to {}", agent_type_str, model_str));
+                    self.last_notice = Some(format!(
+                        "Agent '{}' model set to {}",
+                        agent_type_str, model_str
+                    ));
                 }
             } else {
                 // Has thinking: expand the submenu
@@ -717,7 +759,11 @@ impl App {
         };
 
         let tl_options = thinking_options_for_model(items, model_idx);
-        let tl_index = panel.tabs.get(tab_index).map(|t| t.thinking_level_index).unwrap_or(0);
+        let tl_index = panel
+            .tabs
+            .get(tab_index)
+            .map(|t| t.thinking_level_index)
+            .unwrap_or(0);
         let tl = if tl_options.is_empty() {
             String::new()
         } else {
@@ -738,21 +784,23 @@ impl App {
                 tab.thinking_level_expanded = false;
             }
         } else {
-            let agent_type_str = panel.tabs.get(tab_index).map(|t| t.agent_type_str.clone()).unwrap_or_default();
+            let agent_type_str = panel
+                .tabs
+                .get(tab_index)
+                .map(|t| t.agent_type_str.clone())
+                .unwrap_or_default();
             let model_str = summary.label();
-            self.config.set_agent_model_and_thinking(
-                &self.paths,
-                &agent_type_str,
-                &model_str,
-                &tl,
-            ).ok();
+            self.config
+                .set_agent_model_and_thinking(&self.paths, &agent_type_str, &model_str, &tl)
+                .ok();
             if let Some(tab) = panel.tabs.get_mut(tab_index) {
                 tab.current_label = model_str.clone();
                 tab.thinking_level_expanded = false;
             }
             self.last_notice = Some(format!(
                 "Agent '{}' model set to {} ({})",
-                agent_type_str, model_str,
+                agent_type_str,
+                model_str,
                 if tl.is_empty() { "auto" } else { &tl },
             ));
         }
@@ -771,7 +819,10 @@ impl App {
             return false;
         };
         let overlay = overlay.unwrap();
-        let inner = overlay.inner(Margin { horizontal: 1, vertical: 1 });
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
 
         // Layout sections:
         // [0] instruction: 2 lines
@@ -830,7 +881,10 @@ impl App {
             return false;
         };
         let overlay = overlay.unwrap();
-        let inner = overlay.inner(Margin { horizontal: 1, vertical: 1 });
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
 
         // Layout sections:
         // [0] instruction: 2 lines
@@ -1015,11 +1069,7 @@ impl App {
     }
 
     /// Handle mouse events within the memory panel. Returns true if consumed.
-    fn handle_memory_panel_mouse(
-        &mut self,
-        mouse: MouseEvent,
-        _runtime: &Runtime,
-    ) -> bool {
+    fn handle_memory_panel_mouse(&mut self, mouse: MouseEvent, _runtime: &Runtime) -> bool {
         let Some(overlay) = self.memory_panel_overlay.get() else {
             return false;
         };
@@ -1067,8 +1117,7 @@ impl App {
                 } else if in_right {
                     // Scroll up in right pane → scroll preview up
                     if let Some(mut panel) = self.memory_panel.clone() {
-                        panel.preview_scroll =
-                            panel.preview_scroll.saturating_sub(3);
+                        panel.preview_scroll = panel.preview_scroll.saturating_sub(3);
                         self.memory_panel = Some(panel);
                     }
                     true
@@ -1087,8 +1136,7 @@ impl App {
                 } else if in_right {
                     // Scroll down in right pane → scroll preview down
                     if let Some(mut panel) = self.memory_panel.clone() {
-                        panel.preview_scroll =
-                            panel.preview_scroll.saturating_add(3);
+                        panel.preview_scroll = panel.preview_scroll.saturating_add(3);
                         self.memory_panel = Some(panel);
                     }
                     true
@@ -1376,7 +1424,10 @@ impl App {
         let bottom_threshold = inner.y.saturating_add(inner.height.saturating_sub(1));
 
         // Auto-scroll up when cursor is above the input area
-        if self.mouse_selection.pointer().is_some_and(|p| p.y < top_threshold)
+        if self
+            .mouse_selection
+            .pointer()
+            .is_some_and(|p| p.y < top_threshold)
             && self.input_scroll_offset > 0
         {
             self.input_scroll_offset -= 1;
@@ -1387,7 +1438,10 @@ impl App {
         let visible_lines = inner.height as usize;
         let total_lines = self.composer.display_line_count(inner.width as usize);
         let max_scroll = total_lines.saturating_sub(visible_lines);
-        if self.mouse_selection.pointer().is_some_and(|p| p.y > bottom_threshold)
+        if self
+            .mouse_selection
+            .pointer()
+            .is_some_and(|p| p.y > bottom_threshold)
             && self.input_scroll_offset < max_scroll
         {
             self.input_scroll_offset += 1;

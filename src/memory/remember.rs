@@ -9,14 +9,8 @@ use crate::memory::types::{MemoryEntry, MemoryType};
 /// Jaccard similarity between two strings (from agentmemory's `jaccardSimilarity`).
 /// Filters out words shorter than 3 characters.
 pub fn jaccard_similarity(a: &str, b: &str) -> f64 {
-    let set_a: HashSet<&str> = a
-        .split_whitespace()
-        .filter(|t| t.len() > 2)
-        .collect();
-    let set_b: HashSet<&str> = b
-        .split_whitespace()
-        .filter(|t| t.len() > 2)
-        .collect();
+    let set_a: HashSet<&str> = a.split_whitespace().filter(|t| t.len() > 2).collect();
+    let set_b: HashSet<&str> = b.split_whitespace().filter(|t| t.len() > 2).collect();
 
     if set_a.is_empty() && set_b.is_empty() {
         return 1.0;
@@ -229,12 +223,18 @@ pub fn map_memory_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<Memory
         title: row.get(3)?,
         content: row.get(4)?,
         tags: serde_json::from_str(&tags_json).unwrap_or_default(),
-        source_session_id: row.get::<_, Option<String>>(6)?.and_then(|s| Uuid::parse_str(&s).ok()),
-        created_at: row.get::<_, String>(7).ok()
+        source_session_id: row
+            .get::<_, Option<String>>(6)?
+            .and_then(|s| Uuid::parse_str(&s).ok()),
+        created_at: row
+            .get::<_, String>(7)
+            .ok()
             .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
             .map(|d| d.with_timezone(&chrono::Utc))
             .unwrap_or_else(chrono::Utc::now),
-        updated_at: row.get::<_, String>(8).ok()
+        updated_at: row
+            .get::<_, String>(8)
+            .ok()
             .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
             .map(|d| d.with_timezone(&chrono::Utc))
             .unwrap_or_else(chrono::Utc::now),
@@ -245,7 +245,9 @@ pub fn map_memory_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<Memory
         strength: row.get(13)?,
         importance: row.get::<_, i64>(14)? as u8,
         version: row.get(15)?,
-        parent_id: row.get::<_, Option<String>>(16)?.and_then(|s| Uuid::parse_str(&s).ok()),
+        parent_id: row
+            .get::<_, Option<String>>(16)?
+            .and_then(|s| Uuid::parse_str(&s).ok()),
         supersedes: parse_ids(&supersedes_json),
         related_ids: parse_ids(&related_ids_json),
         is_latest: row.get::<_, i64>(19)? != 0,
