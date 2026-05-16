@@ -1201,7 +1201,6 @@ impl App {
                     self.last_notice = Some(format!("Waiting for {} {}...", count, label));
                 }
 
-                self.notifications.notify("Subagent finished");
             }
             BackendEvent::UsageStats {
                 session_id: _,
