@@ -10,6 +10,15 @@ use uuid::Uuid;
 
 use super::engine::MemoryStore;
 
+/// A task for the compression queue worker pool.
+pub enum QueueTask {
+    /// Full compression + embedding for a new observation.
+    CompressAndEmbed(Uuid),
+    /// Embedding-only for an already-compressed observation
+    /// that is missing a vector embedding.
+    EmbedBackfill(Uuid),
+}
+
 /// Bounded channel + N worker threads for async observation compression.
 ///
 /// Replaces the per-observation `std::thread::spawn` pattern with a fixed pool
@@ -20,7 +29,7 @@ use super::engine::MemoryStore;
 pub struct CompressionQueue {
     /// The sender is wrapped in `Mutex<Option<>>` so `shutdown()` can drop
     /// it without consuming `self` (needed because this struct is behind `Arc`).
-    sender: Mutex<Option<mpsc::SyncSender<Uuid>>>,
+    sender: Mutex<Option<mpsc::SyncSender<QueueTask>>>,
     /// Worker thread handles — never moved or joined; the OS cleans up on exit.
     _workers: Vec<thread::JoinHandle<()>>,
     /// Shared flag read by workers to exit early.
@@ -31,10 +40,10 @@ impl CompressionQueue {
     /// Create a compression queue with N worker threads.
     ///
     /// Each worker polls the shared channel via `try_recv()` (without
-    /// blocking other workers) and calls `store.compress()` on each
-    /// observation ID received.
+    /// blocking other workers) and dispatches to the appropriate
+    /// `MemoryStore` method based on [`QueueTask`] variant.
     pub fn start(store: Arc<MemoryStore>, concurrency: usize, shutdown: Arc<AtomicBool>) -> Self {
-        let (tx, rx) = mpsc::sync_channel::<Uuid>(256);
+        let (tx, rx) = mpsc::sync_channel::<QueueTask>(256);
         let rx = Arc::new(Mutex::new(rx));
         let mut workers = Vec::with_capacity(concurrency);
 
@@ -45,9 +54,6 @@ impl CompressionQueue {
             let handle = thread::Builder::new()
                 .name(format!("compress-{}", i))
                 .spawn(move || {
-                    // Each worker creates its own current-thread tokio runtime
-                    // instead of trying to inherit one from the parent thread
-                    // (std::thread::spawn does not propagate the tokio context).
                     let worker_rt = match tokio::runtime::Builder::new_current_thread()
                         .enable_all()
                         .build()
@@ -68,12 +74,10 @@ impl CompressionQueue {
                             break;
                         }
 
-                        // Hold the lock only long enough to try_recv.
-                        // This prevents one worker from blocking others.
-                        let id = {
+                        let task = {
                             let lock = rx.lock().unwrap();
                             match lock.try_recv() {
-                                Ok(id) => id,
+                                Ok(task) => task,
                                 Err(TryRecvError::Empty) => {
                                     drop(lock);
                                     thread::sleep(Duration::from_millis(100));
@@ -83,8 +87,21 @@ impl CompressionQueue {
                             }
                         };
 
-                        if let Err(e) = worker_rt.block_on(store.compress(id)) {
-                            crate::log_warn!("compression failed for {}: {}", id, e);
+                        match task {
+                            QueueTask::CompressAndEmbed(id) => {
+                                if let Err(e) = worker_rt.block_on(store.compress(id)) {
+                                    crate::log_warn!("compression failed for {}: {}", id, e);
+                                }
+                            }
+                            QueueTask::EmbedBackfill(id) => {
+                                if let Err(e) = worker_rt.block_on(store.backfill_embedding(id)) {
+                                    crate::log_warn!(
+                                        "embedding backfill failed for {}: {}",
+                                        id,
+                                        e
+                                    );
+                                }
+                            }
                         }
                     }
                 })
@@ -100,7 +117,7 @@ impl CompressionQueue {
     }
 
     /// Get a clone of the sender for passing to `MemoryStore`.
-    pub fn sender(&self) -> mpsc::SyncSender<Uuid> {
+    pub fn sender(&self) -> mpsc::SyncSender<QueueTask> {
         self.sender
             .lock()
             .unwrap()
@@ -115,7 +132,17 @@ impl CompressionQueue {
     pub fn enqueue(&self, id: Uuid) -> Result<()> {
         let sender = self.sender.lock().unwrap();
         match sender.as_ref() {
-            Some(s) => s.send(id)?,
+            Some(s) => s.send(QueueTask::CompressAndEmbed(id))?,
+            None => anyhow::bail!("compression queue is shut down"),
+        }
+        Ok(())
+    }
+
+    /// Enqueue an embedding-only backfill task.  Non-blocking.
+    pub fn enqueue_embedding_backfill(&self, id: Uuid) -> Result<()> {
+        let sender = self.sender.lock().unwrap();
+        match sender.as_ref() {
+            Some(s) => s.send(QueueTask::EmbedBackfill(id))?,
             None => anyhow::bail!("compression queue is shut down"),
         }
         Ok(())

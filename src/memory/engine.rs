@@ -13,6 +13,7 @@ use crate::config::{ActiveModel, EmbeddingActiveModel};
 use crate::llm::LlmClient;
 
 use super::compress::CompressionService;
+use super::compression_queue::QueueTask;
 use super::consolidate::{ConsolidationReport, ConsolidationService};
 use super::dedup::DedupMap;
 use super::evict::{EvictionReport, EvictionService};
@@ -63,7 +64,7 @@ pub struct MemoryStore {
     compression_cb_tripped_at: RwLock<Option<std::time::Instant>>,
     /// Sender to enqueue observations for async compression.
     /// Set after `CompressionQueue::start()`; shared across all Arcs.
-    compression_sender: RwLock<Option<mpsc::SyncSender<Uuid>>>,
+    compression_sender: RwLock<Option<mpsc::SyncSender<QueueTask>>>,
 }
 
 impl MemoryStore {
@@ -180,7 +181,7 @@ impl MemoryStore {
 
     /// Set the compression queue sender. Observations will be enqueued
     /// for async compression instead of being scheduled inline.
-    pub fn set_compression_sender(&self, sender: mpsc::SyncSender<Uuid>) {
+    pub fn set_compression_sender(&self, sender: mpsc::SyncSender<QueueTask>) {
         *self.compression_sender.write().unwrap() = Some(sender);
     }
 
@@ -876,10 +877,16 @@ impl MemoryStore {
     }
 
     fn schedule_compression(&self, obs_id: Uuid) {
-        // Send to the compression queue if one is configured.
-        // Otherwise this is a no-op (the old behaviour).
         if let Some(ref sender) = *self.compression_sender.read().unwrap() {
-            let _ = sender.send(obs_id);
+            let _ = sender.send(QueueTask::CompressAndEmbed(obs_id));
+        }
+    }
+
+    /// Enqueue an embedding-only backfill task for an already-compressed
+    /// observation that is missing a vector embedding.
+    pub fn schedule_embedding_backfill(&self, obs_id: Uuid) {
+        if let Some(ref sender) = *self.compression_sender.read().unwrap() {
+            let _ = sender.send(QueueTask::EmbedBackfill(obs_id));
         }
     }
 
@@ -957,22 +964,23 @@ impl MemoryStore {
     /// Backfill embeddings for compressed observations that are missing them.
     ///
     /// This can happen when the vec0 extension failed to load at startup or when
-    /// embedding generation temporarily failed.  It finds compressed observations
-    /// (`obs_type IS NOT NULL`) that have no corresponding row in `vec_observations`
-    /// and spawns background threads to generate + store embeddings.
+    /// embedding generation temporarily failed.  This method only queries IDs
+    /// and enqueues each one through the compression queue; actual embedding
+    /// generation runs asynchronously in the worker pool.
     ///
-    /// Returns the number of observations scheduled for backfill.
+    /// Requires that [`set_compression_sender`] has been called.
+    /// Returns the number of observations queued for backfill.
     pub fn backfill_embeddings(&self, limit: usize) -> Result<usize> {
-        let embed_llm = self.llm.read().unwrap().clone();
-        let embed_model = self.embedding_model.read().unwrap().clone();
-        if embed_llm.is_none() || embed_model.is_none() {
+        if self.llm.read().unwrap().is_none()
+            || self.embedding_model.read().unwrap().is_none()
+        {
             return Ok(0);
         }
 
-        let entries: Vec<(Uuid, String, String, Vec<String>, Vec<String>, Vec<String>)> = {
+        let ids: Vec<Uuid> = {
             let db = self.connection.lock().unwrap();
             let mut stmt = db.prepare(
-                "SELECT co.id, co.title, co.narrative, co.facts, co.concepts, co.files
+                "SELECT co.id
                  FROM compressed_observations co
                  LEFT JOIN vec_obs_map m ON m.observation_id = co.id
                  LEFT JOIN vec_observations v ON v.rowid = m.rowid
@@ -982,91 +990,98 @@ impl MemoryStore {
                  LIMIT ?1"
             )?;
             stmt.query_map(rusqlite::params![limit as i64], |row| {
-                let id: String = row.get(0)?;
-                let title: String = row.get(1)?;
-                let narrative: String = row.get(2)?;
-                let facts_json: String = row.get(3)?;
-                let concepts_json: String = row.get(4)?;
-                let files_json: String = row.get(5)?;
-                Ok((id, title, narrative, facts_json, concepts_json, files_json))
+                row.get::<_, String>(0)
             })?
             .filter_map(|r| r.ok())
-            .filter_map(
-                |(id_str, title, narrative, facts_json, concepts_json, files_json)| {
-                    let id = Uuid::parse_str(&id_str).ok()?;
-                    let facts: Vec<String> = serde_json::from_str(&facts_json).unwrap_or_default();
-                    let concepts: Vec<String> =
-                        serde_json::from_str(&concepts_json).unwrap_or_default();
-                    let files: Vec<String> = serde_json::from_str(&files_json).unwrap_or_default();
-                    Some((id, title, narrative, facts, concepts, files))
-                },
-            )
+            .filter_map(|s| Uuid::parse_str(&s).ok())
             .collect()
         };
 
-        let count = entries.len();
+        let count = ids.len();
         if count == 0 {
             return Ok(0);
         }
 
-        crate::log_info!("backfilling embeddings for {} compressed observations", count);
+        crate::log_info!(
+            "enqueuing {} observations for embedding backfill",
+            count
+        );
 
-        let db_path = self.db_path.clone();
-        let llm = embed_llm.unwrap();
-        let model = embed_model.unwrap();
-
-        let worker_rt = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(rt) => rt,
-            Err(e) => {
-                crate::log_warn!("failed to create runtime for embedding backfill: {}", e);
-                return Ok(count);
-            }
-        };
-
-        for (id, title, narrative, facts, concepts, files) in entries {
-            let search_text = format!(
-                "{} {} {} {} {}",
-                title,
-                narrative,
-                facts.join(" "),
-                concepts.join(" "),
-                files.join(" ")
-            );
-
-            match worker_rt.block_on(llm.embed(&model, &search_text)) {
-                Ok(embedding) => {
-                    let blob: Vec<u8> =
-                        embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
-                    if let Ok(conn) = Connection::open(&db_path) {
-                        let id_str = id.to_string();
-                        let _ = conn.execute(
-                            "INSERT OR IGNORE INTO vec_obs_map(observation_id) VALUES (?1)",
-                            rusqlite::params![&id_str],
-                        );
-                        let rowid: i64 = conn
-                            .query_row(
-                                "SELECT rowid FROM vec_obs_map WHERE observation_id = ?1",
-                                rusqlite::params![&id_str],
-                                |row| row.get(0),
-                            )
-                            .unwrap_or(0);
-                        if rowid > 0 {
-                            let _ = conn.execute(
-                                "INSERT OR REPLACE INTO vec_observations(rowid, embedding) VALUES (?1, ?2)",
-                                rusqlite::params![rowid, blob],
-                            );
-                        }
-                    }
-                    crate::log_info!("backfilled embedding for observation {}", id);
-                }
-                Err(e) => crate::log_warn!("backfill: embedding failed for {}: {}", id, e),
-            }
+        for id in ids {
+            self.schedule_embedding_backfill(id);
         }
 
         Ok(count)
+    }
+
+    /// Generate and store an embedding for a single, already-compressed
+    /// observation.  Called by compression queue workers.
+    pub async fn backfill_embedding(&self, id: Uuid) -> Result<()> {
+        let (title, narrative, facts, concepts, files) = {
+            let db = self.connection.lock().unwrap();
+            let mut stmt = db.prepare(
+                "SELECT co.title, co.narrative, co.facts, co.concepts, co.files
+                 FROM compressed_observations co
+                 WHERE co.id = ?1"
+            )?;
+            stmt.query_row(rusqlite::params![id.to_string()], |row| {
+                let title: String = row.get(0)?;
+                let narrative: String = row.get(1)?;
+                let facts_json: String = row.get(2)?;
+                let concepts_json: String = row.get(3)?;
+                let files_json: String = row.get(4)?;
+                let facts: Vec<String> = serde_json::from_str(&facts_json).unwrap_or_default();
+                let concepts: Vec<String> =
+                    serde_json::from_str(&concepts_json).unwrap_or_default();
+                let files: Vec<String> = serde_json::from_str(&files_json).unwrap_or_default();
+                Ok((title, narrative, facts, concepts, files))
+            })?
+        };
+
+        let llm = match self.llm.read().unwrap().as_ref() {
+            Some(l) => l.clone(),
+            None => anyhow::bail!("no LLM client configured for embedding backfill"),
+        };
+        let model = match self.embedding_model.read().unwrap().as_ref() {
+            Some(m) => m.clone(),
+            None => anyhow::bail!("no embedding model configured for backfill"),
+        };
+
+        let search_text = format!(
+            "{} {} {} {} {}",
+            title,
+            narrative,
+            facts.join(" "),
+            concepts.join(" "),
+            files.join(" ")
+        );
+
+        let embedding = llm.embed(&model, &search_text).await?;
+        let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
+
+        if let Ok(conn) = Connection::open(&self.db_path) {
+            let id_str = id.to_string();
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO vec_obs_map(observation_id) VALUES (?1)",
+                rusqlite::params![&id_str],
+            );
+            let rowid: i64 = conn
+                .query_row(
+                    "SELECT rowid FROM vec_obs_map WHERE observation_id = ?1",
+                    rusqlite::params![&id_str],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            if rowid > 0 {
+                let _ = conn.execute(
+                    "INSERT OR REPLACE INTO vec_observations(rowid, embedding) VALUES (?1, ?2)",
+                    rusqlite::params![rowid, blob],
+                );
+            }
+        }
+
+        crate::log_info!("backfilled embedding for observation {}", id);
+        Ok(())
     }
 
     // ─── Phase 2: Slots ────────────────────────────────────────────

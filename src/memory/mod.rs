@@ -18,7 +18,7 @@ pub mod sessions;
 pub mod slots;
 pub mod types;
 
-pub use compression_queue::{CompressionQueue, DEFAULT_COMPRESSION_CONCURRENCY};
+pub use compression_queue::{CompressionQueue, QueueTask, DEFAULT_COMPRESSION_CONCURRENCY};
 pub use dedup::DedupMap;
 pub use engine::MemoryStore;
 pub use search_index::Bm25Index;
