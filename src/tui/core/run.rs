@@ -362,6 +362,7 @@ impl App {
             selection_clipboard_lease: None,
             last_render_time: Instant::now(),
             render_throttled: false,
+            dirty: false,
             backend_tx,
             backend_rx,
             spinner_start: Instant::now(),
@@ -443,12 +444,13 @@ impl App {
                 self.force_full_redraw = false;
             }
 
-            if elapsed >= frame_budget || !self.render_throttled {
+            if self.dirty && (elapsed >= frame_budget || !self.render_throttled) {
                 terminal
                     .draw(|frame| self.render(frame))
                     .context("failed to render frame")?;
                 self.last_render_time = now;
                 self.render_throttled = true;
+                self.dirty = false;
             }
 
             if self.should_quit {

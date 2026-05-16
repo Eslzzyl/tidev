@@ -227,6 +227,10 @@ struct App {
     selection_clipboard_lease: Option<ClipboardLease>,
     last_render_time: Instant,
     render_throttled: bool,
+    /// Dirty flag: set to true whenever UI state changes.
+    /// The main loop skips terminal.draw() when this is false,
+    /// eliminating wasted CPU during idle periods.
+    dirty: bool,
     backend_tx: UnboundedSender<BackendEvent>,
     backend_rx: UnboundedReceiver<BackendEvent>,
     spinner_start: Instant,
@@ -711,6 +715,7 @@ impl App {
     }
 
     fn handle_backend_event(&mut self, event: BackendEvent, runtime: &Runtime) -> Result<()> {
+        self.dirty = true;
         // Sandbox elevation requests are handled here, outside the per-session
         // dispatch, because they carry a oneshot sender that must not be moved
         // into the event handler's match.

@@ -1399,8 +1399,10 @@ impl App {
         let bottom_threshold = area.y.saturating_add(area.height.saturating_sub(2));
 
         if pointer.y <= top_threshold {
+            self.dirty = true;
             self.scroll_messages_up_internal(self.config.ui.scroll_speed as usize);
         } else if pointer.y >= bottom_threshold {
+            self.dirty = true;
             self.scroll_messages_down_internal(self.config.ui.scroll_speed as usize);
         }
     }
