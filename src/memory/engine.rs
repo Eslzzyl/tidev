@@ -3,7 +3,7 @@ use chrono::Utc;
 use rusqlite::Connection;
 use std::path::PathBuf;
 use std::sync::{
-    Arc, Mutex, Once, RwLock,
+    Arc, Mutex, RwLock,
     atomic::{AtomicBool, AtomicU32, Ordering},
     mpsc,
 };
@@ -28,14 +28,6 @@ use super::{
     lessons::LessonService,
     reflect::{ReflectReport, ReflectService},
 };
-
-/// Global once guard for sqlite-vec auto-extension registration.
-static VEC_INIT: Once = Once::new();
-
-// Direct FFI declaration matching the SQLite C API.
-unsafe extern "C" {
-    fn sqlite3_auto_extension(xEntryPoint: Option<unsafe extern "C" fn()>) -> i32;
-}
 
 // ─── Compression circuit breaker ────────────────────────────────────
 
@@ -77,11 +69,6 @@ pub struct MemoryStore {
 impl MemoryStore {
     /// Open or create the memory store.
     pub fn open(db_path: impl AsRef<std::path::Path>) -> Result<Self> {
-        // Register sqlite-vec auto-extension once (must happen before any connection opens)
-        VEC_INIT.call_once(|| unsafe {
-            sqlite3_auto_extension(Some(sqlite_vec::sqlite3_vec_init));
-        });
-
         let path = db_path.as_ref().to_path_buf();
         let connection = Connection::open(&path)?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
@@ -127,11 +114,6 @@ impl MemoryStore {
         db_path: impl AsRef<std::path::Path>,
         connection: Arc<Mutex<Connection>>,
     ) -> Result<Self> {
-        // Register sqlite-vec auto-extension once
-        VEC_INIT.call_once(|| unsafe {
-            sqlite3_auto_extension(Some(sqlite_vec::sqlite3_vec_init));
-        });
-
         let path = db_path.as_ref().to_path_buf();
 
         let read_connection = Connection::open(&path)?;
@@ -967,6 +949,130 @@ impl MemoryStore {
                     }
                 });
             }
+        }
+
+        Ok(count)
+    }
+
+    /// Backfill embeddings for compressed observations that are missing them.
+    ///
+    /// This can happen when the vec0 extension failed to load at startup or when
+    /// embedding generation temporarily failed.  It finds compressed observations
+    /// (`obs_type IS NOT NULL`) that have no corresponding row in `vec_observations`
+    /// and spawns background threads to generate + store embeddings.
+    ///
+    /// Returns the number of observations scheduled for backfill.
+    pub fn backfill_embeddings(&self, limit: usize) -> Result<usize> {
+        let embed_llm = self.llm.read().unwrap().clone();
+        let embed_model = self.embedding_model.read().unwrap().clone();
+        if embed_llm.is_none() || embed_model.is_none() {
+            return Ok(0);
+        }
+
+        let entries: Vec<(Uuid, String, String, Vec<String>, Vec<String>, Vec<String>)> = {
+            let db = self.connection.lock().unwrap();
+            let mut stmt = db.prepare(
+                "SELECT co.id, co.title, co.narrative, co.facts, co.concepts, co.files
+                 FROM compressed_observations co
+                 LEFT JOIN vec_obs_map m ON m.observation_id = co.id
+                 LEFT JOIN vec_observations v ON v.rowid = m.rowid
+                 WHERE co.obs_type IS NOT NULL
+                   AND v.rowid IS NULL
+                 ORDER BY co.created_at ASC
+                 LIMIT ?1"
+            )?;
+            stmt.query_map(rusqlite::params![limit as i64], |row| {
+                let id: String = row.get(0)?;
+                let title: String = row.get(1)?;
+                let narrative: String = row.get(2)?;
+                let facts_json: String = row.get(3)?;
+                let concepts_json: String = row.get(4)?;
+                let files_json: String = row.get(5)?;
+                Ok((id, title, narrative, facts_json, concepts_json, files_json))
+            })?
+            .filter_map(|r| r.ok())
+            .filter_map(
+                |(id_str, title, narrative, facts_json, concepts_json, files_json)| {
+                    let id = Uuid::parse_str(&id_str).ok()?;
+                    let facts: Vec<String> = serde_json::from_str(&facts_json).unwrap_or_default();
+                    let concepts: Vec<String> =
+                        serde_json::from_str(&concepts_json).unwrap_or_default();
+                    let files: Vec<String> = serde_json::from_str(&files_json).unwrap_or_default();
+                    Some((id, title, narrative, facts, concepts, files))
+                },
+            )
+            .collect()
+        };
+
+        let count = entries.len();
+        if count == 0 {
+            return Ok(0);
+        }
+
+        crate::log_info!("backfilling embeddings for {} compressed observations", count);
+
+        let db_path = self.db_path.clone();
+        let llm = embed_llm.unwrap();
+        let model = embed_model.unwrap();
+
+        for (id, title, narrative, facts, concepts, files) in entries {
+            let db_path = db_path.clone();
+            let llm = llm.clone();
+            let model = model.clone();
+            std::thread::spawn(move || {
+                let worker_rt = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        crate::log_warn!(
+                            "failed to create runtime for embedding backfill of {}: {}",
+                            id,
+                            e
+                        );
+                        return;
+                    }
+                };
+
+                let search_text = format!(
+                    "{} {} {} {} {}",
+                    title,
+                    narrative,
+                    facts.join(" "),
+                    concepts.join(" "),
+                    files.join(" ")
+                );
+
+                match worker_rt.block_on(llm.embed(&model, &search_text)) {
+                    Ok(embedding) => {
+                        let blob: Vec<u8> =
+                            embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
+                        if let Ok(conn) = Connection::open(&db_path) {
+                            let id_str = id.to_string();
+                            let _ = conn.execute(
+                                "INSERT OR IGNORE INTO vec_obs_map(observation_id) VALUES (?1)",
+                                rusqlite::params![&id_str],
+                            );
+                            let rowid: i64 = conn
+                                .query_row(
+                                    "SELECT rowid FROM vec_obs_map WHERE observation_id = ?1",
+                                    rusqlite::params![&id_str],
+                                    |row| row.get(0),
+                                )
+                                .unwrap_or(0);
+                            if rowid > 0 {
+                                let _ = conn.execute(
+                                    "INSERT OR REPLACE INTO vec_observations(rowid, embedding) VALUES (?1, ?2)",
+                                    rusqlite::params![rowid, blob],
+                                );
+                            }
+                        }
+                        crate::log_info!("backfilled embedding for observation {}", id);
+                    }
+                    Err(e) => crate::log_warn!("backfill: embedding failed for {}: {}", id, e),
+                }
+            });
         }
 
         Ok(count)

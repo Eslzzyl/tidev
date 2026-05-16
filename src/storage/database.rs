@@ -1,7 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Once},
     time::Duration,
 };
 
@@ -14,6 +14,14 @@ use super::{
     schema::{SCHEMA_SQL, SCHEMA_VERSION},
     SessionStore,
 };
+
+/// Global once guard for sqlite-vec auto-extension registration.
+static VEC_INIT: Once = Once::new();
+
+// Direct FFI declaration matching the SQLite C API.
+unsafe extern "C" {
+    fn sqlite3_auto_extension(xEntryPoint: Option<unsafe extern "C" fn()>) -> i32;
+}
 
 /// Unified database manager.
 ///
@@ -46,6 +54,12 @@ impl Database {
             fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create database directory {}", parent.display()))?;
         }
+
+        // ── Register sqlite-vec auto-extension ──────────────────────────
+        // Must happen before any connection opens so vec0 virtual table works.
+        VEC_INIT.call_once(|| unsafe {
+            sqlite3_auto_extension(Some(sqlite_vec::sqlite3_vec_init));
+        });
 
         // ── Shared write connection ──────────────────────────────────────
         let write_conn = Connection::open(&path)

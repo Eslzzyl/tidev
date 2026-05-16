@@ -118,6 +118,14 @@ impl App {
                 e
             );
         }
+        // Backfill embeddings for already-compressed observations that are
+        // missing vector embeddings (e.g. when vec0 wasn't loaded at startup).
+        if let Err(e) = memory_store.backfill_embeddings(50) {
+            crate::log_warn!(
+                "startup backfill of embeddings failed: {}",
+                e
+            );
+        }
         // Set sandbox policy based on session mode and config
         let sandbox_policy = mode.sandbox_policy(&config.sandbox);
         tools.set_sandbox_policy(Some(sandbox_policy));
