@@ -45,10 +45,20 @@ impl CompressionQueue {
             let handle = thread::Builder::new()
                 .name(format!("compress-{}", i))
                 .spawn(move || {
-                    let rt = match tokio::runtime::Handle::try_current() {
-                        Ok(h) => h,
-                        Err(_) => {
-                            crate::log_warn!("compression worker {}: no tokio runtime, exiting", i);
+                    // Each worker creates its own current-thread tokio runtime
+                    // instead of trying to inherit one from the parent thread
+                    // (std::thread::spawn does not propagate the tokio context).
+                    let worker_rt = match tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    {
+                        Ok(rt) => rt,
+                        Err(e) => {
+                            crate::log_warn!(
+                                "compression worker {}: failed to create runtime: {}",
+                                i,
+                                e
+                            );
                             return;
                         }
                     };
@@ -73,7 +83,7 @@ impl CompressionQueue {
                             }
                         };
 
-                        if let Err(e) = rt.block_on(store.compress(id)) {
+                        if let Err(e) = worker_rt.block_on(store.compress(id)) {
                             crate::log_warn!("compression failed for {}: {}", id, e);
                         }
                     }

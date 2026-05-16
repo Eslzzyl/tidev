@@ -943,17 +943,21 @@ impl MemoryStore {
             } else {
                 let store = self.clone();
                 std::thread::spawn(move || {
-                    let rt = match tokio::runtime::Handle::try_current() {
-                        Ok(h) => h,
-                        Err(_) => {
+                    let worker_rt = match tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    {
+                        Ok(rt) => rt,
+                        Err(e) => {
                             crate::log_warn!(
-                                "no tokio runtime available, skipping recovery of {}",
-                                id
+                                "failed to create runtime for recovery of {}: {}",
+                                id,
+                                e
                             );
                             return;
                         }
                     };
-                    match rt.block_on(store.compress(id)) {
+                    match worker_rt.block_on(store.compress(id)) {
                         Ok(_) => {
                             crate::log_info!("recovered uncompressed observation {}", id);
                         }

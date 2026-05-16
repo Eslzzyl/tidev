@@ -138,8 +138,7 @@ impl App {
             )),
             auto_approve_permissions: true, // TUI handles permissions via channel
             hooks: crate::hooks::HookEngine::new(config.hooks.clone(), workspace_root.clone())
-                .with_memory_store(memory_store.clone())
-                .with_compression_queue(compression_queue.clone()),
+                .with_memory_store(memory_store.clone()),
         };
         // Schedule periodic eviction (every 60 minutes)
         if tokio::runtime::Handle::try_current().is_ok() {
