@@ -166,6 +166,7 @@ CREATE TABLE IF NOT EXISTS file_reads (
 CREATE INDEX IF NOT EXISTS idx_file_reads_session
     ON file_reads(session_id);
 
+-- Extended memories table
 CREATE TABLE IF NOT EXISTS memories (
     id TEXT PRIMARY KEY,
     workspace_root TEXT NOT NULL,
@@ -177,7 +178,16 @@ CREATE TABLE IF NOT EXISTS memories (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     usage_count INTEGER NOT NULL DEFAULT 0,
-    active INTEGER NOT NULL DEFAULT 1
+    active INTEGER NOT NULL DEFAULT 1,
+    concepts TEXT NOT NULL DEFAULT '[]',
+    files TEXT NOT NULL DEFAULT '[]',
+    strength REAL NOT NULL DEFAULT 0.0,
+    importance INTEGER NOT NULL DEFAULT 5,
+    version INTEGER NOT NULL DEFAULT 1,
+    parent_id TEXT,
+    supersedes TEXT NOT NULL DEFAULT '[]',
+    related_ids TEXT NOT NULL DEFAULT '[]',
+    is_latest INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE INDEX IF NOT EXISTS idx_memories_workspace_active
@@ -188,6 +198,18 @@ CREATE INDEX IF NOT EXISTS idx_memories_type
 
 CREATE INDEX IF NOT EXISTS idx_memories_usage
     ON memories(workspace_root, usage_count DESC);
+
+CREATE INDEX IF NOT EXISTS idx_memories_parent
+    ON memories(parent_id);
+
+-- FTS5 virtual table for full-text search (memories only)
+CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+    title, content, tags, concepts, files,
+    content='memories',
+    content_rowid='rowid',
+    tokenize='porter unicode61'
+);
+
 "#;
 
 /// Schema for the export database (no zstd compression).

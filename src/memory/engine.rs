@@ -295,18 +295,27 @@ impl MemoryStore {
     /// Search memories. Uses FTS5 for sync path.
     /// For hybrid search (BM25 + vector), use the async `search_hybrid` method.
     pub fn search(&self, workspace_root: &str, query: &str) -> Result<Vec<MemoryEntry>> {
-        // Try hybrid search if we're in a tokio context and embedding model is available
+        // Try hybrid search if we're in a tokio context and embedding model is available.
+        // Use block_in_place to avoid panicking when called from a tokio worker thread.
         if self.embedding_model.read().unwrap().is_some() {
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 let future = self.search_hybrid(query, workspace_root, 20);
-                if let Ok(results) = handle.block_on(future) {
+                let result = tokio::task::block_in_place(move || handle.block_on(future));
+                if let Ok(results) = result {
                     if !results.is_empty() {
                         return Ok(results);
                     }
                 }
             }
         }
-        // Fall back to FTS5
+        // Fall back to FTS5 / LIKE
+        self.search_fts5_fallback(workspace_root, query)
+    }
+
+    /// FTS5 + LIKE fallback (no hybrid search recursion).
+    /// Used by both `search` (sync) and `search_hybrid` (async) to avoid
+    /// recursive hybrid-search attempts.
+    fn search_fts5_fallback(&self, workspace_root: &str, query: &str) -> Result<Vec<MemoryEntry>> {
         let db = self.read_connection.lock().unwrap();
         if query.trim().is_empty() {
             // Just return latest memories
@@ -1013,8 +1022,8 @@ impl MemoryStore {
             }
         }
 
-        // Fall back to FTS5
-        self.search(workspace_root, query)
+        // Fall back to FTS5 (no hybrid recursion)
+        self.search_fts5_fallback(workspace_root, query)
     }
 
     // ─── Graph: Knowledge Graph Extraction ─────────────────────────
