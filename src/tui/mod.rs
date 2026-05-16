@@ -1527,7 +1527,9 @@ impl App {
     }
 
     fn queue_prompt(&mut self, prompt: String, attachments: Vec<MessageAttachment>) {
-        let mode = self.mode;
+        // If there's a pending mode switch, use that mode for the queued message
+        // so the user's intent to switch modes takes effect on the next message.
+        let mode = self.pending_mode.unwrap_or(self.mode);
         let thinking_level = self.thinking_level.clone();
 
         // Queue via runtime for processing
