@@ -181,7 +181,6 @@ impl AgentRuntime {
         &mut self,
         session_id: uuid::Uuid,
         mode: Option<SessionMode>,
-        skip_search: bool,
     ) -> String {
         let mut sections: Vec<String> = Vec::new();
 
@@ -226,38 +225,6 @@ impl AgentRuntime {
                 }
                 _result
             }};
-        }
-
-        // ── Workspace memories ──────────────────────────────────────────
-        if !skip_search {
-            let query = self.workspace_root.file_name().and_then(|n| n.to_str());
-            {
-                let _start = std::time::Instant::now();
-                let result =
-                    memory_store.search_hot_context_async(query, &ws, 5, 800).await;
-                let _elapsed = _start.elapsed();
-                crate::log_debug!(
-                    "compose_dynamic_context: search_hot_context_async took {:?}",
-                    _elapsed
-                );
-                if _elapsed > std::time::Duration::from_millis(500) {
-                    crate::log_warn!(
-                        "compose_dynamic_context: search_hot_context_async took {:?} (slow)",
-                        _elapsed
-                    );
-                }
-                if let Ok(memories) = result {
-                    let memory_prompt =
-                        crate::memory::MemoryStore::format_for_prompt(&memories);
-                    if !memory_prompt.is_empty() {
-                        sections.push(memory_prompt);
-                    }
-                }
-            }
-        } else {
-            crate::log_debug!(
-                "compose_dynamic_context: search_hot_context_async skipped (continuation turn)"
-            );
         }
 
         // ── Compressed observations (current session) ───────────────────
@@ -1321,7 +1288,6 @@ impl AgentRuntime {
             static_system_prompt.len()
         );
 
-        let mut _sub_first_iteration = true;
         loop {
             // Check cancellation
             if let Some(ref ct) = cancel_token
@@ -1346,8 +1312,7 @@ impl AgentRuntime {
             // Compose dynamic context + build
             let _t_sub_compose = std::time::Instant::now();
             let dynamic_context =
-                self.compose_dynamic_context(child_session_id, None, !_sub_first_iteration).await;
-            _sub_first_iteration = false;
+                self.compose_dynamic_context(child_session_id, None).await;
             crate::log_info!(
                 "run_subagent: compose_dynamic_context took {:?} ({} chars)",
                 _t_sub_compose.elapsed(),
@@ -1759,7 +1724,6 @@ impl AgentRuntime {
             static_system_prompt.len()
         );
 
-        let mut _first_iteration = true;
         loop {
             // Check cancellation
             if let Some(ref ct) = cancel_token
@@ -1784,8 +1748,7 @@ impl AgentRuntime {
             // 2. Compose dynamic (per-turn) context
             let _t_compose = std::time::Instant::now();
             let dynamic_context =
-                self.compose_dynamic_context(session_id, Some(mode), !_first_iteration).await;
-            _first_iteration = false;
+                self.compose_dynamic_context(session_id, Some(mode)).await;
             crate::log_info!(
                 "agent_loop: composed dynamic context ({} chars) in {:?}",
                 dynamic_context.len(),
@@ -3053,7 +3016,7 @@ mod tests {
         }
 
         let result = agent
-            .compose_dynamic_context(session_id, None, false)
+            .compose_dynamic_context(session_id, None)
             .await;
         assert!(
             result.is_empty(),
@@ -3081,7 +3044,7 @@ mod tests {
         }
 
         let result = agent
-            .compose_dynamic_context(session_id, Some(SessionMode::Build), false)
+            .compose_dynamic_context(session_id, Some(SessionMode::Build))
             .await;
         assert!(
             !result.is_empty(),
