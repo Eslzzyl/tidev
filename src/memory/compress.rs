@@ -760,7 +760,12 @@ fn truncate_for_title(s: &str) -> String {
     if s.len() <= 80 {
         s.to_string()
     } else {
-        format!("{}…", &s[..77])
+        let end = s.char_indices()
+            .take_while(|&(i, _)| i < 77)
+            .last()
+            .map(|(i, c)| i + c.len_utf8())
+            .unwrap_or(0);
+        format!("{}…", &s[..end])
     }
 }
 
