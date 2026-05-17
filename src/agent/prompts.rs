@@ -111,6 +111,8 @@ fn explorer_prompt() -> String {
             Search and report only.\n\
          - You do NOT have access to `write`, `edit`, or `apply_patch` tools. \
             If asked to edit files, refuse and explain that you are a read-only agent.\n\
+         - NO delegation or spawning sub-agents. You must search and explore the \
+            codebase directly using your own tools.\n\
          - Return your analysis/summary as text output. Do not attempt to produce file edits.\n\
          - When using bash, only run read-only commands (find, grep, cat, git log, ls, etc.). \
             Never use sed -i, touch, mkdir, rm, mv, cp, echo >, or any command that modifies the filesystem.\n\
@@ -145,6 +147,8 @@ fn librarian_prompt() -> String {
             Research and report only.\n\
          - You do NOT have access to `write`, `edit`, or `apply_patch` tools. \
             If asked to edit files, refuse and explain that you are a read-only agent.\n\
+         - NO delegation or spawning sub-agents. You must do your own research \
+            directly using your own tools.\n\
          - Return your research findings as text output. Do not attempt to produce file edits.",
         base_instruction()
     )
@@ -176,6 +180,8 @@ fn oracle_prompt() -> String {
             You advise, you don't implement.\n\
          - You do NOT have access to `write`, `edit`, or `apply_patch` tools. \
             If asked to edit files, refuse and explain that you are a read-only agent.\n\
+         - NO delegation or spawning sub-agents. You must analyse the codebase \
+            yourself directly using your own tools.\n\
          - Return your analysis as text output. Do not attempt to produce file edits.\n\
          - Focus on strategy, not execution.\n\
          - Point to specific files/lines when relevant.",
@@ -196,7 +202,11 @@ fn designer_prompt() -> String {
          ## Behaviour\n\
          - Provide concrete code changes, not abstract advice.\n\
          - Consider responsiveness, accessibility, and consistency.\n\
-         - When reviewing, focus on what users actually see and feel.",
+         - When reviewing, focus on what users actually see and feel.\n\n\
+         ## Constraints\n\
+         - NO delegation or spawning sub-agents. You must do your own design \
+            work and implementation directly.\n\
+         - Run relevant validation (build, lint) when requested.",
         base_instruction()
     )
 }
@@ -262,6 +272,7 @@ mod tests {
         assert!(prompt.contains("READ-ONLY"));
         assert!(prompt.contains("do NOT have access to `write`"));
         assert!(prompt.contains("Return your analysis"));
+        assert!(prompt.contains("NO delegation"));
     }
 
     #[test]
@@ -270,6 +281,7 @@ mod tests {
         assert!(prompt.contains("READ-ONLY"));
         assert!(prompt.contains("do NOT have access to `write`"));
         assert!(prompt.contains("Return your research findings"));
+        assert!(prompt.contains("NO delegation"));
     }
 
     #[test]
@@ -278,6 +290,13 @@ mod tests {
         assert!(prompt.contains("READ-ONLY"));
         assert!(prompt.contains("do NOT have access to `write`"));
         assert!(prompt.contains("Return your analysis"));
+        assert!(prompt.contains("NO delegation"));
+    }
+
+    #[test]
+    fn test_designer_constraints() {
+        let prompt = system_prompt(AgentType::Designer);
+        assert!(prompt.contains("NO delegation"));
     }
 
     #[test]
