@@ -55,10 +55,29 @@ pub struct MemoryConfig {
     /// embedding models exist on any provider, vector search degrades to FTS5.
     #[serde(default)]
     pub embedding_model: Option<String>,
+    /// Whether to inject comprehensive memory context into the conversation.
+    /// When true, memory context (observations, summaries, facts, procedures,
+    /// slots, graph, insights) is injected into the first user message only.
+    /// When false (default), memory is stored but never auto-injected.
+    /// Like agentmemory's AGENTMEMORY_INJECT_CONTEXT.
+    #[serde(default)]
+    pub inject_context: bool,
+    /// Whether to search and inject memory context relevant to the file
+    /// being operated on, before each file tool call (read/write/edit/grep/glob).
+    /// Like agentmemory's pre-tool-use enrich hook.
+    #[serde(default)]
+    pub enrich_tools: bool,
+    /// Token budget for the first-turn context injection.
+    #[serde(default = "default_context_token_budget")]
+    pub context_token_budget: usize,
 }
 
 fn default_compression_enabled() -> bool {
     true
+}
+
+fn default_context_token_budget() -> usize {
+    2000
 }
 
 impl Default for MemoryConfig {
@@ -69,6 +88,9 @@ impl Default for MemoryConfig {
             compression_model: None,
             summarization_model: None,
             embedding_model: None,
+            inject_context: false,
+            enrich_tools: false,
+            context_token_budget: 2000,
         }
     }
 }

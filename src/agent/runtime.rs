@@ -181,6 +181,7 @@ impl AgentRuntime {
         &mut self,
         session_id: uuid::Uuid,
         mode: Option<SessionMode>,
+        include_memory: bool,
     ) -> String {
         let mut sections: Vec<String> = Vec::new();
 
@@ -203,117 +204,119 @@ impl AgentRuntime {
             sections.push(mode.reminder().to_string());
         }
 
-        let ws = self.workspace_root.display().to_string();
-        let memory_store = self.tools.memory_store();
+        if include_memory {
+            let ws = self.workspace_root.display().to_string();
+            let memory_store = self.tools.memory_store();
 
-        macro_rules! timed_memory_op {
-            ($label:expr, $body:expr) => {{
-                let _start = std::time::Instant::now();
-                let _result = $body;
-                let _elapsed = _start.elapsed();
-                crate::log_debug!(
-                    "compose_dynamic_context: {} took {:?}",
-                    $label,
-                    _elapsed
-                );
-                if _elapsed > std::time::Duration::from_millis(500) {
-                    crate::log_warn!(
-                        "compose_dynamic_context: {} took {:?} (slow)",
+            macro_rules! timed_memory_op {
+                ($label:expr, $body:expr) => {{
+                    let _start = std::time::Instant::now();
+                    let _result = $body;
+                    let _elapsed = _start.elapsed();
+                    crate::log_debug!(
+                        "compose_dynamic_context: {} took {:?}",
                         $label,
                         _elapsed
                     );
+                    if _elapsed > std::time::Duration::from_millis(500) {
+                        crate::log_warn!(
+                            "compose_dynamic_context: {} took {:?} (slow)",
+                            $label,
+                            _elapsed
+                        );
+                    }
+                    _result
+                }};
+            }
+
+            // ── Compressed observations (current session) ───────────────────
+            if let Ok(obs) = timed_memory_op!(
+                "load_recent_compressed_observations",
+                memory_store.load_recent_compressed_observations(&session_id, 8, 5)
+            ) && !obs.is_empty()
+            {
+                sections.push(Self::format_compressed_observations(&obs));
+            }
+
+            // ── Session summaries (other sessions) ──────────────────────────
+            if let Ok(summaries) = timed_memory_op!(
+                "load_other_session_summaries",
+                memory_store.load_other_session_summaries(&session_id, 5)
+            ) && !summaries.is_empty()
+            {
+                sections.push(Self::format_session_summaries(&summaries));
+            }
+
+            // ── Consolidated knowledge (cross-session facts) ────────────────
+            if let Ok(facts) = timed_memory_op!(
+                "load_consolidated_facts",
+                memory_store.load_consolidated_facts(&ws, 5)
+            ) && !facts.is_empty()
+            {
+                let mut block = "## Consolidated Project Knowledge\n".to_string();
+                for fact in &facts {
+                    block.push_str(&format!(
+                        "- {} (confidence: {:.1})\n",
+                        fact.content, fact.strength
+                    ));
                 }
-                _result
-            }};
-        }
-
-        // ── Compressed observations (current session) ───────────────────
-        if let Ok(obs) = timed_memory_op!(
-            "load_recent_compressed_observations",
-            memory_store.load_recent_compressed_observations(&session_id, 8, 5)
-        ) && !obs.is_empty()
-        {
-            sections.push(Self::format_compressed_observations(&obs));
-        }
-
-        // ── Session summaries (other sessions) ──────────────────────────
-        if let Ok(summaries) = timed_memory_op!(
-            "load_other_session_summaries",
-            memory_store.load_other_session_summaries(&session_id, 5)
-        ) && !summaries.is_empty()
-        {
-            sections.push(Self::format_session_summaries(&summaries));
-        }
-
-        // ── Consolidated knowledge (cross-session facts) ────────────────
-        if let Ok(facts) = timed_memory_op!(
-            "load_consolidated_facts",
-            memory_store.load_consolidated_facts(&ws, 5)
-        ) && !facts.is_empty()
-        {
-            let mut block = "## Consolidated Project Knowledge\n".to_string();
-            for fact in &facts {
-                block.push_str(&format!(
-                    "- {} (confidence: {:.1})\n",
-                    fact.content, fact.strength
-                ));
+                sections.push(block);
             }
-            sections.push(block);
-        }
 
-        // ── Consolidated procedures ─────────────────────────────────────
-        if let Ok(procs) = timed_memory_op!(
-            "load_consolidated_procedures",
-            memory_store.load_consolidated_procedures(&ws, 3)
-        ) && !procs.is_empty()
-        {
-            let mut block = "## Reusable Procedures\n".to_string();
-            for proc in &procs {
-                block.push_str(&format!("- **{}**: {}\n", proc.title, proc.content));
+            // ── Consolidated procedures ─────────────────────────────────────
+            if let Ok(procs) = timed_memory_op!(
+                "load_consolidated_procedures",
+                memory_store.load_consolidated_procedures(&ws, 3)
+            ) && !procs.is_empty()
+            {
+                let mut block = "## Reusable Procedures\n".to_string();
+                for proc in &procs {
+                    block.push_str(&format!("- **{}**: {}\n", proc.title, proc.content));
+                }
+                sections.push(block);
             }
-            sections.push(block);
-        }
 
-        // ── Memory slots ────────────────────────────────────────────────
-        if let Ok(slot_content) = timed_memory_op!(
-            "render_pinned_slots",
-            memory_store.render_pinned_slots(&ws)
-        ) {
-            if !slot_content.is_empty() {
-                sections.push(slot_content);
-            }
-        }
-
-        // ── Knowledge graph context ─────────────────────────────────────
-        let query = self.workspace_root.file_name().and_then(|n| n.to_str());
-        if let Ok(paths) = timed_memory_op!(
-            "search_graph_context",
-            memory_store.search_graph_context(query, 3, 10)
-        ) {
-            if !paths.is_empty() {
-                let graph_prompt =
-                    crate::memory::graph_retrieval::GraphRetrieval::format_for_prompt(&paths, 8);
-                if !graph_prompt.is_empty() {
-                    sections.push(graph_prompt);
+            // ── Memory slots ────────────────────────────────────────────────
+            if let Ok(slot_content) = timed_memory_op!(
+                "render_pinned_slots",
+                memory_store.render_pinned_slots(&ws)
+            ) {
+                if !slot_content.is_empty() {
+                    sections.push(slot_content);
                 }
             }
-        }
 
-        // ── Insights (cross-session synthesized knowledge) ──────────────
-        if let Ok(insights) = timed_memory_op!(
-            "load_insights",
-            memory_store.load_insights(&ws, 5)
-        ) && !insights.is_empty()
-        {
-            let mut block = "## Cross-Session Insights\n".to_string();
-            for insight in &insights {
-                let conf = insight.strength;
-                block.push_str(&format!(
-                    "- **{}** (confidence: {:.1}): {}\n",
-                    insight.title, conf, insight.content
-                ));
+            // ── Knowledge graph context ─────────────────────────────────────
+            let query = self.workspace_root.file_name().and_then(|n| n.to_str());
+            if let Ok(paths) = timed_memory_op!(
+                "search_graph_context",
+                memory_store.search_graph_context(query, 3, 10)
+            ) {
+                if !paths.is_empty() {
+                    let graph_prompt =
+                        crate::memory::graph_retrieval::GraphRetrieval::format_for_prompt(&paths, 8);
+                    if !graph_prompt.is_empty() {
+                        sections.push(graph_prompt);
+                    }
+                }
             }
-            sections.push(block);
+
+            // ── Insights (cross-session synthesized knowledge) ──────────────
+            if let Ok(insights) = timed_memory_op!(
+                "load_insights",
+                memory_store.load_insights(&ws, 5)
+            ) && !insights.is_empty()
+            {
+                let mut block = "## Cross-Session Insights\n".to_string();
+                for insight in &insights {
+                    let conf = insight.strength;
+                    block.push_str(&format!(
+                        "- **{}** (confidence: {:.1}): {}\n",
+                        insight.title, conf, insight.content
+                    ));
+                }
+                sections.push(block);
+            }
         }
 
         if sections.is_empty() {
@@ -801,9 +804,23 @@ impl AgentRuntime {
                     self.hooks.on_pre_tool_use(&tool_call, Some(session_id));
                 }
 
-                let result = handle.await.unwrap_or_else(|join_err| {
+                let mut result = handle.await.unwrap_or_else(|join_err| {
                     ToolExecutionResult::new(format!("Tool task panicked/aborted: {join_err}"))
                 });
+
+                // Pre-tool enrich: search and inject memory relevant to the
+                // file being operated on (agentmemory's mem::enrich equivalent).
+                if self.config.memory.enrich_tools && is_file_operation(&tool_call.name) {
+                    if let Some(ctx) = self
+                        .hooks
+                        .on_pre_tool_use_enrich(&tool_call, Some(session_id))
+                        .await
+                    {
+                        result
+                            .output
+                            .push_str(&format!("\n\n<system-reminder>\n{}\n</system-reminder>", ctx));
+                    }
+                }
 
                 // PostToolUse: ALL read tools fire observations (agentmemory
                 // has no matcher on PostToolUse).
@@ -892,6 +909,20 @@ impl AgentRuntime {
             let mut result = handle.await.unwrap_or_else(|join_err| {
                 ToolExecutionResult::new(format!("Tool task panicked/aborted: {join_err}"))
             });
+
+            // Pre-tool enrich: search and inject memory relevant to the
+            // file being operated on (agentmemory's mem::enrich equivalent).
+            if self.config.memory.enrich_tools && is_file_operation(&tool_call.name) {
+                if let Some(ctx) = self
+                    .hooks
+                    .on_pre_tool_use_enrich(tool_call, Some(session_id))
+                    .await
+                {
+                    result
+                        .output
+                        .push_str(&format!("\n\n<system-reminder>\n{}\n</system-reminder>", ctx));
+                }
+            }
 
             // ─── PostToolFailure Observation ─────────────────────────────
             // If the tool result indicates an error, record a PostToolFailure
@@ -1311,8 +1342,10 @@ impl AgentRuntime {
 
             // Compose dynamic context + build
             let _t_sub_compose = std::time::Instant::now();
+            let is_first_sub_turn = db_messages.len() <= 1;
+            let include_sub_memory = self.config.memory.inject_context && is_first_sub_turn;
             let dynamic_context =
-                self.compose_dynamic_context(child_session_id, None).await;
+                self.compose_dynamic_context(child_session_id, None, include_sub_memory).await;
             crate::log_info!(
                 "run_subagent: compose_dynamic_context took {:?} ({} chars)",
                 _t_sub_compose.elapsed(),
@@ -1747,8 +1780,10 @@ impl AgentRuntime {
 
             // 2. Compose dynamic (per-turn) context
             let _t_compose = std::time::Instant::now();
+            let has_assistant = db_messages.iter().any(|m| m.role == MessageRole::Assistant);
+            let include_memory = self.config.memory.inject_context && !has_assistant;
             let dynamic_context =
-                self.compose_dynamic_context(session_id, Some(mode)).await;
+                self.compose_dynamic_context(session_id, Some(mode), include_memory).await;
             crate::log_info!(
                 "agent_loop: composed dynamic context ({} chars) in {:?}",
                 dynamic_context.len(),
@@ -3016,7 +3051,7 @@ mod tests {
         }
 
         let result = agent
-            .compose_dynamic_context(session_id, None)
+            .compose_dynamic_context(session_id, None, false)
             .await;
         assert!(
             result.is_empty(),
@@ -3044,7 +3079,7 @@ mod tests {
         }
 
         let result = agent
-            .compose_dynamic_context(session_id, Some(SessionMode::Build))
+            .compose_dynamic_context(session_id, Some(SessionMode::Build), false)
             .await;
         assert!(
             !result.is_empty(),

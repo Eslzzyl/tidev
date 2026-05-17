@@ -7,6 +7,9 @@ use crate::hooks::runner::run_hook_command;
 use crate::memory::{HookPayload, HookType, MemoryStore};
 use crate::session::{ToolCall, ToolExecutionResult};
 
+/// Max chars for pre-tool enrich context, matching agentmemory's MAX_CONTEXT_LENGTH.
+const ENRICH_MAX_CHARS: usize = 4000;
+
 /// Outcome of running hooks for a single tool call.
 #[derive(Clone, Debug, Default)]
 pub struct PostToolUseHookOutcome {
@@ -199,6 +202,81 @@ impl HookEngine {
         }
     }
 
+    /// Search memory for observations relevant to the file being operated on.
+    ///
+    /// Like agentmemory's `mem::enrich` (pre-tool-use enrich hook).
+    /// Returns a `<system-reminder>` block with relevant context, or `None`.
+    /// Capped at [`ENRICH_MAX_CHARS`] characters.
+    pub async fn on_pre_tool_use_enrich(
+        &self,
+        tool_call: &ToolCall,
+        session_id: Option<uuid::Uuid>,
+    ) -> Option<String> {
+        let store = self.memory_store.as_ref()?;
+        let _sid = session_id?;
+
+        let workspace_root = self.workspace_root.to_string_lossy().to_string();
+
+        // Extract file paths from tool arguments
+        let file_paths = extract_tool_file_paths(tool_call);
+        if file_paths.is_empty() {
+            return None;
+        }
+
+        // Build search query from file names and search
+        let search_query = file_paths
+            .iter()
+            .filter_map(|p| {
+                Path::new(p)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.to_string())
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        if search_query.trim().is_empty() {
+            return None;
+        }
+
+        let entries = store
+            .search(&workspace_root, &search_query)
+            .ok()?;
+
+        if entries.is_empty() {
+            return None;
+        }
+
+        let mut parts: Vec<String> = Vec::new();
+        for entry in entries.iter().take(8) {
+            let type_str = entry.memory_type.as_str();
+            let title = &entry.title;
+            let content = &entry.content;
+            parts.push(format!("- [{}] {}: {}", type_str, title, content));
+        }
+
+        let body = parts.join("\n");
+        if body.is_empty() {
+            return None;
+        }
+
+        let wrapped = format!(
+            "<agentmemory-relevant-context>\n{}\n</agentmemory-relevant-context>",
+            body
+        );
+
+        // Cap at ENRICH_MAX_CHARS
+        let truncated = if wrapped.len() > ENRICH_MAX_CHARS {
+            let mut t = wrapped[..ENRICH_MAX_CHARS].to_string();
+            t.push_str("\n... (truncated)");
+            t
+        } else {
+            wrapped
+        };
+
+        Some(truncated)
+    }
+
     /// Record a memory observation after tool failure.
     pub fn on_post_tool_failure(
         &self,
@@ -244,7 +322,53 @@ impl HookEngine {
             let _ = store.observe(&payload);
         }
     }
+}
 
+/// Extract file paths from a tool call's JSON arguments.
+///
+/// Mirrors agentmemory's pre-tool-use enrich file-extraction logic:
+/// Grep uses "path"/"file", other file tools use "file_path"/"path".
+fn extract_tool_file_paths(tool_call: &ToolCall) -> Vec<String> {
+    let args: serde_json::Value = match serde_json::from_str(&tool_call.arguments) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+
+    let canonical =
+        crate::tooling::canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
+
+    let keys: &[&str] = if canonical == "grep" {
+        &["path", "file"]
+    } else {
+        &["file_path", "path"]
+    };
+
+    let mut paths: Vec<String> = Vec::new();
+    if let Some(obj) = args.as_object() {
+        for key in keys {
+            if let Some(val) = obj.get(*key) {
+                match val {
+                    serde_json::Value::String(s) if !s.is_empty() => {
+                        paths.push(s.clone());
+                    }
+                    serde_json::Value::Array(arr) => {
+                        for item in arr {
+                            if let serde_json::Value::String(s) = item {
+                                if !s.is_empty() {
+                                    paths.push(s.clone());
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    paths
+}
+
+impl HookEngine {
     /// Check whether a hook matches the given tool call + result.
     fn matches(
         &self,
