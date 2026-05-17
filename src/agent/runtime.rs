@@ -1883,36 +1883,75 @@ impl AgentRuntime {
                 };
                 if context_manager.needs_compaction(&conversation, &model) {
                     crate::log_info!(
-                        "run_agent_loop: spawning background compaction for session {}",
+                        "run_agent_loop: compacting inline for session {}",
                         session_id
                     );
+
+                    // Notify frontend to open a streaming slot for the summary.
+                    let _ = event_tx.send(BackendEvent::TurnStarting {
+                        session_id,
+                        request_id,
+                    });
+
                     let mut compact_model = model.clone();
                     compact_model.system_prompt = static_system_prompt.clone();
-                    let ctx_config = ContextManagerConfig {
-                        prune_threshold_tokens: context_manager.prune_threshold_tokens,
-                        retain_recent_tokens: context_manager.retain_recent_tokens,
-                        maximum_summary_chars: context_manager.maximum_summary_chars,
-                    };
-                    let llm_client = self.llm_client.clone();
-                    let store = self.store.clone();
-                    let tool_defs = self.tool_definitions();
-                    let event_tx_clone = event_tx.clone();
-                    tokio::spawn(async move {
-                        compact_in_background(
-                            llm_client,
-                            store,
-                            tool_defs,
-                            session_id,
-                            compact_model,
-                            ctx_config,
-                            conversation,
-                            event_tx_clone,
+
+                    let compacted = match context_manager
+                        .compact(
+                            &self.llm_client,
+                            &compact_model,
+                            &conversation,
+                            false,
+                            Some((request_id, event_tx.clone())),
+                            &self.tool_definitions(),
                             mode,
                         )
-                        .await;
-                    });
+                        .await
+                    {
+                        Ok(true) => true,
+                        Ok(false) => false,
+                        Err(e) => {
+                            crate::log_warn!(
+                                "run_agent_loop: compaction failed: {}",
+                                e
+                            );
+                            let _ = event_tx.send(BackendEvent::ContextCompacted {
+                                session_id,
+                                compacted: false,
+                                manual: false,
+                                summary: None,
+                                retained_from: 0,
+                                error: Some(e.to_string()),
+                            });
+                            false
+                        }
+                    };
+
+                    if compacted {
+                        // Persist context state to DB
+                        let store = self.store.lock().await;
+                        let _ = store.update_session_context_state(
+                            session_id,
+                            context_manager.summary.as_deref(),
+                            context_manager.retained_from,
+                        );
+                        drop(store);
+
+                        // Notify frontend to insert compaction marker
+                        let _ = event_tx.send(BackendEvent::ContextCompacted {
+                            session_id,
+                            compacted: true,
+                            manual: false,
+                            summary: context_manager.summary.clone(),
+                            retained_from: context_manager.retained_from,
+                            error: None,
+                        });
+                    }
+
+                    // Continue the loop — next iteration picks up compacted context
+                    request_id = rand::random::<u64>();
+                    continue;
                 }
-                return Ok(());
             }
 
             // ─── 6a. Permission approval (frontend interception) ─────────
@@ -2213,91 +2252,6 @@ impl AgentRuntime {
     ) -> Result<Option<crate::session::Conversation>> {
         let store = self.store.lock().await;
         store.load_conversation(session_id)
-    }
-}
-
-/// Snapshot of [`ContextManager`] configuration needed for background
-/// compaction.  This avoids borrowing the real `context_manager` across
-/// a `tokio::spawn` boundary.
-struct ContextManagerConfig {
-    prune_threshold_tokens: usize,
-    retain_recent_tokens: usize,
-    maximum_summary_chars: usize,
-}
-
-/// Run context compaction in a background task.
-///
-/// Takes all necessary state by value so it can be moved into a
-/// `tokio::spawn` future.  On success, sends `BackendEvent::ContextCompacted`
-/// via the event channel; the frontend (TUI/gateway) will update the real
-/// `ContextManager` when it receives the event.
-async fn compact_in_background(
-    llm_client: crate::llm::LlmClient,
-    store: Arc<Mutex<SessionStore>>,
-    tool_defs: Vec<ToolDefinition>,
-    session_id: uuid::Uuid,
-    model: ActiveModel,
-    ctx_config: ContextManagerConfig,
-    conversation: crate::session::Conversation,
-    event_tx: UnboundedSender<BackendEvent>,
-    mode: crate::prompts::SessionMode,
-) {
-    let mut context_manager = ContextManager {
-        summary: None,
-        retained_from: 0,
-        prune_threshold_tokens: ctx_config.prune_threshold_tokens,
-        retain_recent_tokens: ctx_config.retain_recent_tokens,
-        maximum_summary_chars: ctx_config.maximum_summary_chars,
-    };
-
-    match context_manager
-        .compact(
-            &llm_client,
-            &model,
-            &conversation,
-            false,
-            None,
-            &tool_defs,
-            mode,
-        )
-        .await
-    {
-        Ok(true) => {
-            // Persist updated context state
-            if let Ok(ref store) = store.try_lock() {
-                let _ = store.update_session_context_state(
-                    session_id,
-                    context_manager.summary.as_deref(),
-                    context_manager.retained_from,
-                );
-            }
-            crate::log_info!(
-                "compact_in_background: context compacted for session {}",
-                session_id
-            );
-            let _ = event_tx.send(BackendEvent::ContextCompacted {
-                session_id,
-                compacted: true,
-                manual: false,
-                summary: context_manager.summary.clone(),
-                retained_from: context_manager.retained_from,
-                error: None,
-            });
-        }
-        Ok(false) => {
-            // Compaction skipped (not needed after all)
-        }
-        Err(e) => {
-            crate::log_warn!("compact_in_background: context compaction failed: {e}");
-            let _ = event_tx.send(BackendEvent::ContextCompacted {
-                session_id,
-                compacted: false,
-                manual: false,
-                summary: None,
-                retained_from: 0,
-                error: Some(e.to_string()),
-            });
-        }
     }
 }
 
