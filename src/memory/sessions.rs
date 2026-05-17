@@ -5,16 +5,12 @@ use uuid::Uuid;
 
 use crate::config::ActiveModel;
 use crate::llm::LlmClient;
-use crate::session::{Message, MessageRole};
-
 use crate::memory::types::SessionSummary;
 use crate::memory::xml::{clean_llm_xml_response, get_xml_tag_ci, get_xml_children_ci};
+use crate::session::{Message, MessageRole};
+use crate::storage::load_session_messages;
 
-// ─── LLM Prompts (translated from agentmemory/src/prompts/summary.ts) ──
-
-pub const SUMMARY_SYSTEM: &str = "You are a session summarizer for an AI coding agent's memory system. Given all compressed observations from a coding session, produce a concise session summary.
-
-Output EXACTLY this XML format with no additional text:
+pub const SUMMARY_INSTRUCTION: &str = "Please summarize this session. Output EXACTLY this XML format with no additional text:
 
 <summary>
   <title>Short session title (max 100 chars)</title>
@@ -36,44 +32,14 @@ Rules:
 - List all files that were created or modified
 - Concepts should be searchable terms for future context retrieval";
 
-fn build_summary_prompt(observations: &[CompressedView]) -> String {
-    let lines: Vec<String> = observations
-        .iter()
-        .enumerate()
-        .map(|(i, obs)| {
-            format!(
-                "[{}] {}: {}\n{}\nFiles: {}\nConcepts: {}",
-                i + 1,
-                obs.obs_type,
-                obs.title,
-                obs.narrative,
-                obs.files.join(", "),
-                obs.concepts.join(", ")
-            )
-        })
-        .collect();
-
-    format!(
-        "Session observations ({} total):\n\n{}",
-        observations.len(),
-        lines.join("\n\n---\n\n")
-    )
-}
-
-struct CompressedView {
-    obs_type: String,
-    title: String,
-    narrative: String,
-    files: Vec<String>,
-    concepts: Vec<String>,
-}
-
 /// Session management service.
 pub struct SessionService;
 
 impl SessionService {
     /// Generate and store a session summary using LLM.
-    /// Opens its own DB connection to avoid !Send issues.
+    ///
+    /// Loads all session messages verbatim, appends a summary instruction,
+    /// sends to LLM, and persists the parsed XML result.
     pub async fn summarize_session(
         db_path: &std::path::Path,
         llm: &LlmClient,
@@ -81,35 +47,15 @@ impl SessionService {
         session_id: Uuid,
         project: &str,
     ) -> Result<SessionSummary> {
-        // 1. Load compressed observations (sync, connection dropped before await)
-        let views = {
+        // 1. Load session messages (sync, connection dropped before await)
+        let messages = {
             let db = Connection::open(db_path)?;
-            let mut stmt = db.prepare(
-                "SELECT obs_type, title, narrative, files, concepts
-                 FROM compressed_observations
-                 WHERE session_id = ?1
-                 ORDER BY created_at ASC",
-            )?;
-
-            let views: Vec<CompressedView> = stmt
-                .query_map(rusqlite::params![session_id.to_string()], |row| {
-                    let files_json: String = row.get(3)?;
-                    let concepts_json: String = row.get(4)?;
-                    Ok(CompressedView {
-                        obs_type: row.get(0)?,
-                        title: row.get(1)?,
-                        narrative: row.get(2)?,
-                        files: serde_json::from_str(&files_json).unwrap_or_default(),
-                        concepts: serde_json::from_str(&concepts_json).unwrap_or_default(),
-                    })
-                })?
-                .filter_map(|r| r.ok())
-                .collect();
-            views
+            load_session_messages(&db, session_id)?
         };
 
-        if views.is_empty() {
-            // No compressed observations — return empty summary
+        let msg_count = messages.len();
+
+        if msg_count == 0 {
             let summary = SessionSummary {
                 session_id,
                 project: project.to_string(),
@@ -126,45 +72,38 @@ impl SessionService {
             return Ok(summary);
         }
 
-        // ─── STRICTER_SUFFIX for retry (like compress.rs) ────────────
+        // 2. Build LLM request: all messages verbatim + one appended instruction
+        let mut llm_messages = messages;
+        llm_messages.push(Message::new(MessageRole::User, SUMMARY_INSTRUCTION.to_string()));
+
+        // Try LLM call with up to 1 retry on parse failure
         const STRICTER_SUFFIX: &str = r"
 IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text outside the XML tags. Do NOT wrap XML in markdown code fences. The first non-whitespace character MUST be '<'.";
 
-        // Helper: build LLM messages with optional stricter suffix
-        let make_messages = |strict: bool| -> Vec<Message> {
-            let system = if strict {
-                format!("{}{}", SUMMARY_SYSTEM, STRICTER_SUFFIX)
-            } else {
-                SUMMARY_SYSTEM.to_string()
-            };
-            let prompt = build_summary_prompt(&views);
-            vec![
-                Message::new(MessageRole::System, system),
-                Message::new(MessageRole::User, prompt),
-            ]
-        };
-
-        // Try LLM call with up to 1 retry on parse failure
         let mut response = String::new();
         let mut parse_ok = false;
 
         for attempt in 0..2 {
-            let messages = make_messages(attempt > 0);
+            let mut attempt_messages = llm_messages.clone();
+            if attempt > 0
+                && let Some(last) = attempt_messages.last_mut() {
+                    last.content = format!("{}{}", last.content, STRICTER_SUFFIX);
+                }
+
             response = match llm
-                .complete_with_messages(model.clone(), messages, vec![])
+                .complete_with_messages(model.clone(), attempt_messages, vec![])
                 .await
             {
                 Ok(r) => r,
                 Err(e) => {
                     crate::log_warn!("LLM summarization failed (attempt {}): {}", attempt, e);
                     if attempt == 0 {
-                        continue; // retry
+                        continue;
                     }
-                    break; // give up, will use synthetic fallback
+                    break;
                 }
             };
 
-            // Attempt to parse the response
             let cleaned = clean_llm_xml_response(&response);
             let has_title = get_xml_tag_ci(&cleaned, "title").is_some();
             let has_narrative = get_xml_tag_ci(&cleaned, "narrative").is_some();
@@ -197,10 +136,10 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 key_decisions: decisions,
                 files_modified: files,
                 concepts,
-                observation_count: views.len() as i64,
+                observation_count: msg_count as i64,
             }
         } else {
-            let fb = Self::parse_summary_free_text(&response, &views, session_id, project);
+            let fb = Self::parse_summary_free_text(&response, msg_count, session_id, project);
             if let Some(ref fb_title) = fb.title {
                 crate::log_info!(
                     "LLM summarization response unparseable, used free-text fallback (title=\"{}\")",
@@ -209,72 +148,35 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 fb
             } else {
                 crate::log_warn!("LLM summarization failed or response unparseable, using synthetic fallback");
-                let title = views.first().map(|v| v.title.clone()).unwrap_or_default();
-                let mut file_set: std::collections::BTreeSet<String> =
-                    std::collections::BTreeSet::new();
-                let mut concept_set: std::collections::BTreeSet<String> =
-                    std::collections::BTreeSet::new();
-                let mut type_counts: std::collections::BTreeMap<String, usize> =
-                    std::collections::BTreeMap::new();
-                for v in &views {
-                    for f in &v.files {
-                        file_set.insert(f.clone());
-                    }
-                    for c in &v.concepts {
-                        concept_set.insert(c.clone());
-                    }
-                    *type_counts.entry(v.obs_type.clone()).or_default() += 1;
-                }
-                let obs_summary: String = {
-                    let mut parts: Vec<String> = type_counts
-                        .into_iter()
-                        .map(|(t, c)| format!("{}×{}", c, t))
-                        .collect();
-                    parts.sort();
-                    parts.join(", ")
-                };
-                let narrative = if !obs_summary.is_empty() {
-                    format!(
-                        "Session with {} observations ({}).",
-                        views.len(),
-                        obs_summary
-                    )
-                } else {
-                    format!("Session with {} observations.", views.len())
-                };
                 SessionSummary {
                     session_id,
                     project: project.to_string(),
                     created_at: Utc::now(),
-                    title: Some(title),
-                    narrative: Some(narrative),
+                    title: Some(format!("Session {}", &session_id.to_string()[..8])),
+                    narrative: Some(format!("Session with {} messages.", msg_count)),
                     key_decisions: vec![],
-                    files_modified: file_set.into_iter().collect(),
-                    concepts: concept_set.into_iter().collect(),
-                    observation_count: views.len() as i64,
+                    files_modified: vec![],
+                    concepts: vec![],
+                    observation_count: msg_count as i64,
                 }
             }
         };
 
-        // 4. Persist (sync, new connection)
+        // Persist
         let db = Connection::open(db_path)?;
         Self::store_summary(&db, &summary)?;
 
         Ok(summary)
     }
 
-    /// Fallback: extract summary fields from free-form text when the LLM
-    /// cannot produce structured XML. Returns a SessionSummary with fields
-    /// extracted heuristically; returns `None` title if nothing useful.
     fn parse_summary_free_text(
         text: &str,
-        views: &[CompressedView],
+        msg_count: usize,
         session_id: Uuid,
         project: &str,
     ) -> SessionSummary {
         let lines: Vec<&str> = text.lines().collect();
 
-        // Title: first non-empty line under 100 chars
         let title = lines
             .iter()
             .find(|l| !l.trim().is_empty())
@@ -287,7 +189,6 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 }
             });
 
-        // Narrative: skip first "title" line, take the rest
         let narrative = if let Some(t) = &title {
             let rest: Vec<&str> = lines
                 .iter()
@@ -308,7 +209,6 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
             None
         };
 
-        // Decisions: bullet or numbered lines
         let decisions: Vec<String> = lines
             .iter()
             .filter(|l| {
@@ -326,10 +226,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
             .filter(|s| !s.is_empty())
             .collect();
 
-        // Files: extract path-like patterns
         let files = extract_paths_from_text(text);
-
-        // Concepts: extract technical keywords
         let concepts = extract_concepts_from_text(text);
 
         SessionSummary {
@@ -341,7 +238,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
             key_decisions: decisions,
             files_modified: files,
             concepts,
-            observation_count: views.len() as i64,
+            observation_count: msg_count as i64,
         }
     }
 
@@ -411,11 +308,9 @@ fn extract_paths_from_text(text: &str) -> Vec<String> {
             && w.contains('.')
             && !w.starts_with("http")
             && !w.starts_with("https")
-        {
-            if !w.starts_with('<') && !w.starts_with('{') && !w.starts_with('(') && !paths.contains(&w.to_string()) {
+            && !w.starts_with('<') && !w.starts_with('{') && !w.starts_with('(') && !paths.contains(&w.to_string()) {
                 paths.push(w.to_string());
             }
-        }
     }
     paths.truncate(8);
     paths

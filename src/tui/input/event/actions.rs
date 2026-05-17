@@ -180,9 +180,9 @@ impl App {
                 &label,
             ));
         }
-        // Memory tab — compression / summarization / embedding models
+        // Memory tab — summarization model
         {
-            let display = self.config.memory_model_display("compression");
+            let display = self.config.memory_model_display("summarization");
             tabs.push(crate::tui::model_panel::ModelPanelTab::new(
                 "memory", "Memory", &display,
             ));
@@ -441,10 +441,6 @@ impl App {
     pub(crate) fn close_settings_panel(&mut self, _apply: bool) -> Result<()> {
         if let Some(panel) = self.settings_panel.take() {
             panel.apply_to_config(&mut self.config);
-            self.memory_store
-                .set_compression_enabled(self.config.memory.compression_enabled);
-            self.memory_store
-                .set_llm_compression(self.config.memory.llm_compression);
             self.config.save(&self.paths)?;
         }
         Ok(())

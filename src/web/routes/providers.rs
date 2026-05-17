@@ -251,7 +251,7 @@ pub async fn create_provider(
         };
 
         let temperature = match model_req.temperature {
-            Some(t) if t < 0.0 || t > 2.0 => Some(1.0),
+            Some(t) if !(0.0..=2.0).contains(&t) => Some(1.0),
             other => other,
         };
 
@@ -277,7 +277,6 @@ pub async fn create_provider(
         base_url,
         api_type: None,
         models,
-        embedding_models: std::collections::BTreeMap::new(),
     };
 
     // Add to config

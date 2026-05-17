@@ -85,45 +85,6 @@ impl LlmClient {
         result.context("LLM completion failed after retries")
     }
 
-    /// Embed text using a configured embedding model.
-    /// Uses the same retry/backoff infrastructure as completions.
-    pub async fn embed(
-        &self,
-        model: &crate::config::EmbeddingActiveModel,
-        input: &str,
-    ) -> Result<Vec<f32>> {
-        self.embed_with_retry(model, input).await
-    }
-
-    /// Internal: embed with retry logic for retryable errors.
-    async fn embed_with_retry(
-        &self,
-        model: &crate::config::EmbeddingActiveModel,
-        input: &str,
-    ) -> Result<Vec<f32>> {
-        for attempt in 1..=MAX_RETRIES {
-            let result = match model.api_type {
-                ApiType::OpenAiChatCompletions | ApiType::OpenAiResponses => {
-                    openai::embed_openai(&self.http, model, input).await
-                }
-                ApiType::Anthropic => {
-                    anyhow::bail!("anthropic provider does not support embeddings")
-                }
-            };
-            match result {
-                Ok(emb) => return Ok(emb),
-                Err(e) => {
-                    let network_error = classify_anyhow_error(e);
-                    if !network_error.is_retryable() || attempt == MAX_RETRIES {
-                        return Err(anyhow::anyhow!("{}", network_error.message()));
-                    }
-                    backoff_sleep(attempt).await;
-                }
-            }
-        }
-        unreachable!()
-    }
-
     /// Internal: stream chat with retry logic for retryable errors.
     async fn stream_chat_with_retry(
         &self,

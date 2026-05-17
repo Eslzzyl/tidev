@@ -211,39 +211,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
     tokenize='porter unicode61'
 );
 
--- ── Memory System Tables (Phase 1 & 2) ──────────────────────────
-
-CREATE TABLE IF NOT EXISTS vec_obs_map (
-    rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-    observation_id TEXT UNIQUE NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS compressed_observations (
-    id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL REFERENCES sessions(id),
-    created_at TEXT NOT NULL,
-    -- Raw observation (written by observe(), read by compress(), then NULL'd)
-    hook_type TEXT,
-    tool_name TEXT,
-    tool_input TEXT,
-    tool_output TEXT,
-    user_prompt TEXT,
-    assistant_response TEXT,
-    dedup_hash TEXT,
-    -- Compressed observation (written by compress())
-    obs_type TEXT,
-    title TEXT,
-    subtitle TEXT,
-    facts TEXT NOT NULL DEFAULT '[]',
-    narrative TEXT NOT NULL DEFAULT '',
-    concepts TEXT NOT NULL DEFAULT '[]',
-    files TEXT NOT NULL DEFAULT '[]',
-    importance INTEGER NOT NULL DEFAULT 5,
-    confidence REAL,
-    embedding BLOB
-);
-
-CREATE INDEX IF NOT EXISTS idx_compressed_obs_session ON compressed_observations(session_id);
+-- ── Memory System Tables ─────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS session_summaries (
     session_id TEXT PRIMARY KEY REFERENCES sessions(id),
@@ -483,43 +451,6 @@ CREATE TABLE IF NOT EXISTS file_reads (
 
 CREATE INDEX IF NOT EXISTS idx_file_reads_session
     ON file_reads(session_id);
-
--- ── New Memory System Tables (Phase 1) ──
-
--- Merged table: raw observation → compressed observation in one row.
--- observe() writes raw fields, compress() fills compressed fields
--- and NULLs tool_input/tool_output (agentmemory's "KV overwrite" semantics).
-CREATE TABLE IF NOT EXISTS vec_obs_map (
-    rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-    observation_id TEXT UNIQUE NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS compressed_observations (
-    id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL REFERENCES sessions(id),
-    created_at TEXT NOT NULL,
-    -- Raw observation (written by observe(), read by compress(), then NULL'd)
-    hook_type TEXT,
-    tool_name TEXT,
-    tool_input TEXT,
-    tool_output TEXT,
-    user_prompt TEXT,
-    assistant_response TEXT,
-    dedup_hash TEXT,
-    -- Compressed observation (written by compress())
-    obs_type TEXT,
-    title TEXT,
-    subtitle TEXT,
-    facts TEXT NOT NULL DEFAULT '[]',
-    narrative TEXT NOT NULL DEFAULT '',
-    concepts TEXT NOT NULL DEFAULT '[]',
-    files TEXT NOT NULL DEFAULT '[]',
-    importance INTEGER NOT NULL DEFAULT 5,
-    confidence REAL,
-    embedding BLOB
-);
-
-CREATE INDEX IF NOT EXISTS idx_compressed_obs_session ON compressed_observations(session_id);
 
 CREATE TABLE IF NOT EXISTS session_summaries (
     session_id TEXT PRIMARY KEY REFERENCES sessions(id),

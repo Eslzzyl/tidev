@@ -98,13 +98,11 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
 
     // Create shared agent runtime (ToolRegistry, MemoryStore, etc.)
     let memory_store = Arc::new(db.create_memory_store()?);
-    // Configure memory store with LLM for compression/embedding
+    // Configure memory store with LLM
     if let Ok(default_model) = config.resolve_active_model(&auth) {
-        memory_store.set_models(llm_client.clone(), default_model, None, None);
+        memory_store.set_models(llm_client.clone(), default_model, None);
     }
-    memory_store.set_compression_enabled(config.memory.compression_enabled);
-    memory_store.set_llm_compression(config.memory.llm_compression);
-    let _bg = crate::memory::start_background_tasks(
+    crate::memory::start_background_tasks(
         memory_store.clone(),
         &tokio::runtime::Handle::current(),
         &workspace_root.to_string_lossy(),

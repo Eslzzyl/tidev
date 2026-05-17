@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use crate::config::ActiveModel;
 use crate::llm::LlmClient;
+use crate::memory::graph;
 use crate::memory::patterns::PatternMiningService;
 use crate::memory::remember::RememberService;
 use crate::memory::retention::RetentionService;
@@ -85,6 +86,17 @@ impl ConsolidationService {
                 Err(e) => crate::log_warn!("pattern mining failed: {}", e),
             }
         }
+
+        // Tier 0b: Knowledge graph extraction from session summaries
+        if let Ok(db) = Connection::open(db_path)
+            && let Ok(summaries) = Self::load_summaries_for_graph(&db, project) {
+                for summary in &summaries {
+                    let sid = summary.session_id.to_string();
+                    if let Err(e) = graph::extract_from_session_summary(&db, summary, &sid) {
+                        crate::log_warn!("graph extraction failed for summary {}: {}", sid, e);
+                    }
+                }
+            }
 
         // Tier 1
         match Self::consolidate_semantic(db_path, llm, model, project).await {
@@ -376,6 +388,45 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
         Ok(result)
     }
 
+    /// Load all summaries (with or without title) for graph extraction.
+    fn load_summaries_for_graph(db: &Connection, project: &str) -> Result<Vec<SessionSummary>> {
+        let mut stmt = db.prepare(
+            "SELECT session_id, project, created_at, title, narrative,
+                    key_decisions, files_modified, concepts, observation_count
+             FROM session_summaries
+             WHERE project = ?1
+             ORDER BY created_at ASC",
+        )?;
+
+        let rows = stmt.query_map(rusqlite::params![project], |row| {
+            let decisions_json: String = row.get(5)?;
+            let files_json: String = row.get(6)?;
+            let concepts_json: String = row.get(7)?;
+            Ok(SessionSummary {
+                session_id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap_or(Uuid::nil()),
+                project: row.get(1)?,
+                created_at: row
+                    .get::<_, String>(2)
+                    .ok()
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+                    .map(|d| d.with_timezone(&chrono::Utc))
+                    .unwrap_or_else(chrono::Utc::now),
+                title: row.get(3)?,
+                narrative: row.get(4)?,
+                key_decisions: serde_json::from_str(&decisions_json).unwrap_or_default(),
+                files_modified: serde_json::from_str(&files_json).unwrap_or_default(),
+                concepts: serde_json::from_str(&concepts_json).unwrap_or_default(),
+                observation_count: row.get(8)?,
+            })
+        })?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
     fn load_pattern_memories(db: &Connection, project: &str) -> Result<Vec<MemoryEntry>> {
         let mut stmt = db.prepare(
             "SELECT id, workspace_root, memory_type, title, content, tags,
@@ -389,7 +440,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
              ORDER BY created_at DESC",
         )?;
 
-        let rows = stmt.query_map(rusqlite::params![project], |row| map_memory_entry(row))?;
+        let rows = stmt.query_map(rusqlite::params![project], map_memory_entry)?;
 
         let mut result = Vec::new();
         for row in rows {
@@ -681,13 +732,13 @@ fn map_memory_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryEntry> {
         source_session_id: source_session_id.and_then(|s| parse_uuid(&s)),
         created_at: parse_time(&created_at_str).unwrap_or_else(Utc::now),
         updated_at: parse_time(&updated_at_str).unwrap_or_else(Utc::now),
-        usage_count: usage_count,
+        usage_count,
         active: active != 0,
         concepts: serde_json::from_str(&concepts_json).unwrap_or_default(),
         files: serde_json::from_str(&files_json).unwrap_or_default(),
         strength,
         importance: importance as u8,
-        version: version,
+        version,
         parent_id: parent_id.and_then(|s| parse_uuid(&s)),
         supersedes: serde_json::from_str(&supersedes_json).unwrap_or_default(),
         related_ids: serde_json::from_str(&related_ids_json).unwrap_or_default(),

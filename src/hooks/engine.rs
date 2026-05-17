@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::hooks::config::{HooksConfig, PostToolUseHookConfig};
 use crate::hooks::matcher::matches_tool;
 use crate::hooks::runner::run_hook_command;
-use crate::memory::{HookPayload, HookType, MemoryStore};
+use crate::memory::MemoryStore;
 use crate::session::{ToolCall, ToolExecutionResult};
 
 /// Max chars for pre-tool enrich context, matching agentmemory's MAX_CONTEXT_LENGTH.
@@ -109,7 +109,7 @@ impl HookEngine {
         &self,
         tool_call: &ToolCall,
         result: &ToolExecutionResult,
-        session_id: Option<uuid::Uuid>,
+        _session_id: Option<uuid::Uuid>,
     ) -> PostToolUseHookOutcome {
         if self.config.disable_all_hooks {
             return PostToolUseHookOutcome::default();
@@ -164,43 +164,14 @@ impl HookEngine {
             });
         }
 
-        // ── Memory observation capture ────────────────────────────────
-        if let (Some(store), Some(sid)) = (&self.memory_store, session_id) {
-            let payload = HookPayload {
-                session_id: sid,
-                hook_type: HookType::PostToolUse,
-                timestamp: chrono::Utc::now(),
-                tool_name: Some(tool_call.name.clone()),
-                tool_input: Some(tool_call.arguments.clone()),
-                tool_output: Some(result.output.clone()),
-                user_prompt: None,
-                assistant_response: None,
-            };
-            let _ = store.observe(&payload);
-        }
-
         PostToolUseHookOutcome {
             hooks: outcomes,
             any_hook_ran,
         }
     }
 
-    /// Record a memory observation before tool execution.
-    pub fn on_pre_tool_use(&self, tool_call: &ToolCall, session_id: Option<uuid::Uuid>) {
-        if let (Some(store), Some(sid)) = (&self.memory_store, session_id) {
-            let payload = HookPayload {
-                session_id: sid,
-                hook_type: HookType::PreToolUse,
-                timestamp: chrono::Utc::now(),
-                tool_name: Some(tool_call.name.clone()),
-                tool_input: Some(tool_call.arguments.clone()),
-                tool_output: None,
-                user_prompt: None,
-                assistant_response: None,
-            };
-            let _ = store.observe(&payload);
-        }
-    }
+    /// No-op: previously recorded pre-tool observations, now removed.
+    pub fn on_pre_tool_use(&self, _tool_call: &ToolCall, _session_id: Option<uuid::Uuid>) {}
 
     /// Search memory for observations relevant to the file being operated on.
     ///
@@ -277,50 +248,13 @@ impl HookEngine {
         Some(truncated)
     }
 
-    /// Record a memory observation after tool failure.
+    /// No-op: previously recorded post-tool-failure observations, now removed.
     pub fn on_post_tool_failure(
         &self,
-        tool_call: &ToolCall,
-        error: &str,
-        session_id: Option<uuid::Uuid>,
+        _tool_call: &ToolCall,
+        _error: &str,
+        _session_id: Option<uuid::Uuid>,
     ) {
-        if let (Some(store), Some(sid)) = (&self.memory_store, session_id) {
-            let payload = HookPayload {
-                session_id: sid,
-                hook_type: HookType::PostToolFailure,
-                timestamp: chrono::Utc::now(),
-                tool_name: Some(tool_call.name.clone()),
-                tool_input: Some(tool_call.arguments.clone()),
-                tool_output: Some(error.to_string()),
-                user_prompt: None,
-                assistant_response: None,
-            };
-            let _ = store.observe(&payload);
-        }
-    }
-
-    /// Record a generic memory observation (for session_end, subagent, etc.)
-    pub fn record_observation(
-        &self,
-        hook_type: HookType,
-        tool_name: Option<String>,
-        tool_input: Option<String>,
-        tool_output: Option<String>,
-        session_id: Option<uuid::Uuid>,
-    ) {
-        if let (Some(store), Some(sid)) = (&self.memory_store, session_id) {
-            let payload = HookPayload {
-                session_id: sid,
-                hook_type,
-                timestamp: chrono::Utc::now(),
-                tool_name,
-                tool_input,
-                tool_output,
-                user_prompt: None,
-                assistant_response: None,
-            };
-            let _ = store.observe(&payload);
-        }
     }
 }
 
@@ -353,11 +287,10 @@ fn extract_tool_file_paths(tool_call: &ToolCall) -> Vec<String> {
                     }
                     serde_json::Value::Array(arr) => {
                         for item in arr {
-                            if let serde_json::Value::String(s) = item {
-                                if !s.is_empty() {
+                            if let serde_json::Value::String(s) = item
+                                && !s.is_empty() {
                                     paths.push(s.clone());
                                 }
-                            }
                         }
                     }
                     _ => {}

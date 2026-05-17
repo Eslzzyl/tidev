@@ -1,15 +1,9 @@
-use crate::config::{EmbeddingModelSummary, ModelSummary};
+use crate::config::ModelSummary;
 use crate::tui::Composer;
 
 /// Memory tab sub-entry identifiers.
-pub const MEMORY_ROLE_COMPRESSION: &str = "compression";
 pub const MEMORY_ROLE_SUMMARIZATION: &str = "summarization";
-pub const MEMORY_ROLE_EMBEDDING: &str = "embedding";
-pub const MEMORY_ROLES: [&str; 3] = [
-    MEMORY_ROLE_COMPRESSION,
-    MEMORY_ROLE_SUMMARIZATION,
-    MEMORY_ROLE_EMBEDDING,
-];
+pub const MEMORY_ROLES: [&str; 1] = [MEMORY_ROLE_SUMMARIZATION];
 
 /// Which column has focus within the Memory tab's two-column layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,7 +49,7 @@ pub struct ModelPanelState {
     pub tabs: Vec<ModelPanelTab>,
     /// Index into tabs for the currently active tab.
     pub selected_tab_index: usize,
-    /// Within the Memory tab, which sub-entry is selected: 0=Compression, 1=Summarization, 2=Embedding.
+    /// Within the Memory tab, which sub-entry is selected.
     pub memory_sub_selection: usize,
     /// Within the Memory tab, which column has focus.
     pub memory_focus: MemoryFocus,
@@ -87,9 +81,9 @@ impl ModelPanelState {
     /// Get the active memory role string for the current sub-selection.
     pub fn active_memory_role(&self) -> &'static str {
         if self.is_memory_tab() {
-            MEMORY_ROLES[self.memory_sub_selection % MEMORY_ROLES.len()]
+            MEMORY_ROLES[0]
         } else {
-            MEMORY_ROLE_COMPRESSION
+            MEMORY_ROLE_SUMMARIZATION
         }
     }
 
@@ -225,35 +219,24 @@ pub enum ModelPanelItem {
     Model {
         summary: ModelSummary,
     },
-    EmbeddingModel {
-        summary: EmbeddingModelSummary,
-    },
 }
 
 impl ModelPanelItem {
     pub fn as_model(&self) -> Option<&ModelSummary> {
         match self {
             Self::Model { summary, .. } => Some(summary),
-            Self::ProviderHeader { .. } | Self::EmbeddingModel { .. } => None,
-        }
-    }
-
-    pub fn as_embedding_model(&self) -> Option<&EmbeddingModelSummary> {
-        match self {
-            Self::EmbeddingModel { summary, .. } => Some(summary),
-            Self::ProviderHeader { .. } | Self::Model { .. } => None,
+            Self::ProviderHeader { .. } => None,
         }
     }
 
     pub fn is_selectable(&self) -> bool {
-        matches!(self, Self::Model { .. } | Self::EmbeddingModel { .. })
+        matches!(self, Self::Model { .. })
     }
 
     /// Get the label ("provider/model_id") regardless of variant.
     pub fn label(&self) -> Option<String> {
         match self {
             Self::Model { summary } => Some(summary.label()),
-            Self::EmbeddingModel { summary } => Some(summary.label()),
             Self::ProviderHeader { .. } => None,
         }
     }
@@ -279,40 +262,20 @@ impl App {
         let mut items = Vec::new();
         let mut current_provider_id: Option<String> = None;
 
-        if panel.is_memory_tab() && panel.active_memory_role() == MEMORY_ROLE_EMBEDDING {
-            // List embedding models
-            for summary in self.config.available_embedding_models(&self.auth) {
-                if query.is_empty()
-                    || summary.model_id.to_ascii_lowercase().contains(&query)
-                    || summary.provider_id.to_ascii_lowercase().contains(&query)
-                {
-                    if current_provider_id.as_deref() != Some(summary.provider_id.as_str()) {
-                        current_provider_id = Some(summary.provider_id.clone());
-                        items.push(ModelPanelItem::ProviderHeader {
-                            provider_id: summary.provider_id.clone(),
-                            display_name: summary.provider_id.clone(),
-                        });
-                    }
-                    items.push(ModelPanelItem::EmbeddingModel { summary });
-                }
+        for summary in self.config.connected_models(&self.auth) {
+            if !model_panel_matches_query(&query, &summary) {
+                continue;
             }
-        } else {
-            // List LLM models (general tab, agent tabs, memory compression/summarization)
-            for summary in self.config.connected_models(&self.auth) {
-                if !model_panel_matches_query(&query, &summary) {
-                    continue;
-                }
 
-                if current_provider_id.as_deref() != Some(summary.provider_id.as_str()) {
-                    current_provider_id = Some(summary.provider_id.clone());
-                    items.push(ModelPanelItem::ProviderHeader {
-                        provider_id: summary.provider_id.clone(),
-                        display_name: summary.provider_display_name.clone(),
-                    });
-                }
-
-                items.push(ModelPanelItem::Model { summary });
+            if current_provider_id.as_deref() != Some(summary.provider_id.as_str()) {
+                current_provider_id = Some(summary.provider_id.clone());
+                items.push(ModelPanelItem::ProviderHeader {
+                    provider_id: summary.provider_id.clone(),
+                    display_name: summary.provider_display_name.clone(),
+                });
             }
+
+            items.push(ModelPanelItem::Model { summary });
         }
 
         items

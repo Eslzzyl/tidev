@@ -3688,15 +3688,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sqlite-vec"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0ba424237a9a5db2f6071f193319e2b6a32f7f3961debb2fbbfe67067abce3f"
-dependencies = [
- "cc",
-]
-
-[[package]]
 name = "sqlite-wasm-rs"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4007,7 +3998,6 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "shlex",
- "sqlite-vec",
  "strsim",
  "syntect",
  "tempfile",

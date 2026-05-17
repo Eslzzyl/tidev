@@ -2220,6 +2220,21 @@ impl SessionStore {
 /// Unlike `read_blob_maybe_text` (which decompresses), this returns the
 /// raw bytes so the caller can decompress later.  Falls back to reading
 /// as TEXT for backwards compatibility with older databases.
+pub fn load_session_messages(db: &Connection, session_id: Uuid) -> Result<Vec<Message>> {
+    let mut stmt = db.prepare(
+        "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC"
+    )?;
+
+    let rows = stmt.query_map(rusqlite::params![session_id.to_string()], RawMessageRow::from_row)?;
+
+    let mut messages = Vec::new();
+    for row in rows {
+        let raw = row?;
+        messages.push(raw.into_message()?);
+    }
+    Ok(messages)
+}
+
 fn read_blob_maybe_text_bytes(row: &rusqlite::Row, idx: usize) -> rusqlite::Result<Vec<u8>> {
     match row.get::<_, Vec<u8>>(idx) {
         Ok(v) => Ok(v),

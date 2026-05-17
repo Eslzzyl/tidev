@@ -914,9 +914,7 @@ impl App {
                 let label = self.config.memory_model_display(role);
 
                 let role_display = match *role {
-                    "compression" => "Compression",
                     "summarization" => "Summarization",
-                    "embedding" => "Embedding",
                     _ => role,
                 };
 
@@ -1009,7 +1007,6 @@ impl App {
             current.and_then(|label| {
                 items.iter().position(|item| match item {
                     ModelPanelItem::Model { summary } => summary.label() == label,
-                    ModelPanelItem::EmbeddingModel { summary } => summary.label() == label,
                     _ => false,
                 })
             })
@@ -1146,28 +1143,6 @@ impl App {
                             }
                         }
                     }
-                }
-                ModelPanelItem::EmbeddingModel { summary } => {
-                    let spans = vec![
-                        Span::raw("  "),
-                        Span::styled(
-                            summary.display_name.clone(),
-                            Style::default()
-                                .fg(palette.text)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::raw("  "),
-                        Span::styled(
-                            format!("({} · {}d)", summary.model_id, summary.dimensions),
-                            Style::default().fg(palette.muted),
-                        ),
-                        Span::raw("  "),
-                        Span::styled(
-                            format!("{}", summary.provider_id),
-                            Style::default().fg(palette.accent_soft),
-                        ),
-                    ];
-                    rows.push(ListItem::new(Line::from(spans)));
                 }
             }
         }
@@ -1557,12 +1532,8 @@ impl App {
         self.memory_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
 
-        let title = if panel.show_observations {
-            format!(" Observations · {} ", panel.observations.len())
-        } else {
-            let count = panel.filtered_indices().len();
-            format!(" Memories · {}/{} ", count, panel.memories.len())
-        };
+        let count = panel.filtered_indices().len();
+        let title = format!(" Memories · {}/{} ", count, panel.memories.len());
 
         let panel_block = Block::default()
             .style(Style::default().bg(palette.panel))
@@ -1585,194 +1556,8 @@ impl App {
                 ])
                 .split(inner);
 
-                if panel.show_observations {
-                    // ── Observations Mode ──
-                    if panel.observations.is_empty() {
-                        frame.render_widget(
-                            Paragraph::new("No observations yet.")
-                                .alignment(Alignment::Center)
-                                .style(Style::default().bg(palette.panel).fg(palette.muted)),
-                            sections[0],
-                        );
-                    } else {
-                        let panes = Layout::horizontal([
-                            Constraint::Percentage(40),
-                            Constraint::Percentage(60),
-                        ])
-                        .split(sections[0]);
-
-                        // ── Left: Observations List ──
-                        let list_area = panes[0];
-                        let total_obs = panel.observations.len();
-                        let visible_height = list_area.height.saturating_sub(3) as usize;
-
-                        // Header
-                        frame.render_widget(
-                            Paragraph::new(Line::from(Span::styled(
-                                " Observations  (o: toggle back) ",
-                                Style::default()
-                                    .fg(palette.accent)
-                                    .add_modifier(Modifier::BOLD),
-                            )))
-                            .style(Style::default().bg(palette.panel)),
-                            Rect::new(list_area.x, list_area.y, list_area.width, 1),
-                        );
-
-                        // Divider
-                        frame.render_widget(
-                            Paragraph::new(Line::from(Span::styled(
-                                "─".repeat(list_area.width as usize),
-                                Style::default().fg(palette.muted),
-                            )))
-                            .style(Style::default().bg(palette.panel)),
-                            Rect::new(list_area.x, list_area.y + 1, list_area.width, 1),
-                        );
-
-                        // List content
-                        let list_start_y = list_area.y + 2;
-                        let selected_obs = panel.selected_observation_index;
-
-                        // Compute scroll offset
-                        let scroll_offset =
-                            if visible_height >= total_obs || selected_obs < visible_height / 2 {
-                                0
-                            } else if selected_obs + visible_height / 2 >= total_obs {
-                                total_obs.saturating_sub(visible_height)
-                            } else {
-                                selected_obs.saturating_sub(visible_height / 2)
-                            };
-
-                        let mut obs_lines: Vec<Line<'_>> = Vec::new();
-                        let end = (scroll_offset + visible_height).min(total_obs);
-                        for i in scroll_offset..end {
-                            let obs = &panel.observations[i];
-                            let is_selected = i == selected_obs;
-                            let type_str = obs.obs_type.as_str();
-                            let title = if obs.title.is_empty() {
-                                "(no title)"
-                            } else {
-                                &obs.title
-                            };
-                            let display =
-                                format!(" [{}] {} (imp:{})", type_str, title, obs.importance);
-
-                            let style = if is_selected {
-                                Style::default()
-                                    .bg(palette.selection_bg)
-                                    .fg(palette.selection_fg)
-                                    .add_modifier(Modifier::BOLD)
-                            } else {
-                                Style::default().fg(palette.text)
-                            };
-                            obs_lines.push(Line::from(Span::styled(display, style)));
-                        }
-
-                        frame.render_widget(
-                            Paragraph::new(obs_lines).style(Style::default().bg(palette.panel)),
-                            Rect::new(
-                                list_area.x,
-                                list_start_y,
-                                list_area.width,
-                                list_area.height.saturating_sub(2),
-                            ),
-                        );
-
-                        // Scrollbar
-                        if total_obs > visible_height {
-                            let sb_area = Rect::new(
-                                list_area.x + list_area.width.saturating_sub(1),
-                                list_start_y,
-                                1,
-                                list_area.height.saturating_sub(2),
-                            );
-                            render_scrollbar(frame, sb_area, scroll_offset, total_obs, palette);
-                        }
-
-                        // ── Right: Observation Detail ──
-                        let preview_area = panes[1];
-                        let idx = selected_obs.min(total_obs.saturating_sub(1));
-                        let obs = &panel.observations[idx];
-
-                        let mut detail_lines: Vec<Line<'_>> = Vec::new();
-
-                        // Title line
-                        detail_lines.push(Line::from(vec![
-                            Span::styled(
-                                format!(" [{}] ", obs.obs_type.as_str()),
-                                Style::default()
-                                    .fg(palette.accent)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                            Span::styled(
-                                &obs.title,
-                                Style::default()
-                                    .fg(palette.text)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                        ]));
-
-                        // Subtitle
-                        if let Some(sub) = &obs.subtitle {
-                            if !sub.is_empty() {
-                                detail_lines.push(Line::from(Span::styled(
-                                    format!(" {}", sub),
-                                    Style::default().fg(palette.muted),
-                                )));
-                            }
-                        }
-
-                        // Importance
-                        detail_lines.push(Line::from(Span::styled(
-                            format!(" Importance: {}/10", obs.importance),
-                            Style::default().fg(palette.accent_soft),
-                        )));
-
-                        // Concepts
-                        if !obs.concepts.is_empty() {
-                            detail_lines.push(Line::from(Span::styled(
-                                format!(" Concepts: {}", obs.concepts.join(", ")),
-                                Style::default().fg(palette.muted),
-                            )));
-                        }
-
-                        // Files
-                        if !obs.files.is_empty() {
-                            detail_lines.push(Line::from(Span::styled(
-                                format!(" Files: {}", obs.files.join(", ")),
-                                Style::default().fg(palette.muted),
-                            )));
-                        }
-
-                        // Facts
-                        if !obs.facts.is_empty() {
-                            detail_lines.push(Line::from(Span::styled(
-                                format!(" Facts: {}", obs.facts.join("; ")),
-                                Style::default().fg(palette.muted),
-                            )));
-                        }
-
-                        // Narrative
-                        if !obs.narrative.is_empty() {
-                            let sep_w =
-                                preview_area.width.saturating_sub(4).max(10).min(80) as usize;
-                            detail_lines.push(Line::from(Span::styled(
-                                format!(" {}", "─".repeat(sep_w)),
-                                Style::default().fg(palette.border),
-                            )));
-                            detail_lines.push(Line::from(Span::styled(
-                                format!(" {}", obs.narrative),
-                                Style::default().fg(palette.text),
-                            )));
-                        }
-
-                        frame.render_widget(
-                            Paragraph::new(detail_lines).style(Style::default().bg(palette.panel)),
-                            preview_area,
-                        );
-                    }
-                } else {
-                    // ── Memories Mode ──
-                    let filtered = panel.filtered_indices();
+                // ── Memories Mode ──
+                let filtered = panel.filtered_indices();
                     if filtered.is_empty() {
                         // Empty state centered in main area
                         frame.render_widget(
@@ -2101,7 +1886,7 @@ impl App {
                                     // Combine header + markdown content
                                     let mut all_lines: Vec<Line<'_>> = Vec::new();
                                     all_lines.extend(header_lines);
-                                    all_lines.extend(rendered.into_iter());
+                                    all_lines.extend(rendered);
 
                                     let total_lines = all_lines.len();
                                     let scroll =
@@ -2337,23 +2122,18 @@ impl App {
                             }
                         }
                     }
-                }
 
                 // Footer help
                 let footer_y = sections[1].y;
-                let help_text = if panel.show_observations {
-                    "  Up/Down: navigate  o: toggle back  Esc: close"
-                } else {
-                    match panel.focus {
-                        PanelFocus::List if panel.search_active => {
-                            "  Type to search  Esc: clear/exit  Enter: confirm  Up/Down: navigate"
-                        }
-                        PanelFocus::List => {
-                            "  Up/Down: navigate  Left/Right: scroll  /: search  Enter: edit  a: add  e: edit content  d: delete  r: filter  o: observations  Esc: close"
-                        }
-                        PanelFocus::ContentEdit => {
-                            "  Arrow keys: move cursor  Enter: save  Esc: cancel  Shift+Enter: newline"
-                        }
+                let help_text = match panel.focus {
+                    PanelFocus::List if panel.search_active => {
+                        "  Type to search  Esc: clear/exit  Enter: confirm  Up/Down: navigate"
+                    }
+                    PanelFocus::List => {
+                        "  Up/Down: navigate  Left/Right: scroll  /: search  Enter: edit  a: add  e: edit content  d: delete  r: filter  Esc: close"
+                    }
+                    PanelFocus::ContentEdit => {
+                        "  Arrow keys: move cursor  Enter: save  Esc: cancel  Shift+Enter: newline"
                     }
                 };
                 frame.render_widget(

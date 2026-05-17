@@ -384,53 +384,51 @@ memory::search(query):
 
 ## Implementation Order
 
-### Phase 1 — Remove observation write path
+### Phase 1 — Remove observation write path ✅
 
-1. Delete `observe.rs`, `compress.rs`, `compression_queue.rs`, `dedup.rs`
-2. Remove hook engine observation recording (4x `store.observe()`, `record_observation`)
-3. Remove observation-related types from `types.rs`
-4. Remove MemoryStore fields/methods for observation, compression (see field table above)
-5. Remove config fields (`compression_enabled`, `llm_compression`, `compression_model`)
-6. Remove `set_compression_sender`, `compression_enabled`, `llm_compression`, `embedding_model` from all callers (TUI run.rs, web/mod.rs, gateway/mod.rs, actions.rs)
-7. Remove TUI settings entries (Compression/LLM Compression toggles)
+1. ✅ Delete `observe.rs`, `compress.rs`, `compression_queue.rs`, `dedup.rs`
+2. ✅ Remove hook engine observation recording (4x `store.observe()`, `record_observation`)
+3. ✅ Remove observation-related types from `types.rs`
+4. ✅ Remove MemoryStore fields/methods for observation, compression (see field table above)
+5. ✅ Remove config fields (`compression_enabled`, `llm_compression`, `compression_model`)
+6. ✅ Remove `set_compression_sender`, `compression_enabled`, `llm_compression`, `embedding_model` from all callers
+7. ✅ Remove TUI settings entries (Compression/LLM Compression toggles)
+8. ✅ Remove observations panel + rendering (memory_panel.rs, panels.rs)
+9. ✅ Remove `format_compressed_observations` + `## Recent Key Observations` injection (runtime.rs)
+10. ✅ Simplify `start_background_tasks` (remove CompressionQueue, recover/backfill, BackgroundTasks struct)
+11. ✅ Simplify `run_consolidation` / `run_reflect` to use `resolve_summarization_llm`
+12. ✅ Simplify `set_models` to 3 params (llm, active, summarization)
+13. ✅ Simplify MemoryStore constructors
+14. ✅ `cargo check` + `cargo clippy` + `cargo test` pass
 
-### Phase 2 — Remove embedding + search infrastructure, simplify constructor
+### Phase 2 — Remove embedding + search infrastructure, simplify constructor ✅
 
-1. Delete `hybrid_search.rs`
-2. Remove `Bm25Index`, `vec_obs_map`, `vec_observations`
-3. Simplify MemoryStore constructors (`open`, `open_with_shared_write`): remove dedup, bm25, compression_model, embedding_model, hybrid_search, compression_enabled, llm_compression, cb_*, compression_sender fields
-4. Simplify `MemoryStore::search()` to FTS5 + LIKE (no hybrid fallback)
-5. Remove `search_hybrid_with()` and `search_hybrid()`
-6. Remove `embedding_model` config field
-7. Add `memories_fts` startup rebuild after MemoryStore creation
-8. Add incremental FTS5 write on `remember()`
+1. ✅ Delete `hybrid_search.rs`
+2. ✅ Remove `Bm25Index` from `search_index.rs`
+3. ✅ `embedding_model` config field removed from `MemoryConfig`; `resolve_embedding_model` removed; `memory_model_label`/`memory_model_display`/`set_memory_model` stripped of "embedding" cases
+4. ✅ Simplify MemoryStore constructors (remove dedup, bm25, compression_model, embedding_model, hybrid_search, cb_* fields) — done in Phase 1
+5. ✅ Simplify `MemoryStore::search()` to FTS5 + LIKE (no hybrid fallback) — done in Phase 1
+6. ✅ Remove `search_hybrid_with()` and `search_hybrid()` — already removed
+7. ✅ Add `memories_fts` startup rebuild (`rebuild_fts5_if_needed()`)
+8. ✅ Add incremental FTS5 write on `remember()`
 
-### Phase 3 — Rewrite background tasks + startup callers + consumption points
+### Phase 3 — Rewrite background tasks + startup callers + consumption points ✅
 
-1. Simplify `set_models` signature: remove `compression` parameter, rename to `(llm, active, summarization)`
-2. Simplify all startup callers (run.rs, web.rs, gateway.rs):
-   - Remove `set_compression_enabled`, `set_llm_compression`, `set_embedding_model` calls
-   - Update `set_models` call to 3-arg form
-3. Simplify `start_background_tasks()` in `mod.rs`:
-   - Remove CompressionQueue, `recover_uncompressed()`, `backfill_embeddings()`
-   - Remove `BackgroundTasks` struct, return nothing
-   - Keep eviction, consolidation, reflection loops
-4. Rename LLM resolvers in `engine.rs`:
-   - `resolve_compression_llm()` → remove entirely
-   - `run_consolidation` uses new resolver (summarization_model → active_model)
-   - `run_reflect` uses new resolver (summarization_model → active_model)
-   - `resolve_summarization_llm` drops compression_model fallback
-5. Rewrite `sessions.rs` to use messages → LLM summary
-6. Rewrite `patterns.rs` to use messages → co-change + error patterns
-7. Rewrite `graph.rs` to use session_summaries/memories → graph nodes/edges
-8. Remove observations from `compose_dynamic_context` (runtime.rs)
-9. Remove TUI compression queue field + shutdown logic (run.rs)
+1. ✅ Simplify `set_models` signature: remove `compression` parameter, rename to `(llm, active, summarization)` — done in Phase 1
+2. ✅ Simplify all startup callers (run.rs, web.rs, gateway.rs) — done in Phase 1
+3. ✅ Simplify `start_background_tasks()` in `mod.rs` — done in Phase 1
+4. ✅ Rename LLM resolvers in `engine.rs` — done in Phase 1
+5. ✅ Rewrite `sessions.rs` to use messages → LLM summary (reads from `messages` table, decompresses zstd content)
+6. ✅ Rewrite `patterns.rs` to use tool messages → co-change + error patterns (reads `file_diffs` and content from tool result messages)
+7. ✅ Rewrite `graph.rs` to use session_summaries/memories → graph nodes/edges (added `extract_from_session_summary`, `extract_from_memory_entry`, integrated in consolidation pipeline)
+8. ✅ Remove observations from `compose_dynamic_context` (runtime.rs) — done in Phase 1
+9. ✅ Remove TUI compression queue field + shutdown logic (run.rs) — done in Phase 1
 
-### Phase 4 — Final cleanup
+### Phase 4 — Final cleanup ✅
 
-1. Remove observations panel (memory_panel.rs, panels.rs)
-2. Remove orphaned `CompressedObservation` references from TUI render code
-3. Final pass: remove any remaining dead code, verify `cargo clippy` + `cargo test`
+1. ✅ Remove observations panel (memory_panel.rs, panels.rs) — done in Phase 1
+2. ✅ Remove orphaned `CompressedObservation` references from TUI render code — done in Phase 1
+3. ✅ `cargo clippy` + `cargo test` pass
 
 ## Existing Data
 

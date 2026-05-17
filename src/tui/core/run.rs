@@ -81,36 +81,13 @@ impl App {
         }
         tools.set_active_model(active_model.clone());
         // Attach LLM to memory store with model overrides
-        let compression_override = config
-            .memory
-            .compression_model
-            .as_deref()
-            .and_then(|s| config.resolve_model(&auth, Some(s)).ok());
         let summarization_override = config
             .memory
             .summarization_model
             .as_deref()
             .and_then(|s| config.resolve_model(&auth, Some(s)).ok());
-        memory_store.set_models(
-            llm.clone(),
-            active_model.clone(),
-            compression_override,
-            summarization_override,
-        );
-        memory_store.set_compression_enabled(config.memory.compression_enabled);
-        memory_store.set_llm_compression(config.memory.llm_compression);
-        crate::log_info!(
-            "memory: models configured compression={} llm_compression={}",
-            config.memory.compression_enabled,
-            config.memory.llm_compression,
-        );
-        // Attach embedding model for vector search (if configured)
-        if let Ok(embed_model) = config.resolve_embedding_model(&auth, None) {
-            crate::log_info!("memory: embedding model attached ({})", embed_model.model_id);
-            memory_store.set_embedding_model(embed_model);
-        } else {
-            crate::log_info!("memory: no embedding model configured, vector search disabled");
-        }
+        memory_store.set_models(llm.clone(), active_model.clone(), summarization_override);
+        crate::log_info!("memory: models configured");
         // Set sandbox policy based on session mode and config
         let sandbox_policy = mode.sandbox_policy(&config.sandbox);
         tools.set_sandbox_policy(Some(sandbox_policy));
@@ -275,7 +252,6 @@ impl App {
             thinking_level: active_model.thinking_level.clone(),
             memory_store,
             memory_panel: None,
-            compression_queue: None,
             terminal_session: None,
             force_full_redraw: false,
         };
@@ -311,15 +287,13 @@ impl App {
             }
         });
 
-        // Start memory background tasks: compression queue, eviction,
-        // consolidation, reflection.
+        // Start memory background tasks: eviction, consolidation, reflection.
         crate::log_info!("memory: starting background tasks");
-        let bg = crate::memory::start_background_tasks(
+        crate::memory::start_background_tasks(
             self.memory_store.clone(),
             runtime.handle(),
             &self.workspace_root.to_string_lossy(),
         );
-        self.compression_queue = Some(bg.compression_queue);
 
         // Schedule periodic session inactivity check (every 60 seconds).
         let check_store = self.store.clone();
@@ -454,12 +428,6 @@ impl App {
         // Force-kill any remaining child processes (e.g. bash subprocesses
         // whose tokio task was dropped before it could clean up).
         crate::tooling::builtin::kill_all_children();
-
-        // Shut down the compression queue: signal workers, drain in-flight
-        // compressions and embeddings.
-        if let Some(queue) = self.compression_queue.take() {
-            queue.shutdown();
-        }
 
         self.pending_permission_rx = None;
         self.pending_permission_response = None;
@@ -921,11 +889,10 @@ impl App {
         // (loaded in restore_or_load_session), but cached sessions need
         // the stored prompt too. Re-composing would re-capture SystemInfo
         // (date, etc.) and break prefix caching.
-        if let Ok(stored) = self.store.load_session_system_prompt(session_id) {
-            if !stored.is_empty() {
+        if let Ok(stored) = self.store.load_session_system_prompt(session_id)
+            && !stored.is_empty() {
                 model.system_prompt = stored;
             }
-        }
         let mode = if is_active {
             self.mode
         } else {

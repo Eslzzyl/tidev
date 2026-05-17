@@ -19,42 +19,25 @@ use crate::tooling::ToolPermission;
 use self::reasoning::{ThinkingLevelType, ThinkingMatcher};
 
 pub use auth::{
-    ActiveModel, AuthStore, EmbeddingActiveModel, EmbeddingModelSummary, ModelSummary,
+    ActiveModel, AuthStore, ModelSummary,
     ProviderAuth, WebAuth,
 };
 pub use logging::LogConfig;
 pub use mcp::{McpConfig, McpServerConfig};
 pub use paths::ConfigPaths;
-pub use provider::{ApiType, EmbeddingModelConfig, ModelConfig, ProviderConfig, ProviderSource};
+pub use provider::{ApiType, ModelConfig, ProviderConfig, ProviderSource};
 pub use tmp::TmpConfig;
 pub use ui::UiConfig;
 
 pub use self::sandbox::SandboxConfig;
 
 /// Per-model overrides for memory operations.
-/// `None` = inherit from the session's active model (or compression model for summarization).
+/// `None` = inherit from the session's active model.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MemoryConfig {
-    /// Whether automatic compression of observations is enabled.
-    /// When disabled, observations are stored raw without compression.
-    #[serde(default = "default_compression_enabled")]
-    pub compression_enabled: bool,
-    /// Whether to use LLM for compression (synthetic by default, like agentmemory).
-    /// When false, observations are compressed via rule-based heuristics (zero token cost).
-    /// When true, the compression model (or active model) is used for richer summaries.
-    #[serde(default)]
-    pub llm_compression: bool,
-    /// Optional override for compression model. Format: `"provider/model_id"`.
-    #[serde(default)]
-    pub compression_model: Option<String>,
     /// Optional override for summarization model.
-    /// Falls back to `compression_model`, then to the session's active model.
     #[serde(default)]
     pub summarization_model: Option<String>,
-    /// Optional override for embedding model. If not configured and no
-    /// embedding models exist on any provider, vector search degrades to FTS5.
-    #[serde(default)]
-    pub embedding_model: Option<String>,
     /// Whether to inject comprehensive memory context into the conversation.
     /// When true, memory context (observations, summaries, facts, procedures,
     /// slots, graph, insights) is injected into the first user message only.
@@ -72,10 +55,6 @@ pub struct MemoryConfig {
     pub context_token_budget: usize,
 }
 
-fn default_compression_enabled() -> bool {
-    true
-}
-
 fn default_context_token_budget() -> usize {
     2000
 }
@@ -83,11 +62,7 @@ fn default_context_token_budget() -> usize {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
-            compression_enabled: true,
-            llm_compression: false,
-            compression_model: None,
             summarization_model: None,
-            embedding_model: None,
             inject_context: false,
             enrich_tools: false,
             context_token_budget: 2000,
@@ -795,105 +770,10 @@ default_provider = "exa"
             .collect()
     }
 
-    /// List all configured embedding models that have an API key available.
-    pub fn available_embedding_models(&self, auth: &AuthStore) -> Vec<EmbeddingModelSummary> {
-        let mut result = Vec::new();
-
-        for (provider_id, provider) in self.providers.iter().chain(self.bundled_providers.iter()) {
-            let api_type = provider
-                .api_type
-                .as_deref()
-                .map(ApiType::parse)
-                .unwrap_or_default();
-
-            if auth.api_key(provider_id).is_none() {
-                continue;
-            }
-
-            for (_name, model) in &provider.embedding_models {
-                result.push(EmbeddingModelSummary {
-                    provider_id: provider_id.clone(),
-                    model_id: model.model_id.clone(),
-                    display_name: model.display_name.clone(),
-                    base_url: provider.base_url.clone(),
-                    api_type: api_type.clone(),
-                    dimensions: model.dimensions,
-                    context_window: model.context_window,
-                });
-            }
-        }
-
-        result
-    }
-
-    /// Resolve an embedding model by optional query, or use `memory.embedding_model`.
-    /// Falls back to the first available embedding model if none is configured.
-    pub fn resolve_embedding_model(
-        &self,
-        auth: &AuthStore,
-        query: Option<&str>,
-    ) -> Result<EmbeddingActiveModel> {
-        let query = query
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .or(self.memory.embedding_model.as_deref());
-
-        // If a query is given, try to resolve it as "provider/model_id"
-        if let Some(q) = query {
-            let (provider_id, model_id) = self.resolve_model_key(q)?;
-            let provider = self
-                .provider(&provider_id)
-                .with_context(|| format!("unknown provider '{provider_id}'"))?;
-            let config = provider
-                .embedding_models
-                .values()
-                .find(|e| e.model_id == model_id)
-                .with_context(|| {
-                    format!("embedding model '{q}' not found in provider '{provider_id}'")
-                })?;
-
-            let api_type = provider
-                .api_type
-                .as_deref()
-                .map(ApiType::parse)
-                .unwrap_or_default();
-            let api_key = self.resolve_api_key(auth, &provider_id);
-
-            return Ok(EmbeddingActiveModel {
-                provider_id,
-                model_id,
-                display_name: config.display_name.clone(),
-                base_url: provider.base_url.clone(),
-                api_type,
-                api_key,
-                dimensions: config.dimensions,
-                context_window: config.context_window,
-            });
-        }
-
-        // No query: use first available embedding model
-        let models = self.available_embedding_models(auth);
-        let summary = models
-            .first()
-            .context("no embedding models configured or connected")?;
-        let api_key = self.resolve_api_key(auth, &summary.provider_id);
-        Ok(EmbeddingActiveModel {
-            provider_id: summary.provider_id.clone(),
-            model_id: summary.model_id.clone(),
-            display_name: summary.display_name.clone(),
-            base_url: summary.base_url.clone(),
-            api_type: summary.api_type.clone(),
-            api_key,
-            dimensions: summary.dimensions,
-            context_window: summary.context_window,
-        })
-    }
-
     pub fn resolve_active_model(&self, auth: &AuthStore) -> Result<ActiveModel> {
         self.resolve_model(auth, None)
     }
 
-    /// Resolve active model for gateway mode with its own system prompt.
     pub fn resolve_active_model_for_gateway(&self, auth: &AuthStore) -> Result<ActiveModel> {
         let provider_id = if !self.gateway.default_provider.is_empty() {
             &self.gateway.default_provider
@@ -1037,41 +917,19 @@ default_provider = "exa"
     }
 
     /// Return the configured memory model label for a role, if any.
-    /// Roles: "compression", "summarization", "embedding".
+    /// Roles: "summarization".
     pub fn memory_model_label(&self, role: &str) -> Option<&str> {
         match role {
-            "compression" => self.memory.compression_model.as_deref(),
             "summarization" => self.memory.summarization_model.as_deref(),
-            "embedding" => self.memory.embedding_model.as_deref(),
             _ => None,
         }
     }
 
-    /// Return a human-readable label for a memory model role,
-    /// or `"<inherit>"` for compression/summarization, or first available for embedding.
+    /// Return a human-readable label for a memory model role.
     pub fn memory_model_display(&self, role: &str) -> String {
-        match role {
-            "embedding" => self
-                .memory
-                .embedding_model
-                .clone()
-                .or_else(|| {
-                    // Find the first embedding model across all providers
-                    for (pid, provider) in
-                        self.providers.iter().chain(self.bundled_providers.iter())
-                    {
-                        if let Some((_name, _model)) = provider.embedding_models.iter().next() {
-                            return Some(format!("{}/{}", pid, _model.model_id));
-                        }
-                    }
-                    None
-                })
-                .unwrap_or_else(|| "<none>".to_string()),
-            _ => self
-                .memory_model_label(role)
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "<inherit>".to_string()),
-        }
+        self.memory_model_label(role)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "<inherit>".to_string())
     }
 
     /// Set the memory model override for a role and persist to config.
@@ -1081,29 +939,12 @@ default_provider = "exa"
         role: &str,
         model_str: &str,
     ) -> Result<()> {
-        match role {
-            "compression" => {
-                if model_str.is_empty() {
-                    self.memory.compression_model = None;
-                } else {
-                    self.memory.compression_model = Some(model_str.to_string());
-                }
+        if role == "summarization" {
+            if model_str.is_empty() {
+                self.memory.summarization_model = None;
+            } else {
+                self.memory.summarization_model = Some(model_str.to_string());
             }
-            "summarization" => {
-                if model_str.is_empty() {
-                    self.memory.summarization_model = None;
-                } else {
-                    self.memory.summarization_model = Some(model_str.to_string());
-                }
-            }
-            "embedding" => {
-                if model_str.is_empty() {
-                    // Don't clear — keep the previous value
-                } else {
-                    self.memory.embedding_model = Some(model_str.to_string());
-                }
-            }
-            _ => {}
         }
         self.save(paths)
     }
@@ -1364,7 +1205,6 @@ mod tests {
                         request_model_id: None,
                     },
                 )]),
-                embedding_models: BTreeMap::new(),
             },
         );
 
@@ -1388,7 +1228,6 @@ mod tests {
                         request_model_id: None,
                     },
                 )]),
-                embedding_models: BTreeMap::new(),
             },
         );
 
@@ -1412,7 +1251,6 @@ mod tests {
                 base_url: "https://example.com/v1".to_string(),
                 api_type: None,
                 models: BTreeMap::new(),
-                embedding_models: BTreeMap::new(),
             },
         );
 

@@ -150,7 +150,7 @@ impl SlotService {
         let mut stmt = db.prepare(&sql)?;
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(|p| p.as_ref()).collect();
-        let rows = stmt.query_map(param_refs.as_slice(), |row| map_slot(row))?;
+        let rows = stmt.query_map(param_refs.as_slice(), map_slot)?;
 
         let mut result = Vec::new();
         for r in rows {
@@ -176,7 +176,7 @@ impl SlotService {
         )?;
         let result = stmt.query_row(
             rusqlite::params![label, scope.as_str(), project_str],
-            |row| map_slot(row),
+            map_slot,
         );
         match result {
             Ok(slot) => Ok(Some(slot)),

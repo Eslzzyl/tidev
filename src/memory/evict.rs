@@ -21,7 +21,7 @@ impl EvictionService {
             )",
             [],
         )?;
-        report.stale_memories_removed = stale as usize;
+        report.stale_memories_removed = stale;
 
         // 2. Old non-latest versions
         let old_versions = db.execute(
@@ -29,7 +29,7 @@ impl EvictionService {
              AND julianday('now') - julianday(updated_at) > 30",
             [],
         )?;
-        report.old_versions_removed = old_versions as usize;
+        report.old_versions_removed = old_versions;
 
         // 3. Clean up retention_scores for deleted entities
         db.execute(

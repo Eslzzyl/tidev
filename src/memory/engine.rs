@@ -2,26 +2,17 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use rusqlite::Connection;
 use std::path::PathBuf;
-use std::sync::{
-    Arc, Mutex, RwLock,
-    atomic::{AtomicBool, AtomicU32, Ordering},
-    mpsc,
-};
+use std::sync::{Arc, Mutex, RwLock};
 use uuid::Uuid;
 
-use crate::config::{ActiveModel, EmbeddingActiveModel};
+use crate::config::ActiveModel;
 use crate::llm::LlmClient;
 
-use super::compress::CompressionService;
-use super::compression_queue::QueueTask;
 use super::consolidate::{ConsolidationReport, ConsolidationService};
-use super::dedup::DedupMap;
 use super::evict::{EvictionReport, EvictionService};
-use super::hybrid_search::HybridSearch;
-use super::observe::ObservationService;
 use super::remember::RememberService;
 use super::retention::RetentionService;
-use super::search_index::{Bm25Index, fts5_search_memories};
+use super::search_index::fts5_search_memories;
 use super::sessions::SessionService;
 use super::slots::SlotService;
 use super::types::*;
@@ -30,14 +21,6 @@ use super::{
     reflect::{ReflectReport, ReflectService},
 };
 
-// ─── Compression circuit breaker ────────────────────────────────────
-
-/// Consecutive LLM compression failures before tripping the circuit breaker.
-const COMPRESSION_CB_THRESHOLD: u32 = 3;
-
-/// How long to pause LLM compression after tripping (seconds).
-const COMPRESSION_CB_COOLDOWN_SECS: u64 = 300; // 5 minutes
-
 // ─── MemoryStore ───────────────────────────────────────────────────
 
 /// Main memory store.
@@ -45,28 +28,10 @@ pub struct MemoryStore {
     db_path: PathBuf,
     connection: Arc<Mutex<Connection>>,
     read_connection: Mutex<Connection>,
-    dedup: Mutex<DedupMap>,
-    bm25: RwLock<Bm25Index>,
     llm: RwLock<Option<LlmClient>>,
     active_model: RwLock<Option<ActiveModel>>,
-    /// Optional override for compression model (None = use active_model).
-    compression_model: RwLock<Option<ActiveModel>>,
-    /// Optional override for summarization model (None = use compression_model, then active_model).
+    /// Optional override for summarization model (None = use active_model).
     summarization_model: RwLock<Option<ActiveModel>>,
-    /// Configured embedding model for vector search.
-    embedding_model: RwLock<Option<EmbeddingActiveModel>>,
-    hybrid_search: RwLock<HybridSearch>,
-    /// Whether automatic compression is enabled.
-    compression_enabled: AtomicBool,
-    /// Whether to use LLM for compression (default false = synthetic only).
-    llm_compression: AtomicBool,
-    /// Circuit breaker: consecutive LLM compression failures.
-    compression_cb_failures: AtomicU32,
-    /// When the circuit breaker was tripped (None = not tripped).
-    compression_cb_tripped_at: RwLock<Option<std::time::Instant>>,
-    /// Sender to enqueue observations for async compression.
-    /// Set after `CompressionQueue::start()`; shared across all Arcs.
-    compression_sender: RwLock<Option<mpsc::SyncSender<QueueTask>>>,
 }
 
 impl MemoryStore {
@@ -93,22 +58,29 @@ impl MemoryStore {
             db_path: path,
             connection: Arc::new(Mutex::new(connection)),
             read_connection: Mutex::new(read_connection),
-            dedup: Mutex::new(DedupMap::new()),
-            bm25: RwLock::new(Bm25Index::new()),
             llm: RwLock::new(None),
             active_model: RwLock::new(None),
-            compression_model: RwLock::new(None),
             summarization_model: RwLock::new(None),
-            embedding_model: RwLock::new(None),
-            hybrid_search: RwLock::new(HybridSearch::new()),
-            compression_enabled: AtomicBool::new(true),
-            llm_compression: AtomicBool::new(false),
-            compression_cb_failures: AtomicU32::new(0),
-            compression_cb_tripped_at: RwLock::new(None),
-            compression_sender: RwLock::new(None),
         };
 
+        store.rebuild_fts5_if_needed()?;
+
         Ok(store)
+    }
+
+    /// Rebuild the memories_fts index on startup so FTS5 queries work.
+    fn rebuild_fts5_if_needed(&self) -> Result<()> {
+        let db = self.connection.lock().unwrap();
+        let exists: bool = db
+            .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'memories_fts'")?
+            .exists(rusqlite::params![])?;
+        if exists {
+            db.execute(
+                "INSERT INTO memories_fts(memories_fts) VALUES('rebuild')",
+                [],
+            )?;
+        }
+        Ok(())
     }
 
     /// Open connections reusing a shared write connection (provided by
@@ -131,20 +103,12 @@ impl MemoryStore {
             db_path: path,
             connection,
             read_connection: Mutex::new(read_connection),
-            dedup: Mutex::new(DedupMap::new()),
-            bm25: RwLock::new(Bm25Index::new()),
             llm: RwLock::new(None),
             active_model: RwLock::new(None),
-            compression_model: RwLock::new(None),
             summarization_model: RwLock::new(None),
-            embedding_model: RwLock::new(None),
-            hybrid_search: RwLock::new(HybridSearch::new()),
-            compression_enabled: AtomicBool::new(true),
-            llm_compression: AtomicBool::new(false),
-            compression_cb_failures: AtomicU32::new(0),
-            compression_cb_tripped_at: RwLock::new(None),
-            compression_sender: RwLock::new(None),
         };
+
+        store.rebuild_fts5_if_needed()?;
 
         Ok(store)
     }
@@ -154,7 +118,6 @@ impl std::fmt::Debug for MemoryStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MemoryStore")
             .field("db_path", &self.db_path)
-            .field("bm25", &self.bm25)
             .field("llm", &self.llm)
             .finish()
     }
@@ -162,105 +125,20 @@ impl std::fmt::Debug for MemoryStore {
 
 impl MemoryStore {
     /// Set the LLM client and models for memory operations.
-    /// `active` is the session's chat model; `compression` and `summarization` are optional
-    /// overrides (None = inherit from active). Call `set_embedding_model()` separately.
+    /// `active` is the session's chat model; `summarization` is an optional
+    /// override (None = inherit from active).
     pub fn set_models(
         &self,
         llm: LlmClient,
         active: ActiveModel,
-        compression: Option<ActiveModel>,
         summarization: Option<ActiveModel>,
     ) {
         *self.llm.write().unwrap() = Some(llm);
         *self.active_model.write().unwrap() = Some(active);
-        *self.compression_model.write().unwrap() = compression;
         *self.summarization_model.write().unwrap() = summarization;
     }
 
-    /// Enable or disable automatic compression.
-    pub fn set_compression_enabled(&self, enabled: bool) {
-        self.compression_enabled
-            .store(enabled, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    /// Enable or disable LLM-based compression (default: false = synthetic only).
-    pub fn set_llm_compression(&self, enabled: bool) {
-        self.llm_compression
-            .store(enabled, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    /// Set the compression queue sender. Observations will be enqueued
-    /// for async compression instead of being scheduled inline.
-    pub fn set_compression_sender(&self, sender: mpsc::SyncSender<QueueTask>) {
-        *self.compression_sender.write().unwrap() = Some(sender);
-    }
-
-    /// Check whether the compression circuit breaker is tripped.
-    /// When tripped and still within the cooldown window, LLM compression
-    /// is skipped in favour of synthetic compression.
-    ///
-    /// Also checks the atomic failure counter proactively: if the counter
-    /// has already reached [`COMPRESSION_CB_THRESHOLD`] but no worker has
-    /// written `tripped_at` yet (a race window between `fetch_add` and
-    /// the `write`), this method returns `true` to prevent extra LLM calls.
-    fn is_compression_circuit_tripped(&self) -> bool {
-        let tripped_at = self.compression_cb_tripped_at.read().unwrap();
-        match *tripped_at {
-            Some(when) => {
-                let elapsed = when.elapsed().as_secs();
-                if elapsed >= COMPRESSION_CB_COOLDOWN_SECS {
-                    // Cooldown expired — auto-reset
-                    drop(tripped_at);
-                    *self.compression_cb_tripped_at.write().unwrap() = None;
-                    self.compression_cb_failures.store(0, Ordering::Relaxed);
-                    crate::log_info!("compression circuit breaker auto-reset after {}s", elapsed);
-                    false
-                } else {
-                    true
-                }
-            }
-            None => {
-                // No explicit trip yet, but the atomic counter may already
-                // be at the threshold from a concurrent worker that
-                // incremented it but hasn't written tripped_at → treat as
-                // tripped to prevent extra LLM calls.
-                self.compression_cb_failures.load(Ordering::Relaxed)
-                    >= COMPRESSION_CB_THRESHOLD
-            }
-        }
-    }
-
-    /// Set the embedding model for vector search.
-    /// Ensures the vec0 virtual table exists with matching dimensions.
-    pub fn set_embedding_model(&self, model: EmbeddingActiveModel) {
-        let dims = model.dimensions;
-        *self.embedding_model.write().unwrap() = Some(model);
-
-        // Create vec0 virtual table for the given dimensions
-        if let Ok(db) = self.connection.lock() {
-            let sql = format!(
-                "CREATE VIRTUAL TABLE IF NOT EXISTS vec_observations USING vec0(embedding float[{}])",
-                dims
-            );
-            if let Err(e) = db.execute_batch(&sql) {
-                crate::log_warn!("failed to create vec_observations table: {}", e);
-            }
-        }
-    }
-
-    /// Resolve the LLM and model to use for compression.
-    fn resolve_compression_llm(&self) -> Option<(LlmClient, ActiveModel)> {
-        let llm = self.llm.read().unwrap().clone()?;
-        let model = self
-            .compression_model
-            .read()
-            .unwrap()
-            .clone()
-            .or_else(|| self.active_model.read().unwrap().clone())?;
-        Some((llm, model))
-    }
-
-    /// Resolve the LLM and model to use for summarization.
+    /// Resolve the LLM and model to use for summarization/consolidation/reflection.
     fn resolve_summarization_llm(&self) -> Option<(LlmClient, ActiveModel)> {
         let llm = self.llm.read().unwrap().clone()?;
         let model = self
@@ -268,7 +146,6 @@ impl MemoryStore {
             .read()
             .unwrap()
             .clone()
-            .or_else(|| self.compression_model.read().unwrap().clone())
             .or_else(|| self.active_model.read().unwrap().clone())?;
         Some((llm, model))
     }
@@ -345,38 +222,11 @@ impl MemoryStore {
         Ok(())
     }
 
-    /// Search memories. Uses FTS5 for sync path.
-    /// For hybrid search (BM25 + vector), use the async `search_hybrid` method.
+    /// Search memories using FTS5 + LIKE fallback.
     pub fn search(&self, workspace_root: &str, query: &str) -> Result<Vec<MemoryEntry>> {
-        // Try hybrid search if we're in a tokio context and embedding model is available.
-        // Use block_in_place to avoid panicking when called from a tokio worker thread.
-        // Resolve models FIRST and drop all read guards before any async work
-        // to prevent std::sync::RwLock re-entrancy deadlocks.
-        let resolved = {
-            let llm = self.llm.read().unwrap().clone();
-            let model = self.embedding_model.read().unwrap().clone();
-            (llm, model)
-        };
-        if let (Some(llm), Some(model)) = resolved {
-            if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                let future = self.search_hybrid_with(
-                    llm, model, query, workspace_root, 20,
-                );
-                let result = tokio::task::block_in_place(move || handle.block_on(future));
-                if let Ok(results) = result {
-                    if !results.is_empty() {
-                        return Ok(results);
-                    }
-                }
-            }
-        }
-        // Fall back to FTS5 / LIKE
         self.search_fts5_fallback(workspace_root, query)
     }
 
-    /// FTS5 + LIKE fallback (no hybrid search recursion).
-    /// Used by both `search` (sync) and `search_hybrid` (async) to avoid
-    /// recursive hybrid-search attempts.
     fn search_fts5_fallback(&self, workspace_root: &str, query: &str) -> Result<Vec<MemoryEntry>> {
         let db = self.read_connection.lock().unwrap();
         if query.trim().is_empty() {
@@ -405,7 +255,7 @@ impl MemoryStore {
         )?;
         let entries = stmt.query_map(
             rusqlite::params![workspace_root, pattern, pattern, pattern],
-            |row| super::remember::map_memory_entry_from_row(row),
+            super::remember::map_memory_entry_from_row,
         )?;
         let mut result = Vec::new();
         for entry in entries {
@@ -480,15 +330,8 @@ impl MemoryStore {
         Ok(result)
     }
 
-    /// Search for context-relevant memories using semantic search when available.
-    ///
-    /// When `query` is provided and embedding is configured, uses hybrid
-    /// search (BM25 + vector) via `search_hybrid`. Falls back to FTS5,
-    /// then to compound scoring (`select_hot`) when nothing else succeeds.
-    ///
-    /// This is the synchronous version; it uses `block_in_place` when
-    /// called from a tokio context.  Prefer [`search_hot_context_async`]
-    /// in async functions to avoid blocking a tokio worker thread.
+    /// Search for context-relevant memories using FTS5 + LIKE, with
+    /// compound scoring fallback.
     pub fn search_hot_context(
         &self,
         query: Option<&str>,
@@ -500,24 +343,16 @@ impl MemoryStore {
             let q = query.trim();
             if !q.is_empty() {
                 // Try search (hybrid → FTS5 → LIKE) with the query
-                if let Ok(entries) = self.search(workspace_root, q) {
-                    if !entries.is_empty() {
+                if let Ok(entries) = self.search(workspace_root, q)
+                    && !entries.is_empty() {
                         return Ok(entries);
                     }
-                }
             }
         }
         // Fall back to compound sort (importance × frequency × recency)
         self.select_hot(workspace_root, limit, min_chars)
     }
 
-    /// Async version of [`search_hot_context`].
-    ///
-    /// Unlike the sync version, this method does **not** use `block_in_place`
-    /// / `block_on`.  It resolves the embedding model and calls
-    /// [`search_hybrid_with`] (which has a 30-second timeout) via a normal
-    /// `.await`, so the tokio worker thread is yielded while waiting for
-    /// the embedding API response.
     pub async fn search_hot_context_async(
         &self,
         query: Option<&str>,
@@ -527,24 +362,12 @@ impl MemoryStore {
     ) -> Result<Vec<MemoryEntry>> {
         if let Some(query) = query {
             let q = query.trim();
-            if !q.is_empty() {
-                let llm = self.llm.read().unwrap().clone();
-                let model = self.embedding_model.read().unwrap().clone();
-                if let (Some(llm), Some(model)) = (llm, model) {
-                    if let Ok(entries) =
-                        self.search_hybrid_with(llm, model, q, workspace_root, limit).await
-                        && !entries.is_empty()
-                    {
-                        return Ok(entries);
-                    }
-                }
-                // Fall back to FTS5 / LIKE
-                if let Ok(entries) = self.search_fts5_fallback(workspace_root, q)
+            if !q.is_empty()
+                && let Ok(entries) = self.search_fts5_fallback(workspace_root, q)
                     && !entries.is_empty()
                 {
                     return Ok(entries);
                 }
-            }
         }
         self.select_hot(workspace_root, limit, min_chars)
     }
@@ -576,36 +399,6 @@ impl MemoryStore {
         parts.join("\n")
     }
 
-    // ─── Phase 1: Context Injection Helpers ──────────────────────────
-
-    /// Load recent compressed observations for a session, ordered by
-    /// descending importance then recency.
-    pub fn load_recent_compressed_observations(
-        &self,
-        session_id: &Uuid,
-        limit: usize,
-        min_importance: u8,
-    ) -> Result<Vec<CompressedObservation>> {
-        let db = self.read_connection.lock().unwrap();
-        let mut stmt = db.prepare(
-            "SELECT id, session_id, obs_type, title, subtitle,
-                    facts, narrative, concepts, files, importance, confidence, created_at
-             FROM compressed_observations
-             WHERE session_id = ?1 AND importance >= ?2
-             ORDER BY importance DESC, created_at DESC
-             LIMIT ?3",
-        )?;
-        let rows = stmt.query_map(
-            rusqlite::params![session_id.to_string(), min_importance as i64, limit as i64],
-            Self::map_compressed_observation_from_row,
-        )?;
-        let mut result = Vec::new();
-        for row in rows {
-            result.push(row?);
-        }
-        Ok(result)
-    }
-
     /// Load session summaries from sessions other than the current one,
     /// newest first.
     pub fn load_other_session_summaries(
@@ -625,58 +418,6 @@ impl MemoryStore {
         let rows = stmt.query_map(
             rusqlite::params![exclude_session_id.to_string(), limit as i64],
             Self::map_session_summary_from_row,
-        )?;
-        let mut result = Vec::new();
-        for row in rows {
-            result.push(row?);
-        }
-        Ok(result)
-    }
-
-    fn map_compressed_observation_from_row(
-        row: &rusqlite::Row,
-    ) -> rusqlite::Result<CompressedObservation> {
-        Ok(CompressedObservation {
-            id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap_or(Uuid::nil()),
-            session_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap_or(Uuid::nil()),
-            obs_type: ObservationType::parse_str(&row.get::<_, String>(2)?)
-                .unwrap_or(ObservationType::Other),
-            title: row.get(3)?,
-            subtitle: row.get(4)?,
-            facts: serde_json::from_str(&row.get::<_, String>(5)?).unwrap_or_default(),
-            narrative: row.get(6)?,
-            concepts: serde_json::from_str(&row.get::<_, String>(7)?).unwrap_or_default(),
-            files: serde_json::from_str(&row.get::<_, String>(8)?).unwrap_or_default(),
-            importance: row.get::<_, i64>(9)? as u8,
-            confidence: row.get(10)?,
-            created_at: row
-                .get::<_, String>(11)
-                .ok()
-                .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
-                .map(|d| d.with_timezone(&chrono::Utc))
-                .unwrap_or_else(chrono::Utc::now),
-        })
-    }
-
-    /// List recent compressed observations across all sessions, newest first.
-    /// Only returns observations that have been compressed (have obs_type set).
-    pub fn list_recent_observations(
-        &self,
-        limit: usize,
-        min_importance: u8,
-    ) -> Result<Vec<CompressedObservation>> {
-        let db = self.read_connection.lock().unwrap();
-        let mut stmt = db.prepare(
-            "SELECT id, session_id, obs_type, title, subtitle,
-                    facts, narrative, concepts, files, importance, confidence, created_at
-             FROM compressed_observations
-             WHERE obs_type IS NOT NULL AND importance >= ?1
-             ORDER BY importance DESC, created_at DESC
-             LIMIT ?2",
-        )?;
-        let rows = stmt.query_map(
-            rusqlite::params![min_importance as i64, limit as i64],
-            Self::map_compressed_observation_from_row,
         )?;
         let mut result = Vec::new();
         for row in rows {
@@ -705,186 +446,6 @@ impl MemoryStore {
     }
 
     // ─── New AgentMemory-Style API ──────────────────────────────────
-
-    /// Observe a tool hook and create a raw observation.
-    /// Returns the observation ID if new, or None if deduplicated.
-    pub fn observe(&self, payload: &HookPayload) -> Result<Option<Uuid>> {
-        let _t_conn = std::time::Instant::now();
-        let id = {
-            let db = self.connection.lock().unwrap();
-            let mut dedup = self.dedup.lock().unwrap();
-            ObservationService::observe(&db, &mut dedup, payload)?
-        };
-        let _t_conn = _t_conn.elapsed();
-        crate::log_debug!("observe: connection.lock took {:?}", _t_conn);
-        if _t_conn > std::time::Duration::from_millis(100) {
-            crate::log_warn!("observe: connection.lock took {:?} (slow)", _t_conn);
-        }
-        match id {
-            ObservationResult::New(id) => {
-                crate::log_info!(
-                    "observe: scheduled compression for {} (payload hook={})",
-                    id,
-                    payload.hook_type.as_str(),
-                );
-                // Schedule async compression (no DB lock held)
-                self.schedule_compression(id);
-                // Also add to BM25 index
-                let _t_bm25 = std::time::Instant::now();
-                if let Ok(raw) = {
-                    let db = self.read_connection.lock().unwrap();
-                    Self::load_raw_observation(&db, id)
-                } {
-                    let search_text = format!(
-                        "{} {} {} {}",
-                        raw.tool_name.unwrap_or_default(),
-                        raw.tool_input.unwrap_or_default(),
-                        raw.tool_output.unwrap_or_default(),
-                        raw.user_prompt.unwrap_or_default(),
-                    );
-                    self.bm25
-                        .write()
-                        .unwrap()
-                        .add(&id.to_string(), &search_text);
-                }
-                let _t_bm25 = _t_bm25.elapsed();
-                crate::log_debug!("observe: bm25.write took {:?}", _t_bm25);
-                if _t_bm25 > std::time::Duration::from_millis(50) {
-                    crate::log_warn!(
-                        "observe: bm25.write took {:?} (slow)",
-                        _t_bm25
-                    );
-                }
-                Ok(Some(id))
-            }
-            ObservationResult::Deduplicated => Ok(None),
-        }
-    }
-
-    /// Run compression on an observation. Uses LLM when available, falls
-    /// back to synthetic (rule-based) compression otherwise.
-    /// Returns an error if compression is disabled via `set_compression_enabled(false)`.
-    pub async fn compress(&self, observation_id: Uuid) -> Result<CompressedObservation> {
-        if !self
-            .compression_enabled
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
-            anyhow::bail!("compression is disabled by configuration");
-        }
-        let db_path = self.db_path.clone();
-
-        // Only attempt LLM compression when explicitly opted in and available.
-        // Default is synthetic (rule-based) compression — zero LLM calls.
-        let llm_enabled = self.llm_compression.load(Ordering::Relaxed);
-        let use_llm = llm_enabled
-            && self.resolve_compression_llm().is_some()
-            && !self.is_compression_circuit_tripped();
-
-        crate::log_info!(
-            "compress: starting {} method={}",
-            observation_id,
-            if use_llm { "llm" } else { "synthetic" },
-        );
-
-        let compressed = if use_llm {
-            let (llm, model) = self.resolve_compression_llm().unwrap();
-            let conn = Connection::open(&db_path)?;
-            let compress_result = tokio::time::timeout(
-                std::time::Duration::from_secs(120),
-                CompressionService::compress(&conn, &llm, &model, observation_id),
-            )
-            .await;
-            match compress_result {
-                Ok(Ok(c)) => {
-                    // Success — reset circuit breaker
-                    self.compression_cb_failures.store(0, Ordering::Relaxed);
-                    *self.compression_cb_tripped_at.write().unwrap() = None;
-                    c
-                }
-                Ok(Err(e)) => {
-                    crate::log_warn!("LLM compression failed, falling back to synthetic: {}", e);
-                    let failures = self.compression_cb_failures.fetch_add(1, Ordering::Relaxed) + 1;
-                    if failures >= COMPRESSION_CB_THRESHOLD {
-                        crate::log_warn!(
-                            "compression circuit breaker tripped after {} consecutive failures",
-                            failures,
-                        );
-                        *self.compression_cb_tripped_at.write().unwrap() =
-                            Some(std::time::Instant::now());
-                    }
-                    let conn = Connection::open(&db_path)?;
-                    CompressionService::compress_synthetic(&conn, observation_id)?
-                }
-                Err(_) => {
-                    crate::log_warn!("LLM compression timed out, falling back to synthetic");
-                    let failures = self.compression_cb_failures.fetch_add(1, Ordering::Relaxed) + 1;
-                    if failures >= COMPRESSION_CB_THRESHOLD {
-                        crate::log_warn!(
-                            "compression circuit breaker tripped after {} consecutive failures",
-                            failures,
-                        );
-                        *self.compression_cb_tripped_at.write().unwrap() =
-                            Some(std::time::Instant::now());
-                    }
-                    let conn = Connection::open(&db_path)?;
-                    CompressionService::compress_synthetic(&conn, observation_id)?
-                }
-            }
-        } else {
-            let conn = Connection::open(&db_path)?;
-            CompressionService::compress_synthetic(&conn, observation_id)?
-        };
-
-        crate::log_info!(
-            "compress: completed {} title=\"{}\" importance={}",
-            observation_id,
-            compressed.title,
-            compressed.importance,
-        );
-
-        // Update BM25 index
-        self.bm25
-            .write()
-            .unwrap()
-            .add(&compressed.id.to_string(), &compressed.to_search_text());
-
-        // Embed and store in vec0 (best-effort)
-        let embed_llm = self.llm.read().unwrap().clone();
-        let embed_model = self.embedding_model.read().unwrap().clone();
-        if let (Some(llm), Some(model)) = (embed_llm, embed_model) {
-            let id = compressed.id.to_string();
-            let search_text = compressed.to_search_text();
-            crate::log_info!("compress: embedding {} ({} chars)", id, search_text.len());
-            match llm.embed(&model, &search_text).await {
-                Ok(embedding) => {
-                    let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
-                    if let Ok(db) = self.connection.try_lock() {
-                        // Ensure rowid mapping exists
-                        let _ = db.execute(
-                            "INSERT OR IGNORE INTO vec_obs_map(observation_id) VALUES (?1)",
-                            rusqlite::params![&id],
-                        );
-                        let rowid: i64 = db
-                            .query_row(
-                                "SELECT rowid FROM vec_obs_map WHERE observation_id = ?1",
-                                rusqlite::params![&id],
-                                |row| row.get(0),
-                            )
-                            .unwrap_or(0);
-                        if rowid > 0 {
-                            let _ = db.execute(
-                                "INSERT OR REPLACE INTO vec_observations(rowid, embedding) VALUES (?1, ?2)",
-                                rusqlite::params![rowid, blob],
-                            );
-                        }
-                    }
-                }
-                Err(e) => crate::log_warn!("embedding failed: {}", e),
-            }
-        }
-
-        Ok(compressed)
-    }
 
     /// Remember with Jaccard dedup (new API).
     pub fn remember(
@@ -948,7 +509,7 @@ impl MemoryStore {
     /// Run the consolidation pipeline (semantic + procedural).
     pub async fn run_consolidation(&self, project: &str) -> Result<ConsolidationReport> {
         let (llm, model) = self
-            .resolve_compression_llm()
+            .resolve_summarization_llm()
             .ok_or_else(|| anyhow::anyhow!("LLM client not configured for consolidation"))?;
 
         let db_path = self.db_path.clone();
@@ -983,276 +544,6 @@ impl MemoryStore {
         ).context("memory not found")
     }
 
-    fn load_raw_observation(db: &Connection, id: Uuid) -> Result<RawObservation> {
-        use super::types::HookType;
-        db.query_row(
-            "SELECT id, session_id, created_at, hook_type, tool_name, tool_input, tool_output, user_prompt, assistant_response, NULL, NULL
-             FROM compressed_observations WHERE id = ?1",
-            rusqlite::params![id.to_string()],
-            |row| {
-                Ok(RawObservation {
-                    id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap_or(id),
-                    session_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap_or(id),
-                    timestamp: row.get::<_, String>(2).ok()
-                        .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
-                        .map(|d| d.with_timezone(&chrono::Utc))
-                        .unwrap_or_else(chrono::Utc::now),
-                    hook_type: HookType::parse_str(&row.get::<_, String>(3)?).unwrap_or(HookType::PostToolUse),
-                    tool_name: row.get(4)?,
-                    tool_input: row.get(5)?,
-                    tool_output: row.get(6)?,
-                    user_prompt: row.get(7)?,
-                    assistant_response: row.get(8)?,
-                    modality: Modality::Text,
-                    image_data: None,
-                })
-            },
-        ).context("observation not found")
-    }
-
-    fn schedule_compression(&self, obs_id: Uuid) {
-        if let Some(ref sender) = *self.compression_sender.read().unwrap()
-            && let Err(e) = sender.try_send(QueueTask::CompressAndEmbed(obs_id))
-        {
-            match e {
-                mpsc::TrySendError::Full(_) => {
-                    crate::log_warn!(
-                        "compression queue full, dropping observation {}",
-                        obs_id
-                    );
-                }
-                mpsc::TrySendError::Disconnected(_) => {}
-            }
-        }
-    }
-
-    /// Enqueue an embedding-only backfill task for an already-compressed
-    /// observation that is missing a vector embedding.
-    pub fn schedule_embedding_backfill(&self, obs_id: Uuid) {
-        if let Some(ref sender) = *self.compression_sender.read().unwrap()
-            && let Err(e) = sender.try_send(QueueTask::EmbedBackfill(obs_id))
-        {
-            match e {
-                mpsc::TrySendError::Full(_) => {
-                    crate::log_warn!(
-                        "compression queue full, dropping embedding backfill for {}",
-                        obs_id
-                    );
-                }
-                mpsc::TrySendError::Disconnected(_) => {}
-            }
-        }
-    }
-
-    /// Recover uncompressed observations that may have been left behind
-    /// after a previous crash or fast exit (where the async compression
-    /// thread was killed before it could run).
-    ///
-    /// Finds observations where `obs_type IS NULL` (not yet compressed)
-    /// and schedules async compression + embedding for each one.
-    /// Returns the number of observations scheduled.
-    pub fn recover_uncompressed(&self, limit: usize) -> Result<usize> {
-        let ids: Vec<Uuid> = {
-            let db = self.connection.lock().unwrap();
-            let mut stmt = db.prepare(
-                "SELECT id FROM compressed_observations
-                 WHERE obs_type IS NULL
-                 ORDER BY created_at ASC
-                 LIMIT ?1",
-            )?;
-            stmt.query_map(rusqlite::params![limit as i64], |row| {
-                row.get::<_, String>(0)
-            })?
-            .filter_map(|r| r.ok())
-            .filter_map(|s| Uuid::parse_str(&s).ok())
-            .collect()
-            // db and stmt dropped here → lock released
-        };
-
-        let count = ids.len();
-        if count == 0 {
-            return Ok(0);
-        }
-
-        crate::log_info!("recovering {} uncompressed observations", count);
-
-        for id in ids {
-            // Enqueue via the compression sender if available.
-            // If no queue is configured, fall back to a direct thread spawn
-            // (e.g. during early startup before the queue is created).
-            let has_sender = self.compression_sender.read().unwrap().is_some();
-            if has_sender {
-                self.schedule_compression(id);
-            } else {
-                let store = self.clone();
-                std::thread::spawn(move || {
-                    let worker_rt = match tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                    {
-                        Ok(rt) => rt,
-                        Err(e) => {
-                            crate::log_warn!(
-                                "failed to create runtime for recovery of {}: {}",
-                                id,
-                                e
-                            );
-                            return;
-                        }
-                    };
-                    match worker_rt.block_on(store.compress(id)) {
-                        Ok(_) => {
-                            crate::log_info!("recovered uncompressed observation {}", id);
-                        }
-                        Err(e) => {
-                            crate::log_warn!("recovery compression failed for {}: {}", id, e);
-                        }
-                    }
-                });
-            }
-        }
-
-        Ok(count)
-    }
-
-    /// Backfill embeddings for compressed observations that are missing them.
-    ///
-    /// This can happen when the vec0 extension failed to load at startup or when
-    /// embedding generation temporarily failed.  This method only queries IDs
-    /// and enqueues each one through the compression queue; actual embedding
-    /// generation runs asynchronously in the worker pool.
-    ///
-    /// Requires that [`set_compression_sender`] has been called.
-    /// Returns the number of observations queued for backfill.
-    pub fn backfill_embeddings(&self, limit: usize) -> Result<usize> {
-        if self.llm.read().unwrap().is_none()
-            || self.embedding_model.read().unwrap().is_none()
-        {
-            return Ok(0);
-        }
-
-        let ids: Vec<Uuid> = {
-            let db = self.connection.lock().unwrap();
-            let mut stmt = db.prepare(
-                "SELECT co.id
-                 FROM compressed_observations co
-                 LEFT JOIN vec_obs_map m ON m.observation_id = co.id
-                 LEFT JOIN vec_observations v ON v.rowid = m.rowid
-                 WHERE co.obs_type IS NOT NULL
-                   AND v.rowid IS NULL
-                 ORDER BY co.created_at ASC
-                 LIMIT ?1"
-            )?;
-            stmt.query_map(rusqlite::params![limit as i64], |row| {
-                row.get::<_, String>(0)
-            })?
-            .filter_map(|r| r.ok())
-            .filter_map(|s| Uuid::parse_str(&s).ok())
-            .collect()
-        };
-
-        let count = ids.len();
-        if count == 0 {
-            return Ok(0);
-        }
-
-        crate::log_info!(
-            "enqueuing {} observations for embedding backfill",
-            count
-        );
-
-        for id in ids {
-            self.schedule_embedding_backfill(id);
-        }
-
-        Ok(count)
-    }
-
-    /// Generate and store an embedding for a single, already-compressed
-    /// observation.  Called by compression queue workers.
-    pub async fn backfill_embedding(&self, id: Uuid) -> Result<()> {
-        let (title, narrative, facts, concepts, files) = {
-            let db = self.connection.lock().unwrap();
-            let mut stmt = db.prepare(
-                "SELECT co.title, co.narrative, co.facts, co.concepts, co.files
-                 FROM compressed_observations co
-                 WHERE co.id = ?1"
-            )?;
-            stmt.query_row(rusqlite::params![id.to_string()], |row| {
-                let title: String = row.get(0)?;
-                let narrative: String = row.get(1)?;
-                let facts_json: String = row.get(2)?;
-                let concepts_json: String = row.get(3)?;
-                let files_json: String = row.get(4)?;
-                let facts: Vec<String> = serde_json::from_str(&facts_json).unwrap_or_default();
-                let concepts: Vec<String> =
-                    serde_json::from_str(&concepts_json).unwrap_or_default();
-                let files: Vec<String> = serde_json::from_str(&files_json).unwrap_or_default();
-                Ok((title, narrative, facts, concepts, files))
-            })?
-        };
-
-        let llm = match self.llm.read().unwrap().as_ref() {
-            Some(l) => l.clone(),
-            None => anyhow::bail!("no LLM client configured for embedding backfill"),
-        };
-        let model = match self.embedding_model.read().unwrap().as_ref() {
-            Some(m) => m.clone(),
-            None => anyhow::bail!("no embedding model configured for backfill"),
-        };
-
-        let search_text = format!(
-            "{} {} {} {} {}",
-            title,
-            narrative,
-            facts.join(" "),
-            concepts.join(" "),
-            files.join(" ")
-        );
-
-        crate::log_info!("backfill_embedding: starting {} ({} chars)", id, search_text.len());
-        let embedding = match tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            llm.embed(&model, &search_text),
-        )
-        .await
-        {
-            Ok(Ok(emb)) => emb,
-            Ok(Err(e)) => {
-                crate::log_warn!("backfill_embedding: API error for {}: {}", id, e);
-                anyhow::bail!("embedding API error: {}", e);
-            }
-            Err(_) => {
-                crate::log_warn!("backfill_embedding: timed out for {}", id);
-                anyhow::bail!("embedding timed out after 30s");
-            }
-        };
-        let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
-
-        if let Ok(conn) = Connection::open(&self.db_path) {
-            let id_str = id.to_string();
-            let _ = conn.execute(
-                "INSERT OR IGNORE INTO vec_obs_map(observation_id) VALUES (?1)",
-                rusqlite::params![&id_str],
-            );
-            let rowid: i64 = conn
-                .query_row(
-                    "SELECT rowid FROM vec_obs_map WHERE observation_id = ?1",
-                    rusqlite::params![&id_str],
-                    |row| row.get(0),
-                )
-                .unwrap_or(0);
-            if rowid > 0 {
-                let _ = conn.execute(
-                    "INSERT OR REPLACE INTO vec_observations(rowid, embedding) VALUES (?1, ?2)",
-                    rusqlite::params![rowid, blob],
-                );
-            }
-        }
-
-        crate::log_info!("backfilled embedding for observation {}", id);
-        Ok(())
-    }
 
     /// Get a key-value from the `meta` table.
     pub fn meta_get(&self, key: &str) -> Result<Option<String>> {
@@ -1364,113 +655,6 @@ impl MemoryStore {
         EvictionService::run_eviction(&db)
     }
 
-    // ─── Phase 2: Vector + Hybrid Search ───────────────────────────
-
-    /// Run hybrid search (BM25 + vector). Falls back to FTS5 if no embedding model.
-    pub async fn search_hybrid(
-        &self,
-        query: &str,
-        workspace_root: &str,
-        limit: usize,
-    ) -> Result<Vec<MemoryEntry>> {
-        let llm = self.llm.read().unwrap().clone();
-        let model = self.embedding_model.read().unwrap().clone();
-        if let (Some(llm), Some(model)) = (llm, model) {
-            return self.search_hybrid_with(llm, model, query, workspace_root, limit).await;
-        }
-        self.search_fts5_fallback(workspace_root, query)
-    }
-
-    /// Hybrid search with pre-resolved LLM and embedding model.
-    ///
-    /// Unlike [`search_hybrid`], this method does **not** acquire
-    /// `self.llm`/`self.embedding_model` internally, so it is safe to call
-    /// from code paths that already hold those RwLock read guards (see
-    /// [`search`] which resolves models before `block_in_place`).
-    ///
-    /// The embedding API call is wrapped with a 30-second timeout so that
-    /// synchronous callers (compose_static_system_prompt → block_in_place) do not
-    /// block the tokio worker thread indefinitely.
-    pub async fn search_hybrid_with(
-        &self,
-        llm: LlmClient,
-        model: EmbeddingActiveModel,
-        query: &str,
-        workspace_root: &str,
-        limit: usize,
-    ) -> Result<Vec<MemoryEntry>> {
-        let query_embedding = tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            llm.embed(&model, query),
-        )
-        .await;
-
-        match query_embedding {
-            Ok(Ok(emb)) => {
-                let emb_bytes: Vec<u8> = emb.iter().flat_map(|f| f.to_le_bytes()).collect();
-
-                let bm25_results = self.bm25.read().unwrap().search(query, limit * 2);
-
-                let db = self.read_connection.lock().unwrap();
-                let vector_results: Vec<(String, f64)> = match db.prepare(
-                    "SELECT m.observation_id, v.distance
-                     FROM vec_observations v
-                     JOIN vec_obs_map m ON m.rowid = v.rowid
-                     WHERE v.embedding MATCH ?1
-                     ORDER BY v.distance
-                     LIMIT ?2",
-                ) {
-                    Ok(mut stmt) => match stmt.query_map(
-                        rusqlite::params![emb_bytes.as_slice(), (limit * 2) as i64],
-                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?)),
-                    ) {
-                        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
-                        Err(_) => vec![],
-                    },
-                    Err(_) => vec![],
-                };
-
-                let hs = self.hybrid_search.read().unwrap();
-                let results = hs.fuse(bm25_results, vector_results, limit);
-
-                if !results.is_empty() {
-                    let ids: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
-                    let mut entries = Vec::new();
-                    for id in &ids {
-                        let _uuid = Uuid::parse_str(id).unwrap_or(Uuid::nil());
-                        if let Ok(entry) = db.query_row(
-                            "SELECT id, workspace_root, memory_type, title, content, tags, source_session_id, created_at, updated_at, usage_count, active, concepts, files, strength, importance, version, parent_id, supersedes, related_ids, is_latest
-                              FROM memories WHERE id = ?1 AND workspace_root = ?2 AND active = 1 AND is_latest = 1",
-                            rusqlite::params![id, workspace_root],
-                            |row| super::remember::map_memory_entry_from_row(row),
-                        ) {
-                            entries.push(entry);
-                        }
-                    }
-                    if !entries.is_empty() {
-                        return Ok(entries);
-                    }
-                }
-            }
-            Ok(Err(e)) => crate::log_warn!("hybrid search embedding failed: {}", e),
-            Err(_) => crate::log_warn!("hybrid search embedding timed out after 30s"),
-        }
-
-        self.search_fts5_fallback(workspace_root, query)
-    }
-
-    // ─── Graph: Knowledge Graph Extraction ─────────────────────────
-
-    /// Extract graph entities from a compressed observation.
-    ///
-    /// Opens its own DB connection (called from spawned threads where
-    /// `self.connection` is already held).
-    pub fn graph_extract_from_observation(&self, obs: &super::CompressedObservation) -> Result<()> {
-        let db_path = self.db_path.clone();
-        let db = Connection::open(&db_path).context("failed to open DB for graph extraction")?;
-        super::graph::extract_from_observation(&db, obs)
-    }
-
     /// Search the knowledge graph for context related to the query.
     ///
     /// Synchronous, no LLM — safe to call from compose_static_system_prompt.
@@ -1545,7 +729,7 @@ impl MemoryStore {
     /// Run the reflection pipeline (clustering facts + LLM insight synthesis).
     pub async fn run_reflect(&self, project: &str) -> Result<ReflectReport> {
         let (llm, model) = self
-            .resolve_compression_llm()
+            .resolve_summarization_llm()
             .ok_or_else(|| anyhow::anyhow!("LLM client not configured for reflection"))?;
 
         let db_path = self.db_path.clone();

@@ -1,7 +1,7 @@
-/// Case-insensitive XML tag parsing utilities, extracted from compress.rs.
-///
-/// Handles common LLM output quirks: markdown code fences, extra prose,
-/// case variation in tag names, and missing optional fields.
+//! Case-insensitive XML tag parsing utilities, extracted from compress.rs.
+//!
+//! Handles common LLM output quirks: markdown code fences, extra prose,
+//! case variation in tag names, and missing optional fields.
 
 /// Clean an LLM response that may contain markdown fences or explanatory
 /// prose around the XML block. Returns the inner XML content.
@@ -9,8 +9,8 @@ pub fn clean_llm_xml_response(raw: &str) -> String {
     let text = raw.trim().to_string();
 
     // Strip markdown code fences: ```xml ... ``` or ``` ... ```
-    if let (Some(start), Some(end)) = (text.find("```"), text.rfind("```")) {
-        if start < end {
+    if let (Some(start), Some(end)) = (text.find("```"), text.rfind("```"))
+        && start < end {
             let inner_start = match text[start..].find('\n') {
                 Some(nl) => start + nl + 1,
                 None => start + 3,
@@ -19,16 +19,14 @@ pub fn clean_llm_xml_response(raw: &str) -> String {
                 return text[inner_start..end].trim().to_string();
             }
         }
-    }
 
     // If no fences, try to find the <observation>...</observation> block
-    if let Some(tag_start) = find_tag_boundary_ci(&text, "observation", true) {
-        if let Some(tag_end) =
+    if let Some(tag_start) = find_tag_boundary_ci(&text, "observation", true)
+        && let Some(tag_end) =
             find_tag_boundary_ci(&text[tag_start..], "observation", false)
         {
             return text[tag_start..tag_start + tag_end].trim().to_string();
         }
-    }
 
     // Return as-is; the case-insensitive parser will attempt further
     text

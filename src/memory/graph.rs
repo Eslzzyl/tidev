@@ -4,8 +4,6 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::types::CompressedObservation;
-
 // ─── Types ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -164,57 +162,62 @@ pub fn upsert_edge(
     Ok(id)
 }
 
-// ─── Extraction ───────────────────────────────────────────────────────
+// ─── Knowledge Graph Extraction ───────────────────────────────────────
 
-/// Reify a compressed observation into graph nodes + edges.
+/// Extract nodes and edges from a `SessionSummary`.
 ///
-/// tidev's compression step already extracts structured `concepts` and `files`.
-/// This function creates graph nodes from those fields and edges between
-/// co-occurring entities — no additional LLM call needed.
-pub fn extract_from_observation(db: &Connection, obs: &CompressedObservation) -> Result<()> {
-    let mut entity_ids: Vec<(String, String)> = Vec::new(); // (id, type)
-
-    // Create nodes for concepts
-    for concept in &obs.concepts {
-        let label = concept.trim();
-        if label.is_empty() {
-            continue;
-        }
-        let id = upsert_node(db, "concept", label)?;
-        entity_ids.push((id, "concept".to_string()));
+/// Creates `concept` nodes for each concept and `file` nodes for each
+/// modified file, then edges between them with `relates_to` relation.
+pub fn extract_from_session_summary(
+    db: &Connection,
+    summary: &crate::memory::types::SessionSummary,
+    session_id: &str,
+) -> Result<()> {
+    let mut concept_ids: Vec<String> = Vec::new();
+    for concept in &summary.concepts {
+        let id = upsert_node(db, "concept", concept)?;
+        concept_ids.push(id);
     }
 
-    // Create nodes for files
-    for file in &obs.files {
-        let label = file.trim();
-        if label.is_empty() {
-            continue;
-        }
-        let id = upsert_node(db, "file", label)?;
-        entity_ids.push((id, "file".to_string()));
+    let mut file_ids: Vec<String> = Vec::new();
+    for file in &summary.files_modified {
+        let id = upsert_node(db, "file", file)?;
+        file_ids.push(id);
     }
 
-    // Create edges between all pairs that co-occur in this observation
-    // Use different relation types based on entity type pairs:
-    //   concept↔concept → "related_to"
-    //   file↔file       → "co_occurs_with"
-    //   concept↔file    → "mentioned_in"
-    let session_id = Some(obs.session_id.to_string());
-    for i in 0..entity_ids.len() {
-        for j in (i + 1)..entity_ids.len() {
-            let relation = match (entity_ids[i].1.as_str(), entity_ids[j].1.as_str()) {
-                ("file", "file") => "co_occurs_with",
-                ("concept", "concept") => "related_to",
-                _ => "mentioned_in",
-            };
-            upsert_edge(
-                db,
-                &entity_ids[i].0,
-                &entity_ids[j].0,
-                relation,
-                1.0,
-                session_id.as_deref(),
-            )?;
+    // Connect each concept to each file
+    for cid in &concept_ids {
+        for fid in &file_ids {
+            upsert_edge(db, cid, fid, "relates_to", 1.0, Some(session_id))?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Extract nodes and edges from a `MemoryEntry`.
+///
+/// Creates `concept` nodes for each concept and `file` nodes for each
+/// file, then edges between them with `relates_to` relation.
+pub fn extract_from_memory_entry(
+    db: &Connection,
+    entry: &crate::memory::types::MemoryEntry,
+) -> Result<()> {
+    let mut concept_ids: Vec<String> = Vec::new();
+    for concept in &entry.concepts {
+        let id = upsert_node(db, "concept", concept)?;
+        concept_ids.push(id);
+    }
+
+    let mut file_ids: Vec<String> = Vec::new();
+    for file in &entry.files {
+        let id = upsert_node(db, "file", file)?;
+        file_ids.push(id);
+    }
+
+    for cid in &concept_ids {
+        for fid in &file_ids {
+            upsert_edge(db, cid, fid, "relates_to", 1.0, Some(&entry.id.to_string()))?;
         }
     }
 

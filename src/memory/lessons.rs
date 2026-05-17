@@ -81,7 +81,7 @@ impl LessonService {
         )?;
         let rows = stmt.query_map(
             rusqlite::params![project, min_confidence, pattern, limit as i64],
-            |row| map_memory_entry_from_row(row),
+            map_memory_entry_from_row,
         )?;
         let mut result = Vec::new();
         for row in rows {

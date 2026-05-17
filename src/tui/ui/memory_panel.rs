@@ -5,7 +5,7 @@ use ratatui::layout::Rect;
 use std::cell::Cell;
 use uuid::Uuid;
 
-use crate::memory::{CompressedObservation, MemoryEntry, MemoryStore, MemoryType};
+use crate::memory::{MemoryEntry, MemoryStore, MemoryType};
 use crate::tui::input::Composer;
 
 use super::App;
@@ -71,11 +71,6 @@ pub struct MemoryPanelState {
     pub mode: MemoryPanelMode,
     pub selected_index: usize,
     pub memories: Vec<MemoryEntry>,
-    /// Observations mode
-    pub observations: Vec<CompressedObservation>,
-    /// Whether to show observations panel instead of memories
-    pub show_observations: bool,
-    pub selected_observation_index: usize,
     pub filter_type: Option<MemoryType>,
     /// Scroll offset for the right-side content preview (browse mode)
     pub preview_scroll: usize,
@@ -119,9 +114,6 @@ impl MemoryPanelState {
             mode: MemoryPanelMode::Browse,
             selected_index: 0,
             memories: Vec::new(),
-            observations: Vec::new(),
-            show_observations: false,
-            selected_observation_index: 0,
             filter_type: None,
             preview_scroll: 0,
             focus: PanelFocus::List,
@@ -147,13 +139,9 @@ impl MemoryPanelState {
 
     pub fn load(&mut self, store: &MemoryStore, workspace_root: &str) -> Result<()> {
         self.memories = store.get_or_load(workspace_root)?;
-        self.observations = store.list_recent_observations(100, 1).unwrap_or_default();
         self.selected_index = self
             .selected_index
             .min(self.memories.len().saturating_sub(1));
-        self.selected_observation_index = self
-            .selected_observation_index
-            .min(self.observations.len().saturating_sub(1));
         Ok(())
     }
 
@@ -408,38 +396,6 @@ impl App {
 
     /// Keys active when the left list is focused.
     fn handle_browse_list_key(&mut self, panel: MemoryPanelState, key: KeyEvent) -> Result<()> {
-        // Observations mode: simplified navigation
-        if panel.show_observations {
-            match key.code {
-                KeyCode::Up => {
-                    let mut next = panel;
-                    if next.selected_observation_index > 0 {
-                        next.selected_observation_index -= 1;
-                    }
-                    self.memory_panel = Some(next);
-                }
-                KeyCode::Down => {
-                    let mut next = panel;
-                    if next.selected_observation_index + 1 < next.observations.len() {
-                        next.selected_observation_index += 1;
-                    }
-                    self.memory_panel = Some(next);
-                }
-                KeyCode::Char('o') | KeyCode::Char('O') => {
-                    let mut next = panel;
-                    next.show_observations = false;
-                    next.selected_index = 0;
-                    next.preview_scroll = 0;
-                    self.memory_panel = Some(next);
-                }
-                KeyCode::Esc => {
-                    self.close_memory_panel();
-                }
-                _ => {}
-            }
-            return Ok(());
-        }
-
         // If search is active, intercept printable keys and special keys
         if panel.search_active {
             match key.code {
@@ -542,15 +498,6 @@ impl App {
             KeyCode::Char('r') | KeyCode::Char('R') => {
                 let mut next = panel;
                 next.cycle_filter_type();
-                self.memory_panel = Some(next);
-            }
-            KeyCode::Char('o') | KeyCode::Char('O') => {
-                // Toggle observations mode
-                let mut next = panel;
-                next.show_observations = !next.show_observations;
-                next.selected_index = 0;
-                next.selected_observation_index = 0;
-                next.preview_scroll = 0;
                 self.memory_panel = Some(next);
             }
             KeyCode::Char('t') | KeyCode::Char('T') => {

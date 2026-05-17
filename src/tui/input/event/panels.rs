@@ -714,7 +714,6 @@ impl App {
     }
 
     /// 获取消息在 conversation.messages 中的索引
-
     pub(crate) fn handle_fork_confirm_dialog_key(
         &mut self,
         key: KeyEvent,

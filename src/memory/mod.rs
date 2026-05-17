@@ -1,14 +1,9 @@
-pub mod compress;
-pub mod compression_queue;
 pub mod consolidate;
-pub mod dedup;
 pub mod engine;
 pub mod evict;
 pub mod graph;
 pub mod graph_retrieval;
-pub mod hybrid_search;
 pub mod lessons;
-pub mod observe;
 pub mod patterns;
 pub mod reflect;
 pub mod remember;
@@ -19,62 +14,26 @@ pub mod slots;
 pub mod types;
 pub mod xml;
 
-pub use compression_queue::{CompressionQueue, QueueTask, DEFAULT_COMPRESSION_CONCURRENCY};
-pub use dedup::DedupMap;
 pub use engine::MemoryStore;
-pub use search_index::Bm25Index;
+pub use search_index::fts5_search_memories;
 pub use types::*;
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-/// Handles returned from starting memory background tasks.
-pub struct BackgroundTasks {
-    /// The compression queue, for shutdown signalling.
-    pub compression_queue: Arc<CompressionQueue>,
-}
-
-/// Start all memory background tasks: compression queue, periodic eviction,
-/// consolidation, and reflection.
+/// Start all memory background tasks: periodic eviction, consolidation,
+/// and reflection.
 ///
 /// Must be called after models are configured on `store` (via
-/// [`MemoryStore::set_models`], [`MemoryStore::set_embedding_model`], etc.).
+/// [`MemoryStore::set_models`]).
 ///
 /// Call once per session lifecycle, from within a tokio runtime context.
 pub fn start_background_tasks(
     store: Arc<MemoryStore>,
     runtime: &tokio::runtime::Handle,
     workspace_root: &str,
-) -> BackgroundTasks {
+) {
     let _ws = workspace_root.to_string();
-
-    // ── Compression queue ──────────────────────────────────────────────
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let queue = Arc::new(CompressionQueue::start(
-        store.clone(),
-        DEFAULT_COMPRESSION_CONCURRENCY,
-        shutdown,
-    ));
-    store.set_compression_sender(queue.sender());
-    crate::log_info!(
-        "memory: compression queue started ({} workers)",
-        DEFAULT_COMPRESSION_CONCURRENCY,
-    );
-
-    // ── Recover uncompressed observations ──────────────────────────────
-    match store.recover_uncompressed(50) {
-        Ok(0) => crate::log_info!("memory: no uncompressed observations to recover"),
-        Ok(n) => crate::log_info!("memory: queued {} uncompressed observations for compression", n),
-        Err(e) => crate::log_warn!("memory: recovery of uncompressed observations failed: {}", e),
-    }
-
-    // ── Backfill embeddings ────────────────────────────────────────────
-    match store.backfill_embeddings(50) {
-        Ok(0) => crate::log_info!("memory: no observations need embedding backfill"),
-        Ok(n) => crate::log_info!("memory: queued {} observations for embedding backfill", n),
-        Err(e) => crate::log_warn!("memory: backfill of embeddings failed: {}", e),
-    }
 
     // ── Periodic eviction (every 3600s) ────────────────────────────────
     let evict_store = store.clone();
@@ -116,7 +75,7 @@ pub fn start_background_tasks(
                     .as_secs() as i64;
                 now - ts
             });
-            if elapsed.map_or(true, |d| d >= 1800) {
+            if elapsed.is_none_or(|d| d >= 1800) {
                 crate::log_info!(
                     "memory: running consolidation (last run: {}s ago)",
                     elapsed.unwrap_or(-1)
@@ -154,7 +113,7 @@ pub fn start_background_tasks(
                     .as_secs() as i64;
                 now - ts
             });
-            if elapsed.map_or(true, |d| d >= 1800) {
+            if elapsed.is_none_or(|d| d >= 1800) {
                 crate::log_info!(
                     "memory: running reflection (last run: {}s ago)",
                     elapsed.unwrap_or(-1)
@@ -172,6 +131,4 @@ pub fn start_background_tasks(
             }
         }
     });
-
-    BackgroundTasks { compression_queue: queue }
 }

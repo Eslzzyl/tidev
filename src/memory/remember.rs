@@ -114,6 +114,21 @@ impl RememberService {
             ],
         )?;
 
+        // 5. Incremental FTS5 update
+        if let Err(e) = db.execute(
+            "INSERT INTO memories_fts(rowid, title, content, tags, concepts, files)
+             VALUES (last_insert_rowid(), ?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                entry.title,
+                entry.content,
+                serde_json::to_string(&entry.tags)?,
+                serde_json::to_string(&entry.concepts)?,
+                serde_json::to_string(&entry.files)?,
+            ],
+        ) {
+            crate::log_warn!("memory: failed to update FTS5 index: {}", e);
+        }
+
         Ok(entry)
     }
 

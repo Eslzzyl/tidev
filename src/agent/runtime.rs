@@ -229,15 +229,6 @@ impl AgentRuntime {
                 }};
             }
 
-            // ── Compressed observations (current session) ───────────────────
-            if let Ok(obs) = timed_memory_op!(
-                "load_recent_compressed_observations",
-                memory_store.load_recent_compressed_observations(&session_id, 8, 5)
-            ) && !obs.is_empty()
-            {
-                sections.push(Self::format_compressed_observations(&obs));
-            }
-
             // ── Session summaries (other sessions) ──────────────────────────
             if let Ok(summaries) = timed_memory_op!(
                 "load_other_session_summaries",
@@ -280,26 +271,24 @@ impl AgentRuntime {
             if let Ok(slot_content) = timed_memory_op!(
                 "render_pinned_slots",
                 memory_store.render_pinned_slots(&ws)
-            ) {
-                if !slot_content.is_empty() {
+            )
+                && !slot_content.is_empty() {
                     sections.push(slot_content);
                 }
-            }
 
             // ── Knowledge graph context ─────────────────────────────────────
             let query = self.workspace_root.file_name().and_then(|n| n.to_str());
             if let Ok(paths) = timed_memory_op!(
                 "search_graph_context",
                 memory_store.search_graph_context(query, 3, 10)
-            ) {
-                if !paths.is_empty() {
+            )
+                && !paths.is_empty() {
                     let graph_prompt =
                         crate::memory::graph_retrieval::GraphRetrieval::format_for_prompt(&paths, 8);
                     if !graph_prompt.is_empty() {
                         sections.push(graph_prompt);
                     }
                 }
-            }
 
             // ── Insights (cross-session synthesized knowledge) ──────────────
             if let Ok(insights) = timed_memory_op!(
@@ -327,29 +316,6 @@ impl AgentRuntime {
             "<system-reminder>\n{}\n</system-reminder>",
             sections.join("\n\n")
         )
-    }
-
-    /// Format compressed observations for prompt injection.
-    fn format_compressed_observations(obs: &[crate::memory::CompressedObservation]) -> String {
-        let mut parts = Vec::new();
-        parts.push("## Recent Key Observations\n".to_string());
-        for o in obs {
-            let files_str = if o.files.is_empty() {
-                String::new()
-            } else {
-                format!(" ({})", o.files.join(", "))
-            };
-            let concepts_str = if o.concepts.is_empty() {
-                String::new()
-            } else {
-                format!(" [concepts: {}]", o.concepts.join(", "))
-            };
-            parts.push(format!(
-                "- [importance={}] {}: {}{}{}",
-                o.importance, o.title, o.narrative, concepts_str, files_str,
-            ));
-        }
-        parts.join("\n")
     }
 
     /// Format session summaries for prompt injection.
@@ -810,8 +776,8 @@ impl AgentRuntime {
 
                 // Pre-tool enrich: search and inject memory relevant to the
                 // file being operated on (agentmemory's mem::enrich equivalent).
-                if self.config.memory.enrich_tools && is_file_operation(&tool_call.name) {
-                    if let Some(ctx) = self
+                if self.config.memory.enrich_tools && is_file_operation(&tool_call.name)
+                    && let Some(ctx) = self
                         .hooks
                         .on_pre_tool_use_enrich(&tool_call, Some(session_id))
                         .await
@@ -820,7 +786,6 @@ impl AgentRuntime {
                             .output
                             .push_str(&format!("\n\n<system-reminder>\n{}\n</system-reminder>", ctx));
                     }
-                }
 
                 // PostToolUse: ALL read tools fire observations (agentmemory
                 // has no matcher on PostToolUse).
@@ -912,8 +877,8 @@ impl AgentRuntime {
 
             // Pre-tool enrich: search and inject memory relevant to the
             // file being operated on (agentmemory's mem::enrich equivalent).
-            if self.config.memory.enrich_tools && is_file_operation(&tool_call.name) {
-                if let Some(ctx) = self
+            if self.config.memory.enrich_tools && is_file_operation(&tool_call.name)
+                && let Some(ctx) = self
                     .hooks
                     .on_pre_tool_use_enrich(tool_call, Some(session_id))
                     .await
@@ -922,7 +887,6 @@ impl AgentRuntime {
                         .output
                         .push_str(&format!("\n\n<system-reminder>\n{}\n</system-reminder>", ctx));
                 }
-            }
 
             // ─── PostToolFailure Observation ─────────────────────────────
             // If the tool result indicates an error, record a PostToolFailure
@@ -1361,15 +1325,14 @@ impl AgentRuntime {
 
             // Inject <system-reminder> into latest user message
             let _t_sub_inject = std::time::Instant::now();
-            if !dynamic_context.is_empty() {
-                if let Some(last_user) = request_messages
+            if !dynamic_context.is_empty()
+                && let Some(last_user) = request_messages
                     .iter_mut()
                     .rev()
                     .find(|m| m.role == MessageRole::User)
                 {
                     last_user.content = format!("{}\n\n{}", dynamic_context, last_user.content);
                 }
-            }
             crate::log_debug!(
                 "run_subagent: inject system-reminder took {:?}",
                 _t_sub_inject.elapsed()
@@ -1712,7 +1675,9 @@ impl AgentRuntime {
         cancel_token: Option<CancellationToken>,
     ) -> Result<()> {
         let request_id: u64 = rand::random();
-        let result = self
+        
+
+        self
             .run_agent_loop_with_tools_inner(
                 request_id,
                 session_id,
@@ -1725,9 +1690,7 @@ impl AgentRuntime {
                 cancel_token,
                 None,
             )
-            .await;
-
-        result
+            .await
     }
 
     /// Internal implementation with optional permission channel.
@@ -1803,15 +1766,14 @@ impl AgentRuntime {
             //     This keeps the `system` message (static_system_prompt) stable across
             //     every turn, maximising LLM prefix cache hits.
             let _t_inject = std::time::Instant::now();
-            if !dynamic_context.is_empty() {
-                if let Some(last_user) = request_messages
+            if !dynamic_context.is_empty()
+                && let Some(last_user) = request_messages
                     .iter_mut()
                     .rev()
                     .find(|m| m.role == MessageRole::User)
                 {
                     last_user.content = format!("{}\n\n{}", dynamic_context, last_user.content);
                 }
-            }
             crate::log_debug!(
                 "agent_loop: inject system-reminder took {:?}",
                 _t_inject.elapsed()

@@ -190,12 +190,11 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
             }
 
             // Update cursor to the newest fact id in this cluster
-            if let Some(max_id) = cluster.iter().map(|f| f.id.to_string()).max() {
-                if max_id > last_fact_id {
+            if let Some(max_id) = cluster.iter().map(|f| f.id.to_string()).max()
+                && max_id > last_fact_id {
                     last_fact_id = max_id.clone();
                     Self::save_cursor(db_path, "reflect", &max_id)?;
                 }
-            }
         }
 
         Ok(report)
@@ -370,20 +369,18 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
         // Extract each <insight> block using regex (case-insensitive on tag names)
         let pattern = r#"(?i)<insight\s+confidence="([^"]*)"\s+title="([^"]*)"[^>]*>([\s\S]*?)</insight>"#;
         if let Ok(re) = fancy_regex::Regex::new(pattern) {
-            for cap_result in re.captures_iter(&cleaned) {
-                if let Ok(c) = cap_result {
-                    let title = c
-                        .get(2)
-                        .map(|m| m.as_str().trim().to_string())
-                        .unwrap_or_default();
-                    let content = c
-                        .get(3)
-                        .map(|m| m.as_str().trim().to_string())
-                        .unwrap_or_default();
+            for c in re.captures_iter(&cleaned).flatten() {
+                let title = c
+                    .get(2)
+                    .map(|m| m.as_str().trim().to_string())
+                    .unwrap_or_default();
+                let content = c
+                    .get(3)
+                    .map(|m| m.as_str().trim().to_string())
+                    .unwrap_or_default();
 
-                    if !title.is_empty() && !content.is_empty() {
-                        insights.push(InsightEntry { title, content });
-                    }
+                if !title.is_empty() && !content.is_empty() {
+                    insights.push(InsightEntry { title, content });
                 }
             }
         }
