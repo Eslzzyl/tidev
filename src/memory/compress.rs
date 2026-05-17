@@ -135,6 +135,8 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 // ─── XML Parsing (translated from agentmemory/src/functions/compress.ts) ──
+// Extended with case-insensitive matching, markdown fence stripping, and
+// fallback extraction for small/free models that struggle with structured output.
 
 /// Valid observation types (from agentmemory's VALID_TYPES set).
 const VALID_TYPES: &[&str] = &[
@@ -155,44 +157,99 @@ const VALID_TYPES: &[&str] = &[
     "other",
 ];
 
-fn get_xml_tag(xml: &str, tag: &str) -> Option<String> {
-    let start = format!("<{}>", tag);
-    let end = format!("</{}>", tag);
-    let s = xml.find(&start)?;
-    let e = xml[s + start.len()..].find(&end)?;
-    let value = xml[s + start.len()..s + start.len() + e].trim().to_string();
-    if value.is_empty() { None } else { Some(value) }
+/// Clean an LLM response that may contain markdown fences or explanatory
+/// prose around the XML block. Returns the inner XML content.
+fn clean_llm_xml_response(raw: &str) -> String {
+    let text = raw.trim().to_string();
+
+    // Strip markdown code fences: ```xml ... ``` or ``` ... ```
+    if let (Some(start), Some(end)) = (text.find("```"), text.rfind("```")) {
+        if start < end {
+            let inner_start = match text[start..].find('\n') {
+                Some(nl) => start + nl + 1,
+                None => start + 3,
+            };
+            if inner_start < end {
+                return text[inner_start..end].trim().to_string();
+            }
+        }
+    }
+
+    // If no fences, try to find the <observation>...</observation> block
+    if let Some(obs_start) = find_tag_boundary_ci(&text, "observation", true) {
+        if let Some(obs_end) =
+            find_tag_boundary_ci(&text[obs_start..], "observation", false)
+        {
+            return text[obs_start..obs_start + obs_end].trim().to_string();
+        }
+    }
+
+    // Return as-is; the case-insensitive parser will attempt further
+    text
 }
 
-fn get_xml_children(xml: &str, parent: &str, child: &str) -> Vec<String> {
-    let parent_start = format!("<{}>", parent);
-    let parent_end = format!("</{}>", parent);
+/// Find an opening `<tag>` or closing `</tag>` boundary, case-insensitively.
+/// Returns the byte index of the start of the tag (`<` character).
+fn find_tag_boundary_ci(xml: &str, tag: &str, opening: bool) -> Option<usize> {
+    let xml_lower = xml.to_lowercase();
+    let pattern = if opening {
+        format!("<{}", tag.to_lowercase())
+    } else {
+        format!("</{}", tag.to_lowercase())
+    };
+    xml_lower.find(&pattern)
+}
 
-    let s = match xml.find(&parent_start) {
+/// Case-insensitive single-tag value extraction.
+fn get_xml_tag_ci(xml: &str, tag: &str) -> Option<String> {
+    let xml_lower = xml.to_lowercase();
+    let open_tag = format!("<{}>", tag.to_lowercase());
+    let close_tag = format!("</{}>", tag.to_lowercase());
+
+    let start = xml_lower.find(&open_tag)?;
+    let content_start = start + open_tag.len();
+    let end = xml_lower[content_start..].find(&close_tag)?;
+
+    let value = xml[content_start..content_start + end].trim().to_string();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+/// Case-insensitive child-tag list extraction.
+fn get_xml_children_ci(xml: &str, parent: &str, child: &str) -> Vec<String> {
+    let xml_lower = xml.to_lowercase();
+    let parent_open = format!("<{}>", parent.to_lowercase());
+    let parent_close = format!("</{}>", parent.to_lowercase());
+
+    let s = match xml_lower.find(&parent_open) {
         Some(pos) => pos,
         None => return vec![],
     };
-    let e = match xml[s..].find(&parent_end) {
+    let e = match xml_lower[s..].find(&parent_close) {
         Some(pos) => pos,
         None => return vec![],
     };
-    let section = &xml[s + parent_start.len()..s + e];
+    let section = &xml[s + parent_open.len()..s + e];
+    let section_lower = &xml_lower[s + parent_open.len()..s + e];
 
-    let child_start = format!("<{}>", child);
-    let child_end = format!("</{}>", child);
+    let child_open = format!("<{}>", child.to_lowercase());
+    let child_close = format!("</{}>", child.to_lowercase());
 
     let mut result = Vec::new();
     let mut pos = 0;
-    while let Some(cs) = section[pos..].find(&child_start) {
-        let content_start = pos + cs + child_start.len();
-        if let Some(ce) = section[content_start..].find(&child_end) {
+    while let Some(cs) = section_lower[pos..].find(&child_open) {
+        let content_start = pos + cs + child_open.len();
+        if let Some(ce) = section_lower[content_start..].find(&child_close) {
             let value = section[content_start..content_start + ce]
                 .trim()
                 .to_string();
             if !value.is_empty() {
                 result.push(value);
             }
-            pos = content_start + ce + child_end.len();
+            pos = content_start + ce + child_close.len();
         } else {
             break;
         }
@@ -202,6 +259,11 @@ fn get_xml_children(xml: &str, parent: &str, child: &str) -> Vec<String> {
 }
 
 /// Parse compressed observation from LLM XML response.
+///
+/// Applies XML cleansing (markdown fences, prose trimming) then
+/// case-insensitive tag matching.  Falls back to free-text extraction
+/// when structured XML parsing fails, so small/free models that
+/// struggle with the schema can still produce useful observations.
 fn parse_compression_xml(
     xml: &str,
 ) -> Result<(
@@ -214,30 +276,257 @@ fn parse_compression_xml(
     Vec<String>,
     u8,
 )> {
-    let raw_type = get_xml_tag(xml, "type")
-        .ok_or_else(|| anyhow::anyhow!("missing <type> in compression XML"))?;
-    let title = get_xml_tag(xml, "title")
-        .ok_or_else(|| anyhow::anyhow!("missing <title> in compression XML"))?;
+    let cleaned = clean_llm_xml_response(xml);
 
-    let obs_type = if VALID_TYPES.contains(&raw_type.as_str()) {
-        ObservationType::parse_str(&raw_type).unwrap_or(ObservationType::Other)
+    // Attempt structured XML parse with case-insensitive tag matching
+    match try_parse_xml(&cleaned) {
+        Ok(result) => return Ok(result),
+        Err(xml_err) => {
+            crate::log_warn!(
+                "structured XML parse failed ({}), attempting free-text fallback",
+                xml_err
+            );
+        }
+    }
+
+    // Fallback: extract from free-form text
+    fallback_parse_free_text(&cleaned)
+}
+
+/// Attempt case-insensitive structured XML parsing.
+fn try_parse_xml(
+    xml: &str,
+) -> Result<(
+    ObservationType,
+    String,
+    Option<String>,
+    Vec<String>,
+    String,
+    Vec<String>,
+    Vec<String>,
+    u8,
+)> {
+    let raw_type = get_xml_tag_ci(xml, "type")
+        .ok_or_else(|| anyhow::anyhow!("missing <type>"))?;
+    let title = get_xml_tag_ci(xml, "title")
+        .ok_or_else(|| anyhow::anyhow!("missing <title>"))?;
+
+    let obs_type = if VALID_TYPES.contains(&raw_type.to_lowercase().as_str()) {
+        ObservationType::parse_str(&raw_type.to_lowercase()).unwrap_or(ObservationType::Other)
     } else {
         ObservationType::Other
     };
 
-    let subtitle = get_xml_tag(xml, "subtitle");
-    let facts = get_xml_children(xml, "facts", "fact");
-    let narrative = get_xml_tag(xml, "narrative").unwrap_or_default();
-    let concepts = get_xml_children(xml, "concepts", "concept");
-    let files = get_xml_children(xml, "files", "file");
-    let importance = get_xml_tag(xml, "importance")
+    let subtitle = get_xml_tag_ci(xml, "subtitle");
+    let facts = get_xml_children_ci(xml, "facts", "fact");
+    let narrative = get_xml_tag_ci(xml, "narrative").unwrap_or_default();
+    let concepts = get_xml_children_ci(xml, "concepts", "concept");
+    let files = get_xml_children_ci(xml, "files", "file");
+    let importance = get_xml_tag_ci(xml, "importance")
         .and_then(|v| v.parse::<u8>().ok())
-        .map(|v| v.max(1).min(10))
+        .map(|v| v.clamp(1, 10))
         .unwrap_or(5);
 
     Ok((
         obs_type, title, subtitle, facts, narrative, concepts, files, importance,
     ))
+}
+
+/// Fallback: extract observation fields from free-form text when the LLM
+/// cannot produce structured XML. Uses heuristics to salvage useful data.
+fn fallback_parse_free_text(
+    text: &str,
+) -> Result<(
+    ObservationType,
+    String,
+    Option<String>,
+    Vec<String>,
+    String,
+    Vec<String>,
+    Vec<String>,
+    u8,
+)> {
+    let lines: Vec<&str> = text.lines().collect();
+
+    // Title: first non-empty line under 80 chars, or truncated first line
+    let title = lines
+        .iter()
+        .find(|l| !l.trim().is_empty())
+        .map(|l| {
+            let t = l.trim();
+            if t.len() <= 80 {
+                t.to_string()
+            } else {
+                format!("{}…", &t[..77])
+            }
+        })
+        .unwrap_or_else(|| "Observation".to_string());
+
+    // Subtitle: second non-empty line if short
+    let subtitle = lines
+        .iter()
+        .filter(|l| !l.trim().is_empty())
+        .nth(1)
+        .map(|l| l.trim().to_string())
+        .filter(|s| s.len() <= 120);
+
+    // Narrative: join all lines, truncate to 500 chars
+    let narrative = {
+        let joined = text.trim().to_string();
+        if joined.len() > 500 {
+            format!("{}…", &joined[..500])
+        } else {
+            joined
+        }
+    };
+
+    // Files: extract path-like patterns from the text
+    let files = extract_paths_from_text(text);
+
+    // Concepts: pick technical terms from the text
+    let concepts = extract_concepts_from_text(text);
+
+    // Observation type: guess from content
+    let obs_type = guess_obs_type_from_text(text);
+
+    // Facts: pick bullet-like or numbered lines
+    let facts: Vec<String> = lines
+        .iter()
+        .filter(|l| {
+            let trimmed = l.trim();
+            trimmed.starts_with('-')
+                || trimmed.starts_with('*')
+                || trimmed.starts_with("1.")
+                || trimmed.starts_with("2.")
+                || trimmed.starts_with("3.")
+        })
+        .map(|l| {
+            let trimmed = l.trim();
+            let stripped = trimmed
+                .strip_prefix('-')
+                .or_else(|| trimmed.strip_prefix('*'))
+                .or_else(|| {
+                    if let Some(dot) = trimmed.find(". ") {
+                        Some(&trimmed[dot + 2..])
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(trimmed);
+            let s = stripped.trim().to_string();
+            if s.len() > 200 {
+                format!("{}…", &s[..200])
+            } else {
+                s
+            }
+        })
+        .collect();
+
+    // Importance: default to 5 (medium) for fallback
+    let importance = 5u8;
+
+    crate::log_info!(
+        "fallback free-text parse: title='{}', files={:?}, concepts={:?}, facts={}",
+        title, files, concepts, facts.len()
+    );
+
+    Ok((
+        obs_type, title, subtitle, facts, narrative, concepts, files, importance,
+    ))
+}
+
+/// Extract file paths from unstructured text.
+fn extract_paths_from_text(text: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    for word in text.split_whitespace() {
+        let w = word.trim_matches(|c: char| c == ',' || c == '"' || c == '\'' || c == '`' || c == '(' || c == ')');
+        // Match typical file paths: contain / or \ and end with an extension
+        if (w.contains('/') || w.contains('\\'))
+            && w.contains('.')
+            && !w.starts_with("http")
+            && !w.starts_with("https")
+        {
+            // Filter out tag-like fragments and code snippets
+            if !w.starts_with('<')
+                && !w.starts_with('{')
+                && !w.starts_with('(')
+                && !paths.contains(&w.to_string())
+            {
+                paths.push(w.to_string());
+            }
+        }
+    }
+    paths.truncate(8); // reasonable limit
+    paths
+}
+
+/// Extract technical concepts from unstructured text.
+fn extract_concepts_from_text(text: &str) -> Vec<String> {
+    let concept_keywords = &[
+        "Rust", "rust", "Cargo",
+        "Go", "golang",
+        "TypeScript", "JavaScript", "Node",
+        "Python", "React", "Vue",
+        "SQLite", "Postgres", "MySQL",
+        "Docker", "Kubernetes",
+        "API", "CLI", "TUI",
+        "Git", "Linux", "macOS",
+        "SSH", "HTTP", "TLS",
+        "compression", "memory", "caching",
+        "logging", "error", "handling",
+        "configuration", "config",
+        "refactoring", "migration",
+        "testing", "linting", "formatting",
+    ];
+    let mut found: Vec<String> = Vec::new();
+    let text_lower = text.to_lowercase();
+    for &kw in concept_keywords {
+        if text_lower.contains(&kw.to_lowercase()) {
+            let formatted = match kw {
+                "javascript" => "JavaScript".to_string(),
+                "typescript" => "TypeScript".to_string(),
+                "golang" => "Go".to_string(),
+                "rust" => "Rust".to_string(),
+                _ => {
+                    let mut c = kw.chars();
+                    match c.next() {
+                        Some(first) => first.to_uppercase().to_string() + c.as_str(),
+                        None => kw.to_string(),
+                    }
+                }
+            };
+            if !found.contains(&formatted) {
+                found.push(formatted);
+            }
+        }
+    }
+    found
+}
+
+/// Guess observation type from unstructured text.
+fn guess_obs_type_from_text(text: &str) -> ObservationType {
+    let lower = text.to_lowercase();
+    if lower.contains("error") || lower.contains("fail") || lower.contains("panic") {
+        ObservationType::Error
+    } else if lower.contains("edit") || lower.contains("modify") || lower.contains("change") {
+        ObservationType::FileEdit
+    } else if lower.contains("write") || lower.contains("create") || lower.contains("save") {
+        ObservationType::FileWrite
+    } else if lower.contains("read") || lower.contains("view") || lower.contains("open") {
+        ObservationType::FileRead
+    } else if lower.contains("search") || lower.contains("grep") || lower.contains("find") {
+        ObservationType::Search
+    } else if lower.contains("fetch") || lower.contains("download") || lower.contains("http") {
+        ObservationType::WebFetch
+    } else if lower.contains("command") || lower.contains("bash") || lower.contains("run ") {
+        ObservationType::CommandRun
+    } else if lower.contains("decision") || lower.contains("decide") || lower.contains("choose") {
+        ObservationType::Decision
+    } else if lower.contains("discover") || lower.contains("found") || lower.contains("learn") {
+        ObservationType::Discovery
+    } else {
+        ObservationType::Other
+    }
 }
 
 // ─── Compression Service ──────────────────────────────────────────────
@@ -271,7 +560,18 @@ impl CompressionService {
             .await
             .context("LLM compression failed")?;
 
-        // 3. Parse XML response
+        // 2b. Log raw response (with secrets stripped) for debugging
+        let response_preview: String = response
+            .chars()
+            .take(800)
+            .collect();
+        crate::log_debug!(
+            "compression model response ({} chars, preview): {}",
+            response.len(),
+            strip_sensitive(&response_preview),
+        );
+
+        // 3. Parse XML response (robust: CI tags, markdown stripping, free-text fallback)
         let (obs_type, title, subtitle, facts, narrative, concepts, files, importance) =
             parse_compression_xml(&response)?;
 

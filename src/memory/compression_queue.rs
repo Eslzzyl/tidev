@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
-    mpsc::{self, TryRecvError},
+    mpsc::{self, TryRecvError, TrySendError},
 };
 use std::thread;
 use std::time::Duration;
@@ -128,24 +128,34 @@ impl CompressionQueue {
 
     /// Enqueue an observation for async compression.  Non-blocking.
     /// Returns `Ok(())` if the item was queued, or an error if the
-    /// channel is full or disconnected.
+    /// channel is shut down.
     pub fn enqueue(&self, id: Uuid) -> Result<()> {
         let sender = self.sender.lock().unwrap();
         match sender.as_ref() {
-            Some(s) => s.send(QueueTask::CompressAndEmbed(id))?,
+            Some(s) => match s.try_send(QueueTask::CompressAndEmbed(id)) {
+                Ok(()) => Ok(()),
+                Err(TrySendError::Full(_)) => Ok(()),
+                Err(TrySendError::Disconnected(_)) => {
+                    anyhow::bail!("compression queue is shut down")
+                }
+            },
             None => anyhow::bail!("compression queue is shut down"),
         }
-        Ok(())
     }
 
     /// Enqueue an embedding-only backfill task.  Non-blocking.
     pub fn enqueue_embedding_backfill(&self, id: Uuid) -> Result<()> {
         let sender = self.sender.lock().unwrap();
         match sender.as_ref() {
-            Some(s) => s.send(QueueTask::EmbedBackfill(id))?,
+            Some(s) => match s.try_send(QueueTask::EmbedBackfill(id)) {
+                Ok(()) => Ok(()),
+                Err(TrySendError::Full(_)) => Ok(()),
+                Err(TrySendError::Disconnected(_)) => {
+                    anyhow::bail!("compression queue is shut down")
+                }
+            },
             None => anyhow::bail!("compression queue is shut down"),
         }
-        Ok(())
     }
 
     /// Signal shutdown. Workers will exit on their next poll after the

@@ -145,7 +145,7 @@ impl AgentRuntime {
     /// Compose the system prompt for a turn.
     ///
     /// Returns `(prompt, instruction_sources)`.
-    pub fn compose_system_prompt(
+    pub async fn compose_system_prompt(
         &mut self,
         base_prompt: &str,
         mode: Option<SessionMode>,
@@ -203,35 +203,72 @@ impl AgentRuntime {
         // Workspace memories — use semantic search when available
         let ws = self.workspace_root.display().to_string();
         let memory_store = self.tools.memory_store();
-        // Use workspace directory name as the query for semantic retrieval
+
+        macro_rules! timed_memory_op {
+            ($label:expr, $body:expr) => {{
+                let _start = std::time::Instant::now();
+                let _result = $body;
+                let _elapsed = _start.elapsed();
+                if _elapsed > std::time::Duration::from_millis(500) {
+                    crate::log_warn!(
+                        "compose_system_prompt: {} took {:?}",
+                        $label,
+                        _elapsed
+                    );
+                }
+                _result
+            }};
+        }
+
+        // Use workspace directory name as the query for semantic retrieval.
+        // This is the only slow path (embedding API) — use the async version
+        // so the tokio worker thread is released while waiting.
         let query = self.workspace_root.file_name().and_then(|n| n.to_str());
-        if let Ok(memories) = memory_store.search_hot_context(query, &ws, 5, 800) {
-            let memory_prompt = crate::memory::MemoryStore::format_for_prompt(&memories);
-            if !memory_prompt.is_empty() {
-                prompt.push_str("\n\n");
-                prompt.push_str(&memory_prompt);
+        {
+            let _start = std::time::Instant::now();
+            let result =
+                memory_store.search_hot_context_async(query, &ws, 5, 800).await;
+            let _elapsed = _start.elapsed();
+            if _elapsed > std::time::Duration::from_millis(500) {
+                crate::log_warn!(
+                    "compose_system_prompt: search_hot_context_async took {:?}",
+                    _elapsed
+                );
+            }
+            if let Ok(memories) = result {
+                let memory_prompt = crate::memory::MemoryStore::format_for_prompt(&memories);
+                if !memory_prompt.is_empty() {
+                    prompt.push_str("\n\n");
+                    prompt.push_str(&memory_prompt);
+                }
             }
         }
 
         // ── Phase 1: Compressed observations (current session) ──────────
-        if let Ok(obs) = memory_store.load_recent_compressed_observations(&session_id, 8, 5)
-            && !obs.is_empty()
+        if let Ok(obs) = timed_memory_op!(
+            "load_recent_compressed_observations",
+            memory_store.load_recent_compressed_observations(&session_id, 8, 5)
+        ) && !obs.is_empty()
         {
             prompt.push_str("\n\n");
             prompt.push_str(&Self::format_compressed_observations(&obs));
         }
 
         // ── Phase 1: Session summaries (other sessions) ─────────────────
-        if let Ok(summaries) = memory_store.load_other_session_summaries(&session_id, 5)
-            && !summaries.is_empty()
+        if let Ok(summaries) = timed_memory_op!(
+            "load_other_session_summaries",
+            memory_store.load_other_session_summaries(&session_id, 5)
+        ) && !summaries.is_empty()
         {
             prompt.push_str("\n\n");
             prompt.push_str(&Self::format_session_summaries(&summaries));
         }
 
         // ── Phase 7: Consolidated knowledge (cross-session facts) ──────
-        if let Ok(facts) = memory_store.load_consolidated_facts(&ws, 5)
-            && !facts.is_empty()
+        if let Ok(facts) = timed_memory_op!(
+            "load_consolidated_facts",
+            memory_store.load_consolidated_facts(&ws, 5)
+        ) && !facts.is_empty()
         {
             prompt.push_str("\n\n## Consolidated Project Knowledge\n");
             for fact in &facts {
@@ -243,8 +280,10 @@ impl AgentRuntime {
         }
 
         // ── Phase 7: Consolidated procedures ───────────────────────────
-        if let Ok(procs) = memory_store.load_consolidated_procedures(&ws, 3)
-            && !procs.is_empty()
+        if let Ok(procs) = timed_memory_op!(
+            "load_consolidated_procedures",
+            memory_store.load_consolidated_procedures(&ws, 3)
+        ) && !procs.is_empty()
         {
             prompt.push_str("\n\n## Reusable Procedures\n");
             for proc in &procs {
@@ -253,7 +292,10 @@ impl AgentRuntime {
         }
 
         // Memory slots (ensure defaults + render pinned)
-        if let Ok(slot_content) = memory_store.render_pinned_slots(&ws) {
+        if let Ok(slot_content) = timed_memory_op!(
+            "render_pinned_slots",
+            memory_store.render_pinned_slots(&ws)
+        ) {
             if !slot_content.is_empty() {
                 prompt.push_str("\n\n");
                 prompt.push_str(&slot_content);
@@ -262,7 +304,10 @@ impl AgentRuntime {
 
         // ── Graph: Knowledge Graph Context ───────────────────────────
         let query = self.workspace_root.file_name().and_then(|n| n.to_str());
-        if let Ok(paths) = memory_store.search_graph_context(query, 3, 10) {
+        if let Ok(paths) = timed_memory_op!(
+            "search_graph_context",
+            memory_store.search_graph_context(query, 3, 10)
+        ) {
             if !paths.is_empty() {
                 let graph_prompt =
                     crate::memory::graph_retrieval::GraphRetrieval::format_for_prompt(&paths, 8);
@@ -274,8 +319,10 @@ impl AgentRuntime {
         }
 
         // ── Insights (cross-session synthesized knowledge) ────────────
-        if let Ok(insights) = memory_store.load_insights(&ws, 5)
-            && !insights.is_empty()
+        if let Ok(insights) = timed_memory_op!(
+            "load_insights",
+            memory_store.load_insights(&ws, 5)
+        ) && !insights.is_empty()
         {
             prompt.push_str("\n\n## Cross-Session Insights\n");
             for insight in &insights {
@@ -510,6 +557,7 @@ impl AgentRuntime {
         let model_for_task = model.clone();
         let msgs = messages.clone();
         let tl = thinking_level.clone();
+        let _t_spawn = std::time::Instant::now();
         tokio::spawn(async move {
             llm.stream_chat(session_id, request_id, model_for_task, msgs, tools, tx, tl)
                 .await;
@@ -517,8 +565,16 @@ impl AgentRuntime {
 
         let mut turn = AssistantTurn::default();
         let call_start = Utc::now();
+        let mut first_event = true;
 
         while let Some(event) = rx.recv().await {
+            if first_event {
+                crate::log_info!(
+                    "run_single_turn: first event received after {:?} from spawn",
+                    _t_spawn.elapsed()
+                );
+                first_event = false;
+            }
             // Forward to consumer first
             let _ = event_tx.send(event.clone());
 
@@ -965,6 +1021,37 @@ impl AgentRuntime {
         Ok(())
     }
 
+    /// Persist a tool result to the database and emit a `ToolCompleted` event.
+    pub async fn persist_tool_result(
+        &self,
+        session_id: uuid::Uuid,
+        request_id: u64,
+        tool_call: &ToolCall,
+        result: &ToolExecutionResult,
+        event_tx: &UnboundedSender<BackendEvent>,
+    ) -> Result<()> {
+        let tool_msg = Message::tool_result(&tool_call.id, &tool_call.name, result.clone());
+        let _t_start = std::time::Instant::now();
+        {
+            let store = self.store.lock().await;
+            store.append_message(session_id, &tool_msg)?;
+        }
+        let _t_elapsed = _t_start.elapsed();
+        if _t_elapsed > std::time::Duration::from_millis(200) {
+            crate::log_warn!(
+                "persist_tool_result: store.lock + append_message took {:?}",
+                _t_elapsed
+            );
+        }
+        let _ = event_tx.send(BackendEvent::ToolCompleted {
+            session_id,
+            request_id,
+            tool_call: tool_call.clone(),
+            result: result.clone(),
+        });
+        Ok(())
+    }
+
     /// Persist an assistant message to the database.
     ///
     /// Captured token usage from [`AssistantTurn`] is automatically written
@@ -996,36 +1083,16 @@ impl AgentRuntime {
         msg.model_id = turn.model_id.clone();
         msg.tokens_per_second = turn.tokens_per_second;
 
+        let _t_start = std::time::Instant::now();
         let store = self.store.lock().await;
         store.append_message(session_id, &msg)?;
-        Ok(())
-    }
-
-    /// Persist a tool result to the database and emit a `ToolCompleted` event.
-    ///
-    /// This encapsulates the common pattern: create a `Message::tool_result`,
-    /// append it to the DB, and send the `ToolCompleted` event. Both
-    /// `execute_tool_calls` and the TUI's `record_tool_result` can delegate
-    /// to this method.
-    pub async fn persist_tool_result(
-        &self,
-        session_id: uuid::Uuid,
-        request_id: u64,
-        tool_call: &ToolCall,
-        result: &ToolExecutionResult,
-        event_tx: &UnboundedSender<BackendEvent>,
-    ) -> Result<()> {
-        let tool_msg = Message::tool_result(&tool_call.id, &tool_call.name, result.clone());
-        {
-            let store = self.store.lock().await;
-            store.append_message(session_id, &tool_msg)?;
+        let _t_elapsed = _t_start.elapsed();
+        if _t_elapsed > std::time::Duration::from_millis(200) {
+            crate::log_warn!(
+                "persist_assistant_message: store.lock + append_message took {:?}",
+                _t_elapsed
+            );
         }
-        let _ = event_tx.send(BackendEvent::ToolCompleted {
-            session_id,
-            request_id,
-            tool_call: tool_call.clone(),
-            result: result.clone(),
-        });
         Ok(())
     }
 
@@ -1232,7 +1299,7 @@ impl AgentRuntime {
 
             // Compose + build
             let (system_prompt, _sources) =
-                self.compose_system_prompt(&child_model.system_prompt, None, child_session_id);
+                self.compose_system_prompt(&child_model.system_prompt, None, child_session_id).await;
             let mut model_for_turn = child_model.clone();
             model_for_turn.system_prompt = system_prompt;
             let request_messages =
@@ -1427,8 +1494,37 @@ impl AgentRuntime {
             }
 
             // Execute tools — send status for each tool call (like old subagent.rs)
-            for tool_call in &turn.tool_calls {
+            'tool_loop: for tool_call in &turn.tool_calls {
                 use crate::tooling::canonical_tool_name;
+
+                // Reject phantom "task" tool calls early — the task tool is not
+                // available to subagents (filtered from their tool list), but
+                // some LLMs hallucinate it from training data.  Check here so
+                // we don't show a misleading "Tool: task" status before the
+                // execute_tool_calls rejection below.
+                if tool_call.name == "task"
+                    || canonical_tool_name(&tool_call.name) == Some("task")
+                {
+                    crate::log_info!(
+                        "run_subagent: rejecting phantom '{}' call from subagent LLM",
+                        tool_call.name
+                    );
+                    let result = ToolExecutionResult::new(format!(
+                        "Tool '{}' is not available in subagent context. \
+                         Subagents cannot delegate further tasks.",
+                        tool_call.name
+                    ));
+                    self.persist_tool_result(
+                        child_session_id,
+                        request_sequence,
+                        tool_call,
+                        &result,
+                        event_tx,
+                    )
+                    .await?;
+                    continue 'tool_loop;
+                }
+
                 let canonical = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
                 let summary = format!("Tool: {canonical}");
                 send_status(event_tx, summary, Some(tool_call.clone()), None, None);
@@ -1557,17 +1653,35 @@ impl AgentRuntime {
             }
 
             // 1. Load messages from DB
+            let _t_load = std::time::Instant::now();
             let db_messages = {
                 let store = self.store.lock().await;
                 store.load_messages(session_id)?
             };
+            crate::log_info!(
+                "agent_loop: loaded {} messages in {:?}",
+                db_messages.len(),
+                _t_load.elapsed()
+            );
 
             // 2. Compose system prompt
+            let _t_compose = std::time::Instant::now();
             let (system_prompt, _sources) =
-                self.compose_system_prompt(&model.system_prompt, Some(mode), session_id);
+                self.compose_system_prompt(&model.system_prompt, Some(mode), session_id).await;
+            crate::log_info!(
+                "agent_loop: composed system prompt ({} chars) in {:?}",
+                system_prompt.len(),
+                _t_compose.elapsed()
+            );
 
             // 3. Build request messages
+            let _t_build = std::time::Instant::now();
             let request_messages = self.build_request_messages(&db_messages, context_manager, mode);
+            crate::log_info!(
+                "agent_loop: built {} request messages in {:?}",
+                request_messages.len(),
+                _t_build.elapsed()
+            );
 
             // 4. Stream LLM — `Finished` is already forwarded to event_tx
             //    by `run_single_turn`.
@@ -1577,6 +1691,8 @@ impl AgentRuntime {
             // prompt to grow on every turn, breaking prefix caching.
             let mut model_for_turn = model.clone();
             model_for_turn.system_prompt = system_prompt;
+            crate::log_info!("agent_loop: run_single_turn starting");
+            let _t_turn = std::time::Instant::now();
             let turn = self
                 .run_single_turn(
                     session_id,
@@ -1588,6 +1704,10 @@ impl AgentRuntime {
                     &event_tx,
                 )
                 .await?;
+            crate::log_info!(
+                "agent_loop: run_single_turn completed in {:?}",
+                _t_turn.elapsed()
+            );
 
             // Check cancellation before persisting — if the user interrupted
             // this turn (e.g. by sending a new message), discard the assistant
@@ -1658,7 +1778,7 @@ impl AgentRuntime {
                         session_id
                     );
                     let (system_prompt, _sources) =
-                        self.compose_system_prompt(&model.system_prompt, Some(mode), session_id);
+                        self.compose_system_prompt(&model.system_prompt, Some(mode), session_id).await;
                     let mut compact_model = model.clone();
                     compact_model.system_prompt = system_prompt;
                     let ctx_config = ContextManagerConfig {

@@ -988,9 +988,10 @@ impl App {
             crate::prompts::SessionMode::Build
         };
         if is_active {
-            let (system_prompt, _) =
+            let (system_prompt, _) = runtime.block_on(
                 self.agent
-                    .compose_system_prompt(&model.system_prompt, Some(mode), session_id);
+                    .compose_system_prompt(&model.system_prompt, Some(mode), session_id),
+            );
             model.system_prompt = system_prompt;
         }
         // For cached sessions we don't have the mode readily available;

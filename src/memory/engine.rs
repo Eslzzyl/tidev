@@ -188,6 +188,11 @@ impl MemoryStore {
     /// Check whether the compression circuit breaker is tripped.
     /// When tripped and still within the cooldown window, LLM compression
     /// is skipped in favour of synthetic compression.
+    ///
+    /// Also checks the atomic failure counter proactively: if the counter
+    /// has already reached [`COMPRESSION_CB_THRESHOLD`] but no worker has
+    /// written `tripped_at` yet (a race window between `fetch_add` and
+    /// the `write`), this method returns `true` to prevent extra LLM calls.
     fn is_compression_circuit_tripped(&self) -> bool {
         let tripped_at = self.compression_cb_tripped_at.read().unwrap();
         match *tripped_at {
@@ -204,7 +209,14 @@ impl MemoryStore {
                     true
                 }
             }
-            None => false,
+            None => {
+                // No explicit trip yet, but the atomic counter may already
+                // be at the threshold from a concurrent worker that
+                // incremented it but hasn't written tripped_at → treat as
+                // tripped to prevent extra LLM calls.
+                self.compression_cb_failures.load(Ordering::Relaxed)
+                    >= COMPRESSION_CB_THRESHOLD
+            }
         }
     }
 
@@ -328,9 +340,18 @@ impl MemoryStore {
     pub fn search(&self, workspace_root: &str, query: &str) -> Result<Vec<MemoryEntry>> {
         // Try hybrid search if we're in a tokio context and embedding model is available.
         // Use block_in_place to avoid panicking when called from a tokio worker thread.
-        if self.embedding_model.read().unwrap().is_some() {
+        // Resolve models FIRST and drop all read guards before any async work
+        // to prevent std::sync::RwLock re-entrancy deadlocks.
+        let resolved = {
+            let llm = self.llm.read().unwrap().clone();
+            let model = self.embedding_model.read().unwrap().clone();
+            (llm, model)
+        };
+        if let (Some(llm), Some(model)) = resolved {
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                let future = self.search_hybrid(query, workspace_root, 20);
+                let future = self.search_hybrid_with(
+                    llm, model, query, workspace_root, 20,
+                );
                 let result = tokio::task::block_in_place(move || handle.block_on(future));
                 if let Ok(results) = result {
                     if !results.is_empty() {
@@ -454,6 +475,10 @@ impl MemoryStore {
     /// When `query` is provided and embedding is configured, uses hybrid
     /// search (BM25 + vector) via `search_hybrid`. Falls back to FTS5,
     /// then to compound scoring (`select_hot`) when nothing else succeeds.
+    ///
+    /// This is the synchronous version; it uses `block_in_place` when
+    /// called from a tokio context.  Prefer [`search_hot_context_async`]
+    /// in async functions to avoid blocking a tokio worker thread.
     pub fn search_hot_context(
         &self,
         query: Option<&str>,
@@ -473,6 +498,44 @@ impl MemoryStore {
             }
         }
         // Fall back to compound sort (importance × frequency × recency)
+        self.select_hot(workspace_root, limit, min_chars)
+    }
+
+    /// Async version of [`search_hot_context`].
+    ///
+    /// Unlike the sync version, this method does **not** use `block_in_place`
+    /// / `block_on`.  It resolves the embedding model and calls
+    /// [`search_hybrid_with`] (which has a 30-second timeout) via a normal
+    /// `.await`, so the tokio worker thread is yielded while waiting for
+    /// the embedding API response.
+    pub async fn search_hot_context_async(
+        &self,
+        query: Option<&str>,
+        workspace_root: &str,
+        limit: usize,
+        min_chars: usize,
+    ) -> Result<Vec<MemoryEntry>> {
+        if let Some(query) = query {
+            let q = query.trim();
+            if !q.is_empty() {
+                let llm = self.llm.read().unwrap().clone();
+                let model = self.embedding_model.read().unwrap().clone();
+                if let (Some(llm), Some(model)) = (llm, model) {
+                    if let Ok(entries) =
+                        self.search_hybrid_with(llm, model, q, workspace_root, limit).await
+                        && !entries.is_empty()
+                    {
+                        return Ok(entries);
+                    }
+                }
+                // Fall back to FTS5 / LIKE
+                if let Ok(entries) = self.search_fts5_fallback(workspace_root, q)
+                    && !entries.is_empty()
+                {
+                    return Ok(entries);
+                }
+            }
+        }
         self.select_hot(workspace_root, limit, min_chars)
     }
 
@@ -636,14 +699,26 @@ impl MemoryStore {
     /// Observe a tool hook and create a raw observation.
     /// Returns the observation ID if new, or None if deduplicated.
     pub fn observe(&self, payload: &HookPayload) -> Result<Option<Uuid>> {
-        let db = self.connection.lock().unwrap();
-        let mut dedup = self.dedup.lock().unwrap();
-        match ObservationService::observe(&db, &mut dedup, payload)? {
+        let _t_conn = std::time::Instant::now();
+        let id = {
+            let db = self.connection.lock().unwrap();
+            let mut dedup = self.dedup.lock().unwrap();
+            ObservationService::observe(&db, &mut dedup, payload)?
+        };
+        let _t_conn = _t_conn.elapsed();
+        if _t_conn > std::time::Duration::from_millis(100) {
+            crate::log_warn!("observe: connection.lock took {:?}", _t_conn);
+        }
+        match id {
             ObservationResult::New(id) => {
-                // Schedule async compression
+                // Schedule async compression (no DB lock held)
                 self.schedule_compression(id);
                 // Also add to BM25 index
-                if let Ok(raw) = Self::load_raw_observation(&db, id) {
+                let _t_bm25 = std::time::Instant::now();
+                if let Ok(raw) = {
+                    let db = self.read_connection.lock().unwrap();
+                    Self::load_raw_observation(&db, id)
+                } {
                     let search_text = format!(
                         "{} {} {} {}",
                         raw.tool_name.unwrap_or_default(),
@@ -655,6 +730,13 @@ impl MemoryStore {
                         .write()
                         .unwrap()
                         .add(&id.to_string(), &search_text);
+                }
+                let _t_bm25 = _t_bm25.elapsed();
+                if _t_bm25 > std::time::Duration::from_millis(50) {
+                    crate::log_warn!(
+                        "observe: bm25.write took {:?}",
+                        _t_bm25
+                    );
                 }
                 Ok(Some(id))
             }
@@ -742,7 +824,7 @@ impl MemoryStore {
             match llm.embed(&model, &search_text).await {
                 Ok(embedding) => {
                     let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
-                    if let Ok(db) = self.connection.lock() {
+                    if let Ok(db) = self.connection.try_lock() {
                         // Ensure rowid mapping exists
                         let _ = db.execute(
                             "INSERT OR IGNORE INTO vec_obs_map(observation_id) VALUES (?1)",
@@ -895,16 +977,36 @@ impl MemoryStore {
     }
 
     fn schedule_compression(&self, obs_id: Uuid) {
-        if let Some(ref sender) = *self.compression_sender.read().unwrap() {
-            let _ = sender.send(QueueTask::CompressAndEmbed(obs_id));
+        if let Some(ref sender) = *self.compression_sender.read().unwrap()
+            && let Err(e) = sender.try_send(QueueTask::CompressAndEmbed(obs_id))
+        {
+            match e {
+                mpsc::TrySendError::Full(_) => {
+                    crate::log_warn!(
+                        "compression queue full, dropping observation {}",
+                        obs_id
+                    );
+                }
+                mpsc::TrySendError::Disconnected(_) => {}
+            }
         }
     }
 
     /// Enqueue an embedding-only backfill task for an already-compressed
     /// observation that is missing a vector embedding.
     pub fn schedule_embedding_backfill(&self, obs_id: Uuid) {
-        if let Some(ref sender) = *self.compression_sender.read().unwrap() {
-            let _ = sender.send(QueueTask::EmbedBackfill(obs_id));
+        if let Some(ref sender) = *self.compression_sender.read().unwrap()
+            && let Err(e) = sender.try_send(QueueTask::EmbedBackfill(obs_id))
+        {
+            match e {
+                mpsc::TrySendError::Full(_) => {
+                    crate::log_warn!(
+                        "compression queue full, dropping embedding backfill for {}",
+                        obs_id
+                    );
+                }
+                mpsc::TrySendError::Disconnected(_) => {}
+            }
         }
     }
 
@@ -1209,67 +1311,89 @@ impl MemoryStore {
         workspace_root: &str,
         limit: usize,
     ) -> Result<Vec<MemoryEntry>> {
-        // If embedding model is available, try hybrid search
-        let embed_llm = self.llm.read().unwrap().clone();
-        let embed_model = self.embedding_model.read().unwrap().clone();
-        if let (Some(llm), Some(model)) = (embed_llm, embed_model) {
-            let query_embedding = llm.embed(&model, query).await;
-            match query_embedding {
-                Ok(emb) => {
-                    // Convert query embedding to raw bytes for vec0
-                    let emb_bytes: Vec<u8> = emb.iter().flat_map(|f| f.to_le_bytes()).collect();
+        let llm = self.llm.read().unwrap().clone();
+        let model = self.embedding_model.read().unwrap().clone();
+        if let (Some(llm), Some(model)) = (llm, model) {
+            return self.search_hybrid_with(llm, model, query, workspace_root, limit).await;
+        }
+        self.search_fts5_fallback(workspace_root, query)
+    }
 
-                    // 1. BM25 search
-                    let bm25_results = self.bm25.read().unwrap().search(query, limit * 2);
+    /// Hybrid search with pre-resolved LLM and embedding model.
+    ///
+    /// Unlike [`search_hybrid`], this method does **not** acquire
+    /// `self.llm`/`self.embedding_model` internally, so it is safe to call
+    /// from code paths that already hold those RwLock read guards (see
+    /// [`search`] which resolves models before `block_in_place`).
+    ///
+    /// The embedding API call is wrapped with a 30-second timeout so that
+    /// synchronous callers (compose_system_prompt → block_in_place) do not
+    /// block the tokio worker thread indefinitely.
+    pub async fn search_hybrid_with(
+        &self,
+        llm: LlmClient,
+        model: EmbeddingActiveModel,
+        query: &str,
+        workspace_root: &str,
+        limit: usize,
+    ) -> Result<Vec<MemoryEntry>> {
+        let query_embedding = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            llm.embed(&model, query),
+        )
+        .await;
 
-                    // 2. Vector search via vec0
-                    let db = self.read_connection.lock().unwrap();
-                    let vector_results: Vec<(String, f64)> = match db.prepare(
-                        "SELECT m.observation_id, v.distance
-                         FROM vec_observations v
-                         JOIN vec_obs_map m ON m.rowid = v.rowid
-                         WHERE v.embedding MATCH ?1
-                         ORDER BY v.distance
-                         LIMIT ?2",
+        match query_embedding {
+            Ok(Ok(emb)) => {
+                let emb_bytes: Vec<u8> = emb.iter().flat_map(|f| f.to_le_bytes()).collect();
+
+                let bm25_results = self.bm25.read().unwrap().search(query, limit * 2);
+
+                let db = self.read_connection.lock().unwrap();
+                let vector_results: Vec<(String, f64)> = match db.prepare(
+                    "SELECT m.observation_id, v.distance
+                     FROM vec_observations v
+                     JOIN vec_obs_map m ON m.rowid = v.rowid
+                     WHERE v.embedding MATCH ?1
+                     ORDER BY v.distance
+                     LIMIT ?2",
+                ) {
+                    Ok(mut stmt) => match stmt.query_map(
+                        rusqlite::params![emb_bytes.as_slice(), (limit * 2) as i64],
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?)),
                     ) {
-                        Ok(mut stmt) => match stmt.query_map(
-                            rusqlite::params![emb_bytes.as_slice(), (limit * 2) as i64],
-                            |row| Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?)),
-                        ) {
-                            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
-                            Err(_) => vec![],
-                        },
+                        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
                         Err(_) => vec![],
-                    };
+                    },
+                    Err(_) => vec![],
+                };
 
-                    // 3. RRF fusion
-                    let hs = self.hybrid_search.read().unwrap();
-                    let results = hs.fuse(bm25_results, vector_results, limit);
+                let hs = self.hybrid_search.read().unwrap();
+                let results = hs.fuse(bm25_results, vector_results, limit);
 
-                    if !results.is_empty() {
-                        let ids: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
-                        let mut entries = Vec::new();
-                        for id in &ids {
-                            let _uuid = Uuid::parse_str(id).unwrap_or(Uuid::nil());
-                            if let Ok(entry) = db.query_row(
-                                "SELECT id, workspace_root, memory_type, title, content, tags, source_session_id, created_at, updated_at, usage_count, active, concepts, files, strength, importance, version, parent_id, supersedes, related_ids, is_latest
-                                  FROM memories WHERE id = ?1 AND workspace_root = ?2 AND active = 1 AND is_latest = 1",
-                                rusqlite::params![id, workspace_root],
-                                |row| super::remember::map_memory_entry_from_row(row),
-                            ) {
-                                entries.push(entry);
-                            }
-                        }
-                        if !entries.is_empty() {
-                            return Ok(entries);
+                if !results.is_empty() {
+                    let ids: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
+                    let mut entries = Vec::new();
+                    for id in &ids {
+                        let _uuid = Uuid::parse_str(id).unwrap_or(Uuid::nil());
+                        if let Ok(entry) = db.query_row(
+                            "SELECT id, workspace_root, memory_type, title, content, tags, source_session_id, created_at, updated_at, usage_count, active, concepts, files, strength, importance, version, parent_id, supersedes, related_ids, is_latest
+                              FROM memories WHERE id = ?1 AND workspace_root = ?2 AND active = 1 AND is_latest = 1",
+                            rusqlite::params![id, workspace_root],
+                            |row| super::remember::map_memory_entry_from_row(row),
+                        ) {
+                            entries.push(entry);
                         }
                     }
+                    if !entries.is_empty() {
+                        return Ok(entries);
+                    }
                 }
-                Err(e) => crate::log_warn!("hybrid search embedding failed: {}", e),
             }
+            Ok(Err(e)) => crate::log_warn!("hybrid search embedding failed: {}", e),
+            Err(_) => crate::log_warn!("hybrid search embedding timed out after 30s"),
         }
 
-        // Fall back to FTS5 (no hybrid recursion)
         self.search_fts5_fallback(workspace_root, query)
     }
 
