@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::config::ActiveModel;
 use crate::llm::LlmClient;
 use crate::memory::remember::RememberService;
+use crate::memory::xml::clean_llm_xml_response;
 use crate::memory::remember::map_memory_entry_from_row;
 use crate::memory::types::{MemoryEntry, MemoryType};
 use crate::session::{Message, MessageRole};
@@ -120,26 +121,45 @@ impl ReflectService {
                 continue; // skip small clusters
             }
 
+            // ─── STRICTER_SUFFIX for retry ───────────────────────────
+            const STRICTER_SUFFIX: &str = r"
+IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text outside the XML tags. Do NOT wrap XML in markdown code fences.";
+
             // 4. Build prompt and call LLM
             let prompt = build_reflect_prompt(&concepts, cluster);
-            let messages = vec![
-                Message::new(MessageRole::System, REFLECT_SYSTEM.to_string()),
-                Message::new(MessageRole::User, prompt),
-            ];
 
-            let response = match llm
-                .complete_with_messages(model.clone(), messages, vec![])
-                .await
-            {
-                Ok(r) => r,
-                Err(e) => {
-                    crate::log_warn!("reflect LLM call failed for cluster: {}", e);
-                    continue;
+            let mut insights = Vec::new();
+            for attempt in 0..2 {
+                let system = if attempt > 0 {
+                    format!("{}{}", REFLECT_SYSTEM, STRICTER_SUFFIX)
+                } else {
+                    REFLECT_SYSTEM.to_string()
+                };
+                let messages = vec![
+                    Message::new(MessageRole::System, system),
+                    Message::new(MessageRole::User, prompt.clone()),
+                ];
+
+                let response = match llm
+                    .complete_with_messages(model.clone(), messages, vec![])
+                    .await
+                {
+                    Ok(r) => r,
+                    Err(e) => {
+                        crate::log_warn!("reflect LLM call failed (attempt {}): {}", attempt, e);
+                        continue;
+                    }
+                };
+
+                // 5. Parse XML
+                insights = Self::parse_insights_xml(&response);
+                if !insights.is_empty() {
+                    break;
                 }
-            };
-
-            // 5. Parse XML
-            let insights = Self::parse_insights_xml(&response);
+                if attempt == 0 {
+                    crate::log_warn!("reflect: unparseable response, retrying with stricter prompt");
+                }
+            }
 
             // 6. Save insights
             let db = Connection::open(db_path)?;
@@ -343,14 +363,14 @@ impl ReflectService {
     }
 
     /// Parse <insights> XML from LLM response.
-    fn parse_insights_xml(response: &str) -> Vec<InsightEntry> {
+    fn parse_insights_xml(raw: &str) -> Vec<InsightEntry> {
+        let cleaned = clean_llm_xml_response(raw);
         let mut insights = Vec::new();
 
-        // Extract each <insight> block using regex
-        if let Ok(re) = fancy_regex::Regex::new(
-            r#"<insight\s+confidence="([^"]*)"\s+title="([^"]*)"[^>]*>([\s\S]*?)</insight>"#,
-        ) {
-            for cap_result in re.captures_iter(response) {
+        // Extract each <insight> block using regex (case-insensitive on tag names)
+        let pattern = r#"(?i)<insight\s+confidence="([^"]*)"\s+title="([^"]*)"[^>]*>([\s\S]*?)</insight>"#;
+        if let Ok(re) = fancy_regex::Regex::new(pattern) {
+            for cap_result in re.captures_iter(&cleaned) {
                 if let Ok(c) = cap_result {
                     let title = c
                         .get(2)

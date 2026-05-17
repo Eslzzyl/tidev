@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::Utc;
 use rusqlite::Connection;
 use std::path::Path;
@@ -10,6 +10,7 @@ use crate::memory::patterns::PatternMiningService;
 use crate::memory::remember::RememberService;
 use crate::memory::retention::RetentionService;
 use crate::memory::types::*;
+use crate::memory::xml::clean_llm_xml_response;
 use crate::session::{Message, MessageRole};
 
 // ─── LLM Prompts ──────────────────────────────────────────────────────
@@ -137,19 +138,43 @@ impl ConsolidationService {
             return Ok(0);
         }
 
+        // ─── STRICTER_SUFFIX for retry (like compress.rs) ────────────
+        const STRICTER_SUFFIX: &str = r"
+IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text outside the XML tags. Do NOT wrap XML in markdown code fences.";
+
         // 3. Build prompt and call LLM (no DB connection held)
         let prompt = build_semantic_prompt(&new_summaries);
-        let messages = vec![
-            Message::new(MessageRole::System, SEMANTIC_MERGE_SYSTEM.to_string()),
-            Message::new(MessageRole::User, prompt),
-        ];
-        let response = llm
-            .complete_with_messages(model.clone(), messages, vec![])
-            .await
-            .context("semantic consolidation LLM call failed")?;
+        let mut facts = Vec::new();
+        for attempt in 0..2 {
+            let system = if attempt > 0 {
+                format!("{}{}", SEMANTIC_MERGE_SYSTEM, STRICTER_SUFFIX)
+            } else {
+                SEMANTIC_MERGE_SYSTEM.to_string()
+            };
+            let messages = vec![
+                Message::new(MessageRole::System, system),
+                Message::new(MessageRole::User, prompt.clone()),
+            ];
+            let response = match llm
+                .complete_with_messages(model.clone(), messages, vec![])
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    crate::log_warn!("semantic consolidation LLM call failed (attempt {}): {}", attempt, e);
+                    continue;
+                }
+            };
 
-        // 4. Parse XML
-        let facts = parse_facts_xml(&response);
+            // 4. Parse XML
+            facts = parse_facts_xml(&response);
+            if !facts.is_empty() {
+                break;
+            }
+            if attempt == 0 {
+                crate::log_warn!("semantic consolidation: unparseable response, retrying with stricter prompt");
+            }
+        }
 
         // 5. Write facts + update cursor (sync, new connection)
         let db = Connection::open(db_path)?;
@@ -221,22 +246,43 @@ impl ConsolidationService {
             return Ok(0);
         }
 
+        // ─── STRICTER_SUFFIX for retry ───────────────────────────────
+        const STRICTER_SUFFIX: &str = r"
+IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text outside the XML tags. Do NOT wrap XML in markdown code fences.";
+
         // 3. Call LLM (no DB connection held)
         let prompt = build_procedural_prompt(&new_patterns);
-        let messages = vec![
-            Message::new(
-                MessageRole::System,
-                PROCEDURAL_EXTRACTION_SYSTEM.to_string(),
-            ),
-            Message::new(MessageRole::User, prompt),
-        ];
-        let response = llm
-            .complete_with_messages(model.clone(), messages, vec![])
-            .await
-            .context("procedural extraction LLM call failed")?;
+        let mut procedures = Vec::new();
+        for attempt in 0..2 {
+            let system = if attempt > 0 {
+                format!("{}{}", PROCEDURAL_EXTRACTION_SYSTEM, STRICTER_SUFFIX)
+            } else {
+                PROCEDURAL_EXTRACTION_SYSTEM.to_string()
+            };
+            let messages = vec![
+                Message::new(MessageRole::System, system),
+                Message::new(MessageRole::User, prompt.clone()),
+            ];
+            let response = match llm
+                .complete_with_messages(model.clone(), messages, vec![])
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    crate::log_warn!("procedural extraction LLM call failed (attempt {}): {}", attempt, e);
+                    continue;
+                }
+            };
 
-        // 4. Parse XML
-        let procedures = parse_procedures_xml(&response);
+            // 4. Parse XML
+            procedures = parse_procedures_xml(&response);
+            if !procedures.is_empty() {
+                break;
+            }
+            if attempt == 0 {
+                crate::log_warn!("procedural extraction: unparseable response, retrying with stricter prompt");
+            }
+        }
 
         // 5. Write procedures (sync, new connection)
         let db = Connection::open(db_path)?;
@@ -477,34 +523,40 @@ struct ProcedureEntry {
     steps: Vec<String>,
 }
 
-fn parse_facts_xml(xml: &str) -> Vec<FactEntry> {
+fn parse_facts_xml(raw: &str) -> Vec<FactEntry> {
+    let cleaned = clean_llm_xml_response(raw);
+    let xml_lower = cleaned.to_lowercase();
     let mut facts = Vec::new();
 
-    // Find <facts>...</facts>
-    let facts_start = xml.find("<facts>");
-    let facts_end = xml.find("</facts>");
-    let (start, end) = match (facts_start, facts_end) {
-        (Some(s), Some(e)) => (s + "<facts>".len(), e),
-        _ => return facts,
+    let tag_open = "<facts>";
+    let tag_close = "</facts>";
+    let start = match xml_lower.find(tag_open) {
+        Some(s) => s + tag_open.len(),
+        None => return facts,
     };
-    let inner = &xml[start..end];
+    let end = match xml_lower[start..].find(tag_close) {
+        Some(e) => start + e,
+        None => return facts,
+    };
+    let inner = &cleaned[start..end];
+    let inner_lower = &xml_lower[start..end];
 
-    // Parse individual <fact>...</fact>
+    let child_open = "<fact";
+    let child_close = "</fact>";
     let mut pos = 0;
-    while let Some(fs) = inner[pos..].find("<fact") {
-        let tag_end = inner[pos + fs..].find('>').map(|i| pos + fs + i + 1);
+    while let Some(fs) = inner_lower[pos..].find(child_open) {
+        let tag_end = inner_lower[pos + fs..].find('>').map(|i| pos + fs + i + 1);
         let content_start = match tag_end {
             Some(i) => i,
             None => break,
         };
-        let content_end = match inner[content_start..].find("</fact>") {
+        let content_end = match inner_lower[content_start..].find(child_close) {
             Some(i) => content_start + i,
             None => break,
         };
 
         let content = inner[content_start..content_end].trim().to_string();
         if !content.is_empty() {
-            // Use first 80 chars as title
             let title = if content.len() > 80 {
                 format!("{}...", &content[..77])
             } else {
@@ -513,37 +565,44 @@ fn parse_facts_xml(xml: &str) -> Vec<FactEntry> {
             facts.push(FactEntry { title, content });
         }
 
-        pos = content_end + "</fact>".len();
+        pos = content_end + child_close.len();
     }
 
     facts
 }
 
-fn parse_procedures_xml(xml: &str) -> Vec<ProcedureEntry> {
+fn parse_procedures_xml(raw: &str) -> Vec<ProcedureEntry> {
+    let cleaned = clean_llm_xml_response(raw);
+    let xml_lower = cleaned.to_lowercase();
     let mut procedures = Vec::new();
 
-    let outer_start = xml.find("<procedures>");
-    let outer_end = xml.find("</procedures>");
-    let (start, end) = match (outer_start, outer_end) {
-        (Some(s), Some(e)) => (s + "<procedures>".len(), e),
-        _ => return procedures,
+    let tag_open = "<procedures>";
+    let tag_close = "</procedures>";
+    let start = match xml_lower.find(tag_open) {
+        Some(s) => s + tag_open.len(),
+        None => return procedures,
     };
-    let inner = &xml[start..end];
+    let end = match xml_lower[start..].find(tag_close) {
+        Some(e) => start + e,
+        None => return procedures,
+    };
+    let inner = &cleaned[start..end];
+    let inner_lower = &xml_lower[start..end];
 
     let mut pos = 0;
-    while let Some(ps) = inner[pos..].find("<procedure") {
-        let tag_end = inner[pos + ps..].find('>').map(|i| pos + ps + i + 1);
+    while let Some(ps) = inner_lower[pos..].find("<procedure") {
+        let tag_end = inner_lower[pos + ps..].find('>').map(|i| pos + ps + i + 1);
         let block_start = match tag_end {
             Some(i) => i,
             None => break,
         };
-        let block_end = match inner[block_start..].find("</procedure>") {
+        let block_end = match inner_lower[block_start..].find("</procedure>") {
             Some(i) => block_start + i,
             None => break,
         };
 
-        // Extract attributes
-        let attr_section = &inner[pos + ps..pos + ps + 200.min(inner.len() - pos - ps)];
+        // Extract attributes (case-insensitive search on the raw section)
+        let attr_section = &cleaned[pos + ps..pos + ps + 200.min(inner.len() - pos - ps)];
         let name = extract_attr(attr_section, "name").unwrap_or_default();
 
         // Parse steps

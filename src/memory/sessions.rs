@@ -8,6 +8,7 @@ use crate::llm::LlmClient;
 use crate::session::{Message, MessageRole};
 
 use crate::memory::types::SessionSummary;
+use crate::memory::xml::{clean_llm_xml_response, get_xml_tag_ci, get_xml_children_ci};
 
 // ─── LLM Prompts (translated from agentmemory/src/prompts/summary.ts) ──
 
@@ -65,50 +66,6 @@ struct CompressedView {
     narrative: String,
     files: Vec<String>,
     concepts: Vec<String>,
-}
-
-// ─── XML Parsing ──────────────────────────────────────────────────────
-
-fn get_xml_tag(xml: &str, tag: &str) -> Option<String> {
-    let start = format!("<{}>", tag);
-    let end = format!("</{}>", tag);
-    let s = xml.find(&start)?;
-    let e = xml[s + start.len()..].find(&end)?;
-    let value = xml[s + start.len()..s + start.len() + e].trim().to_string();
-    if value.is_empty() { None } else { Some(value) }
-}
-
-fn get_xml_children(xml: &str, parent: &str, child: &str) -> Vec<String> {
-    let parent_start = format!("<{}>", parent);
-    let parent_end = format!("</{}>", parent);
-    let mut result = Vec::new();
-    let s = match xml.find(&parent_start) {
-        Some(pos) => pos,
-        None => return vec![],
-    };
-    let e = match xml[s..].find(&parent_end) {
-        Some(pos) => pos,
-        None => return vec![],
-    };
-    let section = &xml[s + parent_start.len()..s + e];
-    let child_start = format!("<{}>", child);
-    let child_end = format!("</{}>", child);
-    let mut pos = 0;
-    while let Some(cs) = section[pos..].find(&child_start) {
-        let content_start = pos + cs + child_start.len();
-        if let Some(ce) = section[content_start..].find(&child_end) {
-            let value = section[content_start..content_start + ce]
-                .trim()
-                .to_string();
-            if !value.is_empty() {
-                result.push(value);
-            }
-            pos = content_start + ce + child_end.len();
-        } else {
-            break;
-        }
-    }
-    result
 }
 
 /// Session management service.
@@ -169,21 +126,89 @@ impl SessionService {
             return Ok(summary);
         }
 
-        // 2. Build prompt and call LLM (no DB connection held)
-        let prompt = build_summary_prompt(&views);
-        let messages = vec![
-            Message::new(MessageRole::System, SUMMARY_SYSTEM.to_string()),
-            Message::new(MessageRole::User, prompt),
-        ];
+        // ─── STRICTER_SUFFIX for retry (like compress.rs) ────────────
+        const STRICTER_SUFFIX: &str = r"
+IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text outside the XML tags. Do NOT wrap XML in markdown code fences. The first non-whitespace character MUST be '<'.";
 
-        let response = match llm
-            .complete_with_messages(model.clone(), messages, vec![])
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                crate::log_warn!("LLM summarization failed, using synthetic fallback: {}", e);
-                // Generate a synthetic summary from observation data
+        // Helper: build LLM messages with optional stricter suffix
+        let make_messages = |strict: bool| -> Vec<Message> {
+            let system = if strict {
+                format!("{}{}", SUMMARY_SYSTEM, STRICTER_SUFFIX)
+            } else {
+                SUMMARY_SYSTEM.to_string()
+            };
+            let prompt = build_summary_prompt(&views);
+            vec![
+                Message::new(MessageRole::System, system),
+                Message::new(MessageRole::User, prompt),
+            ]
+        };
+
+        // Try LLM call with up to 1 retry on parse failure
+        let mut response = String::new();
+        let mut parse_ok = false;
+
+        for attempt in 0..2 {
+            let messages = make_messages(attempt > 0);
+            response = match llm
+                .complete_with_messages(model.clone(), messages, vec![])
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    crate::log_warn!("LLM summarization failed (attempt {}): {}", attempt, e);
+                    if attempt == 0 {
+                        continue; // retry
+                    }
+                    break; // give up, will use synthetic fallback
+                }
+            };
+
+            // Attempt to parse the response
+            let cleaned = clean_llm_xml_response(&response);
+            let has_title = get_xml_tag_ci(&cleaned, "title").is_some();
+            let has_narrative = get_xml_tag_ci(&cleaned, "narrative").is_some();
+            if has_title && has_narrative {
+                parse_ok = true;
+                break;
+            }
+
+            if attempt == 0 {
+                crate::log_warn!(
+                    "LLM summarization response unparseable (attempt 0), retrying with stricter prompt"
+                );
+            }
+        }
+
+        let summary = if parse_ok {
+            let cleaned = clean_llm_xml_response(&response);
+            let title = get_xml_tag_ci(&cleaned, "title");
+            let narrative = get_xml_tag_ci(&cleaned, "narrative");
+            let decisions = get_xml_children_ci(&cleaned, "decisions", "decision");
+            let files = get_xml_children_ci(&cleaned, "files", "file");
+            let concepts = get_xml_children_ci(&cleaned, "concepts", "concept");
+
+            SessionSummary {
+                session_id,
+                project: project.to_string(),
+                created_at: Utc::now(),
+                title,
+                narrative,
+                key_decisions: decisions,
+                files_modified: files,
+                concepts,
+                observation_count: views.len() as i64,
+            }
+        } else {
+            let fb = Self::parse_summary_free_text(&response, &views, session_id, project);
+            if let Some(ref fb_title) = fb.title {
+                crate::log_info!(
+                    "LLM summarization response unparseable, used free-text fallback (title=\"{}\")",
+                    fb_title
+                );
+                fb
+            } else {
+                crate::log_warn!("LLM summarization failed or response unparseable, using synthetic fallback");
                 let title = views.first().map(|v| v.title.clone()).unwrap_or_default();
                 let mut file_set: std::collections::BTreeSet<String> =
                     std::collections::BTreeSet::new();
@@ -217,7 +242,7 @@ impl SessionService {
                 } else {
                     format!("Session with {} observations.", views.len())
                 };
-                let summary = SessionSummary {
+                SessionSummary {
                     session_id,
                     project: project.to_string(),
                     created_at: Utc::now(),
@@ -227,21 +252,87 @@ impl SessionService {
                     files_modified: file_set.into_iter().collect(),
                     concepts: concept_set.into_iter().collect(),
                     observation_count: views.len() as i64,
-                };
-                let db = Connection::open(db_path)?;
-                Self::store_summary(&db, &summary)?;
-                return Ok(summary);
+                }
             }
         };
 
-        // 3. Parse XML response
-        let title = get_xml_tag(&response, "title");
-        let narrative = get_xml_tag(&response, "narrative");
-        let decisions = get_xml_children(&response, "decisions", "decision");
-        let files = get_xml_children(&response, "files", "file");
-        let concepts = get_xml_children(&response, "concepts", "concept");
+        // 4. Persist (sync, new connection)
+        let db = Connection::open(db_path)?;
+        Self::store_summary(&db, &summary)?;
 
-        let summary = SessionSummary {
+        Ok(summary)
+    }
+
+    /// Fallback: extract summary fields from free-form text when the LLM
+    /// cannot produce structured XML. Returns a SessionSummary with fields
+    /// extracted heuristically; returns `None` title if nothing useful.
+    fn parse_summary_free_text(
+        text: &str,
+        views: &[CompressedView],
+        session_id: Uuid,
+        project: &str,
+    ) -> SessionSummary {
+        let lines: Vec<&str> = text.lines().collect();
+
+        // Title: first non-empty line under 100 chars
+        let title = lines
+            .iter()
+            .find(|l| !l.trim().is_empty())
+            .map(|l| {
+                let t = l.trim();
+                if t.len() <= 100 {
+                    t.to_string()
+                } else {
+                    format!("{}…", &t[..97])
+                }
+            });
+
+        // Narrative: skip first "title" line, take the rest
+        let narrative = if let Some(t) = &title {
+            let rest: Vec<&str> = lines
+                .iter()
+                .filter(|l| l.trim() != t.as_str() && !l.trim().is_empty())
+                .copied()
+                .collect();
+            if rest.is_empty() {
+                None
+            } else {
+                let joined = rest.join("\n").trim().to_string();
+                if joined.len() > 1000 {
+                    Some(format!("{}…", &joined[..1000]))
+                } else {
+                    Some(joined)
+                }
+            }
+        } else {
+            None
+        };
+
+        // Decisions: bullet or numbered lines
+        let decisions: Vec<String> = lines
+            .iter()
+            .filter(|l| {
+                let t = l.trim();
+                (t.starts_with('-') || t.starts_with('*'))
+                    && t.len() > 2
+            })
+            .map(|l| {
+                l.trim()
+                    .trim_start_matches('-')
+                    .trim_start_matches('*')
+                    .trim()
+                    .to_string()
+            })
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        // Files: extract path-like patterns
+        let files = extract_paths_from_text(text);
+
+        // Concepts: extract technical keywords
+        let concepts = extract_concepts_from_text(text);
+
+        SessionSummary {
             session_id,
             project: project.to_string(),
             created_at: Utc::now(),
@@ -251,13 +342,7 @@ impl SessionService {
             files_modified: files,
             concepts,
             observation_count: views.len() as i64,
-        };
-
-        // 4. Persist (sync, new connection)
-        let db = Connection::open(db_path)?;
-        Self::store_summary(&db, &summary)?;
-
-        Ok(summary)
+        }
     }
 
     fn store_summary(db: &Connection, summary: &SessionSummary) -> Result<()> {
@@ -315,4 +400,57 @@ impl SessionService {
             Err(e) => Err(e.into()),
         }
     }
+}
+
+/// Extract file paths from unstructured text.
+fn extract_paths_from_text(text: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    for word in text.split_whitespace() {
+        let w = word.trim_matches(|c: char| c == ',' || c == '"' || c == '\'' || c == '`' || c == '(' || c == ')');
+        if (w.contains('/') || w.contains('\\'))
+            && w.contains('.')
+            && !w.starts_with("http")
+            && !w.starts_with("https")
+        {
+            if !w.starts_with('<') && !w.starts_with('{') && !w.starts_with('(') && !paths.contains(&w.to_string()) {
+                paths.push(w.to_string());
+            }
+        }
+    }
+    paths.truncate(8);
+    paths
+}
+
+/// Extract technical concepts from unstructured text.
+fn extract_concepts_from_text(text: &str) -> Vec<String> {
+    let keywords = &[
+        "Rust", "rust", "Cargo", "Go", "golang", "TypeScript", "JavaScript",
+        "Node", "Python", "React", "Vue", "SQLite", "Postgres", "MySQL",
+        "Docker", "Kubernetes", "API", "CLI", "TUI", "Git", "Linux", "macOS",
+        "SSH", "HTTP", "TLS", "compression", "memory", "caching", "logging",
+        "error", "configuration", "refactoring", "migration", "testing",
+    ];
+    let text_lower = text.to_lowercase();
+    let mut found: Vec<String> = Vec::new();
+    for &kw in keywords {
+        if text_lower.contains(&kw.to_lowercase()) {
+            let formatted = match kw {
+                "javascript" => "JavaScript".to_string(),
+                "typescript" => "TypeScript".to_string(),
+                "golang" => "Go".to_string(),
+                "rust" => "Rust".to_string(),
+                _ => {
+                    let mut c = kw.chars();
+                    match c.next() {
+                        Some(first) => first.to_uppercase().to_string() + c.as_str(),
+                        None => kw.to_string(),
+                    }
+                }
+            };
+            if !found.contains(&formatted) {
+                found.push(formatted);
+            }
+        }
+    }
+    found
 }

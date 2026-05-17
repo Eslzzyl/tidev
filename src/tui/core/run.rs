@@ -344,6 +344,7 @@ impl App {
                                 continue;
                             }
                         };
+                        crate::log_debug!("inactivity check: found {} inactive sessions", ids.len());
                         for id in ids {
                             crate::log_info!("summarising inactive session: {}", id);
                             if let Err(e) = check_store.set_session_status(id, "completed") {
