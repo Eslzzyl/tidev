@@ -238,8 +238,13 @@ impl App {
             });
         }
 
-        // Schedule periodic consolidation (every 30 minutes).
-        crate::log_info!("memory: scheduling periodic consolidation (interval=1800s)");
+        const POLL_INTERVAL_SECS: u64 = 60;
+        const RUN_INTERVAL_SECS: i64 = 1800;
+
+        // Periodic consolidation: check DB-stamped last-run time every 60s.
+        crate::log_info!(
+            "memory: scheduling periodic consolidation (poll={RUN_INTERVAL_SECS}s, run={RUN_INTERVAL_SECS}s)"
+        );
         if tokio::runtime::Handle::try_current().is_ok() {
             let cons_store = memory_store.clone();
             let cons_ws = workspace_root.display().to_string();
@@ -247,16 +252,28 @@ impl App {
 
             tokio::spawn(async move {
                 crate::log_info!("memory: consolidation task started");
-                let mut interval = tokio::time::interval(std::time::Duration::from_secs(1800));
-                interval.tick().await; // skip immediate run
+                let mut interval = tokio::time::interval(Duration::from_secs(POLL_INTERVAL_SECS));
+                interval.tick().await;
                 loop {
                     tokio::select! {
                         _ = interval.tick() => {
-                            crate::log_info!("memory: running consolidation");
-                            if let Err(e) = cons_store.run_consolidation(&cons_ws).await {
-                                crate::log_warn!("memory: consolidation failed: {}", e);
-                            } else {
-                                crate::log_info!("memory: consolidation completed");
+                            let last_run = cons_store
+                                .meta_get("consolidation_last_run")
+                                .ok()
+                                .flatten()
+                                .and_then(|s| s.parse::<i64>().ok());
+                            let elapsed = last_run.map(|ts| Utc::now().timestamp() - ts);
+                            if elapsed.map_or(true, |d| d >= RUN_INTERVAL_SECS) {
+                                crate::log_info!("memory: running consolidation (last run: {}s ago)", elapsed.unwrap_or(-1));
+                                if let Err(e) = cons_store.run_consolidation(&cons_ws).await {
+                                    crate::log_warn!("memory: consolidation failed: {}", e);
+                                } else {
+                                    let _ = cons_store.meta_set(
+                                        "consolidation_last_run",
+                                        &Utc::now().timestamp().to_string(),
+                                    );
+                                    crate::log_info!("memory: consolidation completed");
+                                }
                             }
                         }
                         _ = cons_cancel.cancelled() => {
@@ -268,8 +285,10 @@ impl App {
             });
         }
 
-        // Schedule periodic reflection (every 30 minutes, same as consolidation).
-        crate::log_info!("memory: scheduling periodic reflection (interval=1800s)");
+        // Periodic reflection: same polling pattern.
+        crate::log_info!(
+            "memory: scheduling periodic reflection (poll={POLL_INTERVAL_SECS}s, run={RUN_INTERVAL_SECS}s)"
+        );
         if tokio::runtime::Handle::try_current().is_ok() {
             let reflect_store = memory_store.clone();
             let reflect_ws = workspace_root.display().to_string();
@@ -277,16 +296,28 @@ impl App {
 
             tokio::spawn(async move {
                 crate::log_info!("memory: reflection task started");
-                let mut interval = tokio::time::interval(std::time::Duration::from_secs(1800));
-                interval.tick().await; // skip immediate run
+                let mut interval = tokio::time::interval(Duration::from_secs(POLL_INTERVAL_SECS));
+                interval.tick().await;
                 loop {
                     tokio::select! {
                         _ = interval.tick() => {
-                            crate::log_info!("memory: running reflection");
-                            if let Err(e) = reflect_store.run_reflect(&reflect_ws).await {
-                                crate::log_warn!("memory: reflection failed: {}", e);
-                            } else {
-                                crate::log_info!("memory: reflection completed");
+                            let last_run = reflect_store
+                                .meta_get("reflection_last_run")
+                                .ok()
+                                .flatten()
+                                .and_then(|s| s.parse::<i64>().ok());
+                            let elapsed = last_run.map(|ts| Utc::now().timestamp() - ts);
+                            if elapsed.map_or(true, |d| d >= RUN_INTERVAL_SECS) {
+                                crate::log_info!("memory: running reflection (last run: {}s ago)", elapsed.unwrap_or(-1));
+                                if let Err(e) = reflect_store.run_reflect(&reflect_ws).await {
+                                    crate::log_warn!("memory: reflection failed: {}", e);
+                                } else {
+                                    let _ = reflect_store.meta_set(
+                                        "reflection_last_run",
+                                        &Utc::now().timestamp().to_string(),
+                                    );
+                                    crate::log_info!("memory: reflection completed");
+                                }
                             }
                         }
                         _ = reflect_cancel.cancelled() => {

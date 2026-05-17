@@ -1254,6 +1254,27 @@ impl MemoryStore {
         Ok(())
     }
 
+    /// Get a key-value from the `meta` table.
+    pub fn meta_get(&self, key: &str) -> Result<Option<String>> {
+        let db = self.read_connection.lock().unwrap();
+        let mut stmt = db.prepare("SELECT value FROM meta WHERE key = ?1")?;
+        let mut rows = stmt.query(rusqlite::params![key])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(row.get::<_, String>(0)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Set a key-value in the `meta` table.
+    pub fn meta_set(&self, key: &str, value: &str) -> Result<()> {
+        let db = self.connection.lock().unwrap();
+        db.execute(
+            "INSERT OR REPLACE INTO meta(key, value) VALUES (?1, ?2)",
+            rusqlite::params![key, value],
+        )?;
+        Ok(())
+    }
+
     // ─── Phase 2: Slots ────────────────────────────────────────────
 
     /// Ensure default slots exist.
