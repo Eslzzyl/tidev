@@ -21,6 +21,7 @@ pub enum SettingKey {
     ScrollSpeed,
     RtkEnabled,
     CompressionEnabled,
+    LlmCompression,
 }
 
 #[derive(Clone, Debug)]
@@ -74,6 +75,13 @@ impl SettingsPanelState {
             description: "Enable automatic compression of observations".to_string(),
             setting_type: SettingType::Toggle(config.memory.compression_enabled),
             key: SettingKey::CompressionEnabled,
+        });
+
+        items.push(SettingItem {
+            name: "LLM Compression".to_string(),
+            description: "Use LLM for richer compression (costs tokens; synthetic is default)".to_string(),
+            setting_type: SettingType::Toggle(config.memory.llm_compression),
+            key: SettingKey::LlmCompression,
         });
 
         Self {
@@ -154,6 +162,11 @@ impl SettingsPanelState {
                 SettingKey::CompressionEnabled => {
                     if let SettingType::Toggle(val) = item.setting_type {
                         config.memory.compression_enabled = val;
+                    }
+                }
+                SettingKey::LlmCompression => {
+                    if let SettingType::Toggle(val) = item.setting_type {
+                        config.memory.llm_compression = val;
                     }
                 }
             }

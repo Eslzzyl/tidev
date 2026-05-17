@@ -58,6 +58,8 @@ pub struct MemoryStore {
     hybrid_search: RwLock<HybridSearch>,
     /// Whether automatic compression is enabled.
     compression_enabled: AtomicBool,
+    /// Whether to use LLM for compression (default false = synthetic only).
+    llm_compression: AtomicBool,
     /// Circuit breaker: consecutive LLM compression failures.
     compression_cb_failures: AtomicU32,
     /// When the circuit breaker was tripped (None = not tripped).
@@ -100,6 +102,7 @@ impl MemoryStore {
             embedding_model: RwLock::new(None),
             hybrid_search: RwLock::new(HybridSearch::new()),
             compression_enabled: AtomicBool::new(true),
+            llm_compression: AtomicBool::new(false),
             compression_cb_failures: AtomicU32::new(0),
             compression_cb_tripped_at: RwLock::new(None),
             compression_sender: RwLock::new(None),
@@ -137,6 +140,7 @@ impl MemoryStore {
             embedding_model: RwLock::new(None),
             hybrid_search: RwLock::new(HybridSearch::new()),
             compression_enabled: AtomicBool::new(true),
+            llm_compression: AtomicBool::new(false),
             compression_cb_failures: AtomicU32::new(0),
             compression_cb_tripped_at: RwLock::new(None),
             compression_sender: RwLock::new(None),
@@ -176,6 +180,12 @@ impl MemoryStore {
     /// Enable or disable automatic compression.
     pub fn set_compression_enabled(&self, enabled: bool) {
         self.compression_enabled
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Enable or disable LLM-based compression (default: false = synthetic only).
+    pub fn set_llm_compression(&self, enabled: bool) {
+        self.llm_compression
             .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 
@@ -756,9 +766,12 @@ impl MemoryStore {
         }
         let db_path = self.db_path.clone();
 
-        // Circuit breaker: check if we should skip LLM compression
-        let use_llm =
-            self.resolve_compression_llm().is_some() && !self.is_compression_circuit_tripped();
+        // Only attempt LLM compression when explicitly opted in and available.
+        // Default is synthetic (rule-based) compression — zero LLM calls.
+        let llm_enabled = self.llm_compression.load(Ordering::Relaxed);
+        let use_llm = llm_enabled
+            && self.resolve_compression_llm().is_some()
+            && !self.is_compression_circuit_tripped();
 
         let compressed = if use_llm {
             let (llm, model) = self.resolve_compression_llm().unwrap();

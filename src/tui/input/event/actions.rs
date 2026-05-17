@@ -430,6 +430,10 @@ impl App {
     pub(crate) fn close_settings_panel(&mut self, _apply: bool) -> Result<()> {
         if let Some(panel) = self.settings_panel.take() {
             panel.apply_to_config(&mut self.config);
+            self.memory_store
+                .set_compression_enabled(self.config.memory.compression_enabled);
+            self.memory_store
+                .set_llm_compression(self.config.memory.llm_compression);
             self.config.save(&self.paths)?;
         }
         Ok(())

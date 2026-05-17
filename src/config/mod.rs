@@ -39,6 +39,11 @@ pub struct MemoryConfig {
     /// When disabled, observations are stored raw without compression.
     #[serde(default = "default_compression_enabled")]
     pub compression_enabled: bool,
+    /// Whether to use LLM for compression (synthetic by default, like agentmemory).
+    /// When false, observations are compressed via rule-based heuristics (zero token cost).
+    /// When true, the compression model (or active model) is used for richer summaries.
+    #[serde(default)]
+    pub llm_compression: bool,
     /// Optional override for compression model. Format: `"provider/model_id"`.
     #[serde(default)]
     pub compression_model: Option<String>,
@@ -60,6 +65,7 @@ impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
             compression_enabled: true,
+            llm_compression: false,
             compression_model: None,
             summarization_model: None,
             embedding_model: None,

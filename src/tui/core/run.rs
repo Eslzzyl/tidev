@@ -98,6 +98,7 @@ impl App {
             summarization_override,
         );
         memory_store.set_compression_enabled(config.memory.compression_enabled);
+        memory_store.set_llm_compression(config.memory.llm_compression);
         // Attach embedding model for vector search (if configured)
         if let Ok(embed_model) = config.resolve_embedding_model(&auth, None) {
             memory_store.set_embedding_model(embed_model);
