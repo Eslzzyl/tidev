@@ -354,149 +354,6 @@ impl AgentRuntime {
 
     /// Build request messages from stored session messages, preprocessed
     /// through a [`ContextManager`].
-    pub fn build_request_messages(
-        &self,
-        messages: &[Message],
-        context_manager: &ContextManager,
-        mode: SessionMode,
-    ) -> Vec<Message> {
-        // We replicate the filtering logic of ContextManager::build_request_messages
-        // but accept a plain slice instead of a Conversation.
-        let mut result = Vec::new();
-        let mut pending_tool_calls: HashMap<String, String> = HashMap::new();
-        let mut was_plan_mode = mode == SessionMode::Plan;
-
-        if let Some(summary) = &context_manager.summary {
-            result.push(Message::new(
-                MessageRole::User,
-                format!("Earlier conversation summary:\n{summary}"),
-            ));
-        }
-
-        for message in messages.iter().skip(context_manager.retained_from) {
-            if message.streaming {
-                continue;
-            }
-
-            match message.role {
-                MessageRole::System => {}
-                MessageRole::User => {
-                    // Inject synthetic failure results for any orphaned tool calls
-                    // before the user message, so the provider doesn't see an
-                    // assistant(tool_calls) without corresponding tool results.
-                    for (tool_call_id, tool_name) in pending_tool_calls.drain() {
-                        crate::log_warn!(
-                            "build_request_messages: injecting synthetic failure for orphaned \
-                             tool call id={} name={} before user message",
-                            tool_call_id,
-                            tool_name
-                        );
-                        result.push(Message::tool_result(
-                            tool_call_id,
-                            tool_name,
-                            ToolExecutionResult::new(
-                                "Tool was cancelled by user or interrupted before completion",
-                            ),
-                        ));
-                    }
-                    result.push(message.clone());
-                    if let Some(m) = message.mode {
-                        was_plan_mode = m == SessionMode::Plan;
-                    }
-                }
-                MessageRole::Assistant => {
-                    if message.content.is_empty() && message.tool_calls.is_empty() {
-                        continue;
-                    }
-                    // Inject synthetic failures for any orphaned tool calls
-                    // from a *previous* assistant message before adding this
-                    // new one.  This handles the case where two consecutive
-                    // assistant messages both carry tool_calls — without this,
-                    // the earlier orphan would be lost when pending_tool_calls
-                    // is overwritten below.
-                    if !message.tool_calls.is_empty() && !pending_tool_calls.is_empty() {
-                        for (tool_call_id, tool_name) in pending_tool_calls.drain() {
-                            crate::log_warn!(
-                                "build_request_messages: injecting synthetic failure for orphaned \
-                                 tool call id={} name={} before next assistant tool_calls",
-                                tool_call_id,
-                                tool_name,
-                            );
-                            result.push(Message::tool_result(
-                                tool_call_id,
-                                tool_name,
-                                ToolExecutionResult::new(
-                                    "Tool was cancelled by user or interrupted before completion",
-                                ),
-                            ));
-                        }
-                    }
-                    if let Some(m) = message.mode {
-                        was_plan_mode = m == SessionMode::Plan;
-                    } else if message.content.contains("PLAN MODE")
-                        || message.content.contains("read-only")
-                    {
-                        was_plan_mode = true;
-                    }
-                    pending_tool_calls = message
-                        .tool_calls
-                        .iter()
-                        .map(|tc| (tc.id.clone(), tc.name.clone()))
-                        .collect();
-                    result.push(message.clone());
-                }
-                MessageRole::Tool => {
-                    let Some(tool_call_id) = message.tool_call_id.as_ref() else {
-                        continue;
-                    };
-                    if pending_tool_calls.remove(tool_call_id).is_some() {
-                        result.push(message.clone());
-                    }
-                }
-                MessageRole::Error | MessageRole::Shell => {}
-            }
-        }
-
-        // Inject synthetic failures for orphaned tool calls
-        for (tool_call_id, tool_name) in &pending_tool_calls {
-            crate::log_warn!(
-                "build_request_messages: orphaned tool call id={} name={}, injecting synthetic failure",
-                tool_call_id,
-                tool_name
-            );
-            result.push(Message::tool_result(
-                tool_call_id.clone(),
-                tool_name.clone(),
-                ToolExecutionResult::new(
-                    "Tool was cancelled by user or interrupted before completion",
-                ),
-            ));
-        }
-
-        // Mode-switch reminder
-        if mode == SessionMode::Plan && !was_plan_mode {
-            let reminder = crate::prompts::plan_switch_reminder();
-            if let Some(last_user) = result
-                .iter_mut()
-                .rev()
-                .find(|m| m.role == MessageRole::User)
-            {
-                last_user.content = format!("{}\n\n{}", reminder, last_user.content);
-            }
-        } else if mode == SessionMode::Build && was_plan_mode {
-            let reminder = crate::prompts::build_switch_reminder();
-            if let Some(last_user) = result
-                .iter_mut()
-                .rev()
-                .find(|m| m.role == MessageRole::User)
-            {
-                last_user.content = format!("{}\n\n{}", reminder, last_user.content);
-            }
-        }
-
-        result
-    }
-
     /// Get all available tool definitions (built-in + MCP).
     pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
         self.tools.all_definitions()
@@ -1325,8 +1182,9 @@ impl AgentRuntime {
                 dynamic_context.len()
             );
             let _t_sub_build = std::time::Instant::now();
-            let mut request_messages =
-                self.build_request_messages(&db_messages, &child_context, SessionMode::Build);
+            let mut conv = crate::session::Conversation::new(child_session_id, "", "", "", "", "", "");
+            conv.messages = db_messages;
+            let mut request_messages = child_context.build_request_messages(&conv, SessionMode::Build);
             crate::log_debug!(
                 "run_subagent: build_request_messages took {:?}",
                 _t_sub_build.elapsed()
@@ -1764,7 +1622,9 @@ impl AgentRuntime {
 
             // 3. Build request messages
             let _t_build = std::time::Instant::now();
-            let mut request_messages = self.build_request_messages(&db_messages, context_manager, mode);
+            let mut conv = crate::session::Conversation::new(session_id, "", "", "", "", "", "");
+            conv.messages = db_messages;
+            let mut request_messages = context_manager.build_request_messages(&conv, mode);
             crate::log_info!(
                 "agent_loop: built {} request messages in {:?}",
                 request_messages.len(),
@@ -2271,11 +2131,13 @@ mod tests {
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
+    use uuid::Uuid;
+
     use crate::{
         config::ConfigPaths,
         context::ContextManager,
         prompts::SessionMode,
-        session::{Message, MessageRole, ToolCall, ToolExecutionResult},
+        session::{Conversation, Message, MessageRole, ToolCall, ToolExecutionResult},
         storage::SessionStore,
     };
 
@@ -2358,12 +2220,13 @@ mod tests {
             Message::new(MessageRole::User, "What is the weather?"),
             Message::new(MessageRole::Assistant, "Let me check."),
         ];
-        let (agent, _tmp) = agent_runtime();
         let cm = ContextManager {
             retained_from: 2,
             ..ContextManager::new()
         };
-        let result = agent.build_request_messages(&msgs, &cm, SessionMode::Build);
+        let mut conv = Conversation::new(Uuid::nil(), "", "", "", "", "", "");
+        conv.messages = msgs;
+        let result = cm.build_request_messages(&conv, SessionMode::Build);
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].content, "What is the weather?");
         assert_eq!(result[1].content, "Let me check.");
@@ -2375,30 +2238,30 @@ mod tests {
             Message::new(MessageRole::User, "Hello"),
             Message::new(MessageRole::Assistant, "Hi"),
         ];
-        let (agent, _tmp) = agent_runtime();
         let cm = ContextManager {
             retained_from: 2,
             ..ContextManager::new()
         };
-        let result = agent.build_request_messages(&msgs, &cm, SessionMode::Build);
+        let mut conv = Conversation::new(Uuid::nil(), "", "", "", "", "", "");
+        conv.messages = msgs;
+        let result = cm.build_request_messages(&conv, SessionMode::Build);
         assert_eq!(result.len(), 0);
     }
 
     #[test]
     fn build_request_messages_skips_streaming_messages() {
-        let (agent, _tmp) = agent_runtime();
         let msgs = vec![
             Message::new(MessageRole::User, "hello"),
             Message::streaming(MessageRole::Assistant, "still typing..."),
         ];
-        let result =
-            agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        let mut conv = Conversation::new(Uuid::nil(), "", "", "", "", "", "");
+        conv.messages = msgs;
+        let result = ContextManager::new().build_request_messages(&conv, SessionMode::Build);
         assert!(!result.iter().any(|m| m.content == "still typing..."));
     }
 
     #[test]
     fn build_request_messages_keeps_valid_tool_results() {
-        let (agent, _tmp) = agent_runtime();
         let mut assistant = Message::new(MessageRole::Assistant, "searching");
         assistant.tool_calls = vec![ToolCall {
             id: "tc-1".to_string(),
@@ -2411,8 +2274,9 @@ mod tests {
             Message::tool_result("tc-1", "grep", ToolExecutionResult::new("found!")),
             Message::new(MessageRole::Assistant, "result"),
         ];
-        let result =
-            agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        let mut conv = Conversation::new(Uuid::nil(), "", "", "", "", "", "");
+        conv.messages = msgs;
+        let result = ContextManager::new().build_request_messages(&conv, SessionMode::Build);
         let roles: Vec<_> = result.iter().map(|m| m.role.clone()).collect();
         assert_eq!(
             roles,
@@ -2427,7 +2291,6 @@ mod tests {
 
     #[test]
     fn build_request_messages_injects_orphan_tool_failures() {
-        let (agent, _tmp) = agent_runtime();
         let mut assistant = Message::new(MessageRole::Assistant, "");
         assistant.tool_calls = vec![ToolCall {
             id: "orphan".to_string(),
@@ -2435,8 +2298,9 @@ mod tests {
             arguments: "{}".to_string(),
         }];
         let msgs = vec![assistant, Message::new(MessageRole::User, "what happened?")];
-        let result =
-            agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        let mut conv = Conversation::new(Uuid::nil(), "", "", "", "", "", "");
+        conv.messages = msgs;
+        let result = ContextManager::new().build_request_messages(&conv, SessionMode::Build);
         let roles: Vec<_> = result.iter().map(|m| m.role.clone()).collect();
         assert_eq!(
             roles,
@@ -2449,7 +2313,6 @@ mod tests {
 
     #[test]
     fn build_request_messages_orphan_before_user_regression() {
-        let (agent, _tmp) = agent_runtime();
         let mut orphan_tool_call = Message::new(MessageRole::Assistant, "");
         orphan_tool_call.tool_calls = vec![ToolCall {
             id: "orphan-call".to_string(),
@@ -2460,8 +2323,9 @@ mod tests {
             orphan_tool_call,
             Message::new(MessageRole::User, "the edit failed"),
         ];
-        let result =
-            agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        let mut conv = Conversation::new(Uuid::nil(), "", "", "", "", "", "");
+        conv.messages = msgs;
+        let result = ContextManager::new().build_request_messages(&conv, SessionMode::Build);
         let roles: Vec<_> = result.iter().map(|m| m.role.clone()).collect();
         assert_eq!(
             roles,
@@ -2474,7 +2338,6 @@ mod tests {
 
     #[test]
     fn build_request_messages_mode_switch_injection() {
-        let (agent, _tmp) = agent_runtime();
         // Assistant was in Build mode → now Plan mode → inject plan switch reminder
         let mut assistant = Message::new(MessageRole::Assistant, "ok");
         assistant.mode = Some(SessionMode::Build);
@@ -2483,7 +2346,9 @@ mod tests {
             assistant,
             Message::new(MessageRole::User, "now plan it"),
         ];
-        let result = agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Plan);
+        let mut conv = Conversation::new(Uuid::nil(), "", "", "", "", "", "");
+        conv.messages = msgs;
+        let result = ContextManager::new().build_request_messages(&conv, SessionMode::Plan);
         // The last user message should have the plan switch reminder prepended
         let last_user = result
             .iter()
@@ -2499,13 +2364,14 @@ mod tests {
 
     #[test]
     fn build_request_messages_context_summary() {
-        let (agent, _tmp) = agent_runtime();
         let cm = ContextManager {
             summary: Some("Previous context was about Rust".to_string()),
             ..ContextManager::new()
         };
         let msgs = vec![Message::new(MessageRole::User, "continue")];
-        let result = agent.build_request_messages(&msgs, &cm, SessionMode::Build);
+        let mut conv = Conversation::new(Uuid::nil(), "", "", "", "", "", "");
+        conv.messages = msgs;
+        let result = cm.build_request_messages(&conv, SessionMode::Build);
         assert!(
             result[0]
                 .content
@@ -2516,28 +2382,28 @@ mod tests {
 
     #[test]
     fn build_request_messages_tool_result_cleared_by_new_user() {
-        let (agent, _tmp) = agent_runtime();
         let msgs = vec![
             Message::new(MessageRole::User, "hello"),
             Message::tool_result("nonexistent", "grep", ToolExecutionResult::new("data")),
             Message::new(MessageRole::Assistant, "reply"),
         ];
-        let result =
-            agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        let mut conv = Conversation::new(Uuid::nil(), "", "", "", "", "", "");
+        conv.messages = msgs;
+        let result = ContextManager::new().build_request_messages(&conv, SessionMode::Build);
         let roles: Vec<_> = result.iter().map(|m| m.role.clone()).collect();
         assert_eq!(roles, vec![MessageRole::User, MessageRole::Assistant]);
     }
 
     #[test]
     fn build_request_messages_empty_assistant_skipped() {
-        let (agent, _tmp) = agent_runtime();
         let msgs = vec![
             Message::new(MessageRole::User, "hello"),
             Message::new(MessageRole::Assistant, ""),
             Message::new(MessageRole::Assistant, "real reply"),
         ];
-        let result =
-            agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        let mut conv = Conversation::new(Uuid::nil(), "", "", "", "", "", "");
+        conv.messages = msgs;
+        let result = ContextManager::new().build_request_messages(&conv, SessionMode::Build);
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].content, "hello");
         assert_eq!(result[1].content, "real reply");
@@ -2545,8 +2411,6 @@ mod tests {
 
     #[test]
     fn build_request_messages_consecutive_assistant_tool_calls() {
-        let (agent, _tmp) = agent_runtime();
-
         // Scenario: two consecutive assistant messages both have tool_calls
         // but only the second one gets a tool response (orphan from first).
         let mut assistant_a = Message::new(MessageRole::Assistant, "");
@@ -2570,8 +2434,9 @@ mod tests {
             Message::new(MessageRole::User, "continue?"),
         ];
 
-        let result =
-            agent.build_request_messages(&msgs, &ContextManager::new(), SessionMode::Build);
+        let mut conv = Conversation::new(Uuid::nil(), "", "", "", "", "", "");
+        conv.messages = msgs;
+        let result = ContextManager::new().build_request_messages(&conv, SessionMode::Build);
         let roles: Vec<_> = result.iter().map(|m| m.role.clone()).collect();
 
         // The orphan from assistant_a should get a synthetic failure injected

@@ -183,6 +183,29 @@ impl ContextManager {
                     if message.content.is_empty() && message.tool_calls.is_empty() {
                         continue;
                     }
+                    // Inject synthetic failures for any orphaned tool calls
+                    // from a *previous* assistant message before adding this
+                    // new one. This handles the case where two consecutive
+                    // assistant messages both carry tool_calls — without this,
+                    // the earlier orphan would be lost when pending_tool_calls
+                    // is overwritten below.
+                    if !message.tool_calls.is_empty() && !pending_tool_calls.is_empty() {
+                        for (tool_call_id, tool_name) in pending_tool_calls.drain() {
+                            crate::log_warn!(
+                                "build_request_messages: injecting synthetic failure for orphaned \
+                                 tool call id={} name={} before next assistant tool_calls",
+                                tool_call_id,
+                                tool_name,
+                            );
+                            messages.push(Message::tool_result(
+                                tool_call_id,
+                                tool_name,
+                                ToolExecutionResult::new(
+                                    "Tool was cancelled by user or interrupted before completion",
+                                ),
+                            ));
+                        }
+                    }
                     if let Some(mode) = message.mode {
                         was_plan_mode = mode == SessionMode::Plan;
                     } else if message.content.contains("PLAN MODE")
