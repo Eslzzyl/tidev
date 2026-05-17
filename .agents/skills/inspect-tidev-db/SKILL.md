@@ -132,15 +132,6 @@ zstd -d /tmp/blob.bin -o /tmp/decompressed.txt 2>/dev/null || \
 
 This is useful when you want a quick peek without the export step, but the export approach is generally preferred because it handles schema complexity and multi-blob decompression automatically.
 
-## Sub-Agent Delegation
-
-| When | Sub-agent | Why |
-|---|---|---|
-| Searching for related code by session data patterns | @explorer | Find storage, tooling, or LLM code that produced the data |
-| Analyzing complex schema or data integrity issues | @oracle | Strategic analysis of data flow and architecture |
-| Need to fix a bug found during DB inspection | @fixer | Fast implementation of the confirmed fix |
-| Need API or library behavior about SQLite/zstd | @librarian | Official docs on specific behavior |
-
 ## Tips
 
 - The exported database is a **plain SQLite file** — you can use any SQLite tool (DBeaver, sqlitebrowser, etc.) to open it interactively.
