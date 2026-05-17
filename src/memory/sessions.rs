@@ -1,13 +1,15 @@
 use anyhow::Result;
 use chrono::Utc;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
 use crate::config::ActiveModel;
+use crate::context::ContextManager;
 use crate::llm::LlmClient;
 use crate::memory::types::SessionSummary;
 use crate::memory::xml::{clean_llm_xml_response, get_xml_tag_ci, get_xml_children_ci};
-use crate::session::{Message, MessageRole};
+use crate::prompts::SessionMode;
+use crate::session::{Conversation, Message, MessageRole};
 use crate::storage::load_session_messages;
 
 pub const SUMMARY_INSTRUCTION: &str = "Please summarize this session. Output EXACTLY this XML format with no additional text:
@@ -38,8 +40,10 @@ pub struct SessionService;
 impl SessionService {
     /// Generate and store a session summary using LLM.
     ///
-    /// Loads all session messages verbatim, appends a summary instruction,
-    /// sends to LLM, and persists the parsed XML result.
+    /// Builds the request messages using the same `build_request_messages` logic
+    /// as normal requests and compaction, so the prefix is identical (maximizing
+    /// prompt cache hits). Only messages after the last compact are included,
+    /// with the context summary prepended as context.
     pub async fn summarize_session(
         db_path: &std::path::Path,
         llm: &LlmClient,
@@ -47,10 +51,31 @@ impl SessionService {
         session_id: Uuid,
         project: &str,
     ) -> Result<SessionSummary> {
-        // 1. Load session messages (sync, connection dropped before await)
-        let messages = {
+        // 1. Load session context state + messages (sync, connection dropped before await)
+        let (messages, context_summary, context_retained_from) = {
             let db = Connection::open(db_path)?;
-            load_session_messages(&db, session_id)?
+
+            // Load context state from session record
+            let (summary, retained_from) = {
+                let mut stmt = db.prepare(
+                    "SELECT context_summary, context_retained_from FROM sessions WHERE id = ?1"
+                )?;
+                let result = stmt.query_row(
+                    params![session_id.to_string()],
+                    |row| {
+                        let summary: String = row.get(0)?;
+                        let retained: i64 = row.get(1)?;
+                        Ok((
+                            if summary.is_empty() { None } else { Some(summary) },
+                            retained as usize,
+                        ))
+                    },
+                ).optional()?;
+                result.unwrap_or((None, 0))
+            };
+
+            let messages = load_session_messages(&db, session_id)?;
+            (messages, summary, retained_from)
         };
 
         let msg_count = messages.len();
@@ -72,8 +97,13 @@ impl SessionService {
             return Ok(summary);
         }
 
-        // 2. Build LLM request: all messages verbatim + one appended instruction
-        let mut llm_messages = messages;
+        // 2. Build request messages using the same logic as normal requests / compact.
+        //    This ensures the prefix is byte-for-byte identical, maximizing cache hits.
+        let context_manager = ContextManager::from_state(context_summary, context_retained_from);
+        let mut conv = Conversation::new(session_id, "", "", "", "", "", "");
+        conv.messages = messages;
+
+        let mut llm_messages = context_manager.build_request_messages(&conv, SessionMode::Build);
         llm_messages.push(Message::new(MessageRole::User, SUMMARY_INSTRUCTION.to_string()));
 
         // Try LLM call with up to 1 retry on parse failure
