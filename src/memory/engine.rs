@@ -716,8 +716,9 @@ impl MemoryStore {
             ObservationService::observe(&db, &mut dedup, payload)?
         };
         let _t_conn = _t_conn.elapsed();
+        crate::log_debug!("observe: connection.lock took {:?}", _t_conn);
         if _t_conn > std::time::Duration::from_millis(100) {
-            crate::log_warn!("observe: connection.lock took {:?}", _t_conn);
+            crate::log_warn!("observe: connection.lock took {:?} (slow)", _t_conn);
         }
         match id {
             ObservationResult::New(id) => {
@@ -742,9 +743,10 @@ impl MemoryStore {
                         .add(&id.to_string(), &search_text);
                 }
                 let _t_bm25 = _t_bm25.elapsed();
+                crate::log_debug!("observe: bm25.write took {:?}", _t_bm25);
                 if _t_bm25 > std::time::Duration::from_millis(50) {
                     crate::log_warn!(
-                        "observe: bm25.write took {:?}",
+                        "observe: bm25.write took {:?} (slow)",
                         _t_bm25
                     );
                 }

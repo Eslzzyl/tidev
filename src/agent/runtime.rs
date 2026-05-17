@@ -181,6 +181,7 @@ impl AgentRuntime {
         &mut self,
         session_id: uuid::Uuid,
         mode: Option<SessionMode>,
+        skip_search: bool,
     ) -> String {
         let mut sections: Vec<String> = Vec::new();
 
@@ -211,9 +212,14 @@ impl AgentRuntime {
                 let _start = std::time::Instant::now();
                 let _result = $body;
                 let _elapsed = _start.elapsed();
+                crate::log_debug!(
+                    "compose_dynamic_context: {} took {:?}",
+                    $label,
+                    _elapsed
+                );
                 if _elapsed > std::time::Duration::from_millis(500) {
                     crate::log_warn!(
-                        "compose_dynamic_context: {} took {:?}",
+                        "compose_dynamic_context: {} took {:?} (slow)",
                         $label,
                         _elapsed
                     );
@@ -223,24 +229,35 @@ impl AgentRuntime {
         }
 
         // ── Workspace memories ──────────────────────────────────────────
-        let query = self.workspace_root.file_name().and_then(|n| n.to_str());
-        {
-            let _start = std::time::Instant::now();
-            let result =
-                memory_store.search_hot_context_async(query, &ws, 5, 800).await;
-            let _elapsed = _start.elapsed();
-            if _elapsed > std::time::Duration::from_millis(500) {
-                crate::log_warn!(
+        if !skip_search {
+            let query = self.workspace_root.file_name().and_then(|n| n.to_str());
+            {
+                let _start = std::time::Instant::now();
+                let result =
+                    memory_store.search_hot_context_async(query, &ws, 5, 800).await;
+                let _elapsed = _start.elapsed();
+                crate::log_debug!(
                     "compose_dynamic_context: search_hot_context_async took {:?}",
                     _elapsed
                 );
-            }
-            if let Ok(memories) = result {
-                let memory_prompt = crate::memory::MemoryStore::format_for_prompt(&memories);
-                if !memory_prompt.is_empty() {
-                    sections.push(memory_prompt);
+                if _elapsed > std::time::Duration::from_millis(500) {
+                    crate::log_warn!(
+                        "compose_dynamic_context: search_hot_context_async took {:?} (slow)",
+                        _elapsed
+                    );
+                }
+                if let Ok(memories) = result {
+                    let memory_prompt =
+                        crate::memory::MemoryStore::format_for_prompt(&memories);
+                    if !memory_prompt.is_empty() {
+                        sections.push(memory_prompt);
+                    }
                 }
             }
+        } else {
+            crate::log_debug!(
+                "compose_dynamic_context: search_hot_context_async skipped (continuation turn)"
+            );
         }
 
         // ── Compressed observations (current session) ───────────────────
@@ -1042,9 +1059,13 @@ impl AgentRuntime {
             store.append_message(session_id, &tool_msg)?;
         }
         let _t_elapsed = _t_start.elapsed();
+        crate::log_debug!(
+            "persist_tool_result: store.lock + append_message took {:?}",
+            _t_elapsed
+        );
         if _t_elapsed > std::time::Duration::from_millis(200) {
             crate::log_warn!(
-                "persist_tool_result: store.lock + append_message took {:?}",
+                "persist_tool_result: store.lock + append_message took {:?} (slow)",
                 _t_elapsed
             );
         }
@@ -1092,9 +1113,13 @@ impl AgentRuntime {
         let store = self.store.lock().await;
         store.append_message(session_id, &msg)?;
         let _t_elapsed = _t_start.elapsed();
+        crate::log_debug!(
+            "persist_assistant_message: store.lock + append_message took {:?}",
+            _t_elapsed
+        );
         if _t_elapsed > std::time::Duration::from_millis(200) {
             crate::log_warn!(
-                "persist_assistant_message: store.lock + append_message took {:?}",
+                "persist_assistant_message: store.lock + append_message took {:?} (slow)",
                 _t_elapsed
             );
         }
@@ -1296,6 +1321,7 @@ impl AgentRuntime {
             static_system_prompt.len()
         );
 
+        let mut _sub_first_iteration = true;
         loop {
             // Check cancellation
             if let Some(ref ct) = cancel_token
@@ -1306,18 +1332,37 @@ impl AgentRuntime {
             }
 
             // Load messages
+            let _t_sub_load = std::time::Instant::now();
             let db_messages = {
                 let store = self.store.lock().await;
                 store.load_messages(child_session_id)?
             };
+            crate::log_debug!(
+                "run_subagent: loaded {} messages in {:?}",
+                db_messages.len(),
+                _t_sub_load.elapsed()
+            );
 
             // Compose dynamic context + build
+            let _t_sub_compose = std::time::Instant::now();
             let dynamic_context =
-                self.compose_dynamic_context(child_session_id, None).await;
+                self.compose_dynamic_context(child_session_id, None, !_sub_first_iteration).await;
+            _sub_first_iteration = false;
+            crate::log_info!(
+                "run_subagent: compose_dynamic_context took {:?} ({} chars)",
+                _t_sub_compose.elapsed(),
+                dynamic_context.len()
+            );
+            let _t_sub_build = std::time::Instant::now();
             let mut request_messages =
                 self.build_request_messages(&db_messages, &child_context, SessionMode::Build);
+            crate::log_debug!(
+                "run_subagent: build_request_messages took {:?}",
+                _t_sub_build.elapsed()
+            );
 
             // Inject <system-reminder> into latest user message
+            let _t_sub_inject = std::time::Instant::now();
             if !dynamic_context.is_empty() {
                 if let Some(last_user) = request_messages
                     .iter_mut()
@@ -1327,18 +1372,32 @@ impl AgentRuntime {
                     last_user.content = format!("{}\n\n{}", dynamic_context, last_user.content);
                 }
             }
+            crate::log_debug!(
+                "run_subagent: inject system-reminder took {:?}",
+                _t_sub_inject.elapsed()
+            );
 
+            let _t_sub_prep = std::time::Instant::now();
             let mut model_for_turn = child_model.clone();
             model_for_turn.system_prompt = static_system_prompt.clone();
+            crate::log_debug!(
+                "run_subagent: model_for_turn setup took {:?}",
+                _t_sub_prep.elapsed()
+            );
 
             send_status(event_tx, "Thinking".to_string(), None, None, None);
 
             // Emit TurnStarting so the TUI updates active_request_id and
             // creates a streaming message for this turn in the child session.
+            let _t_sub_ts = std::time::Instant::now();
             let _ = event_tx.send(BackendEvent::TurnStarting {
                 session_id: child_session_id,
                 request_id: request_sequence,
             });
+            crate::log_debug!(
+                "run_subagent: TurnStarting send took {:?}",
+                _t_sub_ts.elapsed()
+            );
 
             // ─── Custom streaming loop (replaces run_single_turn) ─────────
             // We inline the streaming logic so we can emit SubagentStatus events
@@ -1346,6 +1405,7 @@ impl AgentRuntime {
             // Standard events (Delta, ToolCallUpdated, etc.) are still forwarded
             // to event_tx for regular conversation updates.
             use tokio::sync::mpsc::unbounded_channel;
+            let _t_sub_spawn = std::time::Instant::now();
             let (stream_tx, mut stream_rx) = unbounded_channel();
             let llm = self.llm_client.clone();
             let model_for_task = model_for_turn.clone();
@@ -1368,6 +1428,10 @@ impl AgentRuntime {
                 )
                 .await;
             });
+            crate::log_debug!(
+                "run_subagent: LLM spawn overhead took {:?}",
+                _t_sub_spawn.elapsed()
+            );
 
             // Listen for cancellation and drop stream_tx to unblock
             // the event loop below.  The spawned LLM task above is
@@ -1389,6 +1453,7 @@ impl AgentRuntime {
             let mut last_sent_content_len: usize = 0;
             let mut last_sent_reasoning_len: usize = 0;
             let call_start = Utc::now();
+            let mut first_event = true;
 
             const SUBAGENT_STREAM_TIMEOUT: Duration = Duration::from_secs(300); // 5 minutes
 
@@ -1404,6 +1469,14 @@ impl AgentRuntime {
                             );
                         }
                     };
+
+                if first_event {
+                    crate::log_info!(
+                        "run_subagent: first event received after {:?} from spawn",
+                        _t_sub_spawn.elapsed()
+                    );
+                    first_event = false;
+                }
 
                 // Forward to parent event channel (for standard conversation updates)
                 let _ = event_tx.send(event.clone());
@@ -1596,7 +1669,13 @@ impl AgentRuntime {
                 send_status(event_tx, "Working".to_string(), None, None, None);
             }
 
+            crate::log_debug!("run_subagent: tool loop completed");
+            let _t_sub_loopback = std::time::Instant::now();
             request_sequence = request_sequence.wrapping_add(1);
+            crate::log_debug!(
+                "run_subagent: loop-back overhead took {:?}",
+                _t_sub_loopback.elapsed()
+            );
         }
 
         // 5. Read last assistant message from child session
@@ -1680,6 +1759,7 @@ impl AgentRuntime {
             static_system_prompt.len()
         );
 
+        let mut _first_iteration = true;
         loop {
             // Check cancellation
             if let Some(ref ct) = cancel_token
@@ -1704,7 +1784,8 @@ impl AgentRuntime {
             // 2. Compose dynamic (per-turn) context
             let _t_compose = std::time::Instant::now();
             let dynamic_context =
-                self.compose_dynamic_context(session_id, Some(mode)).await;
+                self.compose_dynamic_context(session_id, Some(mode), !_first_iteration).await;
+            _first_iteration = false;
             crate::log_info!(
                 "agent_loop: composed dynamic context ({} chars) in {:?}",
                 dynamic_context.len(),
@@ -1723,6 +1804,7 @@ impl AgentRuntime {
             // 3a. Inject dynamic context as <system-reminder> into latest user message.
             //     This keeps the `system` message (static_system_prompt) stable across
             //     every turn, maximising LLM prefix cache hits.
+            let _t_inject = std::time::Instant::now();
             if !dynamic_context.is_empty() {
                 if let Some(last_user) = request_messages
                     .iter_mut()
@@ -1732,14 +1814,23 @@ impl AgentRuntime {
                     last_user.content = format!("{}\n\n{}", dynamic_context, last_user.content);
                 }
             }
+            crate::log_debug!(
+                "agent_loop: inject system-reminder took {:?}",
+                _t_inject.elapsed()
+            );
 
             // 4. Stream LLM — `Finished` is already forwarded to event_tx
             //    by `run_single_turn`.
             // NOTE: model.system_prompt is the IMMUTABLE static prompt composed
             // once before the loop.  We do NOT override it per-turn, preserving
             // prefix caching across turns.
+            let _t_prep_model = std::time::Instant::now();
             let mut model_for_turn = model.clone();
             model_for_turn.system_prompt = static_system_prompt.clone();
+            crate::log_debug!(
+                "agent_loop: model_for_turn setup took {:?}",
+                _t_prep_model.elapsed()
+            );
             crate::log_info!("agent_loop: run_single_turn starting");
             let _t_turn = std::time::Instant::now();
             let turn = self
@@ -2050,6 +2141,7 @@ impl AgentRuntime {
             }
 
             // 8. Continue loop with new request ID for next turn
+            let _t_post_tools = std::time::Instant::now();
             request_id = rand::random::<u64>();
 
             // Check cancellation before notifying the frontend,
@@ -2067,6 +2159,10 @@ impl AgentRuntime {
                 session_id,
                 request_id,
             });
+            crate::log_info!(
+                "agent_loop: post-tools to TurnStarting took {:?}",
+                _t_post_tools.elapsed()
+            );
         }
     }
 
@@ -2957,7 +3053,7 @@ mod tests {
         }
 
         let result = agent
-            .compose_dynamic_context(session_id, None)
+            .compose_dynamic_context(session_id, None, false)
             .await;
         assert!(
             result.is_empty(),
@@ -2985,7 +3081,7 @@ mod tests {
         }
 
         let result = agent
-            .compose_dynamic_context(session_id, Some(SessionMode::Build))
+            .compose_dynamic_context(session_id, Some(SessionMode::Build), false)
             .await;
         assert!(
             !result.is_empty(),
