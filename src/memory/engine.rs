@@ -278,23 +278,28 @@ impl MemoryStore {
 
     /// Record a usage event for a memory.
     pub fn record_usage(&self, workspace_root: &str, id: Uuid) -> Result<()> {
+        // Read from read_connection first (no write lock held)
+        let (importance, age_days, new_count) = {
+            let rdb = self.read_connection.lock().unwrap();
+            let entry = self.read_by_id(&rdb, &id, workspace_root)?;
+            let age_days = (chrono::Utc::now() - entry.created_at).num_days() as f64;
+            (entry.importance as f64, age_days, entry.usage_count + 1)
+        };
+
+        // Then write via write_connection
         let db = self.connection.lock().unwrap();
         db.execute(
             "UPDATE memories SET usage_count = usage_count + 1 WHERE id = ?1 AND workspace_root = ?2",
             rusqlite::params![id.to_string(), workspace_root],
         )?;
-        // Auto-update retention score
-        if let Ok(entry) = self.read_by_id(&db, &id, workspace_root) {
-            let age_days = (chrono::Utc::now() - entry.created_at).num_days() as f64;
-            let _ = RetentionService::compute_and_store(
-                &db,
-                &id.to_string(),
-                "memory",
-                entry.importance as f64,
-                age_days,
-                entry.usage_count + 1,
-            );
-        }
+        let _ = RetentionService::compute_and_store(
+            &db,
+            &id.to_string(),
+            "memory",
+            importance,
+            age_days,
+            new_count,
+        );
         Ok(())
     }
 

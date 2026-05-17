@@ -86,8 +86,9 @@ impl RememberService {
             is_latest: true,
         };
 
-        // 4. Persist to DB
-        db.execute(
+        // 4. Persist to DB (transactional with FTS5 index update)
+        db.execute_batch("BEGIN TRANSACTION")?;
+        if let Err(e) = db.execute(
             "INSERT INTO memories (id, workspace_root, memory_type, title, content, tags, source_session_id, created_at, updated_at, usage_count, active, concepts, files, strength, importance, version, parent_id, supersedes, related_ids, is_latest)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
             rusqlite::params![
@@ -112,9 +113,11 @@ impl RememberService {
                 serde_json::to_string(&entry.related_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>())?,
                 entry.is_latest as i64,
             ],
-        )?;
+        ) {
+            let _ = db.execute_batch("ROLLBACK");
+            return Err(e.into());
+        }
 
-        // 5. Incremental FTS5 update
         if let Err(e) = db.execute(
             "INSERT INTO memories_fts(rowid, title, content, tags, concepts, files)
              VALUES (last_insert_rowid(), ?1, ?2, ?3, ?4, ?5)",
@@ -126,8 +129,21 @@ impl RememberService {
                 serde_json::to_string(&entry.files)?,
             ],
         ) {
+            let _ = db.execute_batch("ROLLBACK");
             crate::log_warn!("memory: failed to update FTS5 index: {}", e);
+            return Err(e.into());
         }
+        db.execute_batch("COMMIT")?;
+
+        // Auto-compute retention score for the new memory
+        let _ = super::retention::RetentionService::compute_and_store(
+            db,
+            &entry.id.to_string(),
+            "memory",
+            entry.importance as f64,
+            0.0,
+            0,
+        );
 
         Ok(entry)
     }

@@ -598,20 +598,11 @@ impl SessionStore {
             return Ok(());
         }
 
-        // Use execute_batch for transaction control since rusqlite's
-        // Transaction requires &mut self.
-        self.write_conn
-            .lock()
-            .unwrap()
-            .execute_batch("BEGIN TRANSACTION")
-            .context("failed to begin transaction")?;
-
-        let rollback = || {
-            let _ = self.write_conn.lock().unwrap().execute_batch("ROLLBACK");
-        };
+        let guard = self.write_conn.lock().unwrap();
 
         let result = (|| -> Result<()> {
-            let guard = self.write_conn.lock().unwrap();
+            guard.execute_batch("BEGIN TRANSACTION")?;
+
             let mut stmt = guard.prepare(
                 "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
             ).context("failed to prepare batch insert statement")?;
@@ -670,21 +661,19 @@ impl SessionStore {
             }
 
             drop(stmt);
-            self.write_conn
-                .lock()
-                .unwrap()
-                .execute_batch("COMMIT")
-                .context("failed to commit batch insert transaction")?;
+            guard.execute_batch("COMMIT")?;
             Ok(())
         })();
 
         match result {
             Ok(()) => {
+                drop(guard);
                 self.touch_session(session_id)?;
                 Ok(())
             }
             Err(e) => {
-                rollback();
+                let _ = guard.execute_batch("ROLLBACK");
+                drop(guard);
                 Err(e)
             }
         }

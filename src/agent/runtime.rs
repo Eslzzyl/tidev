@@ -306,6 +306,15 @@ impl AgentRuntime {
                 }
                 sections.push(block);
             }
+
+            // ── Hot memories (frequently used / important) ─────────────────
+            if let Ok(hot) = timed_memory_op!(
+                "search_hot_context",
+                memory_store.search_hot_context(query, &ws, 5, 20)
+            ) && !hot.is_empty()
+            {
+                sections.push(crate::memory::MemoryStore::format_for_prompt(&hot));
+            }
         }
 
         if sections.is_empty() {

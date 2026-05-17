@@ -101,24 +101,30 @@ impl ReflectService {
 
         // 3. Check cursor — skip already-processed clusters
         let cursor = Self::load_cursor(db_path, "reflect")?;
-        let mut last_fact_id: String = cursor;
+        // If cursor is a UUID (old format), treat all clusters as new
+        let cursor_is_uuid = cursor.len() == 36 && cursor.contains('-');
+        let mut last_cursor_time: String = if cursor_is_uuid {
+            "1970-01-01T00:00:00+00:00".to_string()
+        } else {
+            cursor
+        };
 
         for cluster in &clusters {
-            // Skip clusters whose newest fact was already processed
-            let cluster_max_id = cluster
-                .iter()
-                .map(|f| f.id.to_string())
-                .max()
-                .unwrap_or_default();
-            if cluster_max_id <= last_fact_id {
-                continue;
-            }
-
             // Extract shared concepts across the cluster
             let concepts = Self::cluster_concepts(cluster);
 
             if cluster.len() < 3 {
                 continue; // skip small clusters
+            }
+
+            // Find the newest fact's created_at in this cluster
+            let cluster_max_time = cluster
+                .iter()
+                .map(|f| f.created_at.to_rfc3339())
+                .max()
+                .unwrap_or_default();
+            if cluster_max_time <= last_cursor_time {
+                continue;
             }
 
             // ─── STRICTER_SUFFIX for retry ───────────────────────────
@@ -161,8 +167,10 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 }
             }
 
-            // 6. Save insights
+            // 6. Save insights (transactional)
             let db = Connection::open(db_path)?;
+            db.execute_batch("BEGIN TRANSACTION")?;
+            let mut all_saved = true;
             for insight in &insights {
                 // Build tags from cluster concepts
                 let tags: Vec<String> = concepts
@@ -183,18 +191,25 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                     None, // source_session_id
                 ) {
                     crate::log_warn!("failed to remember insight: {}", e);
-                    continue;
+                    all_saved = false;
+                    break;
                 }
-
-                report.insights_added += 1;
             }
 
-            // Update cursor to the newest fact id in this cluster
-            if let Some(max_id) = cluster.iter().map(|f| f.id.to_string()).max()
-                && max_id > last_fact_id {
-                    last_fact_id = max_id.clone();
-                    Self::save_cursor(db_path, "reflect", &max_id)?;
-                }
+            if all_saved {
+                db.execute_batch("COMMIT")?;
+                report.insights_added += insights.len();
+            } else {
+                db.execute_batch("ROLLBACK")?;
+                // cursor not updated — will retry on next run
+                continue;
+            }
+
+            // Update cursor to the newest fact time in this cluster
+            if cluster_max_time > last_cursor_time {
+                last_cursor_time = cluster_max_time.clone();
+                Self::save_cursor(db_path, "reflect", &cluster_max_time)?;
+            }
         }
 
         Ok(report)

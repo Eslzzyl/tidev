@@ -9,7 +9,7 @@ use crate::llm::LlmClient;
 use crate::memory::graph;
 use crate::memory::patterns::PatternMiningService;
 use crate::memory::remember::RememberService;
-use crate::memory::retention::RetentionService;
+
 use crate::memory::types::*;
 use crate::memory::xml::clean_llm_xml_response;
 use crate::session::{Message, MessageRole};
@@ -136,14 +136,18 @@ impl ConsolidationService {
         }
 
         // 2. Load cursor — skip already-consolidated summaries
-        let last_id = {
+        let last_cursor = {
             let db = Connection::open(db_path)?;
             Self::load_cursor(&db, "semantic")?
         };
 
+        // If cursor is a UUID (old format), treat all summaries as new; use "1970" to include all
+        let cursor_is_uuid = last_cursor.len() == 36 && last_cursor.contains('-');
+        let cursor_time = if cursor_is_uuid { "1970-01-01T00:00:00+00:00".to_string() } else { last_cursor.clone() };
+
         let new_summaries: Vec<_> = summaries
             .iter()
-            .filter(|s| s.session_id.to_string() > last_id)
+            .filter(|s| s.created_at.to_rfc3339() > cursor_time)
             .collect();
 
         if new_summaries.is_empty() {
@@ -188,8 +192,10 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
             }
         }
 
-        // 5. Write facts + update cursor (sync, new connection)
+        // 5. Write facts + update cursor (sync, new connection, transactional)
         let db = Connection::open(db_path)?;
+        db.execute_batch("BEGIN TRANSACTION")?;
+        let mut written = 0usize;
         for fact in &facts {
             let tags = vec!["consolidated".to_string()];
             if let Err(e) = RememberService::remember(
@@ -206,20 +212,16 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 crate::log_warn!("failed to remember consolidated fact: {}", e);
                 continue;
             }
-            // Auto-compute retention score
-            let _ = RetentionService::compute_and_store(
-                &db,
-                &Uuid::new_v4().to_string(),
-                "memory",
-                5.0,
-                0.0,
-                1,
-            );
+            written += 1;
         }
 
-        // Update cursor to the last summary we processed
-        if let Some(last) = new_summaries.last() {
-            Self::save_cursor(&db, "semantic", &last.session_id.to_string())?;
+        if written == facts.len() {
+            if let Some(last) = new_summaries.last() {
+                Self::save_cursor(&db, "semantic", &last.created_at.to_rfc3339())?;
+            }
+            db.execute_batch("COMMIT")?;
+        } else {
+            db.execute_batch("ROLLBACK")?;
         }
 
         Ok(facts.len())
@@ -244,14 +246,18 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
         }
 
         // 2. Load cursor
-        let last_id = {
+        let last_cursor = {
             let db = Connection::open(db_path)?;
             Self::load_cursor(&db, "procedural")?
         };
 
+        // If cursor is a UUID (old format), treat all patterns as new
+        let cursor_is_uuid = last_cursor.len() == 36 && last_cursor.contains('-');
+        let cursor_time = if cursor_is_uuid { "1970-01-01T00:00:00+00:00".to_string() } else { last_cursor.clone() };
+
         let new_patterns: Vec<_> = patterns
             .iter()
-            .filter(|m| m.id.to_string() > last_id)
+            .filter(|m| m.created_at.to_rfc3339() > cursor_time)
             .collect();
 
         if new_patterns.is_empty() {
@@ -296,8 +302,10 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
             }
         }
 
-        // 5. Write procedures (sync, new connection)
+        // 5. Write procedures (sync, new connection, transactional)
         let db = Connection::open(db_path)?;
+        db.execute_batch("BEGIN TRANSACTION")?;
+        let mut written = 0usize;
         for proc in &procedures {
             let steps_text = proc.steps.join("\n");
             let tags = vec!["consolidated".to_string(), "procedure".to_string()];
@@ -315,11 +323,16 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 crate::log_warn!("failed to remember procedure: {}", e);
                 continue;
             }
+            written += 1;
         }
 
-        // Update cursor
-        if let Some(last) = new_patterns.last() {
-            Self::save_cursor(&db, "procedural", &last.id.to_string())?;
+        if written == procedures.len() {
+            if let Some(last) = new_patterns.last() {
+                Self::save_cursor(&db, "procedural", &last.created_at.to_rfc3339())?;
+            }
+            db.execute_batch("COMMIT")?;
+        } else {
+            db.execute_batch("ROLLBACK")?;
         }
 
         Ok(procedures.len())
