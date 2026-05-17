@@ -92,6 +92,14 @@ async fn run_async() -> Result<()> {
         let store = db.create_session_store()?;
         let memory_store = Arc::new(db.create_memory_store()?);
         let llm = LlmClient::new()?;
+        memory_store.set_models(llm.clone(), default_model.clone(), None, None);
+        memory_store.set_compression_enabled(config.memory.compression_enabled);
+        memory_store.set_llm_compression(config.memory.llm_compression);
+        let _bg = crate::memory::start_background_tasks(
+            memory_store.clone(),
+            &tokio::runtime::Handle::current(),
+            &workspace_root.to_string_lossy(),
+        );
         let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
         let file_read_tracker = Arc::new(FileReadTracker::new());
         let worktree = find_git_worktree(&workspace_root);
@@ -158,6 +166,14 @@ async fn run_async() -> Result<()> {
         let store = db.create_session_store()?;
         let memory_store2 = Arc::new(db.create_memory_store()?);
         let llm = LlmClient::new()?;
+        memory_store2.set_models(llm.clone(), default_model.clone(), None, None);
+        memory_store2.set_compression_enabled(config.memory.compression_enabled);
+        memory_store2.set_llm_compression(config.memory.llm_compression);
+        let _bg2 = crate::memory::start_background_tasks(
+            memory_store2.clone(),
+            &tokio::runtime::Handle::current(),
+            &workspace_root.to_string_lossy(),
+        );
         let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
         let file_read_tracker = Arc::new(FileReadTracker::new());
         let worktree2 = find_git_worktree(&workspace_root);

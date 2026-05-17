@@ -111,40 +111,6 @@ impl App {
         } else {
             crate::log_info!("memory: no embedding model configured, vector search disabled");
         }
-        // Start the compression queue for async observation compression.
-        crate::log_info!(
-            "memory: starting compression queue with {} workers",
-            crate::memory::DEFAULT_COMPRESSION_CONCURRENCY,
-        );
-        let compression_queue_shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let compression_queue = Arc::new(crate::memory::CompressionQueue::start(
-            memory_store.clone(),
-            crate::memory::DEFAULT_COMPRESSION_CONCURRENCY,
-            compression_queue_shutdown.clone(),
-        ));
-        memory_store.set_compression_sender(compression_queue.sender());
-        // Recover any uncompressed observations from previous runs
-        // (runs after the queue is created so recovered jobs go through it).
-        crate::log_info!("memory: recovering uncompressed observations (limit=50)");
-        match memory_store.recover_uncompressed(50) {
-            Ok(0) => crate::log_info!("memory: no uncompressed observations to recover"),
-            Ok(n) => crate::log_info!("memory: queued {} uncompressed observations for compression", n),
-            Err(e) => crate::log_warn!(
-                "memory: recovery of uncompressed observations failed: {}",
-                e
-            ),
-        }
-        // Backfill embeddings for already-compressed observations that are
-        // missing vector embeddings (e.g. when vec0 wasn't loaded at startup).
-        crate::log_info!("memory: backfilling embeddings (limit=50)");
-        match memory_store.backfill_embeddings(50) {
-            Ok(0) => crate::log_info!("memory: no observations need embedding backfill"),
-            Ok(n) => crate::log_info!("memory: queued {} observations for embedding backfill", n),
-            Err(e) => crate::log_warn!(
-                "memory: backfill of embeddings failed: {}",
-                e
-            ),
-        }
         // Set sandbox policy based on session mode and config
         let sandbox_policy = mode.sandbox_policy(&config.sandbox);
         tools.set_sandbox_policy(Some(sandbox_policy));
@@ -167,167 +133,9 @@ impl App {
             hooks: crate::hooks::HookEngine::new(config.hooks.clone(), workspace_root.clone())
                 .with_memory_store(memory_store.clone()),
         };
-        // Schedule periodic eviction (every 60 minutes)
-        if tokio::runtime::Handle::try_current().is_ok() {
-            let evict_store = memory_store.clone();
-            tokio::spawn(async move {
-                let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
-                // Run once on startup
-                if let Err(e) = evict_store.run_eviction() {
-                    crate::log_warn!("initial eviction failed: {}", e);
-                }
-                loop {
-                    interval.tick().await;
-                    if let Err(e) = evict_store.run_eviction() {
-                        crate::log_warn!("scheduled eviction failed: {}", e);
-                    }
-                }
-            });
-        }
-
         // Share current session ID for the background inactivity check.
         let current_session_id: Arc<RwLock<Uuid>> = Arc::new(RwLock::new(session_id));
         let inactivity_check_cancel = CancellationToken::new();
-
-        // Schedule periodic session inactivity check (every 60 seconds).
-        // Sessions inactive for longer than `INACTIVITY_TIMEOUT_SECS` will be
-        // auto-summarised.  (This could be made configurable in the future.)
-        const INACTIVITY_TIMEOUT_SECS: i64 = 300;
-        if tokio::runtime::Handle::try_current().is_ok() {
-            let check_store = store.clone();
-            let check_mem_store = memory_store.clone();
-            let check_ws = workspace_root.display().to_string();
-            let cancel_token = inactivity_check_cancel.clone();
-            let sid_ref = current_session_id.clone();
-
-            tokio::spawn(async move {
-                let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
-                interval.tick().await; // skip immediate run
-
-                loop {
-                    tokio::select! {
-                        _ = interval.tick() => {
-                            let now = Utc::now();
-                            let cutoff = (now - chrono::Duration::seconds(INACTIVITY_TIMEOUT_SECS)).to_rfc3339();
-                            let current = *sid_ref.read().unwrap();
-
-                            let ids = match check_store.find_inactive_sessions(&cutoff, current) {
-                                Ok(ids) => ids,
-                                Err(e) => {
-                                    crate::log_warn!("inactivity check failed: {}", e);
-                                    continue;
-                                }
-                            };
-
-                            for id in ids {
-                                crate::log_info!("summarising inactive session: {}", id);
-                                if let Err(e) = check_store.set_session_status(id, "completed") {
-                                    crate::log_warn!("failed to mark session completed: {}", e);
-                                    continue;
-                                }
-                                if let Err(e) = check_mem_store.summarize_session(id, &check_ws).await {
-                                    crate::log_warn!("session summarisation failed: {}", e);
-                                }
-                            }
-                        }
-                        _ = cancel_token.cancelled() => {
-                            break;
-                        }
-                    }
-                }
-            });
-        }
-
-        const POLL_INTERVAL_SECS: u64 = 60;
-        const RUN_INTERVAL_SECS: i64 = 1800;
-
-        // Periodic consolidation: check DB-stamped last-run time every 60s.
-        crate::log_info!(
-            "memory: scheduling periodic consolidation (poll={RUN_INTERVAL_SECS}s, run={RUN_INTERVAL_SECS}s)"
-        );
-        if tokio::runtime::Handle::try_current().is_ok() {
-            let cons_store = memory_store.clone();
-            let cons_ws = workspace_root.display().to_string();
-            let cons_cancel = inactivity_check_cancel.clone();
-
-            tokio::spawn(async move {
-                crate::log_info!("memory: consolidation task started");
-                let mut interval = tokio::time::interval(Duration::from_secs(POLL_INTERVAL_SECS));
-                interval.tick().await;
-                loop {
-                    tokio::select! {
-                        _ = interval.tick() => {
-                            let last_run = cons_store
-                                .meta_get("consolidation_last_run")
-                                .ok()
-                                .flatten()
-                                .and_then(|s| s.parse::<i64>().ok());
-                            let elapsed = last_run.map(|ts| Utc::now().timestamp() - ts);
-                            if elapsed.map_or(true, |d| d >= RUN_INTERVAL_SECS) {
-                                crate::log_info!("memory: running consolidation (last run: {}s ago)", elapsed.unwrap_or(-1));
-                                if let Err(e) = cons_store.run_consolidation(&cons_ws).await {
-                                    crate::log_warn!("memory: consolidation failed: {}", e);
-                                } else {
-                                    let _ = cons_store.meta_set(
-                                        "consolidation_last_run",
-                                        &Utc::now().timestamp().to_string(),
-                                    );
-                                    crate::log_info!("memory: consolidation completed");
-                                }
-                            }
-                        }
-                        _ = cons_cancel.cancelled() => {
-                            crate::log_info!("memory: consolidation task cancelled");
-                            break;
-                        }
-                    }
-                }
-            });
-        }
-
-        // Periodic reflection: same polling pattern.
-        crate::log_info!(
-            "memory: scheduling periodic reflection (poll={POLL_INTERVAL_SECS}s, run={RUN_INTERVAL_SECS}s)"
-        );
-        if tokio::runtime::Handle::try_current().is_ok() {
-            let reflect_store = memory_store.clone();
-            let reflect_ws = workspace_root.display().to_string();
-            let reflect_cancel = inactivity_check_cancel.clone();
-
-            tokio::spawn(async move {
-                crate::log_info!("memory: reflection task started");
-                let mut interval = tokio::time::interval(Duration::from_secs(POLL_INTERVAL_SECS));
-                interval.tick().await;
-                loop {
-                    tokio::select! {
-                        _ = interval.tick() => {
-                            let last_run = reflect_store
-                                .meta_get("reflection_last_run")
-                                .ok()
-                                .flatten()
-                                .and_then(|s| s.parse::<i64>().ok());
-                            let elapsed = last_run.map(|ts| Utc::now().timestamp() - ts);
-                            if elapsed.map_or(true, |d| d >= RUN_INTERVAL_SECS) {
-                                crate::log_info!("memory: running reflection (last run: {}s ago)", elapsed.unwrap_or(-1));
-                                if let Err(e) = reflect_store.run_reflect(&reflect_ws).await {
-                                    crate::log_warn!("memory: reflection failed: {}", e);
-                                } else {
-                                    let _ = reflect_store.meta_set(
-                                        "reflection_last_run",
-                                        &Utc::now().timestamp().to_string(),
-                                    );
-                                    crate::log_info!("memory: reflection completed");
-                                }
-                            }
-                        }
-                        _ = reflect_cancel.cancelled() => {
-                            crate::log_info!("memory: reflection task cancelled");
-                            break;
-                        }
-                    }
-                }
-            });
-        }
 
         let last_notice = None;
         let retrying_hint = None;
@@ -467,7 +275,7 @@ impl App {
             thinking_level: active_model.thinking_level.clone(),
             memory_store,
             memory_panel: None,
-            compression_queue: Some(compression_queue),
+            compression_queue: None,
             terminal_session: None,
             force_full_redraw: false,
         };
@@ -500,6 +308,55 @@ impl App {
                     crate::log_warn!("snapshot cleanup failed: {}", e);
                 }
                 tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+            }
+        });
+
+        // Start memory background tasks: compression queue, eviction,
+        // consolidation, reflection.
+        crate::log_info!("memory: starting background tasks");
+        let bg = crate::memory::start_background_tasks(
+            self.memory_store.clone(),
+            runtime.handle(),
+            &self.workspace_root.to_string_lossy(),
+        );
+        self.compression_queue = Some(bg.compression_queue);
+
+        // Schedule periodic session inactivity check (every 60 seconds).
+        let check_store = self.store.clone();
+        let check_mem_store = self.memory_store.clone();
+        let check_ws = self.workspace_root.to_string_lossy().to_string();
+        let cancel_token = self.inactivity_check_cancel.clone();
+        let sid_ref = self.current_session_id.clone();
+        runtime.spawn(async move {
+            const INACTIVITY_TIMEOUT_SECS: i64 = 300;
+            let mut interval = tokio::time::interval(Duration::from_secs(60));
+            interval.tick().await;
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        let now = Utc::now();
+                        let cutoff = (now - chrono::Duration::seconds(INACTIVITY_TIMEOUT_SECS)).to_rfc3339();
+                        let current = *sid_ref.read().unwrap();
+                        let ids = match check_store.find_inactive_sessions(&cutoff, current) {
+                            Ok(ids) => ids,
+                            Err(e) => {
+                                crate::log_warn!("inactivity check failed: {}", e);
+                                continue;
+                            }
+                        };
+                        for id in ids {
+                            crate::log_info!("summarising inactive session: {}", id);
+                            if let Err(e) = check_store.set_session_status(id, "completed") {
+                                crate::log_warn!("failed to mark session completed: {}", e);
+                                continue;
+                            }
+                            if let Err(e) = check_mem_store.summarize_session(id, &check_ws).await {
+                                crate::log_warn!("session summarisation failed: {}", e);
+                            }
+                        }
+                    }
+                    _ = cancel_token.cancelled() => break,
+                }
             }
         });
 
