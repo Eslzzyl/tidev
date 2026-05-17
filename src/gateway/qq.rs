@@ -69,7 +69,7 @@ pub struct QQChannel {
     pub llm: LlmClient,
     #[allow(dead_code)]
     pub tools: ToolRegistry,
-    /// Shared AgentRuntime for compose_system_prompt / build_request_messages.
+    /// Shared AgentRuntime for compose_static_system_prompt / build_request_messages.
     pub agent: AgentRuntime,
     #[allow(dead_code)]
     pub instruction_prompt: String,
@@ -313,6 +313,21 @@ impl QQChannel {
             let chat_key = format!("qq:{}", channel_id);
             let mut conversation = self.load_or_create_conversation(&chat_key, &active_model)?;
 
+            // Load the session's static system prompt onto the model.
+            // Legacy sessions (no stored prompt) get composed now.
+            match self.store.load_session_system_prompt(conversation.session_id) {
+                Ok(stored) if !stored.is_empty() => {
+                    active_model.system_prompt = stored;
+                }
+                _ => {
+                    let composed = self.agent.compose_static_system_prompt(&active_model.system_prompt);
+                    if let Err(e) = self.store.update_session_system_prompt(conversation.session_id, &composed) {
+                        crate::log_warn!("failed to persist static system prompt: {}", e);
+                    }
+                    active_model.system_prompt = composed;
+                }
+            }
+
             let handled = self
                 .handle_command(
                     &channel_id,
@@ -329,10 +344,25 @@ impl QQChannel {
             }
         }
 
-        let active_model = self.config.resolve_active_model_for_gateway(&self.auth)?;
+        let mut active_model = self.config.resolve_active_model_for_gateway(&self.auth)?;
         let chat_key = format!("qq:{}", channel_id);
 
         let mut conversation = self.load_or_create_conversation(&chat_key, &active_model)?;
+
+        // Load the session's static system prompt onto the model.
+        // Legacy sessions (no stored prompt) get composed now.
+        match self.store.load_session_system_prompt(conversation.session_id) {
+            Ok(stored) if !stored.is_empty() => {
+                active_model.system_prompt = stored;
+            }
+            _ => {
+                let composed = self.agent.compose_static_system_prompt(&active_model.system_prompt);
+                if let Err(e) = self.store.update_session_system_prompt(conversation.session_id, &composed) {
+                    crate::log_warn!("failed to persist static system prompt: {}", e);
+                }
+                active_model.system_prompt = composed;
+            }
+        }
 
         let user_message = Message::new(MessageRole::User, clean_content.to_string());
         conversation.push(user_message.clone());
@@ -400,6 +430,13 @@ impl QQChannel {
             &active_model.display_name,
             &title,
         )?;
+
+        // Compose the immutable static system prompt and persist it.
+        let static_prompt = self.agent.compose_static_system_prompt(&active_model.system_prompt);
+        if let Err(e) = self.store.update_session_system_prompt(session_id, &static_prompt) {
+            crate::log_warn!("failed to persist static system prompt: {}", e);
+        }
+
         self.store
             .set_gateway_chat_session(GATEWAY_PLATFORM_QQ, chat_key, session_id)?;
 
@@ -871,6 +908,13 @@ impl QQChannel {
             &active_model.display_name,
             &conversation.title,
         )?;
+
+        // Compose the immutable static system prompt and persist it.
+        let static_prompt = self.agent.compose_static_system_prompt(&active_model.system_prompt);
+        if let Err(e) = self.store.update_session_system_prompt(session_id, &static_prompt) {
+            crate::log_warn!("failed to persist static system prompt: {}", e);
+        }
+
         Ok(conversation)
     }
 

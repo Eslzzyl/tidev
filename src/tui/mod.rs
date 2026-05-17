@@ -119,7 +119,7 @@ struct App {
     conversation: Conversation,
     context_manager: ContextManager,
     tools: ToolRegistry,
-    /// Shared AgentRuntime for compose_system_prompt / build_request_messages.
+    /// Shared AgentRuntime for compose_static_system_prompt / build_request_messages.
     agent: AgentRuntime,
     file_read_tracker: Arc<FileReadTracker>,
     commands: CommandRegistry,
@@ -1582,6 +1582,13 @@ impl App {
                     &self.active_model.display_name,
                     "Untitled session",
                 )?;
+
+                // Compose the immutable static system prompt and persist it.
+                let static_prompt = self.agent.compose_static_system_prompt(&self.active_model.system_prompt);
+                self.active_model.system_prompt = static_prompt.clone();
+                if let Err(e) = self.store.update_session_system_prompt(session_id, &static_prompt) {
+                    crate::log_warn!("failed to persist static system prompt: {}", e);
+                }
             }
             self.context_manager = ContextManager::new();
             self.pending_tool_execution = None;

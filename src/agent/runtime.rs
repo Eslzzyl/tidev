@@ -142,51 +142,22 @@ impl AgentRuntime {
         !was_empty
     }
 
-    /// Compose the system prompt for a turn.
+    /// Compose the static system prompt — called exactly once per session lifetime.
     ///
-    /// Returns `(prompt, instruction_sources)`.
-    pub async fn compose_system_prompt(
-        &mut self,
-        base_prompt: &str,
-        mode: Option<SessionMode>,
-        session_id: uuid::Uuid,
-    ) -> (String, Vec<String>) {
+    /// Content: base prompt + environment info.
+    /// Result is persisted to the session DB record and never changes.
+    pub fn compose_static_system_prompt(&self, base_prompt: &str) -> String {
         let base_prompt = base_prompt.trim();
-
-        let (instruction_prompt, sources, new_cache) =
-            instructions::system_prompt_and_sources_with_cache(
-                &self.workspace_root,
-                &self.config_dir,
-                &self.instructions,
-                &self.instruction_content_cache,
-            )
-            .unwrap_or_default();
-
-        self.instruction_content_cache = new_cache;
-
-        let mut prompt = String::new();
-        if !base_prompt.is_empty() {
-            prompt.push_str(base_prompt);
-        }
-        if !instruction_prompt.is_empty() {
-            if !prompt.is_empty() {
-                prompt.push_str("\n\n");
-            }
-            prompt.push_str(&instruction_prompt);
-        }
-        if let Some(mode) = mode {
-            if !prompt.is_empty() {
-                prompt.push_str("\n\n");
-            }
-            prompt.push_str(mode.reminder());
-        }
-
-        // Environment info (same format as TUI)
         let system_info = SystemInfo::detect();
         let working_dir = std::env::current_dir()
             .map(|p| p.display().to_string())
             .unwrap_or_default();
         let is_git = crate::system_info::is_git_repo(&self.workspace_root);
+
+        let mut prompt = String::new();
+        if !base_prompt.is_empty() {
+            prompt.push_str(base_prompt);
+        }
         prompt.push_str("\n\nHere is some useful information about the environment:\n<env>\n  ");
         prompt.push_str(&format!("Working directory: {}\n  ", working_dir));
         prompt.push_str(&format!(
@@ -199,8 +170,39 @@ impl AgentRuntime {
         ));
         prompt.push_str(&system_info.format_env());
         prompt.push_str("\n</env>");
+        prompt
+    }
 
-        // Workspace memories — use semantic search when available
+    /// Compose the per-turn dynamic context, wrapped in `<system-reminder>`.
+    ///
+    /// Injected into the latest user message — does NOT touch the static
+    /// system prompt, preserving LLM prefix caching across turns.
+    pub async fn compose_dynamic_context(
+        &mut self,
+        session_id: uuid::Uuid,
+        mode: Option<SessionMode>,
+    ) -> String {
+        let mut sections: Vec<String> = Vec::new();
+
+        // ── Instruction files ───────────────────────────────────────────
+        let (instruction_prompt, _sources, new_cache) =
+            instructions::system_prompt_and_sources_with_cache(
+                &self.workspace_root,
+                &self.config_dir,
+                &self.instructions,
+                &self.instruction_content_cache,
+            )
+            .unwrap_or_default();
+        self.instruction_content_cache = new_cache;
+        if !instruction_prompt.is_empty() {
+            sections.push(instruction_prompt);
+        }
+
+        // ── Mode reminder ───────────────────────────────────────────────
+        if let Some(mode) = mode {
+            sections.push(mode.reminder().to_string());
+        }
+
         let ws = self.workspace_root.display().to_string();
         let memory_store = self.tools.memory_store();
 
@@ -211,7 +213,7 @@ impl AgentRuntime {
                 let _elapsed = _start.elapsed();
                 if _elapsed > std::time::Duration::from_millis(500) {
                     crate::log_warn!(
-                        "compose_system_prompt: {} took {:?}",
+                        "compose_dynamic_context: {} took {:?}",
                         $label,
                         _elapsed
                     );
@@ -220,9 +222,7 @@ impl AgentRuntime {
             }};
         }
 
-        // Use workspace directory name as the query for semantic retrieval.
-        // This is the only slow path (embedding API) — use the async version
-        // so the tokio worker thread is released while waiting.
+        // ── Workspace memories ──────────────────────────────────────────
         let query = self.workspace_root.file_name().and_then(|n| n.to_str());
         {
             let _start = std::time::Instant::now();
@@ -231,78 +231,76 @@ impl AgentRuntime {
             let _elapsed = _start.elapsed();
             if _elapsed > std::time::Duration::from_millis(500) {
                 crate::log_warn!(
-                    "compose_system_prompt: search_hot_context_async took {:?}",
+                    "compose_dynamic_context: search_hot_context_async took {:?}",
                     _elapsed
                 );
             }
             if let Ok(memories) = result {
                 let memory_prompt = crate::memory::MemoryStore::format_for_prompt(&memories);
                 if !memory_prompt.is_empty() {
-                    prompt.push_str("\n\n");
-                    prompt.push_str(&memory_prompt);
+                    sections.push(memory_prompt);
                 }
             }
         }
 
-        // ── Phase 1: Compressed observations (current session) ──────────
+        // ── Compressed observations (current session) ───────────────────
         if let Ok(obs) = timed_memory_op!(
             "load_recent_compressed_observations",
             memory_store.load_recent_compressed_observations(&session_id, 8, 5)
         ) && !obs.is_empty()
         {
-            prompt.push_str("\n\n");
-            prompt.push_str(&Self::format_compressed_observations(&obs));
+            sections.push(Self::format_compressed_observations(&obs));
         }
 
-        // ── Phase 1: Session summaries (other sessions) ─────────────────
+        // ── Session summaries (other sessions) ──────────────────────────
         if let Ok(summaries) = timed_memory_op!(
             "load_other_session_summaries",
             memory_store.load_other_session_summaries(&session_id, 5)
         ) && !summaries.is_empty()
         {
-            prompt.push_str("\n\n");
-            prompt.push_str(&Self::format_session_summaries(&summaries));
+            sections.push(Self::format_session_summaries(&summaries));
         }
 
-        // ── Phase 7: Consolidated knowledge (cross-session facts) ──────
+        // ── Consolidated knowledge (cross-session facts) ────────────────
         if let Ok(facts) = timed_memory_op!(
             "load_consolidated_facts",
             memory_store.load_consolidated_facts(&ws, 5)
         ) && !facts.is_empty()
         {
-            prompt.push_str("\n\n## Consolidated Project Knowledge\n");
+            let mut block = "## Consolidated Project Knowledge\n".to_string();
             for fact in &facts {
-                prompt.push_str(&format!(
+                block.push_str(&format!(
                     "- {} (confidence: {:.1})\n",
                     fact.content, fact.strength
                 ));
             }
+            sections.push(block);
         }
 
-        // ── Phase 7: Consolidated procedures ───────────────────────────
+        // ── Consolidated procedures ─────────────────────────────────────
         if let Ok(procs) = timed_memory_op!(
             "load_consolidated_procedures",
             memory_store.load_consolidated_procedures(&ws, 3)
         ) && !procs.is_empty()
         {
-            prompt.push_str("\n\n## Reusable Procedures\n");
+            let mut block = "## Reusable Procedures\n".to_string();
             for proc in &procs {
-                prompt.push_str(&format!("- **{}**: {}\n", proc.title, proc.content));
+                block.push_str(&format!("- **{}**: {}\n", proc.title, proc.content));
             }
+            sections.push(block);
         }
 
-        // Memory slots (ensure defaults + render pinned)
+        // ── Memory slots ────────────────────────────────────────────────
         if let Ok(slot_content) = timed_memory_op!(
             "render_pinned_slots",
             memory_store.render_pinned_slots(&ws)
         ) {
             if !slot_content.is_empty() {
-                prompt.push_str("\n\n");
-                prompt.push_str(&slot_content);
+                sections.push(slot_content);
             }
         }
 
-        // ── Graph: Knowledge Graph Context ───────────────────────────
+        // ── Knowledge graph context ─────────────────────────────────────
         let query = self.workspace_root.file_name().and_then(|n| n.to_str());
         if let Ok(paths) = timed_memory_op!(
             "search_graph_context",
@@ -312,29 +310,36 @@ impl AgentRuntime {
                 let graph_prompt =
                     crate::memory::graph_retrieval::GraphRetrieval::format_for_prompt(&paths, 8);
                 if !graph_prompt.is_empty() {
-                    prompt.push_str("\n\n");
-                    prompt.push_str(&graph_prompt);
+                    sections.push(graph_prompt);
                 }
             }
         }
 
-        // ── Insights (cross-session synthesized knowledge) ────────────
+        // ── Insights (cross-session synthesized knowledge) ──────────────
         if let Ok(insights) = timed_memory_op!(
             "load_insights",
             memory_store.load_insights(&ws, 5)
         ) && !insights.is_empty()
         {
-            prompt.push_str("\n\n## Cross-Session Insights\n");
+            let mut block = "## Cross-Session Insights\n".to_string();
             for insight in &insights {
                 let conf = insight.strength;
-                prompt.push_str(&format!(
+                block.push_str(&format!(
                     "- **{}** (confidence: {:.1}): {}\n",
                     insight.title, conf, insight.content
                 ));
             }
+            sections.push(block);
         }
 
-        (prompt, sources)
+        if sections.is_empty() {
+            return String::new();
+        }
+
+        format!(
+            "<system-reminder>\n{}\n</system-reminder>",
+            sections.join("\n\n")
+        )
     }
 
     /// Format compressed observations for prompt injection.
@@ -1222,6 +1227,8 @@ impl AgentRuntime {
                         .model_override
                         .clone()
                         .unwrap_or_else(|| parent_model.clone());
+                    // Use the agent's own base prompt, not the parent's composed prompt.
+                    m.system_prompt = agent_def.system_prompt.clone();
                     // Subagents should NOT inherit the parent's thinking_level.
                     // Use a clean default instead.
                     m.thinking_level = ThinkingLevelType::default();
@@ -1282,6 +1289,13 @@ impl AgentRuntime {
             None,
         );
 
+        // ── Compose the STATIC system prompt ONCE for the subagent ─────────
+        let static_system_prompt = self.compose_static_system_prompt(&child_model.system_prompt);
+        crate::log_info!(
+            "run_subagent: static system prompt composed ({} chars)",
+            static_system_prompt.len()
+        );
+
         loop {
             // Check cancellation
             if let Some(ref ct) = cancel_token
@@ -1297,13 +1311,25 @@ impl AgentRuntime {
                 store.load_messages(child_session_id)?
             };
 
-            // Compose + build
-            let (system_prompt, _sources) =
-                self.compose_system_prompt(&child_model.system_prompt, None, child_session_id).await;
-            let mut model_for_turn = child_model.clone();
-            model_for_turn.system_prompt = system_prompt;
-            let request_messages =
+            // Compose dynamic context + build
+            let dynamic_context =
+                self.compose_dynamic_context(child_session_id, None).await;
+            let mut request_messages =
                 self.build_request_messages(&db_messages, &child_context, SessionMode::Build);
+
+            // Inject <system-reminder> into latest user message
+            if !dynamic_context.is_empty() {
+                if let Some(last_user) = request_messages
+                    .iter_mut()
+                    .rev()
+                    .find(|m| m.role == MessageRole::User)
+                {
+                    last_user.content = format!("{}\n\n{}", dynamic_context, last_user.content);
+                }
+            }
+
+            let mut model_for_turn = child_model.clone();
+            model_for_turn.system_prompt = static_system_prompt.clone();
 
             send_status(event_tx, "Thinking".to_string(), None, None, None);
 
@@ -1643,6 +1669,17 @@ impl AgentRuntime {
     ) -> Result<()> {
         let mut request_id = request_id;
 
+        // ── Use the static system prompt that was composed at session creation ──
+        // Callers (TUI / web / gateways) set model.system_prompt to the fully
+        // composed string (base + env) before entering the loop.  NEVER recompose
+        // here — doing so would re-capture SystemInfo (date, …) and break prefix
+        // caching across turns.
+        let static_system_prompt = model.system_prompt.clone();
+        crate::log_info!(
+            "run_agent_loop: using static system prompt ({} chars)",
+            static_system_prompt.len()
+        );
+
         loop {
             // Check cancellation
             if let Some(ref ct) = cancel_token
@@ -1664,33 +1701,45 @@ impl AgentRuntime {
                 _t_load.elapsed()
             );
 
-            // 2. Compose system prompt
+            // 2. Compose dynamic (per-turn) context
             let _t_compose = std::time::Instant::now();
-            let (system_prompt, _sources) =
-                self.compose_system_prompt(&model.system_prompt, Some(mode), session_id).await;
+            let dynamic_context =
+                self.compose_dynamic_context(session_id, Some(mode)).await;
             crate::log_info!(
-                "agent_loop: composed system prompt ({} chars) in {:?}",
-                system_prompt.len(),
+                "agent_loop: composed dynamic context ({} chars) in {:?}",
+                dynamic_context.len(),
                 _t_compose.elapsed()
             );
 
             // 3. Build request messages
             let _t_build = std::time::Instant::now();
-            let request_messages = self.build_request_messages(&db_messages, context_manager, mode);
+            let mut request_messages = self.build_request_messages(&db_messages, context_manager, mode);
             crate::log_info!(
                 "agent_loop: built {} request messages in {:?}",
                 request_messages.len(),
                 _t_build.elapsed()
             );
 
+            // 3a. Inject dynamic context as <system-reminder> into latest user message.
+            //     This keeps the `system` message (static_system_prompt) stable across
+            //     every turn, maximising LLM prefix cache hits.
+            if !dynamic_context.is_empty() {
+                if let Some(last_user) = request_messages
+                    .iter_mut()
+                    .rev()
+                    .find(|m| m.role == MessageRole::User)
+                {
+                    last_user.content = format!("{}\n\n{}", dynamic_context, last_user.content);
+                }
+            }
+
             // 4. Stream LLM — `Finished` is already forwarded to event_tx
             //    by `run_single_turn`.
-            // NOTE: clone model and set composed prompt on the clone so the
-            // original model.system_prompt stays intact across loop iterations.
-            // Writing the composed prompt back to model would cause the system
-            // prompt to grow on every turn, breaking prefix caching.
+            // NOTE: model.system_prompt is the IMMUTABLE static prompt composed
+            // once before the loop.  We do NOT override it per-turn, preserving
+            // prefix caching across turns.
             let mut model_for_turn = model.clone();
-            model_for_turn.system_prompt = system_prompt;
+            model_for_turn.system_prompt = static_system_prompt.clone();
             crate::log_info!("agent_loop: run_single_turn starting");
             let _t_turn = std::time::Instant::now();
             let turn = self
@@ -1777,10 +1826,8 @@ impl AgentRuntime {
                         "run_agent_loop: spawning background compaction for session {}",
                         session_id
                     );
-                    let (system_prompt, _sources) =
-                        self.compose_system_prompt(&model.system_prompt, Some(mode), session_id).await;
                     let mut compact_model = model.clone();
-                    compact_model.system_prompt = system_prompt;
+                    compact_model.system_prompt = static_system_prompt.clone();
                     let ctx_config = ContextManagerConfig {
                         prune_threshold_tokens: context_manager.prune_threshold_tokens,
                         retain_recent_tokens: context_manager.retain_recent_tokens,
@@ -2834,5 +2881,123 @@ mod tests {
         // The tool either executed or was rejected for needing confirmation.
         // Both outcomes are valid — what matters is the test doesn't panic/crash.
         assert_eq!(results.len(), 1);
+    }
+
+    // ─── System prompt tests ─────────────────────────────────────────
+
+    #[test]
+    fn static_system_prompt_contains_env_info() {
+        let (agent, _tmp) = agent_runtime();
+        let base = "You are a helpful AI";
+        let result = agent.compose_static_system_prompt(base);
+
+        assert!(result.contains(base), "should contain the base prompt");
+        assert!(result.contains("<env>"), "should contain env section");
+        assert!(
+            result.contains("Working directory:"),
+            "should contain working directory"
+        );
+        assert!(
+            result.contains("Workspace root folder:"),
+            "should contain workspace root"
+        );
+        assert!(
+            result.contains("Is directory a git repo:"),
+            "should contain git status"
+        );
+        assert!(
+            !result.contains("<system-reminder>"),
+            "should NOT contain system-reminder tags"
+        );
+    }
+
+    #[test]
+    fn static_system_prompt_is_deterministic() {
+        let (agent, _tmp) = agent_runtime();
+        let base = "You are a helpful AI";
+        let first = agent.compose_static_system_prompt(base);
+        let second = agent.compose_static_system_prompt(base);
+        assert_eq!(
+            first, second,
+            "static prompt should be identical across calls"
+        );
+    }
+
+    #[test]
+    fn static_system_prompt_handles_empty_base() {
+        let (agent, _tmp) = agent_runtime();
+        let result = agent.compose_static_system_prompt("");
+        assert!(
+            result.contains("<env>"),
+            "should contain env even with empty base"
+        );
+        assert!(
+            result.starts_with("\n\nHere is some useful information"),
+            "empty base should skip prefix and start with env info"
+        );
+    }
+
+    #[tokio::test]
+    async fn dynamic_context_empty_when_no_content() {
+        let (mut agent, _tmp) = agent_runtime();
+        let session_id = uuid::Uuid::new_v4();
+        {
+            let store = agent.store.lock().await;
+            store
+                .create_session(
+                    session_id,
+                    &agent.workspace_root,
+                    "test",
+                    "Test",
+                    "test-model",
+                    "Test Model",
+                    "test-session",
+                )
+                .unwrap();
+        }
+
+        let result = agent
+            .compose_dynamic_context(session_id, None)
+            .await;
+        assert!(
+            result.is_empty(),
+            "dynamic context should be empty with no instructions, memories, or mode"
+        );
+    }
+
+    #[tokio::test]
+    async fn dynamic_context_includes_mode_reminder_in_tags() {
+        let (mut agent, _tmp) = agent_runtime();
+        let session_id = uuid::Uuid::new_v4();
+        {
+            let store = agent.store.lock().await;
+            store
+                .create_session(
+                    session_id,
+                    &agent.workspace_root,
+                    "test",
+                    "Test",
+                    "test-model",
+                    "Test Model",
+                    "test-session",
+                )
+                .unwrap();
+        }
+
+        let result = agent
+            .compose_dynamic_context(session_id, Some(SessionMode::Build))
+            .await;
+        assert!(
+            !result.is_empty(),
+            "dynamic context with mode should have content"
+        );
+        assert!(
+            result.starts_with("<system-reminder>\n"),
+            "should open system-reminder tag"
+        );
+        assert!(
+            result.ends_with("\n</system-reminder>"),
+            "should close system-reminder tag"
+        );
     }
 }

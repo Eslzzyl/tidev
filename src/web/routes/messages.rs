@@ -401,7 +401,7 @@ pub async fn send_message(
         .filter(|value| !value.trim().is_empty());
     drop(auth);
 
-    let model = crate::config::ActiveModel {
+    let mut model = crate::config::ActiveModel {
         provider_id: provider_id.clone(),
         provider_display_name: provider.display_name.clone(),
         model_id: model_id.clone(),
@@ -425,6 +425,22 @@ pub async fn send_message(
         extra_body: model_config.extra_body.clone(),
         thinking_level: thinking_level.clone(),
     };
+
+    // ── Load or compose the static system prompt ─────────────────────────
+    {
+        let store = state.store.lock().await;
+        let stored_system_prompt = store.load_session_system_prompt(session_id)?;
+        if !stored_system_prompt.is_empty() {
+            model.system_prompt = stored_system_prompt;
+        } else {
+            // New session — compose static prompt and persist.
+            let composed = state.agent.compose_static_system_prompt(&model.system_prompt);
+            if let Err(e) = store.update_session_system_prompt(session_id, &composed) {
+                crate::log_warn!("failed to persist static system prompt: {}", e);
+            }
+            model.system_prompt = composed;
+        }
+    }
 
     // Create channel for agent events (BackendEvent → AppEvent forwarding)
     let (tx, mut rx) = unbounded_channel::<BackendEvent>();

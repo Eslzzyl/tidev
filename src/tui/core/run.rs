@@ -856,9 +856,22 @@ impl App {
             return Ok(None);
         };
 
-        let active_model =
+        let mut active_model =
             Self::resolve_conversation_model(&self.config, &self.auth, &conversation)
                 .unwrap_or_else(|_| fallback_model.clone());
+
+        // Restore the session's immutable static system prompt.
+        // If the session has no stored prompt (legacy session), compose it now.
+        let stored_system_prompt = self.store.load_session_system_prompt(session_id)?;
+        if !stored_system_prompt.is_empty() {
+            active_model.system_prompt = stored_system_prompt;
+        } else {
+            let composed = self.agent.compose_static_system_prompt(&active_model.system_prompt);
+            if let Err(e) = self.store.update_session_system_prompt(session_id, &composed) {
+                crate::log_warn!("failed to persist static system prompt: {}", e);
+            }
+            active_model.system_prompt = composed;
+        }
 
         let context_manager = ContextManager::from_state(
             conversation.context_summary.clone(),
@@ -980,23 +993,21 @@ impl App {
             return;
         };
 
-        // Compose the system prompt the same way the agent loop does,
-        // so the compaction request shares the same prefix as normal
-        // requests and maximises prefix cache hits.
+        // Use the session's immutable static system prompt from DB.
+        // For the active session, model.system_prompt is already correct
+        // (loaded in restore_or_load_session), but cached sessions need
+        // the stored prompt too. Re-composing would re-capture SystemInfo
+        // (date, etc.) and break prefix caching.
+        if let Ok(stored) = self.store.load_session_system_prompt(session_id) {
+            if !stored.is_empty() {
+                model.system_prompt = stored;
+            }
+        }
         let mode = if is_active {
             self.mode
         } else {
             crate::prompts::SessionMode::Build
         };
-        if is_active {
-            let (system_prompt, _) = runtime.block_on(
-                self.agent
-                    .compose_system_prompt(&model.system_prompt, Some(mode), session_id),
-            );
-            model.system_prompt = system_prompt;
-        }
-        // For cached sessions we don't have the mode readily available;
-        // this is a rare case (background session compaction). Use Build.
 
         self.compacting_sessions.insert(session_id);
         let llm = self.llm.clone();

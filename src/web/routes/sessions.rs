@@ -272,6 +272,11 @@ pub async fn fork_session(
         &title,
     )?;
 
+    // Copy the parent's static system prompt so the fork shares the same prefix.
+    if !source_session.system_prompt.is_empty() {
+        store.update_session_system_prompt(new_session_id, &source_session.system_prompt)?;
+    }
+
     // Copy messages up to (and including) the target message
     let messages_to_copy = &messages[..=target_idx];
     for original in messages_to_copy {

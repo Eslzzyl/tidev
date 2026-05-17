@@ -543,3 +543,112 @@ fn gateway_chat_model_mapping_round_trip() {
 
     let _ = std::fs::remove_file(path);
 }
+
+#[test]
+fn session_system_prompt_round_trip() {
+    let path = std::env::temp_dir().join(format!(
+        "tidev-session-store-{}.sqlite3",
+        uuid::Uuid::new_v4()
+    ));
+    {
+        let store = SessionStore::open(&path).expect("store should open");
+        let session_id = uuid::Uuid::new_v4();
+
+        let _record = store
+            .create_session(
+                session_id,
+                Path::new("/tmp/workspace"),
+                "deepseek",
+                "DeepSeek",
+                "deepseek-v4-flash",
+                "DeepSeek-V4-Flash",
+                "Untitled session",
+            )
+            .expect("session should be created");
+
+        // New session has empty system prompt
+        let loaded = store
+            .load_session_system_prompt(session_id)
+            .expect("should load system prompt");
+        assert_eq!(loaded, "", "new session should have empty system prompt");
+
+        // Update and verify round-trip
+        let prompt = "You are a helpful AI.\n\n<env>\n  Working directory: /tmp\n</env>";
+        store
+            .update_session_system_prompt(session_id, prompt)
+            .expect("should update system prompt");
+
+        let loaded = store
+            .load_session_system_prompt(session_id)
+            .expect("should load system prompt");
+        assert_eq!(loaded, prompt, "loaded prompt should match updated prompt");
+    }
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn forked_session_copies_parent_system_prompt() {
+    let path = std::env::temp_dir().join(format!(
+        "tidev-session-store-{}.sqlite3",
+        uuid::Uuid::new_v4()
+    ));
+    {
+        let store = SessionStore::open(&path).expect("store should open");
+        let parent_id = uuid::Uuid::new_v4();
+
+        store
+            .create_session(
+                parent_id,
+                Path::new("/tmp/workspace"),
+                "deepseek",
+                "DeepSeek",
+                "deepseek-v4-flash",
+                "DeepSeek-V4-Flash",
+                "Parent session",
+            )
+            .expect("parent session should be created");
+
+        let prompt = "Static system prompt for parent";
+        store
+            .update_session_system_prompt(parent_id, prompt)
+            .expect("should set parent system prompt");
+
+        // Create child session (simulating fork)
+        let child_id = uuid::Uuid::new_v4();
+        store
+            .create_session_with_parent(
+                child_id,
+                parent_id,
+                Path::new("/tmp/workspace"),
+                "deepseek",
+                "DeepSeek",
+                "deepseek-v4-flash",
+                "DeepSeek-V4-Flash",
+                "Child session",
+            )
+            .expect("child session should be created");
+
+        // Child does NOT inherit automatically
+        let child_prompt = store
+            .load_session_system_prompt(child_id)
+            .expect("should load child system prompt");
+        assert_eq!(
+            child_prompt, "",
+            "child should not inherit system prompt automatically"
+        );
+
+        // Simulate fork copy: parent's prompt → child
+        store
+            .update_session_system_prompt(child_id, prompt)
+            .expect("should copy system prompt to child");
+
+        let child_prompt = store
+            .load_session_system_prompt(child_id)
+            .expect("should load child system prompt");
+        assert_eq!(
+            child_prompt, prompt,
+            "child should have same prompt after copy"
+        );
+    }
+    let _ = std::fs::remove_file(path);
+}

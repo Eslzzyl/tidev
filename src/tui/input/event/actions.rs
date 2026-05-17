@@ -337,6 +337,17 @@ impl App {
             &format!("Fork of {}", self.conversation.title),
         )?;
 
+        // Copy the parent's static system prompt so the fork shares the same prefix.
+        if !self.active_model.system_prompt.is_empty() {
+            let parent_prompt = self.active_model.system_prompt.clone();
+            if let Err(e) = self
+                .store
+                .update_session_system_prompt(new_session_id, &parent_prompt)
+            {
+                crate::log_warn!("failed to persist static system prompt for fork: {}", e);
+            }
+        }
+
         // 复制消息（从开头到选中的消息），为每条消息生成新的 ID
         let original_messages: Vec<_> = self.conversation.messages[..=message_index].to_vec();
 
@@ -491,8 +502,12 @@ impl App {
     }
 
     pub(crate) fn switch_model(&mut self, selector: Option<&str>) -> Result<()> {
+        // Preserve the session's static system prompt — it was composed at
+        // session creation and must never be recomposed mid-session.
+        let saved_system_prompt = self.active_model.system_prompt.clone();
         let model = self.config.resolve_model(&self.auth, selector)?;
         self.active_model = model.clone();
+        self.active_model.system_prompt = saved_system_prompt;
         self.thinking_level = model.thinking_level.clone();
         // Load saved thinking level preference for this model (overrides auto-detected value)
         if let Ok(Some(level_str)) = self
@@ -584,6 +599,14 @@ impl App {
         self.composer.clear();
         self.composer
             .set_placeholder("Ask TiDev about your code, task, or question...");
+        // ── Compose the static system prompt and persist it ──────────────
+        // This prompt is frozen for the entire session lifetime. Never change it.
+        let static_prompt = self.agent.compose_static_system_prompt(&self.active_model.system_prompt);
+        self.active_model.system_prompt = static_prompt.clone();
+        if let Err(e) = self.store.update_session_system_prompt(session_id, &static_prompt) {
+            crate::log_warn!("failed to persist static system prompt: {}", e);
+        }
+
         self.scroll_messages_to_bottom();
         self.last_notice = Some("Started a fresh session".to_string());
 

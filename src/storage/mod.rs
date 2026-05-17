@@ -62,6 +62,7 @@ pub struct SessionRecord {
     pub ended_at: Option<DateTime<Utc>>,
     pub context_summary: Option<String>,
     pub context_retained_from: usize,
+    pub system_prompt: String,
 }
 
 #[derive(Debug, Clone)]
@@ -345,6 +346,7 @@ impl SessionStore {
             ended_at: None,
             context_summary: None,
             context_retained_from: 0,
+            system_prompt: String::new(),
         })
     }
 
@@ -404,6 +406,7 @@ impl SessionStore {
             ended_at: None,
             context_summary: None,
             context_retained_from: 0,
+            system_prompt: String::new(),
         })
     }
 
@@ -456,6 +459,28 @@ impl SessionStore {
             ],
         )?;
         Ok(())
+    }
+
+    pub fn update_session_system_prompt(
+        &self,
+        session_id: Uuid,
+        system_prompt: &str,
+    ) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.write_conn.lock().unwrap().execute(
+            "UPDATE sessions SET system_prompt = ?1, updated_at = ?2 WHERE id = ?3",
+            params![system_prompt, now, session_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn load_session_system_prompt(&self, session_id: Uuid) -> Result<String> {
+        let result = self.read_conn.query_row(
+            "SELECT system_prompt FROM sessions WHERE id = ?1",
+            params![session_id.to_string()],
+            |row| row.get::<_, String>(0),
+        ).optional()?;
+        Ok(result.unwrap_or_default())
     }
 
     pub fn append_instruction_source(&self, session_id: Uuid, source: &str) -> Result<()> {
@@ -1359,7 +1384,8 @@ impl SessionStore {
         let ended_at = row.get::<_, Option<String>>(10)?;
         let context_summary = row.get::<_, String>(11)?;
         let context_retained_from = row.get::<_, i64>(12)? as usize;
-        let workspace_root = row.get::<_, String>(13)?;
+        let system_prompt = row.get::<_, String>(13)?;
+        let workspace_root = row.get::<_, String>(14)?;
 
         let parent_session_id = parent_session_id
             .map(|value| {
@@ -1405,6 +1431,7 @@ impl SessionStore {
                 Some(context_summary)
             },
             context_retained_from,
+            system_prompt,
         })
     }
 }

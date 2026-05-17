@@ -1340,7 +1340,7 @@ impl MemoryStore {
     /// [`search`] which resolves models before `block_in_place`).
     ///
     /// The embedding API call is wrapped with a 30-second timeout so that
-    /// synchronous callers (compose_system_prompt → block_in_place) do not
+    /// synchronous callers (compose_static_system_prompt → block_in_place) do not
     /// block the tokio worker thread indefinitely.
     pub async fn search_hybrid_with(
         &self,
@@ -1424,7 +1424,7 @@ impl MemoryStore {
 
     /// Search the knowledge graph for context related to the query.
     ///
-    /// Synchronous, no LLM — safe to call from compose_system_prompt.
+    /// Synchronous, no LLM — safe to call from compose_static_system_prompt.
     pub fn search_graph_context(
         &self,
         query: Option<&str>,

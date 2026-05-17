@@ -61,7 +61,7 @@ pub struct TelegramChannel {
     pub store: SessionStore,
     pub llm: LlmClient,
     pub tools: ToolRegistry,
-    /// Shared AgentRuntime for compose_system_prompt / build_request_messages / execute_tool_calls.
+    /// Shared AgentRuntime for compose_static_system_prompt / build_request_messages / execute_tool_calls.
     pub agent: AgentRuntime,
     pub instruction_prompt: String,
     pub allowlist: HashSet<String>,
@@ -257,6 +257,21 @@ impl TelegramChannel {
         let chat_key = self.chat_key(&message);
         let mut active_model = self.resolve_chat_model(&chat_key)?;
         let mut conversation = self.load_or_create_chat_conversation(&chat_key, &active_model)?;
+
+        // Load the session's immutable static system prompt.
+        // Legacy sessions (no stored prompt) get composed now.
+        match self.store.load_session_system_prompt(conversation.session_id) {
+            Ok(stored) if !stored.is_empty() => {
+                active_model.system_prompt = stored;
+            }
+            _ => {
+                let composed = self.agent.compose_static_system_prompt(&active_model.system_prompt);
+                if let Err(e) = self.store.update_session_system_prompt(conversation.session_id, &composed) {
+                    crate::log_warn!("failed to persist static system prompt: {}", e);
+                }
+                active_model.system_prompt = composed;
+            }
+        }
 
         crate::log_info!(
             "Processing message: chat_id={}, session_id={}, content_len={}",
@@ -1044,6 +1059,12 @@ impl TelegramChannel {
             &active_model.display_name,
             &conversation.title,
         )?;
+
+        // Compose the immutable static system prompt and persist it.
+        let static_prompt = self.agent.compose_static_system_prompt(&active_model.system_prompt);
+        if let Err(e) = self.store.update_session_system_prompt(session_id, &static_prompt) {
+            crate::log_warn!("failed to persist static system prompt: {}", e);
+        }
 
         Ok(conversation)
     }
