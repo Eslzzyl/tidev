@@ -99,11 +99,23 @@ impl App {
         );
         memory_store.set_compression_enabled(config.memory.compression_enabled);
         memory_store.set_llm_compression(config.memory.llm_compression);
+        crate::log_info!(
+            "memory: models configured compression={} llm_compression={}",
+            config.memory.compression_enabled,
+            config.memory.llm_compression,
+        );
         // Attach embedding model for vector search (if configured)
         if let Ok(embed_model) = config.resolve_embedding_model(&auth, None) {
+            crate::log_info!("memory: embedding model attached ({})", embed_model.model_id);
             memory_store.set_embedding_model(embed_model);
+        } else {
+            crate::log_info!("memory: no embedding model configured, vector search disabled");
         }
         // Start the compression queue for async observation compression.
+        crate::log_info!(
+            "memory: starting compression queue with {} workers",
+            crate::memory::DEFAULT_COMPRESSION_CONCURRENCY,
+        );
         let compression_queue_shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let compression_queue = Arc::new(crate::memory::CompressionQueue::start(
             memory_store.clone(),
@@ -113,19 +125,25 @@ impl App {
         memory_store.set_compression_sender(compression_queue.sender());
         // Recover any uncompressed observations from previous runs
         // (runs after the queue is created so recovered jobs go through it).
-        if let Err(e) = memory_store.recover_uncompressed(50) {
-            crate::log_warn!(
-                "startup recovery of uncompressed observations failed: {}",
+        crate::log_info!("memory: recovering uncompressed observations (limit=50)");
+        match memory_store.recover_uncompressed(50) {
+            Ok(0) => crate::log_info!("memory: no uncompressed observations to recover"),
+            Ok(n) => crate::log_info!("memory: queued {} uncompressed observations for compression", n),
+            Err(e) => crate::log_warn!(
+                "memory: recovery of uncompressed observations failed: {}",
                 e
-            );
+            ),
         }
         // Backfill embeddings for already-compressed observations that are
         // missing vector embeddings (e.g. when vec0 wasn't loaded at startup).
-        if let Err(e) = memory_store.backfill_embeddings(50) {
-            crate::log_warn!(
-                "startup backfill of embeddings failed: {}",
+        crate::log_info!("memory: backfilling embeddings (limit=50)");
+        match memory_store.backfill_embeddings(50) {
+            Ok(0) => crate::log_info!("memory: no observations need embedding backfill"),
+            Ok(n) => crate::log_info!("memory: queued {} observations for embedding backfill", n),
+            Err(e) => crate::log_warn!(
+                "memory: backfill of embeddings failed: {}",
                 e
-            );
+            ),
         }
         // Set sandbox policy based on session mode and config
         let sandbox_policy = mode.sandbox_policy(&config.sandbox);
@@ -221,44 +239,60 @@ impl App {
         }
 
         // Schedule periodic consolidation (every 30 minutes).
+        crate::log_info!("memory: scheduling periodic consolidation (interval=1800s)");
         if tokio::runtime::Handle::try_current().is_ok() {
             let cons_store = memory_store.clone();
             let cons_ws = workspace_root.display().to_string();
             let cons_cancel = inactivity_check_cancel.clone();
 
             tokio::spawn(async move {
+                crate::log_info!("memory: consolidation task started");
                 let mut interval = tokio::time::interval(std::time::Duration::from_secs(1800));
                 interval.tick().await; // skip immediate run
                 loop {
                     tokio::select! {
                         _ = interval.tick() => {
+                            crate::log_info!("memory: running consolidation");
                             if let Err(e) = cons_store.run_consolidation(&cons_ws).await {
-                                crate::log_warn!("consolidation failed: {}", e);
+                                crate::log_warn!("memory: consolidation failed: {}", e);
+                            } else {
+                                crate::log_info!("memory: consolidation completed");
                             }
                         }
-                        _ = cons_cancel.cancelled() => break,
+                        _ = cons_cancel.cancelled() => {
+                            crate::log_info!("memory: consolidation task cancelled");
+                            break;
+                        }
                     }
                 }
             });
         }
 
         // Schedule periodic reflection (every 30 minutes, same as consolidation).
+        crate::log_info!("memory: scheduling periodic reflection (interval=1800s)");
         if tokio::runtime::Handle::try_current().is_ok() {
             let reflect_store = memory_store.clone();
             let reflect_ws = workspace_root.display().to_string();
             let reflect_cancel = inactivity_check_cancel.clone();
 
             tokio::spawn(async move {
+                crate::log_info!("memory: reflection task started");
                 let mut interval = tokio::time::interval(std::time::Duration::from_secs(1800));
                 interval.tick().await; // skip immediate run
                 loop {
                     tokio::select! {
                         _ = interval.tick() => {
+                            crate::log_info!("memory: running reflection");
                             if let Err(e) = reflect_store.run_reflect(&reflect_ws).await {
-                                crate::log_warn!("reflection failed: {}", e);
+                                crate::log_warn!("memory: reflection failed: {}", e);
+                            } else {
+                                crate::log_info!("memory: reflection completed");
                             }
                         }
-                        _ = reflect_cancel.cancelled() => break,
+                        _ = reflect_cancel.cancelled() => {
+                            crate::log_info!("memory: reflection task cancelled");
+                            break;
+                        }
                     }
                 }
             });

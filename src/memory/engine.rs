@@ -722,6 +722,11 @@ impl MemoryStore {
         }
         match id {
             ObservationResult::New(id) => {
+                crate::log_info!(
+                    "observe: scheduled compression for {} (payload hook={})",
+                    id,
+                    payload.hook_type.as_str(),
+                );
                 // Schedule async compression (no DB lock held)
                 self.schedule_compression(id);
                 // Also add to BM25 index
@@ -775,6 +780,12 @@ impl MemoryStore {
             && self.resolve_compression_llm().is_some()
             && !self.is_compression_circuit_tripped();
 
+        crate::log_info!(
+            "compress: starting {} method={}",
+            observation_id,
+            if use_llm { "llm" } else { "synthetic" },
+        );
+
         let compressed = if use_llm {
             let (llm, model) = self.resolve_compression_llm().unwrap();
             let conn = Connection::open(&db_path)?;
@@ -824,6 +835,13 @@ impl MemoryStore {
             CompressionService::compress_synthetic(&conn, observation_id)?
         };
 
+        crate::log_info!(
+            "compress: completed {} title=\"{}\" importance={}",
+            observation_id,
+            compressed.title,
+            compressed.importance,
+        );
+
         // Update BM25 index
         self.bm25
             .write()
@@ -836,6 +854,7 @@ impl MemoryStore {
         if let (Some(llm), Some(model)) = (embed_llm, embed_model) {
             let id = compressed.id.to_string();
             let search_text = compressed.to_search_text();
+            crate::log_info!("compress: embedding {} ({} chars)", id, search_text.len());
             match llm.embed(&model, &search_text).await {
                 Ok(embedding) => {
                     let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
@@ -1191,6 +1210,7 @@ impl MemoryStore {
             files.join(" ")
         );
 
+        crate::log_info!("backfill_embedding: starting {} ({} chars)", id, search_text.len());
         let embedding = match tokio::time::timeout(
             std::time::Duration::from_secs(30),
             llm.embed(&model, &search_text),
@@ -1198,8 +1218,14 @@ impl MemoryStore {
         .await
         {
             Ok(Ok(emb)) => emb,
-            Ok(Err(e)) => anyhow::bail!("embedding API error: {}", e),
-            Err(_) => anyhow::bail!("embedding timed out after 30s"),
+            Ok(Err(e)) => {
+                crate::log_warn!("backfill_embedding: API error for {}: {}", id, e);
+                anyhow::bail!("embedding API error: {}", e);
+            }
+            Err(_) => {
+                crate::log_warn!("backfill_embedding: timed out for {}", id);
+                anyhow::bail!("embedding timed out after 30s");
+            }
         };
         let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
 

@@ -32,12 +32,26 @@ impl ObservationService {
         let hash = dedup.compute_hash(&payload.session_id.to_string(), tool_name, tool_input);
 
         if dedup.is_duplicate(&hash) {
+            crate::log_debug!(
+                "observe: deduplicated hook={} tool={} session={}",
+                payload.hook_type.as_str(),
+                tool_name,
+                payload.session_id,
+            );
             return Ok(ObservationResult::Deduplicated);
         }
 
         // 3. Create observation
         let obs_id = Uuid::new_v4();
         let now = Utc::now().to_rfc3339();
+
+        crate::log_info!(
+            "observe: new observation {} hook={} tool={} session={}",
+            obs_id,
+            payload.hook_type.as_str(),
+            tool_name,
+            payload.session_id,
+        );
 
         db.execute(
             "INSERT INTO compressed_observations (id, session_id, created_at, hook_type, tool_name, tool_input, tool_output, user_prompt, assistant_response, dedup_hash)

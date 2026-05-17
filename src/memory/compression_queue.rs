@@ -89,16 +89,32 @@ impl CompressionQueue {
 
                         match task {
                             QueueTask::CompressAndEmbed(id) => {
+                                crate::log_info!("queue: compressing {}", id);
+                                let _start = std::time::Instant::now();
                                 if let Err(e) = worker_rt.block_on(store.compress(id)) {
-                                    crate::log_warn!("compression failed for {}: {}", id, e);
+                                    crate::log_warn!("queue: compression failed for {}: {}", id, e);
+                                } else {
+                                    crate::log_info!(
+                                        "queue: compressed {} in {:?}",
+                                        id,
+                                        _start.elapsed()
+                                    );
                                 }
                             }
                             QueueTask::EmbedBackfill(id) => {
+                                crate::log_info!("queue: backfill embedding {}", id);
+                                let _start = std::time::Instant::now();
                                 if let Err(e) = worker_rt.block_on(store.backfill_embedding(id)) {
                                     crate::log_warn!(
-                                        "embedding backfill failed for {}: {}",
+                                        "queue: embedding backfill failed for {}: {}",
                                         id,
                                         e
+                                    );
+                                } else {
+                                    crate::log_info!(
+                                        "queue: backfill embedded {} in {:?}",
+                                        id,
+                                        _start.elapsed()
                                     );
                                 }
                             }
