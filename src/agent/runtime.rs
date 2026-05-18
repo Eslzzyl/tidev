@@ -1812,6 +1812,9 @@ impl AgentRuntime {
                     request_id = rand::random::<u64>();
                     continue;
                 }
+
+                // No queued messages and no compaction needed — turn is complete.
+                break Ok(());
             }
 
             // ─── 6a. Permission approval (frontend interception) ─────────
