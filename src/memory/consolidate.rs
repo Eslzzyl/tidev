@@ -454,7 +454,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
     fn load_summaries(db: &Connection, project: &str) -> Result<Vec<SessionSummary>> {
         let mut stmt = db.prepare(
             "SELECT session_id, project, created_at, title, narrative,
-                    key_decisions, files_modified, concepts, observation_count
+                    key_decisions, files_modified, concepts
              FROM session_summaries
              WHERE project = ?1 AND title IS NOT NULL
              ORDER BY created_at ASC",
@@ -478,7 +478,6 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 key_decisions: serde_json::from_str(&decisions_json).unwrap_or_default(),
                 files_modified: serde_json::from_str(&files_json).unwrap_or_default(),
                 concepts: serde_json::from_str(&concepts_json).unwrap_or_default(),
-                observation_count: row.get(8)?,
             })
         })?;
 
@@ -493,7 +492,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
     fn load_summaries_for_graph(db: &Connection, project: &str) -> Result<Vec<SessionSummary>> {
         let mut stmt = db.prepare(
             "SELECT session_id, project, created_at, title, narrative,
-                    key_decisions, files_modified, concepts, observation_count
+                    key_decisions, files_modified, concepts
              FROM session_summaries
              WHERE project = ?1
              ORDER BY created_at ASC",
@@ -517,7 +516,6 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 key_decisions: serde_json::from_str(&decisions_json).unwrap_or_default(),
                 files_modified: serde_json::from_str(&files_json).unwrap_or_default(),
                 concepts: serde_json::from_str(&concepts_json).unwrap_or_default(),
-                observation_count: row.get(8)?,
             })
         })?;
 

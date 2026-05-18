@@ -452,7 +452,7 @@ impl MemoryStore {
         let db = self.read_connection.lock().unwrap();
         let mut stmt = db.prepare(
             "SELECT session_id, project, created_at, title, narrative,
-                    key_decisions, files_modified, concepts, observation_count
+                    key_decisions, files_modified, concepts
              FROM session_summaries
              WHERE session_id != ?1 AND title IS NOT NULL
              ORDER BY created_at DESC
@@ -484,7 +484,6 @@ impl MemoryStore {
             key_decisions: serde_json::from_str(&row.get::<_, String>(5)?).unwrap_or_default(),
             files_modified: serde_json::from_str(&row.get::<_, String>(6)?).unwrap_or_default(),
             concepts: serde_json::from_str(&row.get::<_, String>(7)?).unwrap_or_default(),
-            observation_count: row.get(8)?,
         })
     }
 

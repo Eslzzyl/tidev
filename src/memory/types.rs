@@ -153,7 +153,6 @@ pub struct SessionSummary {
     pub key_decisions: Vec<String>,
     pub files_modified: Vec<String>,
     pub concepts: Vec<String>,
-    pub observation_count: i64,
 }
 
 // ─── Phase 2 Types ──────────────────────────────────────────────────

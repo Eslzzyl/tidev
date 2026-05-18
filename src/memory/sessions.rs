@@ -90,7 +90,6 @@ impl SessionService {
                 key_decisions: vec![],
                 files_modified: vec![],
                 concepts: vec![],
-                observation_count: 0,
             };
             let store_db = Connection::open(db_path)?;
             Self::store_summary(&store_db, &summary)?;
@@ -166,10 +165,9 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 key_decisions: decisions,
                 files_modified: files,
                 concepts,
-                observation_count: msg_count as i64,
             }
         } else {
-            let fb = Self::parse_summary_free_text(&response, msg_count, session_id, project);
+            let fb = Self::parse_summary_free_text(&response, session_id, project);
             if let Some(ref fb_title) = fb.title {
                 crate::log_info!(
                     "LLM summarization response unparseable, used free-text fallback (title=\"{}\")",
@@ -187,7 +185,6 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                     key_decisions: vec![],
                     files_modified: vec![],
                     concepts: vec![],
-                    observation_count: msg_count as i64,
                 }
             }
         };
@@ -201,7 +198,6 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
 
     fn parse_summary_free_text(
         text: &str,
-        msg_count: usize,
         session_id: Uuid,
         project: &str,
     ) -> SessionSummary {
@@ -268,14 +264,13 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
             key_decisions: decisions,
             files_modified: files,
             concepts,
-            observation_count: msg_count as i64,
-        }
+                    }
     }
 
     fn store_summary(db: &Connection, summary: &SessionSummary) -> Result<()> {
         db.execute(
-            "INSERT OR REPLACE INTO session_summaries (session_id, project, created_at, title, narrative, key_decisions, files_modified, concepts, observation_count)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT OR REPLACE INTO session_summaries (session_id, project, created_at, title, narrative, key_decisions, files_modified, concepts)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             rusqlite::params![
                 summary.session_id.to_string(),
                 summary.project,
@@ -285,7 +280,6 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 serde_json::to_string(&summary.key_decisions)?,
                 serde_json::to_string(&summary.files_modified)?,
                 serde_json::to_string(&summary.concepts)?,
-                summary.observation_count,
             ],
         )?;
 
@@ -295,7 +289,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
     /// Load a session summary.
     pub fn load_summary(db: &Connection, session_id: Uuid) -> Result<Option<SessionSummary>> {
         let mut stmt = db.prepare(
-            "SELECT session_id, project, created_at, title, narrative, key_decisions, files_modified, concepts, observation_count
+            "SELECT session_id, project, created_at, title, narrative, key_decisions, files_modified, concepts
              FROM session_summaries WHERE session_id = ?1",
         )?;
 
@@ -317,7 +311,6 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 key_decisions: serde_json::from_str(&decisions_json).unwrap_or_default(),
                 files_modified: serde_json::from_str(&files_json).unwrap_or_default(),
                 concepts: serde_json::from_str(&concepts_json).unwrap_or_default(),
-                observation_count: row.get(8)?,
             })
         });
 
