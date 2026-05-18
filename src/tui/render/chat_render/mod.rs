@@ -246,11 +246,16 @@ impl App {
                 true,
                 true,
             );
-            self.render_at_mention_palette(frame, layout[2]);
-            self.render_snippet_palette(frame, layout[2]);
-            self.render_command_palette(frame, layout[2]);
-            self.render_snippet_palette(frame, layout[2]);
-            self.render_shell_completion_palette(frame, layout[2]);
+            // Palettes should align with the composer's visual left edge (offset by 2 columns)
+            let palette_area = Rect {
+                x: layout[2].x + 2,
+                ..layout[2]
+            };
+            self.render_at_mention_palette(frame, palette_area);
+            self.render_snippet_palette(frame, palette_area);
+            self.render_command_palette(frame, palette_area);
+            self.render_snippet_palette(frame, palette_area);
+            self.render_shell_completion_palette(frame, palette_area);
         }
         self.render_prompt_footer(frame, layout[3]);
         self.render_retrying_hint(frame, layout[4]);
@@ -370,29 +375,58 @@ impl App {
     pub(super) fn render_messages(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let palette = self.palette();
 
-        let inner = area.inner(Margin {
-            horizontal: 1,
-            vertical: 0,
-        });
+        // Use manual rect layout: 2-column left margin from screen edge,
+        // content fills remaining space (right edge matches composer inner right edge),
+        // scrollbar at far right with 1-column gap from content.
+        const LEFT_MARGIN: u16 = 2;
+        const SCROLLBAR_WIDTH: u16 = 1;
+        const GAP: u16 = 1;
 
-        if inner.width == 0 || inner.height == 0 {
+        if area.width == 0 || area.height == 0 {
             return;
         }
 
-        let scrollbar_area = if inner.width > 2 {
-            let chunks = Layout::horizontal([
-                Constraint::Min(1),
-                Constraint::Length(1), // gap between content and scrollbar
-                Constraint::Length(1),
-            ])
-            .split(inner);
-            (chunks[0], Some(chunks[2]))
-        } else if inner.width > 1 {
-            let chunks =
-                Layout::horizontal([Constraint::Min(1), Constraint::Length(1)]).split(inner);
-            (chunks[0], Some(chunks[1]))
+        let scrollbar_area = if area.width > LEFT_MARGIN + GAP + SCROLLBAR_WIDTH {
+            let content_width = area.width - LEFT_MARGIN - GAP - SCROLLBAR_WIDTH;
+            let content = Rect {
+                x: area.x + LEFT_MARGIN,
+                y: area.y,
+                width: content_width,
+                height: area.height,
+            };
+            let scrollbar = Rect {
+                x: area.x + area.width - SCROLLBAR_WIDTH,
+                y: area.y,
+                width: SCROLLBAR_WIDTH,
+                height: area.height,
+            };
+            (content, Some(scrollbar))
+        } else if area.width > LEFT_MARGIN + SCROLLBAR_WIDTH {
+            // No gap, content + scrollbar directly adjacent
+            let content_width = area.width - LEFT_MARGIN - SCROLLBAR_WIDTH;
+            let content = Rect {
+                x: area.x + LEFT_MARGIN,
+                y: area.y,
+                width: content_width,
+                height: area.height,
+            };
+            let scrollbar = Rect {
+                x: area.x + area.width - SCROLLBAR_WIDTH,
+                y: area.y,
+                width: SCROLLBAR_WIDTH,
+                height: area.height,
+            };
+            (content, Some(scrollbar))
+        } else if area.width > LEFT_MARGIN {
+            let content = Rect {
+                x: area.x + LEFT_MARGIN,
+                y: area.y,
+                width: area.width - LEFT_MARGIN,
+                height: area.height,
+            };
+            (content, None)
         } else {
-            (inner, None)
+            return;
         };
 
         let content_area = scrollbar_area.0;
@@ -535,6 +569,7 @@ impl App {
         let mut lines = Vec::new();
 
         // Session title (top)
+        lines.push(Line::from(""));
         let session_title = shorten(
             &self.conversation.title,
             (area.width.saturating_sub(4).max(1)) as usize,
@@ -546,24 +581,6 @@ impl App {
                 .add_modifier(Modifier::BOLD),
         )]));
         lines.push(Line::from(""));
-
-        // Workspace directory
-        let workspace_path = self.workspace_root.display().to_string();
-        let display_path = workspace_path.replace(
-            &dirs::home_dir().unwrap_or_default().display().to_string(),
-            "~",
-        );
-        lines.push(Line::from(vec![Span::styled(
-            "Workspace",
-            Style::default()
-                .fg(palette.accent)
-                .add_modifier(Modifier::BOLD),
-        )]));
-        lines.push(Line::from(vec![Span::styled(
-            display_path,
-            Style::default().fg(palette.muted),
-        )]));
-
         lines.push(Line::from(""));
 
         // Model info
@@ -765,6 +782,24 @@ impl App {
             )]));
         }
 
+        // Workspace directory (at bottom)
+        lines.push(Line::from(""));
+        let workspace_path = self.workspace_root.display().to_string();
+        let display_path = workspace_path.replace(
+            &dirs::home_dir().unwrap_or_default().display().to_string(),
+            "~",
+        );
+        lines.push(Line::from(vec![Span::styled(
+            "Workspace",
+            Style::default()
+                .fg(palette.accent)
+                .add_modifier(Modifier::BOLD),
+        )]));
+        lines.push(Line::from(vec![Span::styled(
+            display_path,
+            Style::default().fg(palette.muted),
+        )]));
+
         // Estimate total lines for scroll max (accounts for word wrapping)
         let sidebar_padded = area.inner(Margin {
             horizontal: 2,
@@ -857,6 +892,7 @@ impl App {
                 ],
                 width,
                 palette.panel,
+                2,
             ));
             let total_lines = lines.len().max(1);
             return (
@@ -889,7 +925,7 @@ impl App {
 
                 let card_start = running_lines.len();
                 let decorated_lines =
-                    super::render::decorate_card_lines(card_lines, width, palette.panel);
+                    super::render::decorate_card_lines(card_lines, width, palette.panel, 2);
                 running_lines.extend(decorated_lines);
                 let card_end = running_lines.len();
 
@@ -1808,36 +1844,23 @@ impl App {
                     if !card_lines.is_empty() {
                         let start_line = current_line_offset + lines.len();
 
-                        let mut block_start = start_line;
-                        let mut current_min_x = 1;
-                        for (i, line) in card_lines.iter().enumerate() {
-                            let is_reasoning =
-                                line.spans.first().is_some_and(|s| s.content == "┃ ");
-                            let line_min_x = if is_reasoning { 3 } else { 1 };
-
-                            if line_min_x != current_min_x {
-                                if i > 0 {
-                                    selectable_regions_ranges.push(SelectableRegionRange {
-                                        start_line: block_start,
-                                        end_line: start_line + i,
-                                        min_x: current_min_x,
-                                        max_x: None,
-                                    });
-                                }
-                                block_start = start_line + i;
-                                current_min_x = line_min_x;
-                            }
-                        }
-                        if block_start < start_line + card_lines.len() {
+                        // Only make content lines selectable — skip leading/trailing blank spacer lines
+                        let first_content = card_lines.iter().position(|l| {
+                            !l.spans.is_empty() && l.spans.iter().any(|s| !s.content.is_empty())
+                        });
+                        let last_content = card_lines.iter().rposition(|l| {
+                            !l.spans.is_empty() && l.spans.iter().any(|s| !s.content.is_empty())
+                        });
+                        if let (Some(first), Some(last)) = (first_content, last_content) {
                             selectable_regions_ranges.push(SelectableRegionRange {
-                                start_line: block_start,
-                                end_line: start_line + card_lines.len(),
-                                min_x: current_min_x,
+                                start_line: start_line + first,
+                                end_line: start_line + last + 1,
+                                min_x: 2,
                                 max_x: None,
                             });
                         }
 
-                        lines.extend(decorate_card_lines(card_lines, width, card_bg));
+                        lines.extend(decorate_card_lines(card_lines, width, card_bg, 2));
                     }
                 }
 
@@ -1876,21 +1899,33 @@ impl App {
                             for r in &mut regions {
                                 r.start_line += start_line;
                                 r.end_line += start_line;
-                                r.min_x += 1; // decorate_card_lines left padding
+                                r.min_x += 2; // decorate_card_lines left padding
                                 if let Some(max_x) = &mut r.max_x {
-                                    *max_x += 1;
+                                    *max_x += 2;
                                 }
                                 selectable_regions_ranges.push(r.clone());
                             }
 
                             // Calculate fallback region for bash or non-diff output
                             if regions.is_empty() {
-                                selectable_regions_ranges.push(SelectableRegionRange {
-                                    start_line,
-                                    end_line: start_line + tool_card_lines.len(),
-                                    min_x: 1,
-                                    max_x: None,
+                                // Trim leading/trailing blank spacer lines
+                                let first =
+                                    tool_card_lines.iter().position(|l| {
+                                        !l.spans.is_empty()
+                                            && l.spans.iter().any(|s| !s.content.is_empty())
+                                    });
+                                let last = tool_card_lines.iter().rposition(|l| {
+                                    !l.spans.is_empty()
+                                        && l.spans.iter().any(|s| !s.content.is_empty())
                                 });
+                                if let (Some(f), Some(l)) = (first, last) {
+                                    selectable_regions_ranges.push(SelectableRegionRange {
+                                        start_line: start_line + f,
+                                        end_line: start_line + l + 1,
+                                        min_x: 2,
+                                        max_x: None,
+                                    });
+                                }
                             }
 
                             let card_bg = if canonical_tool_name(&tool_call.name) == Some("task") {
@@ -1898,7 +1933,7 @@ impl App {
                             } else {
                                 palette.panel_light
                             };
-                            let decorated = decorate_card_lines(tool_card_lines, width, card_bg);
+                            let decorated = decorate_card_lines(tool_card_lines, width, card_bg, 2);
                             if let Some(result_msg) = tool_result {
                                 lines.extend(decorated);
                                 let end_line = current_line_offset + lines.len();
@@ -1927,36 +1962,23 @@ impl App {
                     if !card_lines.is_empty() {
                         let start_line = current_line_offset + lines.len();
 
-                        let mut block_start = start_line;
-                        let mut current_min_x = 1;
-                        for (i, line) in card_lines.iter().enumerate() {
-                            let is_reasoning =
-                                line.spans.first().is_some_and(|s| s.content == "┃ ");
-                            let line_min_x = if is_reasoning { 3 } else { 1 };
-
-                            if line_min_x != current_min_x {
-                                if i > 0 {
-                                    selectable_regions_ranges.push(SelectableRegionRange {
-                                        start_line: block_start,
-                                        end_line: start_line + i,
-                                        min_x: current_min_x,
-                                        max_x: None,
-                                    });
-                                }
-                                block_start = start_line + i;
-                                current_min_x = line_min_x;
-                            }
-                        }
-                        if block_start < start_line + card_lines.len() {
+                        // Only make content lines selectable — skip leading/trailing blank spacer lines
+                        let first_content = card_lines.iter().position(|l| {
+                            !l.spans.is_empty() && l.spans.iter().any(|s| !s.content.is_empty())
+                        });
+                        let last_content = card_lines.iter().rposition(|l| {
+                            !l.spans.is_empty() && l.spans.iter().any(|s| !s.content.is_empty())
+                        });
+                        if let (Some(first), Some(last)) = (first_content, last_content) {
                             selectable_regions_ranges.push(SelectableRegionRange {
-                                start_line: block_start,
-                                end_line: start_line + card_lines.len(),
-                                min_x: current_min_x,
+                                start_line: start_line + first,
+                                end_line: start_line + last + 1,
+                                min_x: 2,
                                 max_x: None,
                             });
                         }
 
-                        lines.extend(decorate_card_lines(card_lines, width, bg));
+                        lines.extend(decorate_card_lines(card_lines, width, bg, 2));
                     }
                 }
                 if matches!(message.role, MessageRole::User | MessageRole::Shell) {

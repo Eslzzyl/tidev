@@ -285,9 +285,14 @@ impl App {
         );
         frame.render_widget(Paragraph::new(workspace_line), workspace_area);
 
-        self.render_at_mention_palette(frame, sections[2]);
-        self.render_snippet_palette(frame, sections[2]);
-        self.render_command_palette(frame, sections[2]);
+        // Palettes should align with the composer's visual left edge (offset by 2 columns)
+        let palette_area = Rect {
+            x: sections[2].x + 2,
+            ..sections[2]
+        };
+        self.render_at_mention_palette(frame, palette_area);
+        self.render_snippet_palette(frame, palette_area);
+        self.render_command_palette(frame, palette_area);
     }
 
     pub(super) fn render_input_block(
@@ -324,10 +329,27 @@ impl App {
     ) {
         let palette = self.palette();
 
-        let inner = area.inner(Margin {
-            horizontal: if show_left_accent { 2 } else { 1 },
-            vertical: 1,
-        });
+        // Background fill for the input area — start at column 2 to align with message card content area
+        let left_inset: u16 = if show_left_accent { 2 } else { 1 };
+        let bg_rect = Rect {
+            x: area.x + left_inset,
+            y: area.y,
+            width: area.width.saturating_sub(left_inset),
+            height: area.height,
+        };
+        frame.render_widget(
+            Block::default().style(Style::default().bg(palette.panel)),
+            bg_rect,
+        );
+
+        // Inner text area (with 2-column margin from accent bar, 1-column vertical margin)
+        let inner_margin: u16 = if show_left_accent { 2 } else { 1 };
+        let inner = Rect {
+            x: bg_rect.x + inner_margin,
+            y: area.y + 1,
+            width: area.width.saturating_sub(bg_rect.x + inner_margin + 1),
+            height: area.height.saturating_sub(2),
+        };
 
         // When showing the accent bar (main composer), reserve space for metadata at the bottom
         let metadata_height: u16 = if show_left_accent { 2 } else { 0 };
@@ -426,12 +448,6 @@ impl App {
             Text::from(lines)
         };
 
-        // Background fill for the input area
-        frame.render_widget(
-            Block::default().style(Style::default().bg(palette.panel)),
-            area,
-        );
-
         // Left accent bar (mode-colored) — only for the main composer
         if show_left_accent {
             let accent_color = if self.shell_mode {
@@ -450,7 +466,7 @@ impl App {
                         Style::default().fg(accent_color).bg(palette.panel),
                     )]))
                     .style(Style::default().bg(palette.panel)),
-                    Rect::new(area.x, area.y + row, 1, 1),
+                    Rect::new(bg_rect.x, area.y + row, 1, 1),
                 );
             }
 
@@ -524,7 +540,7 @@ impl App {
                 let meta_paragraph = Paragraph::new(Line::from(meta_spans))
                     .style(Style::default().bg(palette.panel));
                 // Render on the second row of metadata_area, aligned with text content
-                let meta_rect = Rect::new(area.x + 2, metadata_area.y + 1, metadata_area.width, 1);
+                let meta_rect = Rect::new(area.x + 4, metadata_area.y + 1, metadata_area.width, 1);
                 frame.render_widget(meta_paragraph, meta_rect);
             }
         }
@@ -919,10 +935,11 @@ pub(crate) fn decorate_card_lines(
     lines: Vec<Line<'static>>,
     width: usize,
     background: Color,
+    left_padding: usize,
 ) -> Vec<Line<'static>> {
     lines
         .into_iter()
-        .map(|line| decorate_card_line(line, width, background))
+        .map(|line| decorate_card_line(line, width, background, left_padding))
         .collect()
 }
 
@@ -930,10 +947,22 @@ pub(crate) fn decorate_card_line(
     line: Line<'static>,
     width: usize,
     background: Color,
+    left_padding: usize,
 ) -> Line<'static> {
     let bg_style = Style::default().bg(background);
     let mut spans = Vec::with_capacity(line.spans.len().saturating_add(2));
-    spans.push(Span::styled(" ", bg_style));
+
+    // Detect if the line already has a visual prefix like "┃ " (used for thinking
+    // and user message indicators). In that case, skip the extra left_padding
+    // so the content text aligns with other card lines.
+    let has_visual_prefix = line
+        .spans
+        .first()
+        .is_some_and(|s| s.content == "┃ ");
+
+    if !has_visual_prefix {
+        spans.push(Span::styled(" ".repeat(left_padding), bg_style));
+    }
 
     for mut span in line.spans {
         if span.style.bg.is_none() {

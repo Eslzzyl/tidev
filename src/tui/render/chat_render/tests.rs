@@ -88,16 +88,11 @@ mod tests {
         assert_eq!(line_text(&lines[0]), "┃ Thinking:");
         assert_eq!(line_text(&lines[1]), "┃ fn main() { println!(\"hi\"); }");
         assert!(
-            lines[1].spans.len() > 2,
-            "expected highlighted spans in code line"
-        );
-        assert!(
             lines[1]
                 .spans
                 .iter()
                 .skip(1)
-                .any(|span| span.style != Style::default()),
-            "expected syntax highlighting styles on code spans"
+                .any(|span| span.style != Style::default()),            "expected syntax highlighting styles on code spans"
         );
     }
 

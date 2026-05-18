@@ -94,7 +94,7 @@ pub(super) fn render_reasoning_markdown_lines(
                 span.style = span.style.patch(body_style);
             }
             span
-        }));
+        }).collect::<Vec<_>>());
         lines.push(Line::from(spans));
     }
 
