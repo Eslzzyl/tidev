@@ -991,6 +991,22 @@ impl SessionStore {
         Ok(())
     }
 
+    pub fn update_message_content(
+        &self,
+        message_id: Uuid,
+        content: &str,
+    ) -> Result<()> {
+        let compressed = compress_text(content);
+        self.write_execute(
+            "UPDATE messages SET content = :content WHERE id = :id",
+            named_params! {
+                ":content": compressed,
+                ":id": message_id.to_string(),
+            },
+        )?;
+        Ok(())
+    }
+
     pub fn load_session_record(&self, session_id: Uuid) -> Result<Option<SessionRecord>> {
         let sql = format!(
             "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.id = ?1 LIMIT 1"

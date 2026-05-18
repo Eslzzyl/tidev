@@ -1160,7 +1160,7 @@ impl AgentRuntime {
 
             // Load messages
             let _t_sub_load = std::time::Instant::now();
-            let db_messages = {
+            let mut db_messages = {
                 let store = self.store.lock().await;
                 store.load_messages(child_session_id)?
             };
@@ -1181,28 +1181,27 @@ impl AgentRuntime {
                 _t_sub_compose.elapsed(),
                 dynamic_context.len()
             );
+            // Persist dynamic context into the last user message's DB record
+            if !dynamic_context.is_empty() {
+                let store = self.store.lock().await;
+                if let Some(last_user) = db_messages.iter_mut().rev().find(|m| m.role == MessageRole::User)
+                    && !last_user.content.starts_with("<system-reminder>")
+                {
+                    last_user.content = format!("{}\n\n{}", dynamic_context, last_user.content);
+                    if let Err(e) = store.update_message_content(last_user.id, &last_user.content) {
+                        crate::log_warn!("run_subagent: failed to persist DC: {}", e);
+                    }
+                }
+                drop(store);
+            }
+
             let _t_sub_build = std::time::Instant::now();
             let mut conv = crate::session::Conversation::new(child_session_id, "", "", "", "", "", "");
             conv.messages = db_messages;
-            let mut request_messages = child_context.build_request_messages(&conv, SessionMode::Build);
+            let request_messages = child_context.build_request_messages(&conv, SessionMode::Build);
             crate::log_debug!(
                 "run_subagent: build_request_messages took {:?}",
                 _t_sub_build.elapsed()
-            );
-
-            // Inject <system-reminder> into latest user message
-            let _t_sub_inject = std::time::Instant::now();
-            if !dynamic_context.is_empty()
-                && let Some(last_user) = request_messages
-                    .iter_mut()
-                    .rev()
-                    .find(|m| m.role == MessageRole::User)
-                {
-                    last_user.content = format!("{}\n\n{}", dynamic_context, last_user.content);
-                }
-            crate::log_debug!(
-                "run_subagent: inject system-reminder took {:?}",
-                _t_sub_inject.elapsed()
             );
 
             let _t_sub_prep = std::time::Instant::now();
@@ -1598,7 +1597,7 @@ impl AgentRuntime {
 
             // 1. Load messages from DB
             let _t_load = std::time::Instant::now();
-            let db_messages = {
+            let mut db_messages = {
                 let store = self.store.lock().await;
                 store.load_messages(session_id)?
             };
@@ -1620,32 +1619,31 @@ impl AgentRuntime {
                 _t_compose.elapsed()
             );
 
-            // 3. Build request messages
+            // 3. Persist dynamic context into the last user message's DB record
+            //    so ALL subsequent reads (compact, summary, ...) see the same
+            //    content that was sent to the LLM (prefix cache hit).
+            if !dynamic_context.is_empty() {
+                let store = self.store.lock().await;
+                if let Some(last_user) = db_messages.iter_mut().rev().find(|m| m.role == MessageRole::User)
+                    && !last_user.content.starts_with("<system-reminder>")
+                {
+                    last_user.content = format!("{}\n\n{}", dynamic_context, last_user.content);
+                    if let Err(e) = store.update_message_content(last_user.id, &last_user.content) {
+                        crate::log_warn!("agent_loop: failed to persist DC: {}", e);
+                    }
+                }
+                drop(store);
+            }
+
+            // 4. Build request messages (already contains DC in the persisted content)
             let _t_build = std::time::Instant::now();
             let mut conv = crate::session::Conversation::new(session_id, "", "", "", "", "", "");
             conv.messages = db_messages;
-            let mut request_messages = context_manager.build_request_messages(&conv, mode);
+            let request_messages = context_manager.build_request_messages(&conv, mode);
             crate::log_info!(
                 "agent_loop: built {} request messages in {:?}",
                 request_messages.len(),
                 _t_build.elapsed()
-            );
-
-            // 3a. Inject dynamic context as <system-reminder> into latest user message.
-            //     This keeps the `system` message (static_system_prompt) stable across
-            //     every turn, maximising LLM prefix cache hits.
-            let _t_inject = std::time::Instant::now();
-            if !dynamic_context.is_empty()
-                && let Some(last_user) = request_messages
-                    .iter_mut()
-                    .rev()
-                    .find(|m| m.role == MessageRole::User)
-                {
-                    last_user.content = format!("{}\n\n{}", dynamic_context, last_user.content);
-                }
-            crate::log_debug!(
-                "agent_loop: inject system-reminder took {:?}",
-                _t_inject.elapsed()
             );
 
             // 4. Stream LLM — `Finished` is already forwarded to event_tx
@@ -1706,7 +1704,12 @@ impl AgentRuntime {
                         "run_agent_loop: processing queued message ({} chars)",
                         qmsg.content.len()
                     );
-                    let mut user_msg = Message::new(MessageRole::User, &qmsg.content);
+                    let content = if !dynamic_context.is_empty() {
+                        format!("{}\n\n{}", dynamic_context, qmsg.content)
+                    } else {
+                        qmsg.content
+                    };
+                    let mut user_msg = Message::new(MessageRole::User, &content);
                     user_msg.attachments = qmsg.attachments;
                     user_msg.mode = qmsg.mode;
                     user_msg.thinking_level = qmsg.thinking_level;

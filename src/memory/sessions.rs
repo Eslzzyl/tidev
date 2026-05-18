@@ -52,30 +52,32 @@ impl SessionService {
         project: &str,
     ) -> Result<SessionSummary> {
         // 1. Load session context state + messages (sync, connection dropped before await)
-        let (messages, context_summary, context_retained_from) = {
+        let (messages, context_summary, context_retained_from, system_prompt) = {
             let db = Connection::open(db_path)?;
 
             // Load context state from session record
-            let (summary, retained_from) = {
+            let (summary, retained_from, system_prompt) = {
                 let mut stmt = db.prepare(
-                    "SELECT context_summary, context_retained_from FROM sessions WHERE id = ?1"
+                    "SELECT context_summary, context_retained_from, system_prompt FROM sessions WHERE id = ?1"
                 )?;
                 let result = stmt.query_row(
                     params![session_id.to_string()],
                     |row| {
                         let summary: String = row.get(0)?;
                         let retained: i64 = row.get(1)?;
+                        let sp: String = row.get(2)?;
                         Ok((
                             if summary.is_empty() { None } else { Some(summary) },
                             retained as usize,
+                            if sp.is_empty() { None } else { Some(sp) },
                         ))
                     },
                 ).optional()?;
-                result.unwrap_or((None, 0))
+                result.unwrap_or((None, 0, None))
             };
 
             let messages = load_session_messages(&db, session_id)?;
-            (messages, summary, retained_from)
+            (messages, summary, retained_from, system_prompt)
         };
 
         let msg_count = messages.len();
@@ -119,8 +121,15 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                     last.content = format!("{}{}", last.content, STRICTER_SUFFIX);
                 }
 
+            let llm_model = if let Some(ref sp) = system_prompt {
+                let mut m = model.clone();
+                m.system_prompt = sp.clone();
+                m
+            } else {
+                model.clone()
+            };
             response = match llm
-                .complete_with_messages(model.clone(), attempt_messages, vec![])
+                .complete_with_messages(llm_model, attempt_messages, vec![])
                 .await
             {
                 Ok(r) => r,

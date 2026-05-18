@@ -908,7 +908,7 @@ impl App {
         }
 
         let is_active = self.conversation.session_id == session_id;
-        let Some((conversation, mut context_manager, mut model)) = (if is_active {
+        let Some((mut conversation, mut context_manager, mut model)) = (if is_active {
             Some((
                 self.conversation.clone(),
                 self.context_manager.clone(),
@@ -925,6 +925,13 @@ impl App {
         }) else {
             return;
         };
+
+        // Reload messages from DB so they reflect any DC persistence
+        // done by the agent loop (which updates DB but not the in-memory
+        // conversation copy used above).
+        if let Ok(db_messages) = self.store.load_messages(session_id) {
+            conversation.messages = db_messages;
+        }
 
         // Use the session's immutable static system prompt from DB.
         // For the active session, model.system_prompt is already correct

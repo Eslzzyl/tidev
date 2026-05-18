@@ -296,7 +296,18 @@ impl TelegramChannel {
             }
         }
 
-        let user_message = Message::new(MessageRole::User, content.to_string());
+        let has_assistant = conversation.messages.iter().any(|m| m.role == MessageRole::Assistant);
+        let include_memory = self.agent.config.memory.inject_context && !has_assistant;
+        let dc = self
+            .agent
+            .compose_dynamic_context(conversation.session_id, Some(SessionMode::Build), include_memory)
+            .await;
+        let content_with_dc = if !dc.is_empty() {
+            format!("{}\n\n{}", dc, content)
+        } else {
+            content.to_string()
+        };
+        let user_message = Message::new(MessageRole::User, content_with_dc);
         conversation.push(user_message.clone());
         self.store
             .append_message(conversation.session_id, &user_message)?;
