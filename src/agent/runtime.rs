@@ -2193,7 +2193,7 @@ mod tests {
             config: crate::config::AppConfig::default(),
             auth: crate::config::AuthStore::default(),
             store: Arc::new(Mutex::new(store)),
-            llm_client: crate::llm::LlmClient::new().unwrap(),
+            llm_client: crate::llm::LlmClient::new(&crate::config::LogConfig::default()).unwrap(),
             tools: crate::tooling::ToolRegistry::new(
                 tmp.path().join("workspace"),
                 tmp.path().join("config"),

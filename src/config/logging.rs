@@ -12,6 +12,12 @@ pub struct LogConfig {
     pub max_files: u32,
     #[serde(default = "default_console")]
     pub console: bool,
+    /// Save LLM request bodies to /tmp/tidev-requests/ for debugging.
+    #[serde(default)]
+    pub save_request_body: bool,
+    /// Maximum request body files to keep before rotating (default: 100).
+    #[serde(default = "default_max_request_files")]
+    pub max_request_files: usize,
 }
 
 fn default_enabled() -> bool {
@@ -34,6 +40,10 @@ fn default_console() -> bool {
     false
 }
 
+fn default_max_request_files() -> usize {
+    100
+}
+
 impl Default for LogConfig {
     fn default() -> Self {
         Self {
@@ -42,6 +52,8 @@ impl Default for LogConfig {
             max_size_mb: 10,
             max_files: 5,
             console: false,
+            save_request_body: false,
+            max_request_files: 100,
         }
     }
 }

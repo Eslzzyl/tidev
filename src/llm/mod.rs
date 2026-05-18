@@ -1,5 +1,6 @@
 mod anthropic;
 mod attachments;
+mod debug;
 mod error;
 mod openai;
 mod responses;
@@ -15,6 +16,7 @@ use uuid::Uuid;
 
 use crate::{
     config::{ActiveModel, ApiType},
+    config::LogConfig,
     session::{BackendEvent, Message},
     tooling::ToolDefinition,
 };
@@ -24,10 +26,12 @@ use error::{MAX_RETRIES, backoff_delay, backoff_sleep, classify_anyhow_error};
 #[derive(Clone, Debug)]
 pub struct LlmClient {
     http: Client,
+    pub save_request_body: bool,
+    pub max_request_files: usize,
 }
 
 impl LlmClient {
-    pub fn new() -> Result<Self> {
+    pub fn new(logging: &LogConfig) -> Result<Self> {
         let http = Client::builder()
             .user_agent("tidev/0.1")
             .timeout(Duration::from_mins(30))
@@ -35,7 +39,11 @@ impl LlmClient {
             .build()
             .context("failed to construct HTTP client")?;
 
-        Ok(Self { http })
+        Ok(Self {
+            http,
+            save_request_body: logging.save_request_body,
+            max_request_files: logging.max_request_files,
+        })
     }
 
     /// Get a reference to the HTTP client for reuse.
@@ -154,6 +162,8 @@ impl LlmClient {
                         model.clone(),
                         messages.clone(),
                         tools.clone(),
+                        self.save_request_body,
+                        self.max_request_files,
                     )
                     .await
                 }
@@ -163,6 +173,8 @@ impl LlmClient {
                         model.clone(),
                         messages.clone(),
                         tools.clone(),
+                        self.save_request_body,
+                        self.max_request_files,
                     )
                     .await
                 }
@@ -172,6 +184,8 @@ impl LlmClient {
                         model.clone(),
                         messages.clone(),
                         tools.clone(),
+                        self.save_request_body,
+                        self.max_request_files,
                     )
                     .await
                 }
@@ -219,6 +233,8 @@ impl LlmClient {
             ApiType::Anthropic => {
                 anthropic::stream_anthropic(
                     &self.http, session_id, request_id, model, messages, tools, tx,
+                    self.save_request_body,
+                    self.max_request_files,
                 )
                 .await
             }
@@ -232,12 +248,16 @@ impl LlmClient {
                     tools,
                     tx,
                     thinking_level,
+                    self.save_request_body,
+                    self.max_request_files,
                 )
                 .await
             }
             ApiType::OpenAiResponses => {
                 responses::stream_responses(
                     &self.http, session_id, request_id, model, messages, tools, tx,
+                    self.save_request_body,
+                    self.max_request_files,
                 )
                 .await
             }

@@ -13,6 +13,7 @@ use crate::{
 };
 
 use super::attachments::message_text_with_file_references;
+use super::debug::save_request_for_debugging;
 use super::error::classify_response_status;
 
 /// Responses API endpoint
@@ -26,6 +27,8 @@ pub(super) async fn stream_responses(
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
     tx: UnboundedSender<BackendEvent>,
+    save_request_body: bool,
+    max_request_files: usize,
 ) -> Result<()> {
     let api_key = model
         .api_key
@@ -33,9 +36,9 @@ pub(super) async fn stream_responses(
         .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
 
     let request = build_responses_request(&model, messages, true, &tools)?;
-    let request_body_size = serde_json::to_string(&request)
-        .map(|s| s.len())
-        .unwrap_or(0);
+    let request_body = serde_json::to_string(&request).unwrap_or_default();
+    let request_body_size = request_body.len();
+    save_request_for_debugging(&request_body, save_request_body, max_request_files);
 
     let endpoint = format!(
         "{}{}",
@@ -492,6 +495,8 @@ pub(super) async fn complete_responses(
     model: ActiveModel,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
+    save_request_body: bool,
+    max_request_files: usize,
 ) -> Result<String> {
     let api_key = model
         .api_key
@@ -499,9 +504,9 @@ pub(super) async fn complete_responses(
         .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
 
     let request = build_responses_request(&model, messages, false, &tools)?;
-    let request_body_size = serde_json::to_string(&request)
-        .map(|s| s.len())
-        .unwrap_or(0);
+    let request_body = serde_json::to_string(&request).unwrap_or_default();
+    let request_body_size = request_body.len();
+    save_request_for_debugging(&request_body, save_request_body, max_request_files);
 
     let endpoint = format!(
         "{}{}",

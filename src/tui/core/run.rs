@@ -41,7 +41,7 @@ impl App {
         let memory_store = Arc::new(db.create_memory_store()?);
         crate::log_info!("startup: stores created in {:?}", _t3.elapsed());
         let _t4 = std::time::Instant::now();
-        let llm = LlmClient::new()?;
+        let llm = LlmClient::new(&config.logging)?;
         crate::log_info!("startup: LlmClient::new in {:?}", _t4.elapsed());
         let http_client = Arc::new(llm.http().clone());
         let _t5 = std::time::Instant::now();

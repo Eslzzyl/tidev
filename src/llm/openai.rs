@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use chrono::Utc;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -14,6 +13,7 @@ use crate::{
 };
 
 use super::attachments::{image_attachments, message_text_with_file_references};
+use super::debug::save_request_for_debugging;
 use super::error::classify_response_status;
 use super::think_parser::ThinkParser;
 use super::tool_call_format::ToolCallBuilder;
@@ -28,6 +28,8 @@ pub(super) async fn stream_openai(
     tools: Vec<ToolDefinition>,
     tx: UnboundedSender<BackendEvent>,
     thinking_level: ThinkingLevelType,
+    save_request_body: bool,
+    max_request_files: usize,
 ) -> Result<()> {
     let api_key = model
         .api_key
@@ -36,7 +38,7 @@ pub(super) async fn stream_openai(
     let request = build_openai_request(&model, messages, true, &tools, thinking_level)?;
     let request_body = serde_json::to_string(&request).unwrap_or_default();
     let request_body_size = request_body.len();
-    save_request_for_debugging(&request_body);
+    save_request_for_debugging(&request_body, save_request_body, max_request_files);
 
     let send_result = http
         .post(model.endpoint())
@@ -244,6 +246,8 @@ pub(super) async fn complete_openai(
     model: ActiveModel,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
+    save_request_body: bool,
+    max_request_files: usize,
 ) -> Result<String> {
     let api_key = model
         .api_key
@@ -258,7 +262,7 @@ pub(super) async fn complete_openai(
     )?;
     let request_body = serde_json::to_string(&request).unwrap_or_default();
     let request_body_size = request_body.len();
-    save_request_for_debugging(&request_body);
+    save_request_for_debugging(&request_body, save_request_body, max_request_files);
 
     let send_result = http
         .post(model.endpoint())
@@ -770,23 +774,4 @@ struct ChatToolCallFunctionPayload {
     arguments: String,
 }
 
-/// Save the serialized request body to /tmp/tidev-requests/ for debugging
-/// prefix cache issues. Timestamp is in CST (UTC+8).
-fn save_request_for_debugging(request_body: &str) {
-    let dir = std::path::Path::new("/tmp/tidev-requests");
-    if let Err(e) = std::fs::create_dir_all(dir) {
-        log_debug!("debug_request: failed to create dir: {}", e);
-        return;
-    }
-    let cst_offset = match chrono::FixedOffset::east_opt(8 * 3600) {
-        Some(offset) => offset,
-        None => return,
-    };
-    let now_cst = Utc::now().with_timezone(&cst_offset);
-    let suffix = Uuid::new_v4().simple();
-    let filename = format!("{}_{}.json", now_cst.format("%Y%m%d_%H%M%S_%3f"), suffix);
-    let filepath = dir.join(&filename);
-    if let Err(e) = std::fs::write(&filepath, request_body) {
-        log_debug!("debug_request: failed to write {}: {}", filename, e);
-    }
-}
+

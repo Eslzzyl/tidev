@@ -13,6 +13,7 @@ use crate::{
 };
 
 use super::attachments::{image_attachments, message_text_with_file_references};
+use super::debug::save_request_for_debugging;
 use super::error::classify_response_status;
 use super::think_parser::ThinkParser;
 use super::tool_call_format::ToolCallBuilder;
@@ -26,15 +27,17 @@ pub(super) async fn stream_anthropic(
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
     tx: UnboundedSender<BackendEvent>,
+    save_request_body: bool,
+    max_request_files: usize,
 ) -> Result<()> {
     let api_key = model
         .api_key
         .clone()
         .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
     let request = build_anthropic_request(&model, messages, &tools)?;
-    let request_body_size = serde_json::to_string(&request)
-        .map(|s| s.len())
-        .unwrap_or(0);
+    let request_body = serde_json::to_string(&request).unwrap_or_default();
+    let request_body_size = request_body.len();
+    save_request_for_debugging(&request_body, save_request_body, max_request_files);
 
     let send_result = http
         .post(model.endpoint())
@@ -241,15 +244,17 @@ pub(super) async fn complete_anthropic(
     model: ActiveModel,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
+    save_request_body: bool,
+    max_request_files: usize,
 ) -> Result<String> {
     let api_key = model
         .api_key
         .clone()
         .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
     let request = build_anthropic_request(&model, messages, &tools)?;
-    let request_body_size = serde_json::to_string(&request)
-        .map(|s| s.len())
-        .unwrap_or(0);
+    let request_body = serde_json::to_string(&request).unwrap_or_default();
+    let request_body_size = request_body.len();
+    save_request_for_debugging(&request_body, save_request_body, max_request_files);
 
     let send_result = http
         .post(model.endpoint())

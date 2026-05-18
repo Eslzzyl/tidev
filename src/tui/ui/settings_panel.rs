@@ -4,6 +4,7 @@ use crate::config::AppConfig;
 pub enum SettingType {
     Toggle(bool),
     Number { value: f32, min: f32, max: f32 },
+    Cycle { options: Vec<String>, selected: usize },
 }
 
 #[derive(Clone, Debug)]
@@ -18,6 +19,8 @@ pub struct SettingItem {
 pub enum SettingKey {
     NotificationEnabled,
     LoggingEnabled,
+    LogLevel,
+    SaveRequestBody,
     ScrollSpeed,
     RtkEnabled,
 }
@@ -30,6 +33,17 @@ pub struct SettingsPanelState {
 
 impl SettingsPanelState {
     pub fn new(config: &AppConfig) -> Self {
+        let log_levels = vec![
+            "DEBUG".to_string(),
+            "INFO".to_string(),
+            "WARN".to_string(),
+            "ERROR".to_string(),
+        ];
+        let log_level_index = log_levels
+            .iter()
+            .position(|l| l == &config.logging.level.to_uppercase())
+            .unwrap_or(1);
+
         let mut items = vec![
             SettingItem {
                 name: "Notifications".to_string(),
@@ -42,6 +56,21 @@ impl SettingsPanelState {
                 description: "Enable debug logging to file".to_string(),
                 setting_type: SettingType::Toggle(config.logging.enabled),
                 key: SettingKey::LoggingEnabled,
+            },
+            SettingItem {
+                name: "Log Level".to_string(),
+                description: format!("Log level: {}", log_levels[log_level_index]),
+                setting_type: SettingType::Cycle {
+                    options: log_levels,
+                    selected: log_level_index,
+                },
+                key: SettingKey::LogLevel,
+            },
+            SettingItem {
+                name: "Save Request Body".to_string(),
+                description: "Save LLM request bodies to /tmp/tidev-requests/ for debugging".to_string(),
+                setting_type: SettingType::Toggle(config.logging.save_request_body),
+                key: SettingKey::SaveRequestBody,
             },
             SettingItem {
                 name: "Scroll Speed".to_string(),
@@ -86,16 +115,23 @@ impl SettingsPanelState {
         }
     }
 
-    /// Toggle for Toggle type only
+    /// Toggle for Toggle / Cycle type
     pub fn toggle_selected(&mut self, rtk_installed: bool) {
-        if let Some(item) = self.items.get_mut(self.selected_index)
-            && let SettingType::Toggle(val) = &mut item.setting_type
-        {
-            // Don't allow toggling RTK if it's not installed
-            if item.key == SettingKey::RtkEnabled && !rtk_installed {
-                return;
+        if let Some(item) = self.items.get_mut(self.selected_index) {
+            match &mut item.setting_type {
+                SettingType::Toggle(val) => {
+                    // Don't allow toggling RTK if it's not installed
+                    if item.key == SettingKey::RtkEnabled && !rtk_installed {
+                        return;
+                    }
+                    *val = !*val;
+                }
+                SettingType::Cycle { options, selected } => {
+                    *selected = (*selected + 1) % options.len();
+                    item.description = format!("Log level: {}", options[*selected]);
+                }
+                SettingType::Number { .. } => {}
             }
-            *val = !*val;
         }
     }
 
@@ -130,6 +166,18 @@ impl SettingsPanelState {
                 SettingKey::LoggingEnabled => {
                     if let SettingType::Toggle(val) = item.setting_type {
                         config.logging.enabled = val;
+                    }
+                }
+                SettingKey::LogLevel => {
+                    if let SettingType::Cycle { options, selected } = &item.setting_type
+                        && *selected < options.len()
+                    {
+                        config.logging.level = options[*selected].clone();
+                    }
+                }
+                SettingKey::SaveRequestBody => {
+                    if let SettingType::Toggle(val) = item.setting_type {
+                        config.logging.save_request_body = val;
                     }
                 }
                 SettingKey::ScrollSpeed => {

@@ -91,7 +91,7 @@ async fn run_async() -> Result<()> {
         // Each channel gets its own resources
         let store = db.create_session_store()?;
         let memory_store = Arc::new(db.create_memory_store()?);
-        let llm = LlmClient::new()?;
+        let llm = LlmClient::new(&config.logging)?;
         memory_store.set_models(llm.clone(), default_model.clone(), None);
         crate::memory::start_background_tasks(
             memory_store.clone(),
@@ -163,7 +163,7 @@ async fn run_async() -> Result<()> {
         // Each channel gets its own resources
         let store = db.create_session_store()?;
         let memory_store2 = Arc::new(db.create_memory_store()?);
-        let llm = LlmClient::new()?;
+        let llm = LlmClient::new(&config.logging)?;
         memory_store2.set_models(llm.clone(), default_model.clone(), None);
         crate::memory::start_background_tasks(
             memory_store2.clone(),

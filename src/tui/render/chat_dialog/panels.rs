@@ -311,17 +311,21 @@ impl App {
     ) {
         use crate::tui::ui::settings_panel::SettingType;
         let current_palette = self.palette();
-        let overlay = centered_rect(60, 12, area);
+        let overlay = centered_rect(60, 16, area);
         self.settings_panel_overlay.set(Some(overlay));
 
         let items: Vec<ListItem> = panel
             .items
             .iter()
             .map(|item| {
-                let status = match item.setting_type {
-                    SettingType::Toggle(true) => "[x]",
-                    SettingType::Toggle(false) => "[ ]",
-                    SettingType::Number { .. } => "[~]",
+                let status: String = match &item.setting_type {
+                    SettingType::Toggle(true) => "[x]".to_string(),
+                    SettingType::Toggle(false) => "[ ]".to_string(),
+                    SettingType::Number { .. } => "[~]".to_string(),
+                    SettingType::Cycle { options, selected } => {
+                        let current = options.get(*selected).map(|s| s.as_str()).unwrap_or("?");
+                        format!("[{current}]")
+                    }
                 };
                 ListItem::new(vec![
                     Line::from(vec![

@@ -644,11 +644,15 @@ skills = []
 # level can be: DEBUG, INFO, WARN, ERROR
 # max_size_mb: max log file size before rotation (default: 10)
 # max_files: number of rotated log files to keep (default: 5)
+# save_request_body: save LLM request bodies to /tmp/tidev-requests/ (default: false)
+# max_request_files: max request body files before rotation (default: 100)
 #[logging]
 #enabled = false
 #level = "INFO"
 #max_size_mb = 10
 #max_files = 5
+#save_request_body = false
+#max_request_files = 100
 
 # RTK (Rust Token Killer) configuration.
 # When enabled, command outputs are compressed to save tokens.

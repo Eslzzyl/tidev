@@ -85,7 +85,7 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     let store = db.create_session_store()?;
 
     // Create LLM client
-    let llm_client = LlmClient::new()?;
+    let llm_client = LlmClient::new(&config.logging)?;
 
     // Create event bus
     let event_bus = EventBus::new(1024);
