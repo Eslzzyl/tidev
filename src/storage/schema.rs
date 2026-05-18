@@ -221,7 +221,7 @@ CREATE TABLE IF NOT EXISTS session_summaries (
     narrative TEXT,
     key_decisions TEXT NOT NULL DEFAULT '[]',
     files_modified TEXT NOT NULL DEFAULT '[]',
-    concepts TEXT NOT NULL DEFAULT '[]',
+    concepts TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS memory_slots (
@@ -461,7 +461,7 @@ CREATE TABLE IF NOT EXISTS session_summaries (
     narrative TEXT,
     key_decisions TEXT NOT NULL DEFAULT '[]',
     files_modified TEXT NOT NULL DEFAULT '[]',
-    concepts TEXT NOT NULL DEFAULT '[]',
+    concepts TEXT NOT NULL DEFAULT '[]'
 );
 
 -- Extended memories table (replaces old schema v26 version)
