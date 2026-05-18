@@ -182,11 +182,11 @@ impl AgentRuntime {
         session_id: uuid::Uuid,
         mode: Option<SessionMode>,
         include_memory: bool,
-    ) -> String {
+    ) -> (String, Vec<String>) {
         let mut sections: Vec<String> = Vec::new();
 
         // ── Instruction files ───────────────────────────────────────────
-        let (instruction_prompt, _sources, new_cache) =
+        let (instruction_prompt, instruction_sources, new_cache) =
             instructions::system_prompt_and_sources_with_cache(
                 &self.workspace_root,
                 &self.config_dir,
@@ -318,12 +318,15 @@ impl AgentRuntime {
         }
 
         if sections.is_empty() {
-            return String::new();
+            return (String::new(), instruction_sources);
         }
 
-        format!(
-            "<system-reminder>\n{}\n</system-reminder>",
-            sections.join("\n\n")
+        (
+            format!(
+                "<system-reminder>\n{}\n</system-reminder>",
+                sections.join("\n\n")
+            ),
+            instruction_sources,
         )
     }
 
@@ -1174,8 +1177,14 @@ impl AgentRuntime {
             let _t_sub_compose = std::time::Instant::now();
             let is_first_sub_turn = db_messages.len() <= 1;
             let include_sub_memory = self.config.memory.inject_context && is_first_sub_turn;
-            let dynamic_context =
+            let (dynamic_context, instruction_sources) =
                 self.compose_dynamic_context(child_session_id, None, include_sub_memory).await;
+            if !instruction_sources.is_empty() {
+                let _ = event_tx.send(BackendEvent::InstructionsLoaded {
+                    session_id: child_session_id,
+                    sources: instruction_sources,
+                });
+            }
             crate::log_info!(
                 "run_subagent: compose_dynamic_context took {:?} ({} chars)",
                 _t_sub_compose.elapsed(),
@@ -1612,8 +1621,14 @@ impl AgentRuntime {
             let _t_compose = std::time::Instant::now();
             let has_assistant = db_messages.iter().any(|m| m.role == MessageRole::Assistant);
             let include_memory = self.config.memory.inject_context && !has_assistant;
-            let dynamic_context =
+            let (dynamic_context, instruction_sources) =
                 self.compose_dynamic_context(session_id, Some(mode), include_memory).await;
+            if !instruction_sources.is_empty() {
+                let _ = event_tx.send(BackendEvent::InstructionsLoaded {
+                    session_id,
+                    sources: instruction_sources,
+                });
+            }
             crate::log_info!(
                 "agent_loop: composed dynamic context ({} chars) in {:?}",
                 dynamic_context.len(),
@@ -2843,12 +2858,16 @@ mod tests {
                 .unwrap();
         }
 
-        let result = agent
+        let (result, sources) = agent
             .compose_dynamic_context(session_id, None, false)
             .await;
         assert!(
             result.is_empty(),
             "dynamic context should be empty with no instructions, memories, or mode"
+        );
+        assert!(
+            sources.is_empty(),
+            "sources should be empty when there are no instruction files"
         );
     }
 
@@ -2871,7 +2890,7 @@ mod tests {
                 .unwrap();
         }
 
-        let result = agent
+        let (result, _sources) = agent
             .compose_dynamic_context(session_id, Some(SessionMode::Build), false)
             .await;
         assert!(
