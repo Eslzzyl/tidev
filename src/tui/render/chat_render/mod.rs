@@ -23,7 +23,7 @@ use ratatui::{
     prelude::{Frame, Modifier, Style, Text},
     style::Color,
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Paragraph, Wrap},
 };
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -78,15 +78,17 @@ impl App {
             area,
         );
 
-        let sidebar_visible = area.width >= self.config.ui.sidebar_width.saturating_add(70);
+        const SIDEBAR_GAP: u16 = 2;
+        let sidebar_visible = area.width >= self.config.ui.sidebar_width.saturating_add(70).saturating_add(SIDEBAR_GAP);
         let main_area = if sidebar_visible {
             let split = Layout::horizontal([
                 Constraint::Min(20),
+                Constraint::Length(SIDEBAR_GAP),
                 Constraint::Length(self.config.ui.sidebar_width),
             ])
             .split(area);
-            self.sidebar_area = Some(split[1]);
-            self.render_sidebar(frame, split[1]);
+            self.sidebar_area = Some(split[2]);
+            self.render_sidebar(frame, split[2]);
             split[0]
         } else {
             area
@@ -123,7 +125,10 @@ impl App {
             0
         };
 
-        let composer_height = composer_height_raw.min(
+        // Extra lines for metadata display inside the composer
+        const METADATA_EXTRA: u16 = 2;
+
+        let composer_height = (composer_height_raw + METADATA_EXTRA).min(
             main_area
                 .height
                 .saturating_sub((queued_height as u16) + 3)
@@ -225,12 +230,15 @@ impl App {
                     _ => self.mode.title().to_string(),
                 }
             };
-            self.render_input_block(
+            self.render_input_block_with_composer(
                 frame,
                 layout[2],
                 &prompt_title,
+                &self.composer,
                 self.composer.placeholder(),
                 false,
+                true,
+                true,
             );
             self.render_at_mention_palette(frame, layout[2]);
             self.render_snippet_palette(frame, layout[2]);
@@ -263,8 +271,7 @@ impl App {
         ]);
 
         let block = Block::default()
-            .borders(Borders::TOP | Borders::BOTTOM)
-            .border_style(Style::default().fg(palette.muted))
+            .style(Style::default().bg(palette.panel))
             .title(title)
             .title_alignment(Alignment::Left);
 
@@ -332,16 +339,11 @@ impl App {
         let palette = self.palette();
 
         let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_idle()))
-            .title(" Subsession ");
+            .style(Style::default().bg(palette.panel));
 
         frame.render_widget(block, area);
 
-        let inner = area.inner(Margin {
-            horizontal: 1,
-            vertical: 1,
-        });
+        let inner = area; // No border margins needed
 
         // Center the navigation hints
         let hint = Line::from(vec![
@@ -362,23 +364,10 @@ impl App {
 
     pub(super) fn render_messages(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let palette = self.palette();
-        let mut title = format!("Conversation · {}", shorten(&self.conversation.title, 32),);
-        if !self.message_follow_tail {
-            title.push_str(" · history");
-        }
-        if self.conversation.parent_session_id.is_some() {
-            title.push_str(" · SUBSESSION");
-        }
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_idle()))
-            .title(title);
-        frame.render_widget(block, area);
 
         let inner = area.inner(Margin {
-            horizontal: 2,
-            vertical: 1,
+            horizontal: 1,
+            vertical: 0,
         });
 
         if inner.width == 0 || inner.height == 0 {
@@ -540,7 +529,17 @@ impl App {
         let palette = self.palette();
         let mut lines = Vec::new();
 
-        // Workspace directory (top)
+        // Session title (top)
+        let session_title = shorten(&self.conversation.title, (area.width.saturating_sub(4).max(1)) as usize);
+        lines.push(Line::from(vec![Span::styled(
+            session_title,
+            Style::default()
+                .fg(palette.text)
+                .add_modifier(Modifier::BOLD),
+        )]));
+        lines.push(Line::from(""));
+
+        // Workspace directory
         let workspace_path = self.workspace_root.display().to_string();
         let display_path = workspace_path.replace(
             &dirs::home_dir().unwrap_or_default().display().to_string(),
@@ -755,7 +754,11 @@ impl App {
         }
 
         // Estimate total lines for scroll max (accounts for word wrapping)
-        let sidebar_content_width = (area.width.saturating_sub(2)) as usize;
+        let sidebar_padded = area.inner(Margin {
+            horizontal: 2,
+            vertical: 0,
+        });
+        let sidebar_content_width = sidebar_padded.width as usize;
         self.sidebar_total_lines = lines
             .iter()
             .map(|line| {
@@ -772,24 +775,24 @@ impl App {
             })
             .sum();
 
-        let sidebar_viewport_lines = area.height.saturating_sub(2) as usize;
+        let sidebar_viewport_lines = area.height as usize;
         let max_scroll = self
             .sidebar_total_lines
             .saturating_sub(sidebar_viewport_lines);
         self.sidebar_scroll_offset = self.sidebar_scroll_offset.min(max_scroll);
 
+        // Background fill for the full sidebar area
+        frame.render_widget(
+            Block::default().style(Style::default().bg(palette.panel)),
+            area,
+        );
+
         let paragraph = Paragraph::new(Text::from(lines))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(palette.border_idle()))
-                    .title("Sidebar"),
-            )
             .style(Style::default().fg(palette.text))
             .wrap(Wrap { trim: false })
             .scroll((self.sidebar_scroll_offset as u16, 0));
 
-        frame.render_widget(paragraph, area);
+        frame.render_widget(paragraph, sidebar_padded);
     }
 
     fn messages_text(

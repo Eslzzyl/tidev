@@ -17,7 +17,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     prelude::{Frame, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 
 impl App {
@@ -48,38 +48,8 @@ impl App {
         let overlay = centered_rect(overlay_width, overlay_height, area);
         frame.render_widget(Clear, overlay);
 
-        let dialog_title = match dialog {
-            ConnectDialog::ProviderPicker { .. } => "Connect provider".to_string(),
-            ConnectDialog::ApiKey { provider_id } => {
-                let label = self
-                    .config
-                    .provider_display_name(provider_id)
-                    .unwrap_or(provider_id)
-                    .to_string();
-                format!("API key · {label}")
-            }
-            ConnectDialog::NewProvider { step, .. } => {
-                format!("Create provider · {}", step.title())
-            }
-            ConnectDialog::EditProvider {
-                provider_id,
-                step,
-                model_step,
-                ..
-            } => {
-                if let Some(model_step) = model_step {
-                    format!("Edit model · {provider_id} · {}", model_step.title())
-                } else {
-                    format!("Edit provider · {provider_id} · {}", step.title())
-                }
-            }
-        };
-
         let panel = Block::default()
-            .style(Style::default().bg(palette.panel))
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()))
-            .title(dialog_title);
+            .style(Style::default().bg(palette.panel_alt));
 
         frame.render_widget(panel, overlay);
         let inner = overlay.inner(Margin {
@@ -87,6 +57,23 @@ impl App {
             vertical: 1,
         });
         self.register_selection_region(inner);
+
+        let dialog_title = match dialog {
+            ConnectDialog::ProviderPicker { .. } => " Connect to provider ",
+            ConnectDialog::ApiKey { .. } => " API Key ",
+            ConnectDialog::NewProvider { .. } => " New Provider ",
+            ConnectDialog::EditProvider { .. } => " Edit Provider ",
+        };
+
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                dialog_title,
+                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            Rect::new(inner.x, inner.y, inner.width, 1),
+        );
+        let body = Rect::new(inner.x, inner.y + 1, inner.width, inner.height.saturating_sub(1));
 
         match dialog {
             ConnectDialog::ProviderPicker { selected } => {
@@ -96,12 +83,12 @@ impl App {
                     Constraint::Min(6),
                     Constraint::Length(1),
                 ])
-                .split(inner);
+                .split(body);
 
                 frame.render_widget(
                     Paragraph::new("Type to filter by provider id or display name. Press Ctrl+E to edit custom providers.")
                         .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     sections[0],
                 );
 
@@ -190,7 +177,7 @@ impl App {
                 state.select(Some((*selected).min(items.len().saturating_sub(1))));
 
                 let list = List::new(list_items)
-                    .style(Style::default().bg(palette.panel).fg(palette.text))
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.text))
                     .highlight_style(
                         Style::default()
                             .bg(palette.selection_bg)
@@ -205,7 +192,7 @@ impl App {
                         "Enter to connect · Ctrl+E to edit custom providers · Esc to cancel",
                     )
                     .alignment(Alignment::Center)
-                    .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     sections[3],
                 );
             }
@@ -222,14 +209,14 @@ impl App {
                     Constraint::Length(4),
                     Constraint::Length(1),
                 ])
-                .split(inner);
+                .split(body);
 
                 frame.render_widget(
                     Paragraph::new(format!("Enter API key for {label}"))
                         .alignment(Alignment::Center)
                         .style(
                             Style::default()
-                                .bg(palette.panel)
+                                .bg(palette.panel_alt)
                                 .fg(palette.text)
                                 .add_modifier(Modifier::BOLD),
                         ),
@@ -241,7 +228,7 @@ impl App {
                         "The key will be stored in auth.json and used for future requests.",
                     )
                     .alignment(Alignment::Center)
-                    .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     lines[1],
                 );
 
@@ -256,7 +243,7 @@ impl App {
                 frame.render_widget(
                     Paragraph::new("Enter to save · Esc to cancel")
                         .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     lines[3],
                 );
             }
@@ -268,14 +255,14 @@ impl App {
                     Constraint::Length(2),
                     Constraint::Length(1),
                 ])
-                .split(inner);
+                .split(body);
 
                 frame.render_widget(
                     Paragraph::new(format!("Create provider · {}", step.title()))
                         .alignment(Alignment::Center)
                         .style(
                             Style::default()
-                                .bg(palette.panel)
+                                .bg(palette.panel_alt)
                                 .fg(palette.text)
                                 .add_modifier(Modifier::BOLD),
                         ),
@@ -285,7 +272,7 @@ impl App {
                 frame.render_widget(
                     Paragraph::new(step.help())
                         .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     lines[1],
                 );
 
@@ -310,7 +297,7 @@ impl App {
                 frame.render_widget(
                     Paragraph::new(prompt_line)
                         .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
                     lines[3],
                 );
 
@@ -322,7 +309,7 @@ impl App {
                 frame.render_widget(
                     Paragraph::new(footer)
                         .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     lines[4],
                 );
             }
@@ -340,7 +327,7 @@ impl App {
                         Constraint::Length(2),
                         Constraint::Length(1),
                     ])
-                    .split(inner);
+                    .split(body);
 
                     let provider_label = self
                         .config
@@ -356,7 +343,7 @@ impl App {
                         .alignment(Alignment::Center)
                         .style(
                             Style::default()
-                                .bg(palette.panel)
+                                .bg(palette.panel_alt)
                                 .fg(palette.text)
                                 .add_modifier(Modifier::BOLD),
                         ),
@@ -366,7 +353,7 @@ impl App {
                     frame.render_widget(
                         Paragraph::new(model_step.help())
                             .alignment(Alignment::Center)
-                            .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                            .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                         lines[1],
                     );
 
@@ -381,14 +368,14 @@ impl App {
                     frame.render_widget(
                         Paragraph::new("Enter to continue · Esc to cancel")
                             .alignment(Alignment::Center)
-                            .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
+                            .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
                         lines[3],
                     );
 
                     frame.render_widget(
                         Paragraph::new("Model ids stay fixed while editing existing models")
                             .alignment(Alignment::Center)
-                            .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                            .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                         lines[4],
                     );
                 } else if *step == EditProviderStep::ModelList {
@@ -397,14 +384,14 @@ impl App {
                         Constraint::Min(8),
                         Constraint::Length(1),
                     ])
-                    .split(inner);
+                    .split(body);
 
                     frame.render_widget(
                         Paragraph::new(format!("Manage models for {}", provider_id))
                             .alignment(Alignment::Center)
                             .style(
                                 Style::default()
-                                    .bg(palette.panel)
+                                    .bg(palette.panel_alt)
                                     .fg(palette.text)
                                     .add_modifier(Modifier::BOLD),
                             ),
@@ -454,7 +441,7 @@ impl App {
                     ));
 
                     let list = List::new(items)
-                        .style(Style::default().bg(palette.panel).fg(palette.text))
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.text))
                         .highlight_style(
                             Style::default()
                                 .bg(palette.selection_bg)
@@ -467,7 +454,7 @@ impl App {
                     frame.render_widget(
                         Paragraph::new("Enter edit · N new · D delete · S save · Esc cancel")
                             .alignment(Alignment::Center)
-                            .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
+                            .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
                         lines[2],
                     );
                 } else if *step == EditProviderStep::ConfirmDeleteModel {
@@ -477,7 +464,7 @@ impl App {
                         Constraint::Length(4),
                         Constraint::Length(1),
                     ])
-                    .split(inner);
+                    .split(body);
 
                     let pending = draft
                         .pending_delete_model_id
@@ -489,7 +476,7 @@ impl App {
                             .alignment(Alignment::Center)
                             .style(
                                 Style::default()
-                                    .bg(palette.panel)
+                                    .bg(palette.panel_alt)
                                     .fg(palette.error)
                                     .add_modifier(Modifier::BOLD),
                             ),
@@ -499,7 +486,7 @@ impl App {
                     frame.render_widget(
                         Paragraph::new("This only removes the model from config.toml. Historical sessions keep their stored snapshot.")
                             .alignment(Alignment::Center)
-                            .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                            .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                         lines[1],
                     );
 
@@ -508,7 +495,7 @@ impl App {
                     frame.render_widget(
                         Paragraph::new("Y to delete · N / Esc to keep")
                             .alignment(Alignment::Center)
-                            .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
+                            .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
                         lines[3],
                     );
                 } else {
@@ -519,14 +506,14 @@ impl App {
                         Constraint::Length(2),
                         Constraint::Length(1),
                     ])
-                    .split(inner);
+                    .split(body);
 
                     frame.render_widget(
                         Paragraph::new(format!("Edit provider · {}", provider_id))
                             .alignment(Alignment::Center)
                             .style(
                                 Style::default()
-                                    .bg(palette.panel)
+                                    .bg(palette.panel_alt)
                                     .fg(palette.text)
                                     .add_modifier(Modifier::BOLD),
                             ),
@@ -536,7 +523,7 @@ impl App {
                     frame.render_widget(
                         Paragraph::new(step.help())
                             .alignment(Alignment::Center)
-                            .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                            .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                         lines[1],
                     );
 
@@ -551,14 +538,14 @@ impl App {
                     frame.render_widget(
                         Paragraph::new("Enter to continue · Esc to cancel")
                             .alignment(Alignment::Center)
-                            .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
+                            .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
                         lines[3],
                     );
 
                     frame.render_widget(
                         Paragraph::new("After the fields, manage models from the list")
                             .alignment(Alignment::Center)
-                            .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                            .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                         lines[4],
                     );
                 }
@@ -579,10 +566,7 @@ impl App {
         frame.render_widget(Clear, overlay);
 
         let block = Block::default()
-            .style(Style::default().bg(palette.panel_alt))
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()))
-            .title(" Tool approval ");
+            .style(Style::default().bg(palette.panel_alt));
         frame.render_widget(block, overlay);
 
         let inner = overlay.inner(Margin {
@@ -592,12 +576,22 @@ impl App {
         self.register_selection_region(inner);
 
         let sections = Layout::vertical([
+            Constraint::Length(1),
             Constraint::Length(2),
             Constraint::Length(2),
             Constraint::Min(4),
             Constraint::Length(2),
         ])
         .split(inner);
+
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                " Tool approval ",
+                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            sections[0],
+        );
 
         frame.render_widget(
             Paragraph::new(dialog.title())
@@ -608,7 +602,7 @@ impl App {
                         .fg(palette.text)
                         .add_modifier(Modifier::BOLD),
                 ),
-            sections[0],
+            sections[1],
         );
 
         frame.render_widget(
@@ -617,14 +611,14 @@ impl App {
             )
             .alignment(Alignment::Center)
             .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
-            sections[1],
+            sections[2],
         );
 
         frame.render_widget(
             Paragraph::new(preview)
                 .style(Style::default().bg(palette.panel_alt).fg(palette.text))
                 .wrap(Wrap { trim: false }),
-            sections[2],
+            sections[3],
         );
 
         frame.render_widget(
@@ -637,7 +631,7 @@ impl App {
                     .bg(palette.panel_alt)
                     .fg(palette.accent_soft),
             ),
-            sections[3],
+            sections[4],
         );
     }
 
@@ -656,13 +650,11 @@ impl App {
         frame.render_widget(Clear, area);
 
         let block = Block::default()
-            .style(Style::default().bg(palette.panel_alt))
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.error))
-            .title(format!(" {} ", dialog.title()));
+            .style(Style::default().bg(palette.panel_alt));
         frame.render_widget(block, area);
 
         let sections = Layout::vertical([
+            Constraint::Length(1),
             Constraint::Length(2),
             Constraint::Length(2),
             Constraint::Length(2),
@@ -671,9 +663,18 @@ impl App {
         .split(inner);
 
         frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                dialog.title(),
+                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            sections[0],
+        );
+
+        frame.render_widget(
             Paragraph::new("A tool is trying to access a path outside the workspace:")
                 .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
-            sections[0],
+            sections[1],
         );
 
         let path_text = format!(
@@ -687,7 +688,7 @@ impl App {
                     .bg(palette.panel_alt)
                     .fg(palette.accent_soft),
             ),
-            sections[1],
+            sections[2],
         );
 
         frame.render_widget(
@@ -698,7 +699,7 @@ impl App {
                         .fg(palette.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
-            sections[2],
+            sections[3],
         );
     }
 
@@ -717,13 +718,11 @@ impl App {
         frame.render_widget(Clear, area);
 
         let block = Block::default()
-            .style(Style::default().bg(palette.panel_alt))
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.error))
-            .title(format!(" {} ", dialog.title()));
+            .style(Style::default().bg(palette.panel_alt));
         frame.render_widget(block, area);
 
         let sections = Layout::vertical([
+            Constraint::Length(1),
             Constraint::Length(2),
             Constraint::Length(2),
             Constraint::Length(2),
@@ -732,9 +731,18 @@ impl App {
         .split(inner);
 
         frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                dialog.title(),
+                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            sections[0],
+        );
+
+        frame.render_widget(
             Paragraph::new("A tool is trying to read a sensitive file:")
                 .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
-            sections[0],
+            sections[1],
         );
 
         let path_text = format!(
@@ -748,7 +756,7 @@ impl App {
                     .bg(palette.panel_alt)
                     .fg(palette.accent_soft),
             ),
-            sections[1],
+            sections[2],
         );
 
         frame.render_widget(
@@ -759,7 +767,7 @@ impl App {
                         .fg(palette.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
-            sections[2],
+            sections[3],
         );
     }
 
@@ -774,10 +782,7 @@ impl App {
         frame.render_widget(Clear, overlay);
 
         let block = Block::default()
-            .style(Style::default().bg(palette.panel))
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()))
-            .title(format!(" {} ", dialog.title()));
+            .style(Style::default().bg(palette.panel_alt));
         frame.render_widget(block, overlay);
 
         let inner = overlay.inner(Margin {
@@ -786,27 +791,37 @@ impl App {
         });
 
         let sections = Layout::vertical([
+            Constraint::Length(1),
             Constraint::Length(2),
             Constraint::Min(3),
             Constraint::Length(1),
         ])
         .split(inner);
 
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                dialog.title(),
+                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            sections[0],
+        );
+
         // 描述文本
         frame.render_widget(
             Paragraph::new(dialog.description())
                 .alignment(Alignment::Center)
                 .wrap(Wrap { trim: true })
-                .style(Style::default().bg(palette.panel).fg(palette.text)),
-            sections[1],
+                .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+            sections[2],
         );
 
         // 底部提示
         frame.render_widget(
             Paragraph::new("Enter to confirm · Esc or N to cancel")
                 .alignment(Alignment::Center)
-                .style(Style::default().bg(palette.panel).fg(palette.muted)),
-            sections[2],
+                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+            sections[3],
         );
     }
 
@@ -821,10 +836,7 @@ impl App {
         frame.render_widget(Clear, overlay);
 
         let block = Block::default()
-            .style(Style::default().bg(palette.panel))
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()))
-            .title(format!(" {} ", dialog.title()));
+            .style(Style::default().bg(palette.panel_alt));
         frame.render_widget(block, overlay);
 
         let inner = overlay.inner(Margin {
@@ -833,27 +845,37 @@ impl App {
         });
 
         let sections = Layout::vertical([
+            Constraint::Length(1),
             Constraint::Length(2),
             Constraint::Min(5),
             Constraint::Length(1),
         ])
         .split(inner);
 
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                dialog.title(),
+                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            sections[0],
+        );
+
         // 描述文本
         frame.render_widget(
             Paragraph::new(dialog.description())
                 .alignment(Alignment::Center)
                 .wrap(Wrap { trim: true })
-                .style(Style::default().bg(palette.panel).fg(palette.text)),
-            sections[1],
+                .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+            sections[2],
         );
 
         // 底部提示
         frame.render_widget(
             Paragraph::new("Enter to confirm · Esc or N to cancel")
                 .alignment(Alignment::Center)
-                .style(Style::default().bg(palette.panel).fg(palette.muted)),
-            sections[2],
+                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+            sections[3],
         );
     }
 
@@ -874,10 +896,7 @@ impl App {
         frame.render_widget(Clear, area);
 
         let block = Block::default()
-            .style(Style::default().bg(palette.panel_alt))
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()))
-            .title(" Question prompt ");
+            .style(Style::default().bg(palette.panel_alt));
         frame.render_widget(block, area);
 
         let options_height = options_lines.len().max(2) as u16;
@@ -990,10 +1009,7 @@ impl App {
                 frame.render_widget(Clear, overlay);
 
                 let block = Block::default()
-                    .style(Style::default().bg(palette.panel))
-                    .title(" Confirm Delete ")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(palette.border_active()));
+                    .style(Style::default().bg(palette.panel_alt));
                 frame.render_widget(block, overlay);
 
                 let inner = overlay.inner(Margin {
@@ -1002,6 +1018,7 @@ impl App {
                 });
                 self.register_selection_region(inner);
                 let sections = Layout::vertical([
+                    Constraint::Length(1),
                     Constraint::Length(3),
                     Constraint::Min(1),
                     Constraint::Length(3),
@@ -1009,10 +1026,19 @@ impl App {
                 .split(inner);
 
                 frame.render_widget(
+                    Paragraph::new(Line::from(vec![Span::styled(
+                        " Delete session(s) ",
+                        Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                    )]))
+                    .style(Style::default().bg(palette.panel_alt)),
+                    sections[0],
+                );
+
+                frame.render_widget(
                     Paragraph::new(format!("Delete {} session(s)?", session_ids.len()))
                         .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel).fg(palette.text)),
-                    sections[0],
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+                    sections[1],
                 );
 
                 let mut content = String::new();
@@ -1025,15 +1051,15 @@ impl App {
 
                 frame.render_widget(
                     Paragraph::new(content)
-                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
-                    sections[1],
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+                    sections[2],
                 );
 
                 frame.render_widget(
                     Paragraph::new("Enter: confirm · Esc: cancel")
                         .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
-                    sections[2],
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
+                    sections[3],
                 );
             }
             SessionPanelDialog::ExportConfirm {
@@ -1044,10 +1070,7 @@ impl App {
                 frame.render_widget(Clear, overlay);
 
                 let block = Block::default()
-                    .style(Style::default().bg(palette.panel))
-                    .title(" Confirm Export ")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(palette.border_active()));
+                    .style(Style::default().bg(palette.panel_alt));
                 frame.render_widget(block, overlay);
 
                 let inner = overlay.inner(Margin {
@@ -1056,6 +1079,7 @@ impl App {
                 });
                 self.register_selection_region(inner);
                 let sections = Layout::vertical([
+                    Constraint::Length(1),
                     Constraint::Length(3),
                     Constraint::Min(1),
                     Constraint::Length(3),
@@ -1063,10 +1087,19 @@ impl App {
                 .split(inner);
 
                 frame.render_widget(
+                    Paragraph::new(Line::from(vec![Span::styled(
+                        " Export session(s) ",
+                        Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                    )]))
+                    .style(Style::default().bg(palette.panel_alt)),
+                    sections[0],
+                );
+
+                frame.render_widget(
                     Paragraph::new(format!("Export {} session(s) to JSONL?", session_ids.len()))
                         .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel).fg(palette.text)),
-                    sections[0],
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+                    sections[1],
                 );
 
                 let mut content = String::new();
@@ -1079,15 +1112,15 @@ impl App {
 
                 frame.render_widget(
                     Paragraph::new(content)
-                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
-                    sections[1],
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+                    sections[2],
                 );
 
                 frame.render_widget(
                     Paragraph::new("Enter: export · Esc: cancel")
                         .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
-                    sections[2],
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
+                    sections[3],
                 );
             }
             SessionPanelDialog::Cleanup {
@@ -1099,10 +1132,7 @@ impl App {
                 frame.render_widget(Clear, overlay);
 
                 let block = Block::default()
-                    .style(Style::default().bg(palette.panel))
-                    .title(" Cleanup Old Sessions ")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(palette.border_active()));
+                    .style(Style::default().bg(palette.panel_alt));
                 frame.render_widget(block, overlay);
 
                 let inner = overlay.inner(Margin {
@@ -1111,6 +1141,7 @@ impl App {
                 });
                 self.register_selection_region(inner);
                 let sections = Layout::vertical([
+                    Constraint::Length(1),
                     Constraint::Length(2),
                     Constraint::Length(2),
                     Constraint::Length(1),
@@ -1118,6 +1149,15 @@ impl App {
                     Constraint::Length(3),
                 ])
                 .split(inner);
+
+                frame.render_widget(
+                    Paragraph::new(Line::from(vec![Span::styled(
+                        " Cleanup Sessions ",
+                        Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                    )]))
+                    .style(Style::default().bg(palette.panel_alt)),
+                    sections[0],
+                );
 
                 let (title_text, hint_text) = if *cleanup_workspace {
                     (
@@ -1143,15 +1183,15 @@ impl App {
                 frame.render_widget(
                     Paragraph::new(title_text)
                         .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel).fg(palette.text)),
-                    sections[0],
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+                    sections[1],
                 );
 
                 frame.render_widget(
                     Paragraph::new(hint_text)
                         .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
-                    sections[1],
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+                    sections[2],
                 );
 
                 frame.render_widget(
@@ -1160,8 +1200,8 @@ impl App {
                         preview.total_count
                     ))
                     .alignment(Alignment::Center)
-                    .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
-                    sections[2],
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
+                    sections[3],
                 );
 
                 let mut content = String::new();
@@ -1171,15 +1211,15 @@ impl App {
 
                 frame.render_widget(
                     Paragraph::new(content)
-                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
-                    sections[3],
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+                    sections[4],
                 );
 
                 frame.render_widget(
                     Paragraph::new("Enter: confirm · Esc: cancel")
                         .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
-                    sections[4],
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
+                    sections[5],
                 );
             }
         }
@@ -1196,10 +1236,7 @@ impl App {
         frame.render_widget(Clear, overlay);
 
         let block = Block::default()
-            .style(Style::default().bg(palette.panel))
-            .title(dialog.title())
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()));
+            .style(Style::default().bg(palette.panel_alt));
         frame.render_widget(block, overlay);
 
         let inner = overlay.inner(Margin {
@@ -1212,28 +1249,38 @@ impl App {
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
+            Constraint::Length(1),
             Constraint::Length(3),
             Constraint::Length(1),
         ])
         .split(inner);
 
         frame.render_widget(
-            Paragraph::new(dialog.description())
-                .style(Style::default().bg(palette.panel).fg(palette.text)),
+            Paragraph::new(Line::from(vec![Span::styled(
+                dialog.title(),
+                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
             sections[0],
         );
 
         frame.render_widget(
-            Paragraph::new("Press Enter to save, Esc to cancel")
-                .style(Style::default().bg(palette.panel).fg(palette.muted)),
+            Paragraph::new(dialog.description())
+                .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
             sections[1],
         );
 
         frame.render_widget(
+            Paragraph::new("Press Enter to save, Esc to cancel")
+                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+            sections[2],
+        );
+
+        frame.render_widget(
             Paragraph::new(self.composer.text())
-                .style(Style::default().bg(palette.panel).fg(palette.text))
+                .style(Style::default().bg(palette.panel_alt).fg(palette.text))
                 .wrap(Wrap { trim: false }),
-            sections[3],
+            sections[4],
         );
     }
 }

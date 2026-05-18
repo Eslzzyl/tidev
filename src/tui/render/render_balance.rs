@@ -1,8 +1,8 @@
 use ratatui::{
     layout::{Constraint, Layout, Margin, Rect},
-    prelude::{Frame, Style},
+    prelude::{Frame, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Clear, Paragraph},
 };
 
 use crate::theme::ThemePalette;
@@ -27,16 +27,13 @@ impl App {
         frame.render_widget(Clear, overlay);
 
         let block = Block::default()
-            .style(Style::default().bg(palette.panel))
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()))
-            .title(" Balance ");
+            .style(Style::default().bg(palette.panel_alt));
 
         frame.render_widget(block, overlay);
 
         let inner = overlay.inner(Margin {
-            horizontal: 1,
-            vertical: 1,
+            horizontal: 0,
+            vertical: 0,
         });
 
         if inner.width < 20 || inner.height < 10 {
@@ -44,15 +41,25 @@ impl App {
         }
 
         let layout = Layout::vertical([
+            Constraint::Length(1),
             Constraint::Length(2),
             Constraint::Min(0),
             Constraint::Length(1),
         ])
         .split(inner);
 
-        self.render_balance_tabs(frame, layout[0], palette);
-        self.render_balance_content(frame, layout[1], palette);
-        self.render_balance_footer(frame, layout[2], palette);
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                " Balance ",
+                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            layout[0],
+        );
+
+        self.render_balance_tabs(frame, layout[1], palette);
+        self.render_balance_content(frame, layout[2], palette);
+        self.render_balance_footer(frame, layout[3], palette);
     }
 
     fn render_balance_tabs(&self, frame: &mut Frame<'_>, area: Rect, palette: ThemePalette) {
@@ -65,29 +72,29 @@ impl App {
         let tabs = ProviderTab::all();
         let mut spans = vec![Span::styled(
             "Provider: ",
-            Style::default().bg(palette.panel).fg(palette.muted),
+            Style::default().bg(palette.panel_alt).fg(palette.muted),
         )];
 
         for (i, tab) in tabs.iter().enumerate() {
             let is_selected = panel.map(|p| p.selected_provider == *tab).unwrap_or(false);
 
             let style = if is_selected {
-                Style::default().bg(palette.panel).fg(palette.text)
+                Style::default().bg(palette.panel_alt).fg(palette.text)
             } else {
-                Style::default().bg(palette.panel).fg(palette.muted)
+                Style::default().bg(palette.panel_alt).fg(palette.muted)
             };
 
             let label = tab.label();
 
             if i > 0 {
-                spans.push(Span::styled("  ", Style::default().bg(palette.panel)));
+                spans.push(Span::styled("  ", Style::default().bg(palette.panel_alt)));
             }
             spans.push(Span::styled(format!("[{}]", label), style));
         }
 
-        spans.push(Span::styled("     ", Style::default().bg(palette.panel)));
+        spans.push(Span::styled("     ", Style::default().bg(palette.panel_alt)));
 
-        let paragraph = Paragraph::new(Line::from(spans)).style(Style::default().bg(palette.panel));
+        let paragraph = Paragraph::new(Line::from(spans)).style(Style::default().bg(palette.panel_alt));
         frame.render_widget(paragraph, area);
     }
 
@@ -112,7 +119,7 @@ impl App {
             None => {
                 let spans = vec![Span::styled(
                     "No balance data",
-                    Style::default().bg(palette.panel).fg(palette.muted),
+                    Style::default().bg(palette.panel_alt).fg(palette.muted),
                 )];
                 let paragraph = Paragraph::new(Line::from(spans));
                 frame.render_widget(paragraph, area);
@@ -133,49 +140,49 @@ impl App {
             if panel.loading {
                 lines.push(Line::from(vec![Span::styled(
                     "Loading...",
-                    Style::default().bg(palette.panel).fg(palette.muted),
+                    Style::default().bg(palette.panel_alt).fg(palette.muted),
                 )]));
             } else if let Some(error) = &panel.error {
                 lines.push(Line::from(vec![Span::styled(
                     format!("Error: {}", error),
-                    Style::default().bg(palette.panel).fg(palette.error),
+                    Style::default().bg(palette.panel_alt).fg(palette.error),
                 )]));
             } else if let Some(balance) = &panel.deepseek_balance {
                 // Header
                 lines.push(Line::from(vec![Span::styled(
                     format!("DeepSeek Account (Available: {})", balance.is_available),
-                    Style::default().bg(palette.panel).fg(palette.text),
+                    Style::default().bg(palette.panel_alt).fg(palette.text),
                 )]));
                 lines.push(Line::from(vec![Span::styled(
                     "─────────────────────────────────",
-                    Style::default().bg(palette.panel).fg(palette.border),
+                    Style::default().bg(palette.panel_alt).fg(palette.border),
                 )]));
 
                 for info in &balance.balance_infos {
                     lines.push(Line::from(vec![Span::styled(
                         format!("Currency: {}", info.currency),
-                        Style::default().bg(palette.panel).fg(palette.text),
+                        Style::default().bg(palette.panel_alt).fg(palette.text),
                     )]));
                     lines.push(Line::from(vec![Span::styled(
                         format!("  Total Balance: {} {}", info.total_balance, info.currency),
-                        Style::default().bg(palette.panel).fg(palette.text),
+                        Style::default().bg(palette.panel_alt).fg(palette.text),
                     )]));
                     lines.push(Line::from(vec![Span::styled(
                         format!("  Granted:      {} {}", info.granted_balance, info.currency),
-                        Style::default().bg(palette.panel).fg(palette.muted),
+                        Style::default().bg(palette.panel_alt).fg(palette.muted),
                     )]));
                     lines.push(Line::from(vec![Span::styled(
                         format!(
                             "  Topped Up:    {} {}",
                             info.topped_up_balance, info.currency
                         ),
-                        Style::default().bg(palette.panel).fg(palette.muted),
+                        Style::default().bg(palette.panel_alt).fg(palette.muted),
                     )]));
                 }
             }
         }
 
-        let paragraph = Paragraph::new(lines).style(Style::default().bg(palette.panel));
+        let paragraph = Paragraph::new(lines).style(Style::default().bg(palette.panel_alt));
         frame.render_widget(paragraph, area);
     }
 
@@ -192,31 +199,31 @@ impl App {
             if panel.loading {
                 lines.push(Line::from(vec![Span::styled(
                     "Loading...",
-                    Style::default().bg(palette.panel).fg(palette.muted),
+                    Style::default().bg(palette.panel_alt).fg(palette.muted),
                 )]));
             } else if let Some(error) = &panel.error {
                 lines.push(Line::from(vec![Span::styled(
                     format!("Error: {}", error),
-                    Style::default().bg(palette.panel).fg(palette.error),
+                    Style::default().bg(palette.panel_alt).fg(palette.error),
                 )]));
             } else if let Some(balance) = &panel.siliconflow_balance {
                 // Header
                 lines.push(Line::from(vec![Span::styled(
                     "SiliconFlow Account",
-                    Style::default().bg(palette.panel).fg(palette.text),
+                    Style::default().bg(palette.panel_alt).fg(palette.text),
                 )]));
                 lines.push(Line::from(vec![Span::styled(
                     "─────────────────────────────────",
-                    Style::default().bg(palette.panel).fg(palette.border),
+                    Style::default().bg(palette.panel_alt).fg(palette.border),
                 )]));
                 lines.push(Line::from(vec![Span::styled(
                     format!("Total Balance: {}", balance.data.total_balance),
-                    Style::default().bg(palette.panel).fg(palette.text),
+                    Style::default().bg(palette.panel_alt).fg(palette.text),
                 )]));
             }
         }
 
-        let paragraph = Paragraph::new(lines).style(Style::default().bg(palette.panel));
+        let paragraph = Paragraph::new(lines).style(Style::default().bg(palette.panel_alt));
         frame.render_widget(paragraph, area);
     }
 
@@ -236,15 +243,15 @@ impl App {
         let spans = vec![
             Span::styled(
                 refresh_hint,
-                Style::default().bg(palette.panel).fg(palette.muted),
+                Style::default().bg(palette.panel_alt).fg(palette.muted),
             ),
             Span::styled(
                 "                    [Esc] Close",
-                Style::default().bg(palette.panel).fg(palette.muted),
+                Style::default().bg(palette.panel_alt).fg(palette.muted),
             ),
         ];
 
-        let paragraph = Paragraph::new(Line::from(spans)).style(Style::default().bg(palette.panel));
+        let paragraph = Paragraph::new(Line::from(spans)).style(Style::default().bg(palette.panel_alt));
         frame.render_widget(paragraph, area);
     }
 }

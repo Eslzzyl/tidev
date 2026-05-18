@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Margin, Rect},
     prelude::{Frame, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState},
+    widgets::{Block, Clear, List, ListItem, ListState},
 };
 
 impl App {
@@ -50,10 +50,7 @@ impl App {
         state.select(Some(self.command_palette.selected_index));
 
         let panel = Block::default()
-            .style(Style::default().bg(palette.panel_alt))
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()))
-            .title(format!("Commands · /{}", self.command_palette.query));
+            .style(Style::default().bg(palette.panel_alt));
 
         let list = List::new(items)
             .style(Style::default().bg(palette.panel_alt).fg(palette.text))
@@ -119,10 +116,7 @@ impl App {
         state.select(Some(self.at_mention.selected_index));
 
         let panel = Block::default()
-            .style(Style::default().bg(palette.panel_alt))
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()))
-            .title(format!("Files · @{}", self.at_mention.query));
+            .style(Style::default().bg(palette.panel_alt));
 
         let list = List::new(items)
             .style(Style::default().bg(palette.panel_alt).fg(palette.text))
@@ -182,10 +176,7 @@ impl App {
         state.select(Some(self.snippet_state.selected_index));
 
         let panel = Block::default()
-            .style(Style::default().bg(palette.panel_alt))
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()))
-            .title(format!("Snippets · {}", self.snippet_state.query));
+            .style(Style::default().bg(palette.panel_alt));
 
         let list = List::new(items)
             .style(Style::default().bg(palette.panel_alt).fg(palette.text))
@@ -233,13 +224,7 @@ impl App {
         state.select(Some(self.shell_completion.selected_index));
 
         let panel = Block::default()
-            .style(Style::default().bg(palette.panel_alt))
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()))
-            .title(format!(
-                "Commands ({})",
-                self.shell_completion.candidates.len()
-            ));
+            .style(Style::default().bg(palette.panel_alt));
 
         let list = List::new(items)
             .style(Style::default().bg(palette.panel_alt).fg(palette.text))

@@ -172,11 +172,9 @@ impl App {
 
         let rect = Rect::new(x, y, width, height);
         let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.accent))
-            .style(Style::default().bg(palette.background).fg(palette.text));
+            .style(Style::default().bg(palette.panel).fg(palette.text));
         let paragraph = Paragraph::new(message.as_str())
-            .style(Style::default().bg(palette.background).fg(palette.text))
+            .style(Style::default().bg(palette.panel).fg(palette.text))
             .alignment(Alignment::Center)
             .block(block);
 
@@ -218,9 +216,9 @@ impl App {
             Constraint::Length(1),
             Constraint::Length(
                 self.composer
-                    .preferred_height(card_inner_width, self.config.ui.max_input_lines),
+                    .preferred_height(card_inner_width, self.config.ui.max_input_lines)
+                    .saturating_add(2),
             ),
-            Constraint::Length(1),
         ])
         .split(inner);
 
@@ -258,39 +256,18 @@ impl App {
             _ => self.mode.title().to_string(),
         };
         let prompt_placeholder = self.composer.placeholder().to_string();
-        self.render_input_block(
+        self.render_input_block_with_composer(
             frame,
             sections[2],
             &prompt_title,
+            &self.composer,
             &prompt_placeholder,
             false,
+            true,
+            true,
         );
 
-        let model_label = self.active_model.label();
-        let sandbox_label = self
-            .tools
-            .sandbox_policy()
-            .map(|p| p.label())
-            .unwrap_or_else(|| self.mode.sandbox_policy(&self.config.sandbox).label());
-        let model_display = if self.thinking_level.is_supported() {
-            format!(
-                "{} [{}]  Sandbox: {}",
-                model_label,
-                self.thinking_level.display_name(),
-                sandbox_label
-            )
-        } else {
-            format!("{}  Sandbox: {}", model_label, sandbox_label)
-        };
-        let model_line = Line::from(vec![Span::styled(
-            model_display,
-            Style::default().fg(palette.accent),
-        )]);
-        frame.render_widget(
-            Paragraph::new(model_line).style(Style::default().fg(palette.text)),
-            sections[3],
-        );
-
+        // Model/sandbox info is now displayed inside the composer as metadata
         let workspace_path = self.workspace_root.display().to_string();
         let display_path = workspace_path.replace(
             &dirs::home_dir().unwrap_or_default().display().to_string(),
@@ -330,6 +307,7 @@ impl App {
             placeholder,
             mask_input,
             true,
+            false,
         );
     }
 
@@ -337,35 +315,39 @@ impl App {
         &self,
         frame: &mut Frame<'_>,
         area: Rect,
-        title: &str,
+        _title: &str,
         composer: &Composer,
         placeholder: &str,
         mask_input: bool,
         register_input_area: bool,
+        show_left_accent: bool,
     ) {
         let palette = self.palette();
-        let border_style = if self.shell_mode {
-            Style::default().fg(palette.success)
-        } else if self.pending_request {
-            // Request was made in current mode — keep its color while waiting
-            Style::default().fg(palette.border_mode_color(self.mode))
-        } else if let Some(pending) = self.pending_mode {
-            // Mode switch queued without pending request — preview the future mode
-            Style::default().fg(palette.border_mode_color(pending))
-        } else {
-            Style::default().fg(palette.border_mode_color(self.mode))
-        };
 
         let inner = area.inner(Margin {
-            horizontal: 1,
+            horizontal: if show_left_accent { 2 } else { 1 },
             vertical: 1,
         });
+
+        // When showing the accent bar (main composer), reserve space for metadata at the bottom
+        let metadata_height: u16 = if show_left_accent { 2 } else { 0 };
+        let (text_area, metadata_area) = if show_left_accent && inner.height > metadata_height {
+            let split = Layout::vertical([
+                Constraint::Min(1),
+                Constraint::Length(metadata_height),
+            ])
+            .split(inner);
+            (split[0], split[1])
+        } else {
+            (inner, Rect::default())
+        };
+
         if register_input_area {
-            self.input_area.set(Some(inner));
+            self.input_area.set(Some(text_area));
         }
 
-        let visible_lines = inner.height.max(1) as usize;
-        let total_lines = composer.display_line_count(inner.width as usize);
+        let visible_lines = text_area.height.max(1) as usize;
+        let total_lines = composer.display_line_count(text_area.width as usize);
         let max_scroll = total_lines.saturating_sub(visible_lines);
 
         // Use stored scroll offset, clamped to valid range
@@ -386,7 +368,7 @@ impl App {
                 Style::default().fg(palette.text),
             )))
         } else {
-            let width = inner.width as usize;
+            let width = text_area.width as usize;
             let selection = composer.selection_range();
 
             // Build lines with selection highlighting
@@ -447,34 +429,127 @@ impl App {
             Text::from(lines)
         };
 
+        // Background fill for the input area
+        frame.render_widget(
+            Block::default().style(Style::default().bg(palette.panel)),
+            area,
+        );
+
+        // Left accent bar (mode-colored) — only for the main composer
+        if show_left_accent {
+            let accent_color = if self.shell_mode {
+                palette.success
+            } else if self.pending_request {
+                palette.border_mode_color(self.mode)
+            } else if let Some(pending) = self.pending_mode {
+                palette.border_mode_color(pending)
+            } else {
+                palette.border_mode_color(self.mode)
+            };
+            for row in 0..area.height {
+                frame.render_widget(
+                    Paragraph::new(Line::from(vec![Span::styled(
+                        "┃",
+                        Style::default().fg(accent_color).bg(palette.panel),
+                    )]))
+                    .style(Style::default().bg(palette.panel)),
+                    Rect::new(area.x, area.y + row, 1, 1),
+                );
+            }
+
+            // Render metadata row below the text content (2nd row of metadata_area, 1st row is blank)
+            if metadata_area.width > 0 && metadata_area.height > 1 {
+                let mut meta_spans: Vec<Span> = Vec::new();
+
+                // Mode label (Build / Plan / Shell)
+                let (mode_label, mode_style) = if self.shell_mode {
+                    ("Shell".to_string(),
+                     Style::default().fg(palette.success).add_modifier(Modifier::BOLD))
+                } else {
+                    (self.mode.title().to_string(),
+                     Style::default().fg(palette.border_mode_color(self.mode)).add_modifier(Modifier::BOLD))
+                };
+                meta_spans.push(Span::styled(mode_label, mode_style));
+
+                // · separator
+                meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
+
+                // Model label
+                meta_spans.push(Span::styled(
+                    self.active_model.label(),
+                    Style::default().fg(palette.text),
+                ));
+
+                // · separator
+                meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
+
+                // Provider
+                meta_spans.push(Span::styled(
+                    &self.active_model.provider_id,
+                    Style::default().fg(palette.muted),
+                ));
+
+                // Thinking level (if supported)
+                if self.thinking_level.is_supported() {
+                    meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
+                    meta_spans.push(Span::styled(
+                        format!("[{}]", self.thinking_level.display_name()),
+                        Style::default().fg(palette.accent_soft),
+                    ));
+                }
+
+                // Sandbox status
+                let sandbox_label = self
+                    .tools
+                    .sandbox_policy()
+                    .map(|p| p.label())
+                    .unwrap_or_else(|| self.mode.sandbox_policy(&self.config.sandbox).label());
+                meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
+                let sandbox_style = if sandbox_label.contains("off") || sandbox_label.contains("read") {
+                    Style::default().fg(palette.warning)
+                } else {
+                    Style::default().fg(palette.success)
+                };
+                meta_spans.push(Span::styled(
+                    format!("sandbox:{}", sandbox_label),
+                    sandbox_style,
+                ));
+
+                let meta_paragraph = Paragraph::new(Line::from(meta_spans))
+                    .style(Style::default().bg(palette.panel));
+                // Render on the second row of metadata_area, aligned with text content
+                let meta_rect = Rect::new(
+                    area.x + 2,
+                    metadata_area.y + 1,
+                    metadata_area.width,
+                    1,
+                );
+                frame.render_widget(meta_paragraph, meta_rect);
+            }
+        }
+
         let mut paragraph = Paragraph::new(content)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(border_style)
-                    .title(title),
-            )
             .style(Style::default().fg(palette.text))
             .scroll((scroll, 0));
 
         paragraph = paragraph.wrap(Wrap { trim: false });
 
-        frame.render_widget(paragraph, area);
+        frame.render_widget(paragraph, text_area);
 
-        if inner.width > 0 && inner.height > 0 {
-            let (cursor_line, cursor_col) = composer.cursor_position(inner.width);
+        if text_area.width > 0 && text_area.height > 0 {
+            let (cursor_line, cursor_col) = composer.cursor_position(text_area.width);
             let mut cursor_line = cursor_line.saturating_sub(scroll);
             let mut cursor_col = cursor_col;
 
-            if composer.cursor_wraps_to_next_row(inner.width as usize) {
+            if composer.cursor_wraps_to_next_row(text_area.width as usize) {
                 cursor_line = cursor_line.saturating_add(1);
                 cursor_col = 0;
             }
 
-            let cursor_x = inner.x.saturating_add(cursor_col);
-            let cursor_y = inner
+            let cursor_x = text_area.x.saturating_add(cursor_col);
+            let cursor_y = text_area
                 .y
-                .saturating_add(cursor_line.min(inner.height.saturating_sub(1)));
+                .saturating_add(cursor_line.min(text_area.height.saturating_sub(1)));
 
             frame.set_cursor_position(Position::new(cursor_x, cursor_y));
         }
@@ -537,7 +612,7 @@ impl App {
         use ratatui::layout::Margin;
         use ratatui::style::{Modifier, Style};
         use ratatui::text::{Line, Span};
-        use ratatui::widgets::{Block, Borders, Clear, List};
+        use ratatui::widgets::{Block, Clear, List};
 
         let palette = self.palette();
 
@@ -545,15 +620,12 @@ impl App {
         frame.render_widget(Clear, overlay);
 
         let block = Block::default()
-            .title(" Sandbox Policy ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()))
             .style(Style::default().bg(palette.panel));
         frame.render_widget(block, overlay);
 
         let inner = overlay.inner(Margin {
-            horizontal: 2,
-            vertical: 1,
+            horizontal: 1,
+            vertical: 0,
         });
 
         let items = S::build_items();
@@ -589,20 +661,17 @@ impl App {
         use ratatui::layout::{Constraint, Layout, Margin};
         use ratatui::style::Style;
         use ratatui::text::{Line, Span};
-        use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+        use ratatui::widgets::{Block, Clear, Paragraph};
 
         let palette = self.palette();
         let overlay = centered_rect(56, 8, area);
         frame.render_widget(Clear, overlay);
 
         let block = Block::default()
-            .title(" Sandbox Denied ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.warning))
             .style(Style::default().bg(palette.panel));
         frame.render_widget(&block, overlay);
 
-        let inner = overlay.inner(Margin::new(2, 1));
+        let inner = overlay.inner(Margin::new(1, 0));
         let sections = Layout::vertical([
             Constraint::Length(2),
             Constraint::Length(1),
@@ -654,36 +723,6 @@ impl App {
         let status_width = status_text.width().min(area.width as usize).max(1) as u16;
         let chunks =
             Layout::horizontal([Constraint::Min(1), Constraint::Length(status_width)]).split(area);
-
-        // Build the left label: model-name [thinking-level]  Sandbox: xxxx
-        // Check runtime override first, fall back to mode-based config policy
-        let sandbox_label = self
-            .tools
-            .sandbox_policy()
-            .map(|p| p.label())
-            .unwrap_or_else(|| self.mode.sandbox_policy(&self.config.sandbox).label());
-
-        let model_label = self.active_model.label();
-        let full_label = if self.thinking_level.is_supported() {
-            format!(
-                "{} [{}]  Sandbox: {}",
-                model_label,
-                self.thinking_level.display_name(),
-                sandbox_label
-            )
-        } else {
-            format!("{}  Sandbox: {}", model_label, sandbox_label)
-        };
-
-        let model_line = Line::from(vec![Span::styled(
-            full_label,
-            Style::default().fg(palette.accent),
-        )]);
-
-        frame.render_widget(
-            Paragraph::new(model_line).style(Style::default().fg(palette.text)),
-            chunks[0],
-        );
 
         frame.render_widget(
             Paragraph::new(status_text)

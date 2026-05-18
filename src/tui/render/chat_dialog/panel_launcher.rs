@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Margin, Rect},
     prelude::{Frame, Modifier, Style},
     text::Line,
-    widgets::{Block, Borders, Clear, List, ListItem, ListState},
+    widgets::{Block, Clear, List, ListItem, ListState},
 };
 
 impl App {
@@ -72,10 +72,7 @@ impl App {
         state.select(Some(self.panel_launcher.selected_index));
 
         let block = Block::default()
-            .style(Style::default().bg(palette.panel_alt))
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()))
-            .title(" Panels ");
+            .style(Style::default().bg(palette.panel_alt));
 
         let list = List::new(items)
             .style(Style::default().bg(palette.panel_alt).fg(palette.text))

@@ -2,7 +2,6 @@ use crate::tui::App;
 use crate::tui::render::render::{centered_rect, render_scrollbar, shorten};
 use crate::{
     tui::mcp_panel::McpPanelState,
-    tui::mcp_panel::McpServerEditorState,
     tui::memory_panel::{EditField, MemoryPanelMode, MemoryPanelState, PanelFocus},
     tui::message_panel::MessagePanelState,
     tui::model_panel::{ModelPanelItem, ModelPanelState, thinking_options_for_model},
@@ -18,7 +17,7 @@ use ratatui::{
     prelude::{Frame, Modifier, Position, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState,
+        Block, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState,
         Wrap,
     },
 };
@@ -35,18 +34,7 @@ impl App {
         self.theme_panel_overlay.set(Some(overlay));
 
         let block = Block::default()
-            .style(Style::default().bg(palette.panel_alt))
-            .title(" Theme  ")
-            .title(format!(
-                " {} themes ",
-                panel
-                    .display_items
-                    .iter()
-                    .filter(|i| matches!(i, DisplayItem::Theme(_)))
-                    .count()
-            ))
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()));
+            .style(Style::default().bg(palette.panel_alt));
 
         frame.render_widget(Clear, overlay);
         frame.render_widget(block, overlay);
@@ -55,6 +43,16 @@ impl App {
             vertical: 1,
         });
         self.register_selection_region(inner);
+
+        // --- Title ---
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                " Theme ",
+                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            Rect::new(inner.x, inner.y, inner.width, 1),
+        );
 
         // --- Search / filter bar ---
         let search_text = if panel.query.is_empty() {
@@ -66,11 +64,11 @@ impl App {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(search_text, search_style)]))
                 .style(Style::default().bg(palette.panel_alt)),
-            Rect::new(inner.x, inner.y, inner.width, 1),
+            Rect::new(inner.x, inner.y + 1, inner.width, 1),
         );
 
         // Divider
-        let divider_y = inner.y + 1;
+        let divider_y = inner.y + 2;
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "─".repeat(inner.width as usize),
@@ -81,8 +79,8 @@ impl App {
         );
 
         // --- List area ---
-        let list_y = inner.y + 2;
-        let list_height = inner.height.saturating_sub(2);
+        let list_y = inner.y + 3;
+        let list_height = inner.height.saturating_sub(3);
         if list_height == 0 {
             return;
         }
@@ -179,10 +177,7 @@ impl App {
 
         frame.render_widget(Clear, overlay);
         let panel_block = Block::default()
-            .style(Style::default().bg(palette.panel))
-            .title(" Agents ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()));
+            .style(Style::default().bg(palette.panel_alt));
         frame.render_widget(panel_block, overlay);
 
         let inner = overlay.inner(Margin {
@@ -190,6 +185,23 @@ impl App {
             vertical: 1,
         });
         self.register_selection_region(inner);
+
+        let sections = Layout::vertical([
+            Constraint::Length(1), // title
+            Constraint::Length(1), // header
+            Constraint::Length(1), // divider
+            Constraint::Min(0),    // content
+        ])
+        .split(inner);
+
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                " Agents ",
+                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            sections[0],
+        );
 
         // Header line
         let header = Line::from(vec![
@@ -208,27 +220,21 @@ impl App {
             ),
         ]);
         frame.render_widget(
-            Paragraph::new(header).style(Style::default().bg(palette.panel)),
-            inner,
+            Paragraph::new(header).style(Style::default().bg(palette.panel_alt)),
+            sections[1],
         );
 
         let divider = Line::from(Span::styled(
             "─".repeat(inner.width as usize),
             Style::default().fg(palette.muted),
         ));
-        let sections = Layout::vertical([
-            Constraint::Length(1), // header
-            Constraint::Length(1), // divider
-            Constraint::Min(0),    // content
-        ])
-        .split(inner);
         frame.render_widget(
-            Paragraph::new(divider).style(Style::default().bg(palette.panel)),
-            sections[1],
+            Paragraph::new(divider).style(Style::default().bg(palette.panel_alt)),
+            sections[2],
         );
 
         // Content area with scrollbar
-        let content_area = sections[2];
+        let content_area = sections[3];
         let (content_area, scrollbar_area) = if content_area.width > 2 {
             let chunks = Layout::horizontal([
                 Constraint::Min(1),
@@ -281,7 +287,7 @@ impl App {
         }
 
         frame.render_widget(
-            Paragraph::new(lines).style(Style::default().bg(palette.panel)),
+            Paragraph::new(lines).style(Style::default().bg(palette.panel_alt)),
             content_area,
         );
 
@@ -350,10 +356,7 @@ impl App {
         state.select(Some(panel.selected_index));
 
         let panel_block = Block::default()
-            .style(Style::default().bg(current_palette.panel_alt))
-            .title(" Settings ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(current_palette.border_active()));
+            .style(Style::default().bg(current_palette.panel_alt));
 
         let list = List::new(items)
             .style(
@@ -391,26 +394,8 @@ impl App {
         self.session_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
 
-        let view_mode_text = match panel.view_mode {
-            SessionViewMode::CurrentWorkspace => "Current Workspace",
-            SessionViewMode::AllSessions => "All Sessions",
-        };
-        let title_text =
-            if panel.operation_mode == crate::tui::session_panel::OperationMode::MultiSelect {
-                format!(
-                    " Sessions: {} ({} selected) ",
-                    view_mode_text,
-                    panel.selected_count()
-                )
-            } else {
-                format!(" Sessions: {} ", view_mode_text)
-            };
-
         let title = Block::default()
-            .style(Style::default().bg(palette.panel))
-            .title(title_text)
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()));
+            .style(Style::default().bg(palette.panel_alt));
         frame.render_widget(title, overlay);
 
         let inner = overlay.inner(Margin {
@@ -419,7 +404,14 @@ impl App {
         });
         self.register_selection_region(inner);
 
+        let view_mode_text = match panel.view_mode {
+            SessionViewMode::CurrentWorkspace => "Current Workspace",
+            SessionViewMode::AllSessions => "All Sessions",
+        };
+        let title_text = format!(" Sessions: {} ", view_mode_text);
+
         let sections = Layout::vertical([
+            Constraint::Length(1),
             Constraint::Length(2),
             Constraint::Length(3),
             Constraint::Min(8),
@@ -428,15 +420,24 @@ impl App {
         .split(inner);
 
         frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                &title_text,
+                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            sections[0],
+        );
+
+        frame.render_widget(
             Paragraph::new("Type to filter by title, model, provider, or session id.")
                 .alignment(Alignment::Center)
-                .style(Style::default().bg(palette.panel).fg(palette.muted)),
-            sections[0],
+                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+            sections[1],
         );
 
         self.render_input_block(
             frame,
-            sections[1],
+            sections[2],
             "Search sessions",
             self.composer.placeholder(),
             false,
@@ -452,8 +453,8 @@ impl App {
             frame.render_widget(
                 Paragraph::new("No sessions match this search.")
                     .alignment(Alignment::Center)
-                    .style(Style::default().bg(palette.panel).fg(palette.muted)),
-                sections[2],
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+                sections[3],
             );
         } else {
             // Compute minimum width needed for the right column
@@ -520,7 +521,7 @@ impl App {
                     Span::styled(
                         shorten(
                             &session.title,
-                            sections[2].width.saturating_sub(max_right_width + 4) as usize,
+                            sections[3].width.saturating_sub(max_right_width + 4) as usize,
                         ),
                         Style::default()
                             .fg(palette.text)
@@ -575,7 +576,7 @@ impl App {
                 rows,
                 [Constraint::Fill(1), Constraint::Min(max_right_width)],
             )
-            .style(Style::default().bg(palette.panel).fg(palette.text))
+            .style(Style::default().bg(palette.panel_alt).fg(palette.text))
             .row_highlight_style(
                 Style::default()
                     .bg(palette.selection_bg)
@@ -583,7 +584,7 @@ impl App {
                     .add_modifier(Modifier::BOLD),
             );
 
-            frame.render_stateful_widget(table, sections[2], &mut state);
+            frame.render_stateful_widget(table, sections[3], &mut state);
         }
 
         let help_text = if panel.operation_mode
@@ -597,8 +598,8 @@ impl App {
         frame.render_widget(
             Paragraph::new(help_text)
                 .alignment(Alignment::Center)
-                .style(Style::default().bg(palette.panel).fg(palette.muted)),
-            sections[3],
+                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+            sections[4],
         );
     }
 
@@ -614,10 +615,7 @@ impl App {
         frame.render_widget(Clear, overlay);
 
         let title = Block::default()
-            .style(Style::default().bg(palette.panel))
-            .title(" User messages ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()));
+            .style(Style::default().bg(palette.panel_alt));
         frame.render_widget(title, overlay);
 
         let inner = overlay.inner(Margin {
@@ -627,6 +625,7 @@ impl App {
         self.register_selection_region(inner);
 
         let sections = Layout::vertical([
+            Constraint::Length(1),
             Constraint::Length(2),
             Constraint::Length(3),
             Constraint::Min(8),
@@ -635,17 +634,26 @@ impl App {
         .split(inner);
 
         frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                " User messages ",
+                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            sections[0],
+        );
+
+        frame.render_widget(
             Paragraph::new(
                 "Type to filter current session user messages. Enter jumps to the selected message.",
             )
             .alignment(Alignment::Center)
-            .style(Style::default().bg(palette.panel).fg(palette.muted)),
-            sections[0],
+            .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+            sections[1],
         );
 
         self.render_input_block(
             frame,
-            sections[1],
+            sections[2],
             "Search user messages",
             self.composer.placeholder(),
             false,
@@ -658,8 +666,8 @@ impl App {
             frame.render_widget(
                 Paragraph::new("No user messages match this search.")
                     .alignment(Alignment::Center)
-                    .style(Style::default().bg(palette.panel).fg(palette.muted)),
-                sections[2],
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+                sections[3],
             );
         } else {
             let mut items: Vec<ListItem> = Vec::new();
@@ -693,7 +701,7 @@ impl App {
             ));
 
             let list = List::new(items)
-                .style(Style::default().bg(palette.panel).fg(palette.text))
+                .style(Style::default().bg(palette.panel_alt).fg(palette.text))
                 .highlight_style(
                     Style::default()
                         .bg(palette.selection_bg)
@@ -701,14 +709,14 @@ impl App {
                         .add_modifier(Modifier::BOLD),
                 );
 
-            frame.render_stateful_widget(list, sections[2], &mut state);
+            frame.render_stateful_widget(list, sections[3], &mut state);
         }
 
         frame.render_widget(
             Paragraph::new("Enter: jump · Esc: close · Ctrl+P/N: nav")
                 .alignment(Alignment::Center)
-                .style(Style::default().bg(palette.panel).fg(palette.muted)),
-            sections[3],
+                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+            sections[4],
         );
     }
 
@@ -723,10 +731,7 @@ impl App {
         self.model_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
         let title = Block::default()
-            .style(Style::default().bg(palette.panel))
-            .title(" Select model ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()));
+            .style(Style::default().bg(palette.panel_alt));
         frame.render_widget(title, overlay);
 
         let inner = overlay.inner(Margin {
@@ -752,6 +757,7 @@ impl App {
         let palette = self.palette();
 
         let sections = Layout::vertical([
+            Constraint::Length(1), // title
             Constraint::Length(1), // tab bar
             Constraint::Length(2), // instruction
             Constraint::Length(3), // search box
@@ -760,34 +766,45 @@ impl App {
         ])
         .split(inner);
 
+        // --- Title ---
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                " Select model ",
+                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            sections[0],
+        );
+
         // --- Tab bar ---
-        self.render_model_panel_tab_bar(frame, sections[0], panel);
+        self.render_model_panel_tab_bar(frame, sections[1], panel);
 
         // --- Instruction ---
         let instruction = "Select a model for this agent. Enter to save, Esc to close.";
         frame.render_widget(
             Paragraph::new(instruction)
                 .alignment(Alignment::Center)
-                .style(Style::default().bg(palette.panel).fg(palette.muted)),
-            sections[1],
+                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+            sections[2],
         );
 
         // --- Search box ---
         self.render_input_block_with_composer(
             frame,
-            sections[2],
+            sections[3],
             "Search models",
             &panel.query,
             panel.query.placeholder(),
             false,
             false,
+            false,
         );
 
         // --- Model list ---
-        self.render_model_panel_model_list(frame, sections[3], panel, true);
+        self.render_model_panel_model_list(frame, sections[4], panel, true);
 
         // --- Footer ---
-        self.render_model_panel_footer(frame, sections[4], panel);
+        self.render_model_panel_footer(frame, sections[5], panel);
     }
 
     /// Two-column layout for Memory tab (sidebar + model list).
@@ -800,16 +817,27 @@ impl App {
         let palette = self.palette();
 
         let sections = Layout::vertical([
+            Constraint::Length(1), // title
             Constraint::Length(1), // tab bar
             Constraint::Min(8),    // main content area (sidebar | right)
         ])
         .split(inner);
 
+        // --- Title ---
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                " Select model ",
+                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            sections[0],
+        );
+
         // --- Tab bar ---
-        self.render_model_panel_tab_bar(frame, sections[0], panel);
+        self.render_model_panel_tab_bar(frame, sections[1], panel);
 
         // Split main area horizontally: left sidebar, separator, right content
-        let main = sections[1];
+        let main = sections[2];
         let cols = Layout::horizontal([
             Constraint::Length(28), // sidebar
             Constraint::Length(1),  // separator
@@ -844,6 +872,7 @@ impl App {
             panel.query.placeholder(),
             false,
             false,
+            false,
         );
 
         // --- Model list ---
@@ -855,7 +884,7 @@ impl App {
         frame.render_widget(
             Paragraph::new(footer)
                 .alignment(Alignment::Center)
-                .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
             right_sections[2],
         );
     }
@@ -893,7 +922,7 @@ impl App {
 
         frame.render_widget(
             Paragraph::new(Line::from(tab_spans))
-                .style(Style::default().bg(palette.panel))
+                .style(Style::default().bg(palette.panel_alt))
                 .alignment(Alignment::Left),
             area,
         );
@@ -953,7 +982,7 @@ impl App {
             frame.render_widget(
                 Paragraph::new("No memory roles")
                     .alignment(Alignment::Center)
-                    .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                 area,
             );
             return;
@@ -961,7 +990,7 @@ impl App {
 
         // Title
         let header =
-            Paragraph::new(" Roles ").style(Style::default().bg(palette.panel).fg(palette.accent));
+            Paragraph::new(" Roles ").style(Style::default().bg(palette.panel_alt).fg(palette.accent));
         let sidebar_layout =
             Layout::vertical([Constraint::Length(1), Constraint::Min(4)]).split(area);
         frame.render_widget(header, sidebar_layout[0]);
@@ -971,7 +1000,7 @@ impl App {
             panel.memory_sub_selection.min(rows.len().saturating_sub(1)),
         ));
         let list = List::new(rows)
-            .style(Style::default().bg(palette.panel).fg(palette.text))
+            .style(Style::default().bg(palette.panel_alt).fg(palette.text))
             .highlight_style(
                 Style::default()
                     .bg(palette.selection_bg)
@@ -1164,7 +1193,7 @@ impl App {
             frame.render_widget(
                 Paragraph::new("No connected models match this search.")
                     .alignment(Alignment::Center)
-                    .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                 area,
             );
         } else {
@@ -1177,7 +1206,7 @@ impl App {
             state.select(Some(sel.min(rows.len().saturating_sub(1))));
 
             let list = List::new(rows)
-                .style(Style::default().bg(palette.panel).fg(palette.text))
+                .style(Style::default().bg(palette.panel_alt).fg(palette.text))
                 .highlight_style(if highlight {
                     Style::default()
                         .bg(palette.selection_bg)
@@ -1185,7 +1214,7 @@ impl App {
                         .add_modifier(Modifier::BOLD)
                 } else {
                     // Transparent highlight when sidebar has focus
-                    Style::default().bg(palette.panel).fg(palette.text)
+                    Style::default().bg(palette.panel_alt).fg(palette.text)
                 });
 
             frame.render_stateful_widget(list, area, &mut state);
@@ -1211,7 +1240,7 @@ impl App {
         frame.render_widget(
             Paragraph::new(footer)
                 .alignment(Alignment::Center)
-                .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
             area,
         );
     }
@@ -1226,10 +1255,7 @@ impl App {
         let overlay = centered_rect(area.width.min(60), area.height.min(20), area);
         frame.render_widget(Clear, overlay);
         let title = Block::default()
-            .style(Style::default().bg(palette.panel))
-            .title(" Search Provider ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()));
+            .style(Style::default().bg(palette.panel_alt));
         frame.render_widget(title, overlay);
 
         let inner = overlay.inner(Margin {
@@ -1237,20 +1263,30 @@ impl App {
             vertical: 1,
         });
 
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                " Search Provider ",
+                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            Rect::new(inner.x, inner.y, inner.width, 1),
+        );
+        let body = Rect::new(inner.x, inner.y + 1, inner.width, inner.height.saturating_sub(1));
+
         // If editing API key, show a compact input view
         if panel.editing_api_key.is_some() {
             let sections = Layout::vertical([
                 Constraint::Length(3), // prompt input
                 Constraint::Length(1), // footer help
             ])
-            .split(inner);
+            .split(body);
 
             frame.render_widget(
                 Paragraph::new(Line::from(vec![Span::styled(
                     panel.input_buffer.placeholder(),
                     Style::default().fg(palette.muted),
                 )]))
-                .style(Style::default().bg(palette.panel)),
+                .style(Style::default().bg(palette.panel_alt)),
                 sections[0],
             );
 
@@ -1281,7 +1317,7 @@ impl App {
             frame.render_widget(
                 Paragraph::new(footer)
                     .alignment(Alignment::Center)
-                    .style(Style::default().bg(palette.panel)),
+                    .style(Style::default().bg(palette.panel_alt)),
                 sections[1],
             );
             return;
@@ -1292,13 +1328,13 @@ impl App {
             Constraint::Min(4),    // provider list
             Constraint::Length(1), // footer help
         ])
-        .split(inner);
+        .split(body);
 
         // --- Instruction ---
         frame.render_widget(
             Paragraph::new("Select a web search provider. ↑↓ navigate, Enter select.")
                 .alignment(Alignment::Center)
-                .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
             sections[0],
         );
 
@@ -1313,7 +1349,7 @@ impl App {
                     .fg(palette.selection_fg)
                     .bg(palette.selection_bg)
             } else {
-                Style::default().bg(palette.panel)
+                Style::default().bg(palette.panel_alt)
             };
 
             // Active checkmark (like model panel)
@@ -1334,7 +1370,7 @@ impl App {
         }
 
         frame.render_widget(
-            ratatui::widgets::List::new(rows).style(Style::default().bg(palette.panel)),
+            ratatui::widgets::List::new(rows).style(Style::default().bg(palette.panel_alt)),
             sections[1],
         );
 
@@ -1358,7 +1394,7 @@ impl App {
         frame.render_widget(
             Paragraph::new(footer)
                 .alignment(Alignment::Center)
-                .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
             sections[2],
         );
     }
@@ -1382,16 +1418,8 @@ impl App {
         );
         self.mcp_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
-        let title_text = panel
-            .editor
-            .as_ref()
-            .map(McpServerEditorState::title)
-            .unwrap_or_else(|| " MCP servers ".to_string());
         let title = Block::default()
-            .style(Style::default().bg(palette.panel))
-            .title(title_text)
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()));
+            .style(Style::default().bg(palette.panel_alt));
         frame.render_widget(title, overlay);
 
         let inner = overlay.inner(Margin {
@@ -1400,6 +1428,18 @@ impl App {
         });
         self.register_selection_region(inner);
 
+        let mcp_title = panel.editor.as_ref().map(|e| e.title()).unwrap_or_else(|| " MCP servers ".to_string());
+
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                &mcp_title,
+                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            Rect::new(inner.x, inner.y, inner.width, 1),
+        );
+        let body = Rect::new(inner.x, inner.y + 1, inner.width, inner.height.saturating_sub(1));
+
         if let Some(editor) = &panel.editor {
             let sections = Layout::vertical([
                 Constraint::Length(2),
@@ -1407,12 +1447,12 @@ impl App {
                 Constraint::Min(8),
                 Constraint::Length(1),
             ])
-            .split(inner);
+            .split(body);
 
             frame.render_widget(
                 Paragraph::new(editor.help())
                     .alignment(Alignment::Center)
-                    .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                 sections[0],
             );
 
@@ -1426,7 +1466,7 @@ impl App {
 
             frame.render_widget(
                 Paragraph::new(editor.draft.summary_text())
-                    .style(Style::default().bg(palette.panel).fg(palette.text))
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.text))
                     .wrap(Wrap { trim: false }),
                 sections[2],
             );
@@ -1434,7 +1474,7 @@ impl App {
             frame.render_widget(
                 Paragraph::new("Enter advance/save · Tab advance/save · Esc cancel")
                     .alignment(Alignment::Center)
-                    .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
                 sections[3],
             );
         } else {
@@ -1444,12 +1484,12 @@ impl App {
                 Constraint::Min(8),
                 Constraint::Length(1),
             ])
-            .split(inner);
+            .split(body);
 
             frame.render_widget(
                 Paragraph::new("Type to filter by server name, transport, or status. Enter toggles connect/disconnect.")
                     .alignment(Alignment::Center)
-                    .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                 sections[0],
             );
 
@@ -1499,7 +1539,7 @@ impl App {
                 frame.render_widget(
                     Paragraph::new("No MCP servers match this search.")
                         .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     sections[2],
                 );
             } else {
@@ -1509,7 +1549,7 @@ impl App {
                 ));
 
                 let list = List::new(rows)
-                    .style(Style::default().bg(palette.panel).fg(palette.text))
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.text))
                     .highlight_style(
                         Style::default()
                             .bg(palette.selection_bg)
@@ -1525,7 +1565,7 @@ impl App {
                     "Enter connect/disconnect · a add · e edit · d remove · R refresh · Esc close",
                 )
                 .alignment(Alignment::Center)
-                .style(Style::default().bg(palette.panel).fg(palette.accent_soft)),
+                .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
                 sections[3],
             );
         }
@@ -1545,14 +1585,8 @@ impl App {
         self.memory_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
 
-        let count = panel.filtered_indices().len();
-        let title = format!(" Memories · {}/{} ", count, panel.memories.len());
-
         let panel_block = Block::default()
-            .style(Style::default().bg(palette.panel))
-            .title(title)
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()));
+            .style(Style::default().bg(palette.panel_alt));
         frame.render_widget(panel_block, overlay);
 
         let inner = overlay.inner(Margin {
@@ -1560,14 +1594,27 @@ impl App {
             vertical: 1,
         });
 
+        let count = panel.filtered_indices().len();
+        let memory_title = format!(" Memories · {}/{} ", count, panel.memories.len());
+
         match panel.mode {
             MemoryPanelMode::Browse => {
                 // Two-pane layout: left (list) + right (preview) with footer
                 let sections = Layout::vertical([
+                    Constraint::Length(1),
                     Constraint::Min(3),    // main two-pane area
                     Constraint::Length(1), // footer help
                 ])
                 .split(inner);
+
+                frame.render_widget(
+                    Paragraph::new(Line::from(vec![Span::styled(
+                        &memory_title,
+                        Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                    )]))
+                    .style(Style::default().bg(palette.panel_alt)),
+                    sections[0],
+                );
 
                 // ── Memories Mode ──
                 let filtered = panel.filtered_indices();
@@ -1576,8 +1623,8 @@ impl App {
                         frame.render_widget(
                             Paragraph::new("No memories yet. Press 'a' to add one.")
                                 .alignment(Alignment::Center)
-                                .style(Style::default().bg(palette.panel).fg(palette.muted)),
-                            sections[0],
+                                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+                            sections[1],
                         );
                     } else {
                         // Split main area into left (35%) and right (65%)
@@ -1585,7 +1632,7 @@ impl App {
                             Constraint::Percentage(35),
                             Constraint::Percentage(65),
                         ])
-                        .split(sections[0]);
+                        .split(sections[1]);
 
                         let list_area = panes[0];
                         let preview_area = panes[1];
@@ -1631,7 +1678,7 @@ impl App {
                         }
                         let header_height = header_lines.len() as u16;
                         frame.render_widget(
-                            Paragraph::new(header_lines).style(Style::default().bg(palette.panel)),
+                            Paragraph::new(header_lines).style(Style::default().bg(palette.panel_alt)),
                             Rect::new(list_area.x, list_area.y, list_area.width, header_height),
                         );
 
@@ -1642,7 +1689,7 @@ impl App {
                                 "─".repeat(list_area.width as usize),
                                 Style::default().fg(palette.muted),
                             )))
-                            .style(Style::default().bg(palette.panel)),
+                            .style(Style::default().bg(palette.panel_alt)),
                             Rect::new(list_area.x, divider_y, list_area.width, 1),
                         );
 
@@ -1737,7 +1784,7 @@ impl App {
                         }
 
                         frame.render_widget(
-                            Paragraph::new(list_lines).style(Style::default().bg(palette.panel)),
+                            Paragraph::new(list_lines).style(Style::default().bg(palette.panel_alt)),
                             list_content_area,
                         );
 
@@ -1913,7 +1960,7 @@ impl App {
 
                                     frame.render_widget(
                                         Paragraph::new(visible_lines)
-                                            .style(Style::default().bg(palette.panel)),
+                                            .style(Style::default().bg(palette.panel_alt)),
                                         preview_content_area,
                                     );
 
@@ -1932,7 +1979,7 @@ impl App {
                                             .alignment(Alignment::Center)
                                             .style(
                                                 Style::default()
-                                                    .bg(palette.panel)
+                                                    .bg(palette.panel_alt)
                                                     .fg(palette.muted),
                                             ),
                                         preview_area,
@@ -2058,7 +2105,7 @@ impl App {
                                     let header_h = header_lines.len() as u16;
                                     frame.render_widget(
                                         Paragraph::new(header_lines)
-                                            .style(Style::default().bg(palette.panel)),
+                                            .style(Style::default().bg(palette.panel_alt)),
                                         Rect::new(
                                             editor_area.x,
                                             editor_area.y,
@@ -2106,7 +2153,7 @@ impl App {
 
                                         frame.render_widget(
                                             Paragraph::new(visible_lines)
-                                                .style(Style::default().bg(palette.panel)),
+                                                .style(Style::default().bg(palette.panel_alt)),
                                             edit_content_area,
                                         );
 
@@ -2126,7 +2173,7 @@ impl App {
                                             .alignment(Alignment::Center)
                                             .style(
                                                 Style::default()
-                                                    .bg(palette.panel)
+                                                    .bg(palette.panel_alt)
                                                     .fg(palette.muted),
                                             ),
                                         preview_area,
@@ -2137,7 +2184,7 @@ impl App {
                     }
 
                 // Footer help
-                let footer_y = sections[1].y;
+                let footer_y = sections[2].y;
                 let help_text = match panel.focus {
                     PanelFocus::List if panel.search_active => {
                         "  Type to search  Esc: clear/exit  Enter: confirm  Up/Down: navigate"
@@ -2154,7 +2201,7 @@ impl App {
                         help_text,
                         Style::default().fg(palette.accent_soft),
                     )))
-                    .style(Style::default().bg(palette.panel)),
+                    .style(Style::default().bg(palette.panel_alt)),
                     Rect::new(inner.x, footer_y, inner.width, 1),
                 );
             }
@@ -2183,7 +2230,7 @@ impl App {
                 frame.render_widget(
                     Paragraph::new(label)
                         .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel).fg(palette.accent)),
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.accent)),
                     sections[0],
                 );
 
@@ -2195,7 +2242,7 @@ impl App {
                             .fg(palette.selection_fg)
                             .add_modifier(Modifier::BOLD)
                     } else {
-                        Style::default().bg(palette.panel).fg(palette.text)
+                        Style::default().bg(palette.panel_alt).fg(palette.text)
                     }
                 };
 
@@ -2291,7 +2338,7 @@ impl App {
                 frame.render_widget(
                     Paragraph::new(hint_text)
                         .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     sections[8],
                 );
             }
@@ -2308,7 +2355,7 @@ impl App {
                     frame.render_widget(
                         Paragraph::new(format!("Delete memory: {}?", entry.title))
                             .alignment(Alignment::Center)
-                            .style(Style::default().bg(palette.panel).fg(palette.warning)),
+                            .style(Style::default().bg(palette.panel_alt).fg(palette.warning)),
                         sections[0],
                     );
                 }
@@ -2316,7 +2363,7 @@ impl App {
                 frame.render_widget(
                     Paragraph::new("Press Y to confirm, N or Esc to cancel")
                         .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel).fg(palette.muted)),
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     sections[1],
                 );
             }
@@ -2339,22 +2386,8 @@ impl App {
         let overlay = centered_rect(85, 80, area);
         self.skills_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
-        // Main block with title
-        let title = if panel.is_empty() {
-            " Skills ".to_string()
-        } else {
-            format!(
-                " Skills · {}/{} ",
-                panel.selected_index + 1,
-                panel.filtered_count()
-            )
-        };
-
         let panel_block = Block::default()
-            .style(Style::default().bg(palette.panel))
-            .title(title)
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()));
+            .style(Style::default().bg(palette.panel_alt));
         frame.render_widget(panel_block, overlay);
 
         let inner = overlay.inner(Margin {
@@ -2362,6 +2395,22 @@ impl App {
             vertical: 1,
         });
         self.register_selection_region(inner);
+
+        let skills_title = if panel.is_empty() {
+            " Skills ".to_string()
+        } else {
+            format!(" Skills · {}/{} ", panel.selected_index + 1, panel.filtered_count())
+        };
+
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                &skills_title,
+                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            Rect::new(inner.x, inner.y, inner.width, 1),
+        );
+        let body = Rect::new(inner.x, inner.y + 1, inner.width, inner.height.saturating_sub(1));
 
         // Check if empty
         if panel.is_empty() {
@@ -2383,8 +2432,8 @@ impl App {
                 )),
             ];
             frame.render_widget(
-                Paragraph::new(empty_text).style(Style::default().bg(palette.panel)),
-                inner,
+                Paragraph::new(empty_text).style(Style::default().bg(palette.panel_alt)),
+                body,
             );
             return;
         }
@@ -2392,7 +2441,7 @@ impl App {
         // Split into left (list) and right (preview) panes
         // Left: 35%, Right: 65%
         let panes = Layout::horizontal([Constraint::Percentage(35), Constraint::Percentage(65)])
-            .split(inner);
+            .split(body);
 
         let list_area = panes[0];
         let preview_area = panes[1];
@@ -2422,7 +2471,7 @@ impl App {
 
         let header_height = header_lines.len() as u16;
         frame.render_widget(
-            Paragraph::new(header_lines).style(Style::default().bg(palette.panel)),
+            Paragraph::new(header_lines).style(Style::default().bg(palette.panel_alt)),
             Rect::new(list_area.x, list_area.y, list_area.width, header_height),
         );
 
@@ -2433,7 +2482,7 @@ impl App {
                 "─".repeat(list_area.width as usize),
                 Style::default().fg(palette.muted),
             )))
-            .style(Style::default().bg(palette.panel)),
+            .style(Style::default().bg(palette.panel_alt)),
             Rect::new(list_area.x, divider_y, list_area.width, 1),
         );
 
@@ -2502,7 +2551,7 @@ impl App {
         }
 
         frame.render_widget(
-            Paragraph::new(list_lines).style(Style::default().bg(palette.panel)),
+            Paragraph::new(list_lines).style(Style::default().bg(palette.panel_alt)),
             list_content_area,
         );
 
@@ -2526,7 +2575,7 @@ impl App {
                 .add_modifier(Modifier::BOLD),
         )])];
         frame.render_widget(
-            Paragraph::new(preview_header).style(Style::default().bg(palette.panel)),
+            Paragraph::new(preview_header).style(Style::default().bg(palette.panel_alt)),
             Rect::new(preview_area.x, preview_area.y, preview_area.width, 1),
         );
 
@@ -2537,7 +2586,7 @@ impl App {
                 "─".repeat(preview_area.width as usize),
                 Style::default().fg(palette.muted),
             )))
-            .style(Style::default().bg(palette.panel)),
+            .style(Style::default().bg(palette.panel_alt)),
             Rect::new(preview_area.x, preview_divider_y, preview_area.width, 1),
         );
 
@@ -2591,7 +2640,7 @@ impl App {
                 .collect();
 
             frame.render_widget(
-                Paragraph::new(visible_lines).style(Style::default().bg(palette.panel)),
+                Paragraph::new(visible_lines).style(Style::default().bg(palette.panel_alt)),
                 preview_content_area,
             );
 
@@ -2624,7 +2673,7 @@ impl App {
                 format!("  {}", hints),
                 Style::default().fg(palette.muted),
             )))
-            .style(Style::default().bg(palette.panel)),
+            .style(Style::default().bg(palette.panel_alt)),
             Rect::new(inner.x, footer_y, inner.width, 1),
         );
     }

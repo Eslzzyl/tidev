@@ -32,16 +32,13 @@ impl App {
         frame.render_widget(Clear, overlay);
 
         let block = Block::default()
-            .style(Style::default().bg(palette.panel))
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.border_active()))
-            .title(" Usage Statistics ");
+            .style(Style::default().bg(palette.panel_alt));
 
         frame.render_widget(block, overlay);
 
         let inner = overlay.inner(Margin {
-            horizontal: 1,
-            vertical: 1,
+            horizontal: 0,
+            vertical: 0,
         });
 
         if inner.width < 20 || inner.height < 10 {
@@ -49,15 +46,25 @@ impl App {
         }
 
         let layout = Layout::vertical([
+            Constraint::Length(1),
             Constraint::Length(2),
             Constraint::Min(10),
             Constraint::Length(2),
         ])
         .split(inner);
 
-        self.render_stats_header(frame, layout[0], palette);
-        self.render_stats_content(frame, layout[1], palette);
-        self.render_stats_footer(frame, layout[2], palette);
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                " Usage Statistics ",
+                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            layout[0],
+        );
+
+        self.render_stats_header(frame, layout[1], palette);
+        self.render_stats_content(frame, layout[2], palette);
+        self.render_stats_footer(frame, layout[3], palette);
     }
 
     fn render_stats_header(&self, frame: &mut Frame<'_>, area: Rect, palette: ThemePalette) {
@@ -73,7 +80,7 @@ impl App {
 
         let mut spans = vec![Span::styled(
             "Time Range: ",
-            Style::default().bg(palette.panel).fg(palette.muted),
+            Style::default().bg(palette.panel_alt).fg(palette.muted),
         )];
 
         for (i, (label, gran)) in granularity_labels
@@ -85,23 +92,23 @@ impl App {
 
             let style = if is_selected {
                 Style::default()
-                    .bg(palette.panel)
+                    .bg(palette.panel_alt)
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().bg(palette.panel).fg(palette.text)
+                Style::default().bg(palette.panel_alt).fg(palette.text)
             };
 
             if i > 0 {
                 spans.push(Span::styled(
                     " | ",
-                    Style::default().bg(palette.panel).fg(palette.muted),
+                    Style::default().bg(palette.panel_alt).fg(palette.muted),
                 ));
             }
             spans.push(Span::styled(format!("[{}]", label), style));
         }
 
-        let paragraph = Paragraph::new(Line::from(spans)).style(Style::default().bg(palette.panel));
+        let paragraph = Paragraph::new(Line::from(spans)).style(Style::default().bg(palette.panel_alt));
         frame.render_widget(paragraph, area);
     }
 
@@ -121,9 +128,9 @@ impl App {
             } else {
                 let paragraph = Paragraph::new(Line::from(Span::styled(
                     "Loading statistics...",
-                    Style::default().bg(palette.panel).fg(palette.muted),
+                    Style::default().bg(palette.panel_alt).fg(palette.muted),
                 )))
-                .style(Style::default().bg(palette.panel));
+                .style(Style::default().bg(palette.panel_alt));
                 frame.render_widget(paragraph, area);
             }
         }
@@ -139,9 +146,9 @@ impl App {
         if stats.entries.is_empty() {
             let paragraph = Paragraph::new(Line::from(Span::styled(
                 "No data available for this time range",
-                Style::default().bg(palette.panel).fg(palette.muted),
+                Style::default().bg(palette.panel_alt).fg(palette.muted),
             )))
-            .style(Style::default().bg(palette.panel));
+            .style(Style::default().bg(palette.panel_alt));
             frame.render_widget(paragraph, area);
             return;
         }
@@ -181,7 +188,7 @@ impl App {
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(palette.border_idle()))
                     .title(" Token Components (Blue:Input, Cyan:Cached, Green:Output) ")
-                    .style(Style::default().bg(palette.panel)),
+                    .style(Style::default().bg(palette.panel_alt)),
             )
             .bar_width(6)
             .bar_gap(0)
@@ -195,12 +202,12 @@ impl App {
         lines.push(Line::from(vec![
             Span::styled(
                 "Total Tokens:      ",
-                Style::default().bg(palette.panel).fg(palette.muted),
+                Style::default().bg(palette.panel_alt).fg(palette.muted),
             ),
             Span::styled(
                 format_token_count(stats.summary.total_tokens as u64),
                 Style::default()
-                    .bg(palette.panel)
+                    .bg(palette.panel_alt)
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD),
             ),
@@ -210,12 +217,12 @@ impl App {
         lines.push(Line::from(vec![
             Span::styled(
                 "Input Tokens:      ",
-                Style::default().bg(palette.panel).fg(palette.muted),
+                Style::default().bg(palette.panel_alt).fg(palette.muted),
             ),
             Span::styled(
                 format_token_count(stats.summary.total_input_tokens as u64),
                 Style::default()
-                    .bg(palette.panel)
+                    .bg(palette.panel_alt)
                     .fg(Color::Blue)
                     .add_modifier(Modifier::BOLD),
             ),
@@ -225,18 +232,18 @@ impl App {
         lines.push(Line::from(vec![
             Span::styled(
                 "Cached Tokens:     ",
-                Style::default().bg(palette.panel).fg(palette.muted),
+                Style::default().bg(palette.panel_alt).fg(palette.muted),
             ),
             Span::styled(
                 format_token_count(stats.summary.total_cache_read_tokens as u64),
                 Style::default()
-                    .bg(palette.panel)
+                    .bg(palette.panel_alt)
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!(" ({:.1}%)", stats.summary.cache_hit_rate()),
-                Style::default().bg(palette.panel).fg(palette.muted),
+                Style::default().bg(palette.panel_alt).fg(palette.muted),
             ),
         ]));
 
@@ -244,12 +251,12 @@ impl App {
         lines.push(Line::from(vec![
             Span::styled(
                 "Output Tokens:     ",
-                Style::default().bg(palette.panel).fg(palette.muted),
+                Style::default().bg(palette.panel_alt).fg(palette.muted),
             ),
             Span::styled(
                 format_token_count(stats.summary.total_output_tokens as u64),
                 Style::default()
-                    .bg(palette.panel)
+                    .bg(palette.panel_alt)
                     .fg(Color::Green)
                     .add_modifier(Modifier::BOLD),
             ),
@@ -261,12 +268,12 @@ impl App {
             lines.push(Line::from(vec![
                 Span::styled(
                     "Last Speed:        ",
-                    Style::default().bg(palette.panel).fg(palette.muted),
+                    Style::default().bg(palette.panel_alt).fg(palette.muted),
                 ),
                 Span::styled(
                     format!("{:.1} t/s", tps),
                     Style::default()
-                        .bg(palette.panel)
+                        .bg(palette.panel_alt)
                         .fg(palette.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
@@ -277,18 +284,18 @@ impl App {
         lines.push(Line::from(vec![
             Span::styled(
                 "Total Requests:    ",
-                Style::default().bg(palette.panel).fg(palette.muted),
+                Style::default().bg(palette.panel_alt).fg(palette.muted),
             ),
             Span::styled(
                 format_token_count(stats.summary.total_requests as u64),
                 Style::default()
-                    .bg(palette.panel)
+                    .bg(palette.panel_alt)
                     .fg(palette.text)
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
 
-        let paragraph = Paragraph::new(lines).style(Style::default().bg(palette.panel));
+        let paragraph = Paragraph::new(lines).style(Style::default().bg(palette.panel_alt));
         frame.render_widget(paragraph, layout[1]);
     }
 
@@ -302,9 +309,9 @@ impl App {
         if stats.model_usage.is_empty() {
             let paragraph = Paragraph::new(Line::from(Span::styled(
                 "No model usage data available",
-                Style::default().bg(palette.panel).fg(palette.muted),
+                Style::default().bg(palette.panel_alt).fg(palette.muted),
             )))
-            .style(Style::default().bg(palette.panel));
+            .style(Style::default().bg(palette.panel_alt));
             frame.render_widget(paragraph, area);
             return;
         }
@@ -330,7 +337,7 @@ impl App {
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(palette.border_idle()))
                     .title(" Token Usage by Model ")
-                    .style(Style::default().bg(palette.panel)),
+                    .style(Style::default().bg(palette.panel_alt)),
             )
             .bar_width(2)
             .bar_gap(1);
@@ -341,7 +348,7 @@ impl App {
         lines.push(Line::from(Span::styled(
             "Top Models by Tokens:",
             Style::default()
-                .bg(palette.panel)
+                .bg(palette.panel_alt)
                 .fg(palette.accent)
                 .add_modifier(Modifier::BOLD),
         )));
@@ -351,20 +358,20 @@ impl App {
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("{}: ", shorten_model_id(&entry.model_id, 20)),
-                    Style::default().bg(palette.panel).fg(palette.text),
+                    Style::default().bg(palette.panel_alt).fg(palette.text),
                 ),
                 Span::styled(
                     format_token_count(entry.total_tokens as u64),
-                    Style::default().bg(palette.panel).fg(palette.accent_soft),
+                    Style::default().bg(palette.panel_alt).fg(palette.accent_soft),
                 ),
                 Span::styled(
                     format!(" ({} requests)", entry.request_count),
-                    Style::default().bg(palette.panel).fg(palette.muted),
+                    Style::default().bg(palette.panel_alt).fg(palette.muted),
                 ),
             ]));
         }
 
-        let paragraph = Paragraph::new(lines).style(Style::default().bg(palette.panel));
+        let paragraph = Paragraph::new(lines).style(Style::default().bg(palette.panel_alt));
         frame.render_widget(paragraph, layout[1]);
     }
 
@@ -376,7 +383,7 @@ impl App {
 
         let mut spans = vec![Span::styled(
             "Chart: ",
-            Style::default().bg(palette.panel).fg(palette.muted),
+            Style::default().bg(palette.panel_alt).fg(palette.muted),
         )];
 
         for (i, (label, chart)) in chart_labels.iter().zip(charts.iter()).enumerate() {
@@ -386,17 +393,17 @@ impl App {
 
             let style = if is_selected {
                 Style::default()
-                    .bg(palette.panel)
+                    .bg(palette.panel_alt)
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().bg(palette.panel).fg(palette.text)
+                Style::default().bg(palette.panel_alt).fg(palette.text)
             };
 
             if i > 0 {
                 spans.push(Span::styled(
                     " | ",
-                    Style::default().bg(palette.panel).fg(palette.muted),
+                    Style::default().bg(palette.panel_alt).fg(palette.muted),
                 ));
             }
             spans.push(Span::styled(format!("[{}]", label), style));
@@ -404,10 +411,10 @@ impl App {
 
         spans.push(Span::styled(
             "    [Tab] Next  [Esc] Close",
-            Style::default().bg(palette.panel).fg(palette.muted),
+            Style::default().bg(palette.panel_alt).fg(palette.muted),
         ));
 
-        let paragraph = Paragraph::new(Line::from(spans)).style(Style::default().bg(palette.panel));
+        let paragraph = Paragraph::new(Line::from(spans)).style(Style::default().bg(palette.panel_alt));
         frame.render_widget(paragraph, area);
     }
 }
