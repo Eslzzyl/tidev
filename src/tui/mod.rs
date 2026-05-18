@@ -1553,6 +1553,7 @@ impl App {
         attachments: Vec<MessageAttachment>,
         runtime: &Runtime,
     ) -> Result<()> {
+        let _t_submit = std::time::Instant::now();
         let prompt = prompt.trim().to_string();
 
         if prompt.is_empty() && attachments.is_empty() {
@@ -1560,6 +1561,7 @@ impl App {
         }
 
         if self.screen == Screen::Welcome {
+            let _t_session = std::time::Instant::now();
             let session_exists = self
                 .store
                 .load_session_record(self.conversation.session_id)?
@@ -1569,6 +1571,7 @@ impl App {
                 let session_id = Uuid::new_v4();
                 self.conversation.session_id = session_id;
                 self.conversation.clear_context_state();
+                let _t_create = std::time::Instant::now();
                 self.store.create_session(
                     session_id,
                     self.workspace_root.as_path(),
@@ -1578,14 +1581,18 @@ impl App {
                     &self.active_model.display_name,
                     "Untitled session",
                 )?;
+                crate::log_info!("agent: create_session took {:?}", _t_create.elapsed());
 
                 // Compose the immutable static system prompt and persist it.
+                let _t_prompt = std::time::Instant::now();
                 let static_prompt = self.agent.compose_static_system_prompt(&self.active_model.system_prompt);
+                crate::log_info!("agent: compose_static_system_prompt took {:?}", _t_prompt.elapsed());
                 self.active_model.system_prompt = static_prompt.clone();
                 if let Err(e) = self.store.update_session_system_prompt(session_id, &static_prompt) {
                     crate::log_warn!("failed to persist static system prompt: {}", e);
                 }
             }
+            crate::log_info!("agent: session init took {:?}", _t_session.elapsed());
             self.context_manager = ContextManager::new();
             self.pending_tool_execution = None;
             self.permission_dialog = None;
@@ -1637,6 +1644,7 @@ impl App {
 
         self.schedule_context_compaction_for_session(self.conversation.session_id, runtime, None);
 
+        crate::log_info!("agent: submit_prompt_now took {:?}", _t_submit.elapsed());
         self.spawn_agent_loop(runtime)
     }
 

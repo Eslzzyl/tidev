@@ -24,21 +24,34 @@ impl App {
     }
 
     pub(crate) fn new_with_paths(paths: ConfigPaths) -> Result<Self> {
+        let _t0 = std::time::Instant::now();
         let workspace_root = env::current_dir().context("failed to determine workspace root")?;
         let config = AppConfig::load_with_project_overlay(&paths, &workspace_root)?;
         crate::logging::init(&paths.data_dir, config.logging.clone());
         crate::log_info!("App initializing, workspace={}", workspace_root.display());
+        crate::log_info!("startup: config loaded in {:?}", _t0.elapsed());
+        let _t1 = std::time::Instant::now();
         let auth = AuthStore::load_or_create(&paths)?;
+        crate::log_info!("startup: auth loaded in {:?}", _t1.elapsed());
+        let _t2 = std::time::Instant::now();
         let db = Database::open(paths.default_database_path())?;
+        crate::log_info!("startup: Database::open (schema init) in {:?}", _t2.elapsed());
+        let _t3 = std::time::Instant::now();
         let store = db.create_session_store()?;
         let memory_store = Arc::new(db.create_memory_store()?);
+        crate::log_info!("startup: stores created in {:?}", _t3.elapsed());
+        let _t4 = std::time::Instant::now();
         let llm = LlmClient::new()?;
+        crate::log_info!("startup: LlmClient::new in {:?}", _t4.elapsed());
         let http_client = Arc::new(llm.http().clone());
+        let _t5 = std::time::Instant::now();
         let theme = ThemeManager::new(&config.theme);
         let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
         let file_read_tracker = Arc::new(FileReadTracker::new());
         // Find git worktree root to limit skill discovery scope
         let worktree = find_git_worktree(&workspace_root);
+        crate::log_info!("startup: theme/mcp created in {:?}", _t5.elapsed());
+        let _t6 = std::time::Instant::now();
         let mut tools = ToolRegistry::new(
             workspace_root.clone(),
             paths.config_dir.clone(),
@@ -52,6 +65,7 @@ impl App {
             config.websearch.clone(),
             Arc::new(auth.clone()),
         );
+        crate::log_info!("startup: ToolRegistry created in {:?}", _t6.elapsed());
         #[allow(unused_variables)]
         let commands = CommandRegistry::new();
         let command_palette = CommandPaletteState::default();
@@ -103,8 +117,9 @@ impl App {
             }));
         }
 
+        let _t_mem = std::time::Instant::now();
         memory_store.set_models(llm.clone(), active_model.clone(), consolidation_override);
-        crate::log_info!("memory: models configured");
+        crate::log_info!("startup: memory set_models in {:?}", _t_mem.elapsed());
         // Set sandbox policy based on session mode and config
         let sandbox_policy = mode.sandbox_policy(&config.sandbox);
         tools.set_sandbox_policy(Some(sandbox_policy));
@@ -238,7 +253,7 @@ impl App {
             selection_clipboard_lease: None,
             last_render_time: Instant::now(),
             render_throttled: false,
-            dirty: false,
+            dirty: true,
             backend_tx,
             backend_rx,
             spinner_start: Instant::now(),
@@ -273,20 +288,26 @@ impl App {
             force_full_redraw: false,
         };
 
+        crate::log_info!("startup: App::new_with_paths total in {:?}", _t0.elapsed());
+
         Ok(app)
     }
 
     pub(crate) fn run(&mut self, runtime: &Runtime) -> Result<()> {
+        let _t_run = std::time::Instant::now();
         let mcp_manager = self.tools.mcp_manager();
         runtime.spawn(async move {
             if let Err(e) = mcp_manager.refresh_all().await {
                 crate::log_warn!("MCP refresh failed: {}", e);
             }
         });
+        crate::log_info!("startup: MCP refresh spawned in {:?}", _t_run.elapsed());
         self.terminal_session = Some(super::TerminalSession::enter()?);
+        crate::log_info!("startup: TerminalSession::enter in {:?}", _t_run.elapsed());
         let backend = CrosstermBackend::new(io::stdout());
         let mut terminal = Terminal::new(backend).context("failed to create terminal")?;
         terminal.clear().context("failed to clear terminal")?;
+        crate::log_info!("startup: terminal created in {:?}", _t_run.elapsed());
 
         let snapshot = self.snapshot.clone();
         let cleanup_cancel = self.cleanup_cancel.clone();
@@ -311,6 +332,7 @@ impl App {
             runtime.handle(),
             &self.workspace_root.to_string_lossy(),
         );
+        crate::log_info!("startup: memory background tasks spawned in {:?}", _t_run.elapsed());
 
         // Schedule periodic session inactivity check (every 60 seconds).
         let check_store = self.store.clone();
@@ -351,6 +373,9 @@ impl App {
                 }
             }
         });
+        crate::log_info!("startup: inactivity check spawned in {:?}", _t_run.elapsed());
+
+        crate::log_info!("startup: entering main event loop — total startup {:?}", _t_run.elapsed());
 
         loop {
             self.process_backend_events(runtime)?;

@@ -1660,7 +1660,7 @@ impl AgentRuntime {
                 "agent_loop: model_for_turn setup took {:?}",
                 _t_prep_model.elapsed()
             );
-            crate::log_info!("agent_loop: run_single_turn starting");
+            crate::log_info!("agent_loop: pre-LLM overhead {:?} — run_single_turn starting", _t_prep_model.elapsed());
             let _t_turn = std::time::Instant::now();
             let turn = self
                 .run_single_turn(
