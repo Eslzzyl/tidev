@@ -393,9 +393,9 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
 
         // Build clusters from union-find roots
         let mut clusters: HashMap<usize, Vec<MemoryEntry>> = HashMap::new();
-        for i in 0..facts.len() {
+        for (i, fact) in facts.iter().enumerate() {
             let root = find(&mut parent, i);
-            clusters.entry(root).or_default().push(facts[i].clone());
+            clusters.entry(root).or_default().push(fact.clone());
         }
 
         clusters.into_values().collect()

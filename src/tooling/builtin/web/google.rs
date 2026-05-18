@@ -50,7 +50,7 @@ impl SearchProvider for GoogleProvider {
         })?;
 
         // Google allows max 10 results per request.
-        let num = num_results.unwrap_or(8).min(10).max(1);
+        let num = num_results.unwrap_or(8).clamp(1, 10);
 
         let mut params: Vec<(&str, String)> = vec![
             ("key", api_key.to_string()),

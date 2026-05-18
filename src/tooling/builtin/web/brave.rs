@@ -41,7 +41,7 @@ impl SearchProvider for BraveProvider {
         })?;
 
         // Map our generic search_type to Brave parameters
-        let count = num_results.unwrap_or(8).min(20).max(1);
+        let count = num_results.unwrap_or(8).clamp(1, 20);
 
         let mut params = vec![("q", query.to_string()), ("count", count.to_string())];
 

@@ -238,8 +238,6 @@ impl App {
                 let list_height = inner.height.saturating_sub(2) as usize;
                 let scroll = if panel.selected_index < list_height {
                     0
-                } else if panel.selected_index < list_height / 2 {
-                    0
                 } else {
                     let target = panel.selected_index.saturating_sub(list_height / 2);
                     target.min(panel.display_items.len().saturating_sub(list_height))

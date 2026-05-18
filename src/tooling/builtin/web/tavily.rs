@@ -47,7 +47,7 @@ impl SearchProvider for TavilyProvider {
             _ => "advanced",
         };
 
-        let max_results = num_results.unwrap_or(8).min(20).max(1);
+        let max_results = num_results.unwrap_or(8).clamp(1, 20);
 
         let payload = json!({
             "api_key": api_key,

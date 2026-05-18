@@ -99,8 +99,6 @@ impl App {
         let display_len = panel.display_items.len();
         let scroll = if panel.selected_index < list_height as usize {
             0
-        } else if panel.selected_index < list_height as usize / 2 {
-            0
         } else {
             // Try to keep selection centered-ish
             let target = panel
@@ -1350,7 +1348,7 @@ impl App {
 
         // --- Provider list ---
         let mut rows: Vec<ListItem> = Vec::new();
-        for i in 0..panel.provider_count() {
+        for (i, info) in BUILTIN_PROVIDERS.iter().enumerate() {
             let status_text = panel.provider_status(i, &self.auth);
 
             let is_selected = i == panel.selected_index;
@@ -1363,7 +1361,6 @@ impl App {
             };
 
             // Active checkmark (like model panel)
-            let info = &BUILTIN_PROVIDERS[i];
             let active_marker = if info.id == panel.active_provider {
                 Span::styled(" ✓", Style::default().fg(palette.accent))
             } else {
@@ -1736,9 +1733,7 @@ impl App {
                         // Compute visible range such that selected_index is visible
                         let total_filtered = filtered.len();
                         let visible_height = list_content_height as usize;
-                        let visible_start = if visible_height == 0 {
-                            0
-                        } else if total_filtered <= visible_height {
+                        let visible_start = if visible_height == 0 || total_filtered <= visible_height {
                             0
                         } else {
                             // Keep selection visible; prefer showing above selection
@@ -1754,8 +1749,7 @@ impl App {
                         let visible_end = (visible_start + visible_height).min(total_filtered);
 
                         let mut list_lines: Vec<Line<'_>> = Vec::new();
-                        for i in visible_start..visible_end {
-                            let mem_idx = filtered[i];
+                        for (i, &mem_idx) in filtered.iter().enumerate().take(visible_end).skip(visible_start) {
                             let entry = &panel.memories[mem_idx];
                             let is_selected = i == panel.selected_index;
 
@@ -1940,7 +1934,7 @@ impl App {
                                     }
 
                                     // Separator
-                                    let sep_w = content_width.max(10).min(80);
+                                    let sep_w = content_width.clamp(10, 80);
                                     header_lines.push(Line::from(Span::styled(
                                         format!(" {}", "─".repeat(sep_w)),
                                         Style::default().fg(palette.border),
