@@ -8,6 +8,10 @@ use uuid::Uuid;
 use crate::config::ActiveModel;
 use crate::llm::LlmClient;
 
+/// Resolves a model label (e.g. "openai/gpt-4o") to a fully-configured
+/// [`ActiveModel`] containing API keys, endpoint, etc.
+pub type ModelResolver = Arc<dyn Fn(&str) -> Result<ActiveModel> + Send + Sync>;
+
 use super::consolidate::{ConsolidationReport, ConsolidationService};
 use super::evict::{EvictionReport, EvictionService};
 use super::remember::RememberService;
@@ -30,8 +34,10 @@ pub struct MemoryStore {
     read_connection: Mutex<Connection>,
     llm: RwLock<Option<LlmClient>>,
     active_model: RwLock<Option<ActiveModel>>,
-    /// Optional override for summarization model (None = use active_model).
-    summarization_model: RwLock<Option<ActiveModel>>,
+    /// Optional override for consolidation/reflection model (None = use active_model).
+    consolidation_model: RwLock<Option<ActiveModel>>,
+    /// Resolver that turns a model label into a fully-configured ActiveModel.
+    model_resolver: RwLock<Option<ModelResolver>>,
 }
 
 impl MemoryStore {
@@ -60,7 +66,8 @@ impl MemoryStore {
             read_connection: Mutex::new(read_connection),
             llm: RwLock::new(None),
             active_model: RwLock::new(None),
-            summarization_model: RwLock::new(None),
+            consolidation_model: RwLock::new(None),
+            model_resolver: RwLock::new(None),
         };
 
         store.rebuild_fts5_if_needed()?;
@@ -105,7 +112,8 @@ impl MemoryStore {
             read_connection: Mutex::new(read_connection),
             llm: RwLock::new(None),
             active_model: RwLock::new(None),
-            summarization_model: RwLock::new(None),
+            consolidation_model: RwLock::new(None),
+            model_resolver: RwLock::new(None),
         };
 
         store.rebuild_fts5_if_needed()?;
@@ -125,24 +133,30 @@ impl std::fmt::Debug for MemoryStore {
 
 impl MemoryStore {
     /// Set the LLM client and models for memory operations.
-    /// `active` is the session's chat model; `summarization` is an optional
-    /// override (None = inherit from active).
+    /// `active` is the session's chat model; `consolidation` is an optional
+    /// override for consolidation/reflection (None = inherit from active).
     pub fn set_models(
         &self,
         llm: LlmClient,
         active: ActiveModel,
-        summarization: Option<ActiveModel>,
+        consolidation: Option<ActiveModel>,
     ) {
         *self.llm.write().unwrap() = Some(llm);
         *self.active_model.write().unwrap() = Some(active);
-        *self.summarization_model.write().unwrap() = summarization;
+        *self.consolidation_model.write().unwrap() = consolidation;
     }
 
-    /// Resolve the LLM and model to use for summarization/consolidation/reflection.
-    fn resolve_summarization_llm(&self) -> Option<(LlmClient, ActiveModel)> {
+    /// Set the model resolver used by [`summarize_session`] to turn a
+    /// model label (from the last assistant message) into an `ActiveModel`.
+    pub fn set_model_resolver(&self, resolver: ModelResolver) {
+        *self.model_resolver.write().unwrap() = Some(resolver);
+    }
+
+    /// Resolve the LLM and model for consolidation/reflection operations.
+    fn resolve_consolidation_llm(&self) -> Option<(LlmClient, ActiveModel)> {
         let llm = self.llm.read().unwrap().clone()?;
         let model = self
-            .summarization_model
+            .consolidation_model
             .read()
             .unwrap()
             .clone()
@@ -497,15 +511,48 @@ impl MemoryStore {
         RememberService::get_version_chain(&db, id)
     }
 
-    /// Generate session summary.
+    /// Generate session summary using the **same model** that generated the
+    /// last assistant message in the session (for prompt-cache reuse).
     pub async fn summarize_session(
         &self,
         session_id: Uuid,
         project: &str,
     ) -> Result<SessionSummary> {
-        let (llm, model) = self
-            .resolve_summarization_llm()
+        let llm = self
+            .llm
+            .read()
+            .unwrap()
+            .clone()
             .ok_or_else(|| anyhow::anyhow!("LLM client not configured for summarization"))?;
+
+        // Find the last assistant message with a model_id set.
+        let model_label = {
+            let db = self.read_connection.lock().unwrap();
+            let mut stmt = db.prepare(
+                "SELECT model_id FROM messages \
+                 WHERE session_id = ?1 AND role = 'assistant' AND model_id IS NOT NULL \
+                 ORDER BY created_at DESC, rowid DESC LIMIT 1"
+            )?;
+            match stmt.query_row(
+                rusqlite::params![session_id.to_string()],
+                |row| row.get::<_, String>(0),
+            ) {
+                Ok(label) => label,
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    anyhow::bail!("no assistant message with model_id found in session");
+                }
+                Err(e) => return Err(e.into()),
+            }
+        };
+
+        let resolver = self
+            .model_resolver
+            .read()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("model resolver not configured for summarization"))?;
+
+        let model = resolver(&model_label)?;
 
         let db_path = self.db_path.clone();
         SessionService::summarize_session(&db_path, &llm, &model, session_id, project).await
@@ -514,7 +561,7 @@ impl MemoryStore {
     /// Run the consolidation pipeline (semantic + procedural).
     pub async fn run_consolidation(&self, project: &str) -> Result<ConsolidationReport> {
         let (llm, model) = self
-            .resolve_summarization_llm()
+            .resolve_consolidation_llm()
             .ok_or_else(|| anyhow::anyhow!("LLM client not configured for consolidation"))?;
 
         let db_path = self.db_path.clone();
@@ -734,7 +781,7 @@ impl MemoryStore {
     /// Run the reflection pipeline (clustering facts + LLM insight synthesis).
     pub async fn run_reflect(&self, project: &str) -> Result<ReflectReport> {
         let (llm, model) = self
-            .resolve_summarization_llm()
+            .resolve_consolidation_llm()
             .ok_or_else(|| anyhow::anyhow!("LLM client not configured for reflection"))?;
 
         let db_path = self.db_path.clone();

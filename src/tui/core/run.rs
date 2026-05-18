@@ -81,12 +81,29 @@ impl App {
         }
         tools.set_active_model(active_model.clone());
         // Attach LLM to memory store with model overrides
-        let summarization_override = config
+        let mut consolidation_override: Option<crate::config::ActiveModel> = config
             .memory
-            .summarization_model
+            .consolidation_model
             .as_deref()
             .and_then(|s| config.resolve_model(&auth, Some(s)).ok());
-        memory_store.set_models(llm.clone(), active_model.clone(), summarization_override);
+        if let Some(ref mut model) = consolidation_override
+            && let Some(tl_str) = config.memory.thinking_levels.get("consolidation")
+        {
+            model.thinking_level =
+                crate::config::reasoning::ThinkingLevelType::from_string(tl_str);
+        }
+
+        // Provide a model resolver so summarization can reuse the last
+        // assistant message's model (for prompt-cache reuse).
+        {
+            let config = config.clone();
+            let auth = auth.clone();
+            memory_store.set_model_resolver(std::sync::Arc::new(move |model_id: &str| {
+                config.resolve_model(&auth, Some(model_id))
+            }));
+        }
+
+        memory_store.set_models(llm.clone(), active_model.clone(), consolidation_override);
         crate::log_info!("memory: models configured");
         // Set sandbox policy based on session mode and config
         let sandbox_policy = mode.sandbox_policy(&config.sandbox);

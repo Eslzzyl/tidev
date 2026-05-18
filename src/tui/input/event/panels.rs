@@ -298,17 +298,25 @@ impl App {
                                 t.thinking_level_expanded = false;
                             }
                         } else if next_panel.is_memory_tab() {
-                            // Memory tab: save model for the sub-entry role
+                            // Memory tab: save model + thinking level
                             let role = next_panel.active_memory_role();
                             let model_str = summary.label();
-                            self.config
-                                .set_memory_model(&self.paths, role, &model_str)?;
+                            self.config.set_memory_model_and_thinking(
+                                &self.paths,
+                                role,
+                                &model_str,
+                                &tl,
+                            )?;
                             if let Some(t) = next_panel.current_tab_mut() {
                                 t.current_label = model_str.clone();
                                 t.thinking_level_expanded = false;
                             }
-                            self.last_notice =
-                                Some(format!("Memory {} model set to {}", role, model_str));
+                            self.last_notice = Some(format!(
+                                "Memory {} model set to {} ({})",
+                                role,
+                                model_str,
+                                if tl.is_empty() { "auto" } else { &tl },
+                            ));
                         } else {
                             // Agent tab: save model + thinking level
                             let agent_type_str = next_panel

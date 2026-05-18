@@ -914,7 +914,7 @@ impl App {
                 let label = self.config.memory_model_display(role);
 
                 let role_display = match *role {
-                    "summarization" => "Summarization",
+                    "consolidation" => "Consolidation",
                     _ => role,
                 };
 
@@ -1068,6 +1068,19 @@ impl App {
                         }
                     } else if is_active && self.thinking_level.is_supported() {
                         Some(self.thinking_level.display_name().to_string())
+                    } else if panel.is_memory_tab() {
+                        let model_label = summary.label();
+                        if let Some(tl_str) =
+                            self.config.memory.thinking_levels.get("consolidation")
+                            && self.config.memory.consolidation_model.as_deref()
+                                == Some(&model_label)
+                        {
+                            let tl_level =
+                                tl_str.rsplit_once(':').map(|(_, v)| v).unwrap_or(tl_str);
+                            Some(tl_level.to_string())
+                        } else {
+                            None
+                        }
                     } else if !panel.is_general_tab() {
                         if let Some(tab) = panel.current_tab() {
                             if let Some(tl_str) =

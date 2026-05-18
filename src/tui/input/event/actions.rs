@@ -180,9 +180,9 @@ impl App {
                 &label,
             ));
         }
-        // Memory tab — summarization model
+        // Memory tab — consolidation model
         {
-            let display = self.config.memory_model_display("summarization");
+            let display = self.config.memory_model_display("consolidation");
             tabs.push(crate::tui::model_panel::ModelPanelTab::new(
                 "memory", "Memory", &display,
             ));

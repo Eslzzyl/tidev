@@ -2,8 +2,8 @@ use crate::config::ModelSummary;
 use crate::tui::Composer;
 
 /// Memory tab sub-entry identifiers.
-pub const MEMORY_ROLE_SUMMARIZATION: &str = "summarization";
-pub const MEMORY_ROLES: [&str; 1] = [MEMORY_ROLE_SUMMARIZATION];
+pub const MEMORY_ROLE_CONSOLIDATION: &str = "consolidation";
+pub const MEMORY_ROLES: [&str; 1] = [MEMORY_ROLE_CONSOLIDATION];
 
 /// Which column has focus within the Memory tab's two-column layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,7 +83,7 @@ impl ModelPanelState {
         if self.is_memory_tab() {
             MEMORY_ROLES[0]
         } else {
-            MEMORY_ROLE_SUMMARIZATION
+            MEMORY_ROLE_CONSOLIDATION
         }
     }
 

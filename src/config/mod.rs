@@ -35,9 +35,13 @@ pub use self::sandbox::SandboxConfig;
 /// `None` = inherit from the session's active model.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MemoryConfig {
-    /// Optional override for summarization model.
+    /// Optional override for consolidation/reflection model.
     #[serde(default)]
-    pub summarization_model: Option<String>,
+    pub consolidation_model: Option<String>,
+    /// Per-role thinking level overrides, keyed by role name (e.g. "consolidation").
+    /// Format matches `ThinkingLevelType::to_string()` (e.g. "deepseek:High").
+    #[serde(default)]
+    pub thinking_levels: BTreeMap<String, String>,
     /// Whether to inject comprehensive memory context into the conversation.
     /// When true, memory context (observations, summaries, facts, procedures,
     /// slots, graph, insights) is injected into the first user message only.
@@ -62,7 +66,8 @@ fn default_context_token_budget() -> usize {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
-            summarization_model: None,
+            consolidation_model: None,
+            thinking_levels: BTreeMap::new(),
             inject_context: false,
             enrich_tools: false,
             context_token_budget: 2000,
@@ -917,10 +922,10 @@ default_provider = "exa"
     }
 
     /// Return the configured memory model label for a role, if any.
-    /// Roles: "summarization".
+    /// Roles: "consolidation".
     pub fn memory_model_label(&self, role: &str) -> Option<&str> {
         match role {
-            "summarization" => self.memory.summarization_model.as_deref(),
+            "consolidation" => self.memory.consolidation_model.as_deref(),
             _ => None,
         }
     }
@@ -939,11 +944,39 @@ default_provider = "exa"
         role: &str,
         model_str: &str,
     ) -> Result<()> {
-        if role == "summarization" {
+        if role == "consolidation" {
             if model_str.is_empty() {
-                self.memory.summarization_model = None;
+                self.memory.consolidation_model = None;
+                self.memory.thinking_levels.remove(role);
             } else {
-                self.memory.summarization_model = Some(model_str.to_string());
+                self.memory.consolidation_model = Some(model_str.to_string());
+                // Clear thinking level when model changes
+                self.memory.thinking_levels.remove(role);
+            }
+        }
+        self.save(paths)
+    }
+
+    /// Set both the memory model override and thinking level for a role.
+    /// Pass empty `thinking_level` to clear the override.
+    pub fn set_memory_model_and_thinking(
+        &mut self,
+        paths: &ConfigPaths,
+        role: &str,
+        model_str: &str,
+        thinking_level: &str,
+    ) -> Result<()> {
+        if role == "consolidation" {
+            if model_str.is_empty() {
+                self.memory.consolidation_model = None;
+                self.memory.thinking_levels.remove(role);
+            } else {
+                self.memory.consolidation_model = Some(model_str.to_string());
+                if thinking_level.is_empty() {
+                    self.memory.thinking_levels.remove(role);
+                } else {
+                    self.memory.thinking_levels.insert(role.to_string(), thinking_level.to_string());
+                }
             }
         }
         self.save(paths)
