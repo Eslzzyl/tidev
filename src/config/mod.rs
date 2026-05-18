@@ -42,6 +42,19 @@ pub struct MemoryConfig {
     /// Format matches `ThinkingLevelType::to_string()` (e.g. "deepseek:High").
     #[serde(default)]
     pub thinking_levels: BTreeMap<String, String>,
+    /// Master switch for the memory system.
+    /// When false, background tasks do not run, auto-learning is skipped,
+    /// and memory is never injected or enriched automatically.
+    /// Manual operations (explicit `remember`/`search` tool calls) still work.
+    #[serde(default = "default_memory_enabled")]
+    pub enabled: bool,
+    /// Automatically learn from sessions and maintain memories.
+    /// Controls: background tasks (consolidation, reflection, eviction),
+    /// session summarization, and future real-time observation recording.
+    /// When disabled, memory is only written via explicit tool calls.
+    /// Ignored when `enabled` is false.
+    #[serde(default = "default_memory_auto_learn")]
+    pub auto_learn: bool,
     /// Whether to inject comprehensive memory context into the conversation.
     /// When true, memory context (observations, summaries, facts, procedures,
     /// slots, graph, insights) is injected into the first user message only.
@@ -59,6 +72,14 @@ pub struct MemoryConfig {
     pub context_token_budget: usize,
 }
 
+fn default_memory_enabled() -> bool {
+    true
+}
+
+fn default_memory_auto_learn() -> bool {
+    true
+}
+
 fn default_context_token_budget() -> usize {
     2000
 }
@@ -68,6 +89,8 @@ impl Default for MemoryConfig {
         Self {
             consolidation_model: None,
             thinking_levels: BTreeMap::new(),
+            enabled: true,
+            auto_learn: true,
             inject_context: false,
             enrich_tools: false,
             context_token_budget: 2000,
@@ -601,6 +624,9 @@ impl AppConfig {
         if has("sandbox") {
             self.sandbox = overlay.sandbox;
         }
+        if has("memory") {
+            self.memory = overlay.memory;
+        }
         if has("tmp") {
             self.tmp = overlay.tmp;
         }
@@ -715,6 +741,18 @@ enabled = false
 # allowlist can contain Telegram user IDs or chat IDs as strings.
 allowlist = []
 poll_timeout_secs = 30
+
+# Memory system configuration.
+# When enabled is false, the entire memory system is disabled
+# (no background tasks, no auto-injection, no auto-learning).
+# auto_learn controls background consolidation, reflection, eviction,
+# and session summarization.
+#[memory]
+#enabled = true
+#auto_learn = true
+#inject_context = false
+#enrich_tools = false
+#context_token_budget = 2000
 
 # Web search provider configuration.
 [websearch]

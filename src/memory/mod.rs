@@ -18,6 +18,7 @@ pub use engine::MemoryStore;
 pub use search_index::fts5_search_memories;
 pub use types::*;
 
+use crate::config::MemoryConfig;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -27,12 +28,20 @@ use std::time::Duration;
 /// Must be called after models are configured on `store` (via
 /// [`MemoryStore::set_models`]).
 ///
+/// Only spawns tasks when `config.enabled && config.auto_learn` is true.
+///
 /// Call once per session lifecycle, from within a tokio runtime context.
 pub fn start_background_tasks(
     store: Arc<MemoryStore>,
     runtime: &tokio::runtime::Handle,
     workspace_root: &str,
+    config: &MemoryConfig,
 ) {
+    if !config.enabled || !config.auto_learn {
+        crate::log_info!("memory: background tasks disabled by config");
+        return;
+    }
+
     let _ws = workspace_root.to_string();
 
     // ── Periodic eviction (every 3600s) ────────────────────────────────

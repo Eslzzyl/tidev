@@ -642,7 +642,8 @@ impl AgentRuntime {
 
                 // Pre-tool enrich: search and inject memory relevant to the
                 // file being operated on (agentmemory's mem::enrich equivalent).
-                if self.config.memory.enrich_tools && is_file_operation(&tool_call.name)
+                if self.config.memory.enabled && self.config.memory.enrich_tools
+                    && is_file_operation(&tool_call.name)
                     && let Some(ctx) = self
                         .hooks
                         .on_pre_tool_use_enrich(&tool_call, Some(session_id))
@@ -743,7 +744,8 @@ impl AgentRuntime {
 
             // Pre-tool enrich: search and inject memory relevant to the
             // file being operated on (agentmemory's mem::enrich equivalent).
-            if self.config.memory.enrich_tools && is_file_operation(&tool_call.name)
+            if self.config.memory.enabled && self.config.memory.enrich_tools
+                && is_file_operation(&tool_call.name)
                 && let Some(ctx) = self
                     .hooks
                     .on_pre_tool_use_enrich(tool_call, Some(session_id))
@@ -1173,7 +1175,7 @@ impl AgentRuntime {
             // Compose dynamic context + build
             let _t_sub_compose = std::time::Instant::now();
             let is_first_sub_turn = db_messages.len() <= 1;
-            let include_sub_memory = self.config.memory.inject_context && is_first_sub_turn;
+            let include_sub_memory = self.config.memory.enabled && self.config.memory.inject_context && is_first_sub_turn;
             let dynamic_context =
                 self.compose_dynamic_context(child_session_id, None, include_sub_memory).await;
             crate::log_info!(
@@ -1610,7 +1612,7 @@ impl AgentRuntime {
             // 2. Compose dynamic (per-turn) context
             let _t_compose = std::time::Instant::now();
             let has_assistant = db_messages.iter().any(|m| m.role == MessageRole::Assistant);
-            let include_memory = self.config.memory.inject_context && !has_assistant;
+            let include_memory = self.config.memory.enabled && self.config.memory.inject_context && !has_assistant;
             let dynamic_context =
                 self.compose_dynamic_context(session_id, Some(mode), include_memory).await;
             crate::log_info!(

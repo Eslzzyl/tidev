@@ -106,6 +106,7 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
         memory_store.clone(),
         &tokio::runtime::Handle::current(),
         &workspace_root.to_string_lossy(),
+        &config.memory,
     );
     let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
     let file_read_tracker = Arc::new(FileReadTracker::new());

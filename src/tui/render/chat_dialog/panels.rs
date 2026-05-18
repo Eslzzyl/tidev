@@ -311,13 +311,19 @@ impl App {
     ) {
         use crate::tui::ui::settings_panel::SettingType;
         let current_palette = self.palette();
-        let overlay = centered_rect(60, 16, area);
+        // 10 items × ~2 lines each = 22 rows
+        let overlay = centered_rect(64, 22, area);
         self.settings_panel_overlay.set(Some(overlay));
 
         let items: Vec<ListItem> = panel
             .items
             .iter()
             .map(|item| {
+                let fg = if item.disabled {
+                    current_palette.muted
+                } else {
+                    current_palette.text
+                };
                 let status: String = match &item.setting_type {
                     SettingType::Toggle(true) => "[x]".to_string(),
                     SettingType::Toggle(false) => "[ ]".to_string(),
@@ -332,17 +338,17 @@ impl App {
                         Span::styled(
                             format!(" {} ", status),
                             Style::default()
-                                .fg(match item.setting_type {
-                                    SettingType::Toggle(true) => current_palette.accent,
+                                .fg(match &item.setting_type {
+                                    SettingType::Toggle(true) => {
+                                        if item.disabled { current_palette.muted } else { current_palette.accent }
+                                    }
                                     _ => current_palette.muted,
                                 })
                                 .add_modifier(Modifier::BOLD),
                         ),
                         Span::styled(
                             &item.name,
-                            Style::default()
-                                .fg(current_palette.text)
-                                .add_modifier(Modifier::BOLD),
+                            Style::default().fg(fg).add_modifier(Modifier::BOLD),
                         ),
                     ]),
                     Line::from(vec![

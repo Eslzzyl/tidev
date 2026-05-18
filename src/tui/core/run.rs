@@ -340,6 +340,7 @@ impl App {
             self.memory_store.clone(),
             runtime.handle(),
             &self.workspace_root.to_string_lossy(),
+            &self.config.memory,
         );
         crate::log_info!("startup: memory background tasks spawned in {:?}", _t_run.elapsed());
 
@@ -349,6 +350,7 @@ impl App {
         let check_ws = self.workspace_root.to_string_lossy().to_string();
         let cancel_token = self.inactivity_check_cancel.clone();
         let sid_ref = self.current_session_id.clone();
+        let memory_auto_learn = self.config.memory.enabled && self.config.memory.auto_learn;
         runtime.spawn(async move {
             const INACTIVITY_TIMEOUT_SECS: i64 = 300;
             let mut interval = tokio::time::interval(Duration::from_secs(60));
@@ -368,12 +370,14 @@ impl App {
                         };
                         crate::log_debug!("inactivity check: found {} inactive sessions", ids.len());
                         for id in ids {
-                            crate::log_info!("summarising inactive session: {}", id);
+                            crate::log_info!("marking inactive session completed: {}", id);
                             if let Err(e) = check_store.set_session_status(id, "completed") {
                                 crate::log_warn!("failed to mark session completed: {}", e);
                                 continue;
                             }
-                            if let Err(e) = check_mem_store.summarize_session(id, &check_ws).await {
+                            if memory_auto_learn
+                                && let Err(e) = check_mem_store.summarize_session(id, &check_ws).await
+                            {
                                 crate::log_warn!("session summarisation failed: {}", e);
                             }
                         }
