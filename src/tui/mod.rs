@@ -64,6 +64,7 @@ use crate::{
     agent::runtime::{AgentRuntime, PendingToolApproval},
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
     context::ContextManager,
+    instructions,
     llm::LlmClient,
     mcp::McpManager,
     memory::MemoryStore,
@@ -1643,6 +1644,21 @@ impl App {
         self.scroll_messages_to_bottom();
 
         self.schedule_context_compaction_for_session(self.conversation.session_id, runtime, None);
+
+        // Load instruction files so "Loaded instructions from ..." appears before
+        // the streaming assistant message is created by spawn_agent_loop.
+        // This is done here (not in the agent loop) to avoid corrupting the
+        // conversation message order (the streaming message must remain last).
+        let (_, sources, new_cache) = instructions::system_prompt_and_sources_with_cache(
+            &self.workspace_root,
+            &self.paths.config_dir,
+            &self.agent.instructions,
+            &self.instruction_content_cache,
+        )
+        .unwrap_or_default();
+        self.update_loaded_instruction_sources(&sources)?;
+        self.instruction_content_cache = new_cache.clone();
+        self.agent.instruction_content_cache = new_cache;
 
         crate::log_info!("agent: submit_prompt_now took {:?}", _t_submit.elapsed());
         self.spawn_agent_loop(runtime)
