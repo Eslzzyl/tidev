@@ -1205,7 +1205,6 @@ impl App {
                     let label = if count == 1 { "subagent" } else { "subagents" };
                     self.last_notice = Some(format!("Waiting for {} {}...", count, label));
                 }
-
             }
             BackendEvent::UsageStats {
                 session_id: _,
@@ -1586,10 +1585,18 @@ impl App {
 
                 // Compose the immutable static system prompt and persist it.
                 let _t_prompt = std::time::Instant::now();
-                let static_prompt = self.agent.compose_static_system_prompt(&self.active_model.system_prompt);
-                crate::log_info!("agent: compose_static_system_prompt took {:?}", _t_prompt.elapsed());
+                let static_prompt = self
+                    .agent
+                    .compose_static_system_prompt(&self.active_model.system_prompt);
+                crate::log_info!(
+                    "agent: compose_static_system_prompt took {:?}",
+                    _t_prompt.elapsed()
+                );
                 self.active_model.system_prompt = static_prompt.clone();
-                if let Err(e) = self.store.update_session_system_prompt(session_id, &static_prompt) {
+                if let Err(e) = self
+                    .store
+                    .update_session_system_prompt(session_id, &static_prompt)
+                {
                     crate::log_warn!("failed to persist static system prompt: {}", e);
                 }
             }

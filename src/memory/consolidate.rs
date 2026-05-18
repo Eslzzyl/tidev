@@ -89,14 +89,15 @@ impl ConsolidationService {
 
         // Tier 0b: Knowledge graph extraction from session summaries
         if let Ok(db) = Connection::open(db_path)
-            && let Ok(summaries) = Self::load_summaries_for_graph(&db, project) {
-                for summary in &summaries {
-                    let sid = summary.session_id.to_string();
-                    if let Err(e) = graph::extract_from_session_summary(&db, summary, &sid) {
-                        crate::log_warn!("graph extraction failed for summary {}: {}", sid, e);
-                    }
+            && let Ok(summaries) = Self::load_summaries_for_graph(&db, project)
+        {
+            for summary in &summaries {
+                let sid = summary.session_id.to_string();
+                if let Err(e) = graph::extract_from_session_summary(&db, summary, &sid) {
+                    crate::log_warn!("graph extraction failed for summary {}: {}", sid, e);
                 }
             }
+        }
 
         // Tier 1
         match Self::consolidate_semantic(db_path, llm, model, project).await {
@@ -143,7 +144,11 @@ impl ConsolidationService {
 
         // If cursor is a UUID (old format), treat all summaries as new; use "1970" to include all
         let cursor_is_uuid = last_cursor.len() == 36 && last_cursor.contains('-');
-        let cursor_time = if cursor_is_uuid { "1970-01-01T00:00:00+00:00".to_string() } else { last_cursor.clone() };
+        let cursor_time = if cursor_is_uuid {
+            "1970-01-01T00:00:00+00:00".to_string()
+        } else {
+            last_cursor.clone()
+        };
 
         let new_summaries: Vec<_> = summaries
             .iter()
@@ -177,7 +182,11 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
             {
                 Ok(r) => r,
                 Err(e) => {
-                    crate::log_warn!("semantic consolidation LLM call failed (attempt {}): {}", attempt, e);
+                    crate::log_warn!(
+                        "semantic consolidation LLM call failed (attempt {}): {}",
+                        attempt,
+                        e
+                    );
                     continue;
                 }
             };
@@ -188,7 +197,9 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 break;
             }
             if attempt == 0 {
-                crate::log_warn!("semantic consolidation: unparseable response, retrying with stricter prompt");
+                crate::log_warn!(
+                    "semantic consolidation: unparseable response, retrying with stricter prompt"
+                );
             }
         }
 
@@ -197,7 +208,9 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
 
         // Check persistent retry count — skip if failed too many times
         let cursor_val = new_summaries.last().map(|s| s.created_at.to_rfc3339());
-        let retry_key = cursor_val.as_ref().map(|c| format!("consolidation_retry_semantic_{}", c));
+        let retry_key = cursor_val
+            .as_ref()
+            .map(|c| format!("consolidation_retry_semantic_{}", c));
         let retry_count: i64 = match &retry_key {
             Some(key) => db
                 .query_row(
@@ -297,7 +310,11 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
 
         // If cursor is a UUID (old format), treat all patterns as new
         let cursor_is_uuid = last_cursor.len() == 36 && last_cursor.contains('-');
-        let cursor_time = if cursor_is_uuid { "1970-01-01T00:00:00+00:00".to_string() } else { last_cursor.clone() };
+        let cursor_time = if cursor_is_uuid {
+            "1970-01-01T00:00:00+00:00".to_string()
+        } else {
+            last_cursor.clone()
+        };
 
         let new_patterns: Vec<_> = patterns
             .iter()
@@ -331,7 +348,11 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
             {
                 Ok(r) => r,
                 Err(e) => {
-                    crate::log_warn!("procedural extraction LLM call failed (attempt {}): {}", attempt, e);
+                    crate::log_warn!(
+                        "procedural extraction LLM call failed (attempt {}): {}",
+                        attempt,
+                        e
+                    );
                     continue;
                 }
             };
@@ -342,7 +363,9 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 break;
             }
             if attempt == 0 {
-                crate::log_warn!("procedural extraction: unparseable response, retrying with stricter prompt");
+                crate::log_warn!(
+                    "procedural extraction: unparseable response, retrying with stricter prompt"
+                );
             }
         }
 
@@ -351,7 +374,9 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
 
         // Check persistent retry count — skip if failed too many times
         let cursor_val = new_patterns.last().map(|m| m.created_at.to_rfc3339());
-        let retry_key = cursor_val.as_ref().map(|c| format!("consolidation_retry_procedural_{}", c));
+        let retry_key = cursor_val
+            .as_ref()
+            .map(|c| format!("consolidation_retry_procedural_{}", c));
         let retry_count: i64 = match &retry_key {
             Some(key) => db
                 .query_row(

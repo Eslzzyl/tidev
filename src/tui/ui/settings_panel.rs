@@ -3,8 +3,15 @@ use crate::config::AppConfig;
 #[derive(Clone, Debug)]
 pub enum SettingType {
     Toggle(bool),
-    Number { value: f32, min: f32, max: f32 },
-    Cycle { options: Vec<String>, selected: usize },
+    Number {
+        value: f32,
+        min: f32,
+        max: f32,
+    },
+    Cycle {
+        options: Vec<String>,
+        selected: usize,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -77,7 +84,8 @@ impl SettingsPanelState {
             },
             SettingItem {
                 name: "Save Request Body".to_string(),
-                description: "Save LLM request bodies to /tmp/tidev-requests/ for debugging".to_string(),
+                description: "Save LLM request bodies to /tmp/tidev-requests/ for debugging"
+                    .to_string(),
                 setting_type: SettingType::Toggle(config.logging.save_request_body),
                 key: SettingKey::SaveRequestBody,
                 disabled: false,
@@ -218,15 +226,19 @@ impl SettingsPanelState {
                     match self.items[i].key {
                         SettingKey::MemoryAutoLearn => {
                             self.items[i].disabled = false;
-                            self.items[i].description = "Automatically learn from sessions and maintain memories".to_string();
+                            self.items[i].description =
+                                "Automatically learn from sessions and maintain memories"
+                                    .to_string();
                         }
                         SettingKey::MemoryInjectContext => {
                             self.items[i].disabled = false;
-                            self.items[i].description = "Do not inject memory context into conversations".to_string();
+                            self.items[i].description =
+                                "Do not inject memory context into conversations".to_string();
                         }
                         SettingKey::MemoryEnrichTools => {
                             self.items[i].disabled = false;
-                            self.items[i].description = "Do not enrich file operations with memories".to_string();
+                            self.items[i].description =
+                                "Do not enrich file operations with memories".to_string();
                         }
                         _ => {}
                     }

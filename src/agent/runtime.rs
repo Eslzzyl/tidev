@@ -236,11 +236,7 @@ impl AgentRuntime {
                     let _start = std::time::Instant::now();
                     let _result = $body;
                     let _elapsed = _start.elapsed();
-                    crate::log_debug!(
-                        "compose_dynamic_context: {} took {:?}",
-                        $label,
-                        _elapsed
-                    );
+                    crate::log_debug!("compose_dynamic_context: {} took {:?}", $label, _elapsed);
                     if _elapsed > std::time::Duration::from_millis(500) {
                         crate::log_warn!(
                             "compose_dynamic_context: {} took {:?} (slow)",
@@ -291,33 +287,31 @@ impl AgentRuntime {
             }
 
             // ── Memory slots ────────────────────────────────────────────────
-            if let Ok(slot_content) = timed_memory_op!(
-                "render_pinned_slots",
-                memory_store.render_pinned_slots(&ws)
-            )
-                && !slot_content.is_empty() {
-                    sections.push(slot_content);
-                }
+            if let Ok(slot_content) =
+                timed_memory_op!("render_pinned_slots", memory_store.render_pinned_slots(&ws))
+                && !slot_content.is_empty()
+            {
+                sections.push(slot_content);
+            }
 
             // ── Knowledge graph context ─────────────────────────────────────
             let query = self.workspace_root.file_name().and_then(|n| n.to_str());
             if let Ok(paths) = timed_memory_op!(
                 "search_graph_context",
                 memory_store.search_graph_context(query, 3, 10)
-            )
-                && !paths.is_empty() {
-                    let graph_prompt =
-                        crate::memory::graph_retrieval::GraphRetrieval::format_for_prompt(&paths, 8);
-                    if !graph_prompt.is_empty() {
-                        sections.push(graph_prompt);
-                    }
+            ) && !paths.is_empty()
+            {
+                let graph_prompt =
+                    crate::memory::graph_retrieval::GraphRetrieval::format_for_prompt(&paths, 8);
+                if !graph_prompt.is_empty() {
+                    sections.push(graph_prompt);
                 }
+            }
 
             // ── Insights (cross-session synthesized knowledge) ──────────────
-            if let Ok(insights) = timed_memory_op!(
-                "load_insights",
-                memory_store.load_insights(&ws, 5)
-            ) && !insights.is_empty()
+            if let Ok(insights) =
+                timed_memory_op!("load_insights", memory_store.load_insights(&ws, 5))
+                && !insights.is_empty()
             {
                 let mut block = "## Cross-Session Insights\n".to_string();
                 for insight in &insights {
@@ -665,17 +659,19 @@ impl AgentRuntime {
 
                 // Pre-tool enrich: search and inject memory relevant to the
                 // file being operated on (agentmemory's mem::enrich equivalent).
-                if self.config.memory.enabled && self.config.memory.enrich_tools
+                if self.config.memory.enabled
+                    && self.config.memory.enrich_tools
                     && is_file_operation(&tool_call.name)
                     && let Some(ctx) = self
                         .hooks
                         .on_pre_tool_use_enrich(&tool_call, Some(session_id))
                         .await
-                    {
-                        result
-                            .output
-                            .push_str(&format!("\n\n<system-reminder>\n{}\n</system-reminder>", ctx));
-                    }
+                {
+                    result.output.push_str(&format!(
+                        "\n\n<system-reminder>\n{}\n</system-reminder>",
+                        ctx
+                    ));
+                }
 
                 // PostToolUse: ALL read tools fire observations (agentmemory
                 // has no matcher on PostToolUse).
@@ -767,17 +763,19 @@ impl AgentRuntime {
 
             // Pre-tool enrich: search and inject memory relevant to the
             // file being operated on (agentmemory's mem::enrich equivalent).
-            if self.config.memory.enabled && self.config.memory.enrich_tools
+            if self.config.memory.enabled
+                && self.config.memory.enrich_tools
                 && is_file_operation(&tool_call.name)
                 && let Some(ctx) = self
                     .hooks
                     .on_pre_tool_use_enrich(tool_call, Some(session_id))
                     .await
-                {
-                    result
-                        .output
-                        .push_str(&format!("\n\n<system-reminder>\n{}\n</system-reminder>", ctx));
-                }
+            {
+                result.output.push_str(&format!(
+                    "\n\n<system-reminder>\n{}\n</system-reminder>",
+                    ctx
+                ));
+            }
 
             // ─── PostToolFailure Observation ─────────────────────────────
             // If the tool result indicates an error, record a PostToolFailure
@@ -992,10 +990,7 @@ impl AgentRuntime {
     ///
     /// All panics/errors are caught and returned as a [`ToolExecutionResult`]
     /// so this never throws from the perspective of `execute_tool_calls`.
-    pub async fn run_subagent(
-        mut self,
-        config: SubagentConfig,
-    ) -> ToolExecutionResult {
+    pub async fn run_subagent(mut self, config: SubagentConfig) -> ToolExecutionResult {
         let result = self
             .run_subagent_inner(
                 config.parent_session_id,
@@ -1193,9 +1188,12 @@ impl AgentRuntime {
             // Compose dynamic context + build
             let _t_sub_compose = std::time::Instant::now();
             let is_first_sub_turn = db_messages.len() <= 1;
-            let include_sub_memory = self.config.memory.enabled && self.config.memory.inject_context && is_first_sub_turn;
-            let dynamic_context =
-                self.compose_dynamic_context(child_session_id, None, include_sub_memory).await;
+            let include_sub_memory = self.config.memory.enabled
+                && self.config.memory.inject_context
+                && is_first_sub_turn;
+            let dynamic_context = self
+                .compose_dynamic_context(child_session_id, None, include_sub_memory)
+                .await;
             crate::log_info!(
                 "run_subagent: compose_dynamic_context took {:?} ({} chars)",
                 _t_sub_compose.elapsed(),
@@ -1204,7 +1202,10 @@ impl AgentRuntime {
             // Persist dynamic context into the last user message's DB record
             if !dynamic_context.is_empty() {
                 let store = self.store.lock().await;
-                if let Some(last_user) = db_messages.iter_mut().rev().find(|m| m.role == MessageRole::User)
+                if let Some(last_user) = db_messages
+                    .iter_mut()
+                    .rev()
+                    .find(|m| m.role == MessageRole::User)
                     && !last_user.content.starts_with("<system-reminder>")
                 {
                     last_user.content = format!("{}\n\n{}", dynamic_context, last_user.content);
@@ -1216,7 +1217,8 @@ impl AgentRuntime {
             }
 
             let _t_sub_build = std::time::Instant::now();
-            let mut conv = crate::session::Conversation::new(child_session_id, "", "", "", "", "", "");
+            let mut conv =
+                crate::session::Conversation::new(child_session_id, "", "", "", "", "", "");
             conv.messages = db_messages;
             let request_messages = child_context.build_request_messages(&conv, SessionMode::Build);
             crate::log_debug!(
@@ -1448,8 +1450,7 @@ impl AgentRuntime {
                 // some LLMs hallucinate it from training data.  Check here so
                 // we don't show a misleading "Tool: task" status before the
                 // execute_tool_calls rejection below.
-                if tool_call.name == "task"
-                    || canonical_tool_name(&tool_call.name) == Some("task")
+                if tool_call.name == "task" || canonical_tool_name(&tool_call.name) == Some("task")
                 {
                     crate::log_info!(
                         "run_subagent: rejecting phantom '{}' call from subagent LLM",
@@ -1561,22 +1562,20 @@ impl AgentRuntime {
         cancel_token: Option<CancellationToken>,
     ) -> Result<()> {
         let request_id: u64 = rand::random();
-        
 
-        self
-            .run_agent_loop_with_tools_inner(
-                request_id,
-                session_id,
-                model,
-                context_manager,
-                mode,
-                thinking_level,
-                tools,
-                event_tx,
-                cancel_token,
-                None,
-            )
-            .await
+        self.run_agent_loop_with_tools_inner(
+            request_id,
+            session_id,
+            model,
+            context_manager,
+            mode,
+            thinking_level,
+            tools,
+            event_tx,
+            cancel_token,
+            None,
+        )
+        .await
     }
 
     /// Internal implementation with optional permission channel.
@@ -1631,9 +1630,11 @@ impl AgentRuntime {
             // 2. Compose dynamic (per-turn) context
             let _t_compose = std::time::Instant::now();
             let has_assistant = db_messages.iter().any(|m| m.role == MessageRole::Assistant);
-            let include_memory = self.config.memory.enabled && self.config.memory.inject_context && !has_assistant;
-            let dynamic_context =
-                self.compose_dynamic_context(session_id, Some(mode), include_memory).await;
+            let include_memory =
+                self.config.memory.enabled && self.config.memory.inject_context && !has_assistant;
+            let dynamic_context = self
+                .compose_dynamic_context(session_id, Some(mode), include_memory)
+                .await;
             crate::log_info!(
                 "agent_loop: composed dynamic context ({} chars) in {:?}",
                 dynamic_context.len(),
@@ -1645,7 +1646,10 @@ impl AgentRuntime {
             //    content that was sent to the LLM (prefix cache hit).
             if !dynamic_context.is_empty() {
                 let store = self.store.lock().await;
-                if let Some(last_user) = db_messages.iter_mut().rev().find(|m| m.role == MessageRole::User)
+                if let Some(last_user) = db_messages
+                    .iter_mut()
+                    .rev()
+                    .find(|m| m.role == MessageRole::User)
                     && !last_user.content.starts_with("<system-reminder>")
                 {
                     last_user.content = format!("{}\n\n{}", dynamic_context, last_user.content);
@@ -1679,7 +1683,10 @@ impl AgentRuntime {
                 "agent_loop: model_for_turn setup took {:?}",
                 _t_prep_model.elapsed()
             );
-            crate::log_info!("agent_loop: pre-LLM overhead {:?} — run_single_turn starting", _t_prep_model.elapsed());
+            crate::log_info!(
+                "agent_loop: pre-LLM overhead {:?} — run_single_turn starting",
+                _t_prep_model.elapsed()
+            );
             let _t_turn = std::time::Instant::now();
             let turn = self
                 .run_single_turn(
@@ -1795,10 +1802,7 @@ impl AgentRuntime {
                         Ok(true) => true,
                         Ok(false) => false,
                         Err(e) => {
-                            crate::log_warn!(
-                                "run_agent_loop: compaction failed: {}",
-                                e
-                            );
+                            crate::log_warn!("run_agent_loop: compaction failed: {}", e);
                             let _ = event_tx.send(BackendEvent::ContextCompacted {
                                 session_id,
                                 compacted: false,
@@ -2074,10 +2078,7 @@ impl AgentRuntime {
     ///
     /// If `cancel_token` is provided and cancelled, the loop stops after the
     /// current turn/tool execution completes.
-    pub async fn run_agent_loop(
-        &mut self,
-        config: AgentLoopConfig<'_>,
-    ) -> Result<()> {
+    pub async fn run_agent_loop(&mut self, config: AgentLoopConfig<'_>) -> Result<()> {
         let tools = self.tool_definitions();
         self.run_agent_loop_with_tools(
             config.session_id,
@@ -2855,9 +2856,7 @@ mod tests {
                 .unwrap();
         }
 
-        let result = agent
-            .compose_dynamic_context(session_id, None, false)
-            .await;
+        let result = agent.compose_dynamic_context(session_id, None, false).await;
         assert!(
             result.is_empty(),
             "dynamic context should be empty with no instructions, memories, or mode"

@@ -31,8 +31,7 @@ impl App {
 
         frame.render_widget(Clear, overlay);
 
-        let block = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let block = Block::default().style(Style::default().bg(palette.panel_alt));
 
         frame.render_widget(block, overlay);
 
@@ -56,7 +55,9 @@ impl App {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 " Usage Statistics ",
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
             layout[0],
@@ -108,7 +109,8 @@ impl App {
             spans.push(Span::styled(format!("[{}]", label), style));
         }
 
-        let paragraph = Paragraph::new(Line::from(spans)).style(Style::default().bg(palette.panel_alt));
+        let paragraph =
+            Paragraph::new(Line::from(spans)).style(Style::default().bg(palette.panel_alt));
         frame.render_widget(paragraph, area);
     }
 
@@ -362,7 +364,9 @@ impl App {
                 ),
                 Span::styled(
                     format_token_count(entry.total_tokens as u64),
-                    Style::default().bg(palette.panel_alt).fg(palette.accent_soft),
+                    Style::default()
+                        .bg(palette.panel_alt)
+                        .fg(palette.accent_soft),
                 ),
                 Span::styled(
                     format!(" ({} requests)", entry.request_count),
@@ -414,7 +418,8 @@ impl App {
             Style::default().bg(palette.panel_alt).fg(palette.muted),
         ));
 
-        let paragraph = Paragraph::new(Line::from(spans)).style(Style::default().bg(palette.panel_alt));
+        let paragraph =
+            Paragraph::new(Line::from(spans)).style(Style::default().bg(palette.panel_alt));
         frame.render_widget(paragraph, area);
     }
 }

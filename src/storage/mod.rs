@@ -6,7 +6,9 @@ mod tests;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use rusqlite::{Connection, OptionalExtension, named_params, params, params_from_iter, types::Type};
+use rusqlite::{
+    Connection, OptionalExtension, named_params, params, params_from_iter, types::Type,
+};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -504,11 +506,14 @@ impl SessionStore {
     }
 
     pub fn load_session_system_prompt(&self, session_id: Uuid) -> Result<String> {
-        let result = self.read_conn.query_row(
-            "SELECT system_prompt FROM sessions WHERE id = ?1",
-            params![session_id.to_string()],
-            |row| row.get::<_, String>(0),
-        ).optional()?;
+        let result = self
+            .read_conn
+            .query_row(
+                "SELECT system_prompt FROM sessions WHERE id = ?1",
+                params![session_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
         Ok(result.unwrap_or_default())
     }
 
@@ -852,17 +857,18 @@ impl SessionStore {
     }
 
     pub fn load_revert_message_id(&self, session_id: Uuid) -> Result<Option<Uuid>> {
-        let message_id = self.read_query_opt(
-            "SELECT message_id FROM session_reverts WHERE session_id = :session_id LIMIT 1",
-            named_params! { ":session_id": session_id.to_string() },
-            |row| row.get::<_, String>(0),
-        )?
-        .map(|value| {
-            Uuid::parse_str(&value).map_err(|error| {
-                rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
+        let message_id = self
+            .read_query_opt(
+                "SELECT message_id FROM session_reverts WHERE session_id = :session_id LIMIT 1",
+                named_params! { ":session_id": session_id.to_string() },
+                |row| row.get::<_, String>(0),
+            )?
+            .map(|value| {
+                Uuid::parse_str(&value).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
+                })
             })
-        })
-        .transpose()?;
+            .transpose()?;
 
         Ok(message_id)
     }
@@ -903,7 +909,9 @@ impl SessionStore {
     }
 
     pub fn load_redo_snapshot(&self, session_id: Uuid) -> Result<Option<String>> {
-        let mut statement = self.read_conn.prepare("SELECT redo_snapshot FROM session_reverts WHERE session_id = ?1 LIMIT 1")?;
+        let mut statement = self
+            .read_conn
+            .prepare("SELECT redo_snapshot FROM session_reverts WHERE session_id = ?1 LIMIT 1")?;
 
         let snapshot = statement
             .query_row(params![session_id.to_string()], |row| {
@@ -991,11 +999,7 @@ impl SessionStore {
         Ok(())
     }
 
-    pub fn update_message_content(
-        &self,
-        message_id: Uuid,
-        content: &str,
-    ) -> Result<()> {
+    pub fn update_message_content(&self, message_id: Uuid, content: &str) -> Result<()> {
         let compressed = compress_text(content);
         self.write_execute(
             "UPDATE messages SET content = :content WHERE id = :id",
@@ -1250,7 +1254,10 @@ impl SessionStore {
         );
 
         let params: Vec<String> = session_ids.to_vec();
-        self.write_conn.lock().unwrap().execute(&sql, params_from_iter(params))?;
+        self.write_conn
+            .lock()
+            .unwrap()
+            .execute(&sql, params_from_iter(params))?;
 
         Ok(())
     }
@@ -1714,16 +1721,18 @@ impl SessionStore {
                 ":start": start_text,
                 ":end": end_text,
             },
-            |row| Ok(map_row!(ModelUsageEntry, row,
-                provider_id: 0,
-                model_id: 1,
-                input_tokens: 2,
-                output_tokens: 3,
-                cache_read_tokens: 4,
-                cache_write_tokens: 5,
-                total_tokens: 6,
-                request_count: 7,
-            )),
+            |row| {
+                Ok(map_row!(ModelUsageEntry, row,
+                    provider_id: 0,
+                    model_id: 1,
+                    input_tokens: 2,
+                    output_tokens: 3,
+                    cache_read_tokens: 4,
+                    cache_write_tokens: 5,
+                    total_tokens: 6,
+                    request_count: 7,
+                ))
+            },
         )
     }
 
@@ -2229,7 +2238,10 @@ pub fn load_session_messages(db: &Connection, session_id: Uuid) -> Result<Vec<Me
         "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC"
     )?;
 
-    let rows = stmt.query_map(rusqlite::params![session_id.to_string()], RawMessageRow::from_row)?;
+    let rows = stmt.query_map(
+        rusqlite::params![session_id.to_string()],
+        RawMessageRow::from_row,
+    )?;
 
     let mut messages = Vec::new();
     for row in rows {

@@ -16,8 +16,8 @@ pub fn save_request_for_debugging(request_body: &str, enabled: bool, max_files: 
     }
 
     // Rotation: delete oldest files if over limit
-    if let Ok(mut entries) = std::fs::read_dir(dir)
-        .map(|iter| iter.filter_map(|e| e.ok()).collect::<Vec<_>>())
+    if let Ok(mut entries) =
+        std::fs::read_dir(dir).map(|iter| iter.filter_map(|e| e.ok()).collect::<Vec<_>>())
     {
         entries.sort_by_key(|e| {
             std::fs::metadata(e.path())

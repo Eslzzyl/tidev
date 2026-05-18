@@ -361,7 +361,9 @@ impl ContextManager {
             }
             text
         } else {
-            config.llm.complete_with_messages(config.model.clone(), compact_msgs, config.tools.to_vec())
+            config
+                .llm
+                .complete_with_messages(config.model.clone(), compact_msgs, config.tools.to_vec())
                 .await
                 .unwrap_or_else(|error| self.fallback_summary(messages, &error.to_string()))
         };

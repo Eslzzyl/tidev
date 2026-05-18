@@ -26,8 +26,7 @@ impl App {
 
         frame.render_widget(Clear, overlay);
 
-        let block = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let block = Block::default().style(Style::default().bg(palette.panel_alt));
 
         frame.render_widget(block, overlay);
 
@@ -51,7 +50,9 @@ impl App {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 " Balance ",
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
             layout[0],
@@ -92,9 +93,13 @@ impl App {
             spans.push(Span::styled(format!("[{}]", label), style));
         }
 
-        spans.push(Span::styled("     ", Style::default().bg(palette.panel_alt)));
+        spans.push(Span::styled(
+            "     ",
+            Style::default().bg(palette.panel_alt),
+        ));
 
-        let paragraph = Paragraph::new(Line::from(spans)).style(Style::default().bg(palette.panel_alt));
+        let paragraph =
+            Paragraph::new(Line::from(spans)).style(Style::default().bg(palette.panel_alt));
         frame.render_widget(paragraph, area);
     }
 
@@ -251,7 +256,8 @@ impl App {
             ),
         ];
 
-        let paragraph = Paragraph::new(Line::from(spans)).style(Style::default().bg(palette.panel_alt));
+        let paragraph =
+            Paragraph::new(Line::from(spans)).style(Style::default().bg(palette.panel_alt));
         frame.render_widget(paragraph, area);
     }
 }

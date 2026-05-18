@@ -407,9 +407,10 @@ impl MemoryStore {
             if !q.is_empty() {
                 // Try search (hybrid → FTS5 → LIKE) with the query
                 if let Ok(entries) = self.search(workspace_root, q)
-                    && !entries.is_empty() {
-                        return Ok(entries);
-                    }
+                    && !entries.is_empty()
+                {
+                    return Ok(entries);
+                }
             }
         }
         // Fall back to compound sort (importance × frequency × recency)
@@ -427,10 +428,10 @@ impl MemoryStore {
             let q = query.trim();
             if !q.is_empty()
                 && let Ok(entries) = self.search_fts5_fallback(workspace_root, q)
-                    && !entries.is_empty()
-                {
-                    return Ok(entries);
-                }
+                && !entries.is_empty()
+            {
+                return Ok(entries);
+            }
         }
         self.select_hot(workspace_root, limit, min_chars)
     }
@@ -575,12 +576,11 @@ impl MemoryStore {
             let mut stmt = db.prepare(
                 "SELECT model_id FROM messages \
                  WHERE session_id = ?1 AND role = 'assistant' AND model_id IS NOT NULL \
-                 ORDER BY created_at DESC, rowid DESC LIMIT 1"
+                 ORDER BY created_at DESC, rowid DESC LIMIT 1",
             )?;
-            match stmt.query_row(
-                rusqlite::params![session_id.to_string()],
-                |row| row.get::<_, String>(0),
-            ) {
+            match stmt.query_row(rusqlite::params![session_id.to_string()], |row| {
+                row.get::<_, String>(0)
+            }) {
                 Ok(label) => label,
                 Err(rusqlite::Error::QueryReturnedNoRows) => {
                     anyhow::bail!("no assistant message with model_id found in session");
@@ -589,12 +589,10 @@ impl MemoryStore {
             }
         };
 
-        let resolver = self
-            .model_resolver
-            .read()
-            .unwrap()
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("model resolver not configured for summarization"))?;
+        let resolver =
+            self.model_resolver.read().unwrap().clone().ok_or_else(|| {
+                anyhow::anyhow!("model resolver not configured for summarization")
+            })?;
 
         let model = resolver(&model_label)?;
 
@@ -649,7 +647,6 @@ impl MemoryStore {
             super::remember::map_memory_entry_from_row,
         ).context("memory not found")
     }
-
 
     /// Get a key-value from the `meta` table.
     pub fn meta_get(&self, key: &str) -> Result<Option<String>> {
@@ -854,5 +851,3 @@ impl MemoryStore {
         ReflectService::reinforce_insight(&db, id)
     }
 }
-
-

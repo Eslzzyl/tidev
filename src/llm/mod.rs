@@ -15,8 +15,8 @@ use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 use crate::{
-    config::{ActiveModel, ApiType},
     config::LogConfig,
+    config::{ActiveModel, ApiType},
     session::{BackendEvent, Message},
     tooling::ToolDefinition,
 };
@@ -234,7 +234,13 @@ impl LlmClient {
         match model.api_type {
             ApiType::Anthropic => {
                 anthropic::stream_anthropic(
-                    &self.http, session_id, request_id, model, messages, tools, tx,
+                    &self.http,
+                    session_id,
+                    request_id,
+                    model,
+                    messages,
+                    tools,
+                    tx,
                     self.save_request_body,
                     self.max_request_files,
                 )
@@ -257,7 +263,13 @@ impl LlmClient {
             }
             ApiType::OpenAiResponses => {
                 responses::stream_responses(
-                    &self.http, session_id, request_id, model, messages, tools, tx,
+                    &self.http,
+                    session_id,
+                    request_id,
+                    model,
+                    messages,
+                    tools,
+                    tx,
                     self.save_request_body,
                     self.max_request_files,
                 )

@@ -210,9 +210,7 @@ impl HookEngine {
             return None;
         }
 
-        let entries = store
-            .search(&workspace_root, &search_query)
-            .ok()?;
+        let entries = store.search(&workspace_root, &search_query).ok()?;
 
         if entries.is_empty() {
             return None;
@@ -268,8 +266,7 @@ fn extract_tool_file_paths(tool_call: &ToolCall) -> Vec<String> {
         Err(_) => return Vec::new(),
     };
 
-    let canonical =
-        crate::tooling::canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
+    let canonical = crate::tooling::canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
 
     let keys: &[&str] = if canonical == "grep" {
         &["path", "file"]
@@ -288,9 +285,10 @@ fn extract_tool_file_paths(tool_call: &ToolCall) -> Vec<String> {
                     serde_json::Value::Array(arr) => {
                         for item in arr {
                             if let serde_json::Value::String(s) = item
-                                && !s.is_empty() {
-                                    paths.push(s.clone());
-                                }
+                                && !s.is_empty()
+                            {
+                                paths.push(s.clone());
+                            }
                         }
                     }
                     _ => {}

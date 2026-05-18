@@ -320,7 +320,9 @@ pub async fn send_message(
 
     // Compute dynamic context and prepend it, so the persisted message
     // matches what the LLM receives (prefix cache consistency).
-    let has_assistant = existing_messages.iter().any(|m| m.role == MessageRole::Assistant);
+    let has_assistant = existing_messages
+        .iter()
+        .any(|m| m.role == MessageRole::Assistant);
     let include_memory = state.agent.config.memory.inject_context && !has_assistant;
     let mut agent_for_dc = state.agent.clone();
     let dc = agent_for_dc
@@ -448,7 +450,9 @@ pub async fn send_message(
             model.system_prompt = stored_system_prompt;
         } else {
             // New session — compose static prompt and persist.
-            let composed = state.agent.compose_static_system_prompt(&model.system_prompt);
+            let composed = state
+                .agent
+                .compose_static_system_prompt(&model.system_prompt);
             if let Err(e) = store.update_session_system_prompt(session_id, &composed) {
                 crate::log_warn!("failed to persist static system prompt: {}", e);
             }

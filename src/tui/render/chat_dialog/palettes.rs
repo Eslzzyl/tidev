@@ -49,8 +49,7 @@ impl App {
         let mut state = ListState::default();
         state.select(Some(self.command_palette.selected_index));
 
-        let panel = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let panel = Block::default().style(Style::default().bg(palette.panel_alt));
 
         let list = List::new(items)
             .style(Style::default().bg(palette.panel_alt).fg(palette.text))
@@ -115,8 +114,7 @@ impl App {
         let mut state = ListState::default();
         state.select(Some(self.at_mention.selected_index));
 
-        let panel = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let panel = Block::default().style(Style::default().bg(palette.panel_alt));
 
         let list = List::new(items)
             .style(Style::default().bg(palette.panel_alt).fg(palette.text))
@@ -175,8 +173,7 @@ impl App {
         let mut state = ListState::default();
         state.select(Some(self.snippet_state.selected_index));
 
-        let panel = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let panel = Block::default().style(Style::default().bg(palette.panel_alt));
 
         let list = List::new(items)
             .style(Style::default().bg(palette.panel_alt).fg(palette.text))
@@ -223,8 +220,7 @@ impl App {
         let mut state = ListState::default();
         state.select(Some(self.shell_completion.selected_index));
 
-        let panel = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let panel = Block::default().style(Style::default().bg(palette.panel_alt));
 
         let list = List::new(items)
             .style(Style::default().bg(palette.panel_alt).fg(palette.text))

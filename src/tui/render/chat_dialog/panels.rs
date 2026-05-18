@@ -17,8 +17,7 @@ use ratatui::{
     prelude::{Frame, Modifier, Position, Style},
     text::{Line, Span},
     widgets::{
-        Block, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState,
-        Wrap,
+        Block, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState, Wrap,
     },
 };
 
@@ -33,8 +32,7 @@ impl App {
         let overlay = centered_rect(36, 22, area);
         self.theme_panel_overlay.set(Some(overlay));
 
-        let block = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let block = Block::default().style(Style::default().bg(palette.panel_alt));
 
         frame.render_widget(Clear, overlay);
         frame.render_widget(block, overlay);
@@ -48,7 +46,9 @@ impl App {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 " Theme ",
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
             Rect::new(inner.x, inner.y, inner.width, 1),
@@ -174,8 +174,7 @@ impl App {
         self.agents_panel_overlay.set(Some(overlay));
 
         frame.render_widget(Clear, overlay);
-        let panel_block = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let panel_block = Block::default().style(Style::default().bg(palette.panel_alt));
         frame.render_widget(panel_block, overlay);
 
         let inner = overlay.inner(Margin {
@@ -195,7 +194,9 @@ impl App {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 " Agents ",
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
             sections[0],
@@ -338,7 +339,11 @@ impl App {
                             Style::default()
                                 .fg(match &item.setting_type {
                                     SettingType::Toggle(true) => {
-                                        if item.disabled { current_palette.muted } else { current_palette.accent }
+                                        if item.disabled {
+                                            current_palette.muted
+                                        } else {
+                                            current_palette.accent
+                                        }
                                     }
                                     _ => current_palette.muted,
                                 })
@@ -363,8 +368,7 @@ impl App {
         let mut state = ListState::default();
         state.select(Some(panel.selected_index));
 
-        let panel_block = Block::default()
-            .style(Style::default().bg(current_palette.panel_alt));
+        let panel_block = Block::default().style(Style::default().bg(current_palette.panel_alt));
 
         let list = List::new(items)
             .style(
@@ -402,8 +406,7 @@ impl App {
         self.session_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
 
-        let title = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let title = Block::default().style(Style::default().bg(palette.panel_alt));
         frame.render_widget(title, overlay);
 
         let inner = overlay.inner(Margin {
@@ -430,7 +433,9 @@ impl App {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 &title_text,
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
             sections[0],
@@ -622,8 +627,7 @@ impl App {
         self.message_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
 
-        let title = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let title = Block::default().style(Style::default().bg(palette.panel_alt));
         frame.render_widget(title, overlay);
 
         let inner = overlay.inner(Margin {
@@ -644,7 +648,9 @@ impl App {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 " User messages ",
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
             sections[0],
@@ -738,8 +744,7 @@ impl App {
         let overlay = centered_rect(area.width.min(104), area.height.min(34), area);
         self.model_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
-        let title = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let title = Block::default().style(Style::default().bg(palette.panel_alt));
         frame.render_widget(title, overlay);
 
         let inner = overlay.inner(Margin {
@@ -778,7 +783,9 @@ impl App {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 " Select model ",
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
             sections[0],
@@ -835,7 +842,9 @@ impl App {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 " Select model ",
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
             sections[0],
@@ -997,8 +1006,8 @@ impl App {
         }
 
         // Title
-        let header =
-            Paragraph::new(" Roles ").style(Style::default().bg(palette.panel_alt).fg(palette.accent));
+        let header = Paragraph::new(" Roles ")
+            .style(Style::default().bg(palette.panel_alt).fg(palette.accent));
         let sidebar_layout =
             Layout::vertical([Constraint::Length(1), Constraint::Min(4)]).split(area);
         frame.render_widget(header, sidebar_layout[0]);
@@ -1262,8 +1271,7 @@ impl App {
         let palette = self.palette();
         let overlay = centered_rect(area.width.min(60), area.height.min(20), area);
         frame.render_widget(Clear, overlay);
-        let title = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let title = Block::default().style(Style::default().bg(palette.panel_alt));
         frame.render_widget(title, overlay);
 
         let inner = overlay.inner(Margin {
@@ -1274,12 +1282,19 @@ impl App {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 " Search Provider ",
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
             Rect::new(inner.x, inner.y, inner.width, 1),
         );
-        let body = Rect::new(inner.x, inner.y + 1, inner.width, inner.height.saturating_sub(1));
+        let body = Rect::new(
+            inner.x,
+            inner.y + 1,
+            inner.width,
+            inner.height.saturating_sub(1),
+        );
 
         // If editing API key, show a compact input view
         if panel.editing_api_key.is_some() {
@@ -1425,8 +1440,7 @@ impl App {
         );
         self.mcp_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
-        let title = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let title = Block::default().style(Style::default().bg(palette.panel_alt));
         frame.render_widget(title, overlay);
 
         let inner = overlay.inner(Margin {
@@ -1435,17 +1449,28 @@ impl App {
         });
         self.register_selection_region(inner);
 
-        let mcp_title = panel.editor.as_ref().map(|e| e.title()).unwrap_or_else(|| " MCP servers ".to_string());
+        let mcp_title = panel
+            .editor
+            .as_ref()
+            .map(|e| e.title())
+            .unwrap_or_else(|| " MCP servers ".to_string());
 
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 &mcp_title,
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
             Rect::new(inner.x, inner.y, inner.width, 1),
         );
-        let body = Rect::new(inner.x, inner.y + 1, inner.width, inner.height.saturating_sub(1));
+        let body = Rect::new(
+            inner.x,
+            inner.y + 1,
+            inner.width,
+            inner.height.saturating_sub(1),
+        );
 
         if let Some(editor) = &panel.editor {
             let sections = Layout::vertical([
@@ -1481,7 +1506,11 @@ impl App {
             frame.render_widget(
                 Paragraph::new("Enter advance/save · Tab advance/save · Esc cancel")
                     .alignment(Alignment::Center)
-                    .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
+                    .style(
+                        Style::default()
+                            .bg(palette.panel_alt)
+                            .fg(palette.accent_soft),
+                    ),
                 sections[3],
             );
         } else {
@@ -1572,7 +1601,11 @@ impl App {
                     "Enter connect/disconnect · a add · e edit · d remove · R refresh · Esc close",
                 )
                 .alignment(Alignment::Center)
-                .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
+                .style(
+                    Style::default()
+                        .bg(palette.panel_alt)
+                        .fg(palette.accent_soft),
+                ),
                 sections[3],
             );
         }
@@ -1592,8 +1625,7 @@ impl App {
         self.memory_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
 
-        let panel_block = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let panel_block = Block::default().style(Style::default().bg(palette.panel_alt));
         frame.render_widget(panel_block, overlay);
 
         let inner = overlay.inner(Margin {
@@ -1617,7 +1649,9 @@ impl App {
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![Span::styled(
                         &memory_title,
-                        Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(palette.accent)
+                            .add_modifier(Modifier::BOLD),
                     )]))
                     .style(Style::default().bg(palette.panel_alt)),
                     sections[0],
@@ -1625,567 +1659,562 @@ impl App {
 
                 // ── Memories Mode ──
                 let filtered = panel.filtered_indices();
-                    if filtered.is_empty() {
-                        // Empty state centered in main area
-                        frame.render_widget(
-                            Paragraph::new("No memories yet. Press 'a' to add one.")
-                                .alignment(Alignment::Center)
-                                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
-                            sections[1],
-                        );
+                if filtered.is_empty() {
+                    // Empty state centered in main area
+                    frame.render_widget(
+                        Paragraph::new("No memories yet. Press 'a' to add one.")
+                            .alignment(Alignment::Center)
+                            .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+                        sections[1],
+                    );
+                } else {
+                    // Split main area into left (35%) and right (65%)
+                    let panes = Layout::horizontal([
+                        Constraint::Percentage(35),
+                        Constraint::Percentage(65),
+                    ])
+                    .split(sections[1]);
+
+                    let list_area = panes[0];
+                    let preview_area = panes[1];
+
+                    // ── Left Pane: Memory List ──
+
+                    // Header
+                    let filter_text = match panel.filter_type {
+                        None => "All types".to_string(),
+                        Some(t) => format!("Filter: {}", t.as_str()),
+                    };
+                    let mut header_lines: Vec<Line<'static>> = Vec::new();
+                    header_lines.push(Line::from(vec![Span::styled(
+                        "  Name",
+                        Style::default()
+                            .fg(palette.accent)
+                            .add_modifier(Modifier::BOLD),
+                    )]));
+                    if panel.search_active {
+                        let cursor = if (std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis()
+                            / 500)
+                            .is_multiple_of(2)
+                        {
+                            "|"
+                        } else {
+                            " "
+                        };
+                        header_lines.push(Line::from(vec![
+                            Span::styled("  🔍 ", Style::default().fg(palette.accent)),
+                            Span::styled(
+                                format!("{}{}", panel.query, cursor),
+                                Style::default().fg(palette.text),
+                            ),
+                        ]));
                     } else {
-                        // Split main area into left (35%) and right (65%)
-                        let panes = Layout::horizontal([
-                            Constraint::Percentage(35),
-                            Constraint::Percentage(65),
+                        header_lines.push(Line::from(Span::styled(
+                            format!("  {}  ·  / to search", filter_text),
+                            Style::default().fg(palette.muted),
+                        )));
+                    }
+                    let header_height = header_lines.len() as u16;
+                    frame.render_widget(
+                        Paragraph::new(header_lines).style(Style::default().bg(palette.panel_alt)),
+                        Rect::new(list_area.x, list_area.y, list_area.width, header_height),
+                    );
+
+                    // Divider
+                    let divider_y = list_area.y + header_height;
+                    frame.render_widget(
+                        Paragraph::new(Line::from(Span::styled(
+                            "─".repeat(list_area.width as usize),
+                            Style::default().fg(palette.muted),
+                        )))
+                        .style(Style::default().bg(palette.panel_alt)),
+                        Rect::new(list_area.x, divider_y, list_area.width, 1),
+                    );
+
+                    // List items with scrollbar
+                    let list_start_y = divider_y + 1;
+                    let list_content_height = list_area.height.saturating_sub(header_height + 1);
+                    let list_content_area = Rect::new(
+                        list_area.x,
+                        list_start_y,
+                        list_area.width,
+                        list_content_height,
+                    );
+
+                    // Split list area into content + scrollbar
+                    let (list_content_area, list_scrollbar_area) = if list_content_area.width > 2 {
+                        let chunks = Layout::horizontal([
+                            Constraint::Min(1),
+                            Constraint::Length(1),
+                            Constraint::Length(1),
                         ])
-                        .split(sections[1]);
-
-                        let list_area = panes[0];
-                        let preview_area = panes[1];
-
-                        // ── Left Pane: Memory List ──
-
-                        // Header
-                        let filter_text = match panel.filter_type {
-                            None => "All types".to_string(),
-                            Some(t) => format!("Filter: {}", t.as_str()),
-                        };
-                        let mut header_lines: Vec<Line<'static>> = Vec::new();
-                        header_lines.push(Line::from(vec![Span::styled(
-                            "  Name",
-                            Style::default()
-                                .fg(palette.accent)
-                                .add_modifier(Modifier::BOLD),
-                        )]));
-                        if panel.search_active {
-                            let cursor = if (std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_millis()
-                                / 500)
-                                .is_multiple_of(2)
-                            {
-                                "|"
-                            } else {
-                                " "
-                            };
-                            header_lines.push(Line::from(vec![
-                                Span::styled("  🔍 ", Style::default().fg(palette.accent)),
-                                Span::styled(
-                                    format!("{}{}", panel.query, cursor),
-                                    Style::default().fg(palette.text),
-                                ),
-                            ]));
-                        } else {
-                            header_lines.push(Line::from(Span::styled(
-                                format!("  {}  ·  / to search", filter_text),
-                                Style::default().fg(palette.muted),
-                            )));
-                        }
-                        let header_height = header_lines.len() as u16;
-                        frame.render_widget(
-                            Paragraph::new(header_lines).style(Style::default().bg(palette.panel_alt)),
-                            Rect::new(list_area.x, list_area.y, list_area.width, header_height),
-                        );
-
-                        // Divider
-                        let divider_y = list_area.y + header_height;
-                        frame.render_widget(
-                            Paragraph::new(Line::from(Span::styled(
-                                "─".repeat(list_area.width as usize),
-                                Style::default().fg(palette.muted),
-                            )))
-                            .style(Style::default().bg(palette.panel_alt)),
-                            Rect::new(list_area.x, divider_y, list_area.width, 1),
-                        );
-
-                        // List items with scrollbar
-                        let list_start_y = divider_y + 1;
-                        let list_content_height =
-                            list_area.height.saturating_sub(header_height + 1);
-                        let list_content_area = Rect::new(
-                            list_area.x,
-                            list_start_y,
-                            list_area.width,
-                            list_content_height,
-                        );
-
-                        // Split list area into content + scrollbar
-                        let (list_content_area, list_scrollbar_area) =
-                            if list_content_area.width > 2 {
-                                let chunks = Layout::horizontal([
-                                    Constraint::Min(1),
-                                    Constraint::Length(1),
-                                    Constraint::Length(1),
-                                ])
+                        .split(list_content_area);
+                        (chunks[0], Some(chunks[2]))
+                    } else if list_content_area.width > 1 {
+                        let chunks =
+                            Layout::horizontal([Constraint::Min(1), Constraint::Length(1)])
                                 .split(list_content_area);
-                                (chunks[0], Some(chunks[2]))
-                            } else if list_content_area.width > 1 {
-                                let chunks =
-                                    Layout::horizontal([Constraint::Min(1), Constraint::Length(1)])
-                                        .split(list_content_area);
-                                (chunks[0], Some(chunks[1]))
-                            } else {
-                                (list_content_area, None)
-                            };
+                        (chunks[0], Some(chunks[1]))
+                    } else {
+                        (list_content_area, None)
+                    };
 
-                        // Compute visible range such that selected_index is visible
-                        let total_filtered = filtered.len();
-                        let visible_height = list_content_height as usize;
-                        let visible_start = if visible_height == 0 || total_filtered <= visible_height {
+                    // Compute visible range such that selected_index is visible
+                    let total_filtered = filtered.len();
+                    let visible_height = list_content_height as usize;
+                    let visible_start = if visible_height == 0 || total_filtered <= visible_height {
+                        0
+                    } else {
+                        // Keep selection visible; prefer showing above selection
+                        let half = visible_height / 2;
+                        if panel.selected_index < half {
                             0
+                        } else if panel.selected_index + half >= total_filtered {
+                            total_filtered.saturating_sub(visible_height)
                         } else {
-                            // Keep selection visible; prefer showing above selection
-                            let half = visible_height / 2;
-                            if panel.selected_index < half {
-                                0
-                            } else if panel.selected_index + half >= total_filtered {
-                                total_filtered.saturating_sub(visible_height)
-                            } else {
-                                panel.selected_index.saturating_sub(half)
-                            }
+                            panel.selected_index.saturating_sub(half)
+                        }
+                    };
+                    let visible_end = (visible_start + visible_height).min(total_filtered);
+
+                    let mut list_lines: Vec<Line<'_>> = Vec::new();
+                    for (i, &mem_idx) in filtered
+                        .iter()
+                        .enumerate()
+                        .take(visible_end)
+                        .skip(visible_start)
+                    {
+                        let entry = &panel.memories[mem_idx];
+                        let is_selected = i == panel.selected_index;
+
+                        // Single-line format: "▸ [proj] Title"
+                        let type_label = entry.memory_type.short_label();
+                        let prefix = if is_selected { "▸" } else { " " };
+                        let base = format!("{} [{}] {}", prefix, type_label, entry.title);
+                        // Truncate to fit width
+                        let max_w = list_content_area.width.saturating_sub(3).max(10) as usize;
+                        let display = if base.chars().count() > max_w {
+                            format!(
+                                "{}…",
+                                base.chars()
+                                    .take(max_w.saturating_sub(1))
+                                    .collect::<String>()
+                            )
+                        } else {
+                            base
                         };
-                        let visible_end = (visible_start + visible_height).min(total_filtered);
 
-                        let mut list_lines: Vec<Line<'_>> = Vec::new();
-                        for (i, &mem_idx) in filtered.iter().enumerate().take(visible_end).skip(visible_start) {
-                            let entry = &panel.memories[mem_idx];
-                            let is_selected = i == panel.selected_index;
+                        let style = if is_selected {
+                            Style::default()
+                                .bg(palette.selection_bg)
+                                .fg(palette.selection_fg)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(palette.text)
+                        };
 
-                            // Single-line format: "▸ [proj] Title"
-                            let type_label = entry.memory_type.short_label();
-                            let prefix = if is_selected { "▸" } else { " " };
-                            let base = format!("{} [{}] {}", prefix, type_label, entry.title);
-                            // Truncate to fit width
-                            let max_w = list_content_area.width.saturating_sub(3).max(10) as usize;
-                            let display = if base.chars().count() > max_w {
-                                format!(
-                                    "{}…",
-                                    base.chars()
-                                        .take(max_w.saturating_sub(1))
-                                        .collect::<String>()
-                                )
-                            } else {
-                                base
-                            };
+                        list_lines.push(Line::from(Span::styled(display, style)));
+                    }
 
-                            let style = if is_selected {
-                                Style::default()
-                                    .bg(palette.selection_bg)
-                                    .fg(palette.selection_fg)
-                                    .add_modifier(Modifier::BOLD)
-                            } else {
-                                Style::default().fg(palette.text)
-                            };
+                    // Fill remaining space
+                    while list_lines.len() < visible_height {
+                        list_lines.push(Line::from(""));
+                    }
 
-                            list_lines.push(Line::from(Span::styled(display, style)));
-                        }
+                    frame.render_widget(
+                        Paragraph::new(list_lines).style(Style::default().bg(palette.panel_alt)),
+                        list_content_area,
+                    );
 
-                        // Fill remaining space
-                        while list_lines.len() < visible_height {
-                            list_lines.push(Line::from(""));
-                        }
+                    // List scrollbar
+                    if let Some(sb_area) = list_scrollbar_area {
+                        render_scrollbar(frame, sb_area, visible_start, total_filtered, palette);
+                    }
 
-                        frame.render_widget(
-                            Paragraph::new(list_lines).style(Style::default().bg(palette.panel_alt)),
-                            list_content_area,
-                        );
+                    // ── Right Pane: Content Preview / Editor ──
+                    match panel.focus {
+                        PanelFocus::List => {
+                            // Browse mode — render markdown preview with auto-wrap
+                            if let Some(entry) = panel.selected_entry() {
+                                let (preview_content_area, preview_scrollbar_area) =
+                                    if preview_area.width > 2 {
+                                        let chunks = Layout::horizontal([
+                                            Constraint::Min(1),
+                                            Constraint::Length(1),
+                                            Constraint::Length(1),
+                                        ])
+                                        .split(preview_area);
+                                        (chunks[0], Some(chunks[2]))
+                                    } else if preview_area.width > 1 {
+                                        let chunks = Layout::horizontal([
+                                            Constraint::Min(1),
+                                            Constraint::Length(1),
+                                        ])
+                                        .split(preview_area);
+                                        (chunks[0], Some(chunks[1]))
+                                    } else {
+                                        (preview_area, None)
+                                    };
 
-                        // List scrollbar
-                        if let Some(sb_area) = list_scrollbar_area {
-                            render_scrollbar(
-                                frame,
-                                sb_area,
-                                visible_start,
-                                total_filtered,
-                                palette,
-                            );
-                        }
+                                use crate::markdown_render::render_markdown_text_with_width_and_cwd;
+                                let content_width =
+                                    preview_content_area.width.saturating_sub(2) as usize;
 
-                        // ── Right Pane: Content Preview / Editor ──
-                        match panel.focus {
-                            PanelFocus::List => {
-                                // Browse mode — render markdown preview with auto-wrap
-                                if let Some(entry) = panel.selected_entry() {
-                                    let (preview_content_area, preview_scrollbar_area) =
-                                        if preview_area.width > 2 {
-                                            let chunks = Layout::horizontal([
-                                                Constraint::Min(1),
-                                                Constraint::Length(1),
-                                                Constraint::Length(1),
-                                            ])
-                                            .split(preview_area);
-                                            (chunks[0], Some(chunks[2]))
-                                        } else if preview_area.width > 1 {
-                                            let chunks = Layout::horizontal([
-                                                Constraint::Min(1),
-                                                Constraint::Length(1),
-                                            ])
-                                            .split(preview_area);
-                                            (chunks[0], Some(chunks[1]))
-                                        } else {
-                                            (preview_area, None)
-                                        };
+                                // Build metadata header lines
+                                let mut header_lines: Vec<Line<'_>> = Vec::new();
 
-                                    use crate::markdown_render::render_markdown_text_with_width_and_cwd;
-                                    let content_width =
-                                        preview_content_area.width.saturating_sub(2) as usize;
-
-                                    // Build metadata header lines
-                                    let mut header_lines: Vec<Line<'_>> = Vec::new();
-
-                                    // Line 1: [type] Title (with RO marker for system types)
-                                    let is_system = matches!(
-                                        entry.memory_type,
-                                        crate::memory::MemoryType::Fact
-                                            | crate::memory::MemoryType::Pattern
-                                            | crate::memory::MemoryType::Insight
-                                            | crate::memory::MemoryType::Lesson
-                                    );
-                                    let title_prefix = if is_system { " [RO]" } else { "" };
-                                    header_lines.push(Line::from(vec![
-                                        Span::styled(
-                                            format!(
-                                                " [{}]{} ",
-                                                entry.memory_type.as_str(),
-                                                title_prefix
-                                            ),
-                                            Style::default()
-                                                .fg(palette.accent)
-                                                .add_modifier(Modifier::BOLD),
-                                        ),
-                                        Span::styled(
-                                            &entry.title,
-                                            Style::default()
-                                                .fg(palette.text)
-                                                .add_modifier(Modifier::BOLD),
-                                        ),
-                                    ]));
-
-                                    // Line 2: tags
-                                    if !entry.tags.is_empty() {
-                                        header_lines.push(Line::from(Span::styled(
-                                            format!(" Tags: {}", entry.tags.join(", ")),
-                                            Style::default().fg(palette.muted),
-                                        )));
-                                    }
-
-                                    // Line 3: concepts
-                                    if !entry.concepts.is_empty() {
-                                        header_lines.push(Line::from(Span::styled(
-                                            format!(" Concepts: {}", entry.concepts.join(", ")),
-                                            Style::default().fg(palette.muted),
-                                        )));
-                                    }
-
-                                    // Line 4: files
-                                    if !entry.files.is_empty() {
-                                        header_lines.push(Line::from(Span::styled(
-                                            format!(" Files: {}", entry.files.join(", ")),
-                                            Style::default().fg(palette.muted),
-                                        )));
-                                    }
-
-                                    // Line 5: importance, strength, version
-                                    let mut meta_parts = Vec::new();
-                                    meta_parts.push(format!("Importance: {}/10", entry.importance));
-                                    if entry.strength > 0.0 {
-                                        meta_parts.push(format!("Strength: {:.2}", entry.strength));
-                                    }
-                                    meta_parts.push(format!("v{}", entry.version));
-                                    header_lines.push(Line::from(Span::styled(
-                                        format!(" {}", meta_parts.join("  ")),
-                                        Style::default().fg(palette.accent_soft),
-                                    )));
-
-                                    // Line 6: created / updated timestamps
-                                    header_lines.push(Line::from(Span::styled(
+                                // Line 1: [type] Title (with RO marker for system types)
+                                let is_system = matches!(
+                                    entry.memory_type,
+                                    crate::memory::MemoryType::Fact
+                                        | crate::memory::MemoryType::Pattern
+                                        | crate::memory::MemoryType::Insight
+                                        | crate::memory::MemoryType::Lesson
+                                );
+                                let title_prefix = if is_system { " [RO]" } else { "" };
+                                header_lines.push(Line::from(vec![
+                                    Span::styled(
                                         format!(
-                                            " Created: {}  Updated: {}",
-                                            entry.created_at.format("%Y-%m-%d %H:%M"),
-                                            entry.updated_at.format("%Y-%m-%d %H:%M")
+                                            " [{}]{} ",
+                                            entry.memory_type.as_str(),
+                                            title_prefix
                                         ),
+                                        Style::default()
+                                            .fg(palette.accent)
+                                            .add_modifier(Modifier::BOLD),
+                                    ),
+                                    Span::styled(
+                                        &entry.title,
+                                        Style::default()
+                                            .fg(palette.text)
+                                            .add_modifier(Modifier::BOLD),
+                                    ),
+                                ]));
+
+                                // Line 2: tags
+                                if !entry.tags.is_empty() {
+                                    header_lines.push(Line::from(Span::styled(
+                                        format!(" Tags: {}", entry.tags.join(", ")),
                                         Style::default().fg(palette.muted),
                                     )));
+                                }
 
-                                    // Line 7: version chain info
-                                    let mut chain_parts: Vec<String> = Vec::new();
-                                    if let Some(pid) = entry.parent_id {
-                                        chain_parts.push(format!("Parent: {}", pid));
-                                    }
-                                    if !entry.supersedes.is_empty() {
-                                        chain_parts.push(format!(
-                                            "Supersedes: {} version(s)",
-                                            entry.supersedes.len()
-                                        ));
-                                    }
-                                    if !entry.related_ids.is_empty() {
-                                        chain_parts.push(format!(
-                                            "Related: {} memory(ies)",
-                                            entry.related_ids.len()
-                                        ));
-                                    }
-                                    if !chain_parts.is_empty() {
-                                        header_lines.push(Line::from(Span::styled(
-                                            format!(" {}", chain_parts.join("  ")),
-                                            Style::default().fg(palette.warning),
+                                // Line 3: concepts
+                                if !entry.concepts.is_empty() {
+                                    header_lines.push(Line::from(Span::styled(
+                                        format!(" Concepts: {}", entry.concepts.join(", ")),
+                                        Style::default().fg(palette.muted),
+                                    )));
+                                }
+
+                                // Line 4: files
+                                if !entry.files.is_empty() {
+                                    header_lines.push(Line::from(Span::styled(
+                                        format!(" Files: {}", entry.files.join(", ")),
+                                        Style::default().fg(palette.muted),
+                                    )));
+                                }
+
+                                // Line 5: importance, strength, version
+                                let mut meta_parts = Vec::new();
+                                meta_parts.push(format!("Importance: {}/10", entry.importance));
+                                if entry.strength > 0.0 {
+                                    meta_parts.push(format!("Strength: {:.2}", entry.strength));
+                                }
+                                meta_parts.push(format!("v{}", entry.version));
+                                header_lines.push(Line::from(Span::styled(
+                                    format!(" {}", meta_parts.join("  ")),
+                                    Style::default().fg(palette.accent_soft),
+                                )));
+
+                                // Line 6: created / updated timestamps
+                                header_lines.push(Line::from(Span::styled(
+                                    format!(
+                                        " Created: {}  Updated: {}",
+                                        entry.created_at.format("%Y-%m-%d %H:%M"),
+                                        entry.updated_at.format("%Y-%m-%d %H:%M")
+                                    ),
+                                    Style::default().fg(palette.muted),
+                                )));
+
+                                // Line 7: version chain info
+                                let mut chain_parts: Vec<String> = Vec::new();
+                                if let Some(pid) = entry.parent_id {
+                                    chain_parts.push(format!("Parent: {}", pid));
+                                }
+                                if !entry.supersedes.is_empty() {
+                                    chain_parts.push(format!(
+                                        "Supersedes: {} version(s)",
+                                        entry.supersedes.len()
+                                    ));
+                                }
+                                if !entry.related_ids.is_empty() {
+                                    chain_parts.push(format!(
+                                        "Related: {} memory(ies)",
+                                        entry.related_ids.len()
+                                    ));
+                                }
+                                if !chain_parts.is_empty() {
+                                    header_lines.push(Line::from(Span::styled(
+                                        format!(" {}", chain_parts.join("  ")),
+                                        Style::default().fg(palette.warning),
+                                    )));
+                                }
+
+                                // Separator
+                                let sep_w = content_width.clamp(10, 80);
+                                header_lines.push(Line::from(Span::styled(
+                                    format!(" {}", "─".repeat(sep_w)),
+                                    Style::default().fg(palette.border),
+                                )));
+
+                                // Render markdown content
+                                let rendered = render_markdown_text_with_width_and_cwd(
+                                    &entry.content,
+                                    Some(content_width),
+                                    None,
+                                );
+
+                                // Combine header + markdown content
+                                let mut all_lines: Vec<Line<'_>> = Vec::new();
+                                all_lines.extend(header_lines);
+                                all_lines.extend(rendered);
+
+                                let total_lines = all_lines.len();
+                                let scroll =
+                                    panel.preview_scroll.min(total_lines.saturating_sub(1));
+
+                                let visible_lines: Vec<Line<'_>> = all_lines
+                                    .into_iter()
+                                    .skip(scroll)
+                                    .take(preview_content_area.height as usize)
+                                    .collect();
+
+                                frame.render_widget(
+                                    Paragraph::new(visible_lines)
+                                        .style(Style::default().bg(palette.panel_alt)),
+                                    preview_content_area,
+                                );
+
+                                if let Some(sb_area) = preview_scrollbar_area {
+                                    render_scrollbar(
+                                        frame,
+                                        sb_area,
+                                        panel.preview_scroll,
+                                        total_lines,
+                                        palette,
+                                    );
+                                }
+                            } else {
+                                frame.render_widget(
+                                    Paragraph::new("No memory selected")
+                                        .alignment(Alignment::Center)
+                                        .style(
+                                            Style::default()
+                                                .bg(palette.panel_alt)
+                                                .fg(palette.muted),
+                                        ),
+                                    preview_area,
+                                );
+                            }
+                        }
+                        PanelFocus::ContentEdit => {
+                            // Edit mode — show entry metadata header + editable content
+                            if let Some(entry) = panel.selected_entry() {
+                                // Split preview area for scrollbar
+                                let (editor_area, _edit_scrollbar_area) = if preview_area.width > 2
+                                {
+                                    let chunks = Layout::horizontal([
+                                        Constraint::Min(1),
+                                        Constraint::Length(1),
+                                        Constraint::Length(1),
+                                    ])
+                                    .split(preview_area);
+                                    (chunks[0], Some(chunks[2]))
+                                } else if preview_area.width > 1 {
+                                    let chunks = Layout::horizontal([
+                                        Constraint::Min(1),
+                                        Constraint::Length(1),
+                                    ])
+                                    .split(preview_area);
+                                    (chunks[0], Some(chunks[1]))
+                                } else {
+                                    (preview_area, None)
+                                };
+
+                                // Build header info lines
+                                let mut header_lines: Vec<Line<'_>> = Vec::new();
+
+                                // Type badge + title
+                                header_lines.push(Line::from(vec![
+                                    Span::styled(
+                                        format!("  [{}] ", entry.memory_type.as_str()),
+                                        Style::default()
+                                            .fg(palette.accent)
+                                            .add_modifier(Modifier::BOLD),
+                                    ),
+                                    Span::styled(
+                                        &entry.title,
+                                        Style::default()
+                                            .fg(palette.text)
+                                            .add_modifier(Modifier::BOLD),
+                                    ),
+                                ]));
+
+                                // Tags
+                                if !entry.tags.is_empty() {
+                                    header_lines.push(Line::from(Span::styled(
+                                        format!("  Tags: {}", entry.tags.join(", ")),
+                                        Style::default().fg(palette.muted),
+                                    )));
+                                }
+
+                                // Concepts
+                                if !entry.concepts.is_empty() {
+                                    header_lines.push(Line::from(Span::styled(
+                                        format!("  Concepts: {}", entry.concepts.join(", ")),
+                                        Style::default().fg(palette.muted),
+                                    )));
+                                }
+
+                                // Files
+                                if !entry.files.is_empty() {
+                                    header_lines.push(Line::from(Span::styled(
+                                        format!("  Files: {}", entry.files.join(", ")),
+                                        Style::default().fg(palette.muted),
+                                    )));
+                                }
+
+                                // Importance / strength / version
+                                let mut meta_parts = Vec::new();
+                                meta_parts.push(format!("Importance: {}/10", entry.importance));
+                                if entry.strength > 0.0 {
+                                    meta_parts.push(format!("Strength: {:.2}", entry.strength));
+                                }
+                                meta_parts.push(format!("v{}", entry.version));
+                                header_lines.push(Line::from(Span::styled(
+                                    format!("  {}", meta_parts.join("  ")),
+                                    Style::default().fg(palette.accent_soft),
+                                )));
+
+                                // Version chain info
+                                let mut chain_parts: Vec<String> = Vec::new();
+                                if let Some(pid) = entry.parent_id {
+                                    chain_parts.push(format!("Parent: {}", pid));
+                                }
+                                if !entry.supersedes.is_empty() {
+                                    chain_parts.push(format!(
+                                        "Supersedes: {} version(s)",
+                                        entry.supersedes.len()
+                                    ));
+                                }
+                                if !entry.related_ids.is_empty() {
+                                    chain_parts.push(format!(
+                                        "Related: {} memory(ies)",
+                                        entry.related_ids.len()
+                                    ));
+                                }
+                                if !chain_parts.is_empty() {
+                                    header_lines.push(Line::from(Span::styled(
+                                        format!("  {}", chain_parts.join("  ")),
+                                        Style::default().fg(palette.warning),
+                                    )));
+                                }
+
+                                // EDITING indicator + separator
+                                let sep_w = editor_area.width.saturating_sub(4) as usize;
+                                header_lines.push(Line::from(Span::styled(
+                                    format!(
+                                        "  ── EDITING ──{}",
+                                        "─".repeat(sep_w.saturating_sub(14).min(40))
+                                    ),
+                                    Style::default()
+                                        .fg(palette.accent)
+                                        .add_modifier(Modifier::BOLD),
+                                )));
+
+                                // Render header
+                                let header_h = header_lines.len() as u16;
+                                frame.render_widget(
+                                    Paragraph::new(header_lines)
+                                        .style(Style::default().bg(palette.panel_alt)),
+                                    Rect::new(
+                                        editor_area.x,
+                                        editor_area.y,
+                                        editor_area.width,
+                                        header_h.min(editor_area.height),
+                                    ),
+                                );
+
+                                // Editor content area (below header)
+                                let edit_content_y = editor_area.y + header_h;
+                                let edit_content_height =
+                                    editor_area.height.saturating_sub(header_h).max(1);
+                                let edit_content_area = Rect::new(
+                                    editor_area.x,
+                                    edit_content_y,
+                                    editor_area.width,
+                                    edit_content_height,
+                                );
+
+                                // Store editor width for cursor movement
+                                panel.editor_width.set(editor_area.width);
+
+                                if edit_content_area.width > 0 && edit_content_height > 0 {
+                                    // Build lines from composer
+                                    let editor_width = edit_content_area.width as usize;
+                                    let visual_lines =
+                                        panel.content_editor.visual_lines(editor_width);
+                                    let editor_scroll = 0;
+                                    let mut lines: Vec<Line<'_>> = Vec::new();
+
+                                    for range in visual_lines.iter() {
+                                        let line_text = &panel.content_editor.text()[range.clone()];
+                                        lines.push(Line::from(Span::styled(
+                                            line_text.to_string(),
+                                            Style::default().fg(palette.text),
                                         )));
                                     }
 
-                                    // Separator
-                                    let sep_w = content_width.clamp(10, 80);
-                                    header_lines.push(Line::from(Span::styled(
-                                        format!(" {}", "─".repeat(sep_w)),
-                                        Style::default().fg(palette.border),
-                                    )));
-
-                                    // Render markdown content
-                                    let rendered = render_markdown_text_with_width_and_cwd(
-                                        &entry.content,
-                                        Some(content_width),
-                                        None,
-                                    );
-
-                                    // Combine header + markdown content
-                                    let mut all_lines: Vec<Line<'_>> = Vec::new();
-                                    all_lines.extend(header_lines);
-                                    all_lines.extend(rendered);
-
-                                    let total_lines = all_lines.len();
-                                    let scroll =
-                                        panel.preview_scroll.min(total_lines.saturating_sub(1));
-
-                                    let visible_lines: Vec<Line<'_>> = all_lines
+                                    let visible_lines: Vec<Line<'_>> = lines
                                         .into_iter()
-                                        .skip(scroll)
-                                        .take(preview_content_area.height as usize)
+                                        .skip(editor_scroll)
+                                        .take(edit_content_height as usize)
                                         .collect();
 
                                     frame.render_widget(
                                         Paragraph::new(visible_lines)
                                             .style(Style::default().bg(palette.panel_alt)),
-                                        preview_content_area,
+                                        edit_content_area,
                                     );
 
-                                    if let Some(sb_area) = preview_scrollbar_area {
-                                        render_scrollbar(
-                                            frame,
-                                            sb_area,
-                                            panel.preview_scroll,
-                                            total_lines,
-                                            palette,
-                                        );
-                                    }
-                                } else {
-                                    frame.render_widget(
-                                        Paragraph::new("No memory selected")
-                                            .alignment(Alignment::Center)
-                                            .style(
-                                                Style::default()
-                                                    .bg(palette.panel_alt)
-                                                    .fg(palette.muted),
-                                            ),
-                                        preview_area,
+                                    // Set cursor position
+                                    let (cursor_line, cursor_col) =
+                                        panel.content_editor.cursor_position(editor_area.width);
+                                    let cursor_y = edit_content_y.saturating_add(
+                                        cursor_line.min(edit_content_height.saturating_sub(1)),
                                     );
+                                    let cursor_x = editor_area.x.saturating_add(cursor_col);
+                                    frame.set_cursor_position(Position::new(cursor_x, cursor_y));
                                 }
-                            }
-                            PanelFocus::ContentEdit => {
-                                // Edit mode — show entry metadata header + editable content
-                                if let Some(entry) = panel.selected_entry() {
-                                    // Split preview area for scrollbar
-                                    let (editor_area, _edit_scrollbar_area) =
-                                        if preview_area.width > 2 {
-                                            let chunks = Layout::horizontal([
-                                                Constraint::Min(1),
-                                                Constraint::Length(1),
-                                                Constraint::Length(1),
-                                            ])
-                                            .split(preview_area);
-                                            (chunks[0], Some(chunks[2]))
-                                        } else if preview_area.width > 1 {
-                                            let chunks = Layout::horizontal([
-                                                Constraint::Min(1),
-                                                Constraint::Length(1),
-                                            ])
-                                            .split(preview_area);
-                                            (chunks[0], Some(chunks[1]))
-                                        } else {
-                                            (preview_area, None)
-                                        };
-
-                                    // Build header info lines
-                                    let mut header_lines: Vec<Line<'_>> = Vec::new();
-
-                                    // Type badge + title
-                                    header_lines.push(Line::from(vec![
-                                        Span::styled(
-                                            format!("  [{}] ", entry.memory_type.as_str()),
+                            } else {
+                                frame.render_widget(
+                                    Paragraph::new("No memory selected")
+                                        .alignment(Alignment::Center)
+                                        .style(
                                             Style::default()
-                                                .fg(palette.accent)
-                                                .add_modifier(Modifier::BOLD),
+                                                .bg(palette.panel_alt)
+                                                .fg(palette.muted),
                                         ),
-                                        Span::styled(
-                                            &entry.title,
-                                            Style::default()
-                                                .fg(palette.text)
-                                                .add_modifier(Modifier::BOLD),
-                                        ),
-                                    ]));
-
-                                    // Tags
-                                    if !entry.tags.is_empty() {
-                                        header_lines.push(Line::from(Span::styled(
-                                            format!("  Tags: {}", entry.tags.join(", ")),
-                                            Style::default().fg(palette.muted),
-                                        )));
-                                    }
-
-                                    // Concepts
-                                    if !entry.concepts.is_empty() {
-                                        header_lines.push(Line::from(Span::styled(
-                                            format!("  Concepts: {}", entry.concepts.join(", ")),
-                                            Style::default().fg(palette.muted),
-                                        )));
-                                    }
-
-                                    // Files
-                                    if !entry.files.is_empty() {
-                                        header_lines.push(Line::from(Span::styled(
-                                            format!("  Files: {}", entry.files.join(", ")),
-                                            Style::default().fg(palette.muted),
-                                        )));
-                                    }
-
-                                    // Importance / strength / version
-                                    let mut meta_parts = Vec::new();
-                                    meta_parts.push(format!("Importance: {}/10", entry.importance));
-                                    if entry.strength > 0.0 {
-                                        meta_parts.push(format!("Strength: {:.2}", entry.strength));
-                                    }
-                                    meta_parts.push(format!("v{}", entry.version));
-                                    header_lines.push(Line::from(Span::styled(
-                                        format!("  {}", meta_parts.join("  ")),
-                                        Style::default().fg(palette.accent_soft),
-                                    )));
-
-                                    // Version chain info
-                                    let mut chain_parts: Vec<String> = Vec::new();
-                                    if let Some(pid) = entry.parent_id {
-                                        chain_parts.push(format!("Parent: {}", pid));
-                                    }
-                                    if !entry.supersedes.is_empty() {
-                                        chain_parts.push(format!(
-                                            "Supersedes: {} version(s)",
-                                            entry.supersedes.len()
-                                        ));
-                                    }
-                                    if !entry.related_ids.is_empty() {
-                                        chain_parts.push(format!(
-                                            "Related: {} memory(ies)",
-                                            entry.related_ids.len()
-                                        ));
-                                    }
-                                    if !chain_parts.is_empty() {
-                                        header_lines.push(Line::from(Span::styled(
-                                            format!("  {}", chain_parts.join("  ")),
-                                            Style::default().fg(palette.warning),
-                                        )));
-                                    }
-
-                                    // EDITING indicator + separator
-                                    let sep_w = editor_area.width.saturating_sub(4) as usize;
-                                    header_lines.push(Line::from(Span::styled(
-                                        format!(
-                                            "  ── EDITING ──{}",
-                                            "─".repeat(sep_w.saturating_sub(14).min(40))
-                                        ),
-                                        Style::default()
-                                            .fg(palette.accent)
-                                            .add_modifier(Modifier::BOLD),
-                                    )));
-
-                                    // Render header
-                                    let header_h = header_lines.len() as u16;
-                                    frame.render_widget(
-                                        Paragraph::new(header_lines)
-                                            .style(Style::default().bg(palette.panel_alt)),
-                                        Rect::new(
-                                            editor_area.x,
-                                            editor_area.y,
-                                            editor_area.width,
-                                            header_h.min(editor_area.height),
-                                        ),
-                                    );
-
-                                    // Editor content area (below header)
-                                    let edit_content_y = editor_area.y + header_h;
-                                    let edit_content_height =
-                                        editor_area.height.saturating_sub(header_h).max(1);
-                                    let edit_content_area = Rect::new(
-                                        editor_area.x,
-                                        edit_content_y,
-                                        editor_area.width,
-                                        edit_content_height,
-                                    );
-
-                                    // Store editor width for cursor movement
-                                    panel.editor_width.set(editor_area.width);
-
-                                    if edit_content_area.width > 0 && edit_content_height > 0 {
-                                        // Build lines from composer
-                                        let editor_width = edit_content_area.width as usize;
-                                        let visual_lines =
-                                            panel.content_editor.visual_lines(editor_width);
-                                        let editor_scroll = 0;
-                                        let mut lines: Vec<Line<'_>> = Vec::new();
-
-                                        for range in visual_lines.iter() {
-                                            let line_text =
-                                                &panel.content_editor.text()[range.clone()];
-                                            lines.push(Line::from(Span::styled(
-                                                line_text.to_string(),
-                                                Style::default().fg(palette.text),
-                                            )));
-                                        }
-
-                                        let visible_lines: Vec<Line<'_>> = lines
-                                            .into_iter()
-                                            .skip(editor_scroll)
-                                            .take(edit_content_height as usize)
-                                            .collect();
-
-                                        frame.render_widget(
-                                            Paragraph::new(visible_lines)
-                                                .style(Style::default().bg(palette.panel_alt)),
-                                            edit_content_area,
-                                        );
-
-                                        // Set cursor position
-                                        let (cursor_line, cursor_col) =
-                                            panel.content_editor.cursor_position(editor_area.width);
-                                        let cursor_y = edit_content_y.saturating_add(
-                                            cursor_line.min(edit_content_height.saturating_sub(1)),
-                                        );
-                                        let cursor_x = editor_area.x.saturating_add(cursor_col);
-                                        frame
-                                            .set_cursor_position(Position::new(cursor_x, cursor_y));
-                                    }
-                                } else {
-                                    frame.render_widget(
-                                        Paragraph::new("No memory selected")
-                                            .alignment(Alignment::Center)
-                                            .style(
-                                                Style::default()
-                                                    .bg(palette.panel_alt)
-                                                    .fg(palette.muted),
-                                            ),
-                                        preview_area,
-                                    );
-                                }
+                                    preview_area,
+                                );
                             }
                         }
                     }
+                }
 
                 // Footer help
                 let footer_y = sections[2].y;
@@ -2390,8 +2419,7 @@ impl App {
         let overlay = centered_rect(85, 80, area);
         self.skills_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
-        let panel_block = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let panel_block = Block::default().style(Style::default().bg(palette.panel_alt));
         frame.render_widget(panel_block, overlay);
 
         let inner = overlay.inner(Margin {
@@ -2403,18 +2431,29 @@ impl App {
         let skills_title = if panel.is_empty() {
             " Skills ".to_string()
         } else {
-            format!(" Skills · {}/{} ", panel.selected_index + 1, panel.filtered_count())
+            format!(
+                " Skills · {}/{} ",
+                panel.selected_index + 1,
+                panel.filtered_count()
+            )
         };
 
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 &skills_title,
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
             Rect::new(inner.x, inner.y, inner.width, 1),
         );
-        let body = Rect::new(inner.x, inner.y + 1, inner.width, inner.height.saturating_sub(1));
+        let body = Rect::new(
+            inner.x,
+            inner.y + 1,
+            inner.width,
+            inner.height.saturating_sub(1),
+        );
 
         // Check if empty
         if panel.is_empty() {

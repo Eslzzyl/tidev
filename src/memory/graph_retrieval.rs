@@ -52,14 +52,16 @@ impl GraphRetrieval {
 
         let mut adjacency: HashMap<&str, Vec<(&str, &str, f64)>> = HashMap::new();
         for edge in &all_edges {
-            adjacency
-                .entry(edge.source_id.as_str())
-                .or_default()
-                .push((edge.target_id.as_str(), edge.relation.as_str(), edge.weight));
-            adjacency
-                .entry(edge.target_id.as_str())
-                .or_default()
-                .push((edge.source_id.as_str(), edge.relation.as_str(), edge.weight));
+            adjacency.entry(edge.source_id.as_str()).or_default().push((
+                edge.target_id.as_str(),
+                edge.relation.as_str(),
+                edge.weight,
+            ));
+            adjacency.entry(edge.target_id.as_str()).or_default().push((
+                edge.source_id.as_str(),
+                edge.relation.as_str(),
+                edge.weight,
+            ));
         }
 
         let mut all_paths: Vec<GraphEntityPath> = Vec::new();

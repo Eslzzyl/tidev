@@ -168,12 +168,26 @@ pub fn extract_from_session_summary(
 
     for concept in &summary.concepts {
         let cid = upsert_node(db, "concept", concept)?;
-        upsert_edge(db, &cid, &session_node_id, "relates_to", 1.0, Some(session_id))?;
+        upsert_edge(
+            db,
+            &cid,
+            &session_node_id,
+            "relates_to",
+            1.0,
+            Some(session_id),
+        )?;
     }
 
     for file in &summary.files_modified {
         let fid = upsert_node(db, "file", file)?;
-        upsert_edge(db, &session_node_id, &fid, "modifies", 1.0, Some(session_id))?;
+        upsert_edge(
+            db,
+            &session_node_id,
+            &fid,
+            "modifies",
+            1.0,
+            Some(session_id),
+        )?;
     }
 
     Ok(())
@@ -193,12 +207,26 @@ pub fn extract_from_memory_entry(
 
     for concept in &entry.concepts {
         let cid = upsert_node(db, "concept", concept)?;
-        upsert_edge(db, &cid, &memory_node_id, "relates_to", 1.0, Some(&memory_label))?;
+        upsert_edge(
+            db,
+            &cid,
+            &memory_node_id,
+            "relates_to",
+            1.0,
+            Some(&memory_label),
+        )?;
     }
 
     for file in &entry.files {
         let fid = upsert_node(db, "file", file)?;
-        upsert_edge(db, &memory_node_id, &fid, "modifies", 1.0, Some(&memory_label))?;
+        upsert_edge(
+            db,
+            &memory_node_id,
+            &fid,
+            "modifies",
+            1.0,
+            Some(&memory_label),
+        )?;
     }
 
     Ok(())

@@ -124,8 +124,13 @@ pub fn execute_tool_call(
             crate::session::ToolExecutionResult::new(output)
         }
         Some("todowrite") => {
-            let output =
-                todo::execute_tool_call(ctx.workspace_root, ctx.store, ctx.session_id, &call.name, arguments)?;
+            let output = todo::execute_tool_call(
+                ctx.workspace_root,
+                ctx.store,
+                ctx.session_id,
+                &call.name,
+                arguments,
+            )?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("skill") => {
@@ -223,8 +228,13 @@ pub fn execute_tool_call_streaming(
             crate::session::ToolExecutionResult::new(output)
         }
         Some("todowrite") => {
-            let output =
-                todo::execute_tool_call(ctx.workspace_root, ctx.store, ctx.session_id, &call.name, arguments)?;
+            let output = todo::execute_tool_call(
+                ctx.workspace_root,
+                ctx.store,
+                ctx.session_id,
+                &call.name,
+                arguments,
+            )?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("skill") => {

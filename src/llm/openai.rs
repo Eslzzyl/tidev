@@ -774,5 +774,3 @@ struct ChatToolCallFunctionPayload {
     name: String,
     arguments: String,
 }
-
-

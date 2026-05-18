@@ -7,13 +7,14 @@ use crate::config::ActiveModel;
 use crate::context::ContextManager;
 use crate::llm::LlmClient;
 use crate::memory::types::SessionSummary;
-use crate::memory::xml::{clean_llm_xml_response, get_xml_tag_ci, get_xml_children_ci};
+use crate::memory::xml::{clean_llm_xml_response, get_xml_children_ci, get_xml_tag_ci};
 use crate::prompts::SessionMode;
 use crate::session::{Conversation, Message, MessageRole};
 use crate::storage::load_session_messages;
 use crate::tooling::ToolDefinition;
 
-pub const SUMMARY_INSTRUCTION: &str = "Please summarize this session. Output EXACTLY this XML format with no additional text:
+pub const SUMMARY_INSTRUCTION: &str =
+    "Please summarize this session. Output EXACTLY this XML format with no additional text:
 
 <summary>
   <title>Short session title (max 100 chars)</title>
@@ -66,19 +67,22 @@ impl SessionService {
                 let mut stmt = db.prepare(
                     "SELECT context_summary, context_retained_from, system_prompt FROM sessions WHERE id = ?1"
                 )?;
-                let result = stmt.query_row(
-                    params![session_id.to_string()],
-                    |row| {
+                let result = stmt
+                    .query_row(params![session_id.to_string()], |row| {
                         let summary: String = row.get(0)?;
                         let retained: i64 = row.get(1)?;
                         let sp: String = row.get(2)?;
                         Ok((
-                            if summary.is_empty() { None } else { Some(summary) },
+                            if summary.is_empty() {
+                                None
+                            } else {
+                                Some(summary)
+                            },
                             retained as usize,
                             if sp.is_empty() { None } else { Some(sp) },
                         ))
-                    },
-                ).optional()?;
+                    })
+                    .optional()?;
                 result.unwrap_or((None, 0, None))
             };
 
@@ -111,7 +115,10 @@ impl SessionService {
         conv.messages = messages;
 
         let mut llm_messages = context_manager.build_request_messages(&conv, SessionMode::Build);
-        llm_messages.push(Message::new(MessageRole::User, SUMMARY_INSTRUCTION.to_string()));
+        llm_messages.push(Message::new(
+            MessageRole::User,
+            SUMMARY_INSTRUCTION.to_string(),
+        ));
 
         // Try LLM call with up to 1 retry on parse failure
         const STRICTER_SUFFIX: &str = r"
@@ -123,9 +130,10 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
         for attempt in 0..2 {
             let mut attempt_messages = llm_messages.clone();
             if attempt > 0
-                && let Some(last) = attempt_messages.last_mut() {
-                    last.content = format!("{}{}", last.content, STRICTER_SUFFIX);
-                }
+                && let Some(last) = attempt_messages.last_mut()
+            {
+                last.content = format!("{}{}", last.content, STRICTER_SUFFIX);
+            }
 
             let llm_model = if let Some(ref sp) = system_prompt {
                 let mut m = model.clone();
@@ -190,7 +198,9 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 );
                 fb
             } else {
-                crate::log_warn!("LLM summarization failed or response unparseable, using synthetic fallback");
+                crate::log_warn!(
+                    "LLM summarization failed or response unparseable, using synthetic fallback"
+                );
                 SessionSummary {
                     session_id,
                     project: project.to_string(),
@@ -211,24 +221,17 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
         Ok(summary)
     }
 
-    fn parse_summary_free_text(
-        text: &str,
-        session_id: Uuid,
-        project: &str,
-    ) -> SessionSummary {
+    fn parse_summary_free_text(text: &str, session_id: Uuid, project: &str) -> SessionSummary {
         let lines: Vec<&str> = text.lines().collect();
 
-        let title = lines
-            .iter()
-            .find(|l| !l.trim().is_empty())
-            .map(|l| {
-                let t = l.trim();
-                if t.len() <= 100 {
-                    t.to_string()
-                } else {
-                    format!("{}…", &t[..97])
-                }
-            });
+        let title = lines.iter().find(|l| !l.trim().is_empty()).map(|l| {
+            let t = l.trim();
+            if t.len() <= 100 {
+                t.to_string()
+            } else {
+                format!("{}…", &t[..97])
+            }
+        });
 
         let narrative = if let Some(t) = &title {
             let rest: Vec<&str> = lines
@@ -254,8 +257,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
             .iter()
             .filter(|l| {
                 let t = l.trim();
-                (t.starts_with('-') || t.starts_with('*'))
-                    && t.len() > 2
+                (t.starts_with('-') || t.starts_with('*')) && t.len() > 2
             })
             .map(|l| {
                 l.trim()
@@ -279,7 +281,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
             key_decisions: decisions,
             files_modified: files,
             concepts,
-                    }
+        }
     }
 
     fn store_summary(db: &Connection, summary: &SessionSummary) -> Result<()> {
@@ -341,14 +343,20 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
 fn extract_paths_from_text(text: &str) -> Vec<String> {
     let mut paths = Vec::new();
     for word in text.split_whitespace() {
-        let w = word.trim_matches(|c: char| c == ',' || c == '"' || c == '\'' || c == '`' || c == '(' || c == ')');
+        let w = word.trim_matches(|c: char| {
+            c == ',' || c == '"' || c == '\'' || c == '`' || c == '(' || c == ')'
+        });
         if (w.contains('/') || w.contains('\\'))
             && w.contains('.')
             && !w.starts_with("http")
             && !w.starts_with("https")
-            && !w.starts_with('<') && !w.starts_with('{') && !w.starts_with('(') && !paths.contains(&w.to_string()) {
-                paths.push(w.to_string());
-            }
+            && !w.starts_with('<')
+            && !w.starts_with('{')
+            && !w.starts_with('(')
+            && !paths.contains(&w.to_string())
+        {
+            paths.push(w.to_string());
+        }
     }
     paths.truncate(8);
     paths
@@ -357,11 +365,40 @@ fn extract_paths_from_text(text: &str) -> Vec<String> {
 /// Extract technical concepts from unstructured text.
 fn extract_concepts_from_text(text: &str) -> Vec<String> {
     let keywords = &[
-        "Rust", "rust", "Cargo", "Go", "golang", "TypeScript", "JavaScript",
-        "Node", "Python", "React", "Vue", "SQLite", "Postgres", "MySQL",
-        "Docker", "Kubernetes", "API", "CLI", "TUI", "Git", "Linux", "macOS",
-        "SSH", "HTTP", "TLS", "compression", "memory", "caching", "logging",
-        "error", "configuration", "refactoring", "migration", "testing",
+        "Rust",
+        "rust",
+        "Cargo",
+        "Go",
+        "golang",
+        "TypeScript",
+        "JavaScript",
+        "Node",
+        "Python",
+        "React",
+        "Vue",
+        "SQLite",
+        "Postgres",
+        "MySQL",
+        "Docker",
+        "Kubernetes",
+        "API",
+        "CLI",
+        "TUI",
+        "Git",
+        "Linux",
+        "macOS",
+        "SSH",
+        "HTTP",
+        "TLS",
+        "compression",
+        "memory",
+        "caching",
+        "logging",
+        "error",
+        "configuration",
+        "refactoring",
+        "migration",
+        "testing",
     ];
     let text_lower = text.to_lowercase();
     let mut found: Vec<String> = Vec::new();

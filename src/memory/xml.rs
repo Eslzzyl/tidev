@@ -10,23 +10,23 @@ pub fn clean_llm_xml_response(raw: &str) -> String {
 
     // Strip markdown code fences: ```xml ... ``` or ``` ... ```
     if let (Some(start), Some(end)) = (text.find("```"), text.rfind("```"))
-        && start < end {
-            let inner_start = match text[start..].find('\n') {
-                Some(nl) => start + nl + 1,
-                None => start + 3,
-            };
-            if inner_start < end {
-                return text[inner_start..end].trim().to_string();
-            }
+        && start < end
+    {
+        let inner_start = match text[start..].find('\n') {
+            Some(nl) => start + nl + 1,
+            None => start + 3,
+        };
+        if inner_start < end {
+            return text[inner_start..end].trim().to_string();
         }
+    }
 
     // If no fences, try to find the <observation>...</observation> block
     if let Some(tag_start) = find_tag_boundary_ci(&text, "observation", true)
-        && let Some(tag_end) =
-            find_tag_boundary_ci(&text[tag_start..], "observation", false)
-        {
-            return text[tag_start..tag_start + tag_end].trim().to_string();
-        }
+        && let Some(tag_end) = find_tag_boundary_ci(&text[tag_start..], "observation", false)
+    {
+        return text[tag_start..tag_start + tag_end].trim().to_string();
+    }
 
     // Return as-is; the case-insensitive parser will attempt further
     text

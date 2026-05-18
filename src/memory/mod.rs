@@ -52,7 +52,10 @@ pub fn start_background_tasks(
         if let Err(e) = evict_store.run_eviction() {
             crate::log_warn!("memory: initial eviction failed: {}", e);
         } else {
-            crate::log_info!("memory: initial eviction completed in {:?}", _t_evict.elapsed());
+            crate::log_info!(
+                "memory: initial eviction completed in {:?}",
+                _t_evict.elapsed()
+            );
         }
         let mut interval = tokio::time::interval(Duration::from_secs(3600));
         loop {

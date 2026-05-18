@@ -597,9 +597,14 @@ impl App {
             .set_placeholder("Ask TiDev about your code, task, or question...");
         // ── Compose the static system prompt and persist it ──────────────
         // This prompt is frozen for the entire session lifetime. Never change it.
-        let static_prompt = self.agent.compose_static_system_prompt(&self.active_model.system_prompt);
+        let static_prompt = self
+            .agent
+            .compose_static_system_prompt(&self.active_model.system_prompt);
         self.active_model.system_prompt = static_prompt.clone();
-        if let Err(e) = self.store.update_session_system_prompt(session_id, &static_prompt) {
+        if let Err(e) = self
+            .store
+            .update_session_system_prompt(session_id, &static_prompt)
+        {
             crate::log_warn!("failed to persist static system prompt: {}", e);
         }
 

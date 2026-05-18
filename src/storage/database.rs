@@ -11,8 +11,8 @@ use rusqlite::{Connection, params};
 use crate::memory::MemoryStore;
 
 use super::{
-    schema::{SCHEMA_SQL, SCHEMA_VERSION},
     SessionStore,
+    schema::{SCHEMA_SQL, SCHEMA_VERSION},
 };
 
 /// Unified database manager.
@@ -43,24 +43,31 @@ impl Database {
 
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create database directory {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| {
+                format!("failed to create database directory {}", parent.display())
+            })?;
         }
 
         // ── Shared write connection ──────────────────────────────────────
         let write_conn = Connection::open(&path)
             .with_context(|| format!("failed to open {}", path.display()))?;
-        write_conn.pragma_update(None, "journal_mode", "WAL")
+        write_conn
+            .pragma_update(None, "journal_mode", "WAL")
             .context("failed to set journal_mode")?;
-        write_conn.pragma_update(None, "foreign_keys", "ON")
+        write_conn
+            .pragma_update(None, "foreign_keys", "ON")
             .context("failed to enable foreign_keys")?;
-        write_conn.pragma_update(None, "synchronous", "NORMAL")
+        write_conn
+            .pragma_update(None, "synchronous", "NORMAL")
             .context("failed to set synchronous")?;
-        write_conn.pragma_update(None, "mmap_size", "268435456")
+        write_conn
+            .pragma_update(None, "mmap_size", "268435456")
             .context("failed to set mmap_size")?;
-        write_conn.pragma_update(None, "cache_size", "-64000")
+        write_conn
+            .pragma_update(None, "cache_size", "-64000")
             .context("failed to set cache_size")?;
-        write_conn.pragma_update(None, "temp_store", "MEMORY")
+        write_conn
+            .pragma_update(None, "temp_store", "MEMORY")
             .context("failed to set temp_store")?;
         write_conn.busy_timeout(Duration::from_secs(5))?;
 

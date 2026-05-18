@@ -71,8 +71,7 @@ impl App {
         let mut state = ListState::default();
         state.select(Some(self.panel_launcher.selected_index));
 
-        let block = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let block = Block::default().style(Style::default().bg(palette.panel_alt));
 
         let list = List::new(items)
             .style(Style::default().bg(palette.panel_alt).fg(palette.text))

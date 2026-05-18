@@ -18,10 +18,7 @@ use crate::tooling::ToolPermission;
 
 use self::reasoning::{ThinkingLevelType, ThinkingMatcher};
 
-pub use auth::{
-    ActiveModel, AuthStore, ModelSummary,
-    ProviderAuth, WebAuth,
-};
+pub use auth::{ActiveModel, AuthStore, ModelSummary, ProviderAuth, WebAuth};
 pub use logging::LogConfig;
 pub use mcp::{McpConfig, McpServerConfig};
 pub use paths::ConfigPaths;
@@ -1017,7 +1014,9 @@ default_provider = "exa"
                 if thinking_level.is_empty() {
                     self.memory.thinking_levels.remove(role);
                 } else {
-                    self.memory.thinking_levels.insert(role.to_string(), thinking_level.to_string());
+                    self.memory
+                        .thinking_levels
+                        .insert(role.to_string(), thinking_level.to_string());
                 }
             }
         }

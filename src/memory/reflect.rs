@@ -7,9 +7,9 @@ use uuid::Uuid;
 use crate::config::ActiveModel;
 use crate::llm::LlmClient;
 use crate::memory::remember::RememberService;
-use crate::memory::xml::clean_llm_xml_response;
 use crate::memory::remember::map_memory_entry_from_row;
 use crate::memory::types::{MemoryEntry, MemoryType};
+use crate::memory::xml::clean_llm_xml_response;
 use crate::session::{Message, MessageRole};
 
 // ─── Prompts ──────────────────────────────────────────────────────────
@@ -187,7 +187,9 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                     break;
                 }
                 if attempt == 0 {
-                    crate::log_warn!("reflect: unparseable response, retrying with stricter prompt");
+                    crate::log_warn!(
+                        "reflect: unparseable response, retrying with stricter prompt"
+                    );
                 }
             }
 
@@ -422,7 +424,8 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
         let mut insights = Vec::new();
 
         // Extract each <insight> block using regex (case-insensitive on tag names)
-        let pattern = r#"(?i)<insight\s+confidence="([^"]*)"\s+title="([^"]*)"[^>]*>([\s\S]*?)</insight>"#;
+        let pattern =
+            r#"(?i)<insight\s+confidence="([^"]*)"\s+title="([^"]*)"[^>]*>([\s\S]*?)</insight>"#;
         if let Ok(re) = fancy_regex::Regex::new(pattern) {
             for c in re.captures_iter(&cleaned).flatten() {
                 let title = c

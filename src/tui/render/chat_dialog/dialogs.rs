@@ -48,8 +48,7 @@ impl App {
         let overlay = centered_rect(overlay_width, overlay_height, area);
         frame.render_widget(Clear, overlay);
 
-        let panel = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let panel = Block::default().style(Style::default().bg(palette.panel_alt));
 
         frame.render_widget(panel, overlay);
         let inner = overlay.inner(Margin {
@@ -68,12 +67,19 @@ impl App {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 dialog_title,
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
             Rect::new(inner.x, inner.y, inner.width, 1),
         );
-        let body = Rect::new(inner.x, inner.y + 1, inner.width, inner.height.saturating_sub(1));
+        let body = Rect::new(
+            inner.x,
+            inner.y + 1,
+            inner.width,
+            inner.height.saturating_sub(1),
+        );
 
         match dialog {
             ConnectDialog::ProviderPicker { selected } => {
@@ -297,7 +303,11 @@ impl App {
                 frame.render_widget(
                     Paragraph::new(prompt_line)
                         .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
+                        .style(
+                            Style::default()
+                                .bg(palette.panel_alt)
+                                .fg(palette.accent_soft),
+                        ),
                     lines[3],
                 );
 
@@ -368,7 +378,11 @@ impl App {
                     frame.render_widget(
                         Paragraph::new("Enter to continue · Esc to cancel")
                             .alignment(Alignment::Center)
-                            .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
+                            .style(
+                                Style::default()
+                                    .bg(palette.panel_alt)
+                                    .fg(palette.accent_soft),
+                            ),
                         lines[3],
                     );
 
@@ -454,7 +468,11 @@ impl App {
                     frame.render_widget(
                         Paragraph::new("Enter edit · N new · D delete · S save · Esc cancel")
                             .alignment(Alignment::Center)
-                            .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
+                            .style(
+                                Style::default()
+                                    .bg(palette.panel_alt)
+                                    .fg(palette.accent_soft),
+                            ),
                         lines[2],
                     );
                 } else if *step == EditProviderStep::ConfirmDeleteModel {
@@ -495,7 +513,11 @@ impl App {
                     frame.render_widget(
                         Paragraph::new("Y to delete · N / Esc to keep")
                             .alignment(Alignment::Center)
-                            .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
+                            .style(
+                                Style::default()
+                                    .bg(palette.panel_alt)
+                                    .fg(palette.accent_soft),
+                            ),
                         lines[3],
                     );
                 } else {
@@ -538,7 +560,11 @@ impl App {
                     frame.render_widget(
                         Paragraph::new("Enter to continue · Esc to cancel")
                             .alignment(Alignment::Center)
-                            .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
+                            .style(
+                                Style::default()
+                                    .bg(palette.panel_alt)
+                                    .fg(palette.accent_soft),
+                            ),
                         lines[3],
                     );
 
@@ -565,8 +591,7 @@ impl App {
         let overlay = centered_rect(area.width.min(96), preview_height.saturating_add(10), area);
         frame.render_widget(Clear, overlay);
 
-        let block = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let block = Block::default().style(Style::default().bg(palette.panel_alt));
         frame.render_widget(block, overlay);
 
         let inner = overlay.inner(Margin {
@@ -587,7 +612,9 @@ impl App {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 " Tool approval ",
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
             sections[0],
@@ -649,8 +676,7 @@ impl App {
 
         frame.render_widget(Clear, area);
 
-        let block = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let block = Block::default().style(Style::default().bg(palette.panel_alt));
         frame.render_widget(block, area);
 
         let sections = Layout::vertical([
@@ -665,7 +691,9 @@ impl App {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 dialog.title(),
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
             sections[0],
@@ -717,8 +745,7 @@ impl App {
 
         frame.render_widget(Clear, area);
 
-        let block = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let block = Block::default().style(Style::default().bg(palette.panel_alt));
         frame.render_widget(block, area);
 
         let sections = Layout::vertical([
@@ -733,7 +760,9 @@ impl App {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 dialog.title(),
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
             sections[0],
@@ -781,8 +810,7 @@ impl App {
         let overlay = centered_rect(60, 10, area);
         frame.render_widget(Clear, overlay);
 
-        let block = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let block = Block::default().style(Style::default().bg(palette.panel_alt));
         frame.render_widget(block, overlay);
 
         let inner = overlay.inner(Margin {
@@ -801,7 +829,9 @@ impl App {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 dialog.title(),
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
             sections[0],
@@ -835,8 +865,7 @@ impl App {
         let overlay = centered_rect(60, 12, area);
         frame.render_widget(Clear, overlay);
 
-        let block = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let block = Block::default().style(Style::default().bg(palette.panel_alt));
         frame.render_widget(block, overlay);
 
         let inner = overlay.inner(Margin {
@@ -855,7 +884,9 @@ impl App {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 dialog.title(),
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
             sections[0],
@@ -895,8 +926,7 @@ impl App {
 
         frame.render_widget(Clear, area);
 
-        let block = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let block = Block::default().style(Style::default().bg(palette.panel_alt));
         frame.render_widget(block, area);
 
         let options_height = options_lines.len().max(2) as u16;
@@ -1008,8 +1038,7 @@ impl App {
                 let overlay = centered_rect(60, 20, area);
                 frame.render_widget(Clear, overlay);
 
-                let block = Block::default()
-                    .style(Style::default().bg(palette.panel_alt));
+                let block = Block::default().style(Style::default().bg(palette.panel_alt));
                 frame.render_widget(block, overlay);
 
                 let inner = overlay.inner(Margin {
@@ -1028,7 +1057,9 @@ impl App {
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![Span::styled(
                         " Delete session(s) ",
-                        Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(palette.accent)
+                            .add_modifier(Modifier::BOLD),
                     )]))
                     .style(Style::default().bg(palette.panel_alt)),
                     sections[0],
@@ -1058,7 +1089,11 @@ impl App {
                 frame.render_widget(
                     Paragraph::new("Enter: confirm · Esc: cancel")
                         .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
+                        .style(
+                            Style::default()
+                                .bg(palette.panel_alt)
+                                .fg(palette.accent_soft),
+                        ),
                     sections[3],
                 );
             }
@@ -1069,8 +1104,7 @@ impl App {
                 let overlay = centered_rect(60, 20, area);
                 frame.render_widget(Clear, overlay);
 
-                let block = Block::default()
-                    .style(Style::default().bg(palette.panel_alt));
+                let block = Block::default().style(Style::default().bg(palette.panel_alt));
                 frame.render_widget(block, overlay);
 
                 let inner = overlay.inner(Margin {
@@ -1089,7 +1123,9 @@ impl App {
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![Span::styled(
                         " Export session(s) ",
-                        Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(palette.accent)
+                            .add_modifier(Modifier::BOLD),
                     )]))
                     .style(Style::default().bg(palette.panel_alt)),
                     sections[0],
@@ -1119,7 +1155,11 @@ impl App {
                 frame.render_widget(
                     Paragraph::new("Enter: export · Esc: cancel")
                         .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
+                        .style(
+                            Style::default()
+                                .bg(palette.panel_alt)
+                                .fg(palette.accent_soft),
+                        ),
                     sections[3],
                 );
             }
@@ -1131,8 +1171,7 @@ impl App {
                 let overlay = centered_rect(70, 25, area);
                 frame.render_widget(Clear, overlay);
 
-                let block = Block::default()
-                    .style(Style::default().bg(palette.panel_alt));
+                let block = Block::default().style(Style::default().bg(palette.panel_alt));
                 frame.render_widget(block, overlay);
 
                 let inner = overlay.inner(Margin {
@@ -1153,7 +1192,9 @@ impl App {
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![Span::styled(
                         " Cleanup Sessions ",
-                        Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(palette.accent)
+                            .add_modifier(Modifier::BOLD),
                     )]))
                     .style(Style::default().bg(palette.panel_alt)),
                     sections[0],
@@ -1200,7 +1241,11 @@ impl App {
                         preview.total_count
                     ))
                     .alignment(Alignment::Center)
-                    .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
+                    .style(
+                        Style::default()
+                            .bg(palette.panel_alt)
+                            .fg(palette.accent_soft),
+                    ),
                     sections[3],
                 );
 
@@ -1218,7 +1263,11 @@ impl App {
                 frame.render_widget(
                     Paragraph::new("Enter: confirm · Esc: cancel")
                         .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel_alt).fg(palette.accent_soft)),
+                        .style(
+                            Style::default()
+                                .bg(palette.panel_alt)
+                                .fg(palette.accent_soft),
+                        ),
                     sections[5],
                 );
             }
@@ -1235,8 +1284,7 @@ impl App {
         let overlay = centered_rect(60, 12, area);
         frame.render_widget(Clear, overlay);
 
-        let block = Block::default()
-            .style(Style::default().bg(palette.panel_alt));
+        let block = Block::default().style(Style::default().bg(palette.panel_alt));
         frame.render_widget(block, overlay);
 
         let inner = overlay.inner(Margin {
@@ -1258,7 +1306,9 @@ impl App {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 dialog.title(),
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
             sections[0],

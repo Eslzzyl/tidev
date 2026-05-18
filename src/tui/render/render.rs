@@ -171,8 +171,7 @@ impl App {
         let y = message_area.top().saturating_add(1);
 
         let rect = Rect::new(x, y, width, height);
-        let block = Block::default()
-            .style(Style::default().bg(palette.panel).fg(palette.text));
+        let block = Block::default().style(Style::default().bg(palette.panel).fg(palette.text));
         let paragraph = Paragraph::new(message.as_str())
             .style(Style::default().bg(palette.panel).fg(palette.text))
             .alignment(Alignment::Center)
@@ -333,11 +332,8 @@ impl App {
         // When showing the accent bar (main composer), reserve space for metadata at the bottom
         let metadata_height: u16 = if show_left_accent { 2 } else { 0 };
         let (text_area, metadata_area) = if show_left_accent && inner.height > metadata_height {
-            let split = Layout::vertical([
-                Constraint::Min(1),
-                Constraint::Length(metadata_height),
-            ])
-            .split(inner);
+            let split = Layout::vertical([Constraint::Min(1), Constraint::Length(metadata_height)])
+                .split(inner);
             (split[0], split[1])
         } else {
             (inner, Rect::default())
@@ -464,11 +460,19 @@ impl App {
 
                 // Mode label (Build / Plan / Shell)
                 let (mode_label, mode_style) = if self.shell_mode {
-                    ("Shell".to_string(),
-                     Style::default().fg(palette.success).add_modifier(Modifier::BOLD))
+                    (
+                        "Shell".to_string(),
+                        Style::default()
+                            .fg(palette.success)
+                            .add_modifier(Modifier::BOLD),
+                    )
                 } else {
-                    (self.mode.title().to_string(),
-                     Style::default().fg(palette.border_mode_color(self.mode)).add_modifier(Modifier::BOLD))
+                    (
+                        self.mode.title().to_string(),
+                        Style::default()
+                            .fg(palette.border_mode_color(self.mode))
+                            .add_modifier(Modifier::BOLD),
+                    )
                 };
                 meta_spans.push(Span::styled(mode_label, mode_style));
 
@@ -506,11 +510,12 @@ impl App {
                     .map(|p| p.label())
                     .unwrap_or_else(|| self.mode.sandbox_policy(&self.config.sandbox).label());
                 meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
-                let sandbox_style = if sandbox_label.contains("off") || sandbox_label.contains("read") {
-                    Style::default().fg(palette.warning)
-                } else {
-                    Style::default().fg(palette.success)
-                };
+                let sandbox_style =
+                    if sandbox_label.contains("off") || sandbox_label.contains("read") {
+                        Style::default().fg(palette.warning)
+                    } else {
+                        Style::default().fg(palette.success)
+                    };
                 meta_spans.push(Span::styled(
                     format!("sandbox:{}", sandbox_label),
                     sandbox_style,
@@ -519,12 +524,7 @@ impl App {
                 let meta_paragraph = Paragraph::new(Line::from(meta_spans))
                     .style(Style::default().bg(palette.panel));
                 // Render on the second row of metadata_area, aligned with text content
-                let meta_rect = Rect::new(
-                    area.x + 2,
-                    metadata_area.y + 1,
-                    metadata_area.width,
-                    1,
-                );
+                let meta_rect = Rect::new(area.x + 2, metadata_area.y + 1, metadata_area.width, 1);
                 frame.render_widget(meta_paragraph, meta_rect);
             }
         }
@@ -620,8 +620,7 @@ impl App {
         let overlay = centered_rect(28, S::build_items().len() as u16 + 2, area);
         frame.render_widget(Clear, overlay);
 
-        let block = Block::default()
-            .style(Style::default().bg(palette.panel));
+        let block = Block::default().style(Style::default().bg(palette.panel));
         frame.render_widget(block, overlay);
 
         let inner = overlay.inner(Margin {
@@ -668,8 +667,7 @@ impl App {
         let overlay = centered_rect(56, 8, area);
         frame.render_widget(Clear, overlay);
 
-        let block = Block::default()
-            .style(Style::default().bg(palette.panel));
+        let block = Block::default().style(Style::default().bg(palette.panel));
         frame.render_widget(&block, overlay);
 
         let inner = overlay.inner(Margin::new(1, 0));

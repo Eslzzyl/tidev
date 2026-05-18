@@ -35,7 +35,10 @@ impl App {
         crate::log_info!("startup: auth loaded in {:?}", _t1.elapsed());
         let _t2 = std::time::Instant::now();
         let db = Database::open(paths.default_database_path())?;
-        crate::log_info!("startup: Database::open (schema init) in {:?}", _t2.elapsed());
+        crate::log_info!(
+            "startup: Database::open (schema init) in {:?}",
+            _t2.elapsed()
+        );
         let _t3 = std::time::Instant::now();
         let store = db.create_session_store()?;
         let memory_store = Arc::new(db.create_memory_store()?);
@@ -103,8 +106,7 @@ impl App {
         if let Some(ref mut model) = consolidation_override
             && let Some(tl_str) = config.memory.thinking_levels.get("consolidation")
         {
-            model.thinking_level =
-                crate::config::reasoning::ThinkingLevelType::from_string(tl_str);
+            model.thinking_level = crate::config::reasoning::ThinkingLevelType::from_string(tl_str);
         }
 
         // Provide a model resolver so summarization can reuse the last
@@ -342,7 +344,10 @@ impl App {
             &self.workspace_root.to_string_lossy(),
             &self.config.memory,
         );
-        crate::log_info!("startup: memory background tasks spawned in {:?}", _t_run.elapsed());
+        crate::log_info!(
+            "startup: memory background tasks spawned in {:?}",
+            _t_run.elapsed()
+        );
 
         // Schedule periodic session inactivity check (every 60 seconds).
         let check_store = self.store.clone();
@@ -386,9 +391,15 @@ impl App {
                 }
             }
         });
-        crate::log_info!("startup: inactivity check spawned in {:?}", _t_run.elapsed());
+        crate::log_info!(
+            "startup: inactivity check spawned in {:?}",
+            _t_run.elapsed()
+        );
 
-        crate::log_info!("startup: entering main event loop — total startup {:?}", _t_run.elapsed());
+        crate::log_info!(
+            "startup: entering main event loop — total startup {:?}",
+            _t_run.elapsed()
+        );
 
         loop {
             self.process_backend_events(runtime)?;
@@ -812,8 +823,13 @@ impl App {
         if !stored_system_prompt.is_empty() {
             active_model.system_prompt = stored_system_prompt;
         } else {
-            let composed = self.agent.compose_static_system_prompt(&active_model.system_prompt);
-            if let Err(e) = self.store.update_session_system_prompt(session_id, &composed) {
+            let composed = self
+                .agent
+                .compose_static_system_prompt(&active_model.system_prompt);
+            if let Err(e) = self
+                .store
+                .update_session_system_prompt(session_id, &composed)
+            {
                 crate::log_warn!("failed to persist static system prompt: {}", e);
             }
             active_model.system_prompt = composed;
@@ -952,9 +968,10 @@ impl App {
         // the stored prompt too. Re-composing would re-capture SystemInfo
         // (date, etc.) and break prefix caching.
         if let Ok(stored) = self.store.load_session_system_prompt(session_id)
-            && !stored.is_empty() {
-                model.system_prompt = stored;
-            }
+            && !stored.is_empty()
+        {
+            model.system_prompt = stored;
+        }
         let mode = if is_active {
             self.mode
         } else {

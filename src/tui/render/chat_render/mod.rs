@@ -79,7 +79,13 @@ impl App {
         );
 
         const SIDEBAR_GAP: u16 = 2;
-        let sidebar_visible = area.width >= self.config.ui.sidebar_width.saturating_add(70).saturating_add(SIDEBAR_GAP);
+        let sidebar_visible = area.width
+            >= self
+                .config
+                .ui
+                .sidebar_width
+                .saturating_add(70)
+                .saturating_add(SIDEBAR_GAP);
         let main_area = if sidebar_visible {
             let split = Layout::horizontal([
                 Constraint::Min(20),
@@ -338,8 +344,7 @@ impl App {
     fn render_subsession_navigation(&self, frame: &mut Frame<'_>, area: Rect) {
         let palette = self.palette();
 
-        let block = Block::default()
-            .style(Style::default().bg(palette.panel));
+        let block = Block::default().style(Style::default().bg(palette.panel));
 
         frame.render_widget(block, area);
 
@@ -530,7 +535,10 @@ impl App {
         let mut lines = Vec::new();
 
         // Session title (top)
-        let session_title = shorten(&self.conversation.title, (area.width.saturating_sub(4).max(1)) as usize);
+        let session_title = shorten(
+            &self.conversation.title,
+            (area.width.saturating_sub(4).max(1)) as usize,
+        );
         lines.push(Line::from(vec![Span::styled(
             session_title,
             Style::default()

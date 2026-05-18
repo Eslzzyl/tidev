@@ -102,9 +102,20 @@ impl PatternMiningService {
     /// Reads tool messages (file_diffs / content) and user messages
     /// (patch_files), extracts files per session, counts co-occurrence pairs
     /// across sessions.
-    fn mine_co_change(db: &Connection, project: &str, cursor: &str) -> Result<(usize, Option<String>)> {
+    fn mine_co_change(
+        db: &Connection,
+        project: &str,
+        cursor: &str,
+    ) -> Result<(usize, Option<String>)> {
         // ── Source A: tool messages with file_diffs ─────────────────────
-        let file_tools = ["write", "edit", "edit_and_apply", "create", "delete", "rename"];
+        let file_tools = [
+            "write",
+            "edit",
+            "edit_and_apply",
+            "create",
+            "delete",
+            "rename",
+        ];
         let mut session_files: HashMap<String, Vec<String>> = HashMap::new();
         let mut max_ts: Option<String> = None;
 
@@ -127,8 +138,12 @@ impl PatternMiningService {
             let rows: Vec<_> = if cursor.is_empty() {
                 let r = stmt.query_map(
                     rusqlite::params![
-                        file_tools[0], file_tools[1], file_tools[2],
-                        file_tools[3], file_tools[4], file_tools[5]
+                        file_tools[0],
+                        file_tools[1],
+                        file_tools[2],
+                        file_tools[3],
+                        file_tools[4],
+                        file_tools[5]
                     ],
                     |row| {
                         let content_blob: Vec<u8> = row.get(0)?;
@@ -142,8 +157,12 @@ impl PatternMiningService {
             } else {
                 let r = stmt.query_map(
                     rusqlite::params![
-                        file_tools[0], file_tools[1], file_tools[2],
-                        file_tools[3], file_tools[4], file_tools[5],
+                        file_tools[0],
+                        file_tools[1],
+                        file_tools[2],
+                        file_tools[3],
+                        file_tools[4],
+                        file_tools[5],
                         cursor
                     ],
                     |row| {
@@ -163,7 +182,9 @@ impl PatternMiningService {
 
                 if let Some(diffs_blob) = diffs_blob {
                     let diffs_text = decompress_text(diffs_blob);
-                    if let Ok(diffs_json) = serde_json::from_str::<Vec<serde_json::Value>>(&diffs_text) {
+                    if let Ok(diffs_json) =
+                        serde_json::from_str::<Vec<serde_json::Value>>(&diffs_text)
+                    {
                         for entry in &diffs_json {
                             if let Some(path) = entry.get("path").and_then(|v| v.as_str())
                                 && !files.contains(&path.to_string())
@@ -191,7 +212,13 @@ impl PatternMiningService {
 
                 max_ts = max_ts
                     .take()
-                    .map(|cur| if created_at > &cur { created_at.clone() } else { cur })
+                    .map(|cur| {
+                        if created_at > &cur {
+                            created_at.clone()
+                        } else {
+                            cur
+                        }
+                    })
                     .or_else(|| Some(created_at.clone()));
             }
         }
@@ -259,7 +286,13 @@ impl PatternMiningService {
 
                 max_ts = max_ts
                     .take()
-                    .map(|cur| if created_at > &cur { created_at.clone() } else { cur })
+                    .map(|cur| {
+                        if created_at > &cur {
+                            created_at.clone()
+                        } else {
+                            cur
+                        }
+                    })
                     .or_else(|| Some(created_at.clone()));
             }
         }
@@ -334,7 +367,11 @@ impl PatternMiningService {
     ///
     /// Reads tool results where content indicates errors. Groups similar
     /// errors across sessions by a normalized text fragment.
-    fn mine_error_repeats(db: &Connection, project: &str, cursor: &str) -> Result<(usize, Option<String>)> {
+    fn mine_error_repeats(
+        db: &Connection,
+        project: &str,
+        cursor: &str,
+    ) -> Result<(usize, Option<String>)> {
         let sql = if cursor.is_empty() {
             "SELECT content, session_id, created_at
              FROM messages
@@ -416,7 +453,13 @@ impl PatternMiningService {
 
             max_ts = max_ts
                 .take()
-                .map(|cur| if created_at > &cur { created_at.clone() } else { cur })
+                .map(|cur| {
+                    if created_at > &cur {
+                        created_at.clone()
+                    } else {
+                        cur
+                    }
+                })
                 .or_else(|| Some(created_at.clone()));
         }
 

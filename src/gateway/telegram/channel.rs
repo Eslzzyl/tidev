@@ -261,13 +261,21 @@ impl TelegramChannel {
 
         // Load the session's immutable static system prompt.
         // Legacy sessions (no stored prompt) get composed now.
-        match self.store.load_session_system_prompt(conversation.session_id) {
+        match self
+            .store
+            .load_session_system_prompt(conversation.session_id)
+        {
             Ok(stored) if !stored.is_empty() => {
                 active_model.system_prompt = stored;
             }
             _ => {
-                let composed = self.agent.compose_static_system_prompt(&active_model.system_prompt);
-                if let Err(e) = self.store.update_session_system_prompt(conversation.session_id, &composed) {
+                let composed = self
+                    .agent
+                    .compose_static_system_prompt(&active_model.system_prompt);
+                if let Err(e) = self
+                    .store
+                    .update_session_system_prompt(conversation.session_id, &composed)
+                {
                     crate::log_warn!("failed to persist static system prompt: {}", e);
                 }
                 active_model.system_prompt = composed;
@@ -297,11 +305,18 @@ impl TelegramChannel {
             }
         }
 
-        let has_assistant = conversation.messages.iter().any(|m| m.role == MessageRole::Assistant);
+        let has_assistant = conversation
+            .messages
+            .iter()
+            .any(|m| m.role == MessageRole::Assistant);
         let include_memory = self.agent.config.memory.inject_context && !has_assistant;
         let dc = self
             .agent
-            .compose_dynamic_context(conversation.session_id, Some(SessionMode::Build), include_memory)
+            .compose_dynamic_context(
+                conversation.session_id,
+                Some(SessionMode::Build),
+                include_memory,
+            )
             .await;
         let content_with_dc = if !dc.is_empty() {
             format!("{}\n\n{}", dc, content)
@@ -1073,8 +1088,13 @@ impl TelegramChannel {
         )?;
 
         // Compose the immutable static system prompt and persist it.
-        let static_prompt = self.agent.compose_static_system_prompt(&active_model.system_prompt);
-        if let Err(e) = self.store.update_session_system_prompt(session_id, &static_prompt) {
+        let static_prompt = self
+            .agent
+            .compose_static_system_prompt(&active_model.system_prompt);
+        if let Err(e) = self
+            .store
+            .update_session_system_prompt(session_id, &static_prompt)
+        {
             crate::log_warn!("failed to persist static system prompt: {}", e);
         }
 
