@@ -140,7 +140,7 @@ pub(super) async fn stream_openai(
                         total_tokens: usage.total_tokens,
                         cache_read_tokens,
                         cache_write_tokens: 0,
-                        model_id: model.model_id.clone(),
+                        model_id: format!("{}:{}", model.provider_id, model.model_id),
                         duration_ms,
                     });
                 }

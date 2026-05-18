@@ -210,7 +210,7 @@ pub(super) async fn stream_anthropic(
                                 total_tokens,
                                 cache_read_tokens: usage.cache_read_input_tokens,
                                 cache_write_tokens: usage.cache_creation_input_tokens,
-                                model_id: model.model_id.clone(),
+                                model_id: format!("{}:{}", model.provider_id, model.model_id),
                                 duration_ms,
                             });
                         }
