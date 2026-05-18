@@ -385,47 +385,6 @@ impl ContextManager {
         self.retained_from
     }
 
-    #[allow(dead_code)]
-    fn choose_split_index(&self, messages: &[Message], retain_recent_tokens: usize) -> usize {
-        let mut token_budget = retain_recent_tokens;
-        let mut keep_from = messages.len();
-
-        for (index, message) in messages.iter().enumerate().rev() {
-            let message_tokens = Self::message_tokens(message);
-            if token_budget < message_tokens {
-                keep_from = index + 1;
-                break;
-            }
-
-            token_budget = token_budget.saturating_sub(message_tokens);
-            keep_from = index;
-        }
-
-        self.align_split_index_to_tool_boundary(messages, keep_from)
-    }
-
-    #[allow(dead_code)]
-    fn align_split_index_to_tool_boundary(
-        &self,
-        messages: &[Message],
-        split_index: usize,
-    ) -> usize {
-        if split_index == 0 || split_index >= messages.len() {
-            return split_index;
-        }
-
-        if !matches!(messages[split_index].role, MessageRole::Tool) {
-            return split_index;
-        }
-
-        let mut aligned_index = split_index;
-        while aligned_index > 0 && matches!(messages[aligned_index].role, MessageRole::Tool) {
-            aligned_index -= 1;
-        }
-
-        aligned_index
-    }
-
     fn fallback_summary(&self, messages: &[Message], error: &str) -> String {
         let mut summary = String::from("Context summary fallback\n");
         summary.push_str(&format!("Compression request failed: {error}\n"));

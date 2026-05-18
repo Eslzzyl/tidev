@@ -156,30 +156,24 @@ pub fn upsert_edge(
 
 /// Extract nodes and edges from a `SessionSummary`.
 ///
-/// Creates `concept` nodes for each concept and `file` nodes for each
-/// modified file, then edges between them with `relates_to` relation.
+/// Uses a star pattern: a session node is created, each concept connects
+/// to the session node, and the session node connects to each file.
+/// This avoids the O(concepts × files) Cartesian product.
 pub fn extract_from_session_summary(
     db: &Connection,
     summary: &crate::memory::types::SessionSummary,
     session_id: &str,
 ) -> Result<()> {
-    let mut concept_ids: Vec<String> = Vec::new();
+    let session_node_id = upsert_node(db, "session", session_id)?;
+
     for concept in &summary.concepts {
-        let id = upsert_node(db, "concept", concept)?;
-        concept_ids.push(id);
+        let cid = upsert_node(db, "concept", concept)?;
+        upsert_edge(db, &cid, &session_node_id, "relates_to", 1.0, Some(session_id))?;
     }
 
-    let mut file_ids: Vec<String> = Vec::new();
     for file in &summary.files_modified {
-        let id = upsert_node(db, "file", file)?;
-        file_ids.push(id);
-    }
-
-    // Connect each concept to each file
-    for cid in &concept_ids {
-        for fid in &file_ids {
-            upsert_edge(db, cid, fid, "relates_to", 1.0, Some(session_id))?;
-        }
+        let fid = upsert_node(db, "file", file)?;
+        upsert_edge(db, &session_node_id, &fid, "modifies", 1.0, Some(session_id))?;
     }
 
     Ok(())
@@ -187,28 +181,24 @@ pub fn extract_from_session_summary(
 
 /// Extract nodes and edges from a `MemoryEntry`.
 ///
-/// Creates `concept` nodes for each concept and `file` nodes for each
-/// file, then edges between them with `relates_to` relation.
+/// Uses a star pattern: a memory node is created, each concept connects
+/// to the memory node, and the memory node connects to each file.
+/// This avoids the O(concepts × files) Cartesian product.
 pub fn extract_from_memory_entry(
     db: &Connection,
     entry: &crate::memory::types::MemoryEntry,
 ) -> Result<()> {
-    let mut concept_ids: Vec<String> = Vec::new();
+    let memory_label = entry.id.to_string();
+    let memory_node_id = upsert_node(db, "memory_entry", &memory_label)?;
+
     for concept in &entry.concepts {
-        let id = upsert_node(db, "concept", concept)?;
-        concept_ids.push(id);
+        let cid = upsert_node(db, "concept", concept)?;
+        upsert_edge(db, &cid, &memory_node_id, "relates_to", 1.0, Some(&memory_label))?;
     }
 
-    let mut file_ids: Vec<String> = Vec::new();
     for file in &entry.files {
-        let id = upsert_node(db, "file", file)?;
-        file_ids.push(id);
-    }
-
-    for cid in &concept_ids {
-        for fid in &file_ids {
-            upsert_edge(db, cid, fid, "relates_to", 1.0, Some(&entry.id.to_string()))?;
-        }
+        let fid = upsert_node(db, "file", file)?;
+        upsert_edge(db, &memory_node_id, &fid, "modifies", 1.0, Some(&memory_label))?;
     }
 
     Ok(())

@@ -70,34 +70,7 @@ impl MemoryStore {
             model_resolver: RwLock::new(None),
         };
 
-        store.rebuild_fts5_if_needed()?;
-
         Ok(store)
-    }
-
-    /// Rebuild the memories_fts index on startup so FTS5 queries work.
-    /// Only rebuilds if the FTS5 table is empty (first startup after schema creation).
-    fn rebuild_fts5_if_needed(&self) -> Result<()> {
-        let db = self.connection.lock().unwrap();
-        let exists: bool = db
-            .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'memories_fts'")?
-            .exists(rusqlite::params![])?;
-        if exists {
-            let has_data: i64 = db
-                .query_row(
-                    "SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH '*'",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap_or(0);
-            if has_data == 0 {
-                db.execute(
-                    "INSERT INTO memories_fts(memories_fts) VALUES('rebuild')",
-                    [],
-                )?;
-            }
-        }
-        Ok(())
     }
 
     /// Open connections reusing a shared write connection (provided by
@@ -125,8 +98,6 @@ impl MemoryStore {
             consolidation_model: RwLock::new(None),
             model_resolver: RwLock::new(None),
         };
-
-        store.rebuild_fts5_if_needed()?;
 
         Ok(store)
     }
@@ -184,7 +155,8 @@ impl MemoryStore {
     /// Store a new memory.
     pub fn add(&self, entry: &MemoryEntry) -> Result<()> {
         let db = self.connection.lock().unwrap();
-        db.execute(
+        db.execute_batch("BEGIN TRANSACTION")?;
+        if let Err(e) = db.execute(
             "INSERT INTO memories (id, workspace_root, memory_type, title, content, tags, source_session_id, created_at, updated_at, usage_count, active, concepts, files, strength, importance, version, parent_id, supersedes, related_ids, is_latest)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
             rusqlite::params![
@@ -209,7 +181,11 @@ impl MemoryStore {
                 serde_json::to_string(&entry.related_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>())?,
                 entry.is_latest as i64,
             ],
-        )?;
+        ) {
+            let _ = db.execute_batch("ROLLBACK");
+            return Err(e.into());
+        }
+
         if let Err(e) = db.execute(
             "INSERT INTO memories_fts(rowid, title, content, tags, concepts, files)
              VALUES (last_insert_rowid(), ?1, ?2, ?3, ?4, ?5)",
@@ -221,8 +197,11 @@ impl MemoryStore {
                 serde_json::to_string(&entry.files)?,
             ],
         ) {
+            let _ = db.execute_batch("ROLLBACK");
             crate::log_warn!("memory: failed to update FTS5 index in add(): {}", e);
+            return Err(e.into());
         }
+        db.execute_batch("COMMIT")?;
         Ok(())
     }
 
@@ -846,8 +825,4 @@ impl MemoryStore {
     }
 }
 
-impl Clone for MemoryStore {
-    fn clone(&self) -> Self {
-        Self::open(&self.db_path).expect("failed to clone MemoryStore")
-    }
-}
+
