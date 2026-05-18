@@ -858,7 +858,7 @@ pub struct CompactSessionResponse {
 
 /// Compact session context (analogous to TUI's /compact command).
 pub async fn compact_session(
-    State(state): State<AppState>,
+    State(mut state): State<AppState>,
     AxumPath(session_id): AxumPath<Uuid>,
 ) -> WebResult<(StatusCode, Json<CompactSessionResponse>)> {
     crate::log_info!("Compacting session {}", session_id);
@@ -944,6 +944,9 @@ pub async fn compact_session(
         thinking_level: ThinkingLevelType::None,
     };
 
+    // Sync the tool registry's active model so the tool list is
+    // byte-for-byte identical to normal requests (preserving prefix cache).
+    state.agent.tools.set_active_model(active_model.clone());
     let store = state.store.clone();
     let llm = state.llm_client.clone();
     let event_bus = state.event_bus.clone();

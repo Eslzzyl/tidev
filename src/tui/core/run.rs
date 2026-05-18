@@ -117,6 +117,15 @@ impl App {
             }));
         }
 
+        // Provide a tool filter so background summarization produces the same
+        // tool list as normal conversation turns (preserving prefix cache).
+        {
+            let t = tools.clone();
+            memory_store.set_tool_filter(std::sync::Arc::new(move |model: &ActiveModel| {
+                t.definitions_for_model(model)
+            }));
+        }
+
         let _t_mem = std::time::Instant::now();
         memory_store.set_models(llm.clone(), active_model.clone(), consolidation_override);
         crate::log_info!("startup: memory set_models in {:?}", _t_mem.elapsed());
@@ -952,6 +961,9 @@ impl App {
         let llm = self.llm.clone();
         let tx = self.backend_tx.clone();
         let manual = stream_request_id.is_some();
+        // Sync the tool registry's active model so the tool list is
+        // byte-for-byte identical to normal requests (preserving prefix cache).
+        self.tools.set_active_model(model.clone());
         let tools = self.tools.all_definitions();
 
         runtime.spawn(async move {

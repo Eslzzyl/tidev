@@ -7,10 +7,16 @@ use uuid::Uuid;
 
 use crate::config::ActiveModel;
 use crate::llm::LlmClient;
+use crate::tooling::ToolDefinition;
 
 /// Resolves a model label (e.g. "openai/gpt-4o") to a fully-configured
 /// [`ActiveModel`] containing API keys, endpoint, etc.
 pub type ModelResolver = Arc<dyn Fn(&str) -> Result<ActiveModel> + Send + Sync>;
+
+/// Returns the tool definitions that should be sent alongside a given model.
+/// Used by background tasks that need to match the tool list used during
+/// normal conversation turns for prefix-cache compatibility.
+pub type ToolFilter = Arc<dyn Fn(&ActiveModel) -> Vec<ToolDefinition> + Send + Sync>;
 
 use super::consolidate::{ConsolidationReport, ConsolidationService};
 use super::evict::{EvictionReport, EvictionService};
@@ -38,6 +44,10 @@ pub struct MemoryStore {
     consolidation_model: RwLock<Option<ActiveModel>>,
     /// Resolver that turns a model label into a fully-configured ActiveModel.
     model_resolver: RwLock<Option<ModelResolver>>,
+    /// Returns tool definitions filtered for a given model.
+    /// Background tasks (summarization, consolidation) use this to match
+    /// the tool list from normal conversation turns for prefix-cache reuse.
+    tool_filter: RwLock<Option<ToolFilter>>,
 }
 
 impl MemoryStore {
@@ -68,6 +78,7 @@ impl MemoryStore {
             active_model: RwLock::new(None),
             consolidation_model: RwLock::new(None),
             model_resolver: RwLock::new(None),
+            tool_filter: RwLock::new(None),
         };
 
         Ok(store)
@@ -97,6 +108,7 @@ impl MemoryStore {
             active_model: RwLock::new(None),
             consolidation_model: RwLock::new(None),
             model_resolver: RwLock::new(None),
+            tool_filter: RwLock::new(None),
         };
 
         Ok(store)
@@ -131,6 +143,14 @@ impl MemoryStore {
     /// model label (from the last assistant message) into an `ActiveModel`.
     pub fn set_model_resolver(&self, resolver: ModelResolver) {
         *self.model_resolver.write().unwrap() = Some(resolver);
+    }
+
+    /// Set the tool filter used by memory background tasks to produce the same
+    /// tool list that normal conversation turns use for a given model.
+    /// This ensures summarization and other background LLM calls share the same
+    /// request prefix as the original conversation (preserving prefix caching).
+    pub fn set_tool_filter(&self, filter: ToolFilter) {
+        *self.tool_filter.write().unwrap() = Some(filter);
     }
 
     /// Resolve the LLM and model for consolidation/reflection operations.
@@ -577,8 +597,18 @@ impl MemoryStore {
 
         let model = resolver(&model_label)?;
 
+        // Resolve tool definitions for the resolved model so the LLM
+        // request prefix matches normal conversation turns (prefix cache).
+        let tools = self
+            .tool_filter
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|f| f(&model))
+            .unwrap_or_default();
+
         let db_path = self.db_path.clone();
-        SessionService::summarize_session(&db_path, &llm, &model, session_id, project).await
+        SessionService::summarize_session(&db_path, &llm, &model, session_id, project, &tools).await
     }
 
     /// Run the consolidation pipeline (semantic + procedural).

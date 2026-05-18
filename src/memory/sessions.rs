@@ -11,6 +11,7 @@ use crate::memory::xml::{clean_llm_xml_response, get_xml_tag_ci, get_xml_childre
 use crate::prompts::SessionMode;
 use crate::session::{Conversation, Message, MessageRole};
 use crate::storage::load_session_messages;
+use crate::tooling::ToolDefinition;
 
 pub const SUMMARY_INSTRUCTION: &str = "Please summarize this session. Output EXACTLY this XML format with no additional text:
 
@@ -44,12 +45,17 @@ impl SessionService {
     /// as normal requests and compaction, so the prefix is identical (maximizing
     /// prompt cache hits). Only messages after the last compact are included,
     /// with the context summary prepended as context.
+    ///
+    /// `tools` must be the same filtered tool list used during normal conversation
+    /// turns for the target model, so the full LLM request (messages + tools)
+    /// is byte-for-byte identical up to the appended summary instruction.
     pub async fn summarize_session(
         db_path: &std::path::Path,
         llm: &LlmClient,
         model: &ActiveModel,
         session_id: Uuid,
         project: &str,
+        tools: &[ToolDefinition],
     ) -> Result<SessionSummary> {
         // 1. Load session context state + messages (sync, connection dropped before await)
         let (messages, context_summary, context_retained_from, system_prompt) = {
@@ -129,7 +135,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 model.clone()
             };
             response = match llm
-                .complete_with_messages(llm_model, attempt_messages, vec![])
+                .complete_with_messages(llm_model, attempt_messages, tools.to_vec())
                 .await
             {
                 Ok(r) => r,

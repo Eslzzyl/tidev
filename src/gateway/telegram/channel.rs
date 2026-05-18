@@ -1486,6 +1486,9 @@ impl TelegramChannel {
         .await?;
 
         // Clone required data for async operation
+        // Sync the tool registry's active model so the tool list is
+        // byte-for-byte identical to normal requests (preserving prefix cache).
+        self.tools.set_active_model(active_model.clone());
         let llm = self.llm.clone();
         let store = self.store.clone();
         let session_id_for_compact = session_id;

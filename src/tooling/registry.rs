@@ -82,6 +82,21 @@ impl ToolRegistry {
         self.active_model = Some(model);
     }
 
+    /// Returns tool definitions filtered for the given model, without mutating
+    /// internal state.  Used by background tasks (e.g. memory summarization)
+    /// that need the same tool list as normal requests for prefix-cache
+    /// compatibility, without contending with the main thread's model setting.
+    pub fn definitions_for_model(&self, model: &crate::config::ActiveModel) -> Vec<ToolDefinition> {
+        let mut definitions = self.definitions.clone();
+        if model.use_apply_patch() {
+            definitions.retain(|d| d.name != "edit" && d.name != "write");
+        } else {
+            definitions.retain(|d| d.name != "apply_patch");
+        }
+        definitions.extend(self.mcp.all_definitions());
+        definitions
+    }
+
     /// Set the active web search provider by name (exa, brave, google, tavily).
     /// This updates `web_search_config.default_provider` so subsequent websearch
     /// tool calls will use the chosen provider.
