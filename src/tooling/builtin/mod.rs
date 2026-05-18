@@ -11,6 +11,26 @@ use crate::config::WebSearchConfig;
 use crate::session::BackendEvent;
 use crate::{prompts::SessionMode, session::ToolCall, storage::SessionStore};
 
+/// Context for executing a tool call — groups all shared configuration
+/// that is independent of the specific tool being invoked.
+pub struct ToolContext<'a> {
+    pub workspace_root: &'a Path,
+    pub config_dir: &'a Path,
+    pub skills: &'a SkillCatalog,
+    pub store: &'a SessionStore,
+    pub session_id: uuid::Uuid,
+    pub max_output_bytes: usize,
+    pub rtk_enabled: bool,
+    pub memory_store: &'a Arc<crate::memory::MemoryStore>,
+    pub mode: SessionMode,
+    pub allow_outside: bool,
+    pub sensitive_file_approved: bool,
+    pub sandbox_policy: Option<crate::sandbox::SandboxPolicy>,
+    pub web_search_config: &'a WebSearchConfig,
+    pub auth_store: &'a AuthStore,
+    pub event_tx: Option<UnboundedSender<BackendEvent>>,
+}
+
 pub mod exec;
 pub mod file;
 pub mod memory;
@@ -48,21 +68,8 @@ pub fn definitions(skill_description: String) -> Vec<ToolDefinition> {
 }
 
 pub fn execute_tool_call(
-    workspace_root: &Path,
-    config_dir: &Path,
-    skills: &SkillCatalog,
-    store: &SessionStore,
-    session_id: uuid::Uuid,
+    ctx: &ToolContext<'_>,
     call: &ToolCall,
-    max_output_bytes: usize,
-    rtk_enabled: bool,
-    memory_store: &Arc<crate::memory::MemoryStore>,
-    mode: SessionMode,
-    allow_outside: bool,
-    sensitive_file_approved: bool,
-    sandbox_policy: Option<crate::sandbox::SandboxPolicy>,
-    web_search_config: &WebSearchConfig,
-    auth_store: &AuthStore,
 ) -> Result<crate::session::ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
@@ -70,34 +77,34 @@ pub fn execute_tool_call(
     let result = match canonical_tool_name(&call.name) {
         Some("read") | Some("write") | Some("edit") | Some("apply_patch") => {
             file::execute_tool_call(
-                workspace_root,
-                config_dir,
+                ctx.workspace_root,
+                ctx.config_dir,
                 &call.name,
                 arguments,
-                max_output_bytes,
-                allow_outside,
-                sensitive_file_approved,
+                ctx.max_output_bytes,
+                ctx.allow_outside,
+                ctx.sensitive_file_approved,
             )?
         }
         Some("glob") | Some("grep") => {
             let output = search::execute_tool_call(
-                workspace_root,
+                ctx.workspace_root,
                 &call.name,
                 arguments,
-                max_output_bytes,
-                allow_outside,
+                ctx.max_output_bytes,
+                ctx.allow_outside,
             )?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("bash") => {
             let result = exec::execute_tool_call(
-                workspace_root,
+                ctx.workspace_root,
                 &call.name,
                 arguments,
-                max_output_bytes,
-                rtk_enabled,
-                sandbox_policy,
-                session_id,
+                ctx.max_output_bytes,
+                ctx.rtk_enabled,
+                ctx.sandbox_policy.clone(),
+                ctx.session_id,
                 None, // event_tx — caller who needs streaming uses the dedicated streaming path
             )?;
             crate::session::ToolExecutionResult::new(result.output)
@@ -107,29 +114,29 @@ pub fn execute_tool_call(
         }
         Some("task") => {
             let output = task::execute_tool_call(
-                workspace_root,
-                store,
-                session_id,
+                ctx.workspace_root,
+                ctx.store,
+                ctx.session_id,
                 &call.name,
                 arguments,
-                mode,
+                ctx.mode,
             )?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("todowrite") => {
             let output =
-                todo::execute_tool_call(workspace_root, store, session_id, &call.name, arguments)?;
+                todo::execute_tool_call(ctx.workspace_root, ctx.store, ctx.session_id, &call.name, arguments)?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("skill") => {
             let args = super::tools::parse_arguments::<SkillArgs>(&call.name, arguments)?;
-            let output = skills.render_skill(&args.name)?;
+            let output = ctx.skills.render_skill(&args.name)?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("memory") => {
             let result = crate::tooling::builtin::memory::execute_tool_call(
-                workspace_root,
-                memory_store,
+                ctx.workspace_root,
+                ctx.memory_store,
                 call,
                 arguments,
             )?;
@@ -137,12 +144,12 @@ pub fn execute_tool_call(
         }
         Some("websearch") | Some("webfetch") => {
             let output = web::execute_tool_call(
-                workspace_root,
+                ctx.workspace_root,
                 &call.name,
                 arguments,
-                max_output_bytes,
-                web_search_config,
-                auth_store,
+                ctx.max_output_bytes,
+                ctx.web_search_config,
+                ctx.auth_store,
             )?;
             crate::session::ToolExecutionResult::new(output)
         }
@@ -158,22 +165,8 @@ pub fn execute_tool_call(
 /// When `event_tx` is `Some`, the bash tool will emit [`BackendEvent::ShellOutput`]
 /// events as output is produced. Other tools ignore the sender and execute normally.
 pub fn execute_tool_call_streaming(
-    workspace_root: &Path,
-    config_dir: &Path,
-    skills: &SkillCatalog,
-    store: &SessionStore,
-    session_id: uuid::Uuid,
+    ctx: &ToolContext<'_>,
     call: &ToolCall,
-    max_output_bytes: usize,
-    rtk_enabled: bool,
-    memory_store: &Arc<crate::memory::MemoryStore>,
-    mode: SessionMode,
-    allow_outside: bool,
-    sensitive_file_approved: bool,
-    event_tx: Option<UnboundedSender<BackendEvent>>,
-    sandbox_policy: Option<crate::sandbox::SandboxPolicy>,
-    web_search_config: &WebSearchConfig,
-    auth_store: &AuthStore,
     cancelled: Option<Arc<AtomicBool>>,
 ) -> Result<crate::session::ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
@@ -182,36 +175,36 @@ pub fn execute_tool_call_streaming(
     let result = match canonical_tool_name(&call.name) {
         Some("read") | Some("write") | Some("edit") | Some("apply_patch") => {
             file::execute_tool_call(
-                workspace_root,
-                config_dir,
+                ctx.workspace_root,
+                ctx.config_dir,
                 &call.name,
                 arguments,
-                max_output_bytes,
-                allow_outside,
-                sensitive_file_approved,
+                ctx.max_output_bytes,
+                ctx.allow_outside,
+                ctx.sensitive_file_approved,
             )?
         }
         Some("glob") | Some("grep") => {
             let output = search::execute_tool_call(
-                workspace_root,
+                ctx.workspace_root,
                 &call.name,
                 arguments,
-                max_output_bytes,
-                allow_outside,
+                ctx.max_output_bytes,
+                ctx.allow_outside,
             )?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("bash") => {
             let result = exec::execute_tool_call_with_cancel(
-                workspace_root,
+                ctx.workspace_root,
                 &call.name,
                 arguments,
-                max_output_bytes,
-                rtk_enabled,
+                ctx.max_output_bytes,
+                ctx.rtk_enabled,
                 cancelled.unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
-                sandbox_policy,
-                session_id,
-                event_tx, // pass the sender through for streaming
+                ctx.sandbox_policy.clone(),
+                ctx.session_id,
+                ctx.event_tx.clone(), // pass the sender through for streaming
             )?;
             crate::session::ToolExecutionResult::new(result.output)
                 .with_rtk_rewritten(result.rtk_rewritten)
@@ -220,29 +213,29 @@ pub fn execute_tool_call_streaming(
         }
         Some("task") => {
             let output = task::execute_tool_call(
-                workspace_root,
-                store,
-                session_id,
+                ctx.workspace_root,
+                ctx.store,
+                ctx.session_id,
                 &call.name,
                 arguments,
-                mode,
+                ctx.mode,
             )?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("todowrite") => {
             let output =
-                todo::execute_tool_call(workspace_root, store, session_id, &call.name, arguments)?;
+                todo::execute_tool_call(ctx.workspace_root, ctx.store, ctx.session_id, &call.name, arguments)?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("skill") => {
             let args = super::tools::parse_arguments::<SkillArgs>(&call.name, arguments)?;
-            let output = skills.render_skill(&args.name)?;
+            let output = ctx.skills.render_skill(&args.name)?;
             crate::session::ToolExecutionResult::new(output)
         }
         Some("memory") => {
             let result = crate::tooling::builtin::memory::execute_tool_call(
-                workspace_root,
-                memory_store,
+                ctx.workspace_root,
+                ctx.memory_store,
                 call,
                 arguments,
             )?;
@@ -250,12 +243,12 @@ pub fn execute_tool_call_streaming(
         }
         Some("websearch") | Some("webfetch") => {
             let output = web::execute_tool_call(
-                workspace_root,
+                ctx.workspace_root,
                 &call.name,
                 arguments,
-                max_output_bytes,
-                web_search_config,
-                auth_store,
+                ctx.max_output_bytes,
+                ctx.web_search_config,
+                ctx.auth_store,
             )?;
             crate::session::ToolExecutionResult::new(output)
         }

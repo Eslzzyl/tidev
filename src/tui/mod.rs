@@ -1729,14 +1729,16 @@ impl App {
 
             if let Err(e) = agent
                 .run_agent_loop_with_permission_channel(
-                    session_id,
+                    crate::agent::runtime::AgentLoopConfig {
+                        session_id,
+                        model,
+                        context_manager: &mut context_manager,
+                        mode,
+                        thinking_level,
+                        event_tx: tx,
+                        cancel_token: Some(cancel_token),
+                    },
                     request_id,
-                    model,
-                    &mut context_manager,
-                    mode,
-                    thinking_level,
-                    tx,
-                    Some(cancel_token),
                     permission_tx,
                 )
                 .await

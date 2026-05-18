@@ -39,6 +39,7 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         workspace_root: PathBuf,
         config_dir: PathBuf,
@@ -296,6 +297,7 @@ impl ToolRegistry {
             .cloned()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn execute_call(
         &self,
         runtime: &tokio::runtime::Handle,
@@ -311,21 +313,24 @@ impl ToolRegistry {
         }
 
         let mut result = super::builtin::execute_tool_call(
-            &self.workspace_root,
-            &self.config_dir,
-            &self.skills,
-            store,
-            session_id,
+            &super::builtin::ToolContext {
+                workspace_root: &self.workspace_root,
+                config_dir: &self.config_dir,
+                skills: &self.skills,
+                store,
+                session_id,
+                max_output_bytes: self.max_output_bytes,
+                rtk_enabled: self.rtk_enabled,
+                memory_store: &self.memory_store,
+                mode,
+                allow_outside,
+                sensitive_file_approved,
+                sandbox_policy: self.sandbox_policy.clone(),
+                web_search_config: &self.web_search_config,
+                auth_store: self.auth_store.as_ref(),
+                event_tx: None,
+            },
             call,
-            self.max_output_bytes,
-            self.rtk_enabled,
-            &self.memory_store,
-            mode,
-            allow_outside,
-            sensitive_file_approved,
-            self.sandbox_policy.clone(),
-            &self.web_search_config,
-            self.auth_store.as_ref(),
         )?;
 
         // Image capability check: If the result contains images but the model doesn't support them,
@@ -370,6 +375,7 @@ impl ToolRegistry {
     ///
     /// Never panics — caught panics become a `ToolExecutionResult` with an
     /// error message.
+    #[allow(clippy::too_many_arguments)]
     pub fn execute_call_spawned(
         &self,
         runtime_handle: tokio::runtime::Handle,
@@ -415,6 +421,7 @@ impl ToolRegistry {
     /// Like [`execute_call_spawned`], but the bash tool will emit
     /// [`BackendEvent::ShellOutput`] events as output is produced.
     /// Other tools ignore the sender and execute normally.
+    #[allow(clippy::too_many_arguments)]
     pub fn execute_call_spawned_streaming(
         &self,
         runtime_handle: tokio::runtime::Handle,
@@ -460,6 +467,7 @@ impl ToolRegistry {
     }
 
     /// Like [`execute_call`] but threads a streaming event sender to the bash tool.
+    #[allow(clippy::too_many_arguments)]
     fn execute_call_with_stream(
         &self,
         runtime: &tokio::runtime::Handle,
@@ -477,22 +485,24 @@ impl ToolRegistry {
         }
 
         let mut result = super::builtin::execute_tool_call_streaming(
-            &self.workspace_root,
-            &self.config_dir,
-            &self.skills,
-            store,
-            session_id,
+            &super::builtin::ToolContext {
+                workspace_root: &self.workspace_root,
+                config_dir: &self.config_dir,
+                skills: &self.skills,
+                store,
+                session_id,
+                max_output_bytes: self.max_output_bytes,
+                rtk_enabled: self.rtk_enabled,
+                memory_store: &self.memory_store,
+                mode,
+                allow_outside,
+                sensitive_file_approved,
+                sandbox_policy: self.sandbox_policy.clone(),
+                web_search_config: &self.web_search_config,
+                auth_store: self.auth_store.as_ref(),
+                event_tx: Some(event_tx),
+            },
             call,
-            self.max_output_bytes,
-            self.rtk_enabled,
-            &self.memory_store,
-            mode,
-            allow_outside,
-            sensitive_file_approved,
-            Some(event_tx),
-            self.sandbox_policy.clone(),
-            &self.web_search_config,
-            self.auth_store.as_ref(),
             cancelled,
         )?;
 

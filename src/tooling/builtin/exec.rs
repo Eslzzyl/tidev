@@ -92,6 +92,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
     )]
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn execute_tool_call(
     workspace_root: &Path,
     tool_name: &str,
@@ -117,6 +118,7 @@ pub fn execute_tool_call(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn execute_tool_call_with_cancel(
     workspace_root: &Path,
     tool_name: &str,
@@ -143,6 +145,7 @@ pub fn execute_tool_call_with_cancel(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_shell_inner(
     workspace_root: &Path,
     command: &str,

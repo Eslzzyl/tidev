@@ -19,6 +19,7 @@ use super::error::classify_response_status;
 /// Responses API endpoint
 const RESPONSES_ENDPOINT: &str = "/responses";
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn stream_responses(
     http: &Client,
     session_id: Uuid,

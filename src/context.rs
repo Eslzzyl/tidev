@@ -11,6 +11,21 @@ use crate::{
     tooling::ToolDefinition,
 };
 
+/// Configuration for compaction operations.
+#[derive(Clone)]
+pub struct CompactionConfig<'a> {
+    pub llm: &'a LlmClient,
+    pub model: &'a ActiveModel,
+    pub conversation: &'a Conversation,
+    pub manual: bool,
+    pub stream_ctx: Option<(
+        u64,
+        tokio::sync::mpsc::UnboundedSender<crate::session::BackendEvent>,
+    )>,
+    pub tools: &'a [ToolDefinition],
+    pub mode: SessionMode,
+}
+
 #[derive(Clone, Debug)]
 pub struct ContextManager {
     pub summary: Option<String>,
@@ -276,41 +291,16 @@ impl ContextManager {
         messages
     }
 
-    pub async fn compact_if_needed(
-        &mut self,
-        llm: &LlmClient,
-        model: &ActiveModel,
-        conversation: &Conversation,
-        manual: bool,
-        stream_ctx: Option<(
-            u64,
-            tokio::sync::mpsc::UnboundedSender<crate::session::BackendEvent>,
-        )>,
-        tools: &[ToolDefinition],
-        mode: SessionMode,
-    ) -> Result<bool> {
-        if !self.needs_compaction(conversation, model) && !manual {
+    pub async fn compact_if_needed(&mut self, config: CompactionConfig<'_>) -> Result<bool> {
+        if !self.needs_compaction(config.conversation, config.model) && !config.manual {
             return Ok(false);
         }
 
-        self.compact(llm, model, conversation, manual, stream_ctx, tools, mode)
-            .await
+        self.compact(config).await
     }
 
-    pub async fn compact(
-        &mut self,
-        llm: &LlmClient,
-        model: &ActiveModel,
-        conversation: &Conversation,
-        _manual: bool,
-        stream_ctx: Option<(
-            u64,
-            tokio::sync::mpsc::UnboundedSender<crate::session::BackendEvent>,
-        )>,
-        tools: &[ToolDefinition],
-        mode: SessionMode,
-    ) -> Result<bool> {
-        let messages = conversation.visible_messages();
+    pub async fn compact(&mut self, config: CompactionConfig<'_>) -> Result<bool> {
+        let messages = config.conversation.visible_messages();
         if messages.is_empty() {
             return Ok(false);
         }
@@ -318,7 +308,7 @@ impl ContextManager {
         // Build request messages using the same logic as normal requests.
         // This ensures the prefix (system prompt + summary + retained messages)
         // is byte-for-byte identical with normal requests, maximizing cache hits.
-        let mut compact_msgs = self.build_request_messages(conversation, mode);
+        let mut compact_msgs = self.build_request_messages(config.conversation, config.mode);
         let summary_instruction = "Please provide a detailed summary of the conversation history above, \
              preserving all goals, decisions, file paths, code changes, tool results, \
              and open tasks. Keep the summary dense and factual. Use short sections such \
@@ -326,13 +316,13 @@ impl ContextManager {
              Prefer bullets over prose.";
         compact_msgs.push(Message::new(MessageRole::User, summary_instruction));
 
-        let summary = if let Some((request_id, ui_tx)) = stream_ctx {
+        let summary = if let Some((request_id, ui_tx)) = config.stream_ctx {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-            let llm_clone = llm.clone();
-            let model_clone = model.clone();
+            let llm_clone = config.llm.clone();
+            let model_clone = config.model.clone();
             let msgs = compact_msgs;
-            let session_id = conversation.session_id;
-            let tools_vec = tools.to_vec();
+            let session_id = config.conversation.session_id;
+            let tools_vec = config.tools.to_vec();
 
             tokio::spawn(async move {
                 let thinking_level = model_clone.thinking_level.clone();
@@ -371,7 +361,7 @@ impl ContextManager {
             }
             text
         } else {
-            llm.complete_with_messages(model.clone(), compact_msgs, tools.to_vec())
+            config.llm.complete_with_messages(config.model.clone(), compact_msgs, config.tools.to_vec())
                 .await
                 .unwrap_or_else(|error| self.fallback_summary(messages, &error.to_string()))
         };

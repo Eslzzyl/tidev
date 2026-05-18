@@ -510,6 +510,7 @@ impl MemoryStore {
     // ─── New AgentMemory-Style API ──────────────────────────────────
 
     /// Remember with Jaccard dedup (new API).
+    #[allow(clippy::too_many_arguments)]
     pub fn remember(
         &self,
         workspace_root: &str,

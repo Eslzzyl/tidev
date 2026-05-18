@@ -30,6 +30,7 @@ pub struct RememberService;
 impl RememberService {
     /// Save a new memory. If a similar memory (>0.7 Jaccard) exists,
     /// the new one supersedes it (version chain).
+    #[allow(clippy::too_many_arguments)]
     pub fn remember(
         db: &Connection,
         workspace_root: &str,

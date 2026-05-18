@@ -51,6 +51,7 @@ impl LlmClient {
         &self.http
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn stream_chat(
         &self,
         session_id: Uuid,
@@ -93,7 +94,7 @@ impl LlmClient {
         result.context("LLM completion failed after retries")
     }
 
-    /// Internal: stream chat with retry logic for retryable errors.
+    #[allow(clippy::too_many_arguments)]
     async fn stream_chat_with_retry(
         &self,
         session_id: Uuid,
@@ -219,6 +220,7 @@ impl LlmClient {
         unreachable!("loop should return before this point")
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn stream_chat_inner(
         &self,
         session_id: Uuid,

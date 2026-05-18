@@ -973,19 +973,27 @@ impl App {
         runtime.spawn(async move {
             let result = if let Some(request_id) = stream_request_id {
                 context_manager
-                    .compact(
-                        &llm,
-                        &model,
-                        &conversation,
-                        true,
-                        Some((request_id, tx.clone())),
-                        &tools,
+                    .compact(crate::context::CompactionConfig {
+                        llm: &llm,
+                        model: &model,
+                        conversation: &conversation,
+                        manual: true,
+                        stream_ctx: Some((request_id, tx.clone())),
+                        tools: &tools,
                         mode,
-                    )
+                    })
                     .await
             } else {
                 context_manager
-                    .compact_if_needed(&llm, &model, &conversation, false, None, &tools, mode)
+                    .compact_if_needed(crate::context::CompactionConfig {
+                        llm: &llm,
+                        model: &model,
+                        conversation: &conversation,
+                        manual: false,
+                        stream_ctx: None,
+                        tools: &tools,
+                        mode,
+                    })
                     .await
             };
 

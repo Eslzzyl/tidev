@@ -471,15 +471,15 @@ pub async fn send_message(
         crate::log_info!("Starting agent loop for session {}", session_id);
 
         if let Err(e) = agent
-            .run_agent_loop(
+            .run_agent_loop(crate::agent::runtime::AgentLoopConfig {
                 session_id,
                 model,
-                &mut context_manager,
+                context_manager: &mut context_manager,
                 mode,
                 thinking_level,
-                tx,
-                None, // cancel_token — web uses event_bus for abort signaling
-            )
+                event_tx: tx,
+                cancel_token: None,
+            })
             .await
         {
             crate::log_error!("Agent loop failed for session {}: {}", session_id, e);
@@ -963,15 +963,15 @@ pub async fn compact_session(
         let prior_retained_from = context_manager.retained_from;
 
         let result = context_manager
-            .compact(
-                &llm,
-                &active_model,
-                &conversation,
-                true,
-                None,
-                &tools,
-                crate::prompts::SessionMode::Build,
-            )
+            .compact(crate::context::CompactionConfig {
+                llm: &llm,
+                model: &active_model,
+                conversation: &conversation,
+                manual: true,
+                stream_ctx: None,
+                tools: &tools,
+                mode: crate::prompts::SessionMode::Build,
+            })
             .await;
 
         match result {

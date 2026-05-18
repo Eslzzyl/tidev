@@ -357,6 +357,7 @@ pub(super) fn tool_definitions(skill_description: String) -> Vec<ToolDefinition>
     builtin::definitions(skill_description)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn execute_shell_tool_call(
     workspace_root: &Path,
     call: &ToolCall,
@@ -446,21 +447,24 @@ pub(super) fn execute_tool_call(
     }
 
     let mut result = builtin::execute_tool_call(
-        workspace_root,
-        config_dir,
-        skills,
-        store,
-        session_id,
+        &builtin::ToolContext {
+            workspace_root,
+            config_dir,
+            skills,
+            store,
+            session_id,
+            max_output_bytes,
+            rtk_enabled,
+            memory_store,
+            mode,
+            allow_outside: false,
+            sensitive_file_approved: false,
+            sandbox_policy: None,
+            web_search_config: &crate::config::WebSearchConfig::default(),
+            auth_store: &crate::config::AuthStore::default(),
+            event_tx: None,
+        },
         call,
-        max_output_bytes,
-        rtk_enabled,
-        memory_store,
-        mode,
-        false, // allow_outside: skill execution doesn't allow outside workspace
-        false, // sensitive_file_approved: skill execution requires explicit user approval
-        None,  // sandbox_policy: skill execution uses default (no sandbox)
-        &crate::config::WebSearchConfig::default(),
-        &crate::config::AuthStore::default(),
     )?;
 
     // Post-execution: record file reads

@@ -104,6 +104,7 @@ pub struct MemoryEntry {
 
 impl MemoryEntry {
     /// Create a new MemoryEntry with sensible defaults for new fields.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: Uuid,
         workspace_root: String,

@@ -94,6 +94,7 @@ pub struct QQChannel {
 
 impl QQChannel {
     /// Create a new QQ channel.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         workspace_root: PathBuf,
         config: AppConfig,
@@ -509,15 +510,15 @@ impl QQChannel {
 
         let result = self
             .agent
-            .run_agent_loop(
+            .run_agent_loop(crate::agent::runtime::AgentLoopConfig {
                 session_id,
-                active_model.clone(),
-                &mut context_manager,
-                SessionMode::Build,
-                active_model.thinking_level.clone(),
+                model: active_model.clone(),
+                context_manager: &mut context_manager,
+                mode: SessionMode::Build,
+                thinking_level: active_model.thinking_level.clone(),
                 event_tx,
-                Some(cancel_token.clone()),
-            )
+                cancel_token: Some(cancel_token.clone()),
+            })
             .await;
 
         // Clean up cancellation token
@@ -965,21 +966,21 @@ impl QQChannel {
                 output_tokens: 0,
             });
 
-        let text = format_status_summary(
-            &conversation.session_id.to_string(),
-            &conversation.title,
-            conversation.messages.len(),
+        let text = format_status_summary(&crate::gateway::commands::SessionStats {
+            session_id: &conversation.session_id.to_string(),
+            title: &conversation.title,
+            message_count: conversation.messages.len(),
             user_message_count,
             assistant_message_count,
             tool_call_count,
-            &active_model.provider_id,
-            &active_model.model_id,
-            active_model.context_window,
-            token_stats.input_tokens,
-            token_stats.output_tokens,
-            self.start_time,
-            None, // Average response time - could be tracked if needed
-        );
+            provider_id: &active_model.provider_id,
+            model_id: &active_model.model_id,
+            context_window: active_model.context_window,
+            input_tokens: token_stats.input_tokens,
+            output_tokens: token_stats.output_tokens,
+            start_time: self.start_time,
+            avg_response_time_ms: None,
+        });
 
         self.send_markdown(channel_id, &text, Some(msg_id)).await
     }
@@ -1051,15 +1052,15 @@ impl QQChannel {
             let mut context_manager = ContextManager::new();
 
             let result = context_manager
-                .compact(
-                    &llm,
-                    &active_model_for_compact,
-                    &conversation_for_compact,
-                    true,
-                    None,
-                    &tools,
-                    SessionMode::Build,
-                )
+                .compact(crate::context::CompactionConfig {
+                    llm: &llm,
+                    model: &active_model_for_compact,
+                    conversation: &conversation_for_compact,
+                    manual: true,
+                    stream_ctx: None,
+                    tools: &tools,
+                    mode: crate::prompts::SessionMode::Build,
+                })
                 .await;
 
             match result {

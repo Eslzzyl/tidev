@@ -311,6 +311,7 @@ impl App {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn render_input_block_with_composer(
         &self,
         frame: &mut Frame<'_>,

@@ -56,6 +56,29 @@ pub struct QueuedUserMessage {
     pub thinking_level: Option<ThinkingLevelType>,
 }
 
+/// Configuration for the agent loop — groups session identity, model, context,
+/// and execution-mode parameters shared by [`run_agent_loop`] and friends.
+pub struct AgentLoopConfig<'a> {
+    pub session_id: uuid::Uuid,
+    pub model: ActiveModel,
+    pub context_manager: &'a mut ContextManager,
+    pub mode: SessionMode,
+    pub thinking_level: ThinkingLevelType,
+    pub event_tx: UnboundedSender<BackendEvent>,
+    pub cancel_token: Option<CancellationToken>,
+}
+
+/// Configuration for [`run_subagent`].
+pub struct SubagentConfig {
+    pub parent_session_id: uuid::Uuid,
+    pub parent_request_id: u64,
+    pub tool_call: ToolCall,
+    pub event_tx: UnboundedSender<BackendEvent>,
+    pub cancel_token: Option<CancellationToken>,
+    pub parent_model: ActiveModel,
+    pub child_session_id: Option<uuid::Uuid>,
+}
+
 /// A tool call with an optional rejection reason.
 ///
 /// Sent by frontends through the permission channel to tell
@@ -971,23 +994,17 @@ impl AgentRuntime {
     /// so this never throws from the perspective of `execute_tool_calls`.
     pub async fn run_subagent(
         mut self,
-        parent_session_id: uuid::Uuid,
-        parent_request_id: u64,
-        tool_call: ToolCall,
-        event_tx: UnboundedSender<BackendEvent>,
-        cancel_token: Option<CancellationToken>,
-        parent_model: crate::config::ActiveModel,
-        child_session_id: Option<uuid::Uuid>,
+        config: SubagentConfig,
     ) -> ToolExecutionResult {
         let result = self
             .run_subagent_inner(
-                parent_session_id,
-                parent_request_id,
-                &tool_call,
-                &event_tx,
-                cancel_token,
-                &parent_model,
-                child_session_id,
+                config.parent_session_id,
+                config.parent_request_id,
+                &config.tool_call,
+                &config.event_tx,
+                config.cancel_token,
+                &config.parent_model,
+                config.child_session_id,
             )
             .await;
         match result {
@@ -996,6 +1013,7 @@ impl AgentRuntime {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn run_subagent_inner(
         &mut self,
         parent_session_id: uuid::Uuid,
@@ -1562,6 +1580,7 @@ impl AgentRuntime {
     }
 
     /// Internal implementation with optional permission channel.
+    #[allow(clippy::too_many_arguments)]
     async fn run_agent_loop_with_tools_inner(
         &mut self,
         request_id: u64,
@@ -1762,15 +1781,15 @@ impl AgentRuntime {
                     compact_model.system_prompt = static_system_prompt.clone();
 
                     let compacted = match context_manager
-                        .compact(
-                            &self.llm_client,
-                            &compact_model,
-                            &conversation,
-                            false,
-                            Some((request_id, event_tx.clone())),
-                            &self.tool_definitions(),
+                        .compact(crate::context::CompactionConfig {
+                            llm: &self.llm_client,
+                            model: &compact_model,
+                            conversation: &conversation,
+                            manual: false,
+                            stream_ctx: Some((request_id, event_tx.clone())),
+                            tools: &self.tool_definitions(),
                             mode,
-                        )
+                        })
                         .await
                     {
                         Ok(true) => true,
@@ -1925,15 +1944,15 @@ impl AgentRuntime {
 
                     let result: ToolExecutionResult = {
                         let fut: Pin<Box<dyn Future<Output = ToolExecutionResult> + Send>> =
-                            Box::pin(agent.run_subagent(
-                                sid,
-                                rid,
-                                owned_tc,
-                                tx,
-                                cancel_token.clone(),
-                                pm,
-                                owned_child_sid,
-                            ));
+                            Box::pin(agent.run_subagent(SubagentConfig {
+                                parent_session_id: sid,
+                                parent_request_id: rid,
+                                tool_call: owned_tc,
+                                event_tx: tx,
+                                cancel_token: cancel_token.clone(),
+                                parent_model: pm,
+                                child_session_id: owned_child_sid,
+                            }));
                         fut.await
                     };
                     self.persist_tool_result(session_id, request_id, tc, &result, &event_tx)
@@ -1969,15 +1988,15 @@ impl AgentRuntime {
 
                     let handle = tokio::spawn(async move {
                         let fut: Pin<Box<dyn Future<Output = ToolExecutionResult> + Send>> =
-                            Box::pin(agent.run_subagent(
-                                sid,
-                                rid,
-                                owned_tc,
-                                tx,
-                                ct,
-                                pm,
-                                owned_child_sid,
-                            ));
+                            Box::pin(agent.run_subagent(SubagentConfig {
+                                parent_session_id: sid,
+                                parent_request_id: rid,
+                                tool_call: owned_tc,
+                                event_tx: tx,
+                                cancel_token: ct,
+                                parent_model: pm,
+                                child_session_id: owned_child_sid,
+                            }));
                         fut.await
                     });
                     task_handles.push((tc.clone(), *child_sid, handle));
@@ -2057,24 +2076,18 @@ impl AgentRuntime {
     /// current turn/tool execution completes.
     pub async fn run_agent_loop(
         &mut self,
-        session_id: uuid::Uuid,
-        model: ActiveModel,
-        context_manager: &mut ContextManager,
-        mode: SessionMode,
-        thinking_level: ThinkingLevelType,
-        event_tx: UnboundedSender<BackendEvent>,
-        cancel_token: Option<CancellationToken>,
+        config: AgentLoopConfig<'_>,
     ) -> Result<()> {
         let tools = self.tool_definitions();
         self.run_agent_loop_with_tools(
-            session_id,
-            model,
-            context_manager,
-            mode,
-            thinking_level,
+            config.session_id,
+            config.model,
+            config.context_manager,
+            config.mode,
+            config.thinking_level,
             tools,
-            event_tx,
-            cancel_token,
+            config.event_tx,
+            config.cancel_token,
         )
         .await
     }
@@ -2087,27 +2100,21 @@ impl AgentRuntime {
     /// dialogs.  Web and gateway frontends use [`run_agent_loop`] instead.
     pub async fn run_agent_loop_with_permission_channel(
         &mut self,
-        session_id: uuid::Uuid,
+        config: AgentLoopConfig<'_>,
         request_id: u64,
-        model: ActiveModel,
-        context_manager: &mut ContextManager,
-        mode: SessionMode,
-        thinking_level: ThinkingLevelType,
-        event_tx: UnboundedSender<BackendEvent>,
-        cancel_token: Option<CancellationToken>,
         permission_tx: tokio::sync::mpsc::UnboundedSender<PendingToolApproval>,
     ) -> Result<()> {
         let tools = self.tool_definitions();
         self.run_agent_loop_with_tools_inner(
             request_id,
-            session_id,
-            model,
-            context_manager,
-            mode,
-            thinking_level,
+            config.session_id,
+            config.model,
+            config.context_manager,
+            config.mode,
+            config.thinking_level,
             tools,
-            event_tx,
-            cancel_token,
+            config.event_tx,
+            config.cancel_token,
             Some(permission_tx),
         )
         .await

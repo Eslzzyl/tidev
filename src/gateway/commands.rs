@@ -109,44 +109,35 @@ pub fn gateway_help_text() -> String {
     .join("\n")
 }
 
-/// Format status information for display.
-/// Parameters:
-/// - session_id: The current session ID
-/// - title: Session title
-/// - message_count: Total number of messages
-/// - user_message_count: Number of user messages
-/// - assistant_message_count: Number of assistant messages
-/// - tool_call_count: Number of tool calls made
-/// - provider_id: LLM provider ID
-/// - model_id: Model ID
-/// - context_window: Model's context window size (in tokens)
-/// - input_tokens: Total input tokens used
-/// - output_tokens: Total output tokens used
-/// - start_time: Gateway start time (Instant)
-/// - avg_response_time_ms: Average response time in milliseconds
-pub fn format_status_summary(
-    session_id: &str,
-    title: &str,
-    message_count: usize,
-    user_message_count: usize,
-    assistant_message_count: usize,
-    tool_call_count: usize,
-    provider_id: &str,
-    model_id: &str,
-    context_window: usize,
-    input_tokens: u32,
-    output_tokens: u32,
-    start_time: std::time::Instant,
-    avg_response_time_ms: Option<u64>,
-) -> String {
-    let token_usage = crate::utils::TokenUsage::new(input_tokens, output_tokens, 0, 0);
-    let total_tokens = token_usage.total();
-    let context_usage_pct = token_usage.context_usage_pct(context_window);
+/// Statistics for a session, used when formatting status summaries.
+#[derive(Debug, Clone)]
+pub struct SessionStats<'a> {
+    pub session_id: &'a str,
+    pub title: &'a str,
+    pub message_count: usize,
+    pub user_message_count: usize,
+    pub assistant_message_count: usize,
+    pub tool_call_count: usize,
+    pub provider_id: &'a str,
+    pub model_id: &'a str,
+    pub context_window: usize,
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+    pub start_time: std::time::Instant,
+    pub avg_response_time_ms: Option<u64>,
+}
 
-    let uptime = start_time.elapsed();
+/// Format status information for display.
+pub fn format_status_summary(stats: &SessionStats<'_>) -> String {
+    let token_usage = crate::utils::TokenUsage::new(stats.input_tokens, stats.output_tokens, 0, 0);
+    let total_tokens = token_usage.total();
+    let context_usage_pct = token_usage.context_usage_pct(stats.context_window);
+
+    let uptime = stats.start_time.elapsed();
     let uptime_str = format_uptime(uptime);
 
-    let response_time_str = avg_response_time_ms
+    let response_time_str = stats
+        .avg_response_time_ms
         .map(|ms| format!("{} ms", ms))
         .unwrap_or_else(|| "N/A".to_string());
 
@@ -165,19 +156,19 @@ pub fn format_status_summary(
         ────────────────\n\
         Avg response: {}\n\
         Gateway uptime: {}",
-        session_id,
-        title,
-        message_count,
-        user_message_count,
-        assistant_message_count,
-        tool_call_count,
-        provider_id,
-        model_id,
+        stats.session_id,
+        stats.title,
+        stats.message_count,
+        stats.user_message_count,
+        stats.assistant_message_count,
+        stats.tool_call_count,
+        stats.provider_id,
+        stats.model_id,
         total_tokens,
-        context_window,
+        stats.context_window,
         context_usage_pct,
-        input_tokens,
-        output_tokens,
+        stats.input_tokens,
+        stats.output_tokens,
         total_tokens,
         response_time_str,
         uptime_str

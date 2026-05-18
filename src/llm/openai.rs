@@ -19,6 +19,7 @@ use super::think_parser::ThinkParser;
 use super::tool_call_format::ToolCallBuilder;
 use super::turn::finalize_turn;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn stream_openai(
     http: &Client,
     session_id: Uuid,
