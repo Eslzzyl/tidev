@@ -246,7 +246,8 @@ CREATE TABLE IF NOT EXISTS graph_nodes (
     node_type TEXT NOT NULL,
     label TEXT NOT NULL,
     properties TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    UNIQUE(node_type, label)
 );
 
 CREATE INDEX IF NOT EXISTS idx_graph_nodes_type ON graph_nodes(node_type);
@@ -260,7 +261,8 @@ CREATE TABLE IF NOT EXISTS graph_edges (
     weight REAL NOT NULL DEFAULT 1.0,
     properties TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
-    session_id TEXT
+    session_id TEXT,
+    UNIQUE(source_id, target_id, relation)
 );
 
 CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges(source_id);
@@ -531,7 +533,8 @@ CREATE TABLE IF NOT EXISTS graph_nodes (
     node_type TEXT NOT NULL,
     label TEXT NOT NULL,
     properties TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    UNIQUE(node_type, label)
 );
 
 CREATE INDEX IF NOT EXISTS idx_graph_nodes_type ON graph_nodes(node_type);
@@ -545,7 +548,8 @@ CREATE TABLE IF NOT EXISTS graph_edges (
     weight REAL NOT NULL DEFAULT 1.0,
     properties TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
-    session_id TEXT
+    session_id TEXT,
+    UNIQUE(source_id, target_id, relation)
 );
 
 CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges(source_id);

@@ -13,11 +13,13 @@ impl EvictionService {
     pub fn run_eviction(db: &Connection) -> Result<EvictionReport> {
         let mut report = EvictionReport::default();
 
-        // 1. Stale memories
+        // 1. Stale memories (use real-time age via julianday, not cached age_days)
         let stale = db.execute(
             "UPDATE memories SET active = 0 WHERE active = 1 AND id IN (
-                SELECT entity_id FROM retention_scores
-                WHERE entity_type = 'memory' AND score < 1.0 AND age_days > 90
+                SELECT rs.entity_id FROM retention_scores rs
+                JOIN memories m ON m.id = rs.entity_id
+                WHERE rs.entity_type = 'memory' AND rs.score < 1.0
+                  AND julianday('now') - julianday(m.created_at) > 90
             )",
             [],
         )?;
@@ -35,6 +37,33 @@ impl EvictionService {
         db.execute(
             "DELETE FROM retention_scores WHERE entity_id NOT IN (
                 SELECT id FROM memories WHERE active = 1
+            )",
+            [],
+        )?;
+
+        // 4. Remove dangling graph nodes that belong to soft-deleted memories
+        //    (no longer referenced by any edge + not referenced by any active memory concept/file)
+        db.execute(
+            "DELETE FROM graph_edges WHERE source_id NOT IN (
+                SELECT id FROM graph_nodes
+            ) OR target_id NOT IN (
+                SELECT id FROM graph_nodes
+            )",
+            [],
+        )?;
+        db.execute(
+            "DELETE FROM graph_nodes WHERE id NOT IN (
+                SELECT source_id FROM graph_edges
+                UNION
+                SELECT target_id FROM graph_edges
+            )",
+            [],
+        )?;
+
+        // 5. Clean up session_summaries that no longer have a corresponding session
+        db.execute(
+            "DELETE FROM session_summaries WHERE session_id NOT IN (
+                SELECT id FROM sessions
             )",
             [],
         )?;

@@ -127,6 +127,30 @@ impl ReflectService {
                 continue;
             }
 
+            // Check persistent retry count — skip if failed too many times
+            let retry_key = format!("reflect_retry_{}", cluster_max_time);
+            let retry_count: i64 = {
+                let db = Connection::open(db_path)?;
+                db.query_row(
+                    "SELECT value FROM meta WHERE key = ?1",
+                    rusqlite::params![&retry_key],
+                    |row| row.get::<_, String>(0),
+                )
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0)
+            };
+            if retry_count >= 3 {
+                crate::log_warn!(
+                    "reflect: skipping cluster at {} after {} consecutive failures",
+                    cluster_max_time,
+                    retry_count
+                );
+                last_cursor_time = cluster_max_time.clone();
+                Self::save_cursor(db_path, "reflect", &cluster_max_time)?;
+                continue;
+            }
+
             // ─── STRICTER_SUFFIX for retry ───────────────────────────
             const STRICTER_SUFFIX: &str = r"
 IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text outside the XML tags. Do NOT wrap XML in markdown code fences.";
@@ -196,12 +220,28 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 }
             }
 
-            if all_saved {
+            if all_saved && !insights.is_empty() {
                 db.execute_batch("COMMIT")?;
                 report.insights_added += insights.len();
+                // On success, reset retry count
+                let _ = db.execute(
+                    "DELETE FROM meta WHERE key = ?1",
+                    rusqlite::params![&retry_key],
+                );
             } else {
                 db.execute_batch("ROLLBACK")?;
-                // cursor not updated — will retry on next run
+                // Persist retry count so we don't retry the same cluster forever
+                let new_count = retry_count + 1;
+                let db2 = Connection::open(db_path)?;
+                let _ = db2.execute(
+                    "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+                    rusqlite::params![&retry_key, new_count.to_string()],
+                );
+                crate::log_warn!(
+                    "reflect: cluster at {} failed (attempt {}/3), will retry",
+                    cluster_max_time,
+                    new_count
+                );
                 continue;
             }
 

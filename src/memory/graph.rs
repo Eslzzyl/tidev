@@ -38,29 +38,22 @@ pub struct GraphStats {
 
 /// Insert a node, or if one with the same (node_type, label) exists, return its id.
 pub fn upsert_node(db: &Connection, node_type: &str, label: &str) -> Result<String> {
-    // Check for existing node
-    let existing: Option<String> = db
-        .query_row(
-            "SELECT id FROM graph_nodes WHERE node_type = ?1 AND label = ?2",
-            rusqlite::params![node_type, label],
-            |row| row.get(0),
-        )
-        .ok();
-
-    if let Some(id) = existing {
-        return Ok(id);
-    }
-
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
     db.execute(
         "INSERT INTO graph_nodes (id, node_type, label, properties, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(node_type, label) DO NOTHING",
         rusqlite::params![id, node_type, label, "{}", now],
     )
     .context("failed to insert graph node")?;
 
-    Ok(id)
+    let existing: String = db.query_row(
+        "SELECT id FROM graph_nodes WHERE node_type = ?1 AND label = ?2",
+        rusqlite::params![node_type, label],
+        |row| row.get(0),
+    )?;
+    Ok(existing)
 }
 
 /// Lookup a node by exact type + label.
@@ -131,35 +124,32 @@ pub fn upsert_edge(
     weight: f64,
     session_id: Option<&str>,
 ) -> Result<String> {
-    let existing: Option<(String, f64)> = db
-        .query_row(
-            "SELECT id, weight FROM graph_edges
-             WHERE source_id = ?1 AND target_id = ?2 AND relation = ?3",
-            rusqlite::params![source_id, target_id, relation],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .ok();
-
-    if let Some((id, old_weight)) = existing {
-        // Merge weight: running average to smooth over repeated co-occurrences
-        let merged = (old_weight + weight) / 2.0;
-        db.execute(
-            "UPDATE graph_edges SET weight = ?1 WHERE id = ?2",
-            rusqlite::params![merged, id],
-        )?;
-        return Ok(id);
-    }
-
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
-    db.execute(
+    let affected = db.execute(
         "INSERT INTO graph_edges (id, source_id, target_id, relation, weight, properties, created_at, session_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(source_id, target_id, relation) DO NOTHING",
         rusqlite::params![id, source_id, target_id, relation, weight, "{}", now, session_id],
     )
     .context("failed to insert graph edge")?;
 
-    Ok(id)
+    if affected > 0 {
+        return Ok(id);
+    }
+
+    let existing: (String, f64) = db.query_row(
+        "SELECT id, weight FROM graph_edges
+         WHERE source_id = ?1 AND target_id = ?2 AND relation = ?3",
+        rusqlite::params![source_id, target_id, relation],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let merged = (existing.1 + weight) / 2.0;
+    db.execute(
+        "UPDATE graph_edges SET weight = ?1 WHERE id = ?2",
+        rusqlite::params![merged, existing.0],
+    )?;
+    Ok(existing.0)
 }
 
 // ─── Knowledge Graph Extraction ───────────────────────────────────────

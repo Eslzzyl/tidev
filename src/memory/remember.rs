@@ -13,7 +13,7 @@ pub fn jaccard_similarity(a: &str, b: &str) -> f64 {
     let set_b: HashSet<&str> = b.split_whitespace().filter(|t| t.len() > 2).collect();
 
     if set_a.is_empty() && set_b.is_empty() {
-        return 1.0;
+        return 0.0;
     }
     if set_a.is_empty() || set_b.is_empty() {
         return 0.0;

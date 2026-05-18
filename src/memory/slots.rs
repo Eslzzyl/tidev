@@ -260,10 +260,25 @@ impl SlotService {
     }
 
     /// Render pinned slots as a formatted string for prompt injection.
-    /// Automatically ensures default slots exist.
+    /// Automatically ensures default slots exist (once per project).
     pub fn render_pinned(db: &Connection, project: &str) -> Result<String> {
-        // Ensure defaults first
-        Self::ensure_defaults(db, project)?;
+        // Ensure defaults only once per project lifetime
+        let initialized_key = format!("slots_initialized_{}", project);
+        let already: bool = db
+            .query_row(
+                "SELECT COUNT(*) FROM meta WHERE key = ?1",
+                rusqlite::params![&initialized_key],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !already {
+            Self::ensure_defaults(db, project)?;
+            let _ = db.execute(
+                "INSERT OR IGNORE INTO meta (key, value) VALUES (?1, '1')",
+                rusqlite::params![&initialized_key],
+            );
+        }
 
         let slots = Self::list(db, None, Some(project))?;
         let pinned: Vec<&MemorySlot> = slots

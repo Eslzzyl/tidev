@@ -76,16 +76,26 @@ impl MemoryStore {
     }
 
     /// Rebuild the memories_fts index on startup so FTS5 queries work.
+    /// Only rebuilds if the FTS5 table is empty (first startup after schema creation).
     fn rebuild_fts5_if_needed(&self) -> Result<()> {
         let db = self.connection.lock().unwrap();
         let exists: bool = db
             .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'memories_fts'")?
             .exists(rusqlite::params![])?;
         if exists {
-            db.execute(
-                "INSERT INTO memories_fts(memories_fts) VALUES('rebuild')",
-                [],
-            )?;
+            let has_data: i64 = db
+                .query_row(
+                    "SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH '*'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            if has_data == 0 {
+                db.execute(
+                    "INSERT INTO memories_fts(memories_fts) VALUES('rebuild')",
+                    [],
+                )?;
+            }
         }
         Ok(())
     }
@@ -223,6 +233,21 @@ impl MemoryStore {
                 entry.id.to_string(),
             ],
         )?;
+        // Sync FTS5 index so updated content is immediately searchable
+        if let Err(e) = db.execute(
+            "INSERT OR REPLACE INTO memories_fts(rowid, title, content, tags, concepts, files)
+             VALUES ((SELECT rowid FROM memories WHERE id = ?1), ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                entry.id.to_string(),
+                entry.title,
+                entry.content,
+                serde_json::to_string(&entry.tags)?,
+                serde_json::to_string(&entry.concepts)?,
+                serde_json::to_string(&entry.files)?,
+            ],
+        ) {
+            crate::log_warn!("memory: failed to update FTS5 index: {}", e);
+        }
         Ok(())
     }
 
