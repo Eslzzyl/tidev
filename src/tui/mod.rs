@@ -788,6 +788,7 @@ impl App {
         };
         if event_type != "Delta"
             && event_type != "ReasoningDelta"
+            && event_type != "ToolCallUpdated"
             && event_type != "UsageStats"
             && event_type != "SubagentStatus"
             && event_type != "InstructionsLoaded"
