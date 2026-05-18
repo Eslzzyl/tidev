@@ -194,6 +194,34 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
 
         // 5. Write facts + update cursor (sync, new connection, transactional)
         let db = Connection::open(db_path)?;
+
+        // Check persistent retry count — skip if failed too many times
+        let cursor_val = new_summaries.last().map(|s| s.created_at.to_rfc3339());
+        let retry_key = cursor_val.as_ref().map(|c| format!("consolidation_retry_semantic_{}", c));
+        let retry_count: i64 = match &retry_key {
+            Some(key) => db
+                .query_row(
+                    "SELECT value FROM meta WHERE key = ?1",
+                    rusqlite::params![key],
+                    |row| row.get::<_, String>(0),
+                )
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
+            None => 0,
+        };
+        if retry_count >= 3 {
+            crate::log_warn!(
+                "consolidation: skipping semantic batch at {} after {} consecutive failures",
+                cursor_val.as_deref().unwrap_or("?"),
+                retry_count
+            );
+            if let Some(ref c) = cursor_val {
+                Self::save_cursor(&db, "semantic", c)?;
+            }
+            return Ok(0);
+        }
+
         db.execute_batch("BEGIN TRANSACTION")?;
         let mut written = 0usize;
         for fact in &facts {
@@ -220,8 +248,24 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 Self::save_cursor(&db, "semantic", &last.created_at.to_rfc3339())?;
             }
             db.execute_batch("COMMIT")?;
+            // On success, reset retry count
+            if let Some(ref key) = retry_key {
+                let _ = db.execute("DELETE FROM meta WHERE key = ?1", rusqlite::params![key]);
+            }
         } else {
             db.execute_batch("ROLLBACK")?;
+            // Persist retry count
+            let new_count = retry_count + 1;
+            if let Some(ref key) = retry_key {
+                let _ = db.execute(
+                    "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+                    rusqlite::params![key, new_count.to_string()],
+                );
+            }
+            crate::log_warn!(
+                "consolidation: semantic batch failed (attempt {}/3), will retry",
+                new_count
+            );
         }
 
         Ok(facts.len())
@@ -304,6 +348,34 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
 
         // 5. Write procedures (sync, new connection, transactional)
         let db = Connection::open(db_path)?;
+
+        // Check persistent retry count — skip if failed too many times
+        let cursor_val = new_patterns.last().map(|m| m.created_at.to_rfc3339());
+        let retry_key = cursor_val.as_ref().map(|c| format!("consolidation_retry_procedural_{}", c));
+        let retry_count: i64 = match &retry_key {
+            Some(key) => db
+                .query_row(
+                    "SELECT value FROM meta WHERE key = ?1",
+                    rusqlite::params![key],
+                    |row| row.get::<_, String>(0),
+                )
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
+            None => 0,
+        };
+        if retry_count >= 3 {
+            crate::log_warn!(
+                "consolidation: skipping procedural batch at {} after {} consecutive failures",
+                cursor_val.as_deref().unwrap_or("?"),
+                retry_count
+            );
+            if let Some(ref c) = cursor_val {
+                Self::save_cursor(&db, "procedural", c)?;
+            }
+            return Ok(0);
+        }
+
         db.execute_batch("BEGIN TRANSACTION")?;
         let mut written = 0usize;
         for proc in &procedures {
@@ -331,8 +403,24 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 Self::save_cursor(&db, "procedural", &last.created_at.to_rfc3339())?;
             }
             db.execute_batch("COMMIT")?;
+            // On success, reset retry count
+            if let Some(ref key) = retry_key {
+                let _ = db.execute("DELETE FROM meta WHERE key = ?1", rusqlite::params![key]);
+            }
         } else {
             db.execute_batch("ROLLBACK")?;
+            // Persist retry count
+            let new_count = retry_count + 1;
+            if let Some(ref key) = retry_key {
+                let _ = db.execute(
+                    "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+                    rusqlite::params![key, new_count.to_string()],
+                );
+            }
+            crate::log_warn!(
+                "consolidation: procedural batch failed (attempt {}/3), will retry",
+                new_count
+            );
         }
 
         Ok(procedures.len())

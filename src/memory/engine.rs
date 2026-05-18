@@ -210,6 +210,19 @@ impl MemoryStore {
                 entry.is_latest as i64,
             ],
         )?;
+        if let Err(e) = db.execute(
+            "INSERT INTO memories_fts(rowid, title, content, tags, concepts, files)
+             VALUES (last_insert_rowid(), ?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                entry.title,
+                entry.content,
+                serde_json::to_string(&entry.tags)?,
+                serde_json::to_string(&entry.concepts)?,
+                serde_json::to_string(&entry.files)?,
+            ],
+        ) {
+            crate::log_warn!("memory: failed to update FTS5 index in add(): {}", e);
+        }
         Ok(())
     }
 
@@ -258,6 +271,13 @@ impl MemoryStore {
             "UPDATE memories SET active = 0 WHERE id = ?1 AND workspace_root = ?2",
             rusqlite::params![id.to_string(), workspace_root],
         )?;
+        // Remove from FTS5 index so it stops consuming query time
+        if let Err(e) = db.execute(
+            "DELETE FROM memories_fts WHERE rowid = (SELECT rowid FROM memories WHERE id = ?1)",
+            rusqlite::params![id.to_string()],
+        ) {
+            crate::log_warn!("memory: failed to delete from FTS5 index: {}", e);
+        }
         Ok(())
     }
 
@@ -745,8 +765,7 @@ impl MemoryStore {
         if q.is_empty() {
             return Ok(Vec::new());
         }
-        let db_path = self.db_path.clone();
-        let db = Connection::open(&db_path).context("failed to open DB for graph search")?;
+        let db = self.read_connection.lock().unwrap();
         super::graph_retrieval::GraphRetrieval::search_related(&db, q, max_depth, max_results)
     }
 
