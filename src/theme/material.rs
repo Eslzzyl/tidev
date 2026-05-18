@@ -5,10 +5,10 @@ impl ThemePalette {
     pub fn material() -> Self {
         Self {
             name: ThemeName::Material,
-            background: Color::Rgb(251, 248, 255),
-            panel: Color::Rgb(255, 255, 255),
-            panel_alt: Color::Rgb(237, 235, 255),
-            panel_light: Color::Rgb(250, 248, 255),
+            background: Color::Rgb(255, 255, 255),
+            panel: Color::Rgb(246, 243, 252),
+            panel_alt: Color::Rgb(233, 230, 245),
+            panel_light: Color::Rgb(240, 236, 248),
             text: Color::Rgb(29, 25, 43),
             muted: Color::Rgb(107, 109, 126),
             border: Color::Rgb(215, 212, 240),

@@ -5,10 +5,10 @@ impl ThemePalette {
     pub fn rose_pine_dawn() -> Self {
         Self {
             name: ThemeName::RosePineDawn,
-            background: Color::Rgb(252, 246, 239),
-            panel: Color::Rgb(252, 246, 240),
-            panel_alt: Color::Rgb(250, 244, 238),
-            panel_light: Color::Rgb(240, 234, 228),
+            background: Color::Rgb(255, 250, 244),
+            panel: Color::Rgb(252, 246, 239),
+            panel_alt: Color::Rgb(245, 239, 234),
+            panel_light: Color::Rgb(248, 242, 238),
             text: Color::Rgb(87, 82, 121),
             muted: Color::Rgb(130, 125, 150),
             border: Color::Rgb(215, 205, 196),

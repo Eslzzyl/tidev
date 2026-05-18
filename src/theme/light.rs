@@ -5,10 +5,10 @@ impl ThemePalette {
     pub fn light() -> Self {
         Self {
             name: ThemeName::Light,
-            background: Color::Rgb(246, 248, 251),
-            panel: Color::Rgb(255, 255, 255),
-            panel_alt: Color::Rgb(236, 241, 247),
-            panel_light: Color::Rgb(239, 246, 252),
+            background: Color::Rgb(255, 255, 255),
+            panel: Color::Rgb(246, 248, 251),
+            panel_alt: Color::Rgb(233, 238, 243),
+            panel_light: Color::Rgb(240, 244, 248),
             text: Color::Rgb(17, 24, 39),
             muted: Color::Rgb(102, 115, 135),
             border: Color::Rgb(203, 213, 225),

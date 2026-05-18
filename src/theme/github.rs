@@ -5,10 +5,10 @@ impl ThemePalette {
     pub fn github() -> Self {
         Self {
             name: ThemeName::Github,
-            background: Color::Rgb(245, 246, 248),
-            panel: Color::Rgb(255, 255, 255),
+            background: Color::Rgb(255, 255, 255),
+            panel: Color::Rgb(246, 248, 250),
             panel_alt: Color::Rgb(234, 238, 243),
-            panel_light: Color::Rgb(242, 245, 249),
+            panel_light: Color::Rgb(240, 243, 246),
             text: Color::Rgb(36, 41, 47),
             muted: Color::Rgb(106, 115, 125),
             border: Color::Rgb(208, 215, 222),

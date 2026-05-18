@@ -5,10 +5,10 @@ impl ThemePalette {
     pub fn orng() -> Self {
         Self {
             name: ThemeName::Orng,
-            background: Color::Rgb(255, 245, 235),
-            panel: Color::Rgb(255, 250, 242),
-            panel_alt: Color::Rgb(255, 235, 214),
-            panel_light: Color::Rgb(255, 248, 245),
+            background: Color::Rgb(255, 250, 245),
+            panel: Color::Rgb(255, 245, 235),
+            panel_alt: Color::Rgb(251, 235, 214),
+            panel_light: Color::Rgb(254, 240, 230),
             text: Color::Rgb(45, 35, 27),
             muted: Color::Rgb(109, 89, 74),
             border: Color::Rgb(220, 190, 160),
