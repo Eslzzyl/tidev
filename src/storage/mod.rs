@@ -1356,11 +1356,10 @@ impl SessionStore {
                AND s.status = 'active'
                AND s.updated_at < ?1
                AND s.id != ?2
-               AND EXISTS (
-                   SELECT 1 FROM compressed_observations co
-                   WHERE co.session_id = s.id
-                     AND co.obs_type IS NOT NULL
-               )
+                AND EXISTS (
+                    SELECT 1 FROM messages m
+                    WHERE m.session_id = s.id
+                )
              ORDER BY s.updated_at ASC",
         )?;
         let ids = stmt
