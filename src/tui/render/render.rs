@@ -476,7 +476,7 @@ impl App {
 
                 // Model label
                 meta_spans.push(Span::styled(
-                    self.active_model.label(),
+                    &self.active_model.display_name,
                     Style::default().fg(palette.text),
                 ));
 
@@ -485,7 +485,7 @@ impl App {
 
                 // Provider
                 meta_spans.push(Span::styled(
-                    &self.active_model.provider_id,
+                    &self.active_model.provider_display_name,
                     Style::default().fg(palette.muted),
                 ));
 

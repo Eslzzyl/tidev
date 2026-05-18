@@ -566,8 +566,12 @@ impl App {
                 .add_modifier(Modifier::BOLD),
         )]));
         lines.push(Line::from(vec![Span::styled(
-            self.active_model.label(),
+            &self.active_model.display_name,
             Style::default().fg(palette.text),
+        )]));
+        lines.push(Line::from(vec![Span::styled(
+            &self.active_model.provider_display_name,
+            Style::default().fg(palette.muted),
         )]));
 
         if let Some(usage) = &self.context_usage {
