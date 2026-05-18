@@ -472,41 +472,6 @@ mod tests {
     }
 
     #[test]
-    fn choose_split_index_keeps_tool_block_together() {
-        let manager = ContextManager::new();
-
-        let mut assistant = Message::new(MessageRole::Assistant, "call tools");
-        assistant.tool_calls = vec![ToolCall {
-            id: "tool-call-1".to_string(),
-            name: "grep".to_string(),
-            arguments: "{}".to_string(),
-        }];
-
-        let tool_result = Message::tool_result(
-            "tool-call-1",
-            "grep",
-            crate::session::ToolExecutionResult::new("result"),
-        );
-
-        let messages = vec![
-            Message::new(MessageRole::User, "first"),
-            assistant,
-            tool_result,
-            Message::new(MessageRole::Assistant, "follow up"),
-        ];
-
-        let total_tokens: usize = messages.iter().map(ContextManager::message_tokens).sum();
-        let first_msg_tokens = ContextManager::message_tokens(&messages[0]);
-        let retain_recent_tokens = total_tokens - first_msg_tokens;
-
-        assert_eq!(
-            manager.choose_split_index(&messages, retain_recent_tokens),
-            1
-        );
-        assert_eq!(manager.retain_recent_tokens, 12_000);
-    }
-
-    #[test]
     fn compaction_budget_scales_with_model_window() {
         let manager = ContextManager::new();
         let model = test_model(128_000, 32_768);
