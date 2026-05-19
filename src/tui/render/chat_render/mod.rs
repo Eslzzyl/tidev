@@ -559,6 +559,22 @@ impl App {
         frame.render_widget(paragraph, content_area);
 
         if let Some(scrollbar_area) = scrollbar_area.1 {
+            // Explicitly fill the gap between content area and scrollbar to prevent
+            // stale visual artifacts (diff backgrounds, table borders, etc.) from
+            // appearing in this gap column when content refreshes. Without this,
+            // ratatui's frame diff optimization may skip updating these cells in
+            // certain edge cases, leaving residual content visible.
+            if content_area.x.saturating_add(content_area.width) < scrollbar_area.x {
+                frame.render_widget(
+                    Block::default().style(Style::default().bg(palette.background)),
+                    Rect {
+                        x: content_area.x + content_area.width,
+                        y: content_area.y,
+                        width: scrollbar_area.x - content_area.x - content_area.width,
+                        height: content_area.height,
+                    },
+                );
+            }
             self.message_scrollbar_area = Some(scrollbar_area);
             self.render_scrollbar(frame, scrollbar_area, scroll, max_scroll);
         }
