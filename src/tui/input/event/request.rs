@@ -36,6 +36,7 @@ impl App {
         self.active_request_id = self.active_request_id.wrapping_add(1);
         self.abort_confirmation_deadline = None;
         self.pending_request = false;
+        self.pending_mode = None;
 
         // Cancel the agent loop so it stops at its next check point.
         if let Some(token) = self.request_cancel_token.take() {

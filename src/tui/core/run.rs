@@ -783,6 +783,7 @@ impl App {
         self.running_tool_executions.clear();
         self.running_subagent_executions.clear();
         self.pending_request = false;
+        self.pending_mode = None;
         self.pending_prompt_queue.clear();
         self.abort_confirmation_deadline = None;
         self.retrying_hint = None;

@@ -452,9 +452,8 @@ impl App {
         if show_left_accent {
             let accent_color = if self.shell_mode {
                 palette.success
-            } else if self.pending_request {
-                palette.border_mode_color(self.mode)
             } else if let Some(pending) = self.pending_mode {
+                // Pending mode switch — show future mode's color immediately
                 palette.border_mode_color(pending)
             } else {
                 palette.border_mode_color(self.mode)
@@ -480,6 +479,13 @@ impl App {
                         "Shell".to_string(),
                         Style::default()
                             .fg(palette.success)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else if let Some(pending) = self.pending_mode {
+                    (
+                        format!("{} → {}", self.mode.title(), pending.title()),
+                        Style::default()
+                            .fg(palette.border_mode_color(pending))
                             .add_modifier(Modifier::BOLD),
                     )
                 } else {
@@ -851,7 +857,12 @@ impl App {
             } else if self.pending_tool_execution.is_some() {
                 format!("{} Running tools", spinner)
             } else {
-                format!("{} {}", spinner, self.mode.title())
+                match self.pending_mode.as_ref() {
+                    Some(pending) => {
+                        format!("{} {} → {} (on completion)", spinner, self.mode.title(), pending.title())
+                    }
+                    None => format!("{} {}", spinner, self.mode.title()),
+                }
             };
 
             let status = if queued_count > 0 {

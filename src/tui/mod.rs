@@ -950,6 +950,7 @@ impl App {
                 }
 
                 self.pending_request = false;
+                self.pending_mode = None;
                 self.pending_tool_execution = None;
                 self.permission_dialog = None;
                 self.question_dialog = None;
