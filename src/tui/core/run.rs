@@ -846,6 +846,28 @@ impl App {
             conversation.context_retained_from,
         );
 
+        let loaded_instruction_sources = self.store.load_instruction_sources(session_id)?;
+
+        // Pre-populate cache from loaded instruction sources so the next
+        // user message doesn't re-read all files and avoid redundant
+        // "Loaded instructions from ..." messages across restarts.
+        let mut instruction_content_cache = std::collections::HashMap::new();
+        for source in &loaded_instruction_sources {
+            if source.starts_with("http://") || source.starts_with("https://") {
+                continue;
+            }
+            let path = if std::path::Path::new(source).is_absolute() {
+                std::path::PathBuf::from(source)
+            } else {
+                self.workspace_root.join(source)
+            };
+            let canonical_path = path.canonicalize().unwrap_or_else(|_| path.clone());
+            if let Ok(content) = std::fs::read_to_string(&canonical_path) {
+                instruction_content_cache
+                    .insert(canonical_path.display().to_string(), content);
+            }
+        }
+
         let mut runtime = CachedSessionRuntime {
             conversation,
             active_model,
@@ -872,8 +894,8 @@ impl App {
             context_usage: None,
             todos: self.store.load_todos(session_id)?,
             file_reads: None,
-            loaded_instruction_sources: self.store.load_instruction_sources(session_id)?,
-            instruction_content_cache: std::collections::HashMap::new(),
+            loaded_instruction_sources,
+            instruction_content_cache,
         };
 
         // Load file reads from database into the tracker

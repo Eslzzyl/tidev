@@ -222,10 +222,32 @@ impl AgentRuntime {
         }
 
         // Load already-injected sources from database (persists across restarts).
-        let already_injected = {
+        let already_injected_raw = {
             let store = self.store.lock().await;
             store.load_instruction_sources(session_id)?
         };
+
+        // Normalize already-injected paths to canonical absolute form so they
+        // match the format used by system_prompt_and_sources_with_cache().
+        // DB may contain relative paths (saved by TUI's update_loaded_instruction_sources)
+        // or absolute paths (saved by a previous run of this function).
+        // Normalizing both to canonical absolutes ensures correct comparison.
+        let already_injected: Vec<String> = already_injected_raw
+            .iter()
+            .map(|s| {
+                if s.starts_with("http://") || s.starts_with("https://") {
+                    return s.clone();
+                }
+                let path = if std::path::Path::new(s).is_absolute() {
+                    std::path::PathBuf::from(s)
+                } else {
+                    self.workspace_root.join(s)
+                };
+                path.canonicalize()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| s.clone())
+            })
+            .collect();
 
         // Find sources that haven't been injected yet.
         let new_sources: Vec<&String> = sources
