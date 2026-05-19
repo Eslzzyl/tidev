@@ -856,6 +856,8 @@ impl App {
                 display_path,
                 Style::default().fg(palette.muted),
             )]),
+            Line::from(""),
+            Line::from(""),
         ];
         let footer_height: u16 = footer_lines.len() as u16;
 
