@@ -1,5 +1,6 @@
 pub mod compression;
 pub mod database;
+pub mod migration;
 pub mod schema;
 #[cfg(test)]
 mod tests;
@@ -26,7 +27,7 @@ use crate::{
 use rayon::prelude::*;
 
 use self::compression::{compress_text, decompress_text};
-use schema::{EXPORT_SCHEMA_SQL, SCHEMA_SQL, SCHEMA_VERSION, SESSION_SELECT_COLUMNS};
+use schema::{EXPORT_SCHEMA_SQL, SCHEMA_SQL, SESSION_SELECT_COLUMNS};
 
 /// Build a struct literal from a SQLite row where each field maps directly
 /// to a column index with no custom conversion.
@@ -242,11 +243,13 @@ impl SessionStore {
     /// [`Database::create_session_store`].
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let store = Self::open_existing(path)?;
-        store.write_conn.lock().unwrap().execute_batch(SCHEMA_SQL)?;
-        store.write_conn.lock().unwrap().execute(
-            "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?1)",
-            params![SCHEMA_VERSION.to_string()],
-        )?;
+        {
+            let conn = store.write_conn.lock().unwrap();
+            conn.execute_batch(SCHEMA_SQL)
+                .context("failed to initialise database schema")?;
+            migration::run_pending(&conn)
+                .context("failed to run database migrations")?;
+        }
         Ok(store)
     }
 

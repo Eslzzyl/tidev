@@ -74,6 +74,11 @@ enum Command {
         #[command(subcommand)]
         action: TmpCommand,
     },
+    /// Manage database schema (migrations, status, etc.)
+    Db {
+        #[command(subcommand)]
+        action: DbCommand,
+    },
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -93,6 +98,14 @@ enum TmpCommand {
         #[arg(long)]
         dry_run: bool,
     },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum DbCommand {
+    /// Apply pending schema migrations
+    Migrate,
+    /// Show migration status (current version vs. latest)
+    Status,
 }
 pub fn run() -> anyhow::Result<()> {
     match Cli::parse().command {
@@ -214,6 +227,30 @@ pub fn run() -> anyhow::Result<()> {
                 } else {
                     println!("Would clean {} temp file(s) (dry-run)", removed.len());
                 }
+                Ok(())
+            }
+        },
+        Some(Command::Db { action }) => match action {
+            DbCommand::Migrate => {
+                let paths = crate::config::ConfigPaths::discover()?;
+                let db = crate::storage::database::Database::open(&paths.database_file)?;
+                eprintln!("Database migrated successfully.");
+                drop(db);
+                Ok(())
+            }
+            DbCommand::Status => {
+                let paths = crate::config::ConfigPaths::discover()?;
+                let db_path = &paths.database_file;
+                if !db_path.exists() {
+                    println!("Database does not exist yet at: {}", db_path.display());
+                    println!("Latest schema version: {}", crate::storage::schema::SCHEMA_VERSION);
+                    return Ok(());
+                }
+                let conn = rusqlite::Connection::open(db_path)?;
+                let status = crate::storage::migration::status(&conn)?;
+                println!("Current version: {}", status.current_version);
+                println!("Latest version:  {}", status.latest_version);
+                println!("Pending:         {}", status.pending_count);
                 Ok(())
             }
         },

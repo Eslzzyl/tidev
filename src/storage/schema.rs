@@ -1,4 +1,4 @@
-pub const SCHEMA_VERSION: i64 = 32;
+pub const SCHEMA_VERSION: i64 = 33;
 
 pub const SESSION_SELECT_COLUMNS: &str = "s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, s.status, s.ended_at, s.context_summary, s.context_retained_from, s.system_prompt, COALESCE(sw.workspace_root, '')";
 

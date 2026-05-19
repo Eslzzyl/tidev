@@ -6,14 +6,15 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use rusqlite::{Connection, params};
+use rusqlite::Connection;
 
 use crate::memory::MemoryStore;
 
 use super::{
     SessionStore,
-    schema::{SCHEMA_SQL, SCHEMA_VERSION},
+    schema::SCHEMA_SQL,
 };
+use super::migration;
 
 /// Unified database manager.
 ///
@@ -90,12 +91,9 @@ impl Database {
             .execute_batch(SCHEMA_SQL)
             .context("failed to initialise database schema")?;
 
-        write_conn
-            .execute(
-                "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?1)",
-                params![SCHEMA_VERSION.to_string()],
-            )
-            .context("failed to record schema version")?;
+        // Run pending schema migrations.
+        migration::run_pending(&write_conn)
+            .context("failed to run database migrations")?;
 
         let shared_conn = Arc::new(Mutex::new(write_conn));
 
