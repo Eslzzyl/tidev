@@ -31,14 +31,14 @@ pub(super) fn render_reasoning_lines(
     render_reasoning_markdown_lines(reasoning, body_width, Some(ctx.workspace_root), ctx.palette)
 }
 
-/// Strip all `<system-reminder>…</system-reminder>` blocks from the given
-/// text. These tags are injected into user-message content for LLM prefix
-/// cache consistency and must not be visible in the UI.
+/// Strip all `<system-reminder>…</system-reminder>` blocks from the
+/// given text. These tags are injected into user-message content for LLM
+/// prefix cache consistency and must not be visible in the UI.
 fn strip_system_reminder_tags(text: &str) -> String {
     let mut result = String::with_capacity(text.len());
     let mut rest = text;
     loop {
-        if let Some(start) = rest.find("<system-reminder>") {
+        if let Some(start) = rest.find("<system-reminder") {
             // Push content before the tag
             result.push_str(&rest[..start]);
             // Find the closing tag

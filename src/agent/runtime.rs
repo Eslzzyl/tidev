@@ -1293,23 +1293,25 @@ impl AgentRuntime {
                 _t_sub_load.elapsed()
             );
 
-            // Inject new instructions + first-turn memory
+            // Inject new instructions + first-turn memory into the actual
+            // last user message only (never retroactively modify historical
+            // messages). Skip if already has any form of <system-reminder>.
             let _t_sub_inject = std::time::Instant::now();
             let is_first_sub_turn = db_messages.len() <= 1;
             let has_assistant = db_messages.iter().any(|m| m.role == MessageRole::Assistant);
-            if let Some(last_user) = db_messages
-                .iter_mut()
-                .rev()
-                .find(|m| m.role == MessageRole::User && !m.content.starts_with("<system-reminder>"))
-            {
-                self.inject_new_instructions(child_session_id, last_user).await?;
-                if is_first_sub_turn {
-                    self.inject_first_turn_memory(
-                        child_session_id,
-                        last_user,
-                        has_assistant,
-                    )
-                    .await?;
+            let last_user_idx = db_messages.iter().rposition(|m| m.role == MessageRole::User);
+            if let Some(idx) = last_user_idx {
+                let last_user = &mut db_messages[idx];
+                if !last_user.content.starts_with("<system-reminder") {
+                    self.inject_new_instructions(child_session_id, last_user).await?;
+                    if is_first_sub_turn {
+                        self.inject_first_turn_memory(
+                            child_session_id,
+                            last_user,
+                            has_assistant,
+                        )
+                        .await?;
+                    }
                 }
             }
             crate::log_debug!(
@@ -1735,45 +1737,48 @@ impl AgentRuntime {
             let _t_inject = std::time::Instant::now();
             let has_assistant = db_messages.iter().any(|m| m.role == MessageRole::Assistant);
 
+            // Find the actual last user message index (deterministic, never
+            // falls back to historical messages on subsequent turns).
+            let last_user_idx = db_messages.iter().rposition(|m| m.role == MessageRole::User);
+
             // Compute mode state from messages BEFORE the last user (read-only,
             // before any mutable borrow below).
-            let mode_state = {
-                let last_user_idx = db_messages.iter().rposition(|m| m.role == MessageRole::User);
-                last_user_idx.map(|idx| {
-                    let prior_mode_seen =
-                        db_messages[..idx].iter().any(|m| m.mode.is_some());
-                    let mut was_plan_mode = mode == SessionMode::Plan;
-                    for message in &db_messages[..idx] {
-                        if let Some(m) = message.mode {
-                            was_plan_mode = m == SessionMode::Plan;
-                        } else if message.role == MessageRole::Assistant
-                            && (message.content.contains("PLAN MODE")
-                                || message.content.contains("read-only"))
-                        {
-                            was_plan_mode = true;
-                        }
+            let mode_state = last_user_idx.map(|idx| {
+                let prior_mode_seen =
+                    db_messages[..idx].iter().any(|m| m.mode.is_some());
+                let mut was_plan_mode = mode == SessionMode::Plan;
+                for message in &db_messages[..idx] {
+                    if let Some(m) = message.mode {
+                        was_plan_mode = m == SessionMode::Plan;
+                    } else if message.role == MessageRole::Assistant
+                        && (message.content.contains("PLAN MODE")
+                            || message.content.contains("read-only"))
+                    {
+                        was_plan_mode = true;
                     }
-                    (prior_mode_seen, was_plan_mode)
-                })
-            };
+                }
+                (prior_mode_seen, was_plan_mode)
+            });
 
-            if let Some(last_user) = db_messages
-                .iter_mut()
-                .rev()
-                .find(|m| m.role == MessageRole::User && !m.content.starts_with("<system-reminder>"))
-            {
-                self.inject_new_instructions(session_id, last_user).await?;
-                self.inject_first_turn_memory(session_id, last_user, has_assistant)
-                    .await?;
-                if let Some((prior_mode_seen, was_plan_mode)) = mode_state {
-                    self.inject_mode_reminder(
-                        session_id,
-                        last_user,
-                        mode,
-                        prior_mode_seen,
-                        was_plan_mode,
-                    )
-                    .await?;
+            // Inject into the actual last user message only. Never retroactively
+            // modify historical user messages (would break prefix caching).
+            // Skip if it already has any form of <system-reminder> tag prefix.
+            if let Some(idx) = last_user_idx {
+                let last_user = &mut db_messages[idx];
+                if !last_user.content.starts_with("<system-reminder") {
+                    self.inject_new_instructions(session_id, last_user).await?;
+                    self.inject_first_turn_memory(session_id, last_user, has_assistant)
+                        .await?;
+                    if let Some((prior_mode_seen, was_plan_mode)) = mode_state {
+                        self.inject_mode_reminder(
+                            session_id,
+                            last_user,
+                            mode,
+                            prior_mode_seen,
+                            was_plan_mode,
+                        )
+                        .await?;
+                    }
                 }
             }
             crate::log_info!(

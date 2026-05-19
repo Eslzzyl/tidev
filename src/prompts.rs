@@ -73,7 +73,7 @@ pub fn gateway_system_prompt() -> String {
 }
 
 pub fn plan_mode_reminder() -> &'static str {
-    "<system-reminder mode=\"plan\">\n\
+    "<system-reminder>\n\
     You are in Plan mode. This is a READ-ONLY mode. STRICTLY FORBIDDEN:\n\
     ANY file edits, modifications, or system changes. Do NOT use write, edit,\n\
     apply_patch, or bash commands that modify files.\n\n\
