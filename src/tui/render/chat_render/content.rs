@@ -34,7 +34,7 @@ pub(super) fn render_reasoning_lines(
 /// Strip all `<system-reminder>…</system-reminder>` blocks from the
 /// given text. These tags are injected into user-message content for LLM
 /// prefix cache consistency and must not be visible in the UI.
-fn strip_system_reminder_tags(text: &str) -> String {
+pub(crate) fn strip_system_reminder_tags(text: &str) -> String {
     let mut result = String::with_capacity(text.len());
     let mut rest = text;
     loop {

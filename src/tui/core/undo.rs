@@ -3,6 +3,7 @@ use tokio::runtime::Runtime;
 use uuid::Uuid;
 
 use crate::snapshot::FileDiff;
+use crate::tui::render::chat_render::strip_system_reminder_tags;
 use crate::{context::ContextManager, shared::undo::StepPatch, snapshot::Patch};
 
 use super::{App, BackendEvent, Screen};
@@ -339,7 +340,7 @@ impl App {
                 Some(&redo_snapshot)
             },
         )?;
-        self.composer.set_text(message_content);
+        self.composer.set_text(strip_system_reminder_tags(&message_content));
         self.screen = Screen::Chat;
         self.scroll_messages_to_bottom();
         if let Some(n) = notice {

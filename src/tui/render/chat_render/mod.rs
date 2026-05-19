@@ -4,6 +4,8 @@ mod tests;
 mod tool;
 mod utils;
 
+pub(crate) use content::strip_system_reminder_tags;
+
 use crate::{
     config::{AppConfig, AuthStore},
     markdown_render::{WrapOptions, word_wrap_line},
