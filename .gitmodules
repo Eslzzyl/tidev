@@ -14,11 +14,3 @@
 	path = opencode-dynamic-context-pruning
 	url = https://github.com/Opencode-DCP/opencode-dynamic-context-pruning.git
 	shallow = true
-[submodule "agentmemory"]
-	path = agentmemory
-	url = https://github.com/rohitg00/agentmemory.git
-	shallow = true
-[submodule "iii-engine"]
-	path = iii-engine
-	url = https://github.com/iii-hq/iii.git
-	shallow = true
