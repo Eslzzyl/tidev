@@ -103,7 +103,7 @@ impl App {
         let composer_height_raw = self
             .composer
             .preferred_height(
-                main_area.width.saturating_sub(4),
+                main_area.width.saturating_sub(5),
                 self.config.ui.max_input_lines,
             )
             .min(main_area.height.saturating_sub(3).max(3));

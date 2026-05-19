@@ -200,7 +200,7 @@ impl App {
         let card_height = 20u16.min(area.height.saturating_sub(2).max(10));
         let card = centered_rect(card_width, card_height, area);
 
-        let card_inner_width = card.width.saturating_sub(4);
+        let card_inner_width = card.width.saturating_sub(7);
 
         let block = Block::default().borders(Borders::NONE);
         frame.render_widget(block, card);
@@ -347,7 +347,7 @@ impl App {
         let inner = Rect {
             x: bg_rect.x + inner_margin,
             y: area.y + 1,
-            width: area.width.saturating_sub(bg_rect.x + inner_margin + 1),
+            width: area.width.saturating_sub(left_inset + inner_margin + 1),
             height: area.height.saturating_sub(2),
         };
 

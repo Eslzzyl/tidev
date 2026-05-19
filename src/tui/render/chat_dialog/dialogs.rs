@@ -938,7 +938,7 @@ impl App {
             let input_height = self
                 .composer
                 .preferred_height(
-                    inner.width.saturating_sub(4),
+                    inner.width.saturating_sub(3),
                     self.config.ui.max_input_lines,
                 )
                 .min(available_input_height.max(3));
