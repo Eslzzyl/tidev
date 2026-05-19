@@ -159,6 +159,7 @@ pub(crate) struct QueuedPrompt {
     pub(crate) attachments: Vec<MessageAttachment>,
     pub(crate) mode: Option<SessionMode>,
     pub(crate) thinking_level: Option<ThinkingLevelType>,
+    pub(crate) instruction_sources: Vec<String>,
 }
 
 impl QueuedPrompt {
@@ -167,12 +168,14 @@ impl QueuedPrompt {
         attachments: Vec<MessageAttachment>,
         mode: Option<SessionMode>,
         thinking_level: Option<ThinkingLevelType>,
+        instruction_sources: Vec<String>,
     ) -> Self {
         Self {
             prompt: prompt.into(),
             attachments,
             mode,
             thinking_level,
+            instruction_sources,
         }
     }
 }

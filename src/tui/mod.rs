@@ -1459,6 +1459,11 @@ impl App {
                         user_message.mode = queued.mode;
                         user_message.thinking_level = queued.thinking_level;
                         self.conversation.push(user_message);
+
+                        // Show "Loaded instructions" notification below the user message
+                        if let Err(e) = self.update_loaded_instruction_sources(&queued.instruction_sources) {
+                            crate::log_warn!("Failed to update instruction sources for queued prompt: {}", e);
+                        }
                     }
                     self.pending_request = true;
                     self.last_notice = Some(match self.mode {
@@ -1556,11 +1561,6 @@ impl App {
     }
 
     fn queue_prompt(&mut self, prompt: String, attachments: Vec<MessageAttachment>, instruction_sources: Vec<String>) {
-        // Persist and display nearby instruction sources immediately
-        if let Err(e) = self.update_loaded_instruction_sources(&instruction_sources) {
-            crate::log_warn!("Failed to update instruction sources for queued prompt: {}", e);
-        }
-
         // If there's a pending mode switch, use that mode for the queued message
         // so the user's intent to switch modes takes effect on the next message.
         let mode = self.pending_mode.unwrap_or(self.mode);
@@ -1576,12 +1576,15 @@ impl App {
         self.agent.queue_user_message(msg);
 
         // Add to display queue for UI rendering
+        // instruction_sources will be shown when the queued message is processed
+        // (in TurnStarting handler) so the notification appears below the user message.
         self.pending_prompt_queue
             .push_back(crate::tui::core::state::QueuedPrompt::new(
                 prompt,
                 attachments,
                 Some(mode),
                 Some(thinking_level),
+                instruction_sources,
             ));
     }
 
@@ -1597,11 +1600,6 @@ impl App {
 
         if prompt.is_empty() && attachments.is_empty() {
             return Ok(());
-        }
-
-        // Persist and display nearby instruction sources from @ references
-        if let Err(e) = self.update_loaded_instruction_sources(&instruction_sources) {
-            crate::log_warn!("Failed to update instruction sources for prompt: {}", e);
         }
 
         if self.screen == Screen::Welcome {
@@ -1679,6 +1677,13 @@ impl App {
         self.conversation.push(user_message.clone());
         self.store
             .append_message(self.conversation.session_id, &user_message)?;
+
+        // Persist and display nearby instruction sources from @ references
+        // below the user message, so the notification appears after the user's
+        // message card rather than above it.
+        if let Err(e) = self.update_loaded_instruction_sources(&instruction_sources) {
+            crate::log_warn!("Failed to update instruction sources for prompt: {}", e);
+        }
 
         self.draft_attachments.clear();
 
