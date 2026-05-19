@@ -37,23 +37,20 @@ pub fn create_bwrap_args(
     cwd: &Path,
     writable_roots: &[PathBuf],
 ) -> Vec<String> {
-    let mut args = Vec::new();
-
-    // --unshare-ipc: separate IPC namespace
-    // --unshare-pid: separate PID namespace (process isolation)
-    // --unshare-uts: separate host/domain name
-    // --die-with-parent: kill sandbox if parent dies
-    args.push("--unshare-ipc".to_string());
-    args.push("--unshare-pid".to_string());
-    args.push("--unshare-uts".to_string());
-    args.push("--die-with-parent".to_string());
-    args.push("--hostname".to_string());
-    args.push("tidev".to_string());
-
-    // Default: mount entire filesystem as read-only
-    args.push("--ro-bind".to_string());
-    args.push("/".to_string());
-    args.push("/".to_string());
+    let mut args = vec![
+        "--unshare-ipc",
+        "--unshare-pid",
+        "--unshare-uts",
+        "--die-with-parent",
+        "--hostname",
+        "tidev",
+        "--ro-bind",
+        "/",
+        "/",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect::<Vec<_>>();
 
     // Add writable roots on top of the read-only view
     let writable_dirs = compute_writable_dirs(policy, cwd, writable_roots);
@@ -78,7 +75,7 @@ pub fn create_bwrap_args(
     // If TMPDIR is set and different from /tmp, also mount it
     if let Ok(tmpdir) = std::env::var("TMPDIR") {
         let tmpdir_path = PathBuf::from(&tmpdir);
-        if tmpdir_path.is_absolute() && tmpdir_path != PathBuf::from("/tmp") {
+        if tmpdir_path.is_absolute() && tmpdir_path != Path::new("/tmp") {
             args.push("--bind".to_string());
             args.push(tmpdir.to_string());
             args.push(tmpdir);
