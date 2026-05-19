@@ -4,8 +4,6 @@ import {
   CheckCircle2,
   Circle,
   Clock,
-  XCircle,
-  AlertTriangle,
   Plus,
   Minus,
   Pencil,
@@ -130,10 +128,6 @@ export function RightSidebar() {
         );
       case "in_progress":
         return <Clock className="h-4 w-4 text-blue-500 dark:text-blue-400" />;
-      case "cancelled":
-        return (
-          <XCircle className="h-4 w-4 text-neutral-400 dark:text-neutral-500" />
-        );
       default:
         return (
           <Circle className="h-4 w-4 text-neutral-500 dark:text-neutral-400" />
@@ -303,15 +297,11 @@ export function RightSidebar() {
                       </span>
                       <span
                         className={`flex-1 ${
-                          todo.status === "completed" ||
-                          todo.status === "cancelled"
+                          todo.status === "completed"
                             ? "text-neutral-400 line-through dark:text-neutral-500"
                             : "text-neutral-700 dark:text-neutral-300"
                         }`}
                       >
-                        {todo.priority === "high" && (
-                          <AlertTriangle className="mr-0.5 inline h-3.5 w-3.5 text-amber-500" />
-                        )}
                         {todo.content}
                       </span>
                     </li>

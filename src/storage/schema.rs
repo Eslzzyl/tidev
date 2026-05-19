@@ -86,7 +86,6 @@ CREATE TABLE IF NOT EXISTS todos (
     position INTEGER NOT NULL,
     content TEXT NOT NULL,
     status TEXT NOT NULL,
-    priority TEXT NOT NULL,
     PRIMARY KEY(session_id, position)
 );
 
@@ -372,7 +371,6 @@ CREATE TABLE IF NOT EXISTS todos (
     position INTEGER NOT NULL,
     content TEXT NOT NULL,
     status TEXT NOT NULL,
-    priority TEXT NOT NULL,
     PRIMARY KEY(session_id, position)
 );
 

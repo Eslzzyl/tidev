@@ -760,15 +760,12 @@ impl App {
                 ),
                 "in_progress" => ("● ", Style::default().fg(palette.accent)),
                 "pending" => ("○ ", Style::default().fg(palette.text)),
-                "cancelled" => ("✗ ", Style::default().fg(palette.muted)),
                 _ => ("○ ", Style::default().fg(palette.text)),
             };
 
-            let priority_marker = if todo.priority == "high" { "⚠ " } else { "" };
-
             let content = &todo.content;
             lines.push(Line::from(vec![
-                Span::styled(format!("{priority_marker}{checkbox}"), style),
+                Span::styled(checkbox.to_string(), style),
                 Span::styled(content.as_str(), style),
             ]));
         }

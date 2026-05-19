@@ -113,17 +113,14 @@ mod tests {
             TodoItem {
                 content: "Task 1".to_string(),
                 status: "completed".to_string(),
-                priority: "high".to_string(),
             },
             TodoItem {
                 content: "Task 2".to_string(),
                 status: "in_progress".to_string(),
-                priority: "medium".to_string(),
             },
             TodoItem {
                 content: "Task 3".to_string(),
                 status: "pending".to_string(),
-                priority: "low".to_string(),
             },
         ];
         let output = serde_json::to_string_pretty(&todos).unwrap();

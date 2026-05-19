@@ -779,7 +779,7 @@ impl SessionStore {
         if !todos.is_empty() {
             let guard = self.write_conn.lock().unwrap();
             let mut stmt = guard.prepare(
-                "INSERT INTO todos (session_id, position, content, status, priority) VALUES (?1, ?2, ?3, ?4, ?5)"
+                "INSERT INTO todos (session_id, position, content, status) VALUES (?1, ?2, ?3, ?4)"
             )?;
 
             for (position, todo) in todos.iter().enumerate() {
@@ -788,7 +788,6 @@ impl SessionStore {
                     position as i64,
                     &todo.content,
                     &todo.status,
-                    &todo.priority,
                 ])?;
             }
         }
@@ -799,14 +798,13 @@ impl SessionStore {
 
     pub fn load_todos(&self, session_id: Uuid) -> Result<Vec<TodoItem>> {
         let mut statement = self.read_conn.prepare(
-            "SELECT content, status, priority FROM todos WHERE session_id = ?1 ORDER BY position ASC",
+            "SELECT content, status FROM todos WHERE session_id = ?1 ORDER BY position ASC",
         )?;
 
         let rows = statement.query_map(params![session_id.to_string()], |row| {
             Ok(TodoItem {
                 content: row.get::<_, String>(0)?,
                 status: row.get::<_, String>(1)?,
-                priority: row.get::<_, String>(2)?,
             })
         })?;
 
@@ -2014,9 +2012,9 @@ impl SessionStore {
         {
             let mut stmt = self
                 .read_conn
-                .prepare("SELECT session_id, position, content, status, priority FROM todos WHERE session_id = ?1")?;
+                .prepare("SELECT session_id, position, content, status FROM todos WHERE session_id = ?1")?;
             let mut insert = tx.prepare(
-                "INSERT OR REPLACE INTO todos (session_id, position, content, status, priority) VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT OR REPLACE INTO todos (session_id, position, content, status) VALUES (?1, ?2, ?3, ?4)",
             )?;
             for sid in &session_id_strs {
                 let rows = stmt.query_map(params![sid], |row| {
@@ -2025,12 +2023,11 @@ impl SessionStore {
                         row.get::<_, i64>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
                     ))
                 })?;
                 for row in rows {
-                    let (sid, pos, content, status, priority) = row?;
-                    insert.execute(params![sid, pos, content, status, priority])?;
+                    let (sid, pos, content, status) = row?;
+                    insert.execute(params![sid, pos, content, status])?;
                 }
             }
         }

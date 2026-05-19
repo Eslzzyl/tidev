@@ -64,7 +64,6 @@ pub struct ApiFileDiff {
 pub struct ApiTodoItem {
     pub content: String,
     pub status: String,
-    pub priority: String,
 }
 
 /// Message in the API
@@ -163,7 +162,6 @@ pub async fn list_messages(
         .map(|t| ApiTodoItem {
             content: t.content,
             status: t.status,
-            priority: t.priority,
         })
         .collect();
 

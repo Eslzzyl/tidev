@@ -1,15 +1,12 @@
 import {
   Circle,
   CheckCircle2,
-  AlertCircle,
   Clock,
-  ArrowRight,
 } from "lucide-react";
 
 interface TodoItem {
   content: string;
-  status: "pending" | "in_progress" | "completed" | "cancelled";
-  priority: "low" | "medium" | "high";
+  status: "pending" | "in_progress" | "completed";
 }
 
 interface Props {
@@ -26,22 +23,13 @@ const statusIcon: Record<string, { icon: typeof Circle; className: string }> = {
     icon: CheckCircle2,
     className: "text-green-500 dark:text-green-400",
   },
-  cancelled: {
-    icon: Circle,
-    className: "text-neutral-300 dark:text-neutral-600 line-through",
-  },
-};
-
-const priorityColor: Record<string, string> = {
-  high: "text-red-500 dark:text-red-400",
-  medium: "text-amber-500 dark:text-amber-400",
-  low: "text-neutral-400 dark:text-neutral-500",
 };
 
 function parseTodos(output: string): TodoItem[] {
   try {
     const parsed = JSON.parse(output);
     if (Array.isArray(parsed)) return parsed;
+    if (parsed && Array.isArray(parsed.newTodos)) return parsed.newTodos;
     if (parsed && Array.isArray(parsed.todos)) return parsed.todos;
   } catch {
     // Not valid JSON
@@ -65,9 +53,7 @@ export function TodoRenderer({ output }: Props) {
       {todos.map((todo, idx) => {
         const StatusIcon = statusIcon[todo.status]?.icon ?? Circle;
         const statusClass = statusIcon[todo.status]?.className ?? "";
-        const priorityClass = priorityColor[todo.priority] ?? "";
-        const isDone =
-          todo.status === "completed" || todo.status === "cancelled";
+        const isDone = todo.status === "completed";
 
         return (
           <div
@@ -90,15 +76,6 @@ export function TodoRenderer({ output }: Props) {
                 {todo.content}
               </span>
             </div>
-            <span
-              className={`flex-shrink-0 text-xs font-medium ${priorityClass}`}
-            >
-              {todo.priority === "high"
-                ? "!!"
-                : todo.priority === "medium"
-                  ? "!"
-                  : ""}
-            </span>
           </div>
         );
       })}

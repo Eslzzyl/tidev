@@ -12,7 +12,6 @@ use crate::web::{error::WebResult, state::AppState};
 pub struct TodoItem {
     pub content: String,
     pub status: String,
-    pub priority: String,
 }
 
 /// Todo list response
@@ -36,7 +35,6 @@ pub async fn get_todos(
         .map(|t| TodoItem {
             content: t.content,
             status: t.status,
-            priority: t.priority,
         })
         .collect();
 

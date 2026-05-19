@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   Circle,
   Loader2,
-  XCircle,
 } from "lucide-react";
 import { useSessionStore } from "../../stores/useSessionStore";
 import { useUIStore } from "../../stores/useUIStore";
@@ -765,8 +764,6 @@ export function MessageInput({
                             <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-green-500" />
                           ) : todo.status === "in_progress" ? (
                             <Loader2 className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 animate-spin text-blue-500" />
-                          ) : todo.status === "cancelled" ? (
-                            <XCircle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-red-500" />
                           ) : (
                             <Circle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-neutral-400" />
                           )}

@@ -278,8 +278,7 @@ tool_args! {
 tool_args! {
     pub struct TodoItem {
         content: string("Brief description of the task"),
-        status: string("Current status of the task: pending, in_progress, completed, cancelled"),
-        priority: string("Priority level of the task: high, medium, low"),
+        status: string("Current status of the task: pending, in_progress, completed"),
     }
 }
 

@@ -767,14 +767,14 @@ pub(super) fn render_tool_result_detail_lines(
         struct RawTodo {
             content: String,
             status: Option<String>,
-            priority: Option<String>,
         }
 
         let raw_todos = if let Ok(todos) = serde_json::from_str::<Vec<RawTodo>>(effective_output) {
             Some(todos)
         } else if let Ok(value) = serde_json::from_str::<serde_json::Value>(effective_output) {
             value
-                .get("todos")
+                .get("newTodos")
+                .or_else(|| value.get("todos"))
                 .and_then(|v| serde_json::from_value::<Vec<RawTodo>>(v.clone()).ok())
         } else {
             None
@@ -786,7 +786,6 @@ pub(super) fn render_tool_result_detail_lines(
                 .map(|r| TodoItem {
                     content: r.content,
                     status: r.status.unwrap_or_else(|| "pending".to_string()),
-                    priority: r.priority.unwrap_or_else(|| "medium".to_string()),
                 })
                 .collect();
             return (
@@ -1515,15 +1514,12 @@ pub(super) fn render_todos_checkbox_list(
                     .add_modifier(Modifier::BOLD),
             ),
             "pending" => ("○ ", Style::default().fg(palette.text)),
-            "cancelled" => ("✗ ", Style::default().fg(palette.muted)),
             _ => ("○ ", Style::default().fg(palette.text)),
         };
 
-        let priority_marker = if todo.priority == "high" { "⚠ " } else { "" };
-
         let content = shorten(&todo.content, max_content_len);
         lines.push(Line::from(vec![
-            Span::styled(format!("  {priority_marker}{checkbox}"), style),
+            Span::styled(format!("  {checkbox}"), style),
             Span::styled(content, style),
         ]));
     }
