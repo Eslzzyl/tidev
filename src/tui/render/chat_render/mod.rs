@@ -701,61 +701,87 @@ impl App {
 
         // Changed Files section
         lines.push(Line::from(""));
-        lines.push(Line::from(vec![Span::styled(
-            "Changed Files",
-            Style::default()
-                .fg(palette.accent)
-                .add_modifier(Modifier::BOLD),
-        )]));
 
-        {
-            let mut all_diffs = Vec::new();
-            let mut seen_files = std::collections::HashSet::new();
-            for msg in self.conversation.visible_messages() {
-                if let Some(diffs_json) = &msg.file_diffs
-                    && let Ok(diffs) =
-                        serde_json::from_str::<Vec<crate::snapshot::FileDiff>>(diffs_json)
-                {
-                    for d in &diffs {
-                        if seen_files.insert(d.file.clone()) {
-                            all_diffs.push(d.clone());
-                        }
+        let mut all_diffs = Vec::new();
+        let mut seen_files = std::collections::HashSet::new();
+        for msg in self.conversation.visible_messages() {
+            if let Some(diffs_json) = &msg.file_diffs
+                && let Ok(diffs) =
+                    serde_json::from_str::<Vec<crate::snapshot::FileDiff>>(diffs_json)
+            {
+                for d in &diffs {
+                    if seen_files.insert(d.file.clone()) {
+                        all_diffs.push(d.clone());
                     }
                 }
             }
+        }
 
-            if all_diffs.is_empty() {
-                lines.push(Line::from(vec![Span::styled(
-                    "(no changes yet)",
-                    Style::default().fg(palette.muted),
-                )]));
-            } else {
-                // Sort: modified first, then added, then deleted
-                all_diffs.sort_by_key(|d| match d.status.as_deref() {
-                    Some("modified") => 0,
-                    Some("added") => 1,
-                    Some("deleted") => 2,
-                    _ => 3,
-                });
+        lines.push(Line::from(vec![
+            Span::styled(
+                "Changed Files",
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" ({})", all_diffs.len()),
+                Style::default().fg(palette.muted),
+            ),
+        ]));
 
-                for d in &all_diffs {
-                    let (status_icon, style) = match d.status.as_deref() {
-                        Some("added") => ("+ ", Style::default().fg(palette.success)),
-                        Some("deleted") => ("- ", Style::default().fg(palette.error)),
-                        _ => ("~ ", Style::default().fg(palette.warning)),
-                    };
+        if all_diffs.is_empty() {
+            lines.push(Line::from(vec![Span::styled(
+                "(no changes yet)",
+                Style::default().fg(palette.muted),
+            )]));
+        } else {
+            // Sort: modified first, then added, then deleted
+            all_diffs.sort_by_key(|d| match d.status.as_deref() {
+                Some("modified") => 0,
+                Some("added") => 1,
+                Some("deleted") => 2,
+                _ => 3,
+            });
 
-                    let filename = Path::new(&d.file)
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_else(|| d.file.clone());
+            // Available content width for right-alignment
+            let content_width = (area.width as usize).saturating_sub(4); // 2-char padding each side
 
-                    let summary = format!(
-                        "{}{} (+{}/-{})",
-                        status_icon, filename, d.additions, d.deletions
-                    );
-                    lines.push(Line::from(vec![Span::styled(summary, style)]));
-                }
+            for d in &all_diffs {
+                let filename = Path::new(&d.file)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| d.file.clone());
+
+                let add_str = format!("+{}", d.additions);
+                let del_str = format!("-{}", d.deletions);
+
+                // Filename in normal text color (matching opencode's text-strong)
+                let file_span =
+                    Span::styled(filename.clone(), Style::default().fg(palette.text));
+
+                // +N in green (matching opencode's text-diff-add-base)
+                let add_span =
+                    Span::styled(add_str.clone(), Style::default().fg(palette.diff_add));
+
+                // -M in red (matching opencode's text-diff-delete-base)
+                let del_span =
+                    Span::styled(del_str.clone(), Style::default().fg(palette.diff_delete));
+
+                // Calculate padding to right-align the counts (like opencode's space-between)
+                let fw = UnicodeWidthStr::width(filename.as_str());
+                let aw = UnicodeWidthStr::width(add_str.as_str());
+                let dw = UnicodeWidthStr::width(del_str.as_str());
+                // +2 for spaces between filename/counts and between the two counts
+                let padding = content_width.saturating_sub(fw + aw + dw + 2);
+
+                lines.push(Line::from(vec![
+                    file_span,
+                    Span::raw(" ".repeat(padding)),
+                    add_span,
+                    Span::raw(" "),
+                    del_span,
+                ]));
             }
         }
 

@@ -157,6 +157,8 @@ pub struct ThemePalette {
     pub success: Color,
     pub warning: Color,
     pub error: Color,
+    pub diff_add: Color,
+    pub diff_delete: Color,
     pub selection_bg: Color,
     pub selection_fg: Color,
     pub mode_build: Color,
