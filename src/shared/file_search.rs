@@ -39,18 +39,23 @@ pub struct FileSearchIndex {
     pub(crate) completed_generation: AtomicU64,
     worker_generation: AtomicU64,
     watcher_id_seed: AtomicU64,
+    revision: AtomicU64,
+    empty_cache: Mutex<(u64, Vec<FileSuggestion>)>,
 }
 
 impl Clone for FileSearchIndex {
     fn clone(&self) -> Self {
+        let snapshot = self.snapshot.lock().unwrap();
         Self {
             root: Mutex::new(self.root.lock().unwrap().clone()),
-            snapshot: Mutex::new(self.snapshot.lock().unwrap().clone()),
+            snapshot: Mutex::new(snapshot.clone()),
             watcher: Mutex::new(None), // Watcher is not cloned
             current_generation: AtomicU64::new(self.current_generation.load(Ordering::Acquire)),
             completed_generation: AtomicU64::new(self.completed_generation.load(Ordering::Acquire)),
             worker_generation: AtomicU64::new(self.worker_generation.load(Ordering::Acquire)),
             watcher_id_seed: AtomicU64::new(self.watcher_id_seed.load(Ordering::Acquire)),
+            revision: AtomicU64::new(self.revision.load(Ordering::Acquire)),
+            empty_cache: Mutex::new(self.empty_cache.lock().unwrap().clone()),
         }
     }
 }
@@ -89,6 +94,8 @@ struct IndexedEntry {
     lowercase_name: String,
     basename_char_offset: usize,
     kind: FileEntryKind,
+    depth: u32,
+    is_dotfile: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -141,6 +148,8 @@ impl FileSearchIndex {
             snapshot.segments = Arc::new(HashMap::new());
             snapshot.flat_cache = Arc::new(Vec::new());
             snapshot.revision = snapshot.revision.wrapping_add(1);
+            self.revision.store(snapshot.revision, Ordering::Release);
+            self.empty_cache.lock().unwrap().0 = 0;
         }
 
         self.current_generation.load(Ordering::Acquire)
@@ -332,6 +341,7 @@ impl FileSearchIndex {
             snapshot.segments = Arc::new(segments);
             snapshot.flat_cache = Arc::new(flat_cache);
             snapshot.revision = snapshot.revision.wrapping_add(1);
+            self.revision.store(snapshot.revision, Ordering::Release);
         }
 
         self.completed_generation
@@ -360,17 +370,33 @@ impl FileSearchIndex {
         snapshot.segments = Arc::new(segments);
         snapshot.flat_cache = Arc::new(flat_cache);
         snapshot.revision = snapshot.revision.wrapping_add(1);
+        self.revision.store(snapshot.revision, Ordering::Release);
     }
 
     pub fn revision(&self) -> u64 {
-        self.snapshot.lock().unwrap().revision
+        self.revision.load(Ordering::Acquire)
     }
 
     pub fn search(&self, query: &str) -> Vec<FileSuggestion> {
         let normalized = query.trim().to_ascii_lowercase();
-        let (entries, _revision) = {
+        if normalized.is_empty() {
+            let revision = self.revision.load(Ordering::Acquire);
+            let mut cache = self.empty_cache.lock().unwrap();
+            if cache.0 == revision {
+                return cache.1.clone();
+            }
+            let entries = {
+                let snapshot = self.snapshot.lock().unwrap();
+                Arc::clone(&snapshot.flat_cache)
+            };
+            let result = rank_entries(entries.as_slice(), &normalized);
+            *cache = (revision, result.clone());
+            return result;
+        }
+
+        let entries = {
             let snapshot = self.snapshot.lock().unwrap();
-            (Arc::clone(&snapshot.flat_cache), snapshot.revision)
+            Arc::clone(&snapshot.flat_cache)
         };
 
         rank_entries(entries.as_slice(), &normalized)
@@ -387,6 +413,8 @@ impl Default for FileSearchIndex {
             completed_generation: AtomicU64::new(0),
             worker_generation: AtomicU64::new(0),
             watcher_id_seed: AtomicU64::new(0),
+            revision: AtomicU64::new(0),
+            empty_cache: Mutex::new((0, Vec::new())),
         }
     }
 }
@@ -537,6 +565,10 @@ fn build_indexed_entry(rel: &Path, path: &Path, is_dir: bool) -> Option<IndexedE
             .map(|value| value.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default(),
         basename_char_offset: basename_char_offset(&path_text),
+        depth: path_text.bytes().filter(|b| *b == b'/').count() as u32,
+        is_dotfile: rel
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with('.')),
         path: path_text,
         display,
         kind,
@@ -545,26 +577,19 @@ fn build_indexed_entry(rel: &Path, path: &Path, is_dir: bool) -> Option<IndexedE
 
 fn rank_entries(indexed_entries: &[IndexedEntry], query: &str) -> Vec<FileSuggestion> {
     if query.is_empty() {
-        let mut suggestions = indexed_entries
-            .iter()
-            .map(|entry| entry.suggestion(Vec::new()))
-            .collect::<Vec<_>>();
-        suggestions.sort_by(|left, right| {
+        let mut entries: Vec<&IndexedEntry> = indexed_entries.iter().collect();
+        entries.sort_by(|left, right| {
             kind_rank(left.kind)
                 .cmp(&kind_rank(right.kind))
-                .then_with(|| {
-                    // Shallower entries first (root-level prioritized)
-                    let depth_left = left.path.bytes().filter(|b| *b == b'/').count();
-                    let depth_right = right.path.bytes().filter(|b| *b == b'/').count();
-                    depth_left.cmp(&depth_right)
-                })
-                .then_with(|| {
-                    // Non-dotfile names first within the same depth
-                    is_dotfile_path(&left.path).cmp(&is_dotfile_path(&right.path))
-                })
+                .then_with(|| left.depth.cmp(&right.depth))
+                .then_with(|| left.is_dotfile.cmp(&right.is_dotfile))
                 .then_with(|| left.display.cmp(&right.display))
         });
-        suggestions.truncate(MAX_SUGGESTIONS);
+        entries.truncate(MAX_SUGGESTIONS);
+        let suggestions: Vec<FileSuggestion> = entries
+            .into_iter()
+            .map(|entry| entry.suggestion(Vec::new()))
+            .collect();
         suggestions
     } else {
         let mut ranked: Vec<_> = indexed_entries
@@ -579,12 +604,7 @@ fn rank_entries(indexed_entries: &[IndexedEntry], query: &str) -> Vec<FileSugges
             right_score
                 .cmp(left_score)
                 .then_with(|| kind_rank(left.kind).cmp(&kind_rank(right.kind)))
-                .then_with(|| {
-                    // Non-dotfile names first when scores and kinds are equal
-                    left.lowercase_name
-                        .starts_with('.')
-                        .cmp(&right.lowercase_name.starts_with('.'))
-                })
+                .then_with(|| left.is_dotfile.cmp(&right.is_dotfile))
                 .then_with(|| left.display.cmp(&right.display))
         });
         ranked.truncate(MAX_SUGGESTIONS);
@@ -667,15 +687,10 @@ fn score_entry(entry: &IndexedEntry, query: &str) -> Option<MatchCandidate> {
         FileEntryKind::Image => 8,
         FileEntryKind::File => 0,
     };
-    let depth = entry.path.bytes().filter(|byte| *byte == b'/').count() as u32;
+    let depth = entry.depth;
     let depth_penalty = depth * 6;
     let root_bonus = if depth == 0 { 50 } else { 0 };
-    // Penalty for hidden files/dirs (starting with '.') so non-dotfiles rank higher
-    let dotfile_penalty = if entry.lowercase_name.starts_with('.') {
-        60
-    } else {
-        0
-    };
+    let dotfile_penalty = if entry.is_dotfile { 60 } else { 0 };
 
     best.map(|mut candidate| {
         candidate.score = candidate
@@ -826,12 +841,6 @@ fn kind_rank(kind: FileEntryKind) -> usize {
         FileEntryKind::Image => 1,
         FileEntryKind::File => 2,
     }
-}
-
-/// Returns true if the basename (last component) of a relative path starts with '.'
-fn is_dotfile_path(path: &str) -> bool {
-    let basename = path.rsplit_once('/').map(|(_, name)| name).unwrap_or(path);
-    basename.starts_with('.')
 }
 
 fn is_image_path(path: &Path) -> bool {

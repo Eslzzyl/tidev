@@ -600,19 +600,38 @@ pub(super) fn spans_with_highlights(
     normal_style: Style,
     highlighted_style: Style,
 ) -> Vec<Span<'static>> {
-    let mut spans = Vec::with_capacity(text.chars().count());
-    let mut highlight_indices = highlight_indices.iter().copied().peekable();
+    if highlight_indices.is_empty() {
+        return vec![Span::styled(text.to_string(), normal_style)];
+    }
+
+    let mut spans = Vec::new();
+    let mut hi_iter = highlight_indices.iter().copied().peekable();
+    let mut current_run = String::new();
+    let mut current_style = normal_style;
+
+    macro_rules! flush_run {
+        () => {
+            if !current_run.is_empty() {
+                spans.push(Span::styled(std::mem::take(&mut current_run), current_style));
+            }
+        };
+    }
 
     for (index, ch) in text.chars().enumerate() {
-        let style = if highlight_indices.peek().is_some_and(|next| *next == index) {
-            highlight_indices.next();
+        let style = if hi_iter.peek().is_some_and(|next| *next == index) {
+            hi_iter.next();
             highlighted_style
         } else {
             normal_style
         };
 
-        spans.push(Span::styled(ch.to_string(), style));
+        if style != current_style {
+            flush_run!();
+            current_style = style;
+        }
+        current_run.push(ch);
     }
+    flush_run!();
 
     spans
 }
