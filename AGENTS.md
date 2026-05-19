@@ -1,32 +1,52 @@
-# TiDev
-
-A terminal AI coding assistant built with Rust.
-
 ## Build & Verify
 
 ```sh
 cargo check          # faster than cargo build
-cargo clippy         # linting
-cargo clippy --fix   # auto-fix issues, then manually edit remaining ones
-cargo test
+cargo clippy         # linting (no rustfmt config in root — uses defaults)
+cargo clippy --fix   # auto-fix issues
+cargo test           # >200 test functions, 8 async; uses tempfile crate
 ```
+
+## Key CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `tidev` (no subcommand) | Terminal TUI (default) |
+| `tidev gateway` | Start gateway server (Telegram + QQ bots) |
+| `tidev web` | Start web UI server |
+| `tidev web --dev-fs` | Serve web frontend from `web/dist` instead of embedded assets |
+| `tidev db migrate` | Apply pending schema migrations |
+| `tidev db status` | Show current vs. latest schema version |
+| `tidev export --session <UUID>` | Export session(s) to plain SQLite (no zstd) |
+| `tidev export --all` | Export all sessions |
+| `tidev tmp list` | List tidev temp files in /tmp |
+| `tidev tmp clean` | Clean old temp files (`--dry-run` to preview) |
 
 ## Entry Points
 
-- `src/main.rs` → `pub fn run()` in `src/lib.rs`
-- Default mode: `app::run()` (terminal TUI)
-- Gateway mode: `tidev gateway telegram` runs `gateway::run()`
+- `src/main.rs` → `pub fn run()` in `src/lib.rs` (CLI dispatch via clap)
+- Default mode: Terminal UI (`src/tui/`)
+- Gateway mode: `tidev gateway` → `gateway::run()` (Telegram + QQ)
+- Web mode: `tidev web` → `web::run()` (axum HTTP+WS, frontend in `web/`)
+- Session export: `tidev export --session <UUID>`
 
 ## Architecture (key modules)
 
-- `src/app.rs` — main TUI run loop
-- `src/storage.rs` — SQLite session persistence (`SessionStore`)
-- `src/storage/migration.rs` — schema migration runner
-- `src/llm.rs` — LLM provider abstraction
-- `src/context.rs` — conversation context management
-- `src/tooling.rs` — agent tool definitions
-- `src/instructions.rs` — instruction file handling
-- `src/snapshot.rs` — file tree snapshots
+- `src/agent/runtime.rs` — **shared agent loop** (LLM ↔ tool execution) used by all frontends. Contains `run_agent_loop()` and `run_subagent()`.
+- `src/agent/mod.rs` — 6 agent types: General, Explorer, Librarian, Oracle, Designer, Fixer
+- `src/tui/` — terminal UI (ratatui + crossterm); `src/tui/core/run.rs` is the TUI entry point
+- `src/web/` — axum web server; `routes/`, `event_bus.rs` (WebSocket events), `state.rs`
+- `src/gateway/` — Telegram (`telegram/`) and QQ (`qq.rs`) bot integrations via shared channel orchestrator
+- `src/storage/` — SQLite persistence (`SessionStore` with separate read/write connections); schema in `schema.rs`, migrations in `migration.rs`
+- `src/llm/` — LLM provider abstraction (Anthropic `anthropic.rs`, OpenAI chat `openai.rs`, OpenAI Responses API `responses.rs`)
+- `src/config/` — config loading, auth storage, provider config, MCP config, sandbox config, reasoning/thinking levels
+- `src/tooling/` — tool definitions, `ToolRegistry`, `ToolArgs` trait, `SkillCatalog`, `FileReadTracker`
+- `src/memory/` — memory/graph/retention system (graph nodes/edges, consolidation, eviction, lessons)
+- `src/sandbox/` — sandbox execution (bwrap, landlock, seatbelt, process hardening)
+- `src/snapshot/` — git snapshot/revert for workspace file tracking
+- `src/mcp.rs` — Model Context Protocol (experimental); child process and streamable HTTP transports
+- `src/instructions.rs` — instruction file resolution (AGENTS.md, CLAUDE.md, etc.) with upward directory walk
+- `src/prompts.rs` — session modes: `Plan` (read-only) and `Build` (full tools); system prompts
 
 ## Storage Locations
 
@@ -34,54 +54,66 @@ cargo test
 - Auth: `~/.local/share/tidev/auth.json`
 - DB: `~/.local/share/tidev/sessions.sqlite3`
 
-## Database Schema & Migrations
+## Database Schema
 
-Tables: `meta`, `sessions`, `session_workspaces`, `session_reverts`, `messages`, `tool_events`, `todos`, `tool_permissions`.
+Tables: `meta`, `sessions`, `session_workspaces`, `session_instruction_sources`, `session_reverts`, `messages`, `tool_events`, `todos`, `tool_permissions`, `graph_nodes`, `graph_edges`, `retention_scores`.
 
-Schema changes are handled by the migration system in `src/storage/migration.rs`.
+### Schema changes
 
-### How to add a migration
-
-1. **Append** a `Migration` entry to `MIGRATIONS` in `src/storage/migration.rs`:
-   ```rust
-   Migration {
-       version: 33,
-       description: "Add collapsed column to messages",
-       sql: "ALTER TABLE messages ADD COLUMN collapsed INTEGER NOT NULL DEFAULT 0;",
-   }
-   ```
-2. **Update `SCHEMA_SQL`** in `src/storage/schema.rs` so fresh installations get the complete schema.
-3. **Bump `SCHEMA_VERSION`** in `src/storage/schema.rs`.
-4. Run `cargo test` to verify.
-
-Migrations auto-apply on startup. You can also manually run `tidev db migrate` or check status with `tidev db status`.
+1. Append a `Migration` entry to `MIGRATIONS` in `src/storage/migration.rs`
+2. Update `SCHEMA_SQL` in `src/storage/schema.rs` for fresh installs
+3. Bump `SCHEMA_VERSION` in `src/storage/schema.rs`
+4. Run `cargo test` to verify
 
 ### Squashing old migrations
 
-When many small migrations have accumulated:
-1. Update `SCHEMA_SQL` to represent the cumulative state of the squashed migrations.
-2. Remove the squashed entries from `MIGRATIONS` in `migration.rs`.
-3. For each existing database, update `meta` row `('schema_version', '<new_baseline_version>')`.
+1. Update `SCHEMA_SQL` to cumulative squashed state
+2. Remove squashed entries from `MIGRATIONS`
+3. Update `meta` row `('schema_version', '<new_baseline_version>')` for existing databases
 
-### CLI commands
+## Build System
 
-- `tidev db migrate` — apply pending migrations
-- `tidev db status` — show current vs. latest schema version
+- `build.rs` builds web frontend (`pnpm build` in `web/`) and embeds assets via `include_bytes!`
+- If `pnpm` is not available, the web frontend is skipped and `tidev web` shows a placeholder page (TUI works fine)
+- Release profile optimizes for binary size: `opt-level = "s"`, `lto = true`, `codegen-units = 1`, `strip = true`
 
 ## Provider Presets
 
-`presets.toml` in the repo root is merged with user config at runtime. Do not put user credentials in this file.
+`presets.toml` in the repo root is merged with user config at runtime.
 
 ## Submodules
 
-- `codex/`
-- `opencode/`
-- `rtk/`
-- `nanobot/`
-- `zeroclaw/`
+| Path | Upstream |
+|------|----------|
+| `opencode/` | [anomalyco/opencode](https://github.com/anomalyco/opencode) |
+| `codex/` | [openai/codex](https://github.com/openai/codex) |
+| `zeroclaw/` | [zeroclaw-labs/zeroclaw](https://github.com/zeroclaw-labs/zeroclaw) |
+| `opencode-dynamic-context-pruning/` | [Opencode-DCP](https://github.com/Opencode-DCP/opencode-dynamic-context-pruning) |
 
-## Web frontend
+## Web Frontend
 
-web frontend in ./web/
+See `web/AGENTS.md`. Uses **pnpm** (not npm/yarn). Build commands:
 
-use pnpm as package manager.
+```bash
+cd web && pnpm install && pnpm build
+```
+
+Dev server: `pnpm dev` (Vite, serves from filesystem). TypeScript 6.0 + React 19 + Tailwind CSS 4.
+
+## npm Package
+
+`npm/tidev/` publishes the binary via GitHub release artifacts (`npm install -g tidev`). Installation downloads the correct platform binary in `scripts/install.js`.
+
+## Release
+
+Triggered by pushing a `v*` tag. CI workflow (`.github/workflows/release.yml`):
+- Builds for 5 platforms (Linux x64/ARM64, macOS x64/ARM64, Windows x64)
+- Requires `libdbus-1-dev` on Linux
+- Builds web frontend, then `cargo build --release --locked`
+- Creates GitHub Release with checksum manifest
+- Publishes to npm (`npm/tidev/`)
+
+## Important Conventions
+
+- `cargo clippy` for linting; no root-level rustfmt config (uses defaults)
+- Database columns with large content (messages, tool events) are zstd-compressed at the application layer
