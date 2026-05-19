@@ -495,7 +495,18 @@ impl App {
                     "merge_step_diffs: updating msg.file_diffs with {} files",
                     merged.len()
                 );
-                msg.file_diffs = Some(json);
+                msg.file_diffs = Some(json.clone());
+                // Persist immediately so changed files survive app restart
+                if let Err(e) = self.store.update_message_file_diffs(
+                    self.conversation.session_id,
+                    msg_id,
+                    &json,
+                ) {
+                    crate::log_warn!(
+                        "merge_step_diffs: failed to persist file_diffs: {}",
+                        e
+                    );
+                }
                 self.invalidate_active_message_render_cache_for(msg_id);
             }
         }
