@@ -143,6 +143,9 @@ impl App {
                 .max(3),
         );
 
+        // In subsession, the navigation area needs only 3 rows (1 content + 1 padding above/below)
+        let subsession_nav_height: u16 = 3;
+
         // Handle workspace boundary dialog (similar to question dialog)
         if let Some(dialog) = self.workspace_boundary_dialog.clone() {
             let dialog_height = dialog
@@ -208,7 +211,13 @@ impl App {
         let layout = Layout::vertical([
             Constraint::Min(6),
             Constraint::Length(queued_height as u16),
-            Constraint::Length(composer_height),
+            Constraint::Length(
+                if self.conversation.parent_session_id.is_some() {
+                    subsession_nav_height
+                } else {
+                    composer_height
+                },
+            ),
             Constraint::Length(1),
             Constraint::Length(1),
         ])
@@ -352,12 +361,9 @@ impl App {
         let palette = self.palette();
 
         let block = Block::default().style(Style::default().bg(palette.panel));
-
         frame.render_widget(block, area);
 
-        let inner = area; // No border margins needed
-
-        // Center the navigation hints
+        // Build navigation hint
         let hint = Line::from(vec![
             Span::styled("Up", Style::default().fg(palette.accent_soft)),
             Span::styled(": return to parent  ", Style::default().fg(palette.muted)),
@@ -367,11 +373,21 @@ impl App {
             Span::styled(": switch subagent", Style::default().fg(palette.muted)),
         ]);
 
+        // Vertically center the single-line hint in the middle of the 3-row area
+        let content_height: u16 = 1;
+        let y_offset = area.height.saturating_sub(content_height) / 2;
+        let content_rect = Rect {
+            x: area.x,
+            y: area.y + y_offset,
+            width: area.width,
+            height: content_height.min(area.height),
+        };
+
         let paragraph = Paragraph::new(hint)
             .alignment(Alignment::Center)
             .style(Style::default().fg(palette.text));
 
-        frame.render_widget(paragraph, inner);
+        frame.render_widget(paragraph, content_rect);
     }
 
     pub(super) fn render_messages(&mut self, frame: &mut Frame<'_>, area: Rect) {
