@@ -646,7 +646,7 @@ mod tests {
         config::ConfigPaths,
         session::{Message, MessageRole},
     };
-    use std::{fs, path::PathBuf, process::Command};
+    use std::{fs, path::Path, path::PathBuf, process::Command};
 
     struct CwdGuard(PathBuf);
 
@@ -663,9 +663,9 @@ mod tests {
     }
 
     fn build_app(
-        workspace_root: &PathBuf,
-        config_root: &PathBuf,
-        data_root: &PathBuf,
+        workspace_root: &Path,
+        config_root: &Path,
+        data_root: &Path,
         init_git: bool,
     ) -> (App, Runtime, CwdGuard) {
         let original_cwd = std::env::current_dir().expect("cwd should be readable");
@@ -681,8 +681,8 @@ mod tests {
         }
 
         let paths = ConfigPaths {
-            config_dir: config_root.clone(),
-            data_dir: data_root.clone(),
+            config_dir: config_root.to_path_buf(),
+            data_dir: data_root.to_path_buf(),
             config_file: config_root.join("config.toml"),
             auth_file: data_root.join("auth.json"),
             database_file: data_root.join("sessions.sqlite3"),

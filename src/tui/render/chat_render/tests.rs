@@ -1,6 +1,4 @@
-#[cfg(test)]
-mod tests {
-    use crate::config::{AppConfig, AuthStore};
+use crate::config::{AppConfig, AuthStore};
     use crate::prompts::SessionMode;
     use crate::session::{Conversation, Message, MessageRole};
     use crate::theme::ThemePalette;
@@ -367,4 +365,3 @@ A: Rust, Python";
         let max_scroll = total_lines.saturating_sub(app.message_viewport_lines.max(1));
         assert!(app.message_scroll_offset <= max_scroll);
     }
-}
