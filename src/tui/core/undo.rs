@@ -129,14 +129,21 @@ impl App {
                 msg.patch_files = Some(patch_files_json);
             }
 
-            // Dispatch async diff_full for accurate sidebar display with full patches
+            // Dispatch async diff_full for accurate sidebar display with full patches.
+            // Skip if from and to are the same hash — this happens when
+            // finalize_snapshot is called a second time (from finish_assistant_turn)
+            // after step data was already consumed by ToolCompleted.  dispatching
+            // diff_full(same, same) would return an empty list and overwrite the
+            // previously stored file_diffs with nothing.
             let final_hash = step_hashes.last().cloned().unwrap_or(initial_hash.clone());
-            self.dispatch_async_diff_full(
-                runtime,
-                initial_hash.clone(),
-                final_hash,
-                last_user_message_id,
-            );
+            if final_hash != initial_hash {
+                self.dispatch_async_diff_full(
+                    runtime,
+                    initial_hash.clone(),
+                    final_hash,
+                    last_user_message_id,
+                );
+            }
         }
 
         // Clear per-step tracking state
