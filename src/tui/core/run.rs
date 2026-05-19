@@ -299,6 +299,9 @@ impl App {
             force_full_redraw: false,
         };
 
+        // Start background file indexing so the @-mention panel is ready
+        // when the user first presses the @ key.
+        app.at_mention.start_background_indexing(&workspace_root);
         crate::log_info!("startup: App::new_with_paths total in {:?}", _t0.elapsed());
 
         Ok(app)
