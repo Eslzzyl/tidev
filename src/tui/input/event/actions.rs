@@ -620,7 +620,7 @@ impl App {
             return Ok(());
         }
 
-        let attachments = self.build_prompt_attachments(&prompt)?;
+        let (attachments, instruction_sources) = self.build_prompt_attachments(&prompt)?;
         if attachments.iter().any(MessageAttachment::is_image) && !self.active_model.supports_images
         {
             self.last_notice = Some("This model does not support image attachments".to_string());
@@ -628,12 +628,12 @@ impl App {
         }
 
         if self.pending_request || !self.pending_prompt_queue.is_empty() {
-            self.queue_prompt(prompt, attachments);
+            self.queue_prompt(prompt, attachments, instruction_sources);
             self.draft_attachments.clear();
             return Ok(());
         }
 
-        self.submit_prompt_now(prompt, attachments, runtime)
+        self.submit_prompt_now(prompt, attachments, instruction_sources, runtime)
     }
 
     pub(crate) fn toggle_stats_panel(&mut self) {

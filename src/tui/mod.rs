@@ -309,8 +309,11 @@ pub fn run() -> Result<()> {
 impl App {
     /// Build prompt attachments for @ references with truncation like opencode.
     /// Uses build_at_reference_attachment for @ references to apply read tool truncation.
-    fn build_prompt_attachments(&self, prompt: &str) -> Result<Vec<MessageAttachment>> {
+    /// Returns (attachments, instruction_sources) where instruction_sources contains
+    /// the deduplicated paths of nearby instruction files that were loaded.
+    fn build_prompt_attachments(&self, prompt: &str) -> Result<(Vec<MessageAttachment>, Vec<String>)> {
         let mut attachments = Vec::new();
+        let mut all_instruction_sources = Vec::new();
         let mut seen_paths = std::collections::BTreeSet::new();
 
         for path in self.inline_file_references(prompt) {
@@ -320,18 +323,27 @@ impl App {
 
             // Use build_at_reference_attachment for @ references with truncation
             match self.build_at_reference_attachment(&path)? {
-                Some(attachment) => attachments.push(attachment),
+                Some((attachment, sources)) => {
+                    attachments.push(attachment);
+                    for source in sources {
+                        if !all_instruction_sources.contains(&source) {
+                            all_instruction_sources.push(source);
+                        }
+                    }
+                }
                 None => continue,
             }
         }
 
         // Add draft attachments (pasted files) without truncation
         attachments.extend(self.draft_attachments.iter().cloned());
-        Ok(attachments)
+        Ok((attachments, all_instruction_sources))
     }
 
     /// Build attachment for @ reference with truncation like opencode's read tool.
-    fn build_at_reference_attachment(&self, path: &str) -> Result<Option<MessageAttachment>> {
+    /// Returns (MessageAttachment, instruction_sources) where instruction_sources
+    /// contains the paths of nearby instruction files that were loaded.
+    fn build_at_reference_attachment(&self, path: &str) -> Result<Option<(MessageAttachment, Vec<String>)>> {
         use crate::tooling::builtin::file::read_file_for_at_reference;
 
         let absolute = self.resolve_workspace_path(path);
@@ -342,10 +354,10 @@ impl App {
 
         if metadata.is_dir() {
             let tree = build_directory_tree(&absolute, 2, 80)?;
-            return Ok(Some(MessageAttachment::DirectoryReference {
+            return Ok(Some((MessageAttachment::DirectoryReference {
                 path: path.trim_end_matches(['/', '\\']).to_string(),
                 tree: Arc::new(tree),
-            }));
+            }, Vec::new())));
         }
 
         if let Some(mime) = image_mime_from_path(&absolute) {
@@ -356,34 +368,54 @@ impl App {
                 .unwrap_or(path)
                 .to_string();
             let data_url = format!("data:{mime};base64,{}", BASE64_STANDARD.encode(bytes));
-            return Ok(Some(MessageAttachment::Image {
+            return Ok(Some((MessageAttachment::Image {
                 filename,
                 mime: mime.to_string(),
                 data_url,
-            }));
+            }, Vec::new())));
         }
 
         // For text files, read with truncation like opencode's read tool
         match read_file_for_at_reference(&self.workspace_root, path, false) {
-            Ok((tool_output, truncated)) => {
+            Ok((mut tool_output, truncated)) => {
+                // Load nearby instruction files (like the read tool does)
+                let mut instruction_sources = Vec::new();
+                if let Ok(nearby) = instructions::resolve_nearby_instructions(
+                    &self.workspace_root,
+                    &self.paths.config_dir,
+                    &absolute,
+                )
+                && !nearby.is_empty()
+                {
+                    let mut reminders = Vec::new();
+                    for (ipath, content) in nearby {
+                        instruction_sources.push(ipath.to_string_lossy().to_string());
+                        reminders.push(content);
+                    }
+                    tool_output.push_str(&format!(
+                        "\n\n<system-reminder>\n{}\n</system-reminder>",
+                        reminders.join("\n\n")
+                    ));
+                }
+
                 // Also read full content for display purposes
                 let content = std::fs::read_to_string(&absolute).unwrap_or_else(|_| String::new());
-                Ok(Some(MessageAttachment::FileReference {
+                Ok(Some((MessageAttachment::FileReference {
                     path: path.to_string(),
                     content: Arc::new(content),
                     tool_output: Some(Arc::new(tool_output)),
                     truncated,
-                }))
+                }, instruction_sources)))
             }
             Err(_error) => {
                 // Fall back to full content if read fails
                 let content = std::fs::read_to_string(&absolute).unwrap_or_else(|_| String::new());
-                Ok(Some(MessageAttachment::FileReference {
+                Ok(Some((MessageAttachment::FileReference {
                     path: path.to_string(),
                     content: Arc::new(content),
                     tool_output: None,
                     truncated: false,
-                }))
+                }, Vec::new())))
             }
         }
     }
@@ -1523,7 +1555,12 @@ impl App {
         Ok(())
     }
 
-    fn queue_prompt(&mut self, prompt: String, attachments: Vec<MessageAttachment>) {
+    fn queue_prompt(&mut self, prompt: String, attachments: Vec<MessageAttachment>, instruction_sources: Vec<String>) {
+        // Persist and display nearby instruction sources immediately
+        if let Err(e) = self.update_loaded_instruction_sources(&instruction_sources) {
+            crate::log_warn!("Failed to update instruction sources for queued prompt: {}", e);
+        }
+
         // If there's a pending mode switch, use that mode for the queued message
         // so the user's intent to switch modes takes effect on the next message.
         let mode = self.pending_mode.unwrap_or(self.mode);
@@ -1552,6 +1589,7 @@ impl App {
         &mut self,
         prompt: String,
         attachments: Vec<MessageAttachment>,
+        instruction_sources: Vec<String>,
         runtime: &Runtime,
     ) -> Result<()> {
         let _t_submit = std::time::Instant::now();
@@ -1559,6 +1597,11 @@ impl App {
 
         if prompt.is_empty() && attachments.is_empty() {
             return Ok(());
+        }
+
+        // Persist and display nearby instruction sources from @ references
+        if let Err(e) = self.update_loaded_instruction_sources(&instruction_sources) {
+            crate::log_warn!("Failed to update instruction sources for prompt: {}", e);
         }
 
         if self.screen == Screen::Welcome {
