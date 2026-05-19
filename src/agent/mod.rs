@@ -94,11 +94,12 @@ impl AgentType {
                 "webfetch",
                 "memory",
             ]),
-            // Librarian: research tools (no code modification).
+            // Librarian: research tools + bash for source-code study (no code modification).
             Self::Librarian => Some(&[
                 "read",
                 "glob",
                 "grep",
+                "bash",
                 "websearch",
                 "webfetch",
                 "question",
