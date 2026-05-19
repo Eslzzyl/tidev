@@ -2658,7 +2658,7 @@ mod tests {
         for (json_str, expected_read_only) in test_cases {
             let args = serde_json::from_str::<TaskArgs>(json_str).unwrap();
             let is_ro = crate::agent::AgentType::parse(args.subagent_type.trim())
-                .map_or(false, |t| t.is_read_only());
+                .is_some_and(|t| t.is_read_only());
             assert_eq!(is_ro, expected_read_only, "failed for: {json_str}");
         }
     }

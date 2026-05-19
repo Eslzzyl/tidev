@@ -417,6 +417,10 @@ impl SnapshotService {
     }
 }
 
+fn clash(a: &str, b: &str) -> bool {
+    a == b || a.starts_with(&format!("{}/", b)) || b.starts_with(&format!("{}/", a))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ConfigPaths, SnapshotService};
@@ -549,8 +553,4 @@ mod tests {
         let _ = fs::remove_dir_all(&workspace_root);
         let _ = fs::remove_dir_all(&data_dir);
     }
-}
-
-fn clash(a: &str, b: &str) -> bool {
-    a == b || a.starts_with(&format!("{}/", b)) || b.starts_with(&format!("{}/", a))
 }

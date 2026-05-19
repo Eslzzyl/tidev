@@ -163,20 +163,6 @@ fn should_ignore_path(path: &str) -> bool {
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::should_ignore_path;
-
-    #[test]
-    fn ignores_git_metadata_paths() {
-        assert!(should_ignore_path(".git"));
-        assert!(should_ignore_path(".git/config"));
-        assert!(should_ignore_path("repo/.git/info/exclude"));
-        assert!(!should_ignore_path(".gitignore"));
-        assert!(!should_ignore_path("src/git.rs"));
-    }
-}
-
 pub fn check_ignored(gitdir: &Path, worktree: &Path, files: &[String]) -> Result<HashSet<String>> {
     if files.is_empty() {
         return Ok(HashSet::new());
@@ -720,4 +706,18 @@ pub fn diff_file(
         .context("failed to run git diff for file")?;
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_ignore_path;
+
+    #[test]
+    fn ignores_git_metadata_paths() {
+        assert!(should_ignore_path(".git"));
+        assert!(should_ignore_path(".git/config"));
+        assert!(should_ignore_path("repo/.git/info/exclude"));
+        assert!(!should_ignore_path(".gitignore"));
+        assert!(!should_ignore_path("src/git.rs"));
+    }
 }
