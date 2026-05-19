@@ -510,6 +510,7 @@ impl App {
         let cached = CachedSessionRuntime {
             conversation: self.conversation.clone(),
             active_model: self.active_model.clone(),
+            mode: self.mode,
             context_manager: self.context_manager.clone(),
             pending_tool_execution: self.pending_tool_execution.clone(),
             permission_dialog: self.permission_dialog.clone(),
@@ -655,6 +656,7 @@ impl App {
         self.question_dialog = cached.question_dialog;
         self.running_tool_executions = cached.running_tool_executions;
         self.running_subagent_executions = cached.running_subagent_executions;
+        self.mode = cached.mode;
         self.pending_request = cached.pending_request;
         self.pending_prompt_queue = cached.pending_prompt_queue;
         self.active_request_id = cached.active_request_id;
@@ -846,6 +848,7 @@ impl App {
         let mut runtime = CachedSessionRuntime {
             conversation,
             active_model,
+            mode: SessionMode::Build,
             context_manager,
             pending_tool_execution: None,
             permission_dialog: None,
@@ -924,6 +927,23 @@ impl App {
             .find_map(|m| m.thinking_level.as_ref())
         {
             runtime.active_model.thinking_level = last_level.clone();
+        }
+
+        // Restore mode from last user message
+        if let Some(last_mode) = runtime
+            .conversation
+            .messages
+            .iter()
+            .rev()
+            .find_map(|m| {
+                if matches!(m.role, crate::session::MessageRole::User) {
+                    m.mode
+                } else {
+                    None
+                }
+            })
+        {
+            runtime.mode = last_mode;
         }
 
         Ok(Some(runtime))

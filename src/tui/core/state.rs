@@ -181,6 +181,7 @@ impl QueuedPrompt {
 pub(crate) struct CachedSessionRuntime {
     pub(crate) conversation: Conversation,
     pub(crate) active_model: ActiveModel,
+    pub(crate) mode: SessionMode,
     pub(crate) context_manager: ContextManager,
     pub(crate) pending_tool_execution: Option<PendingToolExecution>,
     pub(crate) permission_dialog: Option<PermissionDialogState>,
