@@ -237,18 +237,16 @@ pub(super) fn render_message_cards_inner(
                 content_lines.push(line_with_style(&attachment.summary(), palette.accent_soft));
             }
             let mut lines = Vec::new();
-            lines.push(Line::from(""));
+            let prefix_style = Style::default()
+                .fg(palette.accent)
+                .add_modifier(Modifier::BOLD);
+            lines.push(Line::from(vec![Span::styled("┃ ", prefix_style)]));
             for line in content_lines {
-                let mut spans = vec![Span::styled(
-                    "┃ ",
-                    Style::default()
-                        .fg(palette.accent)
-                        .add_modifier(Modifier::BOLD),
-                )];
+                let mut spans = vec![Span::styled("┃ ", prefix_style)];
                 spans.extend(line.spans);
                 lines.push(Line::from(spans));
             }
-            lines.push(Line::from(""));
+            lines.push(Line::from(vec![Span::styled("┃ ", prefix_style)]));
             lines
         })],
         MessageRole::Assistant => {

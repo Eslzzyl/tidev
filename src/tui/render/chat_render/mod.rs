@@ -1962,14 +1962,17 @@ impl App {
                     if !card_lines.is_empty() {
                         let start_line = current_line_offset + lines.len();
 
-                        // Only make content lines selectable — skip leading/trailing blank spacer lines
-                        let first_content = card_lines.iter().position(|l| {
-                            !l.spans.is_empty() && l.spans.iter().any(|s| !s.content.is_empty())
-                        });
-                        let last_content = card_lines.iter().rposition(|l| {
-                            !l.spans.is_empty() && l.spans.iter().any(|s| !s.content.is_empty())
-                        });
-                        if let (Some(first), Some(last)) = (first_content, last_content) {
+                        // Only make content lines selectable — skip leading/trailing spacer lines
+                        // that only have ┃ with no actual content
+                        let is_other_line = |l: &Line<'static>| {
+                            !l.spans.is_empty() && !l.spans.iter().any(|s| {
+                                !s.content.is_empty() && s.content != "┃ "
+                            })
+                        };
+                        if let (Some(first), Some(last)) = (
+                            card_lines.iter().position(|l| !is_other_line(l)),
+                            card_lines.iter().rposition(|l| !is_other_line(l)),
+                        ) {
                             selectable_regions_ranges.push(SelectableRegionRange {
                                 start_line: start_line + first,
                                 end_line: start_line + last + 1,
