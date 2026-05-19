@@ -196,20 +196,18 @@ impl AgentRuntime {
         prompt
     }
 
-    /// Compose the per-turn dynamic context, wrapped in `<system-reminder>`.
+    /// Inject instruction files into the last user message if they
+    /// haven't been injected yet in this session.
     ///
-    /// Injected into the latest user message — does NOT touch the static
-    /// system prompt, preserving LLM prefix caching across turns.
-    pub async fn compose_dynamic_context(
+    /// Uses `session_instruction_sources` in the database to track which
+    /// files have already been injected, so the same file is never injected
+    /// twice — even across process restarts.
+    async fn inject_new_instructions(
         &mut self,
         session_id: uuid::Uuid,
-        mode: Option<SessionMode>,
-        include_memory: bool,
-    ) -> String {
-        let mut sections: Vec<String> = Vec::new();
-
-        // ── Instruction files ───────────────────────────────────────────
-        let (instruction_prompt, _sources, new_cache) =
+        last_user_msg: &mut Message,
+    ) -> Result<bool> {
+        let (instruction_prompt, sources, new_cache) =
             instructions::system_prompt_and_sources_with_cache(
                 &self.workspace_root,
                 &self.config_dir,
@@ -218,130 +216,204 @@ impl AgentRuntime {
             )
             .unwrap_or_default();
         self.instruction_content_cache = new_cache;
-        if !instruction_prompt.is_empty() {
-            sections.push(instruction_prompt);
+
+        if instruction_prompt.is_empty() || sources.is_empty() {
+            return Ok(false);
         }
 
-        // ── Mode reminder ───────────────────────────────────────────────
-        if let Some(mode) = mode {
-            sections.push(mode.reminder().to_string());
+        // Load already-injected sources from database (persists across restarts).
+        let already_injected = {
+            let store = self.store.lock().await;
+            store.load_instruction_sources(session_id)?
+        };
+
+        // Find sources that haven't been injected yet.
+        let new_sources: Vec<&String> = sources
+            .iter()
+            .filter(|s| !already_injected.contains(s))
+            .collect();
+
+        if new_sources.is_empty() {
+            return Ok(false);
         }
 
-        if include_memory {
-            let ws = self.workspace_root.display().to_string();
-            let memory_store = self.tools.memory_store();
-
-            macro_rules! timed_memory_op {
-                ($label:expr, $body:expr) => {{
-                    let _start = std::time::Instant::now();
-                    let _result = $body;
-                    let _elapsed = _start.elapsed();
-                    crate::log_debug!("compose_dynamic_context: {} took {:?}", $label, _elapsed);
-                    if _elapsed > std::time::Duration::from_millis(500) {
-                        crate::log_warn!(
-                            "compose_dynamic_context: {} took {:?} (slow)",
-                            $label,
-                            _elapsed
-                        );
-                    }
-                    _result
-                }};
-            }
-
-            // ── Session summaries (other sessions) ──────────────────────────
-            if let Ok(summaries) = timed_memory_op!(
-                "load_other_session_summaries",
-                memory_store.load_other_session_summaries(&session_id, 5)
-            ) && !summaries.is_empty()
-            {
-                sections.push(Self::format_session_summaries(&summaries));
-            }
-
-            // ── Consolidated knowledge (cross-session facts) ────────────────
-            if let Ok(facts) = timed_memory_op!(
-                "load_consolidated_facts",
-                memory_store.load_consolidated_facts(&ws, 5)
-            ) && !facts.is_empty()
-            {
-                let mut block = "## Consolidated Project Knowledge\n".to_string();
-                for fact in &facts {
-                    block.push_str(&format!(
-                        "- {} (confidence: {:.1})\n",
-                        fact.content, fact.strength
-                    ));
-                }
-                sections.push(block);
-            }
-
-            // ── Consolidated procedures ─────────────────────────────────────
-            if let Ok(procs) = timed_memory_op!(
-                "load_consolidated_procedures",
-                memory_store.load_consolidated_procedures(&ws, 3)
-            ) && !procs.is_empty()
-            {
-                let mut block = "## Reusable Procedures\n".to_string();
-                for proc in &procs {
-                    block.push_str(&format!("- **{}**: {}\n", proc.title, proc.content));
-                }
-                sections.push(block);
-            }
-
-            // ── Memory slots ────────────────────────────────────────────────
-            if let Ok(slot_content) =
-                timed_memory_op!("render_pinned_slots", memory_store.render_pinned_slots(&ws))
-                && !slot_content.is_empty()
-            {
-                sections.push(slot_content);
-            }
-
-            // ── Knowledge graph context ─────────────────────────────────────
-            let query = self.workspace_root.file_name().and_then(|n| n.to_str());
-            if let Ok(paths) = timed_memory_op!(
-                "search_graph_context",
-                memory_store.search_graph_context(query, 3, 10)
-            ) && !paths.is_empty()
-            {
-                let graph_prompt =
-                    crate::memory::graph_retrieval::GraphRetrieval::format_for_prompt(&paths, 8);
-                if !graph_prompt.is_empty() {
-                    sections.push(graph_prompt);
-                }
-            }
-
-            // ── Insights (cross-session synthesized knowledge) ──────────────
-            if let Ok(insights) =
-                timed_memory_op!("load_insights", memory_store.load_insights(&ws, 5))
-                && !insights.is_empty()
-            {
-                let mut block = "## Cross-Session Insights\n".to_string();
-                for insight in &insights {
-                    let conf = insight.strength;
-                    block.push_str(&format!(
-                        "- **{}** (confidence: {:.1}): {}\n",
-                        insight.title, conf, insight.content
-                    ));
-                }
-                sections.push(block);
-            }
-
-            // ── Hot memories (frequently used / important) ─────────────────
-            if let Ok(hot) = timed_memory_op!(
-                "search_hot_context",
-                memory_store.search_hot_context(query, &ws, 5, 20)
-            ) && !hot.is_empty()
-            {
-                sections.push(crate::memory::MemoryStore::format_for_prompt(&hot));
+        // Build <system-reminder> content for the new instruction files.
+        let mut sections = Vec::new();
+        for source in &new_sources {
+            if let Some(content) = self.instruction_content_cache.get(*source) {
+                sections.push(format!("Instructions from: {}\n{}", source, content));
             }
         }
 
         if sections.is_empty() {
-            return String::new();
+            return Ok(false);
         }
 
-        format!(
+        let injection = format!(
             "<system-reminder>\n{}\n</system-reminder>",
             sections.join("\n\n")
-        )
+        );
+        last_user_msg.content = format!("{}\n\n{}", injection, last_user_msg.content);
+
+        // Persist: update message content + record sources as injected.
+        let store = self.store.lock().await;
+        store.update_message_content(last_user_msg.id, &last_user_msg.content)?;
+        for source in &new_sources {
+            store.append_instruction_source(session_id, source)?;
+        }
+        drop(store);
+
+        crate::log_info!(
+            "injected {} new instruction file(s) into user message {}",
+            new_sources.len(),
+            last_user_msg.id
+        );
+
+        Ok(true)
+    }
+
+    /// Inject memory context into the first user message of a session
+    /// (only when no assistant message exists yet).
+    async fn inject_first_turn_memory(
+        &self,
+        session_id: uuid::Uuid,
+        last_user_msg: &mut Message,
+        has_assistant: bool,
+    ) -> Result<bool> {
+        if has_assistant || !self.config.memory.enabled || !self.config.memory.inject_context {
+            return Ok(false);
+        }
+
+        let ws = self.workspace_root.display().to_string();
+        let memory_store = self.tools.memory_store();
+        let mut sections: Vec<String> = Vec::new();
+
+        macro_rules! timed_memory_op {
+            ($label:expr, $body:expr) => {{
+                let _start = std::time::Instant::now();
+                let _result = $body;
+                let _elapsed = _start.elapsed();
+                crate::log_debug!(
+                    "inject_first_turn_memory: {} took {:?}",
+                    $label,
+                    _elapsed
+                );
+                if _elapsed > std::time::Duration::from_millis(500) {
+                    crate::log_warn!(
+                        "inject_first_turn_memory: {} took {:?} (slow)",
+                        $label,
+                        _elapsed
+                    );
+                }
+                _result
+            }};
+        }
+
+        // ── Session summaries (other sessions) ──────────────────────────
+        if let Ok(summaries) = timed_memory_op!(
+            "load_other_session_summaries",
+            memory_store.load_other_session_summaries(&session_id, 5)
+        ) && !summaries.is_empty()
+        {
+            sections.push(Self::format_session_summaries(&summaries));
+        }
+
+        // ── Consolidated knowledge (cross-session facts) ────────────────
+        if let Ok(facts) = timed_memory_op!(
+            "load_consolidated_facts",
+            memory_store.load_consolidated_facts(&ws, 5)
+        ) && !facts.is_empty()
+        {
+            let mut block = "## Consolidated Project Knowledge\n".to_string();
+            for fact in &facts {
+                block.push_str(&format!(
+                    "- {} (confidence: {:.1})\n",
+                    fact.content, fact.strength
+                ));
+            }
+            sections.push(block);
+        }
+
+        // ── Consolidated procedures ─────────────────────────────────────
+        if let Ok(procs) = timed_memory_op!(
+            "load_consolidated_procedures",
+            memory_store.load_consolidated_procedures(&ws, 3)
+        ) && !procs.is_empty()
+        {
+            let mut block = "## Reusable Procedures\n".to_string();
+            for proc in &procs {
+                block.push_str(&format!("- **{}**: {}\n", proc.title, proc.content));
+            }
+            sections.push(block);
+        }
+
+        // ── Memory slots ────────────────────────────────────────────────
+        if let Ok(slot_content) =
+            timed_memory_op!("render_pinned_slots", memory_store.render_pinned_slots(&ws))
+            && !slot_content.is_empty()
+        {
+            sections.push(slot_content);
+        }
+
+        // ── Knowledge graph context ─────────────────────────────────────
+        let query = self.workspace_root.file_name().and_then(|n| n.to_str());
+        if let Ok(paths) = timed_memory_op!(
+            "search_graph_context",
+            memory_store.search_graph_context(query, 3, 10)
+        ) && !paths.is_empty()
+        {
+            let graph_prompt =
+                crate::memory::graph_retrieval::GraphRetrieval::format_for_prompt(&paths, 8);
+            if !graph_prompt.is_empty() {
+                sections.push(graph_prompt);
+            }
+        }
+
+        // ── Insights (cross-session synthesized knowledge) ──────────────
+        if let Ok(insights) =
+            timed_memory_op!("load_insights", memory_store.load_insights(&ws, 5))
+            && !insights.is_empty()
+        {
+            let mut block = "## Cross-Session Insights\n".to_string();
+            for insight in &insights {
+                let conf = insight.strength;
+                block.push_str(&format!(
+                    "- **{}** (confidence: {:.1}): {}\n",
+                    insight.title, conf, insight.content
+                ));
+            }
+            sections.push(block);
+        }
+
+        // ── Hot memories (frequently used / important) ─────────────────
+        if let Ok(hot) = timed_memory_op!(
+            "search_hot_context",
+            memory_store.search_hot_context(query, &ws, 5, 20)
+        ) && !hot.is_empty()
+        {
+            sections.push(crate::memory::MemoryStore::format_for_prompt(&hot));
+        }
+
+        if sections.is_empty() {
+            return Ok(false);
+        }
+
+        let injection = format!(
+            "<system-reminder>\n{}\n</system-reminder>",
+            sections.join("\n\n")
+        );
+        last_user_msg.content = format!("{}\n\n{}", injection, last_user_msg.content);
+
+        let store = self.store.lock().await;
+        store.update_message_content(last_user_msg.id, &last_user_msg.content)?;
+        drop(store);
+
+        crate::log_info!(
+            "injected first-turn memory context into user message {}",
+            last_user_msg.id
+        );
+
+        Ok(true)
     }
 
     /// Format session summaries for prompt injection.
@@ -1185,36 +1257,29 @@ impl AgentRuntime {
                 _t_sub_load.elapsed()
             );
 
-            // Compose dynamic context + build
-            let _t_sub_compose = std::time::Instant::now();
+            // Inject new instructions + first-turn memory
+            let _t_sub_inject = std::time::Instant::now();
             let is_first_sub_turn = db_messages.len() <= 1;
-            let include_sub_memory = self.config.memory.enabled
-                && self.config.memory.inject_context
-                && is_first_sub_turn;
-            let dynamic_context = self
-                .compose_dynamic_context(child_session_id, None, include_sub_memory)
-                .await;
-            crate::log_info!(
-                "run_subagent: compose_dynamic_context took {:?} ({} chars)",
-                _t_sub_compose.elapsed(),
-                dynamic_context.len()
-            );
-            // Persist dynamic context into the last user message's DB record
-            if !dynamic_context.is_empty() {
-                let store = self.store.lock().await;
-                if let Some(last_user) = db_messages
-                    .iter_mut()
-                    .rev()
-                    .find(|m| m.role == MessageRole::User)
-                    && !last_user.content.starts_with("<system-reminder>")
-                {
-                    last_user.content = format!("{}\n\n{}", dynamic_context, last_user.content);
-                    if let Err(e) = store.update_message_content(last_user.id, &last_user.content) {
-                        crate::log_warn!("run_subagent: failed to persist DC: {}", e);
-                    }
+            let has_assistant = db_messages.iter().any(|m| m.role == MessageRole::Assistant);
+            if let Some(last_user) = db_messages
+                .iter_mut()
+                .rev()
+                .find(|m| m.role == MessageRole::User && !m.content.starts_with("<system-reminder>"))
+            {
+                self.inject_new_instructions(child_session_id, last_user).await?;
+                if is_first_sub_turn {
+                    self.inject_first_turn_memory(
+                        child_session_id,
+                        last_user,
+                        has_assistant,
+                    )
+                    .await?;
                 }
-                drop(store);
             }
+            crate::log_debug!(
+                "run_subagent: context injection took {:?}",
+                _t_sub_inject.elapsed()
+            );
 
             let _t_sub_build = std::time::Instant::now();
             let mut conv =
@@ -1627,40 +1692,27 @@ impl AgentRuntime {
                 _t_load.elapsed()
             );
 
-            // 2. Compose dynamic (per-turn) context
-            let _t_compose = std::time::Instant::now();
+            // 2. Inject per-turn context into the last user message.
+            //    Each injection is independent and persists immediately,
+            //    so all subsequent reads (compact, summary, ...) see the
+            //    same content sent to the LLM (prefix cache consistency).
+            let _t_inject = std::time::Instant::now();
             let has_assistant = db_messages.iter().any(|m| m.role == MessageRole::Assistant);
-            let include_memory =
-                self.config.memory.enabled && self.config.memory.inject_context && !has_assistant;
-            let dynamic_context = self
-                .compose_dynamic_context(session_id, Some(mode), include_memory)
-                .await;
+            if let Some(last_user) = db_messages
+                .iter_mut()
+                .rev()
+                .find(|m| m.role == MessageRole::User && !m.content.starts_with("<system-reminder>"))
+            {
+                self.inject_new_instructions(session_id, last_user).await?;
+                self.inject_first_turn_memory(session_id, last_user, has_assistant)
+                    .await?;
+            }
             crate::log_info!(
-                "agent_loop: composed dynamic context ({} chars) in {:?}",
-                dynamic_context.len(),
-                _t_compose.elapsed()
+                "agent_loop: context injection took {:?}",
+                _t_inject.elapsed()
             );
 
-            // 3. Persist dynamic context into the last user message's DB record
-            //    so ALL subsequent reads (compact, summary, ...) see the same
-            //    content that was sent to the LLM (prefix cache hit).
-            if !dynamic_context.is_empty() {
-                let store = self.store.lock().await;
-                if let Some(last_user) = db_messages
-                    .iter_mut()
-                    .rev()
-                    .find(|m| m.role == MessageRole::User)
-                    && !last_user.content.starts_with("<system-reminder>")
-                {
-                    last_user.content = format!("{}\n\n{}", dynamic_context, last_user.content);
-                    if let Err(e) = store.update_message_content(last_user.id, &last_user.content) {
-                        crate::log_warn!("agent_loop: failed to persist DC: {}", e);
-                    }
-                }
-                drop(store);
-            }
-
-            // 4. Build request messages (already contains DC in the persisted content)
+            // 3. Build request messages (already contains DC in the persisted content)
             let _t_build = std::time::Instant::now();
             let mut conv = crate::session::Conversation::new(session_id, "", "", "", "", "", "");
             conv.messages = db_messages;
@@ -1732,11 +1784,7 @@ impl AgentRuntime {
                         "run_agent_loop: processing queued message ({} chars)",
                         qmsg.content.len()
                     );
-                    let content = if !dynamic_context.is_empty() {
-                        format!("{}\n\n{}", dynamic_context, qmsg.content)
-                    } else {
-                        qmsg.content
-                    };
+                    let content = qmsg.content;
                     let mut user_msg = Message::new(MessageRole::User, &content);
                     user_msg.attachments = qmsg.attachments;
                     user_msg.mode = qmsg.mode;
@@ -2838,7 +2886,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dynamic_context_empty_when_no_content() {
+    async fn inject_new_instructions_does_nothing_when_no_instructions() {
         let (mut agent, _tmp) = agent_runtime();
         let session_id = uuid::Uuid::new_v4();
         {
@@ -2854,48 +2902,23 @@ mod tests {
                     "test-session",
                 )
                 .unwrap();
-        }
-
-        let result = agent.compose_dynamic_context(session_id, None, false).await;
-        assert!(
-            result.is_empty(),
-            "dynamic context should be empty with no instructions, memories, or mode"
-        );
-    }
-
-    #[tokio::test]
-    async fn dynamic_context_includes_mode_reminder_in_tags() {
-        let (mut agent, _tmp) = agent_runtime();
-        let session_id = uuid::Uuid::new_v4();
-        {
-            let store = agent.store.lock().await;
-            store
-                .create_session(
-                    session_id,
-                    &agent.workspace_root,
-                    "test",
-                    "Test",
-                    "test-model",
-                    "Test Model",
-                    "test-session",
-                )
+            // Create a clean user message.
+            let mut msg = Message::new(MessageRole::User, "hello");
+            store.append_message(session_id, &msg).unwrap();
+            msg.id = store
+                .load_messages(session_id)
+                .unwrap()
+                .into_iter()
+                .find(|m| m.role == MessageRole::User)
+                .unwrap()
+                .id;
+            drop(store);
+            // With no instruction files configured, injection should do nothing.
+            let result = agent
+                .inject_new_instructions(session_id, &mut msg)
+                .await
                 .unwrap();
+            assert!(!result, "should not inject when no instructions");
         }
-
-        let result = agent
-            .compose_dynamic_context(session_id, Some(SessionMode::Build), false)
-            .await;
-        assert!(
-            !result.is_empty(),
-            "dynamic context with mode should have content"
-        );
-        assert!(
-            result.starts_with("<system-reminder>\n"),
-            "should open system-reminder tag"
-        );
-        assert!(
-            result.ends_with("\n</system-reminder>"),
-            "should close system-reminder tag"
-        );
     }
 }

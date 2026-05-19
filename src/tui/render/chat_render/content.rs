@@ -31,6 +31,37 @@ pub(super) fn render_reasoning_lines(
     render_reasoning_markdown_lines(reasoning, body_width, Some(ctx.workspace_root), ctx.palette)
 }
 
+/// Strip all `<system-reminder>…</system-reminder>` blocks from the given
+/// text. These tags are injected into user-message content for LLM prefix
+/// cache consistency and must not be visible in the UI.
+fn strip_system_reminder_tags(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut rest = text;
+    loop {
+        if let Some(start) = rest.find("<system-reminder>") {
+            // Push content before the tag
+            result.push_str(&rest[..start]);
+            // Find the closing tag
+            if let Some(end) = rest[start..].find("</system-reminder>") {
+                let after_close = start + end + "</system-reminder>".len();
+                rest = &rest[after_close..];
+                // Skip trailing whitespace/newlines after the closing tag
+                while rest.starts_with('\n') || rest.starts_with('\r') || rest.starts_with(' ') {
+                    rest = &rest[1..];
+                }
+            } else {
+                // No closing tag — keep the rest as-is
+                result.push_str(&rest[start..]);
+                break;
+            }
+        } else {
+            result.push_str(rest);
+            break;
+        }
+    }
+    result
+}
+
 pub(super) fn render_text_body_lines(
     ctx: &RenderContext<'_>,
     text: &str,
@@ -195,9 +226,10 @@ pub(super) fn render_message_cards_inner(
 
     match message.role {
         MessageRole::User | MessageRole::Shell => vec![(palette.panel_alt, {
+            let display_content = strip_system_reminder_tags(&message.content);
             let mut content_lines = render_text_body_lines(
                 ctx,
-                &message.content,
+                &display_content,
                 body_width.saturating_sub(2),
                 Some(ctx.workspace_root),
             );

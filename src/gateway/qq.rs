@@ -381,25 +381,9 @@ impl QQChannel {
             }
         }
 
-        let has_assistant = conversation
-            .messages
-            .iter()
-            .any(|m| m.role == MessageRole::Assistant);
-        let include_memory = self.agent.config.memory.inject_context && !has_assistant;
-        let dc = self
-            .agent
-            .compose_dynamic_context(
-                conversation.session_id,
-                Some(SessionMode::Build),
-                include_memory,
-            )
-            .await;
-        let content_with_dc = if !dc.is_empty() {
-            format!("{}\n\n{}", dc, clean_content)
-        } else {
-            clean_content.to_string()
-        };
-        let user_message = Message::new(MessageRole::User, content_with_dc);
+        // Persist user message (agent loop will inject
+        // instructions and memory context before the LLM turn).
+        let user_message = Message::new(MessageRole::User, clean_content);
         conversation.push(user_message.clone());
         self.store
             .append_message(conversation.session_id, &user_message)?;

@@ -318,23 +318,8 @@ pub async fn send_message(
         body.content.clone()
     };
 
-    // Compute dynamic context and prepend it, so the persisted message
-    // matches what the LLM receives (prefix cache consistency).
-    let has_assistant = existing_messages
-        .iter()
-        .any(|m| m.role == MessageRole::Assistant);
-    let include_memory = state.agent.config.memory.inject_context && !has_assistant;
-    let mut agent_for_dc = state.agent.clone();
-    let dc = agent_for_dc
-        .compose_dynamic_context(session_id, Some(mode), include_memory)
-        .await;
-    let content = if !dc.is_empty() {
-        format!("{}\n\n{}", dc, content)
-    } else {
-        content
-    };
-
-    // Add user message to database
+    // Add user message to database (agent loop will inject
+    // instructions and memory context before the LLM turn).
     let user_message = Message {
         id: Uuid::new_v4(),
         role: MessageRole::User,
