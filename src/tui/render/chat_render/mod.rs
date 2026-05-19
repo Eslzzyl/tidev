@@ -823,30 +823,55 @@ impl App {
             )]));
         }
 
-        // Workspace directory (at bottom)
-        lines.push(Line::from(""));
-        let workspace_path = self.workspace_root.display().to_string();
-        let display_path = workspace_path.replace(
-            &dirs::home_dir().unwrap_or_default().display().to_string(),
-            "~",
+        // Background fill for the full sidebar area
+        frame.render_widget(
+            Block::default().style(Style::default().bg(palette.panel)),
+            area,
         );
-        lines.push(Line::from(vec![Span::styled(
-            "Workspace",
-            Style::default()
-                .fg(palette.accent)
-                .add_modifier(Modifier::BOLD),
-        )]));
-        lines.push(Line::from(vec![Span::styled(
-            display_path,
-            Style::default().fg(palette.muted),
-        )]));
 
-        // Estimate total lines for scroll max (accounts for word wrapping)
+        // Split sidebar: scrollable content (top) + fixed footer with workspace (bottom)
         let sidebar_padded = area.inner(Margin {
             horizontal: 2,
             vertical: 0,
         });
         let sidebar_content_width = sidebar_padded.width as usize;
+
+        // Build fixed footer (workspace path, always visible)
+        let workspace_path = self.workspace_root.display().to_string();
+        let display_path = workspace_path.replace(
+            &dirs::home_dir().unwrap_or_default().display().to_string(),
+            "~",
+        );
+        // Truncate long workspace paths
+        let display_path = shorten(&display_path, sidebar_content_width.max(1));
+        let footer_lines = vec![
+            Line::from(""),
+            Line::from(vec![Span::styled(
+                "Workspace",
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
+            )]),
+            Line::from(vec![Span::styled(
+                display_path,
+                Style::default().fg(palette.muted),
+            )]),
+        ];
+        let footer_height: u16 = footer_lines.len() as u16;
+
+        // Content area height = sidebar height - footer height
+        let content_height = area.height.saturating_sub(footer_height);
+        let content_area = Rect {
+            height: content_height,
+            ..sidebar_padded
+        };
+        let footer_area = Rect {
+            y: area.y + area.height.saturating_sub(footer_height),
+            height: footer_height,
+            ..sidebar_padded
+        };
+
+        // Estimate total lines for scroll max (accounts for word wrapping)
         self.sidebar_total_lines = lines
             .iter()
             .map(|line| {
@@ -863,24 +888,23 @@ impl App {
             })
             .sum();
 
-        let sidebar_viewport_lines = area.height as usize;
+        let sidebar_viewport_lines = content_height as usize;
         let max_scroll = self
             .sidebar_total_lines
             .saturating_sub(sidebar_viewport_lines);
         self.sidebar_scroll_offset = self.sidebar_scroll_offset.min(max_scroll);
 
-        // Background fill for the full sidebar area
-        frame.render_widget(
-            Block::default().style(Style::default().bg(palette.panel)),
-            area,
-        );
-
+        // Render scrollable content
         let paragraph = Paragraph::new(Text::from(lines))
             .style(Style::default().fg(palette.text))
             .wrap(Wrap { trim: false })
             .scroll((self.sidebar_scroll_offset as u16, 0));
+        frame.render_widget(paragraph, content_area);
 
-        frame.render_widget(paragraph, sidebar_padded);
+        // Render fixed footer (workspace path)
+        let footer_paragraph = Paragraph::new(Text::from(footer_lines))
+            .style(Style::default().fg(palette.text));
+        frame.render_widget(footer_paragraph, footer_area);
     }
 
     fn messages_text(
