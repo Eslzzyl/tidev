@@ -416,6 +416,42 @@ impl AgentRuntime {
         Ok(true)
     }
 
+    /// Inject the current mode's reminder into the last user message on the
+    /// first turn, or a mode-switch reminder when the mode has changed since
+    /// the last turn.  Persists to the database so subsequent reads see the
+    /// same content (prefix cache consistency).
+    async fn inject_mode_reminder(
+        &self,
+        _session_id: uuid::Uuid,
+        last_user_msg: &mut Message,
+        current_mode: SessionMode,
+        prior_mode_seen: bool,
+        was_plan_mode: bool,
+    ) -> Result<bool> {
+        let reminder = if !prior_mode_seen {
+            current_mode.reminder().to_string()
+        } else if current_mode == SessionMode::Plan && !was_plan_mode {
+            crate::prompts::plan_switch_reminder()
+        } else if current_mode == SessionMode::Build && was_plan_mode {
+            crate::prompts::build_switch_reminder()
+        } else {
+            return Ok(false);
+        };
+
+        last_user_msg.content = format!("{}\n\n{}", reminder, last_user_msg.content);
+
+        let store = self.store.lock().await;
+        store.update_message_content(last_user_msg.id, &last_user_msg.content)?;
+        drop(store);
+
+        crate::log_info!(
+            "injected mode reminder into user message {}",
+            last_user_msg.id
+        );
+
+        Ok(true)
+    }
+
     /// Format session summaries for prompt injection.
     fn format_session_summaries(summaries: &[crate::memory::SessionSummary]) -> String {
         let mut parts = Vec::new();
@@ -1698,6 +1734,29 @@ impl AgentRuntime {
             //    same content sent to the LLM (prefix cache consistency).
             let _t_inject = std::time::Instant::now();
             let has_assistant = db_messages.iter().any(|m| m.role == MessageRole::Assistant);
+
+            // Compute mode state from messages BEFORE the last user (read-only,
+            // before any mutable borrow below).
+            let mode_state = {
+                let last_user_idx = db_messages.iter().rposition(|m| m.role == MessageRole::User);
+                last_user_idx.map(|idx| {
+                    let prior_mode_seen =
+                        db_messages[..idx].iter().any(|m| m.mode.is_some());
+                    let mut was_plan_mode = mode == SessionMode::Plan;
+                    for message in &db_messages[..idx] {
+                        if let Some(m) = message.mode {
+                            was_plan_mode = m == SessionMode::Plan;
+                        } else if message.role == MessageRole::Assistant
+                            && (message.content.contains("PLAN MODE")
+                                || message.content.contains("read-only"))
+                        {
+                            was_plan_mode = true;
+                        }
+                    }
+                    (prior_mode_seen, was_plan_mode)
+                })
+            };
+
             if let Some(last_user) = db_messages
                 .iter_mut()
                 .rev()
@@ -1706,6 +1765,16 @@ impl AgentRuntime {
                 self.inject_new_instructions(session_id, last_user).await?;
                 self.inject_first_turn_memory(session_id, last_user, has_assistant)
                     .await?;
+                if let Some((prior_mode_seen, was_plan_mode)) = mode_state {
+                    self.inject_mode_reminder(
+                        session_id,
+                        last_user,
+                        mode,
+                        prior_mode_seen,
+                        was_plan_mode,
+                    )
+                    .await?;
+                }
             }
             crate::log_info!(
                 "agent_loop: context injection took {:?}",
@@ -2402,7 +2471,9 @@ mod tests {
 
     #[test]
     fn build_request_messages_mode_switch_injection() {
-        // Assistant was in Build mode → now Plan mode → inject plan switch reminder
+        // Mode injection has been moved to `inject_mode_reminder` in the agent
+        // runtime.  `build_request_messages` is now read-only — it assembles
+        // messages without modifying content.
         let mut assistant = Message::new(MessageRole::Assistant, "ok");
         assistant.mode = Some(SessionMode::Build);
         let msgs = vec![
@@ -2413,17 +2484,13 @@ mod tests {
         let mut conv = Conversation::new(Uuid::nil(), "", "", "", "", "", "");
         conv.messages = msgs;
         let result = ContextManager::new().build_request_messages(&conv, SessionMode::Plan);
-        // The last user message should have the plan switch reminder prepended
+        // Content should NOT be modified (no mode injection here anymore).
         let last_user = result
             .iter()
             .rev()
             .find(|m| m.role == MessageRole::User)
             .unwrap();
-        assert!(
-            last_user.content.contains("PLAN MODE") || last_user.content.contains("plan"),
-            "Expected plan mode reminder in user message, got: {}",
-            last_user.content
-        );
+        assert_eq!(last_user.content, "now plan it");
     }
 
     #[test]

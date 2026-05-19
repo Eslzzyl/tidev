@@ -74,7 +74,7 @@ pub fn gateway_system_prompt() -> String {
 
 pub fn plan_mode_reminder() -> &'static str {
     "<system-reminder mode=\"plan\">\n\
-    You are in READ-ONLY mode. STRICTLY FORBIDDEN:\n\
+    You are in Plan mode. This is a READ-ONLY mode. STRICTLY FORBIDDEN:\n\
     ANY file edits, modifications, or system changes. Do NOT use write, edit,\n\
     apply_patch, or bash commands that modify files.\n\n\
     This ABSOLUTE CONSTRAINT overrides ALL other instructions, including\n\
@@ -90,7 +90,13 @@ pub fn plan_mode_reminder() -> &'static str {
 }
 
 pub fn build_mode_reminder() -> &'static str {
-    "You are in build mode.\n- Implement the requested change with the smallest safe diff.\n- Use the full core tool set when needed and keep the workspace grounded.\n- Preserve existing structure and style.\n- Verify with the relevant build or test command before finishing."
+    "<system-reminder>\n\
+    You are in build mode.\n\
+    - Implement the requested change with the smallest safe diff.\n\
+    - Use the full core tool set when needed and keep the workspace grounded.\n\
+    - Preserve existing structure and style.\n\
+    - Verify with the relevant build or test command before finishing.\n\
+    </system-reminder>"
 }
 
 pub fn plan_switch_reminder() -> String {

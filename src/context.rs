@@ -5,7 +5,6 @@ use anyhow::Result;
 use crate::{
     config::ActiveModel,
     llm::LlmClient,
-    prompts,
     prompts::SessionMode,
     session::{Conversation, Message, MessageAttachment, MessageRole, ToolExecutionResult},
     tooling::ToolDefinition,
@@ -143,13 +142,11 @@ impl ContextManager {
     pub fn build_request_messages(
         &self,
         conversation: &Conversation,
-        current_mode: SessionMode,
+        _current_mode: SessionMode,
     ) -> Vec<Message> {
         let mut messages = Vec::new();
         // Map from tool_call_id → tool_name to track which tool calls still need results.
         let mut pending_tool_calls: HashMap<String, String> = HashMap::new();
-        let mut was_plan_mode = current_mode == SessionMode::Plan;
-
         if let Some(summary) = &self.summary {
             messages.push(Message::new(
                 MessageRole::User,
@@ -188,9 +185,6 @@ impl ContextManager {
                         ));
                     }
                     messages.push(message.clone());
-                    if let Some(mode) = message.mode {
-                        was_plan_mode = mode == SessionMode::Plan;
-                    }
                 }
                 MessageRole::Assistant => {
                     // Skip assistant messages that have neither content nor tool_calls,
@@ -220,13 +214,6 @@ impl ContextManager {
                                 ),
                             ));
                         }
-                    }
-                    if let Some(mode) = message.mode {
-                        was_plan_mode = mode == SessionMode::Plan;
-                    } else if message.content.contains("PLAN MODE")
-                        || message.content.contains("read-only")
-                    {
-                        was_plan_mode = true;
                     }
                     pending_tool_calls = message
                         .tool_calls
@@ -266,26 +253,6 @@ impl ContextManager {
                     "Tool was cancelled by user or interrupted before completion",
                 ),
             ));
-        }
-
-        if current_mode == SessionMode::Plan && !was_plan_mode {
-            let reminder = prompts::plan_switch_reminder();
-            if let Some(last_user_msg) = messages
-                .iter_mut()
-                .rev()
-                .find(|m| m.role == MessageRole::User)
-            {
-                last_user_msg.content = format!("{}\n\n{}", reminder, last_user_msg.content);
-            }
-        } else if current_mode == SessionMode::Build && was_plan_mode {
-            let reminder = prompts::build_switch_reminder();
-            if let Some(last_user_msg) = messages
-                .iter_mut()
-                .rev()
-                .find(|m| m.role == MessageRole::User)
-            {
-                last_user_msg.content = format!("{}\n\n{}", reminder, last_user_msg.content);
-            }
         }
 
         messages
