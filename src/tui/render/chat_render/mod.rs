@@ -1284,7 +1284,7 @@ impl App {
 
     fn load_expanded_tool_outputs(&self, messages: &[Message]) -> HashMap<Uuid, String> {
         let mut map = HashMap::new();
-        for msg in messages {
+        for msg in messages.iter().filter(|m| matches!(m.role, MessageRole::Tool)) {
             if !self.expanded_tool_results.contains(&msg.id) {
                 continue;
             }
@@ -1977,8 +1977,17 @@ impl App {
                                 let canonical = canonical_tool_name(&tool_call.name);
                                 let has_expandable = match canonical {
                                     // These tools' renderers never use expanded_tool_results
-                                    Some("read" | "grep" | "glob" | "skill" | "write" | "edit"
-                                         | "apply_patch" | "question" | "todowrite") => false,
+                                    Some("read" | "grep" | "glob" | "skill"
+                                         | "question" | "todowrite") => false,
+                                    // write/edit/apply_patch normally render diff text (no expand).
+                                    // When no diff is available (e.g. output too large), they
+                                    // fall through to render_output_preview_lines which IS
+                                    // expandable.
+                                    Some("write" | "edit" | "apply_patch") => {
+                                        result_msg.metadata.diff.is_none()
+                                            && result_msg.content.lines().count()
+                                                > TOOL_OUTPUT_PREVIEW_LINES
+                                    }
                                     // All other tools (task, websearch, webfetch, memory,
                                     // bash, MCP, etc.) use expanded_tool_results — only
                                     // meaningful if output exceeds preview threshold
@@ -2065,13 +2074,13 @@ impl App {
         frame: &mut Frame<'_>,
         area: Rect,
         scroll: usize,
-        _max_scroll: usize,
+        max_scroll: usize,
     ) {
         super::render::render_scrollbar(
             frame,
             area,
             scroll,
-            self.message_total_lines,
+            max_scroll,
             self.palette(),
         );
     }

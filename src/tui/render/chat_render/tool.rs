@@ -939,6 +939,10 @@ pub(super) fn render_subagent_task_preview(
             "▲ Click to collapse",
             Style::default().fg(palette.muted),
         )]));
+        lines.push(Line::from(vec![Span::styled(
+            "  Ctrl+Click to enter subsession",
+            Style::default().fg(palette.muted),
+        )]));
     } else {
         // Preview mode: show first few lines
         let max_preview = TOOL_OUTPUT_PREVIEW_LINES;
@@ -1666,7 +1670,7 @@ pub(super) fn render_output_preview_lines(
     let max_lines = if is_expanded {
         total_output_lines
     } else if is_error {
-        4
+        TOOL_OUTPUT_PREVIEW_LINES.saturating_sub(1)
     } else {
         TOOL_OUTPUT_PREVIEW_LINES
     };
@@ -1722,16 +1726,6 @@ pub(super) fn render_output_preview_lines(
                 "  ▼ {} more line(s) — Click to expand",
                 total_output_lines - max_lines
             ),
-            Style::default().fg(palette.muted),
-        )]));
-    } else if total_output_lines > TOOL_OUTPUT_PREVIEW_LINES && message_id.is_some() {
-        let hint = if is_expanded {
-            "▲ Click to collapse"
-        } else {
-            "▼ Click to expand"
-        };
-        lines.push(Line::from(vec![Span::styled(
-            hint,
             Style::default().fg(palette.muted),
         )]));
     }

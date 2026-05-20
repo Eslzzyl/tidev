@@ -1003,7 +1003,7 @@ pub(crate) fn decorate_card_line(
 
     let used_width = line_display_width(&Line::from(spans.clone()));
     if used_width < width {
-        spans.push(Span::styled(" ".repeat(width - used_width), bg_style));
+        spans.push(Span::styled(" ".repeat(width.saturating_sub(used_width)), bg_style));
     }
 
     Line::from(spans)
