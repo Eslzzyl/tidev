@@ -21,7 +21,7 @@ use super::utils::{
 };
 use super::{RenderContext, TOOL_OUTPUT_EXPANDED_MAX_LINES, TOOL_OUTPUT_PREVIEW_LINES};
 use crate::tui::diff_render::render_unified_diff_text;
-use crate::tui::render::render::{line_with_style, shorten, shorten_single_line};
+use crate::tui::render::render::{line_with_style, shorten_single_line};
 
 pub(super) fn render_tool_call_with_result(
     tool_call: &ToolCall,
@@ -86,18 +86,36 @@ pub(super) fn render_tool_call_with_result(
     let mut lines = Vec::new();
     lines.push(Line::from(""));
 
-    let call_lines = render_tool_call_lines(
-        tool_call,
-        body_width,
-        palette,
-        exit_code,
-        rtk_rewritten,
-        ctx.workspace_root,
-    );
-    lines.extend(call_lines);
+    // For write/edit that have live line count info, skip the
+    // generic "Preparing" state and show title + progress directly.
+    let has_live_progress = matches!(canonical_name, "write" | "edit")
+        && (write_lines > 0 || edit_old_lines > 0 || edit_new_lines > 0);
 
-    if is_pending || is_waiting_result {
-        // Show calling status inline with live line counts for write/edit
+    if is_pending && !has_live_progress {
+        // No live progress data yet → show generic preparing state
+        let preparing_text = preparing_text_for_tool(canonical_name);
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} ", ctx.spinner),
+                Style::default().fg(palette.accent_soft),
+            ),
+            Span::styled(preparing_text, Style::default().fg(palette.muted)),
+        ]));
+    } else {
+        // Arguments complete or write/edit with live progress: show header
+        let call_lines = render_tool_call_lines(
+            tool_call,
+            body_width,
+            palette,
+            exit_code,
+            rtk_rewritten,
+            ctx.workspace_root,
+        );
+        lines.extend(call_lines);
+    }
+
+    // Show live progress during streaming or waiting for write/edit
+    if (is_pending && has_live_progress) || is_waiting_result {
         let progress_text = match canonical_name {
             "write" if write_lines > 0 => format!("Writing {} lines...", write_lines),
             "edit" if edit_old_lines > 0 && edit_new_lines > 0 => {
@@ -106,9 +124,13 @@ pub(super) fn render_tool_call_with_result(
                     edit_old_lines, edit_new_lines
                 )
             }
-            "edit" if edit_old_lines > 0 => format!("Replacing {} lines...", edit_old_lines),
-            "edit" if edit_new_lines > 0 => format!("Writing {} lines...", edit_new_lines),
-            _ => "Calling...".to_string(),
+            "edit" if edit_old_lines > 0 => {
+                format!("Replacing {} lines with 0 lines...", edit_old_lines)
+            }
+            "edit" if edit_new_lines > 0 => {
+                format!("Replacing 0 lines with {} lines...", edit_new_lines)
+            }
+            _ => unreachable!(),
         };
         lines.push(Line::from(vec![
             Span::styled(
@@ -534,6 +556,24 @@ pub(super) fn parse_bash_exit_code(output: &str) -> (Option<i32>, &str) {
     (None, output)
 }
 
+/// Returns a localized preparing text for the given canonical tool name,
+/// shown as a spinner status while tool arguments are still streaming.
+fn preparing_text_for_tool(canonical_name: &str) -> &'static str {
+    match canonical_name {
+        "bash" => "Preparing shell command...",
+        "write" => "Preparing write...",
+        "edit" => "Preparing edit...",
+        "websearch" => "Preparing web search...",
+        "webfetch" => "Preparing web fetch...",
+        "task" => "Preparing subagent task...",
+        "question" => "Preparing questions...",
+        "todowrite" => "Preparing todo list...",
+        "memory" => "Preparing memory operation...",
+        "apply_patch" => "Preparing patch...",
+        _ => "Preparing...",
+    }
+}
+
 pub(super) fn render_tool_call_lines(
     tool_call: &ToolCall,
     body_width: usize,
@@ -553,84 +593,50 @@ pub(super) fn render_tool_call_lines(
 
     let mut lines = Vec::new();
 
-    let canonical_display = canonical_tool_name(&tool_call.name)
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| tool_call.name.clone());
-
     let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or("");
-
-    // Build title line with optional exit code for bash
-    let title_spans = if canonical_name == "bash" {
-        // Build the base spans for bash tool
-        let mut spans = vec![
-            Span::styled("Tool: ", Style::default().fg(palette.muted)),
-            Span::styled(
-                canonical_display.clone(),
-                Style::default()
-                    .fg(palette.text)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ];
-
-        // Add [rtk] marker after tool name if command was rewritten
-        if rtk_rewritten {
-            spans.push(Span::styled(
-                " [rtk]",
-                Style::default().fg(palette.accent_soft),
-            ));
-        }
-
-        // Add exit code status
-        if let Some(code) = exit_code {
-            if code == 0 {
-                spans.push(Span::styled(" ✓", Style::default().fg(palette.success)));
-            } else {
-                spans.push(Span::styled(
-                    format!(" ✗ {}", code),
-                    Style::default().fg(palette.error),
-                ));
-            }
-        }
-        spans
-    } else {
-        vec![
-            Span::styled("Tool: ", Style::default().fg(palette.muted)),
-            Span::styled(
-                canonical_display.clone(),
-                Style::default()
-                    .fg(palette.text)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]
-    };
-    lines.push(Line::from(title_spans));
 
     match canonical_name {
         "bash" => {
             let command = get_field("command").unwrap_or("");
             let desc = get_field("description");
 
-            if let Some(d) = desc {
-                let desc_line = Line::from(d.to_string());
-                let wrap_width = body_width.saturating_sub(4);
-                let wrapped =
-                    word_wrap_line(&desc_line, WrapOptions::new(wrap_width).break_words(true));
-                for (i, wrapped_line) in wrapped.iter().enumerate() {
-                    let mut spans = if i == 0 {
-                        vec![Span::styled(
-                            "  Description: ",
-                            Style::default().fg(palette.muted),
-                        )]
-                    } else {
-                        vec![Span::styled("                ", Style::default())]
-                    };
-                    spans.extend(wrapped_line.spans.iter().map(|s| {
-                        Span::styled(s.content.to_string(), Style::default().fg(palette.text))
-                    }));
-                    lines.push(Line::from(spans));
-                }
+            // Title: Bash: [description]  ✓/✗ N  [rtk]
+            let display = desc.unwrap_or(command);
+            let mut title_spans = vec![
+                Span::styled("Bash: ", Style::default().fg(palette.muted)),
+                Span::styled(
+                    display.to_string(),
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ];
+
+            // Add [rtk] marker if command was rewritten
+            if rtk_rewritten {
+                title_spans.push(Span::styled(
+                    " [rtk]",
+                    Style::default().fg(palette.accent_soft),
+                ));
             }
 
+            // Add exit code status
+            if let Some(code) = exit_code {
+                if code == 0 {
+                    title_spans.push(Span::styled(
+                        "  ✓",
+                        Style::default().fg(palette.success),
+                    ));
+                } else {
+                    title_spans.push(Span::styled(
+                        format!("  ✗ {}", code),
+                        Style::default().fg(palette.error),
+                    ));
+                }
+            }
+            lines.push(Line::from(title_spans));
+
+            // Command line (below title)
             for line in command.lines() {
                 let owned_line = Line::from(line.to_string());
                 let wrapped = word_wrap_line(
@@ -655,47 +661,72 @@ pub(super) fn render_tool_call_lines(
             let path = get_field("file_path").unwrap_or("file");
             let rel_path = display_workspace_relative(workspace_root, Path::new(path));
             lines.push(Line::from(vec![
-                Span::styled("  Path: ", Style::default().fg(palette.muted)),
-                Span::styled(rel_path, Style::default().fg(palette.text)),
+                Span::styled("Write ", Style::default().fg(palette.muted)),
+                Span::styled(
+                    rel_path,
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                ),
             ]));
         }
         "websearch" => {
             let query = get_field("query").unwrap_or("");
-            lines.push(Line::from(vec![
-                Span::styled("  Query: ", Style::default().fg(palette.muted)),
-                Span::styled(query.to_string(), Style::default().fg(palette.text)),
-            ]));
+            let mut title_spans = vec![
+                Span::styled(
+                    "Search web for ",
+                    Style::default().fg(palette.accent_soft),
+                ),
+                Span::styled(
+                    query.to_string(),
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ];
+            let mut suffix_parts: Vec<String> = Vec::new();
             if let Some(num) = get_field("num_results") {
-                lines.push(Line::from(vec![
-                    Span::styled("  Max results: ", Style::default().fg(palette.muted)),
-                    Span::styled(num.to_string(), Style::default().fg(palette.text)),
-                ]));
+                suffix_parts.push(format!("max: {}", num));
             }
             if let Some(st) = get_field("search_type") {
-                lines.push(Line::from(vec![
-                    Span::styled("  Type: ", Style::default().fg(palette.muted)),
-                    Span::styled(st.to_string(), Style::default().fg(palette.text)),
-                ]));
+                suffix_parts.push(st.to_string());
             }
+            if !suffix_parts.is_empty() {
+                title_spans.push(Span::styled(
+                    format!("  ({})", suffix_parts.join(", ")),
+                    Style::default().fg(palette.muted),
+                ));
+            }
+            lines.push(Line::from(title_spans));
         }
         "webfetch" => {
             let url = get_field("url").unwrap_or("");
-            lines.push(Line::from(vec![
-                Span::styled("  URL: ", Style::default().fg(palette.muted)),
-                Span::styled(url.to_string(), Style::default().fg(palette.accent)),
-            ]));
+            let mut title_spans = vec![
+                Span::styled(
+                    "Fetch web page from ",
+                    Style::default().fg(palette.accent),
+                ),
+                Span::styled(
+                    url.to_string(),
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ];
+            let mut suffix_parts: Vec<String> = Vec::new();
             if let Some(fmt) = get_field("format") {
-                lines.push(Line::from(vec![
-                    Span::styled("  Format: ", Style::default().fg(palette.muted)),
-                    Span::styled(fmt.to_string(), Style::default().fg(palette.text)),
-                ]));
+                suffix_parts.push(format!("format: {}", fmt));
             }
             if let Some(to) = get_field("timeout") {
-                lines.push(Line::from(vec![
-                    Span::styled("  Timeout: ", Style::default().fg(palette.muted)),
-                    Span::styled(to.to_string(), Style::default().fg(palette.text)),
-                ]));
+                suffix_parts.push(format!("{}s", to));
             }
+            if !suffix_parts.is_empty() {
+                title_spans.push(Span::styled(
+                    format!("  ({})", suffix_parts.join(", ")),
+                    Style::default().fg(palette.muted),
+                ));
+            }
+            lines.push(Line::from(title_spans));
         }
         _ => {
             let summary = summarize_tool_call(
@@ -704,12 +735,12 @@ pub(super) fn render_tool_call_lines(
                 body_width,
                 workspace_root,
             );
-            for line in summary.lines() {
-                lines.push(Line::from(vec![
-                    Span::styled("  ", Style::default()),
-                    Span::styled(line.to_string(), Style::default().fg(palette.text)),
-                ]));
-            }
+            lines.push(Line::from(vec![Span::styled(
+                summary,
+                Style::default()
+                    .fg(palette.text)
+                    .add_modifier(Modifier::BOLD),
+            )]));
         }
     }
 
@@ -1490,19 +1521,17 @@ pub(super) fn render_todos_checkbox_list(
     body_width: usize,
     palette: ThemePalette,
 ) -> Vec<Line<'static>> {
-    let mut lines = vec![line_with_style("Updated todo list:", palette.accent_soft)];
+    let mut lines = Vec::new();
 
     if todos.is_empty() {
         lines.push(line_with_style("  (no items)", palette.muted));
         return lines;
     }
 
-    let max_content_len = body_width.saturating_sub(6).max(1);
-
     for todo in todos {
         let (checkbox, style) = match todo.status.as_str() {
             "completed" => (
-                "✔ ",
+                "x ",
                 Style::default()
                     .fg(palette.muted)
                     .add_modifier(Modifier::CROSSED_OUT),
@@ -1517,11 +1546,38 @@ pub(super) fn render_todos_checkbox_list(
             _ => ("○ ", Style::default().fg(palette.text)),
         };
 
-        let content = shorten(&todo.content, max_content_len);
-        lines.push(Line::from(vec![
-            Span::styled(format!("  {checkbox}"), style),
-            Span::styled(content, style),
-        ]));
+        let checkbox_prefix = format!("  {}", checkbox);
+        let checkbox_width = UnicodeWidthStr::width(checkbox_prefix.as_str());
+        let indent = " ".repeat(checkbox_width);
+
+        let content_line = Line::from(todo.content.clone());
+        let wrapped = word_wrap_line(
+            &content_line,
+            WrapOptions::new(body_width.saturating_sub(2))
+                .initial_indent(Line::from(vec![Span::styled(
+                    checkbox_prefix,
+                    style,
+                )]))
+                .subsequent_indent(Line::from(vec![Span::styled(
+                    indent,
+                    Style::default(),
+                )])),
+        );
+
+        for wl in wrapped {
+            let mut owned_spans: Vec<Span<'static>> = wl
+                .spans
+                .into_iter()
+                .map(|s| Span::styled(s.content.to_string(), s.style))
+                .collect();
+            // Apply the todo item style to content parts (after the prefix)
+            for span in owned_spans.iter_mut().skip(1) {
+                if span.style.fg.is_none() {
+                    span.style = span.style.patch(style);
+                }
+            }
+            lines.push(Line::from(owned_spans));
+        }
     }
 
     lines

@@ -152,11 +152,10 @@ use crate::config::{AppConfig, AuthStore};
 
         let text = text_lines_to_string(&lines);
         assert!(
-            text.contains("Updated todo list"),
-            "should contain header: {}",
+            text.contains("Task 1"),
+            "should contain Task 1: {}",
             text
         );
-        assert!(text.contains("Task 1"), "should contain Task 1: {}", text);
         assert!(text.contains("Task 2"), "should contain Task 2: {}", text);
         assert!(text.contains("Task 3"), "should contain Task 3: {}", text);
     }

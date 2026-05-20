@@ -219,6 +219,7 @@ pub(super) fn summarize_tool_call(
                 other => format!("Memory: {other}"),
             }
         }
+        "apply_patch" => "Apply patch".to_string(),
         _ => {
             let mut summary = display_tool_name(tool_name);
             summary = summary[0..1].to_uppercase() + &summary[1..];
@@ -402,6 +403,13 @@ pub(super) fn summarize_tool_arguments(tool_name: &str, arguments: &str) -> Vec<
             }
             if let Some(mtype) = string_field("memory_type") {
                 fields.push(("type".to_string(), mtype));
+            }
+        }
+        "apply_patch" => {
+            if let Some(patch) = string_field("patch_text") {
+                let first_line = patch.lines().next().unwrap_or(patch.as_str());
+                let preview = shorten_single_line(first_line, 80);
+                fields.push(("patch".to_string(), preview));
             }
         }
         _ => {}
