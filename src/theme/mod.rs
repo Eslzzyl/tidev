@@ -227,6 +227,7 @@ impl ThemeManager {
         let theme_name = palette.name;
         crate::markdown_render::spawn_background_load();
         crate::markdown_render::set_syntax_theme_by_name(theme_name);
+        crate::markdown_render::set_rule_color(palette.muted);
         Self { palette }
     }
 
@@ -256,6 +257,7 @@ impl ThemeManager {
             ThemeName::Contrast => ThemePalette::contrast(),
         };
         crate::markdown_render::set_syntax_theme_by_name(name);
+        crate::markdown_render::set_rule_color(self.palette.muted);
     }
 
     pub fn toggle(&mut self) {

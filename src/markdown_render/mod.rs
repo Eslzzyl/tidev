@@ -12,7 +12,7 @@ use std::sync::Mutex;
 use pulldown_cmark::{
     Alignment, CodeBlockKind, CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd,
 };
-use ratatui::style::Style;
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
 
 pub use highlight::set_syntax_theme_by_name;
@@ -50,6 +50,19 @@ static MARKDOWN_RENDER_CACHE: LazyLock<
 
 /// Maximum number of entries in the markdown render cache.
 const MARKDOWN_RENDER_CACHE_MAX_ENTRIES: usize = 256;
+
+/// Global muted color for horizontal rules, set by the theme system.
+/// When `None`, falls back to `Color::DarkGray`.
+static RULE_COLOR: LazyLock<Mutex<Option<Color>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+/// Set the muted color used for rendering horizontal rules (`---`).
+/// Called by the theme system when the theme changes.
+pub(crate) fn set_rule_color(color: Color) {
+    if let Ok(mut guard) = RULE_COLOR.lock() {
+        *guard = Some(color);
+    }
+}
 
 pub(crate) fn render_markdown_text_with_width_and_cwd(
     input: &str,
@@ -152,10 +165,17 @@ where
     I: Iterator<Item = Event<'a>>,
 {
     fn new(iter: I, cwd: Option<&Path>) -> Self {
+        let mut styles = MarkdownStyles::default();
+        // Apply globally configured rule color if set (by theme system)
+        if let Ok(guard) = RULE_COLOR.lock() {
+            if let Some(color) = *guard {
+                styles.rule = Style::default().fg(color);
+            }
+        }
         Self {
             iter,
             text: Text::default(),
-            styles: MarkdownStyles::default(),
+            styles,
             inline_styles: Vec::new(),
             indent_stack: Vec::new(),
             list_indices: Vec::new(),
@@ -203,7 +223,20 @@ where
                 if !self.text.lines.is_empty() {
                     self.push_blank_line();
                 }
-                self.push_line(Line::from("———"));
+                // Draw a centered horizontal rule using ─ characters
+                let width = self.wrap_width.unwrap_or(80);
+                let rule_len = ((width as f64) * 2.0 / 3.0) as usize;
+                let rule_len = rule_len.max(8);
+                let padding = (width.saturating_sub(rule_len)) / 2;
+                let line_str = format!(
+                    "{}{}",
+                    " ".repeat(padding),
+                    "─".repeat(rule_len),
+                );
+                self.push_line(Line::from(Span::styled(
+                    line_str,
+                    self.styles.rule,
+                )));
                 self.needs_newline = true;
             }
             Event::Html(html) => self.html(html, false),
