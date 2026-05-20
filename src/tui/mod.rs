@@ -544,44 +544,67 @@ impl App {
         None
     }
 
+    /// Normalize a source path to canonical absolute form.
+    /// URLs are passed through unchanged.
+    fn canonicalize_instruction_source(&self, source: &str) -> String {
+        if source.starts_with("http://") || source.starts_with("https://") {
+            return source.to_string();
+        }
+        let path = if Path::new(source).is_absolute() {
+            PathBuf::from(source)
+        } else {
+            self.workspace_root.join(source)
+        };
+        path.canonicalize()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| source.to_string())
+    }
+
     fn update_loaded_instruction_sources(&mut self, sources: &[String]) -> Result<()> {
-        let display_sources: Vec<String> = sources
+        // Normalize incoming sources to canonical absolute paths for consistent
+        // comparison and storage.  sources from system_prompt_and_sources_with_cache()
+        // are already canonical, while @-ref sources may need normalisation.
+        let canonical_sources: Vec<String> = sources
             .iter()
-            .map(|source| self.display_instruction_source(source))
+            .map(|s| self.canonicalize_instruction_source(s))
             .collect();
 
-        // Find newly loaded sources
+        // Find newly loaded sources by comparing canonical paths.
         let mut newly_loaded = Vec::new();
-        for source in &display_sources {
+        for source in &canonical_sources {
             if !self.loaded_instruction_sources.contains(source) {
                 newly_loaded.push(source.clone());
             }
         }
 
         crate::log_info!(
-            "update_loaded_instruction_sources: raw_sources={:?} display_sources={:?} loaded={:?} newly_loaded={:?}",
+            "update_loaded_instruction_sources: sources={:?} canonical={:?} loaded={:?} newly_loaded={:?}",
             sources,
-            display_sources,
+            canonical_sources,
             self.loaded_instruction_sources,
             newly_loaded,
         );
 
         if !newly_loaded.is_empty() {
-            let content = if newly_loaded.len() == 1 {
-                format!("Loaded instructions from {}", newly_loaded[0])
+            // Build the display text using relative paths for readability.
+            let display_texts: Vec<String> = newly_loaded
+                .iter()
+                .map(|s| self.display_instruction_source(s))
+                .collect();
+            let content = if display_texts.len() == 1 {
+                format!("Loaded instructions from {}", display_texts[0])
             } else {
                 format!(
                     "Loaded {} instruction files: {}",
-                    newly_loaded.len(),
-                    newly_loaded.join(", ")
+                    display_texts.len(),
+                    display_texts.join(", ")
                 )
             };
 
             self.push_message(MessageRole::System, content)?;
 
-            // Merge newly loaded sources instead of overwriting the entire list.
-            // This prevents previously loaded sources (like root AGENTS.md) from being
-            // "re-discovered" as new when deep directory instructions are added.
+            // Merge newly loaded sources — store canonical absolute paths
+            // so the DB and in-memory list are consistent across restarts.
             for source in newly_loaded {
                 if !self.loaded_instruction_sources.contains(&source) {
                     if let Err(e) = self

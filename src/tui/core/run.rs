@@ -794,6 +794,8 @@ impl App {
         self.retrying_hint = None;
         self.context_usage = None;
         self.scroll_messages_to_bottom();
+        self.loaded_instruction_sources.clear();
+        self.instruction_content_cache.clear();
     }
 
     pub(crate) fn restore_or_load_session(
@@ -851,7 +853,24 @@ impl App {
             conversation.context_retained_from,
         );
 
-        let loaded_instruction_sources = self.store.load_instruction_sources(session_id)?;
+        let mut loaded_instruction_sources = self.store.load_instruction_sources(session_id)?;
+
+        // Normalise legacy DB entries (may contain relative paths saved by
+        // earlier versions) to canonical absolute form so the in-memory list
+        // is consistent regardless of what the DB holds.
+        for source in loaded_instruction_sources.iter_mut() {
+            if source.starts_with("http://") || source.starts_with("https://") {
+                continue;
+            }
+            let path = if std::path::Path::new(source.as_str()).is_absolute() {
+                std::path::PathBuf::from(source.as_str())
+            } else {
+                self.workspace_root.join(source.as_str())
+            };
+            if let Ok(canonical) = path.canonicalize() {
+                *source = canonical.display().to_string();
+            }
+        }
 
         // Pre-populate cache from loaded instruction sources so the next
         // user message doesn't re-read all files and avoid redundant
@@ -861,15 +880,9 @@ impl App {
             if source.starts_with("http://") || source.starts_with("https://") {
                 continue;
             }
-            let path = if std::path::Path::new(source).is_absolute() {
-                std::path::PathBuf::from(source)
-            } else {
-                self.workspace_root.join(source)
-            };
-            let canonical_path = path.canonicalize().unwrap_or_else(|_| path.clone());
-            if let Ok(content) = std::fs::read_to_string(&canonical_path) {
-                instruction_content_cache
-                    .insert(canonical_path.display().to_string(), content);
+            // source is now guaranteed to be canonical absolute.
+            if let Ok(content) = std::fs::read_to_string(source) {
+                instruction_content_cache.insert(source.clone(), content);
             }
         }
         crate::log_info!(

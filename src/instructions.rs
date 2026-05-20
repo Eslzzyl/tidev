@@ -64,10 +64,10 @@ pub fn resolve_nearby_instructions(
                 && let Ok(content) = fs::read_to_string(&candidate)
                 && !content.trim().is_empty()
             {
-                seen.insert(canonical);
+                seen.insert(canonical.clone());
                 results.push((
-                    candidate.clone(),
-                    format!("Instructions from: {}\n{}", candidate.display(), content),
+                    canonical.clone(),
+                    format!("Instructions from: {}\n{}", canonical.display(), content),
                 ));
             }
         }
