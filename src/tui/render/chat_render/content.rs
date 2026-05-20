@@ -466,6 +466,7 @@ pub(super) fn compute_block_data(
             for (_, card_lines) in &cards {
                 lines += card_lines.len();
             }
+            lines += 1;
             (1, lines, cache_entries)
         }
         MessageRole::Error => {
@@ -488,6 +489,7 @@ pub(super) fn compute_block_data(
             for (_, card_lines) in &cards {
                 lines += card_lines.len();
             }
+            lines += 1;
             (1, lines, cache_entries)
         }
         MessageRole::Shell => {

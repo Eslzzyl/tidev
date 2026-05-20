@@ -2057,7 +2057,7 @@ impl App {
                         user_card_ranges.push((message.id, start_line, end_line));
                     }
                 }
-                if matches!(message.role, MessageRole::User | MessageRole::Shell) {
+                if matches!(message.role, MessageRole::User | MessageRole::Shell | MessageRole::System | MessageRole::Error) {
                     lines.push(Line::from(""));
                 }
             }
