@@ -245,7 +245,7 @@ pub(super) fn summarize_tool_arguments(tool_name: &str, arguments: &str) -> Vec<
             .as_ref()
             .and_then(|value| value.get(key))
             .and_then(serde_json::Value::as_str)
-            .map(|value| shorten_single_line(value, 96))
+            .map(|value| value.to_string())
     };
 
     match canonical_name {
