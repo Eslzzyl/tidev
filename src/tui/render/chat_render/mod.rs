@@ -793,6 +793,9 @@ impl App {
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| d.file.clone());
 
+                let show_add = d.additions > 0;
+                let show_del = d.deletions > 0;
+
                 let add_str = format!("+{}", d.additions);
                 let del_str = format!("-{}", d.deletions);
 
@@ -810,18 +813,23 @@ impl App {
 
                 // Calculate padding to right-align the counts (like opencode's space-between)
                 let fw = UnicodeWidthStr::width(filename.as_str());
-                let aw = UnicodeWidthStr::width(add_str.as_str());
-                let dw = UnicodeWidthStr::width(del_str.as_str());
-                // +2 for spaces between filename/counts and between the two counts
-                let padding = content_width.saturating_sub(fw + aw + dw + 2);
+                let aw = if show_add { UnicodeWidthStr::width(add_str.as_str()) } else { 0 };
+                let dw = if show_del { UnicodeWidthStr::width(del_str.as_str()) } else { 0 };
+                // +1 for space between the two counts when both are visible
+                let gap_count = if show_add && show_del { 1 } else { 0 };
+                let padding = content_width.saturating_sub(fw + aw + dw + gap_count);
 
-                lines.push(Line::from(vec![
-                    file_span,
-                    Span::raw(" ".repeat(padding)),
-                    add_span,
-                    Span::raw(" "),
-                    del_span,
-                ]));
+                let mut spans = vec![file_span, Span::raw(" ".repeat(padding))];
+                if show_add {
+                    spans.push(add_span);
+                }
+                if show_del {
+                    if show_add {
+                        spans.push(Span::raw(" "));
+                    }
+                    spans.push(del_span);
+                }
+                lines.push(Line::from(spans));
             }
         }
 
