@@ -169,6 +169,7 @@ use crate::config::{AppConfig, AuthStore};
             id: "tool-call-id".to_string(),
             name: "read".to_string(),
             arguments: "{\"file_path\": \"/tmp/example.txt\"}".to_string(),
+            thought_signature: None,
         };
 
         let ctx = RenderContext {

@@ -310,8 +310,11 @@ pub struct ToolCall {
     pub id: String,
     pub name: String,
     pub arguments: String,
+    /// Opaque signature from Gemini thought/reasoning that must be echoed back
+    /// in subsequent conversation turns (required for Gemini 3+ models).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thought_signature: Option<String>,
 }
-
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AssistantTurn {
     #[serde(default)]
@@ -965,16 +968,19 @@ mod tests {
             id: "tool-call-1".to_string(),
             name: "bash".to_string(),
             arguments: "{\"command\":\"ls\"}".to_string(),
+            thought_signature: None,
         });
         turn.upsert_tool_call(ToolCall {
             id: "tool-call-1".to_string(),
             name: "bash".to_string(),
             arguments: "{\"command\":\"ls -la\"}".to_string(),
+            thought_signature: None,
         });
         turn.upsert_tool_call(ToolCall {
             id: "tool-call-2".to_string(),
             name: "read".to_string(),
             arguments: "{\"path\":\"README.md\"}".to_string(),
+            thought_signature: None,
         });
 
         assert_eq!(turn.tool_calls.len(), 2);

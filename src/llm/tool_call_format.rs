@@ -20,6 +20,7 @@ impl ToolCallBuilder {
                 self.name
             },
             arguments: self.arguments,
+            thought_signature: None,
         }
     }
 }
@@ -141,6 +142,7 @@ pub(super) fn parse_invoke_xml(text: &str) -> (String, Vec<crate::session::ToolC
                     id: format!("tool-call-{}", call_index),
                     name,
                     arguments: args_json,
+                    thought_signature: None,
                 });
                 call_index += 1;
 

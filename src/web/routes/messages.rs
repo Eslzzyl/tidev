@@ -414,6 +414,7 @@ pub async fn send_message(
         api_type: match provider.api_type.as_deref() {
             Some("anthropic") => crate::config::ApiType::Anthropic,
             Some("openai_responses") => crate::config::ApiType::OpenAiResponses,
+            Some("google_gemini") => crate::config::ApiType::GoogleGemini,
             _ => crate::config::ApiType::OpenAiChatCompletions,
         },
         temperature: model_config.temperature,
@@ -920,6 +921,7 @@ pub async fn compact_session(
         api_type: match provider.api_type.as_deref() {
             Some("anthropic") => crate::config::ApiType::Anthropic,
             Some("openai_responses") => crate::config::ApiType::OpenAiResponses,
+            Some("google_gemini") => crate::config::ApiType::GoogleGemini,
             _ => crate::config::ApiType::OpenAiChatCompletions,
         },
         temperature: model_config.temperature,

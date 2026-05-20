@@ -706,6 +706,7 @@ mod tests {
             id: "call-1".to_string(),
             name: "question".to_string(),
             arguments: "{}".to_string(),
+            thought_signature: None,
         };
         let questions: Vec<QuestionInfo> = serde_json::from_value(json!([
             {
@@ -776,6 +777,7 @@ mod tests {
             id: "call-2".to_string(),
             name: "question".to_string(),
             arguments: "{}".to_string(),
+            thought_signature: None,
         };
         let questions: Vec<QuestionInfo> = serde_json::from_value(json!([
             {
@@ -837,6 +839,7 @@ mod tests {
             id: "call-3".to_string(),
             name: "question".to_string(),
             arguments: "{}".to_string(),
+            thought_signature: None,
         };
         let questions: Vec<QuestionInfo> = serde_json::from_value(json!([
             {

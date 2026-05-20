@@ -285,6 +285,7 @@ pub(super) async fn stream_responses(
                                     id: key_id.clone(),
                                     name: builder.name().to_string(),
                                     arguments: arguments.to_string(),
+                                    thought_signature: None,
                                 };
                                 let _ = tx.send(BackendEvent::ToolCallUpdated {
                                     session_id,
@@ -696,6 +697,7 @@ fn finalize_turn(
             id: builder.id().to_string(),
             name: builder.name().to_string(),
             arguments: builder.arguments().unwrap_or_default().to_string(),
+            thought_signature: None,
         })
         .collect::<Vec<_>>();
 

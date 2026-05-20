@@ -2435,6 +2435,7 @@ mod tests {
             id: "tc-1".to_string(),
             name: "grep".to_string(),
             arguments: "{}".to_string(),
+            thought_signature: None,
         }];
         let msgs = vec![
             Message::new(MessageRole::User, "find it"),
@@ -2464,6 +2465,7 @@ mod tests {
             id: "orphan".to_string(),
             name: "edit".to_string(),
             arguments: "{}".to_string(),
+            thought_signature: None,
         }];
         let msgs = vec![assistant, Message::new(MessageRole::User, "what happened?")];
         let mut conv = Conversation::new(Uuid::nil(), "", "", "", "", "", "");
@@ -2486,6 +2488,7 @@ mod tests {
             id: "orphan-call".to_string(),
             name: "edit".to_string(),
             arguments: "{}".to_string(),
+            thought_signature: None,
         }];
         let msgs = vec![
             orphan_tool_call,
@@ -2584,12 +2587,14 @@ mod tests {
             id: "orphan-1".to_string(),
             name: "grep".to_string(),
             arguments: "{}".to_string(),
+            thought_signature: None,
         }];
         let mut assistant_b = Message::new(MessageRole::Assistant, "");
         assistant_b.tool_calls = vec![ToolCall {
             id: "valid-2".to_string(),
             name: "read".to_string(),
             arguments: "{}".to_string(),
+            thought_signature: None,
         }];
         let tool_response = Message::tool_result("valid-2", "read", ToolExecutionResult::new("ok"));
         let msgs = vec![
@@ -2724,6 +2729,7 @@ mod tests {
                     name: "edit".to_string(),
                     arguments: r#"{"path":"/nonexistent","old_text":"a","new_text":"b"}"#
                         .to_string(),
+                    thought_signature: None,
                 },
                 false,
                 false,
@@ -2733,6 +2739,7 @@ mod tests {
                     id: "tc-2".to_string(),
                     name: "read".to_string(),
                     arguments: r#"{"file_path":"/nonexistent"}"#.to_string(),
+                    thought_signature: None,
                 },
                 false,
                 false,
@@ -2797,6 +2804,7 @@ mod tests {
                 id: "tc-1".to_string(),
                 name: "read".to_string(),
                 arguments: r#"{"file_path":"."}"#.to_string(),
+                thought_signature: None,
             },
             false,
             false,
@@ -2847,6 +2855,7 @@ mod tests {
                 id: "tc-persist".to_string(),
                 name: "read".to_string(),
                 arguments: r#"{"file_path":"."}"#.to_string(),
+                thought_signature: None,
             },
             false,
             false,
@@ -2909,6 +2918,7 @@ mod tests {
                 id: "tc-bash".to_string(),
                 name: "bash".to_string(),
                 arguments: r#"{"command":"echo hello"}"#.to_string(),
+                thought_signature: None,
             },
             false,
             false,

@@ -2,6 +2,7 @@ mod anthropic;
 mod attachments;
 mod debug;
 mod error;
+mod gemini;
 mod openai;
 mod responses;
 mod think_parser;
@@ -190,6 +191,17 @@ impl LlmClient {
                     )
                     .await
                 }
+                ApiType::GoogleGemini => {
+                    gemini::complete_gemini(
+                        &self.http,
+                        model.clone(),
+                        messages.clone(),
+                        tools.clone(),
+                        self.save_request_body,
+                        self.max_request_files,
+                    )
+                    .await
+                }
             };
 
             match result {
@@ -263,6 +275,20 @@ impl LlmClient {
             }
             ApiType::OpenAiResponses => {
                 responses::stream_responses(
+                    &self.http,
+                    session_id,
+                    request_id,
+                    model,
+                    messages,
+                    tools,
+                    tx,
+                    self.save_request_body,
+                    self.max_request_files,
+                )
+                .await
+            }
+            ApiType::GoogleGemini => {
+                gemini::stream_gemini(
                     &self.http,
                     session_id,
                     request_id,

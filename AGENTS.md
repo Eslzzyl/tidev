@@ -38,7 +38,7 @@ cargo test           # >200 test functions, 8 async; uses tempfile crate
 - `src/web/` — axum web server; `routes/`, `event_bus.rs` (WebSocket events), `state.rs`
 - `src/gateway/` — Telegram (`telegram/`) and QQ (`qq.rs`) bot integrations via shared channel orchestrator
 - `src/storage/` — SQLite persistence (`SessionStore` with separate read/write connections); schema in `schema.rs`, migrations in `migration.rs`
-- `src/llm/` — LLM provider abstraction (Anthropic `anthropic.rs`, OpenAI chat `openai.rs`, OpenAI Responses API `responses.rs`)
+- `src/llm/` — LLM provider abstraction: Anthropic (`anthropic.rs`), OpenAI chat (`openai.rs`), OpenAI Responses API (`responses.rs`), Google Gemini (`gemini.rs`)
 - `src/config/` — config loading, auth storage, provider config, MCP config, sandbox config, reasoning/thinking levels
 - `src/tooling/` — tool definitions, `ToolRegistry`, `ToolArgs` trait, `SkillCatalog`, `FileReadTracker`
 - `src/memory/` — memory/graph/retention system (graph nodes/edges, consolidation, eviction, lessons)

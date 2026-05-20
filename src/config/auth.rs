@@ -218,7 +218,23 @@ impl ActiveModel {
             ApiType::OpenAiResponses => {
                 format!("{}/v1/responses", self.base_url.trim_end_matches('/'))
             }
+            ApiType::GoogleGemini => {
+                format!(
+                    "{}/models/{}:generateContent",
+                    self.base_url.trim_end_matches('/'),
+                    self.request_model_id
+                )
+            }
         }
+    }
+
+    /// Gemini streaming endpoint (uses SSE via `streamGenerateContent`).
+    pub fn gemini_stream_endpoint(&self) -> String {
+        format!(
+            "{}/models/{}:streamGenerateContent?alt=sse",
+            self.base_url.trim_end_matches('/'),
+            self.request_model_id
+        )
     }
 
     /// 获取完整的 extra_body（合并基础配置 + 思考配置）

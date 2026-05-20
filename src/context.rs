@@ -448,6 +448,7 @@ mod tests {
             id: "tool-call-1".to_string(),
             name: "grep".to_string(),
             arguments: "{}".to_string(),
+            thought_signature: None,
         }];
 
         let valid_conversation = test_conversation(vec![
@@ -492,6 +493,7 @@ mod tests {
             id: "orphan-call".to_string(),
             name: "edit".to_string(),
             arguments: "{}".to_string(),
+            thought_signature: None,
         }];
         let conversation_with_orphan = test_conversation(vec![
             orphan_tool_call,

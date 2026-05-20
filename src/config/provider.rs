@@ -14,6 +14,7 @@ pub enum ApiType {
     OpenAiChatCompletions,
     Anthropic,
     OpenAiResponses,
+    GoogleGemini,
 }
 
 impl ApiType {
@@ -22,6 +23,7 @@ impl ApiType {
             Self::OpenAiChatCompletions => "openai_chat_completions",
             Self::Anthropic => "anthropic",
             Self::OpenAiResponses => "openai_responses",
+            Self::GoogleGemini => "google_gemini",
         }
     }
 
@@ -29,6 +31,7 @@ impl ApiType {
         match s {
             "anthropic" => Self::Anthropic,
             "openai_responses" => Self::OpenAiResponses,
+            "google_gemini" => Self::GoogleGemini,
             _ => Self::OpenAiChatCompletions,
         }
     }
