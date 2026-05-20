@@ -94,6 +94,7 @@ impl App {
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 let position = Position::new(mouse.column, mouse.row);
+                self.hovered_card = None;
 
                 // Check if clicking on scrollbar
                 if self.handle_scrollbar_mouse_down(position) {
@@ -121,6 +122,24 @@ impl App {
                 // Always update pointer position for auto-scroll
                 self.mouse_selection.drag(position);
                 self.handle_input_area_drag(position);
+            }
+            MouseEventKind::Moved => {
+                let position = Position::new(mouse.column, mouse.row);
+                let hit_id = self
+                    .tool_result_card_bounds
+                    .iter()
+                    .find(|(_, rect)| rect.contains(position))
+                    .map(|(id, _)| *id)
+                    // If not on a tool card, check user message cards
+                    .or_else(|| {
+                        self.user_card_bounds
+                            .iter()
+                            .find(|(_, rect)| rect.contains(position))
+                            .map(|(id, _)| *id)
+                    });
+                if self.hovered_card != hit_id {
+                    self.hovered_card = hit_id;
+                }
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 let position = Position::new(mouse.column, mouse.row);
@@ -170,6 +189,7 @@ impl App {
             }
             MouseEventKind::ScrollUp => {
                 let position = Position::new(mouse.column, mouse.row);
+                self.hovered_card = None;
                 if self.handle_input_area_scroll_up(position) {
                     return;
                 }
@@ -183,6 +203,7 @@ impl App {
             }
             MouseEventKind::ScrollDown => {
                 let position = Position::new(mouse.column, mouse.row);
+                self.hovered_card = None;
                 if self.handle_input_area_scroll_down(position) {
                     return;
                 }

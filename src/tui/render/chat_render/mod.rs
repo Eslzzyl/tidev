@@ -455,6 +455,7 @@ impl App {
             text,
             total_lines,
             card_ranges,
+            user_card_ranges,
             selectable_regions_ranges,
             rendered_virtualized,
             virtualized_render_scroll,
@@ -529,6 +530,31 @@ impl App {
                 };
                 self.tool_result_card_bounds
                     .push((card_range.message_id, card_rect));
+            }
+        }
+
+        // Calculate screen positions for user message cards
+        self.user_card_bounds.clear();
+        for (message_id, start_line, end_line) in user_card_ranges {
+            let screen_start = start_line.saturating_sub(render_scroll);
+            let screen_end = end_line.saturating_sub(render_scroll);
+
+            if screen_end == 0 || screen_start >= self.message_viewport_lines {
+                continue;
+            }
+
+            let visible_start = screen_start as u16;
+            let visible_end = (screen_end.min(self.message_viewport_lines)) as u16;
+
+            if visible_start < visible_end {
+                let card_rect = Rect {
+                    x: content_area.x,
+                    y: content_area.y.saturating_add(visible_start),
+                    width: content_area.width,
+                    height: visible_end.saturating_sub(visible_start),
+                };
+                self.user_card_bounds
+                    .push((message_id, card_rect));
             }
         }
 
@@ -932,6 +958,7 @@ impl App {
         Text<'static>,
         usize,
         Vec<ToolResultCardRange>,
+        Vec<(Uuid, usize, usize)>,  // user card ranges: (message_id, start_line, end_line)
         Vec<SelectableRegionRange>,
         bool,
         usize,
@@ -945,6 +972,7 @@ impl App {
 
         let mut lines = Vec::new();
         let mut card_ranges = Vec::new();
+        let mut user_card_ranges = Vec::new();
         let mut selectable_regions_ranges = Vec::new();
         let mut running_card_ranges = Vec::new();
 
@@ -982,6 +1010,7 @@ impl App {
                 Text::from(lines),
                 total_lines,
                 card_ranges,
+                user_card_ranges, // empty at this point
                 selectable_regions_ranges,
                 false,
                 0,
@@ -1099,6 +1128,7 @@ impl App {
                 width,
                 body_width,
                 &mut card_ranges,
+                &mut user_card_ranges,
                 &mut selectable_regions_ranges,
                 current_line_offset,
                 &ctx,
@@ -1141,6 +1171,7 @@ impl App {
             Text::from(lines),
             total_lines,
             card_ranges,
+            user_card_ranges,
             selectable_regions_ranges,
             true,
             render_scroll,
@@ -1911,6 +1942,7 @@ impl App {
         width: usize,
         body_width: usize,
         card_ranges: &mut Vec<ToolResultCardRange>,
+        user_card_ranges: &mut Vec<(Uuid, usize, usize)>,
         selectable_regions_ranges: &mut Vec<SelectableRegionRange>,
         current_line_offset: usize,
         ctx: &RenderContext<'_>,
@@ -2020,11 +2052,31 @@ impl App {
                                 }
                             }
 
-                            let card_bg = if canonical_tool_name(&tool_call.name) == Some("task") {
+                            let mut card_bg = if canonical_tool_name(&tool_call.name) == Some("task") {
                                 palette.panel
                             } else {
                                 palette.panel_light
                             };
+                            // Apply hover highlight only when clicking the card actually
+                            // changes its visual content — i.e., the renderer uses
+                            // expanded_tool_results AND the output exceeds the preview
+                            // threshold (5 lines).  Tools whose renderers never vary with
+                            // expansion state are excluded entirely.
+                            if let Some(result_msg) = tool_result {
+                                let canonical = canonical_tool_name(&tool_call.name);
+                                let has_expandable = match canonical {
+                                    // These tools' renderers never use expanded_tool_results
+                                    Some("read" | "grep" | "glob" | "skill" | "write" | "edit"
+                                         | "apply_patch" | "question" | "todowrite") => false,
+                                    // All other tools (task, websearch, webfetch, memory,
+                                    // bash, MCP, etc.) use expanded_tool_results — only
+                                    // meaningful if output exceeds preview threshold
+                                    _ => result_msg.content.lines().count() > TOOL_OUTPUT_PREVIEW_LINES,
+                                };
+                                if self.hovered_card == Some(result_msg.id) && has_expandable {
+                                    card_bg = palette.hover_bg(card_bg);
+                                }
+                            }
                             let decorated = decorate_card_lines(tool_card_lines, width, card_bg, 2);
                             if let Some(result_msg) = tool_result {
                                 lines.extend(decorated);
@@ -2045,11 +2097,17 @@ impl App {
             MessageRole::User | MessageRole::System | MessageRole::Error | MessageRole::Shell => {
                 let cards =
                     self.cached_render_message_cards(ctx, message, body_width, is_round_end);
-                let bg = match message.role {
+                let mut bg = match message.role {
                     MessageRole::User => palette.panel_alt,
                     MessageRole::Error => palette.panel_light,
                     _ => palette.background,
                 };
+                // Apply hover highlight for user message cards
+                if matches!(message.role, MessageRole::User | MessageRole::Shell)
+                    && self.hovered_card == Some(message.id)
+                {
+                    bg = palette.hover_bg(bg);
+                }
                 for (_, card_lines) in cards {
                     if !card_lines.is_empty() {
                         let start_line = current_line_offset + lines.len();
@@ -2074,6 +2132,9 @@ impl App {
                         }
 
                         lines.extend(decorate_card_lines(card_lines, width, bg, 2));
+                        // Record user card bounds for hover detection
+                        let end_line = current_line_offset + lines.len();
+                        user_card_ranges.push((message.id, start_line, end_line));
                     }
                 }
                 if matches!(message.role, MessageRole::User | MessageRole::Shell) {

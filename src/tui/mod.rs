@@ -245,6 +245,11 @@ struct App {
     instruction_content_cache: std::collections::HashMap<String, String>,
     expanded_tool_results: std::collections::HashSet<Uuid>,
     tool_result_card_bounds: Vec<(Uuid, Rect)>,
+    /// Hovered card message ID for mouse hover highlight (tool cards + user cards)
+    hovered_card: Option<Uuid>,
+    /// User message card screen bounds: (message_id, screen_rect)
+    /// Recalculated every frame in render_chat()
+    user_card_bounds: Vec<(Uuid, Rect)>,
     /// Maps tool_call_id → child_session_id for subagent task navigation
     subagent_task_map: std::collections::HashMap<String, Uuid>,
     /// Running subagent card screen bounds: (execution_index, screen_rect)

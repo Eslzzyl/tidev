@@ -279,6 +279,8 @@ impl App {
             instruction_content_cache: std::collections::HashMap::new(),
             expanded_tool_results: std::collections::HashSet::new(),
             tool_result_card_bounds: Vec::new(),
+            hovered_card: None,
+            user_card_bounds: Vec::new(),
             subagent_task_map: std::collections::HashMap::new(),
             running_subagent_card_bounds: Vec::new(),
             pending_permission_rx: None,

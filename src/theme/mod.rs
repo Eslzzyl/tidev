@@ -214,6 +214,17 @@ impl ThemePalette {
             SessionMode::Plan => self.mode_plan,
         }
     }
+
+    /// Return a subtly highlighted version of `base` for mouse hover effects.
+    /// Lightens on dark themes, darkens on light themes, so the card appears
+    /// to "lift" on hover without changing hue.
+    pub fn hover_bg(&self, base: Color) -> Color {
+        if self.name.is_dark() {
+            mix_colors(Color::Rgb(255, 255, 255), base, 0.08)
+        } else {
+            mix_colors(Color::Rgb(0, 0, 0), base, 0.06)
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
