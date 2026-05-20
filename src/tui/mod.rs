@@ -558,6 +558,14 @@ impl App {
             }
         }
 
+        crate::log_info!(
+            "update_loaded_instruction_sources: raw_sources={:?} display_sources={:?} loaded={:?} newly_loaded={:?}",
+            sources,
+            display_sources,
+            self.loaded_instruction_sources,
+            newly_loaded,
+        );
+
         if !newly_loaded.is_empty() {
             let content = if newly_loaded.len() == 1 {
                 format!("Loaded instructions from {}", newly_loaded[0])
@@ -598,9 +606,19 @@ impl App {
         if path.is_absolute()
             && let Ok(rel) = path.strip_prefix(&self.workspace_root)
         {
-            return rel.display().to_string();
+            let result = rel.display().to_string();
+            crate::log_info!(
+                "display_instruction_source: abs->rel  {} -> {}",
+                source,
+                result,
+            );
+            return result;
         }
 
+        crate::log_info!(
+            "display_instruction_source: passthrough {}",
+            source,
+        );
         source.to_string()
     }
 
@@ -1462,6 +1480,10 @@ impl App {
                         self.conversation.push(user_message);
 
                         // Show "Loaded instructions" notification below the user message
+                        crate::log_info!(
+                            "TurnStarting: queued instruction_sources={:?}",
+                            queued.instruction_sources,
+                        );
                         if let Err(e) = self.update_loaded_instruction_sources(&queued.instruction_sources) {
                             crate::log_warn!("Failed to update instruction sources for queued prompt: {}", e);
                         }
@@ -1682,6 +1704,10 @@ impl App {
         // Persist and display nearby instruction sources from @ references
         // below the user message, so the notification appears after the user's
         // message card rather than above it.
+        crate::log_info!(
+            "submit_prompt_now: @-ref instruction_sources={:?}",
+            instruction_sources,
+        );
         if let Err(e) = self.update_loaded_instruction_sources(&instruction_sources) {
             crate::log_warn!("Failed to update instruction sources for prompt: {}", e);
         }
@@ -1702,6 +1728,11 @@ impl App {
 
         self.schedule_context_compaction_for_session(self.conversation.session_id, runtime, None);
 
+        crate::log_info!(
+            "submit_prompt_now: before instruction load, instruction_content_cache keys={:?}",
+            self.instruction_content_cache.keys().collect::<Vec<_>>(),
+        );
+
         // Load instruction files so "Loaded instructions from ..." appears before
         // the streaming assistant message is created by spawn_agent_loop.
         // This is done here (not in the agent loop) to avoid corrupting the
@@ -1716,6 +1747,11 @@ impl App {
         self.update_loaded_instruction_sources(&sources)?;
         self.instruction_content_cache = new_cache.clone();
         self.agent.instruction_content_cache = new_cache;
+
+        crate::log_info!(
+            "submit_prompt_now: after instruction load, sources={:?}",
+            sources,
+        );
 
         crate::log_info!("agent: submit_prompt_now took {:?}", _t_submit.elapsed());
         self.spawn_agent_loop(runtime)

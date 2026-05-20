@@ -695,6 +695,11 @@ impl App {
                     .insert(canonical_path.display().to_string(), content);
             }
         }
+        crate::log_info!(
+            "restore_cached_session_runtime: loaded_instruction_sources={:?} cache_keys={:?}",
+            self.loaded_instruction_sources,
+            self.instruction_content_cache.keys().collect::<Vec<_>>(),
+        );
 
         // Restore cached file read records
         if let Some(reads) = cached.file_reads {
@@ -867,6 +872,12 @@ impl App {
                     .insert(canonical_path.display().to_string(), content);
             }
         }
+        crate::log_info!(
+            "load_session_runtime_from_store: session={} loaded_instruction_sources={:?} cache_keys={:?}",
+            session_id,
+            loaded_instruction_sources,
+            instruction_content_cache.keys().collect::<Vec<_>>(),
+        );
 
         let mut runtime = CachedSessionRuntime {
             conversation,

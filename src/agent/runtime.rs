@@ -255,6 +255,14 @@ impl AgentRuntime {
             .filter(|s| !already_injected.contains(s))
             .collect();
 
+        crate::log_info!(
+            "inject_new_instructions: already_injected_raw={:?} already_injected_norm={:?} sources={:?} new_sources={:?}",
+            already_injected_raw,
+            already_injected,
+            sources,
+            new_sources,
+        );
+
         if new_sources.is_empty() {
             return Ok(false);
         }

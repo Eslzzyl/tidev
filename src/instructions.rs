@@ -174,6 +174,10 @@ pub fn system_prompt_and_sources_with_cache(
         let path_str = path.display().to_string();
         if let Some(cached_content) = cache.get(&path_str) {
             // Use cached content
+            crate::log_info!(
+                "system_prompt_and_sources_with_cache: HIT  path={}",
+                path_str,
+            );
             if !cached_content.trim().is_empty() {
                 sections.push(format!(
                     "Instructions from: {}\n{}",
@@ -184,6 +188,11 @@ pub fn system_prompt_and_sources_with_cache(
             }
         } else {
             // Read and cache new content
+            crate::log_info!(
+                "system_prompt_and_sources_with_cache: MISS path={} cache_keys={:?}",
+                path_str,
+                cache.keys().collect::<Vec<_>>(),
+            );
             if let Ok(content) = fs::read_to_string(&path)
                 && !content.trim().is_empty()
             {
