@@ -41,6 +41,7 @@ pub trait SearchProvider: Send + Sync {
         query: &str,
         num_results: Option<i64>,
         search_type: Option<&str>,
+        offset: Option<i64>,
     ) -> Result<String>;
 }
 
@@ -174,6 +175,7 @@ async fn execute_search(
             query,
             args.num_results,
             args.search_type.as_deref(),
+            args.offset,
         )
         .await
 }

@@ -31,6 +31,7 @@ impl SearchProvider for BraveProvider {
         query: &str,
         num_results: Option<i64>,
         search_type: Option<&str>,
+        offset: Option<i64>,
     ) -> Result<String> {
         let api_key = auth.search_api_key("brave").ok_or_else(|| {
             anyhow::anyhow!(
@@ -40,8 +41,10 @@ impl SearchProvider for BraveProvider {
             )
         })?;
 
-        // Map our generic search_type to Brave parameters
-        let count = num_results.unwrap_or(8).clamp(1, 20);
+        let offset = offset.unwrap_or(0).max(0);
+        let base_num = num_results.unwrap_or(8);
+        // Fetch extra results to account for offset
+        let count = (base_num + offset).clamp(1, 20);
 
         let mut params = vec![("q", query.to_string()), ("count", count.to_string())];
 
@@ -70,11 +73,11 @@ impl SearchProvider for BraveProvider {
             .await
             .context("failed to parse Brave Search response")?;
 
-        format_brave_results(&body)
+        format_brave_results(&body, offset as usize)
     }
 }
 
-fn format_brave_results(body: &serde_json::Value) -> Result<String> {
+fn format_brave_results(body: &serde_json::Value, offset: usize) -> Result<String> {
     let results = body
         .get("web")
         .and_then(|w| w.get("results"))
@@ -82,12 +85,12 @@ fn format_brave_results(body: &serde_json::Value) -> Result<String> {
         .map(|arr| arr.as_slice())
         .unwrap_or_default();
 
-    if results.is_empty() {
+    if results.is_empty() || offset >= results.len() {
         return Ok("No search results found. Please try a different query.".to_string());
     }
 
     let mut output = String::new();
-    for (i, item) in results.iter().enumerate() {
+    for (i, item) in results.iter().enumerate().skip(offset) {
         let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("");
         let url = item.get("url").and_then(|v| v.as_str()).unwrap_or("");
         let desc = item
@@ -95,7 +98,7 @@ fn format_brave_results(body: &serde_json::Value) -> Result<String> {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        output.push_str(&format!("{}. [{}]({})\n   {}\n\n", i + 1, title, url, desc));
+        output.push_str(&format!("{}. [{}]({})\n   {}\n\n", i + 1 - offset, title, url, desc));
     }
 
     if output.is_empty() {

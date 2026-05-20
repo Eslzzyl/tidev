@@ -15,6 +15,7 @@ use crate::tooling::tools::WebFetchArgs;
 const FETCH_DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const FETCH_MAX_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_RESPONSE_BYTES: usize = 5 * 1024 * 1024;
+const FETCH_DEFAULT_LINE_LIMIT: i64 = 2000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WebFetchFormat {
@@ -101,7 +102,54 @@ pub async fn fetch(args: WebFetchArgs) -> Result<String> {
     if output.is_empty() {
         bail!("fetched page is empty");
     }
-    Ok(output)
+
+    // Apply line-based offset/limit (matching read tool behavior)
+    let offset = args.offset.unwrap_or(1);
+    let limit = args.limit.unwrap_or(FETCH_DEFAULT_LINE_LIMIT);
+    if offset < 1 {
+        bail!("offset must be greater than or equal to 1");
+    }
+    if limit < 1 {
+        bail!("limit must be greater than or equal to 1");
+    }
+
+    let lines: Vec<&str> = output.lines().collect();
+    let total_lines = lines.len();
+
+    if total_lines < offset as usize && !(total_lines == 0 && offset == 1) {
+        bail!(
+            "Offset {} is out of range for this page ({} lines)",
+            offset,
+            total_lines,
+        );
+    }
+
+    let start = (offset as usize).saturating_sub(1);
+    let selected: Vec<&str> = lines.iter().skip(start).take(limit as usize).copied().collect();
+    let end = start + selected.len();
+
+    let mut content = selected
+        .iter()
+        .enumerate()
+        .map(|(i, line)| format!("{}: {}", offset as usize + i, line))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let has_more = end < total_lines;
+    let next_offset = offset + selected.len() as i64;
+    if has_more {
+        content.push_str(&format!(
+            "\n\n(Showing lines {}-{} of {}. Use offset={} to continue.)",
+            offset,
+            offset + selected.len() as i64 - 1,
+            total_lines,
+            next_offset,
+        ));
+    } else {
+        content.push_str(&format!("\n\n(End of page - total {} lines)", total_lines));
+    }
+
+    Ok(content)
 }
 
 async fn fetch_response(http: &Client, url: &Url, headers: HeaderMap) -> Result<reqwest::Response> {

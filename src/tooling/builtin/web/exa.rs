@@ -32,6 +32,7 @@ impl SearchProvider for ExaProvider {
         query: &str,
         num_results: Option<i64>,
         search_type: Option<&str>,
+        offset: Option<i64>,
     ) -> Result<String> {
         // Resolve the endpoint URL: provider_config -> env var -> default
         let exa_url = provider_config
@@ -46,6 +47,11 @@ impl SearchProvider for ExaProvider {
             _ => "auto",
         };
 
+        let offset = offset.unwrap_or(0).max(0);
+        let base_num = num_results.unwrap_or(8);
+        // Fetch extra results to account for offset
+        let num_results_val = base_num + offset;
+
         let payload = json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -55,7 +61,7 @@ impl SearchProvider for ExaProvider {
                 "arguments": {
                     "query": query,
                     "type": st,
-                    "numResults": num_results.unwrap_or(8),
+                    "numResults": num_results_val,
                     "livecrawl": "fallback",
                     "contextMaxCharacters": null,
                 }
@@ -90,7 +96,12 @@ impl SearchProvider for ExaProvider {
             "No search results found. Please try a different query.".to_string()
         });
 
-        Ok(text)
+        // Apply result-level offset by skipping the first N result items
+        if offset > 0 {
+            Ok(skip_formatted_results(&text, offset as usize))
+        } else {
+            Ok(text)
+        }
     }
 }
 
@@ -122,4 +133,103 @@ fn parse_exa_sse(body: &str) -> Result<Option<String>> {
     }
 
     Ok(None)
+}
+
+/// Skip the first `offset` search result items in formatted text.
+///
+/// Results are detected by lines matching the pattern `N. [Title](url)`.
+/// The function finds the (offset+1)-th result and returns everything from
+/// that line onward, renumbering results starting from 1.
+fn skip_formatted_results(text: &str, offset: usize) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut result_count = 0;
+    let mut skip_to: Option<usize> = None;
+
+    for (i, line) in lines.iter().enumerate() {
+        // Detect numbered result lines: "N. [Title](...)"
+        let is_result_start = {
+            let trimmed = line.trim();
+            let bytes = trimmed.as_bytes();
+            if bytes.is_empty() {
+                false
+            } else {
+                let mut pos = 0;
+                // Skip leading digits
+                while pos < bytes.len() && bytes[pos].is_ascii_digit() {
+                    pos += 1;
+                }
+                // Must be followed by ". [" — the start of a markdown link
+                pos < bytes.len() && bytes[pos..].starts_with(b". [")
+            }
+        };
+
+        if is_result_start {
+            if result_count == offset {
+                skip_to = Some(i);
+                break;
+            }
+            result_count += 1;
+        }
+    }
+
+    match skip_to {
+        Some(start) => {
+            // Renumber results starting from 1
+            let mut new_num = 1;
+            let mut output = String::new();
+            for line in lines[start..].iter() {
+                let trimmed = line.trim();
+                if !trimmed.is_empty() {
+                    let bytes = trimmed.as_bytes();
+                    let mut pos = 0;
+                    while pos < bytes.len() && bytes[pos].is_ascii_digit() {
+                        pos += 1;
+                    }
+                    if pos > 0 && pos < bytes.len() && bytes[pos..].starts_with(b". [") {
+                        // This is a result line — renumber it
+                        output.push_str(&format!("{}. {}\n", new_num, &trimmed[pos + 2..]));
+                        new_num += 1;
+                    } else {
+                        output.push_str(line);
+                        output.push('\n');
+                    }
+                } else {
+                    output.push('\n');
+                }
+            }
+            output.trim().to_string()
+        }
+        None => format!(
+            "No more results (offset {} exceeds available results)",
+            offset
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_skip_formatted_results_skips_first_result() {
+        let text = "1. [First](https://example.com)\n   Description one\n\n2. [Second](https://example2.com)\n   Description two\n\n3. [Third](https://example3.com)\n   Description three";
+        let result = skip_formatted_results(text, 1);
+        assert!(result.contains("[Second]"));
+        assert!(!result.contains("[First]"));
+        assert!(result.starts_with("1."));
+    }
+
+    #[test]
+    fn test_skip_formatted_results_skips_all_when_offset_too_large() {
+        let text = "1. [Only](https://example.com)\n   Description";
+        let result = skip_formatted_results(text, 5);
+        assert!(result.contains("No more results"));
+    }
+
+    #[test]
+    fn test_skip_formatted_results_zero_offset_returns_full() {
+        let text = "1. [First](https://example.com)\n   Description\n\n2. [Second](https://example2.com)\n   Description";
+        let result = skip_formatted_results(text, 0);
+        assert_eq!(result, text.trim());
+    }
 }

@@ -334,6 +334,7 @@ tool_args! {
         query: string("Web search query"),
         num_results: optional_integer("Number of search results to return"),
         search_type: optional_string("Search type: auto, fast, or deep"),
+        offset: optional_integer("Number of search results to skip from the start (0-indexed)"),
     }
 }
 
@@ -342,6 +343,8 @@ tool_args! {
         url: string("The URL to fetch"),
         format: optional_string("Output format: text, markdown, or html"),
         timeout: optional_integer("Timeout in seconds (max 120)"),
+        offset: optional_integer("1-indexed line number to start reading from"),
+        limit: optional_integer("Maximum number of lines to return"),
     }
 }
 

@@ -159,10 +159,20 @@ function summarizeArguments(name: string, entry: ToolCallEntry): string {
         return "(todos)";
       }
       case "websearch": {
-        return args.query || "(no query)";
+        let summary = args.query || "(no query)";
+        if (args.offset !== undefined) {
+          summary += ` [offset=${args.offset}]`;
+        }
+        return summary;
       }
       case "webfetch": {
-        return args.url || "(no url)";
+        let summary = args.url || "(no url)";
+        if (args.offset !== undefined || args.limit !== undefined) {
+          summary += ` [line ${args.offset ?? 1}`;
+          if (args.limit !== undefined) summary += `, limit=${args.limit}`;
+          summary += `]`;
+        }
+        return summary;
       }
       default:
         return entry.arguments.length > 60

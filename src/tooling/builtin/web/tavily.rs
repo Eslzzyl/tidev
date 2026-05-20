@@ -32,6 +32,7 @@ impl SearchProvider for TavilyProvider {
         query: &str,
         num_results: Option<i64>,
         search_type: Option<&str>,
+        offset: Option<i64>,
     ) -> Result<String> {
         let api_key = auth.search_api_key("tavily").ok_or_else(|| {
             anyhow::anyhow!(
@@ -47,7 +48,10 @@ impl SearchProvider for TavilyProvider {
             _ => "advanced",
         };
 
-        let max_results = num_results.unwrap_or(8).clamp(1, 20);
+        let offset = offset.unwrap_or(0).max(0);
+        let base_num = num_results.unwrap_or(8);
+        // Fetch extra results to account for offset
+        let max_results = (base_num + offset).clamp(1, 20);
 
         let payload = json!({
             "api_key": api_key,
@@ -75,18 +79,20 @@ impl SearchProvider for TavilyProvider {
             .await
             .context("failed to parse Tavily Search response")?;
 
-        format_tavily_results(&body)
+        format_tavily_results(&body, offset as usize)
     }
 }
 
-fn format_tavily_results(body: &serde_json::Value) -> Result<String> {
+fn format_tavily_results(body: &serde_json::Value, offset: usize) -> Result<String> {
     let mut output = String::new();
 
-    // Tavily includes a human-readable answer
-    if let Some(answer) = body.get("answer").and_then(|v| v.as_str())
-        && !answer.is_empty()
-    {
-        output.push_str(&format!("Summary: {}\n\n", answer));
+    // Tavily includes a human-readable answer (only show on first page)
+    if offset == 0 {
+        if let Some(answer) = body.get("answer").and_then(|v| v.as_str())
+            && !answer.is_empty()
+        {
+            output.push_str(&format!("Summary: {}\n\n", answer));
+        }
     }
 
     let results = body
@@ -95,11 +101,11 @@ fn format_tavily_results(body: &serde_json::Value) -> Result<String> {
         .map(|arr| arr.as_slice())
         .unwrap_or_default();
 
-    if results.is_empty() {
+    if results.is_empty() || offset >= results.len() {
         return Ok("No search results found. Please try a different query.".to_string());
     }
 
-    for (i, item) in results.iter().enumerate() {
+    for (i, item) in results.iter().enumerate().skip(offset) {
         let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("");
         let url = item.get("url").and_then(|v| v.as_str()).unwrap_or("");
         let content = item.get("content").and_then(|v| v.as_str()).unwrap_or("");
@@ -111,7 +117,7 @@ fn format_tavily_results(body: &serde_json::Value) -> Result<String> {
 
         output.push_str(&format!(
             "{}. [{}]({}){}\n   {}\n\n",
-            i + 1,
+            i + 1 - offset,
             title,
             url,
             score,

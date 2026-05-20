@@ -32,6 +32,7 @@ impl SearchProvider for GoogleProvider {
         query: &str,
         num_results: Option<i64>,
         search_type: Option<&str>,
+        offset: Option<i64>,
     ) -> Result<String> {
         let api_key = auth.search_api_key("google").ok_or_else(|| {
             anyhow::anyhow!(
@@ -51,12 +52,15 @@ impl SearchProvider for GoogleProvider {
 
         // Google allows max 10 results per request.
         let num = num_results.unwrap_or(8).clamp(1, 10);
+        // Google 'start' is 1-indexed; offset is 0-indexed
+        let start = offset.map(|o| o + 1).unwrap_or(1).max(1);
 
         let mut params: Vec<(&str, String)> = vec![
             ("key", api_key.to_string()),
             ("cx", cx.to_string()),
             ("q", query.to_string()),
             ("num", num.to_string()),
+            ("start", start.to_string()),
         ];
 
         // "fast" → sort by date
