@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use uuid::Uuid;
@@ -368,8 +368,7 @@ impl MemoryStore {
         limit: usize,
         min_chars: usize,
     ) -> Result<Vec<MemoryEntry>> {
-        let db = self.read_connection.lock().unwrap();
-        let mut stmt = db.prepare(
+        self.read_query(
             "SELECT id, workspace_root, memory_type, title, content, tags, source_session_id, created_at, updated_at, usage_count, active, concepts, files, strength, importance, version, parent_id, supersedes, related_ids, is_latest
              FROM memories
              WHERE workspace_root = ?1 AND active = 1 AND is_latest = 1 AND LENGTH(content) >= ?2
@@ -379,18 +378,9 @@ impl MemoryStore {
                  CASE WHEN updated_at >= datetime('now', '-7 days') THEN 0.2 ELSE 0.0 END
              DESC
              LIMIT ?3",
-        )?;
-
-        let entries = stmt.query_map(
             rusqlite::params![workspace_root, min_chars as i64, limit as i64],
             super::remember::map_memory_entry_from_row,
-        )?;
-
-        let mut result = Vec::new();
-        for entry in entries {
-            result.push(entry?);
-        }
-        Ok(result)
+        )
     }
 
     /// Search for context-relevant memories using FTS5 + LIKE, with
@@ -470,24 +460,16 @@ impl MemoryStore {
         exclude_session_id: &Uuid,
         limit: usize,
     ) -> Result<Vec<SessionSummary>> {
-        let db = self.read_connection.lock().unwrap();
-        let mut stmt = db.prepare(
+        self.read_query(
             "SELECT session_id, project, created_at, title, narrative,
                     key_decisions, files_modified, concepts
              FROM session_summaries
              WHERE session_id != ?1 AND title IS NOT NULL
              ORDER BY created_at DESC
              LIMIT ?2",
-        )?;
-        let rows = stmt.query_map(
             rusqlite::params![exclude_session_id.to_string(), limit as i64],
             Self::map_session_summary_from_row,
-        )?;
-        let mut result = Vec::new();
-        for row in rows {
-            result.push(row?);
-        }
-        Ok(result)
+        )
     }
 
     fn map_session_summary_from_row(row: &rusqlite::Row) -> rusqlite::Result<SessionSummary> {
@@ -650,21 +632,18 @@ impl MemoryStore {
 
     /// Get a key-value from the `meta` table.
     pub fn meta_get(&self, key: &str) -> Result<Option<String>> {
-        let db = self.read_connection.lock().unwrap();
-        let mut stmt = db.prepare("SELECT value FROM meta WHERE key = ?1")?;
-        let mut rows = stmt.query(rusqlite::params![key])?;
-        match rows.next()? {
-            Some(row) => Ok(Some(row.get::<_, String>(0)?)),
-            None => Ok(None),
-        }
+        self.read_query_opt(
+            "SELECT value FROM meta WHERE key = :key",
+            rusqlite::named_params! { ":key": key },
+            |row| row.get::<_, String>(0),
+        )
     }
 
     /// Set a key-value in the `meta` table.
     pub fn meta_set(&self, key: &str, value: &str) -> Result<()> {
-        let db = self.connection.lock().unwrap();
-        db.execute(
-            "INSERT OR REPLACE INTO meta(key, value) VALUES (?1, ?2)",
-            rusqlite::params![key, value],
+        self.write_execute(
+            "INSERT OR REPLACE INTO meta(key, value) VALUES (:key, :value)",
+            rusqlite::named_params! { ":key": key, ":value": value },
         )?;
         Ok(())
     }
@@ -849,5 +828,60 @@ impl MemoryStore {
     pub fn reinforce_insight(&self, id: &Uuid) -> Result<()> {
         let db = self.connection.lock().unwrap();
         ReflectService::reinforce_insight(&db, id)
+    }
+
+    // ─── Internal Query Helpers ──────────────────────────────────────
+
+    /// Execute a write query on the shared write connection.
+    fn write_execute(&self, sql: &str, params: impl rusqlite::Params) -> Result<usize> {
+        self.connection
+            .lock()
+            .unwrap()
+            .execute(sql, params)
+            .map_err(anyhow::Error::from)
+    }
+
+    /// Prepare a read query, map all rows, and collect into a Vec.
+    fn read_query<T>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+        f: impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+    ) -> Result<Vec<T>> {
+        let db = self.read_connection.lock().unwrap();
+        let mut stmt = db.prepare(sql)?;
+        let rows = stmt.query_map(params, f)?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    /// Query a single optional row from the read connection.
+    fn read_query_opt<T>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+        f: impl FnOnce(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+    ) -> Result<Option<T>> {
+        let db = self.read_connection.lock().unwrap();
+        let mut stmt = db.prepare(sql)?;
+        stmt.query_row(params, f)
+            .optional()
+            .map_err(anyhow::Error::from)
+    }
+
+    /// Query a single row from the read connection (error if not found).
+    #[allow(dead_code)]
+    fn read_query_row<T>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+        f: impl FnOnce(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+    ) -> Result<T> {
+        let db = self.read_connection.lock().unwrap();
+        let mut stmt = db.prepare(sql)?;
+        stmt.query_row(params, f).map_err(anyhow::Error::from)
     }
 }

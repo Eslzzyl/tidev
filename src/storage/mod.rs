@@ -29,21 +29,40 @@ use rayon::prelude::*;
 use self::compression::{compress_text, decompress_text};
 use schema::{EXPORT_SCHEMA_SQL, SCHEMA_SQL, SESSION_SELECT_COLUMNS};
 
-/// Build a struct literal from a SQLite row where each field maps directly
-/// to a column index with no custom conversion.
+/// Build a struct literal from a SQLite row.
 ///
-/// # Examples
+/// Two forms are supported:
+///
+/// **Simple** — each field maps directly to a column index:
 ///
 /// ```ignore
-/// fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
-///     Ok(map_row!(Self, row,
-///         id: 0,
-///         name: 1,
-///         content: 2,
-///     ))
-/// }
+/// map_row!(Self, row,
+///     id: 0,
+///     name: 1,
+///     content: 2,
+/// )
 /// ```
+///
+/// **With conversion** — each field has an explicit expression
+/// (useful for boolean conversion, custom function calls, etc.):
+///
+/// ```ignore
+/// map_row!(Self, row,
+///     id: 0 => row.get(0)?,
+///     streaming: 11 => row.get::<_, i64>(11)? != 0,
+///     patch_files: 20 => read_opt_blob_maybe_text(row, 20)?,
+/// )
+/// ```
+///
+/// The two forms **cannot** be mixed in a single invocation.
 macro_rules! map_row {
+    // With explicit conversion expression per field
+    ($struct:tt, $row:expr, $($field:ident: $idx:expr => $conv:expr),+ $(,)?) => {
+        $struct {
+            $($field: $conv),+
+        }
+    };
+    // Simple index-only mapping (existing)
     ($struct:tt, $row:expr, $($field:ident: $idx:expr),+ $(,)?) => {
         $struct {
             $($field: $row.get($idx)?),+
@@ -451,23 +470,27 @@ impl SessionStore {
         retained_from: usize,
     ) -> Result<()> {
         let now = Utc::now().to_rfc3339();
-        self.write_conn.lock().unwrap().execute(
-            "UPDATE sessions SET context_summary = ?1, context_retained_from = ?2, updated_at = ?3 WHERE id = ?4",
-            params![
-                summary.unwrap_or(""),
-                retained_from as i64,
-                now,
-                session_id.to_string(),
-            ],
+        self.write_execute(
+            "UPDATE sessions SET context_summary = :summary, context_retained_from = :retained_from, updated_at = :updated_at WHERE id = :id",
+            named_params! {
+                ":summary": summary.unwrap_or(""),
+                ":retained_from": retained_from as i64,
+                ":updated_at": now,
+                ":id": session_id.to_string(),
+            },
         )?;
         Ok(())
     }
 
     pub fn update_session_title(&self, session_id: Uuid, title: &str) -> Result<()> {
         let now = Utc::now().to_rfc3339();
-        self.write_conn.lock().unwrap().execute(
-            "UPDATE sessions SET title = ?1, updated_at = ?2 WHERE id = ?3",
-            params![title, now, session_id.to_string()],
+        self.write_execute(
+            "UPDATE sessions SET title = :title, updated_at = :updated_at WHERE id = :id",
+            named_params! {
+                ":title": title,
+                ":updated_at": now,
+                ":id": session_id.to_string(),
+            },
         )?;
         Ok(())
     }
@@ -481,16 +504,16 @@ impl SessionStore {
         model_display_name: &str,
     ) -> Result<()> {
         let now = Utc::now().to_rfc3339();
-        self.write_conn.lock().unwrap().execute(
-            "UPDATE sessions SET provider_id = ?1, provider_display_name = ?2, model_id = ?3, model_display_name = ?4, updated_at = ?5 WHERE id = ?6",
-            params![
-                provider_id,
-                provider_display_name,
-                model_id,
-                model_display_name,
-                now,
-                session_id.to_string(),
-            ],
+        self.write_execute(
+            "UPDATE sessions SET provider_id = :provider_id, provider_display_name = :provider_display_name, model_id = :model_id, model_display_name = :model_display_name, updated_at = :updated_at WHERE id = :id",
+            named_params! {
+                ":provider_id": provider_id,
+                ":provider_display_name": provider_display_name,
+                ":model_id": model_id,
+                ":model_display_name": model_display_name,
+                ":updated_at": now,
+                ":id": session_id.to_string(),
+            },
         )?;
         Ok(())
     }
@@ -501,9 +524,13 @@ impl SessionStore {
         system_prompt: &str,
     ) -> Result<()> {
         let now = Utc::now().to_rfc3339();
-        self.write_conn.lock().unwrap().execute(
-            "UPDATE sessions SET system_prompt = ?1, updated_at = ?2 WHERE id = ?3",
-            params![system_prompt, now, session_id.to_string()],
+        self.write_execute(
+            "UPDATE sessions SET system_prompt = :system_prompt, updated_at = :updated_at WHERE id = :id",
+            named_params! {
+                ":system_prompt": system_prompt,
+                ":updated_at": now,
+                ":id": session_id.to_string(),
+            },
         )?;
         Ok(())
     }
@@ -693,9 +720,12 @@ impl SessionStore {
         }
 
         for message_id in message_ids {
-            self.write_conn.lock().unwrap().execute(
-                "DELETE FROM messages WHERE session_id = ?1 AND id = ?2",
-                params![session_id.to_string(), message_id.to_string()],
+            self.write_execute(
+                "DELETE FROM messages WHERE session_id = :session_id AND id = :id",
+                named_params! {
+                    ":session_id": session_id.to_string(),
+                    ":id": message_id.to_string(),
+                },
             )?;
         }
 
@@ -755,18 +785,18 @@ impl SessionStore {
     }
 
     pub fn copy_tool_permissions(&self, from_session_id: Uuid, to_session_id: Uuid) -> Result<()> {
-        self.write_conn.lock().unwrap().execute(
+        self.write_execute(
             "INSERT INTO tool_permissions (session_id, tool_name, allowed, created_at)
-             SELECT ?1, tool_name, allowed, ?2
+             SELECT :to_session_id, tool_name, allowed, :created_at
              FROM tool_permissions
-             WHERE session_id = ?3
+             WHERE session_id = :from_session_id
              ON CONFLICT(session_id, tool_name)
              DO UPDATE SET allowed = excluded.allowed, created_at = excluded.created_at",
-            params![
-                to_session_id.to_string(),
-                Utc::now().to_rfc3339(),
-                from_session_id.to_string(),
-            ],
+            named_params! {
+                ":to_session_id": to_session_id.to_string(),
+                ":created_at": Utc::now().to_rfc3339(),
+                ":from_session_id": from_session_id.to_string(),
+            },
         )?;
 
         self.touch_session(to_session_id)?;
@@ -774,9 +804,11 @@ impl SessionStore {
     }
 
     pub fn replace_todos(&self, session_id: Uuid, todos: &[TodoItem]) -> Result<()> {
-        self.write_conn.lock().unwrap().execute(
-            "DELETE FROM todos WHERE session_id = ?1",
-            params![session_id.to_string()],
+        self.write_execute(
+            "DELETE FROM todos WHERE session_id = :session_id",
+            named_params! {
+                ":session_id": session_id.to_string(),
+            },
         )?;
 
         if !todos.is_empty() {
@@ -800,34 +832,26 @@ impl SessionStore {
     }
 
     pub fn load_todos(&self, session_id: Uuid) -> Result<Vec<TodoItem>> {
-        let mut statement = self.read_conn.prepare(
-            "SELECT content, status FROM todos WHERE session_id = ?1 ORDER BY position ASC",
-        )?;
-
-        let rows = statement.query_map(params![session_id.to_string()], |row| {
-            Ok(TodoItem {
-                content: row.get::<_, String>(0)?,
-                status: row.get::<_, String>(1)?,
-            })
-        })?;
-
-        let mut todos = Vec::new();
-        for row in rows {
-            todos.push(row?);
-        }
-
-        Ok(todos)
+        self.read_query(
+            "SELECT content, status FROM todos WHERE session_id = :session_id ORDER BY position ASC",
+            named_params! { ":session_id": session_id.to_string() },
+            |row| {
+                Ok(TodoItem {
+                    content: row.get::<_, String>(0)?,
+                    status: row.get::<_, String>(1)?,
+                })
+            },
+        )
     }
 
     pub fn load_latest_session(&self) -> Result<Option<SessionRecord>> {
-        let sql = format!(
-            "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.parent_session_id IS NULL ORDER BY s.updated_at DESC LIMIT 1"
-        );
-        let mut statement = self.read_conn.prepare(&sql)?;
-
-        let record = statement.query_row([], Self::session_from_row).optional()?;
-
-        Ok(record)
+        self.read_query_opt(
+            &format!(
+                "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.parent_session_id IS NULL ORDER BY s.updated_at DESC LIMIT 1"
+            ),
+            [],
+            Self::session_from_row,
+        )
     }
 
     pub fn load_conversation(&self, session_id: Uuid) -> Result<Option<Conversation>> {
@@ -883,20 +907,22 @@ impl SessionStore {
         let compressed_snapshot = redo_snapshot.map(compress_text);
         match message_id {
             Some(message_id) => {
-                self.write_conn.lock().unwrap().execute(
-                    "INSERT INTO session_reverts (session_id, message_id, redo_snapshot, created_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(session_id) DO UPDATE SET message_id = excluded.message_id, redo_snapshot = excluded.redo_snapshot, created_at = excluded.created_at",
-                    params![
-                        session_id.to_string(),
-                        message_id.to_string(),
-                        compressed_snapshot,
-                        Utc::now().to_rfc3339(),
-                    ],
+                self.write_execute(
+                    "INSERT INTO session_reverts (session_id, message_id, redo_snapshot, created_at) VALUES (:session_id, :message_id, :redo_snapshot, :created_at) ON CONFLICT(session_id) DO UPDATE SET message_id = excluded.message_id, redo_snapshot = excluded.redo_snapshot, created_at = excluded.created_at",
+                    named_params! {
+                        ":session_id": session_id.to_string(),
+                        ":message_id": message_id.to_string(),
+                        ":redo_snapshot": compressed_snapshot,
+                        ":created_at": Utc::now().to_rfc3339(),
+                    },
                 )?;
             }
             None => {
-                self.write_conn.lock().unwrap().execute(
-                    "DELETE FROM session_reverts WHERE session_id = ?1",
-                    params![session_id.to_string()],
+                self.write_execute(
+                    "DELETE FROM session_reverts WHERE session_id = :session_id",
+                    named_params! {
+                        ":session_id": session_id.to_string(),
+                    },
                 )?;
             }
         }
@@ -910,41 +936,35 @@ impl SessionStore {
     }
 
     pub fn load_redo_snapshot(&self, session_id: Uuid) -> Result<Option<String>> {
-        let mut statement = self
-            .read_conn
-            .prepare("SELECT redo_snapshot FROM session_reverts WHERE session_id = ?1 LIMIT 1")?;
-
-        let snapshot = statement
-            .query_row(params![session_id.to_string()], |row| {
-                read_opt_blob_maybe_text(row, 0)
-            })
-            .optional()?
-            .flatten()
-            .map(|bytes| decompress_text(&bytes));
+        let snapshot = self.read_query_opt(
+            "SELECT redo_snapshot FROM session_reverts WHERE session_id = :session_id LIMIT 1",
+            named_params! { ":session_id": session_id.to_string() },
+            |row| read_opt_blob_maybe_text(row, 0),
+        )?
+        .flatten()
+        .map(|bytes| decompress_text(&bytes));
 
         Ok(snapshot)
     }
 
     /// Get token statistics for a session.
     pub fn get_session_token_stats(&self, session_id: Uuid) -> Result<SessionTokenStats> {
-        let mut statement = self.read_conn.prepare(
+        self.read_query_row(
             r#"
             SELECT
                 COALESCE(SUM(input_tokens), 0) as input_tokens,
                 COALESCE(SUM(output_tokens), 0) as output_tokens
             FROM messages
-            WHERE session_id = ?1
+            WHERE session_id = :session_id
             "#,
-        )?;
-
-        let stats = statement.query_row(params![session_id.to_string()], |row| {
-            Ok(SessionTokenStats {
-                input_tokens: row.get::<_, i64>(0)? as u32,
-                output_tokens: row.get::<_, i64>(1)? as u32,
-            })
-        })?;
-
-        Ok(stats)
+            named_params! { ":session_id": session_id.to_string() },
+            |row| {
+                Ok(SessionTokenStats {
+                    input_tokens: row.get::<_, i64>(0)? as u32,
+                    output_tokens: row.get::<_, i64>(1)? as u32,
+                })
+            },
+        )
     }
 
     pub fn update_message_snapshot(
@@ -1013,18 +1033,13 @@ impl SessionStore {
     }
 
     pub fn load_session_record(&self, session_id: Uuid) -> Result<Option<SessionRecord>> {
-        let sql = format!(
-            "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.id = ?1 LIMIT 1"
-        );
-        let mut statement = self.read_conn.prepare(&sql)?;
-
-        let record = statement
-            .query_row(params![session_id.to_string()], |row| {
-                Self::session_from_row(row)
-            })
-            .optional()?;
-
-        Ok(record)
+        self.read_query_opt(
+            &format!(
+                "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.id = :session_id LIMIT 1"
+            ),
+            named_params! { ":session_id": session_id.to_string() },
+            Self::session_from_row,
+        )
     }
 
     pub fn set_gateway_chat_session(
@@ -1033,14 +1048,14 @@ impl SessionStore {
         chat_key: &str,
         session_id: Uuid,
     ) -> Result<()> {
-        self.write_conn.lock().unwrap().execute(
-            "INSERT INTO gateway_chat_sessions (platform, chat_key, session_id, updated_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(platform, chat_key) DO UPDATE SET session_id = excluded.session_id, updated_at = excluded.updated_at",
-            params![
-                platform,
-                chat_key,
-                session_id.to_string(),
-                Utc::now().to_rfc3339(),
-            ],
+        self.write_execute(
+            "INSERT INTO gateway_chat_sessions (platform, chat_key, session_id, updated_at) VALUES (:platform, :chat_key, :session_id, :updated_at) ON CONFLICT(platform, chat_key) DO UPDATE SET session_id = excluded.session_id, updated_at = excluded.updated_at",
+            named_params! {
+                ":platform": platform,
+                ":chat_key": chat_key,
+                ":session_id": session_id.to_string(),
+                ":updated_at": Utc::now().to_rfc3339(),
+            },
         )?;
         Ok(())
     }
@@ -1050,13 +1065,14 @@ impl SessionStore {
         platform: &str,
         chat_key: &str,
     ) -> Result<Option<Uuid>> {
-        let mut statement = self.read_conn.prepare(
-            "SELECT session_id FROM gateway_chat_sessions WHERE platform = ?1 AND chat_key = ?2 LIMIT 1",
+        let value = self.read_query_opt(
+            "SELECT session_id FROM gateway_chat_sessions WHERE platform = :platform AND chat_key = :chat_key LIMIT 1",
+            named_params! {
+                ":platform": platform,
+                ":chat_key": chat_key,
+            },
+            |row| row.get::<_, String>(0),
         )?;
-
-        let value = statement
-            .query_row(params![platform, chat_key], |row| row.get::<_, String>(0))
-            .optional()?;
 
         value
             .map(|raw| Uuid::parse_str(&raw).context("invalid stored gateway session id"))
@@ -1081,15 +1097,15 @@ impl SessionStore {
         provider_id: &str,
         model_id: &str,
     ) -> Result<()> {
-        self.write_conn.lock().unwrap().execute(
-            "INSERT INTO gateway_chat_models (platform, chat_key, provider_id, model_id, updated_at) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(platform, chat_key) DO UPDATE SET provider_id = excluded.provider_id, model_id = excluded.model_id, updated_at = excluded.updated_at",
-            params![
-                platform,
-                chat_key,
-                provider_id,
-                model_id,
-                Utc::now().to_rfc3339(),
-            ],
+        self.write_execute(
+            "INSERT INTO gateway_chat_models (platform, chat_key, provider_id, model_id, updated_at) VALUES (:platform, :chat_key, :provider_id, :model_id, :updated_at) ON CONFLICT(platform, chat_key) DO UPDATE SET provider_id = excluded.provider_id, model_id = excluded.model_id, updated_at = excluded.updated_at",
+            named_params! {
+                ":platform": platform,
+                ":chat_key": chat_key,
+                ":provider_id": provider_id,
+                ":model_id": model_id,
+                ":updated_at": Utc::now().to_rfc3339(),
+            },
         )?;
         Ok(())
     }
@@ -1099,23 +1115,23 @@ impl SessionStore {
         platform: &str,
         chat_key: &str,
     ) -> Result<Option<(String, String)>> {
-        let mut statement = self.read_conn.prepare(
-            "SELECT provider_id, model_id FROM gateway_chat_models WHERE platform = ?1 AND chat_key = ?2 LIMIT 1",
-        )?;
-
-        let value = statement
-            .query_row(params![platform, chat_key], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .optional()?;
-
-        Ok(value)
+        self.read_query_opt(
+            "SELECT provider_id, model_id FROM gateway_chat_models WHERE platform = :platform AND chat_key = :chat_key LIMIT 1",
+            named_params! {
+                ":platform": platform,
+                ":chat_key": chat_key,
+            },
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
     }
 
     pub fn clear_gateway_chat_model(&self, platform: &str, chat_key: &str) -> Result<()> {
-        self.write_conn.lock().unwrap().execute(
-            "DELETE FROM gateway_chat_models WHERE platform = ?1 AND chat_key = ?2",
-            params![platform, chat_key],
+        self.write_execute(
+            "DELETE FROM gateway_chat_models WHERE platform = :platform AND chat_key = :chat_key",
+            named_params! {
+                ":platform": platform,
+                ":chat_key": chat_key,
+            },
         )?;
         Ok(())
     }
@@ -1176,60 +1192,41 @@ impl SessionStore {
 
     pub fn load_sessions_for_workspace(&self, workspace_root: &Path) -> Result<Vec<SessionRecord>> {
         let workspace_root = workspace_root.display().to_string();
-        let sql = format!(
-            "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE sw.workspace_root = ?1 AND s.parent_session_id IS NULL ORDER BY s.updated_at DESC, s.created_at DESC"
-        );
-        let mut statement = self.read_conn.prepare(&sql)?;
-
-        let rows = statement.query_map(params![workspace_root], Self::session_from_row)?;
-
-        let mut records = Vec::new();
-        for row in rows {
-            records.push(row?);
-        }
-
-        Ok(records)
+        self.read_query(
+            &format!(
+                "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE sw.workspace_root = :workspace_root AND s.parent_session_id IS NULL ORDER BY s.updated_at DESC, s.created_at DESC"
+            ),
+            named_params! { ":workspace_root": workspace_root },
+            Self::session_from_row,
+        )
     }
 
     pub fn load_child_sessions(&self, parent_session_id: Uuid) -> Result<Vec<SessionRecord>> {
-        let sql = format!(
-            "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.parent_session_id = ?1 ORDER BY s.updated_at DESC, s.created_at DESC"
-        );
-        let mut statement = self.read_conn.prepare(&sql)?;
-
-        let rows = statement.query_map(
-            params![parent_session_id.to_string()],
+        self.read_query(
+            &format!(
+                "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.parent_session_id = :parent_session_id ORDER BY s.updated_at DESC, s.created_at DESC"
+            ),
+            named_params! { ":parent_session_id": parent_session_id.to_string() },
             Self::session_from_row,
-        )?;
-
-        let mut records = Vec::new();
-        for row in rows {
-            records.push(row?);
-        }
-
-        Ok(records)
+        )
     }
 
     pub fn load_all_sessions(&self) -> Result<Vec<SessionRecord>> {
-        let sql = format!(
-            "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.parent_session_id IS NULL ORDER BY s.updated_at DESC, s.created_at DESC"
-        );
-        let mut statement = self.read_conn.prepare(&sql)?;
-
-        let rows = statement.query_map([], Self::session_from_row)?;
-
-        let mut records = Vec::new();
-        for row in rows {
-            records.push(row?);
-        }
-
-        Ok(records)
+        self.read_query(
+            &format!(
+                "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.parent_session_id IS NULL ORDER BY s.updated_at DESC, s.created_at DESC"
+            ),
+            [],
+            Self::session_from_row,
+        )
     }
 
     pub fn delete_session(&self, session_id: Uuid) -> Result<()> {
-        self.write_conn.lock().unwrap().execute(
-            "DELETE FROM sessions WHERE id = ?1",
-            params![session_id.to_string()],
+        self.write_execute(
+            "DELETE FROM sessions WHERE id = :id",
+            named_params! {
+                ":id": session_id.to_string(),
+            },
         )?;
         Ok(())
     }
@@ -1270,17 +1267,13 @@ impl SessionStore {
         let cutoff = Utc::now() - duration;
         let cutoff_text = cutoff.to_rfc3339();
 
-        let sql = format!(
-            "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.updated_at < ?1 AND s.parent_session_id IS NULL ORDER BY s.updated_at DESC"
-        );
-        let mut statement = self.read_conn.prepare(&sql)?;
-
-        let rows = statement.query_map(params![cutoff_text], Self::session_from_row)?;
-
-        let mut records = Vec::new();
-        for row in rows {
-            records.push(row?);
-        }
+        let records: Vec<SessionRecord> = self.read_query(
+            &format!(
+                "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.updated_at < :cutoff AND s.parent_session_id IS NULL ORDER BY s.updated_at DESC"
+            ),
+            named_params! { ":cutoff": cutoff_text },
+            Self::session_from_row,
+        )?;
 
         let session_ids: Vec<String> = records.iter().map(|r| r.session_id.to_string()).collect();
         self.delete_sessions_by_ids(&session_ids)?;
@@ -1294,17 +1287,13 @@ impl SessionStore {
     ) -> Result<Vec<SessionRecord>> {
         let workspace_root = workspace_root.display().to_string();
 
-        let sql = format!(
-            "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE sw.workspace_root = ?1 AND s.parent_session_id IS NULL ORDER BY s.updated_at DESC"
-        );
-        let mut statement = self.read_conn.prepare(&sql)?;
-
-        let rows = statement.query_map(params![workspace_root], Self::session_from_row)?;
-
-        let mut records = Vec::new();
-        for row in rows {
-            records.push(row?);
-        }
+        let records: Vec<SessionRecord> = self.read_query(
+            &format!(
+                "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE sw.workspace_root = :workspace_root AND s.parent_session_id IS NULL ORDER BY s.updated_at DESC"
+            ),
+            named_params! { ":workspace_root": workspace_root },
+            Self::session_from_row,
+        )?;
 
         let session_ids: Vec<String> = records.iter().map(|r| r.session_id.to_string()).collect();
         self.delete_sessions_by_ids(&session_ids)?;
@@ -1330,19 +1319,13 @@ impl SessionStore {
         let cutoff = Utc::now() - duration;
         let cutoff_text = cutoff.to_rfc3339();
 
-        let sql = format!(
-            "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.updated_at < ?1 AND s.parent_session_id IS NULL ORDER BY sw.workspace_root, s.updated_at DESC"
-        );
-        let mut statement = self.read_conn.prepare(&sql)?;
-
-        let rows = statement.query_map(params![cutoff_text], Self::session_from_row)?;
-
-        let mut records = Vec::new();
-        for row in rows {
-            records.push(row?);
-        }
-
-        Ok(records)
+        self.read_query(
+            &format!(
+                "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s INNER JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.updated_at < :cutoff AND s.parent_session_id IS NULL ORDER BY sw.workspace_root, s.updated_at DESC"
+            ),
+            named_params! { ":cutoff": cutoff_text },
+            Self::session_from_row,
+        )
     }
 
     pub fn get_current_workspace_sessions_count(&self, workspace_root: &Path) -> Result<i64> {
@@ -1561,13 +1544,13 @@ impl SessionStore {
         let now_text = now.to_rfc3339();
         let total_tokens = input_tokens as i64 + output_tokens as i64;
 
-        self.write_conn.lock().unwrap().execute(
+        self.write_execute(
             r#"
             INSERT INTO usage_stats (
                 provider_id, model_id, time_bucket, granularity,
                 input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
                 total_tokens, request_count, created_at, updated_at
-            ) VALUES (?1, ?2, ?3, 'hour', ?4, ?5, ?6, ?7, ?8, 1, ?9, ?9)
+            ) VALUES (:provider_id, :model_id, :time_bucket, 'hour', :input_tokens, :output_tokens, :cache_read_tokens, :cache_write_tokens, :total_tokens, 1, :now_text, :now_text)
             ON CONFLICT(provider_id, model_id, time_bucket, granularity) DO UPDATE SET
                 input_tokens = input_tokens + excluded.input_tokens,
                 output_tokens = output_tokens + excluded.output_tokens,
@@ -1577,17 +1560,17 @@ impl SessionStore {
                 request_count = request_count + 1,
                 updated_at = excluded.updated_at
             "#,
-            params![
-                provider_id,
-                model_id,
-                time_bucket,
-                input_tokens as i64,
-                output_tokens as i64,
-                cache_read_tokens as i64,
-                cache_write_tokens as i64,
-                total_tokens,
-                now_text,
-            ],
+            named_params! {
+                ":provider_id": provider_id,
+                ":model_id": model_id,
+                ":time_bucket": time_bucket,
+                ":input_tokens": input_tokens as i64,
+                ":output_tokens": output_tokens as i64,
+                ":cache_read_tokens": cache_read_tokens as i64,
+                ":cache_write_tokens": cache_write_tokens as i64,
+                ":total_tokens": total_tokens,
+                ":now_text": now_text,
+            },
         )?;
 
         Ok(())
@@ -1738,7 +1721,7 @@ impl SessionStore {
     }
 
     pub fn get_all_time_summary(&self) -> Result<UsageSummary> {
-        let mut stmt = self.read_conn.prepare(
+        self.read_query_row(
             r#"
             SELECT
                 SUM(input_tokens),
@@ -1749,20 +1732,18 @@ impl SessionStore {
                 SUM(request_count)
             FROM usage_stats
             "#,
-        )?;
-
-        let row = stmt.query_row([], |row| {
-            Ok(UsageSummary {
-                total_input_tokens: row.get::<_, Option<i64>>(0)?.unwrap_or(0),
-                total_output_tokens: row.get::<_, Option<i64>>(1)?.unwrap_or(0),
-                total_cache_read_tokens: row.get::<_, Option<i64>>(2)?.unwrap_or(0),
-                total_cache_write_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or(0),
-                total_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or(0),
-                total_requests: row.get::<_, Option<i64>>(5)?.unwrap_or(0),
-            })
-        })?;
-
-        Ok(row)
+            [],
+            |row| {
+                Ok(UsageSummary {
+                    total_input_tokens: row.get::<_, Option<i64>>(0)?.unwrap_or(0),
+                    total_output_tokens: row.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                    total_cache_read_tokens: row.get::<_, Option<i64>>(2)?.unwrap_or(0),
+                    total_cache_write_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or(0),
+                    total_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or(0),
+                    total_requests: row.get::<_, Option<i64>>(5)?.unwrap_or(0),
+                })
+            },
+        )
     }
 
     /// Record that a file was read by the model
@@ -1774,16 +1755,15 @@ impl SessionStore {
         mtime: Option<i64>,
         size: Option<i64>,
     ) -> Result<()> {
-        self.write_conn.lock().unwrap().execute(
-            r#"INSERT OR REPLACE INTO file_reads (session_id, file_path, read_at, mtime, size)
-               VALUES (?1, ?2, ?3, ?4, ?5)"#,
-            params![
-                session_id.to_string(),
-                file_path,
-                read_at.to_rfc3339(),
-                mtime,
-                size,
-            ],
+        self.write_execute(
+            "INSERT OR REPLACE INTO file_reads (session_id, file_path, read_at, mtime, size) VALUES (:session_id, :file_path, :read_at, :mtime, :size)",
+            named_params! {
+                ":session_id": session_id.to_string(),
+                ":file_path": file_path,
+                ":read_at": read_at.to_rfc3339(),
+                ":mtime": mtime,
+                ":size": size,
+            },
         )?;
         Ok(())
     }

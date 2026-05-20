@@ -184,6 +184,35 @@ impl UsageStatsService {
         Self { connection }
     }
 
+    // ─── Internal query helpers ──────────────────────────────────────
+
+    /// Prepare a query, map all rows, and collect into a Vec.
+    fn query<T>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+        f: impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+    ) -> Result<Vec<T>> {
+        let mut stmt = self.connection.prepare(sql)?;
+        let rows = stmt.query_map(params, f)?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    /// Query a single row from the connection (error if not found).
+    fn query_row<T>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+        f: impl FnOnce(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+    ) -> Result<T> {
+        let mut stmt = self.connection.prepare(sql)?;
+        stmt.query_row(params, f).map_err(anyhow::Error::from)
+    }
+
     pub fn record_usage(
         &self,
         provider_id: &str,
@@ -300,12 +329,10 @@ impl UsageStatsService {
         start: DateTime<Utc>,
         end: DateTime<Utc>,
     ) -> Result<Vec<ModelUsageEntry>> {
-        let mut entries = Vec::new();
-
         let start_text = start.to_rfc3339();
         let end_text = end.to_rfc3339();
 
-        let mut stmt = self.connection.prepare(
+        self.query(
             r#"
             SELECT
                 provider_id,
@@ -321,30 +348,24 @@ impl UsageStatsService {
             GROUP BY provider_id, model_id
             ORDER BY total_tokens DESC
             "#,
-        )?;
-
-        let rows = stmt.query_map(params![start_text, end_text], |row| {
-            Ok(ModelUsageEntry {
-                provider_id: row.get(0)?,
-                model_id: row.get(1)?,
-                input_tokens: row.get(2)?,
-                output_tokens: row.get(3)?,
-                cache_read_tokens: row.get(4)?,
-                cache_write_tokens: row.get(5)?,
-                total_tokens: row.get(6)?,
-                request_count: row.get(7)?,
-            })
-        })?;
-
-        for row in rows {
-            entries.push(row?);
-        }
-
-        Ok(entries)
+            params![start_text, end_text],
+            |row| {
+                Ok(ModelUsageEntry {
+                    provider_id: row.get(0)?,
+                    model_id: row.get(1)?,
+                    input_tokens: row.get(2)?,
+                    output_tokens: row.get(3)?,
+                    cache_read_tokens: row.get(4)?,
+                    cache_write_tokens: row.get(5)?,
+                    total_tokens: row.get(6)?,
+                    request_count: row.get(7)?,
+                })
+            },
+        )
     }
 
     pub fn get_all_time_summary(&self) -> Result<UsageSummary> {
-        let mut stmt = self.connection.prepare(
+        self.query_row(
             r#"
             SELECT
                 SUM(input_tokens),
@@ -355,19 +376,17 @@ impl UsageStatsService {
                 SUM(request_count)
             FROM usage_stats
             "#,
-        )?;
-
-        let row = stmt.query_row([], |row| {
-            Ok(UsageSummary {
-                total_input_tokens: row.get::<_, Option<i64>>(0)?.unwrap_or(0),
-                total_output_tokens: row.get::<_, Option<i64>>(1)?.unwrap_or(0),
-                total_cache_read_tokens: row.get::<_, Option<i64>>(2)?.unwrap_or(0),
-                total_cache_write_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or(0),
-                total_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or(0),
-                total_requests: row.get::<_, Option<i64>>(5)?.unwrap_or(0),
-            })
-        })?;
-
-        Ok(row)
+            [],
+            |row| {
+                Ok(UsageSummary {
+                    total_input_tokens: row.get::<_, Option<i64>>(0)?.unwrap_or(0),
+                    total_output_tokens: row.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                    total_cache_read_tokens: row.get::<_, Option<i64>>(2)?.unwrap_or(0),
+                    total_cache_write_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or(0),
+                    total_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or(0),
+                    total_requests: row.get::<_, Option<i64>>(5)?.unwrap_or(0),
+                })
+            },
+        )
     }
 }
