@@ -19,9 +19,9 @@ use super::utils::{
     parse_line_range_from_read_output, parse_read_content_metadata, summarize_tool_arguments,
     summarize_tool_call, tool_output_is_error,
 };
-use super::{RenderContext, TOOL_OUTPUT_EXPANDED_MAX_LINES, TOOL_OUTPUT_PREVIEW_LINES};
+use super::{RenderContext, TOOL_OUTPUT_PREVIEW_LINES};
 use crate::tui::diff_render::render_unified_diff_text;
-use crate::tui::render::render::{line_with_style, shorten_single_line};
+use crate::tui::render::render::line_with_style;
 
 pub(super) fn render_tool_call_with_result(
     tool_call: &ToolCall,
@@ -934,26 +934,9 @@ pub(super) fn render_subagent_task_preview(
 
     if is_expanded {
         // Show all lines when expanded
-        let max_lines = TOOL_OUTPUT_EXPANDED_MAX_LINES;
-        let line_count = md_lines.len();
-        if line_count <= max_lines {
-            lines.extend(md_lines);
-        } else {
-            lines.extend(md_lines.into_iter().take(max_lines));
-            lines.push(Line::from(vec![Span::styled(
-                format!(
-                    "  ▼ {} more line(s) — Click to expand",
-                    line_count - max_lines
-                ),
-                Style::default().fg(palette.muted),
-            )]));
-        }
+        lines.extend(md_lines);
         lines.push(Line::from(vec![Span::styled(
-            if line_count > max_lines {
-                "▲ Click to collapse"
-            } else {
-                "▲  Click to collapse"
-            },
+            "▲ Click to collapse",
             Style::default().fg(palette.muted),
         )]));
     } else {
@@ -1025,26 +1008,10 @@ pub(super) fn render_websearch_result_lines(
     let md_lines: Vec<Line<'static>> = rendered.lines;
 
     if is_expanded {
-        let max_lines = TOOL_OUTPUT_EXPANDED_MAX_LINES;
-        let line_count = md_lines.len();
-        if line_count <= max_lines {
-            lines.extend(md_lines);
-        } else {
-            lines.extend(md_lines.into_iter().take(max_lines));
-            lines.push(Line::from(vec![Span::styled(
-                format!(
-                    "  ▼ {} more line(s) — Click to expand",
-                    line_count - max_lines
-                ),
-                Style::default().fg(palette.muted),
-            )]));
-        }
+        // Show all lines when expanded
+        lines.extend(md_lines);
         lines.push(Line::from(vec![Span::styled(
-            if line_count > max_lines {
-                "▲ Click to collapse"
-            } else {
-                "▲  Click to collapse"
-            },
+            "▲ Click to collapse",
             Style::default().fg(palette.muted),
         )]));
     } else {
@@ -1109,26 +1076,10 @@ pub(super) fn render_webfetch_result_lines(
     let md_lines: Vec<Line<'static>> = rendered.lines;
 
     if is_expanded {
-        let max_lines = TOOL_OUTPUT_EXPANDED_MAX_LINES;
-        let line_count = md_lines.len();
-        if line_count <= max_lines {
-            lines.extend(md_lines);
-        } else {
-            lines.extend(md_lines.into_iter().take(max_lines));
-            lines.push(Line::from(vec![Span::styled(
-                format!(
-                    "  ▼ {} more line(s) — Click to expand",
-                    line_count - max_lines
-                ),
-                Style::default().fg(palette.muted),
-            )]));
-        }
+        // Show all lines when expanded
+        lines.extend(md_lines);
         lines.push(Line::from(vec![Span::styled(
-            if line_count > max_lines {
-                "▲ Click to collapse"
-            } else {
-                "▲  Click to collapse"
-            },
+            "▲ Click to collapse",
             Style::default().fg(palette.muted),
         )]));
     } else {
@@ -1242,7 +1193,7 @@ pub(super) fn render_memory_result_lines(
         }
 
         let max_items = if is_expanded {
-            (TOOL_OUTPUT_EXPANDED_MAX_LINES / 2).max(2)
+            usize::MAX // show all items when expanded
         } else {
             (TOOL_OUTPUT_PREVIEW_LINES / 2).max(2)
         };
@@ -1280,24 +1231,26 @@ pub(super) fn render_memory_result_lines(
             }
         }
 
-        let remaining = total.saturating_sub(shown.len());
-        if remaining > 0 {
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![Span::styled(
-                format!("  … {} more result(s)", remaining),
-                Style::default().fg(palette.muted),
-            )]));
-        }
-
-        if total > max_items {
-            lines.push(Line::from(vec![Span::styled(
-                if is_expanded {
-                    "▲ Click to collapse"
-                } else {
-                    "▼ Click to expand"
-                },
-                Style::default().fg(palette.muted),
-            )]));
+        if is_expanded {
+            if total > 0 {
+                lines.push(Line::from(""));
+                lines.push(Line::from(vec![Span::styled(
+                    "▲ Click to collapse",
+                    Style::default().fg(palette.muted),
+                )]));
+            }
+        } else {
+            let remaining = total.saturating_sub(shown.len());
+            if remaining > 0 {
+                lines.push(Line::from(""));
+                lines.push(Line::from(vec![Span::styled(
+                    format!(
+                        "  ▼ {} more result(s) — Click to expand",
+                        remaining
+                    ),
+                    Style::default().fg(palette.muted),
+                )]));
+            }
         }
 
         return lines;
@@ -1432,29 +1385,16 @@ fn render_memory_read_lines(
     let prefix = Span::styled("  ", Style::default());
 
     if is_expanded {
-        let max_lines = TOOL_OUTPUT_EXPANDED_MAX_LINES;
-        let line_count = md_lines.len();
-        if line_count <= max_lines {
-            for l in md_lines {
-                let mut spans = vec![prefix.clone()];
-                spans.extend(l.spans);
-                lines.push(Line::from(spans));
-            }
-        } else {
-            for l in md_lines.into_iter().take(max_lines) {
-                let mut spans = vec![prefix.clone()];
-                spans.extend(l.spans);
-                lines.push(Line::from(spans));
-            }
-            lines.push(Line::from(vec![Span::styled(
-                format!("  … {} more line(s)", line_count - max_lines),
-                Style::default().fg(palette.muted),
-            )]));
-            lines.push(Line::from(vec![Span::styled(
-                "▲ Click to collapse",
-                Style::default().fg(palette.muted),
-            )]));
+        // Show all lines when expanded
+        for l in md_lines {
+            let mut spans = vec![prefix.clone()];
+            spans.extend(l.spans);
+            lines.push(Line::from(spans));
         }
+        lines.push(Line::from(vec![Span::styled(
+            "▲ Click to collapse",
+            Style::default().fg(palette.muted),
+        )]));
     } else {
         let max_preview = TOOL_OUTPUT_PREVIEW_LINES;
         let line_count = md_lines.len();
@@ -1721,8 +1661,10 @@ pub(super) fn render_output_preview_lines(
     let mut lines = Vec::new();
 
     let is_expanded = message_id.is_some_and(|id| expanded_tool_results.contains(&id));
+    let total_output_lines = output.lines().count();
+
     let max_lines = if is_expanded {
-        TOOL_OUTPUT_EXPANDED_MAX_LINES
+        total_output_lines
     } else if is_error {
         4
     } else {
@@ -1735,7 +1677,6 @@ pub(super) fn render_output_preview_lines(
         palette.text
     };
 
-    let total_output_lines = output.lines().count();
     let wrap_width = body_width.saturating_sub(2);
 
     for line in output.lines().take(max_lines) {
@@ -1753,34 +1694,34 @@ pub(super) fn render_output_preview_lines(
                 lines.push(Line::from(spans));
             }
         } else {
+            // Preview (collapsed) mode: show each line with full wrapping
             let wrapped =
                 word_wrap_line(&owned_line, WrapOptions::new(wrap_width).break_words(true));
-            if let Some(first_wrapped) = wrapped.first() {
-                let mut content = first_wrapped
-                    .spans
-                    .iter()
-                    .map(|s| &*s.content)
-                    .collect::<String>();
-                if wrapped.len() > 1 || total_output_lines > max_lines {
-                    // Try to fit "..."
-                    if content.width() >= wrap_width {
-                        content = shorten_single_line(&content, wrap_width.saturating_sub(3));
-                        content.push_str("...");
-                    } else {
-                        content.push_str("...");
-                    }
-                }
-                lines.push(Line::from(vec![Span::styled(
-                    content,
-                    Style::default().fg(fg),
-                )]));
+            for wrapped_line in wrapped.iter() {
+                let mut spans = Vec::new();
+                spans.extend(
+                    wrapped_line.spans.iter().map(|span| {
+                        Span::styled(span.content.to_string(), Style::default().fg(fg))
+                    }),
+                );
+                lines.push(Line::from(spans));
             }
         }
     }
 
-    if total_output_lines > max_lines {
+    if is_expanded {
+        if total_output_lines > 0 {
+            lines.push(Line::from(vec![Span::styled(
+                "▲ Click to collapse",
+                Style::default().fg(palette.muted),
+            )]));
+        }
+    } else if total_output_lines > max_lines {
         lines.push(Line::from(vec![Span::styled(
-            format!("... {} more line(s)", total_output_lines - max_lines),
+            format!(
+                "  ▼ {} more line(s) — Click to expand",
+                total_output_lines - max_lines
+            ),
             Style::default().fg(palette.muted),
         )]));
     } else if total_output_lines > TOOL_OUTPUT_PREVIEW_LINES && message_id.is_some() {

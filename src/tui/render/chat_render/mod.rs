@@ -8,7 +8,6 @@ pub(crate) use content::strip_system_reminder_tags;
 
 use crate::{
     config::{AppConfig, AuthStore},
-    markdown_render::{WrapOptions, word_wrap_line},
     prompts::SessionMode,
     session::{Conversation, Message, MessageRole, ToolCall},
     theme::ThemePalette,
@@ -42,7 +41,6 @@ use crate::tui::render::render::{
 use crate::tui::chat_render::content::BlockComputation;
 
 const TOOL_OUTPUT_PREVIEW_LINES: usize = 5;
-const TOOL_OUTPUT_EXPANDED_MAX_LINES: usize = 100;
 const MAX_VISIBLE_QUEUED_PROMPTS: usize = 4;
 
 #[derive(Clone, Debug)]
@@ -1393,93 +1391,6 @@ impl App {
                 Style::default().fg(palette.accent_soft),
                 Style::default().fg(palette.text),
             ));
-        }
-
-        lines
-    }
-
-    #[allow(dead_code)]
-    fn render_output_preview_lines(
-        &self,
-        output: &str,
-        body_width: usize,
-        is_error: bool,
-        message_id: Option<Uuid>,
-    ) -> Vec<Line<'static>> {
-        let palette = self.palette();
-        let mut lines = Vec::new();
-
-        let is_expanded = message_id.is_some_and(|id| self.expanded_tool_results.contains(&id));
-        let max_lines = if is_expanded {
-            TOOL_OUTPUT_EXPANDED_MAX_LINES
-        } else if is_error {
-            4
-        } else {
-            TOOL_OUTPUT_PREVIEW_LINES
-        };
-
-        let prefix = if is_error { "!" } else { "↳" };
-        let fg = if is_error {
-            palette.error
-        } else {
-            palette.text
-        };
-        let prefix_style = Style::default().fg(if is_error {
-            palette.error
-        } else {
-            palette.accent_soft
-        });
-
-        let total_output_lines = output.lines().count();
-        let wrap_width = body_width.saturating_sub(2);
-
-        for line in output.lines().take(max_lines) {
-            if is_expanded {
-                let owned_line = Line::from(line.to_string());
-                let wrapped =
-                    word_wrap_line(&owned_line, WrapOptions::new(wrap_width).break_words(true));
-                for (wrap_idx, wrapped_line) in wrapped.iter().enumerate() {
-                    let effective_prefix = if wrap_idx == 0 { prefix } else { " " };
-                    let mut spans =
-                        vec![Span::styled(format!("{} ", effective_prefix), prefix_style)];
-                    spans.extend(wrapped_line.spans.iter().map(|span| {
-                        Span::styled(span.content.to_string(), Style::default().fg(fg))
-                    }));
-                    lines.push(Line::from(spans));
-                }
-            } else {
-                lines.push(line_with_prefix(
-                    prefix,
-                    &shorten_single_line(line, wrap_width),
-                    prefix_style,
-                    Style::default().fg(fg),
-                ));
-            }
-        }
-
-        if total_output_lines > max_lines {
-            lines.push(line_with_prefix(
-                prefix,
-                &format!("... {} more line(s)", total_output_lines - max_lines),
-                Style::default().fg(palette.muted),
-                Style::default().fg(palette.muted),
-            ));
-        } else if total_output_lines > TOOL_OUTPUT_PREVIEW_LINES && message_id.is_some() {
-            let hint = if is_expanded {
-                "▲ Click to collapse"
-            } else {
-                "▼ Click to expand"
-            };
-            lines.push(line_with_prefix(
-                prefix,
-                hint,
-                Style::default().fg(palette.muted),
-                Style::default().fg(palette.muted),
-            ));
-        }
-
-        if lines.is_empty() {
-            lines.push(line_with_style("(no output)", palette.muted));
         }
 
         lines
