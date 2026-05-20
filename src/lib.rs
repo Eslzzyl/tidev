@@ -271,13 +271,11 @@ fn auto_cleanup_on_startup() {
     crate::tmp::auto_cleanup(&config.tmp);
 
     // Clean tool outputs older than 7 days
-    if let Ok(store) = crate::storage::SessionStore::open(&paths.database_file) {
-        if let Ok(count) = store.delete_expired_tool_outputs(7) {
-            if count > 0 {
+    if let Ok(store) = crate::storage::SessionStore::open(&paths.database_file)
+        && let Ok(count) = store.delete_expired_tool_outputs(7)
+            && count > 0 {
                 crate::log_info!("Cleaned up {count} old tool output(s)");
             }
-        }
-    }
 }
 
 #[cfg(test)]

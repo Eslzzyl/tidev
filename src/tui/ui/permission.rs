@@ -652,8 +652,8 @@ impl App {
         // TUI can display the complete content when the card is expanded.
         // The task tool stores the full output inside the subagent session
         // rather than here, so we skip it.
-        if tool_call.name != "task" {
-            if let Err(e) = self.store.save_tool_output(
+        if tool_call.name != "task"
+            && let Err(e) = self.store.save_tool_output(
                 self.conversation.session_id,
                 message.id,
                 &tool_call.name,
@@ -661,7 +661,6 @@ impl App {
             ) {
                 crate::log_warn!("Failed to save full tool output: {e}");
             }
-        }
 
         // Persistence is handled by AgentRuntime::persist_tool_result.
 

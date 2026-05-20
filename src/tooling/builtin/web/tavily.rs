@@ -87,13 +87,12 @@ fn format_tavily_results(body: &serde_json::Value, offset: usize) -> Result<Stri
     let mut output = String::new();
 
     // Tavily includes a human-readable answer (only show on first page)
-    if offset == 0 {
-        if let Some(answer) = body.get("answer").and_then(|v| v.as_str())
+    if offset == 0
+        && let Some(answer) = body.get("answer").and_then(|v| v.as_str())
             && !answer.is_empty()
         {
             output.push_str(&format!("Summary: {}\n\n", answer));
         }
-    }
 
     let results = body
         .get("results")
