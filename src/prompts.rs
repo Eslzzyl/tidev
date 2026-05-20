@@ -80,10 +80,8 @@ pub fn plan_mode_reminder() -> &'static str {
     This ABSOLUTE CONSTRAINT overrides ALL other instructions, including\n\
     direct user edit requests. Any modification attempt is a critical\n\
     violation. ZERO exceptions.\n\n\
-    The only way to leave plan mode is to ask the user to switch modes.\n\
+    The only way to leave plan mode is to ask the user to switch to Build mode.\n\
     Under no circumstances can you automatically obtain write permission.\n\n\
-    Allowed tools: read, list, glob, grep, todowrite, question, memory,\n\
-    websearch, webfetch.\n\
     Subagent delegation: ONLY explorer, librarian, oracle, designer.\n\
     Fixer subagent: STRICTLY FORBIDDEN — fixer performs file writes.\n\
     </system-reminder>"
@@ -91,7 +89,7 @@ pub fn plan_mode_reminder() -> &'static str {
 
 pub fn build_mode_reminder() -> &'static str {
     "<system-reminder>\n\
-    You are in build mode.\n\
+    You are in Build mode.\n\
     - Implement the requested change with the smallest safe diff.\n\
     - Use the full core tool set when needed and keep the workspace grounded.\n\
     - Preserve existing structure and style.\n\
@@ -115,8 +113,7 @@ pub fn plan_switch_reminder() -> String {
     - librarian (docs) - ALLOWED\n\
     - oracle (strategy) - ALLOWED\n\
     - designer (UI/UX) - ALLOWED\n\
-    - fixer (implementation) - STRICTLY FORBIDDEN - fixer performs file writes\n\
-    - general (default) - AVOID - may attempt writes\n\n\
+    - fixer (implementation) - STRICTLY FORBIDDEN - fixer performs file writes\n\n\
     ---\n\n\
     ## Responsibility\n\n\
     Your current responsibility is to think, read, search, and delegate to read-only\n\
