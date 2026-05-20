@@ -2090,6 +2090,7 @@ impl App {
             scroll,
             max_scroll,
             self.palette(),
+            self.scrollbar_hovered,
         );
     }
 }

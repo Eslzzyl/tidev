@@ -247,6 +247,7 @@ impl App {
             message_content_area: None,
             message_scrollbar_area: None,
             scrollbar_drag_state: None,
+            scrollbar_hovered: false,
             sidebar_area: None,
             sidebar_scroll_offset: 0,
             sidebar_total_lines: 0,

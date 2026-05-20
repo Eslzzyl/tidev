@@ -203,6 +203,8 @@ struct App {
     message_content_area: Option<Rect>,
     message_scrollbar_area: Option<Rect>,
     scrollbar_drag_state: Option<state::ScrollbarDragState>,
+    /// Whether the mouse cursor is currently hovering over the scrollbar area.
+    scrollbar_hovered: bool,
     sidebar_area: Option<Rect>,
     sidebar_scroll_offset: usize,
     sidebar_total_lines: usize,

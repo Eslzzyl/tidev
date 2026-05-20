@@ -16,13 +16,20 @@ pub(crate) fn render_scrollbar(
     scroll: usize,
     content_height: usize,
     palette: ThemePalette,
+    hovered: bool,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
     }
 
-    let track_style = Style::default().bg(palette.background).fg(palette.border);
-    let thumb_style = Style::default().bg(palette.background).fg(palette.accent);
+    let bg = if hovered {
+        palette.hover_bg(palette.background)
+    } else {
+        palette.background
+    };
+
+    let track_style = Style::default().bg(bg).fg(palette.border);
+    let thumb_style = Style::default().bg(bg).fg(palette.accent);
     let height = area.height as usize;
     let mut lines = Vec::with_capacity(height);
 
@@ -51,7 +58,7 @@ pub(crate) fn render_scrollbar(
     }
 
     let paragraph =
-        Paragraph::new(Text::from(lines)).style(Style::default().bg(palette.background));
+        Paragraph::new(Text::from(lines)).style(Style::default().bg(bg));
     frame.render_widget(paragraph, area);
 }
 use std::time::Instant;

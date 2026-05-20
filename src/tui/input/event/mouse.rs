@@ -95,6 +95,7 @@ impl App {
             MouseEventKind::Down(MouseButton::Left) => {
                 let position = Position::new(mouse.column, mouse.row);
                 self.hovered_card = None;
+                self.scrollbar_hovered = false;
 
                 // Check if clicking on scrollbar
                 if self.handle_scrollbar_mouse_down(position) {
@@ -139,6 +140,14 @@ impl App {
                     });
                 if self.hovered_card != hit_id {
                     self.hovered_card = hit_id;
+                }
+
+                // Check scrollbar hover
+                let scrollbar_hovered = self
+                    .message_scrollbar_area
+                    .is_some_and(|area| area.contains(position));
+                if self.scrollbar_hovered != scrollbar_hovered {
+                    self.scrollbar_hovered = scrollbar_hovered;
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => {
@@ -190,6 +199,7 @@ impl App {
             MouseEventKind::ScrollUp => {
                 let position = Position::new(mouse.column, mouse.row);
                 self.hovered_card = None;
+                self.scrollbar_hovered = false;
                 if self.handle_input_area_scroll_up(position) {
                     return;
                 }
@@ -204,6 +214,7 @@ impl App {
             MouseEventKind::ScrollDown => {
                 let position = Position::new(mouse.column, mouse.row);
                 self.hovered_card = None;
+                self.scrollbar_hovered = false;
                 if self.handle_input_area_scroll_down(position) {
                     return;
                 }

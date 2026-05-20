@@ -159,7 +159,7 @@ impl App {
 
         // Scrollbar
         if let Some(sb_area) = scrollbar_area {
-            render_scrollbar(frame, sb_area, scroll, display_len, palette);
+            render_scrollbar(frame, sb_area, scroll, display_len, palette, false);
         }
     }
 
@@ -298,6 +298,7 @@ impl App {
                 panel.scroll_offset,
                 panel.agents.len() + 2, // agents + footer
                 palette,
+                false,
             );
         }
     }
@@ -1831,7 +1832,7 @@ impl App {
 
                     // List scrollbar
                     if let Some(sb_area) = list_scrollbar_area {
-                        render_scrollbar(frame, sb_area, visible_start, total_filtered, palette);
+                        render_scrollbar(frame, sb_area, visible_start, total_filtered, palette, false);
                     }
 
                     // ── Right Pane: Content Preview / Editor ──
@@ -2006,6 +2007,7 @@ impl App {
                                         panel.preview_scroll,
                                         total_lines,
                                         palette,
+                                        false,
                                     );
                                 }
                             } else {
@@ -2606,6 +2608,7 @@ impl App {
                 panel.list_scroll,
                 panel.filtered_indices.len(),
                 palette,
+                false,
             );
         }
 
@@ -2695,12 +2698,13 @@ impl App {
                     panel.preview_scroll,
                     total_preview_lines,
                     palette,
+                    false,
                 );
             }
         } else {
             // No skill selected, just render scrollbar track if area exists
             if let Some(sb_area) = preview_scrollbar_area {
-                render_scrollbar(frame, sb_area, 0, 0, palette);
+                render_scrollbar(frame, sb_area, 0, 0, palette, false);
             }
         }
 
