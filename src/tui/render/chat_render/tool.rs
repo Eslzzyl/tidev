@@ -779,7 +779,8 @@ pub(super) fn render_tool_result_detail_lines(
     if !is_error
         && matches!(canonical_name, "edit" | "write" | "apply_patch")
         && let Some(diff) = message.metadata.diff.as_ref()
-        && let Some((diff_lines, regions)) = render_unified_diff_text(diff, body_width, palette)
+        && let Some((diff_lines, regions)) =
+            render_unified_diff_text(diff, body_width.saturating_sub(2), palette)
     {
         return (diff_lines, None, regions);
     }
@@ -788,7 +789,7 @@ pub(super) fn render_tool_result_detail_lines(
     if !is_error
         && matches!(canonical_name, "edit" | "write" | "apply_patch")
         && let Some((diff_lines, regions)) =
-            render_unified_diff_text(effective_output, body_width, palette)
+            render_unified_diff_text(effective_output, body_width.saturating_sub(2), palette)
     {
         return (diff_lines, None, regions);
     }
