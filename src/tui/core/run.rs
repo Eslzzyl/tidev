@@ -297,6 +297,7 @@ impl App {
             memory_panel: None,
             terminal_session: None,
             force_full_redraw: false,
+            processing_child_session: false,
         };
 
         // Start background file indexing so the @-mention panel is ready

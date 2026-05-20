@@ -294,6 +294,9 @@ struct App {
     /// on the next event loop iteration (ratatui's frame buffer is stale after
     /// leaving and re-entering the alternate screen).
     force_full_redraw: bool,
+    /// True when temporarily processing events for a child session (subagent).
+    /// Used to suppress desktop notifications from subagent events.
+    processing_child_session: bool,
 }
 pub fn run() -> Result<()> {
     let runtime = Runtime::new().context("failed to create runtime")?;
@@ -802,12 +805,16 @@ impl App {
         let session_id = event.session_id();
         let request_id = event.request_id();
         if session_id != self.conversation.session_id {
-            return self.with_temporary_session_context(session_id, |app| {
+            let saved = self.processing_child_session;
+            self.processing_child_session = true;
+            let result = self.with_temporary_session_context(session_id, |app| {
                 if let Some(request_id) = request_id {
                     app.prime_active_request(request_id);
                 }
                 app.handle_backend_event_for_active(event, runtime)
             });
+            self.processing_child_session = saved;
+            return result;
         }
 
         if let Some(request_id) = request_id {
@@ -1007,8 +1014,10 @@ impl App {
                 self.pending_permission_response = None;
                 self.pending_permission_rx = None;
 
-                self.notifications
-                    .notify(&format!("Request failed: {}", error));
+                if !self.processing_child_session {
+                    self.notifications
+                        .notify(&format!("Request failed: {}", error));
+                }
 
                 if let Some(message) = self.conversation.messages.last_mut()
                     && message.streaming
@@ -1592,7 +1601,9 @@ impl App {
                 crate::log_warn!("failed to finalize snapshot: {}", error);
             }
 
-            self.notifications.notify("Response complete");
+            if !self.processing_child_session {
+                self.notifications.notify("Response complete");
+            }
         } else {
             // Tool calls are present — keep `pending_request` true.
             // Permission approval will happen via the channel, and
