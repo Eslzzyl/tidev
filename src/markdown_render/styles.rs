@@ -15,7 +15,6 @@ pub(super) struct MarkdownStyles {
     pub(super) unordered_list_marker: Style,
     pub(super) link: Style,
     pub(super) blockquote: Style,
-    pub(super) rule: Style,
 }
 
 impl Default for MarkdownStyles {
@@ -35,7 +34,6 @@ impl Default for MarkdownStyles {
             unordered_list_marker: Style::default(),
             link: Style::default().cyan().underlined(),
             blockquote: Style::default().green(),
-            rule: Style::default().dark_gray(),
         }
     }
 }
