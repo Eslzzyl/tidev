@@ -1253,10 +1253,19 @@ impl App {
         cards
     }
 
-    fn load_expanded_tool_outputs(&self, _messages: &[Message]) -> HashMap<Uuid, String> {
-        // tool_events table was removed; expanded tool output falls back to
-        // message.content via tool_output_from_message.
-        HashMap::new()
+    fn load_expanded_tool_outputs(&self, messages: &[Message]) -> HashMap<Uuid, String> {
+        let mut map = HashMap::new();
+        for msg in messages {
+            if !self.expanded_tool_results.contains(&msg.id) {
+                continue;
+            }
+            // Try to load the full output from the tool_outputs table.
+            if let Ok(Some(output)) = self.store.load_tool_output(msg.id) {
+                map.insert(msg.id, output);
+            }
+            // Not in the table → message.content (preview) will be used instead.
+        }
+        map
     }
 
     fn render_running_subagent_lines(

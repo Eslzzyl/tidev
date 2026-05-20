@@ -1464,6 +1464,91 @@ impl SessionStore {
             system_prompt,
         })
     }
+
+    // ── Tool output storage ───────────────────────────────────────────
+
+    /// Save the full (untruncated) output of a tool call.
+    ///
+    /// The output is zstd-compressed before writing to the `tool_outputs`
+    /// table.  Only outputs that exceed the 8 000‑char preview limit need
+    /// to be stored here; small outputs are fully contained in
+    /// `message.content` already.
+    pub fn save_tool_output(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        tool_name: &str,
+        output: &str,
+    ) -> Result<()> {
+        let compressed = compress_text(output);
+        self.write_execute(
+            "INSERT OR REPLACE INTO tool_outputs
+                (message_id, session_id, tool_name, output, created_at)
+             VALUES (:message_id, :session_id, :tool_name, :output, :created_at)",
+            named_params! {
+                ":message_id": message_id.to_string(),
+                ":session_id": session_id.to_string(),
+                ":tool_name": tool_name,
+                ":output": compressed,
+                ":created_at": Utc::now().to_rfc3339(),
+            },
+        )?;
+        Ok(())
+    }
+
+    /// Load the full (untruncated) output of a tool call.
+    ///
+    /// Returns `None` when there is no stored output (the output was small
+    /// enough to fit in `message.content`, or the message is from an older
+    /// database version that did not populate the table).
+    pub fn load_tool_output(&self, message_id: Uuid) -> Result<Option<String>> {
+        self.read_query_opt(
+            "SELECT output FROM tool_outputs WHERE message_id = :message_id",
+            named_params! {
+                ":message_id": message_id.to_string(),
+            },
+            |row| row.get::<_, Vec<u8>>(0),
+        )
+        .map(|opt| opt.map(|data| decompress_text(&data)))
+    }
+
+    /// Delete tool outputs older than `max_age_days`.
+    ///
+    /// Returns the number of deleted rows.
+    pub fn delete_expired_tool_outputs(&self, max_age_days: i64) -> Result<usize> {
+        let cutoff = (Utc::now() - ChronoDuration::days(max_age_days)).to_rfc3339();
+        self.write_execute(
+            "DELETE FROM tool_outputs WHERE created_at < :cutoff",
+            named_params! {
+                ":cutoff": cutoff,
+            },
+        )
+    }
+
+    /// Spawn a background thread that periodically deletes tool outputs
+    /// older than `max_age_days`.  The thread runs every `interval` and
+    /// uses a cloned database connection so it does not block the main
+    /// thread.
+    pub fn start_output_cleanup(&self, max_age_days: i64, interval: Duration) {
+        let conn = self.write_conn.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(interval);
+            let cutoff =
+                (Utc::now() - ChronoDuration::days(max_age_days)).to_rfc3339();
+            match conn.lock().unwrap().execute(
+                "DELETE FROM tool_outputs WHERE created_at < :cutoff",
+                named_params! { ":cutoff": cutoff },
+            ) {
+                Ok(count) if count > 0 => {
+                    crate::log_info!("Cleaned up {count} old tool output(s)");
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    crate::log_warn!("Failed to clean old tool outputs: {e}");
+                }
+            }
+        });
+    }
 }
 
 fn parse_datetime(value: &str) -> std::result::Result<DateTime<Utc>, chrono::ParseError> {

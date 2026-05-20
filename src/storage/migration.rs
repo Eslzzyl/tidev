@@ -98,6 +98,26 @@ CREATE INDEX IF NOT EXISTS idx_todos_session_position
     ON todos(session_id, position);
 "#,
     },
+    // ── v34: Add tool_outputs table ─────────────────────────────────────
+    //
+    // Stores the full (zstd-compressed) output of tool calls so the TUI
+    // can display the complete output when the user expands a tool result
+    // card.  The output is compressed with zstd level 3 before writing.
+    Migration {
+        version: 34,
+        description: "Add tool_outputs table for full tool output storage",
+        sql: r#"
+CREATE TABLE IF NOT EXISTS tool_outputs (
+    message_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    tool_name TEXT NOT NULL,
+    output BLOB NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tool_outputs_session_created
+    ON tool_outputs(session_id, created_at);
+"#,
+    },
 ];
 
 // ---------------------------------------------------------------------------

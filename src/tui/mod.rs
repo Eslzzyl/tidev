@@ -1068,8 +1068,19 @@ impl App {
                                 && m.tool_call_id.as_deref() == Some(&tool_call.id)
                         });
                         if let Some(tool_idx) = tool_idx {
-                            let display_result = result.preview_for_storage(Some("bash"));
                             let message_id = self.conversation.messages[tool_idx].id;
+
+                            // Save the full output before truncation
+                            if let Err(e) = self.store.save_tool_output(
+                                self.conversation.session_id,
+                                message_id,
+                                "bash",
+                                &result.output,
+                            ) {
+                                crate::log_warn!("Failed to save full bash output: {e}");
+                            }
+
+                            let display_result = result.preview_for_storage(Some("bash"));
                             self.conversation.messages[tool_idx].content = display_result.output;
                             self.conversation.messages[tool_idx].streaming = false;
                             self.conversation.messages[tool_idx].attachments =
