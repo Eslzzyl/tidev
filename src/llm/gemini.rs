@@ -162,9 +162,11 @@ pub(super) async fn stream_gemini(
                 for candidate in candidates {
                     // Track finish reason
                     if let Some(reason) = &candidate.finish_reason
-                        && reason != "FINISH_REASON_UNSPECIFIED" && reason != "finish_reason_unspecified" {
-                            finish_reason = Some(reason.clone());
-                        }
+                        && reason != "FINISH_REASON_UNSPECIFIED"
+                        && reason != "finish_reason_unspecified"
+                    {
+                        finish_reason = Some(reason.clone());
+                    }
 
                     let Some(content) = candidate.content else {
                         continue;
@@ -213,9 +215,10 @@ pub(super) async fn stream_gemini(
 
                         // ── Function call part ─────────────────────────────
                         if let Some(fcall) = part.function_call {
-                            let tc_id = fcall.id.clone().unwrap_or_else(|| {
-                                format!("gc-{}-{}", fcall.name, request_id)
-                            });
+                            let tc_id = fcall
+                                .id
+                                .clone()
+                                .unwrap_or_else(|| format!("gc-{}-{}", fcall.name, request_id));
 
                             let tc = ToolCall {
                                 id: tc_id.clone(),
@@ -231,12 +234,15 @@ pub(super) async fn stream_gemini(
                                 tool_call: tc,
                             });
 
-                            tool_calls.insert(tool_call_index, ToolCallBuilder {
-                                id: tc_id,
-                                name: fcall.name,
-                                arguments: serde_json::to_string(&fcall.args)
-                                    .unwrap_or_else(|_| "{}".to_string()),
-                            });
+                            tool_calls.insert(
+                                tool_call_index,
+                                ToolCallBuilder {
+                                    id: tc_id,
+                                    name: fcall.name,
+                                    arguments: serde_json::to_string(&fcall.args)
+                                        .unwrap_or_else(|_| "{}".to_string()),
+                                },
+                            );
                             tool_call_index += 1;
                         }
 
@@ -244,25 +250,26 @@ pub(super) async fn stream_gemini(
                         // These are server-side code execution built-in tools.
                         // For now, we just include the text output as content.
                         if let Some(code_result) = part.code_execution_result
-                            && let Some(output) = code_result.output {
-                                let (visible, reasoning) = think_parser.push(&output);
-                                if !visible.is_empty() {
-                                    let _ = tx.send(BackendEvent::Delta {
-                                        session_id,
-                                        request_id,
-                                        content: visible.clone(),
-                                    });
-                                    assistant_text.push_str(&visible);
-                                }
-                                if !reasoning.is_empty() {
-                                    let _ = tx.send(BackendEvent::ReasoningDelta {
-                                        session_id,
-                                        request_id,
-                                        content: reasoning.clone(),
-                                    });
-                                    reasoning_text.push_str(&reasoning);
-                                }
+                            && let Some(output) = code_result.output
+                        {
+                            let (visible, reasoning) = think_parser.push(&output);
+                            if !visible.is_empty() {
+                                let _ = tx.send(BackendEvent::Delta {
+                                    session_id,
+                                    request_id,
+                                    content: visible.clone(),
+                                });
+                                assistant_text.push_str(&visible);
                             }
+                            if !reasoning.is_empty() {
+                                let _ = tx.send(BackendEvent::ReasoningDelta {
+                                    session_id,
+                                    request_id,
+                                    content: reasoning.clone(),
+                                });
+                                reasoning_text.push_str(&reasoning);
+                            }
+                        }
                     }
 
                     // ── Citations ─────────────────────────────────────────
@@ -533,8 +540,8 @@ fn build_gemini_request(
                 let content_text = message_text_with_file_references(&message);
 
                 // Parse the response as JSON if possible
-                let response_value: serde_json::Value =
-                    serde_json::from_str(&content_text).unwrap_or(serde_json::Value::String(content_text));
+                let response_value: serde_json::Value = serde_json::from_str(&content_text)
+                    .unwrap_or(serde_json::Value::String(content_text));
 
                 let parts = vec![GeminiPart {
                     text: None,
@@ -593,11 +600,12 @@ fn build_gemini_request(
 
     // Merge extra_body into generation config
     if let Some(extra) = &model.extra_body
-        && let Some(obj) = extra.as_object() {
-            for (k, v) in obj {
-                generation_config[k] = v.clone();
-            }
+        && let Some(obj) = extra.as_object()
+    {
+        for (k, v) in obj {
+            generation_config[k] = v.clone();
         }
+    }
 
     Ok(GeminiRequest {
         contents,
@@ -608,10 +616,7 @@ fn build_gemini_request(
 }
 
 /// Build the parts array for a user message (text + optional images).
-fn user_message_parts(
-    model: &ActiveModel,
-    message: &Message,
-) -> Result<Vec<GeminiPart>> {
+fn user_message_parts(model: &ActiveModel, message: &Message) -> Result<Vec<GeminiPart>> {
     let text = message_text_with_file_references(message);
     let images: Vec<&crate::session::MessageAttachment> = image_attachments(message).collect();
 
@@ -639,30 +644,31 @@ fn user_message_parts(
         if let MessageAttachment::Image { data_url, .. } = attachment {
             // Parse "data:mime/type;base64,<data>" format
             if let Some(rest) = data_url.strip_prefix("data:")
-                && let Some(semicolon) = rest.find(';') {
-                    let mime_type = &rest[..semicolon];
-                    let after_semi = &rest[semicolon + 1..];
-                    if let Some(comma) = after_semi.find(',') {
-                        let encoding = &after_semi[..comma];
-                        let data = &after_semi[comma + 1..];
-                        if encoding == "base64" {
-                            parts.push(GeminiPart {
-                                text: None,
-                                inline_data: Some(GeminiBlob {
-                                    mime_type: mime_type.to_string(),
-                                    data: data.to_string(),
-                                }),
-                                file_data: None,
-                                function_call: None,
-                                function_response: None,
-                                executable_code: None,
-                                code_execution_result: None,
-                                thought: None,
-                                thought_signature: None,
-                            });
-                        }
+                && let Some(semicolon) = rest.find(';')
+            {
+                let mime_type = &rest[..semicolon];
+                let after_semi = &rest[semicolon + 1..];
+                if let Some(comma) = after_semi.find(',') {
+                    let encoding = &after_semi[..comma];
+                    let data = &after_semi[comma + 1..];
+                    if encoding == "base64" {
+                        parts.push(GeminiPart {
+                            text: None,
+                            inline_data: Some(GeminiBlob {
+                                mime_type: mime_type.to_string(),
+                                data: data.to_string(),
+                            }),
+                            file_data: None,
+                            function_call: None,
+                            function_response: None,
+                            executable_code: None,
+                            code_execution_result: None,
+                            thought: None,
+                            thought_signature: None,
+                        });
                     }
                 }
+            }
         }
     }
 

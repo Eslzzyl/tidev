@@ -1832,7 +1832,14 @@ impl App {
 
                     // List scrollbar
                     if let Some(sb_area) = list_scrollbar_area {
-                        render_scrollbar(frame, sb_area, visible_start, total_filtered, palette, false);
+                        render_scrollbar(
+                            frame,
+                            sb_area,
+                            visible_start,
+                            total_filtered,
+                            palette,
+                            false,
+                        );
                     }
 
                     // ── Right Pane: Content Preview / Editor ──

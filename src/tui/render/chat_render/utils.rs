@@ -83,18 +83,23 @@ pub(super) fn render_reasoning_markdown_lines(
     for line in rendered_lines {
         let mut spans = Vec::with_capacity(line.spans.len().saturating_add(1));
         spans.push(Span::styled("┃ ", label_style));
-        spans.extend(line.spans.into_iter().map(|mut span| {
-            // Mix the foreground color with background for all spans (including highlighted ones)
-            // Use 0.4 ratio for a slightly more visible dimmed text
-            if let Some(fg) = span.style.fg {
-                span.style = span
-                    .style
-                    .fg(crate::theme::mix_colors(fg, palette.background, 0.4));
-            } else {
-                span.style = span.style.patch(body_style);
-            }
-            span
-        }).collect::<Vec<_>>());
+        spans.extend(
+            line.spans
+                .into_iter()
+                .map(|mut span| {
+                    // Mix the foreground color with background for all spans (including highlighted ones)
+                    // Use 0.4 ratio for a slightly more visible dimmed text
+                    if let Some(fg) = span.style.fg {
+                        span.style =
+                            span.style
+                                .fg(crate::theme::mix_colors(fg, palette.background, 0.4));
+                    } else {
+                        span.style = span.style.patch(body_style);
+                    }
+                    span
+                })
+                .collect::<Vec<_>>(),
+        );
         lines.push(Line::from(spans));
     }
 

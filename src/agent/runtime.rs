@@ -323,11 +323,7 @@ impl AgentRuntime {
                 let _start = std::time::Instant::now();
                 let _result = $body;
                 let _elapsed = _start.elapsed();
-                crate::log_debug!(
-                    "inject_first_turn_memory: {} took {:?}",
-                    $label,
-                    _elapsed
-                );
+                crate::log_debug!("inject_first_turn_memory: {} took {:?}", $label, _elapsed);
                 if _elapsed > std::time::Duration::from_millis(500) {
                     crate::log_warn!(
                         "inject_first_turn_memory: {} took {:?} (slow)",
@@ -400,8 +396,7 @@ impl AgentRuntime {
         }
 
         // ── Insights (cross-session synthesized knowledge) ──────────────
-        if let Ok(insights) =
-            timed_memory_op!("load_insights", memory_store.load_insights(&ws, 5))
+        if let Ok(insights) = timed_memory_op!("load_insights", memory_store.load_insights(&ws, 5))
             && !insights.is_empty()
         {
             let mut block = "## Cross-Session Insights\n".to_string();
@@ -1329,18 +1324,17 @@ impl AgentRuntime {
             let _t_sub_inject = std::time::Instant::now();
             let is_first_sub_turn = db_messages.len() <= 1;
             let has_assistant = db_messages.iter().any(|m| m.role == MessageRole::Assistant);
-            let last_user_idx = db_messages.iter().rposition(|m| m.role == MessageRole::User);
+            let last_user_idx = db_messages
+                .iter()
+                .rposition(|m| m.role == MessageRole::User);
             if let Some(idx) = last_user_idx {
                 let last_user = &mut db_messages[idx];
                 if !last_user.content.starts_with("<system-reminder") {
-                    self.inject_new_instructions(child_session_id, last_user).await?;
-                    if is_first_sub_turn {
-                        self.inject_first_turn_memory(
-                            child_session_id,
-                            last_user,
-                            has_assistant,
-                        )
+                    self.inject_new_instructions(child_session_id, last_user)
                         .await?;
+                    if is_first_sub_turn {
+                        self.inject_first_turn_memory(child_session_id, last_user, has_assistant)
+                            .await?;
                     }
                 }
             }
@@ -1769,13 +1763,14 @@ impl AgentRuntime {
 
             // Find the actual last user message index (deterministic, never
             // falls back to historical messages on subsequent turns).
-            let last_user_idx = db_messages.iter().rposition(|m| m.role == MessageRole::User);
+            let last_user_idx = db_messages
+                .iter()
+                .rposition(|m| m.role == MessageRole::User);
 
             // Compute mode state from messages BEFORE the last user (read-only,
             // before any mutable borrow below).
             let mode_state = last_user_idx.map(|idx| {
-                let prior_mode_seen =
-                    db_messages[..idx].iter().any(|m| m.mode.is_some());
+                let prior_mode_seen = db_messages[..idx].iter().any(|m| m.mode.is_some());
                 let mut was_plan_mode = mode == SessionMode::Plan;
                 for message in &db_messages[..idx] {
                     if let Some(m) = message.mode {

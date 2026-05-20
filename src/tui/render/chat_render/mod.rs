@@ -209,13 +209,11 @@ impl App {
         let layout = Layout::vertical([
             Constraint::Min(6),
             Constraint::Length(queued_height as u16),
-            Constraint::Length(
-                if self.conversation.parent_session_id.is_some() {
-                    subsession_nav_height
-                } else {
-                    composer_height
-                },
-            ),
+            Constraint::Length(if self.conversation.parent_session_id.is_some() {
+                subsession_nav_height
+            } else {
+                composer_height
+            }),
             Constraint::Length(1),
             Constraint::Length(1),
         ])
@@ -551,8 +549,7 @@ impl App {
                     width: content_area.width,
                     height: visible_end.saturating_sub(visible_start),
                 };
-                self.user_card_bounds
-                    .push((message_id, card_rect));
+                self.user_card_bounds.push((message_id, card_rect));
             }
         }
 
@@ -800,12 +797,10 @@ impl App {
                 let del_str = format!("-{}", d.deletions);
 
                 // Filename in normal text color (matching opencode's text-strong)
-                let file_span =
-                    Span::styled(filename.clone(), Style::default().fg(palette.text));
+                let file_span = Span::styled(filename.clone(), Style::default().fg(palette.text));
 
                 // +N in green (matching opencode's text-diff-add-base)
-                let add_span =
-                    Span::styled(add_str.clone(), Style::default().fg(palette.diff_add));
+                let add_span = Span::styled(add_str.clone(), Style::default().fg(palette.diff_add));
 
                 // -M in red (matching opencode's text-diff-delete-base)
                 let del_span =
@@ -813,8 +808,16 @@ impl App {
 
                 // Calculate padding to right-align the counts (like opencode's space-between)
                 let fw = UnicodeWidthStr::width(filename.as_str());
-                let aw = if show_add { UnicodeWidthStr::width(add_str.as_str()) } else { 0 };
-                let dw = if show_del { UnicodeWidthStr::width(del_str.as_str()) } else { 0 };
+                let aw = if show_add {
+                    UnicodeWidthStr::width(add_str.as_str())
+                } else {
+                    0
+                };
+                let dw = if show_del {
+                    UnicodeWidthStr::width(del_str.as_str())
+                } else {
+                    0
+                };
                 // +1 for space between the two counts when both are visible
                 let gap_count = if show_add && show_del { 1 } else { 0 };
                 let padding = content_width.saturating_sub(fw + aw + dw + gap_count);
@@ -952,8 +955,8 @@ impl App {
         frame.render_widget(paragraph, content_area);
 
         // Render fixed footer (workspace path)
-        let footer_paragraph = Paragraph::new(Text::from(footer_lines))
-            .style(Style::default().fg(palette.text));
+        let footer_paragraph =
+            Paragraph::new(Text::from(footer_lines)).style(Style::default().fg(palette.text));
         frame.render_widget(footer_paragraph, footer_area);
     }
 
@@ -964,7 +967,7 @@ impl App {
         Text<'static>,
         usize,
         Vec<ToolResultCardRange>,
-        Vec<(Uuid, usize, usize)>,  // user card ranges: (message_id, start_line, end_line)
+        Vec<(Uuid, usize, usize)>, // user card ranges: (message_id, start_line, end_line)
         Vec<SelectableRegionRange>,
         bool,
         usize,
@@ -1292,7 +1295,10 @@ impl App {
 
     fn load_expanded_tool_outputs(&self, messages: &[Message]) -> HashMap<Uuid, String> {
         let mut map = HashMap::new();
-        for msg in messages.iter().filter(|m| matches!(m.role, MessageRole::Tool)) {
+        for msg in messages
+            .iter()
+            .filter(|m| matches!(m.role, MessageRole::Tool))
+        {
             if !self.expanded_tool_results.contains(&msg.id) {
                 continue;
             }
@@ -1952,11 +1958,10 @@ impl App {
                             // Calculate fallback region for bash or non-diff output
                             if regions.is_empty() {
                                 // Trim leading/trailing blank spacer lines
-                                let first =
-                                    tool_card_lines.iter().position(|l| {
-                                        !l.spans.is_empty()
-                                            && l.spans.iter().any(|s| !s.content.is_empty())
-                                    });
+                                let first = tool_card_lines.iter().position(|l| {
+                                    !l.spans.is_empty()
+                                        && l.spans.iter().any(|s| !s.content.is_empty())
+                                });
                                 let last = tool_card_lines.iter().rposition(|l| {
                                     !l.spans.is_empty()
                                         && l.spans.iter().any(|s| !s.content.is_empty())
@@ -1971,11 +1976,12 @@ impl App {
                                 }
                             }
 
-                            let mut card_bg = if canonical_tool_name(&tool_call.name) == Some("task") {
-                                palette.panel
-                            } else {
-                                palette.panel_light
-                            };
+                            let mut card_bg =
+                                if canonical_tool_name(&tool_call.name) == Some("task") {
+                                    palette.panel
+                                } else {
+                                    palette.panel_light
+                                };
                             // Apply hover highlight only when clicking the card actually
                             // changes its visual content — i.e., the renderer uses
                             // expanded_tool_results AND the output exceeds the preview
@@ -1985,8 +1991,10 @@ impl App {
                                 let canonical = canonical_tool_name(&tool_call.name);
                                 let has_expandable = match canonical {
                                     // These tools' renderers never use expanded_tool_results
-                                    Some("read" | "grep" | "glob" | "skill"
-                                         | "question" | "todowrite") => false,
+                                    Some(
+                                        "read" | "grep" | "glob" | "skill" | "question"
+                                        | "todowrite",
+                                    ) => false,
                                     // write/edit/apply_patch normally render diff text (no expand).
                                     // When no diff is available (e.g. output too large), they
                                     // fall through to render_output_preview_lines which IS
@@ -1999,7 +2007,10 @@ impl App {
                                     // All other tools (task, websearch, webfetch, memory,
                                     // bash, MCP, etc.) use expanded_tool_results — only
                                     // meaningful if output exceeds preview threshold
-                                    _ => result_msg.content.lines().count() > TOOL_OUTPUT_PREVIEW_LINES,
+                                    _ => {
+                                        result_msg.content.lines().count()
+                                            > TOOL_OUTPUT_PREVIEW_LINES
+                                    }
                                 };
                                 if self.hovered_card == Some(result_msg.id) && has_expandable {
                                     card_bg = palette.hover_bg(card_bg);
@@ -2043,9 +2054,11 @@ impl App {
                         // Only make content lines selectable — skip leading/trailing spacer lines
                         // that only have ┃ with no actual content
                         let is_other_line = |l: &Line<'static>| {
-                            !l.spans.is_empty() && !l.spans.iter().any(|s| {
-                                !s.content.is_empty() && s.content != "┃ "
-                            })
+                            !l.spans.is_empty()
+                                && !l
+                                    .spans
+                                    .iter()
+                                    .any(|s| !s.content.is_empty() && s.content != "┃ ")
                         };
                         if let (Some(first), Some(last)) = (
                             card_lines.iter().position(|l| !is_other_line(l)),
@@ -2065,7 +2078,13 @@ impl App {
                         user_card_ranges.push((message.id, start_line, end_line));
                     }
                 }
-                if matches!(message.role, MessageRole::User | MessageRole::Shell | MessageRole::System | MessageRole::Error) {
+                if matches!(
+                    message.role,
+                    MessageRole::User
+                        | MessageRole::Shell
+                        | MessageRole::System
+                        | MessageRole::Error
+                ) {
                     lines.push(Line::from(""));
                 }
             }

@@ -151,9 +151,7 @@ pub fn current_version(conn: &Connection) -> Result<Option<i64>> {
     ) {
         Ok(v) => match v.parse::<i64>() {
             Ok(n) => Ok(Some(n)),
-            Err(e) => anyhow::bail!(
-                "Invalid schema_version in meta table: {v:?} — {e}"
-            ),
+            Err(e) => anyhow::bail!("Invalid schema_version in meta table: {v:?} — {e}"),
         },
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
@@ -183,8 +181,7 @@ pub fn run_pending(conn: &Connection) -> Result<i64> {
         None => {
             // Fresh database — write the initial schema version.
             crate::log_info!("Fresh database, setting schema version to {SCHEMA_VERSION}");
-            set_version(conn, SCHEMA_VERSION)
-                .context("failed to write initial schema version")?;
+            set_version(conn, SCHEMA_VERSION).context("failed to write initial schema version")?;
             return Ok(SCHEMA_VERSION);
         }
     };
@@ -229,8 +226,7 @@ pub fn run_pending(conn: &Connection) -> Result<i64> {
         tx.execute_batch(m.sql)
             .with_context(|| format!("migration v{} failed", m.version))?;
 
-        set_version(&tx, m.version)
-            .context("failed to update schema_version after migration")?;
+        set_version(&tx, m.version).context("failed to update schema_version after migration")?;
 
         tx.commit()
             .with_context(|| format!("failed to commit migration v{}", m.version))?;
@@ -437,7 +433,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(has_priority, "pre-migration: todos should have priority column");
+        assert!(
+            has_priority,
+            "pre-migration: todos should have priority column"
+        );
 
         // Run migration
         let result = run_pending(&conn).unwrap();
@@ -451,7 +450,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(!has_priority, "post-migration: todos should NOT have priority column");
+        assert!(
+            !has_priority,
+            "post-migration: todos should NOT have priority column"
+        );
 
         // Verify data survived
         let count: i64 = conn
@@ -460,11 +462,9 @@ mod tests {
         assert_eq!(count, 1, "todo data should survive migration");
 
         let content: String = conn
-            .query_row(
-                "SELECT content FROM todos WHERE position = 1",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT content FROM todos WHERE position = 1", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(content, "Test todo");
     }

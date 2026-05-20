@@ -125,7 +125,12 @@ pub async fn fetch(args: WebFetchArgs) -> Result<String> {
     }
 
     let start = (offset as usize).saturating_sub(1);
-    let selected: Vec<&str> = lines.iter().skip(start).take(limit as usize).copied().collect();
+    let selected: Vec<&str> = lines
+        .iter()
+        .skip(start)
+        .take(limit as usize)
+        .copied()
+        .collect();
     let end = start + selected.len();
 
     let mut content = selected

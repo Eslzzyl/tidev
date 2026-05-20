@@ -73,7 +73,11 @@ impl AtMentionState {
         self.start_background_indexing(workspace_root);
 
         let current_revision = self.index.revision();
-        if self.visible && self.query == query && self.last_index_revision == current_revision && !self.suggestions.is_empty() {
+        if self.visible
+            && self.query == query
+            && self.last_index_revision == current_revision
+            && !self.suggestions.is_empty()
+        {
             return;
         }
 

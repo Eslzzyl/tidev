@@ -10,11 +10,8 @@ use rusqlite::Connection;
 
 use crate::memory::MemoryStore;
 
-use super::{
-    SessionStore,
-    schema::SCHEMA_SQL,
-};
 use super::migration;
+use super::{SessionStore, schema::SCHEMA_SQL};
 
 /// Unified database manager.
 ///
@@ -92,8 +89,7 @@ impl Database {
             .context("failed to initialise database schema")?;
 
         // Run pending schema migrations.
-        migration::run_pending(&write_conn)
-            .context("failed to run database migrations")?;
+        migration::run_pending(&write_conn).context("failed to run database migrations")?;
 
         let shared_conn = Arc::new(Mutex::new(write_conn));
 

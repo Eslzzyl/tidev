@@ -266,8 +266,7 @@ impl SessionStore {
             let conn = store.write_conn.lock().unwrap();
             conn.execute_batch(SCHEMA_SQL)
                 .context("failed to initialise database schema")?;
-            migration::run_pending(&conn)
-                .context("failed to run database migrations")?;
+            migration::run_pending(&conn).context("failed to run database migrations")?;
         }
         Ok(store)
     }
@@ -814,7 +813,7 @@ impl SessionStore {
         if !todos.is_empty() {
             let guard = self.write_conn.lock().unwrap();
             let mut stmt = guard.prepare(
-                "INSERT INTO todos (session_id, position, content, status) VALUES (?1, ?2, ?3, ?4)"
+                "INSERT INTO todos (session_id, position, content, status) VALUES (?1, ?2, ?3, ?4)",
             )?;
 
             for (position, todo) in todos.iter().enumerate() {
@@ -936,13 +935,14 @@ impl SessionStore {
     }
 
     pub fn load_redo_snapshot(&self, session_id: Uuid) -> Result<Option<String>> {
-        let snapshot = self.read_query_opt(
-            "SELECT redo_snapshot FROM session_reverts WHERE session_id = :session_id LIMIT 1",
-            named_params! { ":session_id": session_id.to_string() },
-            |row| read_opt_blob_maybe_text(row, 0),
-        )?
-        .flatten()
-        .map(|bytes| decompress_text(&bytes));
+        let snapshot = self
+            .read_query_opt(
+                "SELECT redo_snapshot FROM session_reverts WHERE session_id = :session_id LIMIT 1",
+                named_params! { ":session_id": session_id.to_string() },
+                |row| read_opt_blob_maybe_text(row, 0),
+            )?
+            .flatten()
+            .map(|bytes| decompress_text(&bytes));
 
         Ok(snapshot)
     }
@@ -1531,20 +1531,21 @@ impl SessionStore {
     /// thread.
     pub fn start_output_cleanup(&self, max_age_days: i64, interval: Duration) {
         let conn = self.write_conn.clone();
-        std::thread::spawn(move || loop {
-            std::thread::sleep(interval);
-            let cutoff =
-                (Utc::now() - ChronoDuration::days(max_age_days)).to_rfc3339();
-            match conn.lock().unwrap().execute(
-                "DELETE FROM tool_outputs WHERE created_at < :cutoff",
-                named_params! { ":cutoff": cutoff },
-            ) {
-                Ok(count) if count > 0 => {
-                    crate::log_info!("Cleaned up {count} old tool output(s)");
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    crate::log_warn!("Failed to clean old tool outputs: {e}");
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(interval);
+                let cutoff = (Utc::now() - ChronoDuration::days(max_age_days)).to_rfc3339();
+                match conn.lock().unwrap().execute(
+                    "DELETE FROM tool_outputs WHERE created_at < :cutoff",
+                    named_params! { ":cutoff": cutoff },
+                ) {
+                    Ok(count) if count > 0 => {
+                        crate::log_info!("Cleaned up {count} old tool output(s)");
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        crate::log_warn!("Failed to clean old tool outputs: {e}");
+                    }
                 }
             }
         });
@@ -2078,9 +2079,9 @@ impl SessionStore {
 
         // 8. todos
         {
-            let mut stmt = self
-                .read_conn
-                .prepare("SELECT session_id, position, content, status FROM todos WHERE session_id = ?1")?;
+            let mut stmt = self.read_conn.prepare(
+                "SELECT session_id, position, content, status FROM todos WHERE session_id = ?1",
+            )?;
             let mut insert = tx.prepare(
                 "INSERT OR REPLACE INTO todos (session_id, position, content, status) VALUES (?1, ?2, ?3, ?4)",
             )?;

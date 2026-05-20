@@ -210,11 +210,7 @@ where
                 let rule_len = ((width as f64) * 2.0 / 3.0) as usize;
                 let rule_len = rule_len.max(8);
                 let padding = (width.saturating_sub(rule_len)) / 2;
-                let line_str = format!(
-                    "{}{}",
-                    " ".repeat(padding),
-                    "─".repeat(rule_len),
-                );
+                let line_str = format!("{}{}", " ".repeat(padding), "─".repeat(rule_len),);
                 self.push_line(Line::from(line_str));
                 self.needs_newline = true;
             }

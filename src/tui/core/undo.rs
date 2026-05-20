@@ -347,7 +347,8 @@ impl App {
                 Some(&redo_snapshot)
             },
         )?;
-        self.composer.set_text(strip_system_reminder_tags(&message_content));
+        self.composer
+            .set_text(strip_system_reminder_tags(&message_content));
         self.screen = Screen::Chat;
         self.scroll_messages_to_bottom();
         if let Some(n) = notice {
@@ -509,10 +510,7 @@ impl App {
                     msg_id,
                     &json,
                 ) {
-                    crate::log_warn!(
-                        "merge_step_diffs: failed to persist file_diffs: {}",
-                        e
-                    );
+                    crate::log_warn!("merge_step_diffs: failed to persist file_diffs: {}", e);
                 }
                 self.invalidate_active_message_render_cache_for(msg_id);
             }

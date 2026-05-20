@@ -243,7 +243,10 @@ pub fn run() -> anyhow::Result<()> {
                 let db_path = &paths.database_file;
                 if !db_path.exists() {
                     println!("Database does not exist yet at: {}", db_path.display());
-                    println!("Latest schema version: {}", crate::storage::schema::SCHEMA_VERSION);
+                    println!(
+                        "Latest schema version: {}",
+                        crate::storage::schema::SCHEMA_VERSION
+                    );
                     return Ok(());
                 }
                 let conn = rusqlite::Connection::open(db_path)?;
@@ -273,9 +276,10 @@ fn auto_cleanup_on_startup() {
     // Clean tool outputs older than 7 days
     if let Ok(store) = crate::storage::SessionStore::open(&paths.database_file)
         && let Ok(count) = store.delete_expired_tool_outputs(7)
-            && count > 0 {
-                crate::log_info!("Cleaned up {count} old tool output(s)");
-            }
+        && count > 0
+    {
+        crate::log_info!("Cleaned up {count} old tool output(s)");
+    }
 }
 
 #[cfg(test)]

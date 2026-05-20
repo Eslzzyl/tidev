@@ -623,10 +623,7 @@ pub(super) fn render_tool_call_lines(
             // Add exit code status
             if let Some(code) = exit_code {
                 if code == 0 {
-                    title_spans.push(Span::styled(
-                        "  ✓",
-                        Style::default().fg(palette.success),
-                    ));
+                    title_spans.push(Span::styled("  ✓", Style::default().fg(palette.success)));
                 } else {
                     title_spans.push(Span::styled(
                         format!("  ✗ {}", code),
@@ -673,10 +670,7 @@ pub(super) fn render_tool_call_lines(
         "websearch" => {
             let query = get_field("query").unwrap_or("");
             let mut title_spans = vec![
-                Span::styled(
-                    "Search web for ",
-                    Style::default().fg(palette.accent_soft),
-                ),
+                Span::styled("Search web for ", Style::default().fg(palette.accent_soft)),
                 Span::styled(
                     query.to_string(),
                     Style::default()
@@ -702,10 +696,7 @@ pub(super) fn render_tool_call_lines(
         "webfetch" => {
             let url = get_field("url").unwrap_or("");
             let mut title_spans = vec![
-                Span::styled(
-                    "Fetch web page from ",
-                    Style::default().fg(palette.accent),
-                ),
+                Span::styled("Fetch web page from ", Style::default().fg(palette.accent)),
                 Span::styled(
                     url.to_string(),
                     Style::default()
@@ -1248,10 +1239,7 @@ pub(super) fn render_memory_result_lines(
             if remaining > 0 {
                 lines.push(Line::from(""));
                 lines.push(Line::from(vec![Span::styled(
-                    format!(
-                        "  ▼ {} more result(s) — Click to expand",
-                        remaining
-                    ),
+                    format!("  ▼ {} more result(s) — Click to expand", remaining),
                     Style::default().fg(palette.muted),
                 )]));
             }
@@ -1499,14 +1487,8 @@ pub(super) fn render_todos_checkbox_list(
         let wrapped = word_wrap_line(
             &content_line,
             WrapOptions::new(body_width.saturating_sub(2))
-                .initial_indent(Line::from(vec![Span::styled(
-                    checkbox_prefix,
-                    style,
-                )]))
-                .subsequent_indent(Line::from(vec![Span::styled(
-                    indent,
-                    Style::default(),
-                )])),
+                .initial_indent(Line::from(vec![Span::styled(checkbox_prefix, style)]))
+                .subsequent_indent(Line::from(vec![Span::styled(indent, Style::default())])),
         );
 
         for wl in wrapped {

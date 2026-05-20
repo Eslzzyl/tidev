@@ -658,9 +658,10 @@ impl App {
                 message.id,
                 &tool_call.name,
                 &result.output,
-            ) {
-                crate::log_warn!("Failed to save full tool output: {e}");
-            }
+            )
+        {
+            crate::log_warn!("Failed to save full tool output: {e}");
+        }
 
         // Persistence is handled by AgentRuntime::persist_tool_result.
 

@@ -321,7 +321,10 @@ impl App {
     /// Uses build_at_reference_attachment for @ references to apply read tool truncation.
     /// Returns (attachments, instruction_sources) where instruction_sources contains
     /// the deduplicated paths of nearby instruction files that were loaded.
-    fn build_prompt_attachments(&self, prompt: &str) -> Result<(Vec<MessageAttachment>, Vec<String>)> {
+    fn build_prompt_attachments(
+        &self,
+        prompt: &str,
+    ) -> Result<(Vec<MessageAttachment>, Vec<String>)> {
         let mut attachments = Vec::new();
         let mut all_instruction_sources = Vec::new();
         let mut seen_paths = std::collections::BTreeSet::new();
@@ -353,7 +356,10 @@ impl App {
     /// Build attachment for @ reference with truncation like opencode's read tool.
     /// Returns (MessageAttachment, instruction_sources) where instruction_sources
     /// contains the paths of nearby instruction files that were loaded.
-    fn build_at_reference_attachment(&self, path: &str) -> Result<Option<(MessageAttachment, Vec<String>)>> {
+    fn build_at_reference_attachment(
+        &self,
+        path: &str,
+    ) -> Result<Option<(MessageAttachment, Vec<String>)>> {
         use crate::tooling::builtin::file::read_file_for_at_reference;
 
         let absolute = self.resolve_workspace_path(path);
@@ -364,10 +370,13 @@ impl App {
 
         if metadata.is_dir() {
             let tree = build_directory_tree(&absolute, 2, 80)?;
-            return Ok(Some((MessageAttachment::DirectoryReference {
-                path: path.trim_end_matches(['/', '\\']).to_string(),
-                tree: Arc::new(tree),
-            }, Vec::new())));
+            return Ok(Some((
+                MessageAttachment::DirectoryReference {
+                    path: path.trim_end_matches(['/', '\\']).to_string(),
+                    tree: Arc::new(tree),
+                },
+                Vec::new(),
+            )));
         }
 
         if let Some(mime) = image_mime_from_path(&absolute) {
@@ -378,11 +387,14 @@ impl App {
                 .unwrap_or(path)
                 .to_string();
             let data_url = format!("data:{mime};base64,{}", BASE64_STANDARD.encode(bytes));
-            return Ok(Some((MessageAttachment::Image {
-                filename,
-                mime: mime.to_string(),
-                data_url,
-            }, Vec::new())));
+            return Ok(Some((
+                MessageAttachment::Image {
+                    filename,
+                    mime: mime.to_string(),
+                    data_url,
+                },
+                Vec::new(),
+            )));
         }
 
         // For text files, read with truncation like opencode's read tool
@@ -394,8 +406,7 @@ impl App {
                     &self.workspace_root,
                     &self.paths.config_dir,
                     &absolute,
-                )
-                && !nearby.is_empty()
+                ) && !nearby.is_empty()
                 {
                     let mut reminders = Vec::new();
                     for (ipath, content) in nearby {
@@ -410,22 +421,28 @@ impl App {
 
                 // Also read full content for display purposes
                 let content = std::fs::read_to_string(&absolute).unwrap_or_else(|_| String::new());
-                Ok(Some((MessageAttachment::FileReference {
-                    path: path.to_string(),
-                    content: Arc::new(content),
-                    tool_output: Some(Arc::new(tool_output)),
-                    truncated,
-                }, instruction_sources)))
+                Ok(Some((
+                    MessageAttachment::FileReference {
+                        path: path.to_string(),
+                        content: Arc::new(content),
+                        tool_output: Some(Arc::new(tool_output)),
+                        truncated,
+                    },
+                    instruction_sources,
+                )))
             }
             Err(_error) => {
                 // Fall back to full content if read fails
                 let content = std::fs::read_to_string(&absolute).unwrap_or_else(|_| String::new());
-                Ok(Some((MessageAttachment::FileReference {
-                    path: path.to_string(),
-                    content: Arc::new(content),
-                    tool_output: None,
-                    truncated: false,
-                }, Vec::new())))
+                Ok(Some((
+                    MessageAttachment::FileReference {
+                        path: path.to_string(),
+                        content: Arc::new(content),
+                        tool_output: None,
+                        truncated: false,
+                    },
+                    Vec::new(),
+                )))
             }
         }
     }
@@ -648,10 +665,7 @@ impl App {
             return result;
         }
 
-        crate::log_info!(
-            "display_instruction_source: passthrough {}",
-            source,
-        );
+        crate::log_info!("display_instruction_source: passthrough {}", source,);
         source.to_string()
     }
 
@@ -1534,8 +1548,13 @@ impl App {
                             "TurnStarting: queued instruction_sources={:?}",
                             queued.instruction_sources,
                         );
-                        if let Err(e) = self.update_loaded_instruction_sources(&queued.instruction_sources) {
-                            crate::log_warn!("Failed to update instruction sources for queued prompt: {}", e);
+                        if let Err(e) =
+                            self.update_loaded_instruction_sources(&queued.instruction_sources)
+                        {
+                            crate::log_warn!(
+                                "Failed to update instruction sources for queued prompt: {}",
+                                e
+                            );
                         }
                     }
                     self.pending_request = true;
@@ -1635,7 +1654,12 @@ impl App {
         Ok(())
     }
 
-    fn queue_prompt(&mut self, prompt: String, attachments: Vec<MessageAttachment>, instruction_sources: Vec<String>) {
+    fn queue_prompt(
+        &mut self,
+        prompt: String,
+        attachments: Vec<MessageAttachment>,
+        instruction_sources: Vec<String>,
+    ) {
         // If there's a pending mode switch, use that mode for the queued message
         // so the user's intent to switch modes takes effect on the next message.
         let mode = self.pending_mode.unwrap_or(self.mode);

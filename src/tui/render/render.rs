@@ -57,8 +57,7 @@ pub(crate) fn render_scrollbar(
         }
     }
 
-    let paragraph =
-        Paragraph::new(Text::from(lines)).style(Style::default().bg(bg));
+    let paragraph = Paragraph::new(Text::from(lines)).style(Style::default().bg(bg));
     frame.render_widget(paragraph, area);
 }
 use std::time::Instant;
@@ -625,7 +624,10 @@ pub(super) fn spans_with_highlights(
     macro_rules! flush_run {
         () => {
             if !current_run.is_empty() {
-                spans.push(Span::styled(std::mem::take(&mut current_run), current_style));
+                spans.push(Span::styled(
+                    std::mem::take(&mut current_run),
+                    current_style,
+                ));
             }
         };
     }
@@ -866,7 +868,12 @@ impl App {
             } else {
                 match self.pending_mode.as_ref() {
                     Some(pending) => {
-                        format!("{} {} → {} (on completion)", spinner, self.mode.title(), pending.title())
+                        format!(
+                            "{} {} → {} (on completion)",
+                            spinner,
+                            self.mode.title(),
+                            pending.title()
+                        )
                     }
                     None => format!("{} {}", spinner, self.mode.title()),
                 }
@@ -992,10 +999,7 @@ pub(crate) fn decorate_card_line(
     // Detect if the line already has a visual prefix like "┃ " (used for thinking
     // and user message indicators). In that case, skip the extra left_padding
     // so the content text aligns with other card lines.
-    let has_visual_prefix = line
-        .spans
-        .first()
-        .is_some_and(|s| s.content == "┃ ");
+    let has_visual_prefix = line.spans.first().is_some_and(|s| s.content == "┃ ");
 
     if !has_visual_prefix {
         spans.push(Span::styled(" ".repeat(left_padding), bg_style));
@@ -1010,7 +1014,10 @@ pub(crate) fn decorate_card_line(
 
     let used_width = line_display_width(&Line::from(spans.clone()));
     if used_width < width {
-        spans.push(Span::styled(" ".repeat(width.saturating_sub(used_width)), bg_style));
+        spans.push(Span::styled(
+            " ".repeat(width.saturating_sub(used_width)),
+            bg_style,
+        ));
     }
 
     Line::from(spans)

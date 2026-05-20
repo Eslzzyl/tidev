@@ -98,7 +98,13 @@ fn format_brave_results(body: &serde_json::Value, offset: usize) -> Result<Strin
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        output.push_str(&format!("{}. [{}]({})\n   {}\n\n", i + 1 - offset, title, url, desc));
+        output.push_str(&format!(
+            "{}. [{}]({})\n   {}\n\n",
+            i + 1 - offset,
+            title,
+            url,
+            desc
+        ));
     }
 
     if output.is_empty() {

@@ -984,19 +984,13 @@ impl App {
         }
 
         // Restore mode from last user message
-        if let Some(last_mode) = runtime
-            .conversation
-            .messages
-            .iter()
-            .rev()
-            .find_map(|m| {
-                if matches!(m.role, crate::session::MessageRole::User) {
-                    m.mode
-                } else {
-                    None
-                }
-            })
-        {
+        if let Some(last_mode) = runtime.conversation.messages.iter().rev().find_map(|m| {
+            if matches!(m.role, crate::session::MessageRole::User) {
+                m.mode
+            } else {
+                None
+            }
+        }) {
             runtime.mode = last_mode;
         }
 
