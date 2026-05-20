@@ -2082,13 +2082,13 @@ impl App {
         frame: &mut Frame<'_>,
         area: Rect,
         scroll: usize,
-        max_scroll: usize,
+        _max_scroll: usize,
     ) {
         super::render::render_scrollbar(
             frame,
             area,
             scroll,
-            max_scroll,
+            self.message_total_lines,
             self.palette(),
             self.scrollbar_hovered,
         );
