@@ -117,9 +117,11 @@ export const api = {
     fetchJson<SessionDetail>(`${API_BASE}/sessions/${id}`),
 
   deleteSession: (id: string) =>
-    fetchWithAuth(`${API_BASE}/sessions/${id}`, { method: "DELETE" }).then((r) => {
-      if (!r.ok) throw new Error(`Failed to delete session: ${r.status}`);
-    }),
+    fetchWithAuth(`${API_BASE}/sessions/${id}`, { method: "DELETE" }).then(
+      (r) => {
+        if (!r.ok) throw new Error(`Failed to delete session: ${r.status}`);
+      },
+    ),
 
   // Messages
   listMessages: (sessionId: string) =>
@@ -137,13 +139,10 @@ export const api = {
     ),
 
   abortRequest: (sessionId: string, data: AbortRequest) =>
-    fetchJson<{ success: boolean }>(
-      `${API_BASE}/sessions/${sessionId}/abort`,
-      {
-        method: "POST",
-        body: JSON.stringify(data),
-      },
-    ),
+    fetchJson<{ success: boolean }>(`${API_BASE}/sessions/${sessionId}/abort`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 
   // Models
   listModels: () => fetchJson<{ models: ModelInfo[] }>(`${API_BASE}/models`),

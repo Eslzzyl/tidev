@@ -180,24 +180,33 @@ export function useSmartInput(
   const thinkingDropdownRef = useRef<HTMLDivElement | null>(null);
 
   // Update thinking levels based on model - use data from API model info
-  const updateThinkingLevels = useCallback((modelId: string) => {
-    const model = models.find((m) => m.id === modelId);
-    if (model && model.thinking_supported && model.thinking_options.length > 0) {
-      const options = model.thinking_options.map((opt) => {
-        const parts = opt.split(":");
-        const label = parts[1] ? parts[1].charAt(0).toUpperCase() + parts[1].slice(1) : opt;
-        return { label, value: opt };
-      });
-      setThinkingOptions(options);
-      const defaultTl = model.thinking_options.includes(model.thinking_level)
-        ? model.thinking_level
-        : model.thinking_options[0];
-      setSelectedThinkingState(defaultTl);
-    } else {
-      setThinkingOptions([]);
-      setSelectedThinkingState("");
-    }
-  }, [models]);
+  const updateThinkingLevels = useCallback(
+    (modelId: string) => {
+      const model = models.find((m) => m.id === modelId);
+      if (
+        model &&
+        model.thinking_supported &&
+        model.thinking_options.length > 0
+      ) {
+        const options = model.thinking_options.map((opt) => {
+          const parts = opt.split(":");
+          const label = parts[1]
+            ? parts[1].charAt(0).toUpperCase() + parts[1].slice(1)
+            : opt;
+          return { label, value: opt };
+        });
+        setThinkingOptions(options);
+        const defaultTl = model.thinking_options.includes(model.thinking_level)
+          ? model.thinking_level
+          : model.thinking_options[0];
+        setSelectedThinkingState(defaultTl);
+      } else {
+        setThinkingOptions([]);
+        setSelectedThinkingState("");
+      }
+    },
+    [models],
+  );
 
   // Fetch models and default model on mount
   useEffect(() => {

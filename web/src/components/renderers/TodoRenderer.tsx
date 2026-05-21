@@ -1,8 +1,4 @@
-import {
-  Circle,
-  CheckCircle2,
-  Clock,
-} from "lucide-react";
+import { Circle, CheckCircle2, Clock } from "lucide-react";
 
 interface TodoItem {
   content: string;

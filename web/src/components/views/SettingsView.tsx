@@ -427,17 +427,22 @@ function WebAccessSettings() {
             />
           </div>
 
-          {error && (
-            <p className="text-sm text-red-500">{error}</p>
-          )}
+          {error && <p className="text-sm text-red-500">{error}</p>}
           {success && (
-            <p className="text-sm text-green-500">Password updated successfully</p>
+            <p className="text-sm text-green-500">
+              Password updated successfully
+            </p>
           )}
 
           <div className="flex gap-2">
             <button
               type="submit"
-              disabled={!currentPassword.trim() || !newPassword.trim() || newPassword !== confirmPassword || submitting}
+              disabled={
+                !currentPassword.trim() ||
+                !newPassword.trim() ||
+                newPassword !== confirmPassword ||
+                submitting
+              }
               className="rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
             >
               {submitting ? "Saving..." : "Change Password"}
@@ -479,16 +484,18 @@ function WebAccessSettings() {
             />
           </div>
 
-          {error && (
-            <p className="text-sm text-red-500">{error}</p>
-          )}
+          {error && <p className="text-sm text-red-500">{error}</p>}
           {success && (
             <p className="text-sm text-green-500">Password set successfully</p>
           )}
 
           <button
             type="submit"
-            disabled={!newPassword.trim() || newPassword !== confirmPassword || submitting}
+            disabled={
+              !newPassword.trim() ||
+              newPassword !== confirmPassword ||
+              submitting
+            }
             className="rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
           >
             {submitting ? "Saving..." : "Set Password"}

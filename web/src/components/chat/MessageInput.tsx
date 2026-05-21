@@ -88,25 +88,34 @@ export function MessageInput({
   const isInputEnabled = currentSessionId !== null || isDraftSession;
 
   // Update thinking levels based on model - use data from API model info
-  const updateThinkingLevels = useCallback((modelId: string) => {
-    const model = models.find((m) => m.id === modelId);
-    if (model && model.thinking_supported && model.thinking_options.length > 0) {
-      const options = model.thinking_options.map((opt) => {
-        const parts = opt.split(":");
-        const label = parts[1] ? parts[1].charAt(0).toUpperCase() + parts[1].slice(1) : opt;
-        return { label, value: opt };
-      });
-      setThinkingOptions(options);
-      // Prefer the model's default thinking level, fall back to first option
-      const defaultTl = model.thinking_options.includes(model.thinking_level)
-        ? model.thinking_level
-        : model.thinking_options[0];
-      setSelectedThinking(defaultTl);
-    } else {
-      setThinkingOptions([]);
-      setSelectedThinking("");
-    }
-  }, [models]);
+  const updateThinkingLevels = useCallback(
+    (modelId: string) => {
+      const model = models.find((m) => m.id === modelId);
+      if (
+        model &&
+        model.thinking_supported &&
+        model.thinking_options.length > 0
+      ) {
+        const options = model.thinking_options.map((opt) => {
+          const parts = opt.split(":");
+          const label = parts[1]
+            ? parts[1].charAt(0).toUpperCase() + parts[1].slice(1)
+            : opt;
+          return { label, value: opt };
+        });
+        setThinkingOptions(options);
+        // Prefer the model's default thinking level, fall back to first option
+        const defaultTl = model.thinking_options.includes(model.thinking_level)
+          ? model.thinking_level
+          : model.thinking_options[0];
+        setSelectedThinking(defaultTl);
+      } else {
+        setThinkingOptions([]);
+        setSelectedThinking("");
+      }
+    },
+    [models],
+  );
 
   // Load models and set initial selection
   useEffect(() => {
@@ -227,7 +236,9 @@ export function MessageInput({
     compositionJustCommittedRef.current = false;
   }
 
-  function handleCompositionEnd(_e: React.CompositionEvent<HTMLTextAreaElement>) {
+  function handleCompositionEnd(
+    _e: React.CompositionEvent<HTMLTextAreaElement>,
+  ) {
     composingRef.current = false;
     if (_e.data) {
       compositionJustCommittedRef.current = true;

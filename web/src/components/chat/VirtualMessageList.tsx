@@ -82,9 +82,7 @@ function renderEntry(
   canUndo?: boolean,
 ) {
   if ("kind" in entry && entry.kind === "system") {
-    return (
-      <SystemMessageBlockComponent message={entry.message} />
-    );
+    return <SystemMessageBlockComponent message={entry.message} />;
   }
   return (
     <MessageRound

@@ -137,13 +137,11 @@ export function WelcomePage() {
         console.log(
           "[WelcomePage] addMessage before:",
           JSON.stringify(
-            useSessionStore
-              .getState()
-              .messages.map((m) => ({
-                id: m.id,
-                role: m.role,
-                content: m.content.substring(0, 20),
-              })),
+            useSessionStore.getState().messages.map((m) => ({
+              id: m.id,
+              role: m.role,
+              content: m.content.substring(0, 20),
+            })),
           ),
         );
         useSessionStore.getState().addMessage({
@@ -155,13 +153,11 @@ export function WelcomePage() {
         console.log(
           "[WelcomePage] addMessage after:",
           JSON.stringify(
-            useSessionStore
-              .getState()
-              .messages.map((m) => ({
-                id: m.id,
-                role: m.role,
-                content: m.content.substring(0, 20),
-              })),
+            useSessionStore.getState().messages.map((m) => ({
+              id: m.id,
+              role: m.role,
+              content: m.content.substring(0, 20),
+            })),
           ),
         );
 

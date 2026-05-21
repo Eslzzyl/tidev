@@ -53,8 +53,9 @@ export function GitView() {
   const [loadingMore, setLoadingMore] = useState(false);
 
   // Commit detail (History tab)
-  const [selectedCommit, setSelectedCommit] =
-    useState<GitShowResponse | null>(null);
+  const [selectedCommit, setSelectedCommit] = useState<GitShowResponse | null>(
+    null,
+  );
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [fileDiffs, setFileDiffs] = useState<
@@ -71,9 +72,9 @@ export function GitView() {
   const [loadingChangeDiff, setLoadingChangeDiff] = useState<string | null>(
     null,
   );
-  const [expandedChangeFiles, setExpandedChangeFiles] = useState<
-    Set<string>
-  >(new Set());
+  const [expandedChangeFiles, setExpandedChangeFiles] = useState<Set<string>>(
+    new Set(),
+  );
 
   // Mobile detail sheet
   const [detailOpen, setDetailOpen] = useState(false);
@@ -111,8 +112,7 @@ export function GitView() {
       if (containerWidth === 0) return;
 
       const dx = e.clientX - resizeStartRef.current.x;
-      const newRatio =
-        resizeStartRef.current.ratio + dx / containerWidth;
+      const newRatio = resizeStartRef.current.ratio + dx / containerWidth;
       // Clamp
       const clamped = Math.min(
         Math.max(newRatio, MIN_PANEL_PCT / 100),
@@ -137,32 +137,27 @@ export function GitView() {
 
   // ── Data fetching ───────────────────────────────────────────────────
 
-  const loadCommits = useCallback(
-    async (skip: number, replace: boolean) => {
-      try {
-        if (replace) {
-          setLoading(true);
-        } else {
-          setLoadingMore(true);
-        }
-        const result = await api.gitLog(PAGE_SIZE, skip);
-        if (replace) {
-          setAllCommits(result.commits);
-        } else {
-          setAllCommits((prev) => [...prev, ...result.commits]);
-        }
-        setHasMore(result.has_more);
-      } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to load history",
-        );
-      } finally {
-        setLoading(false);
-        setLoadingMore(false);
+  const loadCommits = useCallback(async (skip: number, replace: boolean) => {
+    try {
+      if (replace) {
+        setLoading(true);
+      } else {
+        setLoadingMore(true);
       }
-    },
-    [],
-  );
+      const result = await api.gitLog(PAGE_SIZE, skip);
+      if (replace) {
+        setAllCommits(result.commits);
+      } else {
+        setAllCommits((prev) => [...prev, ...result.commits]);
+      }
+      setHasMore(result.has_more);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load history");
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }, []);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -223,10 +218,7 @@ export function GitView() {
       }
       setLoadingFileDiff(filePath);
       try {
-        const diffs = await api.gitShowFileDiff(
-          selectedCommit.sha,
-          filePath,
-        );
+        const diffs = await api.gitShowFileDiff(selectedCommit.sha, filePath);
         if (diffs.length > 0) {
           setFileDiffs((prev) => ({
             ...prev,
@@ -576,10 +568,7 @@ export function GitView() {
             onToggleChangeDiff={toggleChangeDiff}
           />
         ) : activeTab === "history" ? (
-          <div
-            ref={splitContainerRef}
-            className="flex flex-1 overflow-hidden"
-          >
+          <div ref={splitContainerRef} className="flex flex-1 overflow-hidden">
             {/* Left: History list */}
             <div
               className="overflow-y-auto"
@@ -600,9 +589,7 @@ export function GitView() {
             <div
               onMouseDown={handleSplitResizeStart}
               className={`hidden w-1 cursor-col-resize bg-transparent hover:bg-neutral-300 dark:hover:bg-neutral-700 md:block ${
-                isResizingSplit
-                  ? "bg-neutral-400 dark:bg-neutral-600"
-                  : ""
+                isResizingSplit ? "bg-neutral-400 dark:bg-neutral-600" : ""
               }`}
               role="separator"
               aria-label="Resize panels"
@@ -972,9 +959,7 @@ function HistoryPanel({
       {loadingMore && (
         <div className="flex items-center justify-center py-4">
           <Loader2 className="h-4 w-4 animate-spin text-neutral-400" />
-          <span className="ml-2 text-xs text-neutral-500">
-            Loading more...
-          </span>
+          <span className="ml-2 text-xs text-neutral-500">Loading more...</span>
         </div>
       )}
 
@@ -1034,9 +1019,7 @@ function CommitDetailPanel({
   if (detailError) {
     return (
       <div className="p-4">
-        <p className="text-sm text-red-600 dark:text-red-400">
-          {detailError}
-        </p>
+        <p className="text-sm text-red-600 dark:text-red-400">{detailError}</p>
       </div>
     );
   }
@@ -1189,11 +1172,7 @@ function BranchesPanel({
             placeholder="New branch name"
             className="flex-1 rounded border border-neutral-300 bg-white px-3 py-1.5 text-xs text-neutral-900 placeholder-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500"
             onKeyDown={(e) => {
-              if (
-                e.key === "Enter" &&
-                newBranchName.trim() &&
-                !creatingBranch
-              )
+              if (e.key === "Enter" && newBranchName.trim() && !creatingBranch)
                 onCreateBranch();
             }}
           />
@@ -1248,9 +1227,7 @@ function BranchesPanel({
               <span className="text-xs text-neutral-400">current</span>
             )}
             {branch.remote && (
-              <span className="text-xs text-neutral-400">
-                {branch.remote}
-              </span>
+              <span className="text-xs text-neutral-400">{branch.remote}</span>
             )}
             {!branch.current && (
               <button

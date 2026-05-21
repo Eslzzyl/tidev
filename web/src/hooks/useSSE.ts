@@ -405,7 +405,10 @@ export function useSSE(sessionId: string | null) {
         const statusLine = `\n\n_Retrying (${event.attempt}/${event.max_attempts}): ${event.reason}..._`;
         return {
           ...prev,
-          segments: [...filtered, { type: "text" as const, content: statusLine }],
+          segments: [
+            ...filtered,
+            { type: "text" as const, content: statusLine },
+          ],
         };
       });
     };

@@ -39,7 +39,9 @@ export function ModelPanel({
   const [searchQuery, setSearchQuery] = useState("");
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [agentModels, setAgentModels] = useState<Record<string, string>>({});
-  const [agentThinkingLevels, setAgentThinkingLevels] = useState<Record<string, string>>({});
+  const [agentThinkingLevels, setAgentThinkingLevels] = useState<
+    Record<string, string>
+  >({});
   const [isLoading, setIsLoading] = useState(false);
   const [expandedModelId, setExpandedModelId] = useState<string | null>(null);
   const [selectedThinking, setSelectedThinking] = useState<string>("");
@@ -51,10 +53,7 @@ export function ModelPanel({
     if (!isOpen) return;
 
     setIsLoading(true);
-    Promise.all([
-      api.listModels(),
-      api.getAgentModels(),
-    ])
+    Promise.all([api.listModels(), api.getAgentModels()])
       .then(([modelsResp, agentModelsResp]) => {
         setModels(modelsResp.models ?? []);
         setAgentModels(agentModelsResp.agent_models);
@@ -96,7 +95,11 @@ export function ModelPanel({
   }, [isOpen, onClose]);
 
   // Compute the currently "active" model for the selected tab
-  const activeModelForTab = useMemo((): { provider_id: string; model_id: string; label: string } | null => {
+  const activeModelForTab = useMemo((): {
+    provider_id: string;
+    model_id: string;
+    label: string;
+  } | null => {
     if (activeTab === "general") {
       if (currentModelId && currentProviderId) {
         const m = models.find(
@@ -160,9 +163,16 @@ export function ModelPanel({
   const handleSelectModel = useCallback(
     async (model: ModelInfo) => {
       // If model supports thinking and not already expanded for this model, expand
-      if (model.thinking_supported && expandedModelId !== `${model.provider_id}/${model.id}`) {
+      if (
+        model.thinking_supported &&
+        expandedModelId !== `${model.provider_id}/${model.id}`
+      ) {
         setExpandedModelId(`${model.provider_id}/${model.id}`);
-        setSelectedThinking(model.thinking_options.includes(model.thinking_level) ? model.thinking_level : model.thinking_options[0]);
+        setSelectedThinking(
+          model.thinking_options.includes(model.thinking_level)
+            ? model.thinking_level
+            : model.thinking_options[0],
+        );
         return;
       }
 
@@ -316,89 +326,97 @@ export function ModelPanel({
                   <div className="sticky top-0 bg-white px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider text-neutral-500 dark:bg-neutral-900 dark:text-neutral-400">
                     {provider}
                   </div>
-                    {providerModels.map((model) => {
-                      const isSelected =
-                        activeTab === "general"
-                          ? model.id === currentModelId &&
-                            model.provider_id === currentProviderId
-                          : agentModels[activeTab] ===
-                            `${model.provider_id}/${model.id}`;
-                      const isExpanded =
-                        expandedModelId === `${model.provider_id}/${model.id}`;
+                  {providerModels.map((model) => {
+                    const isSelected =
+                      activeTab === "general"
+                        ? model.id === currentModelId &&
+                          model.provider_id === currentProviderId
+                        : agentModels[activeTab] ===
+                          `${model.provider_id}/${model.id}`;
+                    const isExpanded =
+                      expandedModelId === `${model.provider_id}/${model.id}`;
 
-                      return (
-                        <div key={`${model.provider_id}/${model.id}`}>
-                          <button
-                            onClick={() => handleSelectModel(model)}
-                            className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-xs transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
+                    return (
+                      <div key={`${model.provider_id}/${model.id}`}>
+                        <button
+                          onClick={() => handleSelectModel(model)}
+                          className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-xs transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
+                            isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                          }`}
+                        >
+                          <span
+                            className={`flex-1 font-medium ${
                               isSelected
-                                ? "bg-blue-50 dark:bg-blue-900/20"
-                                : ""
+                                ? "text-blue-700 dark:text-blue-300"
+                                : "text-neutral-900 dark:text-neutral-100"
                             }`}
                           >
-                            <span
-                              className={`flex-1 font-medium ${
-                                isSelected
-                                  ? "text-blue-700 dark:text-blue-300"
-                                  : "text-neutral-900 dark:text-neutral-100"
-                              }`}
-                            >
-                              {model.display_name}
-                            </span>
-                            {model.supports_vision && (
-                              <Camera className="h-3.5 w-3.5 text-neutral-400" />
-                            )}
-                            {isSelected && (
-                              <Check className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-                            )}
-                          </button>
-                          {/* Thinking level sub-menu when expanded */}
-                          {isExpanded && model.thinking_supported && (
-                            <div className="ml-6 border-l-2 border-amber-200 pl-3 py-1 dark:border-amber-700">
-                              {model.thinking_options.map((opt) => {
-                                const parts = opt.split(":");
-                                const label = parts[1] ? parts[1] : opt;
-                                const isTlSelected = selectedThinking === opt;
-                                return (
-                                  <button
-                                    key={opt}
-                                    onClick={() => {
-                                      setSelectedThinking(opt);
-                                      // Immediately confirm with this thinking level
-                                      const tl = opt;
-                                      if (activeTab === "general") {
-                                        api.setDefaultModel({
+                            {model.display_name}
+                          </span>
+                          {model.supports_vision && (
+                            <Camera className="h-3.5 w-3.5 text-neutral-400" />
+                          )}
+                          {isSelected && (
+                            <Check className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                          )}
+                        </button>
+                        {/* Thinking level sub-menu when expanded */}
+                        {isExpanded && model.thinking_supported && (
+                          <div className="ml-6 border-l-2 border-amber-200 pl-3 py-1 dark:border-amber-700">
+                            {model.thinking_options.map((opt) => {
+                              const parts = opt.split(":");
+                              const label = parts[1] ? parts[1] : opt;
+                              const isTlSelected = selectedThinking === opt;
+                              return (
+                                <button
+                                  key={opt}
+                                  onClick={() => {
+                                    setSelectedThinking(opt);
+                                    // Immediately confirm with this thinking level
+                                    const tl = opt;
+                                    if (activeTab === "general") {
+                                      api
+                                        .setDefaultModel({
                                           provider_id: model.provider_id,
                                           model_id: model.id,
                                           thinking_level: tl,
-                                        }).catch(console.error);
-                                        onModelChange?.(model);
-                                        onClose();
-                                      } else {
-                                        const modelStr = `${model.provider_id}/${model.id}`;
-                                        api.setAgentModel({
+                                        })
+                                        .catch(console.error);
+                                      onModelChange?.(model);
+                                      onClose();
+                                    } else {
+                                      const modelStr = `${model.provider_id}/${model.id}`;
+                                      api
+                                        .setAgentModel({
                                           agent_type: activeTab,
                                           model_str: modelStr,
                                           thinking_level: tl,
-                                        }).catch(console.error);
-                                        setAgentModels((prev) => ({ ...prev, [activeTab]: modelStr }));
-                                      }
-                                      setExpandedModelId(null);
-                                    }}
-                                    className={`flex w-full items-center gap-2 px-3 py-1 text-left text-xs transition-colors hover:bg-neutral-50 dark:hover:bg-neutral-800 ${
-                                      isTlSelected ? "text-amber-700 dark:text-amber-300" : "text-neutral-500 dark:text-neutral-400"
-                                    }`}
-                                  >
-                                    <span>{isTlSelected ? "●" : "○"}</span>
-                                    <span>{label}</span>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}                </div>
+                                        })
+                                        .catch(console.error);
+                                      setAgentModels((prev) => ({
+                                        ...prev,
+                                        [activeTab]: modelStr,
+                                      }));
+                                    }
+                                    setExpandedModelId(null);
+                                  }}
+                                  className={`flex w-full items-center gap-2 px-3 py-1 text-left text-xs transition-colors hover:bg-neutral-50 dark:hover:bg-neutral-800 ${
+                                    isTlSelected
+                                      ? "text-amber-700 dark:text-amber-300"
+                                      : "text-neutral-500 dark:text-neutral-400"
+                                  }`}
+                                >
+                                  <span>{isTlSelected ? "●" : "○"}</span>
+                                  <span>{label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}{" "}
+                </div>
               ),
             )
           )}
@@ -417,7 +435,11 @@ export function ModelPanel({
                 </span>
               </>
             ) : (
-              <span className="italic">{activeTab === "general" ? "No model selected" : "Using parent session model (<inherit>)"}</span>
+              <span className="italic">
+                {activeTab === "general"
+                  ? "No model selected"
+                  : "Using parent session model (<inherit>)"}
+              </span>
             )}
           </div>
           <div className="flex items-center gap-2">

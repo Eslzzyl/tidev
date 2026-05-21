@@ -190,9 +190,7 @@ function getResultSummary(entry: ToolCallEntry): string {
   if (entry.result.isError) return " failed";
 
   const name = entry.name;
-  const canonical = ["grep", "glob", "skill"].includes(name)
-    ? name
-    : "";
+  const canonical = ["grep", "glob", "skill"].includes(name) ? name : "";
 
   switch (canonical) {
     case "grep":
