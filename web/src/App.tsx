@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, lazy, Suspense, useRef } from "react";
 import { useSessionStore } from "./stores/useSessionStore";
 import {
   useUIStore,
@@ -177,21 +177,45 @@ function App() {
     loadData();
   }, [setSessions, setCurrentSession, setMessages]);
 
-  // Global resize handlers
+  // Resize RAF ref — throttles state updates to once per frame
+  const resizeRafRef = useRef<number | null>(null);
+
+  // Global resize handlers (throttled via requestAnimationFrame)
   useEffect(() => {
     if (!isResizingLeft && !isResizingRight) return;
 
     const handleResizeMove = (e: MouseEvent) => {
-      if (isResizingLeft) {
-        const diff = e.clientX - resizeStartX;
-        setLeftSidebarWidth(resizeStartWidth + diff);
-      } else if (isResizingRight) {
-        const diff = resizeStartX - e.clientX;
-        setRightSidebarWidth(resizeStartWidth + diff);
-      }
+      // Throttle: ignore events if a frame is already queued
+      if (resizeRafRef.current !== null) return;
+
+      const clientX = e.clientX; // capture immediately (avoid stale event)
+
+      resizeRafRef.current = requestAnimationFrame(() => {
+        resizeRafRef.current = null;
+
+        if (isResizingLeft) {
+          const diff = clientX - resizeStartX;
+          const newWidth = Math.min(
+            500,
+            Math.max(180, resizeStartWidth + diff),
+          );
+          setLeftSidebarWidth(newWidth);
+        } else if (isResizingRight) {
+          const diff = resizeStartX - clientX;
+          const newWidth = Math.min(
+            500,
+            Math.max(180, resizeStartWidth + diff),
+          );
+          setRightSidebarWidth(newWidth);
+        }
+      });
     };
 
     const handleResizeEnd = () => {
+      if (resizeRafRef.current !== null) {
+        cancelAnimationFrame(resizeRafRef.current);
+        resizeRafRef.current = null;
+      }
       setIsResizingLeft(false);
       setIsResizingRight(false);
       document.body.style.cursor = "";
@@ -203,6 +227,9 @@ function App() {
     return () => {
       document.removeEventListener("mousemove", handleResizeMove);
       document.removeEventListener("mouseup", handleResizeEnd);
+      if (resizeRafRef.current !== null) {
+        cancelAnimationFrame(resizeRafRef.current);
+      }
     };
   }, [
     isResizingLeft,
@@ -287,36 +314,37 @@ function App() {
 
         {/* Main content area */}
         <div className="flex flex-1 min-h-0">
-          {/* Left Sidebar - only in chat view with active session */}
-          {showSidebars && (
-            <>
-              <aside
-                className={`fixed inset-y-0 left-0 z-50 transform border-r border-neutral-200 bg-white transition-transform duration-200 ease-in-out md:relative md:translate-x-0 dark:border-neutral-800 dark:bg-neutral-950 ${
-                  mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
-                }`}
-                style={{ width: leftSidebarWidth }}
-              >
-                <LeftSidebar />
-              </aside>
+          {/* Left Sidebar - stays mounted but hidden outside chat tab */}
+          {/* Kept mounted to avoid layout recalculation when switching tabs */}
+          <div style={{ display: showSidebars ? "" : "none" }}>
+            <aside
+              className={`fixed inset-y-0 left-0 z-50 transform border-r border-neutral-200 bg-white transition-transform duration-200 ease-in-out md:relative md:translate-x-0 dark:border-neutral-800 dark:bg-neutral-950 ${
+                mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+              }`}
+              style={{ width: leftSidebarWidth, willChange: "width" }}
+            >
+              <LeftSidebar />
+            </aside>
 
-              {/* Left Resize Handle */}
-              <ResizeHandle
-                onResizeStart={handleLeftResizeStart}
-                isResizing={isResizingLeft}
+            {/* Left Resize Handle */}
+            <ResizeHandle
+              onResizeStart={handleLeftResizeStart}
+              isResizing={isResizingLeft}
+            />
+
+            {/* Mobile overlay */}
+            {mobileMenuOpen && (
+              <button
+                onClick={closeMobileMenu}
+                className="fixed inset-0 z-40 bg-black/50 md:hidden"
+                aria-label="Close menu"
               />
+            )}
+          </div>
 
-              {/* Mobile overlay */}
-              {mobileMenuOpen && (
-                <button
-                  onClick={closeMobileMenu}
-                  className="fixed inset-0 z-40 bg-black/50 md:hidden"
-                  aria-label="Close menu"
-                />
-              )}
-            </>
-          )}
-
-          {/* Main content - switches based on active tab */}
+          {/* Main content - all views stay mounted, hidden via display:none */}
+          {/* ChatPanel must stay mounted to preserve virtualizer state across */}
+          {/* tab switches — otherwise every switch triggers a full remount. */}
           <main className="relative flex-1 min-w-0">
             <Suspense
               fallback={
@@ -325,37 +353,50 @@ function App() {
                 </div>
               }
             >
-              {activeTab === "chat" &&
-                (showWelcomePage ? <WelcomePage /> : <ChatPanel />)}
-              {activeTab === "files" && <FilesView />}
-              {activeTab === "terminal" && (
-                <div className="flex h-full flex-col overflow-hidden">
-                  <TerminalView />
-                </div>
-              )}
-              {activeTab === "git" && <GitView />}
+              <div
+                className="h-full"
+                style={{ display: activeTab === "chat" ? "" : "none" }}
+              >
+                {showWelcomePage ? <WelcomePage /> : <ChatPanel />}
+              </div>
+              <div
+                className="h-full"
+                style={{ display: activeTab === "files" ? "" : "none" }}
+              >
+                <FilesView />
+              </div>
+              <div
+                className="flex h-full flex-col overflow-hidden"
+                style={{ display: activeTab === "terminal" ? "" : "none" }}
+              >
+                <TerminalView />
+              </div>
+              <div
+                className="h-full"
+                style={{ display: activeTab === "git" ? "" : "none" }}
+              >
+                <GitView />
+              </div>
             </Suspense>
           </main>
 
-          {/* Right Sidebar - only in chat view */}
-          {showRightSidebar && (
-            <>
-              <ResizeHandle
-                onResizeStart={handleRightResizeStart}
-                isResizing={isResizingRight}
-              />
+          {/* Right Sidebar - stays mounted but hidden outside chat tab */}
+          <div style={{ display: showRightSidebar ? "" : "none" }}>
+            <ResizeHandle
+              onResizeStart={handleRightResizeStart}
+              isResizing={isResizingRight}
+            />
 
-              <aside
-                className="hidden border-l border-neutral-200 bg-white md:block dark:border-neutral-800 dark:bg-neutral-950"
-                style={{ width: rightSidebarWidth }}
-              >
-                <RightSidebar />
-              </aside>
-            </>
-          )}
+            <aside
+              className="hidden border-l border-neutral-200 bg-white md:block dark:border-neutral-800 dark:bg-neutral-950"
+              style={{ width: rightSidebarWidth, willChange: "width" }}
+            >
+              <RightSidebar />
+            </aside>
+          </div>
 
           {/* Mobile Right Sidebar */}
-          {showSidebars && (
+          <div style={{ display: showSidebars ? "" : "none" }}>
             <aside
               className={`fixed inset-y-0 right-0 z-50 transform border-l border-neutral-200 bg-white transition-transform duration-200 ease-in-out md:hidden dark:border-neutral-800 dark:bg-neutral-950 ${
                 mobileRightSidebarOpen ? "translate-x-0" : "translate-x-full"
@@ -364,7 +405,7 @@ function App() {
             >
               <RightSidebar />
             </aside>
-          )}
+          </div>
 
           {/* Mobile overlay for right sidebar */}
           {showSidebars && mobileRightSidebarOpen && (

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, memo } from "react";
 import {
   Loader2,
   ChevronDown,
@@ -285,7 +285,7 @@ function looksLikeJson(output: string): boolean {
   return trimmed.startsWith("{") || trimmed.startsWith("[");
 }
 
-export function ToolCallRow({ entry }: Props) {
+export const ToolCallRow = memo(function ToolCallRow({ entry }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const didAutoExpand = useRef(false);
@@ -521,4 +521,4 @@ export function ToolCallRow({ entry }: Props) {
       )}
     </div>
   );
-}
+});

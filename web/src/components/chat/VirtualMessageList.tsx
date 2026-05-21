@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import type { VirtualItem } from "@tanstack/react-virtual";
 import type { Round, SystemMessageBlock } from "../../types/round";
 import { MessageRound } from "./MessageRound";
@@ -21,6 +22,10 @@ interface Props {
  * For large lists (> VIRTUALIZE_THRESHOLD) it uses absolute-positioned
  * virtual rows via `@tanstack/react-virtual`.  For small lists it falls
  * back to a simple flat layout.
+ *
+ * Stagger entrance animations are only applied during the initial mount
+ * of this component.  Tab switches and sidebar toggles do NOT re-trigger
+ * the cascade, avoiding costly animation of every message.
  */
 export function VirtualMessageList({
   entries,
@@ -31,13 +36,30 @@ export function VirtualMessageList({
   onUndoRequest,
   canUndo,
 }: Props) {
+  // Track initial mount: stagger animations only fire once when the component
+  // first appears (e.g. loading a session for the first time).  Subsequent
+  // re-mounts from tab switches or sidebar toggles skip the cascade entirely.
+  const [initialMount, setInitialMount] = useState(true);
+  useEffect(() => {
+    if (initialMount) {
+      const timer = setTimeout(() => setInitialMount(false), 600);
+      return () => clearTimeout(timer);
+    }
+  }, [initialMount]);
+
+  const getStaggerIndex = (idx: number) => (initialMount ? idx : undefined);
+
   // --- Small list: flat render (no virtualization) ---
   if (!isVirtualized) {
     return (
       <div className="divide-y divide-neutral-100 dark:divide-neutral-900">
         {entries.map((entry, idx) => (
-          <div key={entry.id} className="contents">
-            {renderEntry(entry, onUndoRequest, canUndo, idx)}
+          <div
+            key={entry.id}
+            className="contents"
+            style={{ contentVisibility: "auto" }}
+          >
+            {renderEntry(entry, onUndoRequest, canUndo, getStaggerIndex(idx))}
           </div>
         ))}
       </div>
@@ -65,9 +87,15 @@ export function VirtualMessageList({
                 left: 0,
                 width: "100%",
                 transform: `translateY(${virtualItem.start}px)`,
+                contain: "layout style paint",
               }}
             >
-              {renderEntry(entry, onUndoRequest, canUndo, virtualItem.index)}
+              {renderEntry(
+                entry,
+                onUndoRequest,
+                canUndo,
+                getStaggerIndex(virtualItem.index),
+              )}
             </div>
           );
         })}

@@ -8,7 +8,7 @@ import {
 import type { Round, SystemMessageBlock } from "../types/round";
 
 /** Only enable virtual scrolling when there are more than this many entries. */
-const VIRTUALIZE_THRESHOLD = 50;
+const VIRTUALIZE_THRESHOLD = 30;
 
 /** Number of extra items rendered above/below the visible viewport. */
 const OVERSCAN = 6;

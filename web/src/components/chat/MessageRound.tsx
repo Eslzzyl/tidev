@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Round } from "../../types/round";
 import { MarkdownRenderer } from "../renderers/MarkdownRenderer";
 import { ThinkingBlock } from "../renderers/ThinkingBlock";
@@ -15,7 +16,7 @@ interface Props {
   staggerIndex?: number;
 }
 
-export function MessageRound({ round, onUndoRequest, canUndo = true, staggerIndex }: Props) {
+export const MessageRound = memo(function MessageRound({ round, onUndoRequest, canUndo = true, staggerIndex }: Props) {
   function getFooterParts(): string[] {
     const parts: string[] = [];
     if (round.modelName) parts.push(round.modelName);
@@ -166,4 +167,4 @@ export function MessageRound({ round, onUndoRequest, canUndo = true, staggerInde
       )}
     </div>
   );
-}
+});

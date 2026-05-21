@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, memo } from "react";
 import { Lightbulb, ChevronDown, Timer } from "lucide-react";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { CopyButton } from "../ui/CopyButton";
@@ -45,7 +45,7 @@ function ElapsedTimer({ startedAt }: { startedAt: string }) {
   );
 }
 
-export function ThinkingBlock({
+export const ThinkingBlock = memo(function ThinkingBlock({
   content,
   tokenCount,
   defaultExpanded = true,
@@ -90,4 +90,4 @@ export function ThinkingBlock({
       </div>
     </div>
   );
-}
+});

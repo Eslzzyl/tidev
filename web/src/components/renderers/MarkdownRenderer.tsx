@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -230,7 +230,7 @@ function isMermaidCode(language: string, content: string): boolean {
   );
 }
 
-export function MarkdownRenderer({ content }: Props) {
+export const MarkdownRenderer = memo(function MarkdownRenderer({ content }: Props) {
   if (!content) return null;
 
   return (
@@ -279,7 +279,7 @@ export function MarkdownRenderer({ content }: Props) {
       </ReactMarkdown>
     </div>
   );
-}
+});
 
 function languageToExtension(language: string): string {
   const map: Record<string, string> = {
