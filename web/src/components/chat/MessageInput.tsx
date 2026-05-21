@@ -138,7 +138,11 @@ export function MessageInput({
         }
       })
       .catch(() => {});
-  }, [selectedModelId, updateThinkingLevels, currentSession]);
+    // NOTE: updateThinkingLevels intentionally excluded from deps to avoid a
+    // circular loop: it depends on `models`, which this effect sets, and
+    // including it would cause an infinite re-fetch cycle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedModelId, currentSession]);
 
   // Close dropdowns on click outside
   useEffect(() => {
