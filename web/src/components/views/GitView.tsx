@@ -855,23 +855,32 @@ function ChangeFileRow({
           }`}
         />
       </button>
-      {isExpanded && (
-        <div className="ml-4 border-l-2 border-neutral-200 pl-2 dark:border-neutral-700">
-          {file.status === "?" ? (
-            <p className="py-2 text-xs text-neutral-400">
-              New file — no previous version to diff against
-            </p>
-          ) : diff ? (
-            diff.diff ? (
-              <DiffRenderer diff={diff.diff} filepath={file.path} />
-            ) : (
+      {/* Diff content — smooth height transition */}
+      <div
+        className="motion-safe:transition-all motion-safe:duration-300 motion-safe:ease-smooth grid"
+        style={{
+          gridTemplateRows: isExpanded ? "1fr" : "0fr",
+          opacity: isExpanded ? 1 : 0,
+        }}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="ml-4 border-l-2 border-neutral-200 pl-2 dark:border-neutral-700">
+            {file.status === "?" ? (
               <p className="py-2 text-xs text-neutral-400">
-                No diff content (binary or empty file)
+                New file — no previous version to diff against
               </p>
-            )
-          ) : null}
+            ) : diff ? (
+              diff.diff ? (
+                <DiffRenderer diff={diff.diff} filepath={file.path} />
+              ) : (
+                <p className="py-2 text-xs text-neutral-400">
+                  No diff content (binary or empty file)
+                </p>
+              )
+            ) : null}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -924,12 +933,11 @@ function HistoryPanel({
   return (
     <div className="p-4">
       <div className="space-y-2">
-        {commits.map((commit) => (
+          {commits.map((commit) => (
           <button
             key={commit.sha}
             onClick={() => onSelectCommit(commit.sha)}
-            className={`w-full rounded-lg border p-3 text-left transition-colors ${
-              selectedSha === commit.sha
+            className={`motion-safe:animate-slide-up-fade w-full rounded-lg border p-3 text-left transition-colors ${              selectedSha === commit.sha
                 ? "border-neutral-500 bg-neutral-100 dark:border-neutral-500 dark:bg-neutral-800"
                 : "border-neutral-200 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900"
             }`}
@@ -1100,21 +1108,37 @@ function CommitDetailPanel({
                 />
               </button>
 
-              {/* Inline diff for this file */}
-              {expandedFiles.has(file.path) && fileDiffs[file.path] && (
-                <div className="ml-4 border-l-2 border-neutral-200 pl-2 dark:border-neutral-700">
-                  {fileDiffs[file.path].diff ? (
-                    <DiffRenderer
-                      diff={fileDiffs[file.path].diff}
-                      filepath={file.path}
-                    />
-                  ) : (
-                    <p className="py-2 text-xs text-neutral-400">
-                      No diff content (binary or empty file)
-                    </p>
+              {/* Inline diff for this file — smooth height transition */}
+              <div
+                className="motion-safe:transition-all motion-safe:duration-300 motion-safe:ease-smooth grid"
+                style={{
+                  gridTemplateRows:
+                    expandedFiles.has(file.path) && fileDiffs[file.path]
+                      ? "1fr"
+                      : "0fr",
+                  opacity:
+                    expandedFiles.has(file.path) && fileDiffs[file.path]
+                      ? 1
+                      : 0,
+                }}
+              >
+                <div className="min-h-0 overflow-hidden">
+                  {fileDiffs[file.path] && (
+                    <div className="ml-4 border-l-2 border-neutral-200 pl-2 dark:border-neutral-700">
+                      {fileDiffs[file.path].diff ? (
+                        <DiffRenderer
+                          diff={fileDiffs[file.path].diff}
+                          filepath={file.path}
+                        />
+                      ) : (
+                        <p className="py-2 text-xs text-neutral-400">
+                          No diff content (binary or empty file)
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
-              )}
+              </div>
             </div>
           ))}
         </div>
@@ -1217,7 +1241,8 @@ function BranchesPanel({
         {sorted.map((branch, i) => (
           <div
             key={i}
-            className="flex items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
+            className="motion-safe:animate-slide-up-fade flex items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
+            style={{ animationDelay: `${i * 30}ms` }}
           >
             <GitBranch className="h-3.5 w-3.5 text-neutral-500" />
             <span className="flex-1 font-medium text-neutral-900 dark:text-neutral-100">

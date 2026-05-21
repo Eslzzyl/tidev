@@ -35,9 +35,9 @@ export function VirtualMessageList({
   if (!isVirtualized) {
     return (
       <div className="divide-y divide-neutral-100 dark:divide-neutral-900">
-        {entries.map((entry) => (
+        {entries.map((entry, idx) => (
           <div key={entry.id} className="contents">
-            {renderEntry(entry, onUndoRequest, canUndo)}
+            {renderEntry(entry, onUndoRequest, canUndo, idx)}
           </div>
         ))}
       </div>
@@ -67,7 +67,7 @@ export function VirtualMessageList({
                 transform: `translateY(${virtualItem.start}px)`,
               }}
             >
-              {renderEntry(entry, onUndoRequest, canUndo)}
+              {renderEntry(entry, onUndoRequest, canUndo, virtualItem.index)}
             </div>
           );
         })}
@@ -80,6 +80,7 @@ function renderEntry(
   entry: VirtualEntry,
   onUndoRequest?: (messageId: string) => void,
   canUndo?: boolean,
+  staggerIndex?: number,
 ) {
   if ("kind" in entry && entry.kind === "system") {
     return <SystemMessageBlockComponent message={entry.message} />;
@@ -89,6 +90,7 @@ function renderEntry(
       round={entry as Round}
       onUndoRequest={onUndoRequest}
       canUndo={canUndo}
+      staggerIndex={staggerIndex}
     />
   );
 }

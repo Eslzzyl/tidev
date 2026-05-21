@@ -71,16 +71,14 @@ function GitStatusDot({ status }: { status?: GitDisplayStatus }) {
     dotClass = "bg-orange-400 dark:bg-orange-500";
     title = status.rawStatus;
   } else if (status.hasStaged) {
-    dotClass = "bg-green-500 dark:bg-green-400";
+    dotClass = "bg-green-400 dark:bg-green-500";
     title = status.rawStatus;
-  } else {
-    return null;
   }
 
   return (
     <span
-      className={`ml-auto shrink-0 h-2 w-2 rounded-full ${dotClass}`}
-      title={title ? `Git: ${title}` : undefined}
+      className={`ml-auto h-2 w-2 shrink-0 rounded-full motion-safe:animate-pulse-soft ${dotClass}`}
+      title={title}
     />
   );
 }
@@ -466,35 +464,44 @@ function TreeNodeItem({
         <GitStatusDot status={gitDisplay} />
       </button>
 
-      {/* Render children if expanded */}
-      {node.isDirectory && node.expanded && (
-        <div>
-          {node.children.length > 0 ? (
-            node.children.map((child) => (
-              <TreeNodeItem
-                key={child.path}
-                node={child}
-                depth={depth + 1}
-                selectedPath={selectedPath}
-                onNodeClick={onNodeClick}
-                onToggleExpand={onToggleExpand}
-                onContextMenu={onContextMenu}
-                gitDisplayMap={gitDisplayMap}
-                dragOverPath={dragOverPath}
-                onDragStart={onDragStart}
-                onDragOver={onDragOverCb}
-                onDragLeave={onDragLeave}
-                onDrop={onDrop}
-              />
-            ))
-          ) : (
-            <div
-              className="py-1 text-xs text-neutral-400"
-              style={{ paddingLeft: `${24 + (depth + 1) * 16}px` }}
-            >
-              {node.loading ? "Loading..." : "Empty"}
-            </div>
-          )}
+      {/* Render children if expanded — smooth height transition */}
+      {node.isDirectory && (
+        <div
+          className="motion-safe:transition-all motion-safe:duration-300 motion-safe:ease-smooth grid"
+          style={{
+            gridTemplateRows: node.expanded ? "1fr" : "0fr",
+            opacity: node.expanded ? 1 : 0,
+          }}
+        >
+          <div className="min-h-0 overflow-hidden">
+            {node.children.length > 0 ? (
+              node.children.map((child) => (
+                <div key={child.path}>
+                  <TreeNodeItem
+                    node={child}
+                    depth={depth + 1}
+                    selectedPath={selectedPath}
+                    onNodeClick={onNodeClick}
+                    onToggleExpand={onToggleExpand}
+                    onContextMenu={onContextMenu}
+                    gitDisplayMap={gitDisplayMap}
+                    dragOverPath={dragOverPath}
+                    onDragStart={onDragStart}
+                    onDragOver={onDragOverCb}
+                    onDragLeave={onDragLeave}
+                    onDrop={onDrop}
+                  />
+                </div>
+              ))
+            ) : (
+              <div
+                className="py-1 text-xs text-neutral-400"
+                style={{ paddingLeft: `${24 + (depth + 1) * 16}px` }}
+              >
+                {node.loading ? "Loading..." : "Empty"}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

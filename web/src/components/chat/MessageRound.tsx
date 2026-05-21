@@ -10,9 +10,12 @@ interface Props {
   round: Round;
   onUndoRequest?: (messageId: string) => void;
   canUndo?: boolean;
+  /** Used to stagger entrance animations when the message list is remounted
+   *  (e.g. switching tabs).  Passed from VirtualMessageList. */
+  staggerIndex?: number;
 }
 
-export function MessageRound({ round, onUndoRequest, canUndo = true }: Props) {
+export function MessageRound({ round, onUndoRequest, canUndo = true, staggerIndex }: Props) {
   function getFooterParts(): string[] {
     const parts: string[] = [];
     if (round.modelName) parts.push(round.modelName);
@@ -46,8 +49,18 @@ export function MessageRound({ round, onUndoRequest, canUndo = true }: Props) {
   const showUndoButton =
     canUndo && round.status === "complete" && onUndoRequest;
 
+  // Stagger entrance animation — messages animate in sequentially from oldest
+  // (low index) to newest (high index), creating a visible cascade when the
+  // chat panel is remounted (e.g. switching tabs).
+  const staggerDelay = staggerIndex !== undefined
+    ? `${Math.min(staggerIndex * 20, 500)}ms`
+    : undefined;
+
   return (
-    <div className="border-b border-neutral-100 dark:border-neutral-900">
+    <div
+      className="motion-safe:animate-slide-up-fade border-b border-neutral-100 dark:border-neutral-900"
+      style={staggerDelay ? { animationDelay: staggerDelay } : undefined}
+    >
       {/* User message */}
       <div className="group flex gap-3 px-4 py-4">
         <div className="flex-shrink-0">
@@ -128,14 +141,14 @@ export function MessageRound({ round, onUndoRequest, canUndo = true }: Props) {
 
               {/* Streaming indicator */}
               {round.status === "streaming" && round.segments.length === 0 && (
-                <div className="flex items-center gap-1 text-neutral-400">
-                  <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400" />
+                <div className="flex items-center gap-1.5 text-neutral-400">
+                  <div className="h-2 w-2 animate-stream-dot rounded-full bg-neutral-400" />
                   <div
-                    className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400"
+                    className="h-2 w-2 animate-stream-dot rounded-full bg-neutral-400"
                     style={{ animationDelay: "0.2s" }}
                   />
                   <div
-                    className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-400"
+                    className="h-2 w-2 animate-stream-dot rounded-full bg-neutral-400"
                     style={{ animationDelay: "0.4s" }}
                   />
                 </div>

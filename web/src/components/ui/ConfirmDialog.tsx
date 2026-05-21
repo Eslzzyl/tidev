@@ -32,12 +32,12 @@ export function ConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/30"
+      className="fixed inset-0 z-[9998] flex items-center justify-center motion-safe:animate-fade-in bg-black/30"
       onClick={(e) => {
         if (e.target === e.currentTarget && !isLoading) onCancel();
       }}
     >
-      <div className="w-72 rounded-lg border border-neutral-200 bg-white p-4 shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
+      <div className="motion-safe:animate-scale-fade w-72 rounded-lg border border-neutral-200 bg-white p-4 shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
         <div className="mb-3 flex items-center gap-2">
           {danger && <AlertTriangle className="h-4 w-4 text-red-500" />}
           <span className="text-sm font-medium text-neutral-800 dark:text-neutral-200">

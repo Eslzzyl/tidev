@@ -1,3 +1,4 @@
+import { useRef, useState, useEffect } from "react";
 import {
   MessageSquare,
   FolderTree,
@@ -39,6 +40,27 @@ export function Header() {
   const isDraftSession = useSessionStore((s) => s.isDraftSession);
   const draftTitle = useSessionStore((s) => s.draftTitle);
 
+  // ── Tab sliding indicator ──
+  const navRef = useRef<HTMLDivElement>(null);
+  const [indicator, setIndicator] = useState({ left: 0, width: 0 });
+
+  // Measure active tab position whenever it changes.
+  // Uses data attributes instead of callback refs to avoid infinite render loops.
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const activeEl = nav.querySelector<HTMLButtonElement>(
+      `[data-tab-id="${activeTab}"]`,
+    );
+    if (!activeEl) return;
+    const navRect = nav.getBoundingClientRect();
+    const tabRect = activeEl.getBoundingClientRect();
+    setIndicator({
+      left: tabRect.left - navRect.left,
+      width: tabRect.width,
+    });
+  }, [activeTab]);
+
   return (
     <header className="flex h-11 items-center justify-between border-b border-neutral-200 bg-white px-3 dark:border-neutral-800 dark:bg-neutral-950">
       {/* Left: mobile menu + nav tabs */}
@@ -52,17 +74,22 @@ export function Header() {
           <Menu className="h-4 w-4" />
         </button>
 
-        {/* Nav tabs */}
-        <nav className="flex items-center gap-0.5" role="tablist">
+        {/* Nav tabs with animated sliding indicator */}
+        <nav
+          ref={navRef}
+          className="relative flex items-center gap-0.5"
+          role="tablist"
+        >
           {tabs.map((tab) => (
             <button
               key={tab.id}
+              data-tab-id={tab.id}
               onClick={() => setActiveTab(tab.id)}
               role="tab"
               aria-selected={activeTab === tab.id}
-              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+              className={`relative z-10 flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
                 activeTab === tab.id
-                  ? "bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100"
+                  ? "text-neutral-900 dark:text-neutral-100"
                   : "text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-300"
               }`}
             >
@@ -70,6 +97,14 @@ export function Header() {
               <span className="hidden sm:inline">{tab.label}</span>
             </button>
           ))}
+          {/* Animated background pill — slides to the active tab */}
+          <div
+            className="absolute inset-y-0.5 rounded-md bg-neutral-100 motion-safe:transition-all motion-safe:duration-200 motion-safe:ease-smooth dark:bg-neutral-800"
+            style={{
+              left: `${indicator.left}px`,
+              width: `${indicator.width}px`,
+            }}
+          />
         </nav>
       </div>
 

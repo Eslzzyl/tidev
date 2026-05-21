@@ -74,12 +74,20 @@ export function ThinkingBlock({
         {startedAt && <ElapsedTimer startedAt={startedAt} />}
       </div>
 
-      {/* Thinking content — only rendered when expanded */}
-      {expanded && (
-        <div className="text-neutral-500 dark:text-neutral-400">
-          <MarkdownRenderer content={content} />
+      {/* Thinking content — smooth expand/collapse via CSS Grid height transition */}
+      <div
+        className="motion-safe:transition-all motion-safe:duration-300 motion-safe:ease-smooth grid"
+        style={{
+          gridTemplateRows: expanded ? "1fr" : "0fr",
+          opacity: expanded ? 1 : 0,
+        }}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="pt-1 text-neutral-500 dark:text-neutral-400">
+            <MarkdownRenderer content={content} />
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

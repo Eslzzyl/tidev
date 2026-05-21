@@ -673,7 +673,7 @@ export function MessageInput({
           {/* Mode toggle */}
           <button
             onClick={toggleMode}
-            className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
+            className={`rounded px-2 py-1 text-xs font-medium transition-all duration-150 hover:scale-105 ${
               mode === "plan"
                 ? "bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-300"
                 : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300"
@@ -685,7 +685,7 @@ export function MessageInput({
           {/* Model selector - opens ModelPanel */}
           <button
             onClick={() => setModelPanelOpen(true)}
-            className="flex items-center gap-1 rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+            className="flex items-center gap-1 rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 transition-all duration-150 hover:scale-105 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
           >
             <span className="max-w-[120px] truncate">
               {selectedModelDisplay?.display_name || "Select model"}
@@ -899,7 +899,7 @@ export function MessageInput({
             {isStreaming ? (
               <button
                 onClick={handleStop}
-                className="mb-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-red-100 text-red-600 transition-colors hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50"
+                className="mb-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-red-100 text-red-600 transition-all duration-150 hover:scale-105 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50"
                 aria-label="Stop streaming"
               >
                 <Square className="h-4 w-4" fill="currentColor" />
@@ -908,7 +908,7 @@ export function MessageInput({
               <button
                 onClick={handleSubmit}
                 disabled={!inputValue.trim() || !isInputEnabled || isSubmitting}
-                className="mb-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-neutral-900 text-white transition-colors hover:bg-neutral-800 disabled:opacity-50 disabled:hover:bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+                className="mb-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-neutral-900 text-white transition-all duration-150 hover:scale-105 hover:bg-neutral-800 disabled:opacity-50 disabled:hover:scale-100 disabled:hover:bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
                 aria-label="Send message"
               >
                 <ArrowUp className="h-4 w-4" />
