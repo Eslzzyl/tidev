@@ -89,7 +89,7 @@ export const MessageRound = memo(function MessageRound({ round, onUndoRequest, c
 
       {/* Assistant response */}
       {round.segments.length > 0 && (
-        <div className="group flex gap-3 px-4 py-4">
+        <div className="group flex gap-3 px-4 py-4 motion-safe:animate-[fade-in_0.15s_ease-out]">
           <div className="flex-shrink-0">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-xs font-medium text-white dark:bg-blue-500">
               A

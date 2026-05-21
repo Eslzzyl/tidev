@@ -33,47 +33,20 @@ export function ChatPanel() {
   const allRounds = useMemo(() => {
     const rounds: (Round | SystemMessageBlockType)[] = [...completedRounds];
     if (streamingRound) {
-      console.log(
-        "[ChatPanel] streamingRound present, completedRounds:",
-        completedRounds.length,
-        "streamingRound.userMessage.id:",
-        streamingRound.userMessage.id.substring(0, 20),
-        "streamingRound.status:",
-        streamingRound.status,
-        "streamingRound.segments:",
-        streamingRound.segments.length,
-      );
-      // When streaming, the streaming round contains a reference to the user
-      // message that is already present in completedRounds (derived from the
-      // messages store). Remove any completed round that references the same
-      // user message to avoid duplicate user message rendering.
-      const filtered = rounds.filter((r) => {
-        if ("userMessage" in r) {
-          const keep =
-            (r as Round).userMessage.id !== streamingRound.userMessage.id;
-          if (!keep)
-            console.log(
-              "[ChatPanel] filtering out completed round",
-              (r as Round).id,
-            );
-          return keep;
+      // Replace the last completed round that has a userMessage with the
+      // streaming round, so the user message appears only once.  Using
+      // position (rather than userMessage.id comparison) avoids a race
+      // where the messages store is refreshed (e.g. via SSE reconnect)
+      // and the pending message ID no longer matches the real one.
+      for (let i = rounds.length - 1; i >= 0; i--) {
+        if ("userMessage" in rounds[i]) {
+          // Preserve the original id so React keeps the same key and
+          // updates the MessageRound in-place instead of remounting it.
+          rounds[i] = { ...streamingRound, id: rounds[i].id } as Round;
+          break;
         }
-        return true;
-      });
-      console.log(
-        "[ChatPanel] allRounds count:",
-        filtered.length + 1,
-        "(filtered:",
-        filtered.length,
-        "+ streaming: 1)",
-      );
-      filtered.push(streamingRound);
-      return filtered;
+      }
     }
-    console.log(
-      "[ChatPanel] no streamingRound, completedRounds:",
-      completedRounds.length,
-    );
     return rounds;
   }, [completedRounds, streamingRound]);
 

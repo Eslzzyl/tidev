@@ -112,12 +112,12 @@ export function buildRounds(
         }
       }
     } else {
+      // Unknown role (error, shell, etc.) — render as a system message
+      // so it doesn't appear as a spurious user round.
       rounds.push({
-        id: `round-standalone-${msg.id}`,
-        userMessage: msg,
-        segments: [],
-        toolCallMap: {},
-        status: "complete",
+        id: `system-${msg.id}`,
+        message: msg,
+        kind: "system",
       });
     }
   }

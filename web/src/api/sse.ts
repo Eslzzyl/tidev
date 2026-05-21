@@ -123,6 +123,10 @@ export class SSEClient {
     this.eventSource.addEventListener("shell.output", (e: MessageEvent) => {
       this.emit("shell.output", JSON.parse(e.data));
     });
+
+    this.eventSource.addEventListener("messages.updated", (e: MessageEvent) => {
+      this.emit("messages.updated", JSON.parse(e.data));
+    });
   }
 
   disconnect() {

@@ -86,15 +86,22 @@ export function useSSE(sessionId: string | null) {
         const existing = toolCallMap[tool_call_id];
 
         if (existing) {
-          if (args && args !== existing.arguments) {
-            existing.arguments = args;
-          }
+          const mergedArgs =
+            args && args !== existing.arguments
+              ? args
+              : existing.arguments;
+          let argsComplete = false;
           try {
-            JSON.parse(existing.arguments);
-            existing.argumentsComplete = true;
+            JSON.parse(mergedArgs);
+            argsComplete = true;
           } catch {
             // Still streaming
           }
+          toolCallMap[tool_call_id] = {
+            ...existing,
+            arguments: mergedArgs,
+            argumentsComplete: argsComplete,
+          };
         } else {
           let argsComplete = false;
           try {
@@ -116,12 +123,9 @@ export function useSSE(sessionId: string | null) {
         return {
           ...round,
           toolCallMap,
-          segments: prev
-            ? round.segments
-            : [
-                ...round.segments,
-                { type: "tool_call", toolCallId: tool_call_id },
-              ],
+          segments: !existing
+            ? [...round.segments, { type: "tool_call", toolCallId: tool_call_id }]
+            : round.segments,
         };
       });
     };
@@ -162,38 +166,41 @@ export function useSSE(sessionId: string | null) {
       updateStreamingRound((prev) => {
         if (!prev) return prev;
 
-        // Find all bash tool calls in the round and update their streaming output
+        // Find the most recently added bash tool call (the actively running one)
+        // by scanning segments backward.  This avoids applying output to ALL
+        // bash entries when multiple concurrent bash calls exist.
         const toolCallMap = { ...prev.toolCallMap };
-        let changed = false;
-
-        for (const [id, entry] of Object.entries(toolCallMap)) {
-          if (entry.name === "bash") {
-            // Parse exit code from content if present (format: "[exit N]\n...")
-            let exitCode: number | null = exit_code ?? null;
-            let cleanContent = content;
-
-            // If the backend already formatted with [exit N], extract it
-            const exitMatch = content.match(/^\[exit\s*(-?\d+)\]\n/);
-            if (exitMatch) {
-              exitCode = parseInt(exitMatch[1], 10);
-              cleanContent = content.slice(exitMatch[0].length);
-            }
-
-            toolCallMap[id] = {
-              ...entry,
-              result: {
-                output: cleanContent,
-                exitCode,
-                isError: exitCode !== null && exitCode !== 0,
-              },
-              resultComplete: finished,
-              argumentsComplete: true,
-            };
-            changed = true;
+        let targetId: string | null = null;
+        for (let i = prev.segments.length - 1; i >= 0; i--) {
+          const seg = prev.segments[i];
+          if (seg.type === "tool_call" && toolCallMap[seg.toolCallId]?.name === "bash") {
+            targetId = seg.toolCallId;
+            break;
           }
         }
+        if (!targetId) return prev;
 
-        return changed ? { ...prev, toolCallMap } : prev;
+        // Parse exit code from content if present (format: "[exit N]\n...")
+        let exitCode: number | null = exit_code ?? null;
+        let cleanContent = content;
+        const exitMatch = content.match(/^\[exit\s*(-?\d+)\]\n/);
+        if (exitMatch) {
+          exitCode = parseInt(exitMatch[1], 10);
+          cleanContent = content.slice(exitMatch[0].length);
+        }
+
+        toolCallMap[targetId] = {
+          ...toolCallMap[targetId],
+          result: {
+            output: cleanContent,
+            exitCode,
+            isError: exitCode !== null && exitCode !== 0,
+          },
+          resultComplete: finished,
+          argumentsComplete: true,
+        };
+
+        return { ...prev, toolCallMap };
       });
     };
 
@@ -345,6 +352,10 @@ export function useSSE(sessionId: string | null) {
         // locally-constructed version to ensure the displayed content matches
         // exactly what was streamed.
         api.listMessages(currentSessionId).then(({ messages: apiMessages }) => {
+          // Guard against stale callbacks: the session may have changed
+          // while the API call was in-flight.
+          if (useSessionStore.getState().currentSessionId !== currentSessionId) return;
+
           const msgs = [...apiMessages];
           const lastIdx = msgs.length - 1;
           if (lastIdx >= 0 && msgs[lastIdx].role === "assistant") {
@@ -360,20 +371,33 @@ export function useSSE(sessionId: string | null) {
           );
           setMessages(msgs);
           useSessionStore.getState().setCurrentUsageStats(null);
+          // Clear streaming state AFTER messages are updated so that
+          // allRounds transitions from streamingRound to completedRounds
+          // in a single render, avoiding an intermediate state where the
+          // streaming content disappears before the API data arrives.
+          streamingRef.current = null;
+          setStreamingRound(null);
+        }).catch((err) => {
+          console.error("[SSE] failed to refresh messages after completion:", err);
+          // Even on failure, clean up so the UI doesn't get stuck waiting
+          streamingRef.current = null;
+          setStreamingRound(null);
         });
       } else {
+        streamingRef.current = null;
+        setStreamingRound(null);
         useSessionStore.getState().setCurrentUsageStats(null);
       }
 
-      streamingRef.current = null;
-      setStreamingRound(null);
+      // was: streamingRef.current = null; setStreamingRound(null);
     };
 
     const handleErrorEvent = (event: AppEvent) => {
       if (!event || event.type !== "error") return;
       setStreaming(false);
       // Add error content to streaming round and mark it complete so
-      // the user can see what went wrong.
+      // the user can see what went wrong.  Keep the round in place so
+      // the error is visible — do NOT clear it here.
       const round = streamingRef.current;
       if (round) {
         updateStreamingRound((prev) => {
@@ -389,8 +413,6 @@ export function useSSE(sessionId: string | null) {
           };
         });
       }
-      setStreamingRound(null);
-      streamingRef.current = null;
     };
 
     const handleRetrying = (event: AppEvent) => {
@@ -427,6 +449,14 @@ export function useSSE(sessionId: string | null) {
         api.listMessages(currentSessionId).then(({ messages, todos }) => {
           setMessages(messages);
           useSessionStore.getState().setTodos(todos ?? []);
+          // If streaming was active but the backend already finished
+          // (e.g. SSE reconnected after message.complete was sent),
+          // clear the stale streaming round so the UI shows final data.
+          const lastMsg = messages[messages.length - 1];
+          if (lastMsg?.role === "assistant" && lastMsg.completed_at) {
+            streamingRef.current = null;
+            setStreamingRound(null);
+          }
         });
       }
     };

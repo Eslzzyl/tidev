@@ -74,7 +74,7 @@ export function useChatAutoScroll(
         });
       }
     });
-  });
+  }, [isStreaming, containerRef]);
 
   return {
     handleScroll,

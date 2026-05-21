@@ -322,13 +322,9 @@ export const ToolCallRow = memo(function ToolCallRow({ entry }: Props) {
         setElapsedMs(Date.now() - (startTimeRef.current ?? Date.now()));
       }, 100);
     } else if (entry.resultComplete) {
-      // Tool completed — stop timer; if we have a stored start, calculate final duration
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
-      }
-      if (startTimeRef.current && !entry.result?.exitCode) {
-        // Keep the final elapsed time
       }
     }
 
@@ -337,6 +333,8 @@ export const ToolCallRow = memo(function ToolCallRow({ entry }: Props) {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
+      // Do not reset startTimeRef — it's intentionally preserved
+      // across re-renders to keep the elapsed duration stable.
     };
   }, [entry.argumentsComplete, entry.resultComplete]);
 

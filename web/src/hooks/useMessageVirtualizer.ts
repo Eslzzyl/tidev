@@ -96,13 +96,7 @@ export function useMessageVirtualizer(
     enabled: isVirtualized,
   });
 
-  const virtualItems = useMemo(
-    () => virtualizer.getVirtualItems(),
-    // Virtualizer is stable; calling getVirtualItems() on every render is fine
-    // but we scope it to length changes to avoid unnecessary re-renders.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [entries.length, virtualizer],
-  );
+  const virtualItems = virtualizer.getVirtualItems();
 
   const totalSize = virtualizer.getTotalSize();
 
