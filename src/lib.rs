@@ -42,6 +42,8 @@ struct Cli {
 enum Command {
     /// Start gateway server (all enabled platforms: Telegram, QQ, etc.)
     Gateway,
+    /// Start TUI (default when no subcommand is given)
+    Tui,
     /// Start web server
     Web {
         /// Host to bind to
@@ -131,6 +133,10 @@ pub fn run() -> anyhow::Result<()> {
         Some(Command::Gateway) => {
             auto_cleanup_on_startup();
             gateway::run()
+        }
+        Some(Command::Tui) => {
+            auto_cleanup_on_startup();
+            tui::run()
         }
         Some(Command::Web {
             host,
