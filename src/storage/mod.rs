@@ -1889,7 +1889,12 @@ impl SessionStore {
     /// All other tables are copied verbatim. Only data belonging to the
     /// given sessions is included (plus global tables such as `meta`,
     /// `usage_stats`, and `memories`).
-    pub fn export_to_sqlite(&self, session_ids: &[Uuid], output_path: &Path) -> Result<()> {
+    pub fn export_to_sqlite(
+        &self,
+        session_ids: &[Uuid],
+        output_path: &Path,
+        compress: bool,
+    ) -> Result<()> {
         // Remove existing file so we start fresh
         let _ = fs::remove_file(output_path);
         if let Some(parent) = output_path.parent() {
@@ -1902,7 +1907,11 @@ impl SessionStore {
             format!("failed to create export database {}", output_path.display())
         })?;
         export_conn.execute_batch("PRAGMA foreign_keys = OFF")?;
-        export_conn.execute_batch(EXPORT_SCHEMA_SQL)?;
+        if compress {
+            export_conn.execute_batch(SCHEMA_SQL)?;
+        } else {
+            export_conn.execute_batch(EXPORT_SCHEMA_SQL)?;
+        }
 
         // ── Session ID helpers ────────────────────────────────────────────
         let session_id_strs: Vec<String> = session_ids.iter().map(|id| id.to_string()).collect();
@@ -2006,8 +2015,16 @@ impl SessionStore {
             for sid in &session_id_strs {
                 let row = stmt
                     .query_row(params![sid], |row| {
-                        let redo: Option<String> =
-                            read_opt_blob_maybe_text(row, 2)?.map(|bytes| decompress_text(&bytes));
+                        let redo: Option<Vec<u8>> = if compress {
+                            row.get::<_, Option<Vec<u8>>>(2).unwrap_or_else(|_| {
+                                row.get::<_, Option<String>>(2)
+                                    .map(|s| s.map(|s| s.into_bytes()))
+                                    .unwrap_or(None)
+                            })
+                        } else {
+                            read_opt_blob_maybe_text(row, 2)?
+                                .map(|bytes| decompress_text(&bytes).into_bytes())
+                        };
                         Ok((
                             row.get::<_, String>(0)?,
                             row.get::<_, String>(1)?,
@@ -2022,57 +2039,113 @@ impl SessionStore {
             }
         }
 
-        // 6. messages ── decompress content & reasoning
+        // 6. messages
         {
             let mut insert = tx.prepare(
                 "INSERT OR REPLACE INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
             )?;
-            for sid in session_ids {
-                let messages = self.load_messages(*sid)?;
-                for msg in &messages {
-                    let tool_calls = serde_json::to_string(&msg.tool_calls)
-                        .context("failed to serialize tool calls")?;
-                    let attachments = serde_json::to_string(&msg.attachments)
-                        .context("failed to serialize attachments")?;
-                    let metadata = serde_json::to_string(&msg.metadata)
-                        .context("failed to serialize metadata")?;
-                    let mode = msg
-                        .mode
-                        .as_ref()
-                        .map(|m| serde_json::to_string(&m).unwrap_or_default());
-                    let thinking_level = msg.thinking_level.as_ref().map(|t| t.to_string());
-                    insert.execute(params![
-                        msg.id.to_string(),
-                        sid.to_string(),
-                        msg.role.db_value(),
-                        msg.content, // plain text, already decompressed
-                        attachments,
-                        if msg.reasoning.is_empty() {
-                            None
-                        } else {
-                            Some(&msg.reasoning)
-                        },
-                        tool_calls,
-                        msg.tool_call_id,
-                        msg.tool_name,
-                        metadata,
-                        msg.created_at.to_rfc3339(),
-                        msg.completed_at.map(|t| t.to_rfc3339()),
-                        if msg.streaming { 1_i64 } else { 0_i64 },
-                        msg.input_tokens,
-                        msg.output_tokens,
-                        msg.total_tokens,
-                        msg.cache_read_tokens,
-                        msg.cache_write_tokens,
-                        msg.model_id,
-                        msg.tokens_per_second,
-                        msg.snapshot_hash,
-                        msg.patch_files,
-                        msg.file_diffs,
-                        mode,
-                        if msg.rtk_rewritten { 1_i64 } else { 0_i64 },
-                        thinking_level,
-                    ])?;
+            if compress {
+                // Compressed export: read raw BLOB bytes directly
+                let mut msg_stmt = self.read_conn.prepare(
+                    "SELECT id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC"
+                )?;
+                for sid in &session_id_strs {
+                    let rows = msg_stmt.query_map(params![sid], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,   // id
+                            row.get::<_, String>(1)?,   // session_id
+                            row.get::<_, String>(2)?,   // role
+                            row.get::<_, Vec<u8>>(3)?,  // content (BLOB, keep compressed)
+                            row.get::<_, String>(4)?,   // attachments
+                            row.get::<_, Option<Vec<u8>>>(5)?, // reasoning (BLOB)
+                            read_blob_maybe_text_bytes(row, 6)?, // tool_calls (BLOB or TEXT)
+                            row.get::<_, Option<String>>(7)?,    // tool_call_id
+                            row.get::<_, Option<String>>(8)?,    // tool_name
+                            read_blob_maybe_text_bytes(row, 9)?, // metadata (BLOB or TEXT)
+                            row.get::<_, String>(10)?,  // created_at
+                            row.get::<_, Option<String>>(11)?,   // completed_at
+                            row.get::<_, i64>(12)?,     // streaming
+                            row.get::<_, Option<i64>>(13)?,      // input_tokens
+                            row.get::<_, Option<i64>>(14)?,      // output_tokens
+                            row.get::<_, Option<i64>>(15)?,      // total_tokens
+                            row.get::<_, Option<i64>>(16)?,      // cache_read_tokens
+                            row.get::<_, Option<i64>>(17)?,      // cache_write_tokens
+                            row.get::<_, Option<String>>(18)?,   // model_id
+                            row.get::<_, Option<f64>>(19)?,      // tokens_per_second
+                            row.get::<_, Option<String>>(20)?,   // snapshot_hash
+                            read_opt_blob_maybe_text(row, 21)?,  // patch_files (BLOB or TEXT)
+                            read_opt_blob_maybe_text(row, 22)?,  // file_diffs (BLOB or TEXT)
+                            row.get::<_, Option<String>>(23)?,   // mode
+                            row.get::<_, i64>(24)?,    // rtk_rewritten
+                            row.get::<_, Option<String>>(25)?,   // thinking_level
+                        ))
+                    })?;
+                    for row in rows {
+                        let (id, sid2, role, content, attachments, reasoning, tool_calls,
+                             tool_call_id, tool_name, metadata, created_at, completed_at,
+                             streaming, input_tokens, output_tokens, total_tokens,
+                             cache_read_tokens, cache_write_tokens, model_id, tokens_per_second,
+                             snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten,
+                             thinking_level) = row?;
+                        insert.execute(params![
+                            id, sid2, role, content, attachments, reasoning, tool_calls,
+                            tool_call_id, tool_name, metadata, created_at, completed_at,
+                            streaming, input_tokens, output_tokens, total_tokens,
+                            cache_read_tokens, cache_write_tokens, model_id, tokens_per_second,
+                            snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten,
+                            thinking_level,
+                        ])?;
+                    }
+                }
+            } else {
+                // Uncompressed export: decompress content & reasoning to TEXT
+                for sid in session_ids {
+                    let messages = self.load_messages(*sid)?;
+                    for msg in &messages {
+                        let tool_calls = serde_json::to_string(&msg.tool_calls)
+                            .context("failed to serialize tool calls")?;
+                        let attachments = serde_json::to_string(&msg.attachments)
+                            .context("failed to serialize attachments")?;
+                        let metadata = serde_json::to_string(&msg.metadata)
+                            .context("failed to serialize metadata")?;
+                        let mode = msg
+                            .mode
+                            .as_ref()
+                            .map(|m| serde_json::to_string(&m).unwrap_or_default());
+                        let thinking_level = msg.thinking_level.as_ref().map(|t| t.to_string());
+                        insert.execute(params![
+                            msg.id.to_string(),
+                            sid.to_string(),
+                            msg.role.db_value(),
+                            msg.content, // plain text, already decompressed
+                            attachments,
+                            if msg.reasoning.is_empty() {
+                                None
+                            } else {
+                                Some(&msg.reasoning)
+                            },
+                            tool_calls,
+                            msg.tool_call_id,
+                            msg.tool_name,
+                            metadata,
+                            msg.created_at.to_rfc3339(),
+                            msg.completed_at.map(|t| t.to_rfc3339()),
+                            if msg.streaming { 1_i64 } else { 0_i64 },
+                            msg.input_tokens,
+                            msg.output_tokens,
+                            msg.total_tokens,
+                            msg.cache_read_tokens,
+                            msg.cache_write_tokens,
+                            msg.model_id,
+                            msg.tokens_per_second,
+                            msg.snapshot_hash,
+                            msg.patch_files,
+                            msg.file_diffs,
+                            mode,
+                            if msg.rtk_rewritten { 1_i64 } else { 0_i64 },
+                            thinking_level,
+                        ])?;
+                    }
                 }
             }
         }
@@ -2262,6 +2335,392 @@ impl SessionStore {
         tx.commit()?;
         export_conn.execute_batch("PRAGMA foreign_keys = ON")?;
         Ok(())
+    }
+
+    /// Import sessions from an exported SQLite database file into the local store.
+    ///
+    /// `session_filter` — if non-empty, only import the specified session UUIDs.
+    /// `replace` — if `true`, overwrite existing sessions that have the same UUID.
+    ///
+    /// Returns the number of sessions successfully imported.
+    pub fn import_from_sqlite(
+        &self,
+        input_path: &Path,
+        session_filter: &[String],
+        replace: bool,
+    ) -> Result<usize> {
+        let import_conn = Connection::open(input_path)
+            .with_context(|| format!("failed to open import file {}", input_path.display()))?;
+
+        // ── Detect format: are BLOB columns compressed or TEXT? ────────
+        let is_compressed = {
+            let col_type: String = import_conn.query_row(
+                "SELECT type FROM pragma_table_info('messages') WHERE name = 'content'",
+                [],
+                |row| row.get(0),
+            )?;
+            col_type.to_uppercase() == "BLOB"
+        };
+
+        // ── List available sessions in the import file ─────────────────
+        #[derive(Clone)]
+        struct ImportSession {
+            id: String,
+            parent_session_id: Option<String>,
+            provider_id: String,
+            provider_display_name: String,
+            model_id: String,
+            model_display_name: String,
+            title: String,
+            created_at: String,
+            updated_at: String,
+            status: String,
+            ended_at: Option<String>,
+            context_summary: String,
+            context_retained_from: i64,
+            system_prompt: String,
+        }
+
+        let mut stmt = import_conn.prepare(
+            "SELECT id, parent_session_id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at, status, ended_at, context_summary, context_retained_from, system_prompt FROM sessions ORDER BY created_at ASC",
+        )?;
+        let all_import_sessions: Vec<ImportSession> = stmt.query_map([], |row| {
+            Ok(ImportSession {
+                id: row.get(0)?,
+                parent_session_id: row.get(1)?,
+                provider_id: row.get(2)?,
+                provider_display_name: row.get(3)?,
+                model_id: row.get(4)?,
+                model_display_name: row.get(5)?,
+                title: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+                status: row.get(9)?,
+                ended_at: row.get(10)?,
+                context_summary: row.get(11)?,
+                context_retained_from: row.get(12)?,
+                system_prompt: row.get(13)?,
+            })
+        })?.collect::<rusqlite::Result<Vec<_>>>()?;
+
+        // Build filter set
+        let filter_set: std::collections::HashSet<String> =
+            session_filter.iter().cloned().collect();
+        let sessions_to_import: Vec<ImportSession> = if filter_set.is_empty() {
+            all_import_sessions
+        } else {
+            all_import_sessions
+                .into_iter()
+                .filter(|s| filter_set.contains(&s.id))
+                .collect()
+        };
+
+        if sessions_to_import.is_empty() {
+            return Ok(0);
+        }
+
+        // ── Prepare write-side statements (once, outside the loop) ─────
+        let guard = self.write_conn.lock().unwrap();
+
+        let result = (|| -> Result<usize> {
+            guard.execute_batch("BEGIN TRANSACTION")?;
+
+            // Pre-compile all INSERT statements
+            let mut insert_session = guard.prepare(
+                "INSERT OR REPLACE INTO sessions (id, parent_session_id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at, status, ended_at, context_summary, context_retained_from, system_prompt) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            )?;
+            let mut insert_workspace = guard.prepare(
+                "INSERT OR REPLACE INTO session_workspaces (session_id, workspace_root) VALUES (?1, ?2)",
+            )?;
+            let mut insert_instruction_sources = guard.prepare(
+                "INSERT OR REPLACE INTO session_instruction_sources (session_id, source) VALUES (?1, ?2)",
+            )?;
+            let mut insert_message = guard.prepare(
+                "INSERT OR REPLACE INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+            )?;
+            let mut insert_revert = guard.prepare(
+                "INSERT OR REPLACE INTO session_reverts (session_id, message_id, redo_snapshot, created_at) VALUES (?1, ?2, ?3, ?4)",
+            )?;
+            let mut insert_todo = guard.prepare(
+                "INSERT OR REPLACE INTO todos (session_id, position, content, status) VALUES (?1, ?2, ?3, ?4)",
+            )?;
+            let mut insert_tool_permission = guard.prepare(
+                "INSERT OR REPLACE INTO tool_permissions (session_id, tool_name, allowed, created_at) VALUES (?1, ?2, ?3, ?4)",
+            )?;
+            let mut insert_file_read = guard.prepare(
+                "INSERT OR REPLACE INTO file_reads (session_id, file_path, read_at, mtime, size) VALUES (?1, ?2, ?3, ?4, ?5)",
+            )?;
+
+            let mut import_gateway_session = guard.prepare(
+                "INSERT OR REPLACE INTO gateway_chat_sessions (platform, chat_key, session_id, updated_at) VALUES (?1, ?2, ?3, ?4)",
+            )?;
+
+            // Pre-compile queries against import_conn
+            let mut ws_stmt = import_conn.prepare(
+                "SELECT workspace_root FROM session_workspaces WHERE session_id = ?1",
+            )?;
+            let mut instr_stmt = import_conn.prepare(
+                "SELECT source FROM session_instruction_sources WHERE session_id = ?1",
+            )?;
+            let mut msg_stmt = import_conn.prepare(
+                "SELECT id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
+            )?;
+            let mut revert_stmt = import_conn.prepare(
+                "SELECT session_id, message_id, redo_snapshot, created_at FROM session_reverts WHERE session_id = ?1",
+            )?;
+            let mut todo_stmt = import_conn.prepare(
+                "SELECT session_id, position, content, status FROM todos WHERE session_id = ?1",
+            )?;
+            let mut perm_stmt = import_conn.prepare(
+                "SELECT session_id, tool_name, allowed, created_at FROM tool_permissions WHERE session_id = ?1",
+            )?;
+            let mut file_stmt = import_conn.prepare(
+                "SELECT session_id, file_path, read_at, mtime, size FROM file_reads WHERE session_id = ?1",
+            )?;
+            let mut gw_session_stmt = import_conn.prepare(
+                "SELECT platform, chat_key, session_id, updated_at FROM gateway_chat_sessions WHERE session_id = ?1",
+            )?;
+
+            let mut imported_count = 0usize;
+
+            for session in &sessions_to_import {
+                // Check if session already exists locally
+                let exists: bool = guard
+                    .query_row(
+                        "SELECT COUNT(*) FROM sessions WHERE id = ?1",
+                        params![&session.id],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .unwrap_or(0)
+                    > 0;
+
+                if exists {
+                    if !replace {
+                        eprintln!(
+                            "Skipping session {} (already exists, use --replace to overwrite)",
+                            session.id
+                        );
+                        continue;
+                    }
+                    // Delete existing session (cascading due to foreign keys)
+                    guard.execute(
+                        "DELETE FROM sessions WHERE id = ?1",
+                        params![&session.id],
+                    )?;
+                }
+
+                // Insert session record
+                insert_session.execute(params![
+                    &session.id,
+                    &session.parent_session_id,
+                    &session.provider_id,
+                    &session.provider_display_name,
+                    &session.model_id,
+                    &session.model_display_name,
+                    &session.title,
+                    &session.created_at,
+                    &session.updated_at,
+                    &session.status,
+                    &session.ended_at,
+                    &session.context_summary,
+                    session.context_retained_from,
+                    &session.system_prompt,
+                ])?;
+
+                // session_workspaces
+                if let Some(root) = ws_stmt.query_row(params![&session.id], |row| {
+                    row.get::<_, String>(0)
+                }).optional()? {
+                    insert_workspace.execute(params![&session.id, root])?;
+                }
+
+                // session_instruction_sources
+                let instr_rows = instr_stmt.query_map(params![&session.id], |row| {
+                    row.get::<_, String>(0)
+                })?;
+                for source in instr_rows {
+                    let source = source?;
+                    insert_instruction_sources.execute(params![&session.id, source])?;
+                }
+
+                // session_reverts
+                if let Some(revert) = revert_stmt.query_row(params![&session.id], |row| {
+                    let redo: Option<Vec<u8>> = if is_compressed {
+                        row.get::<_, Option<Vec<u8>>>(2).unwrap_or_else(|_| {
+                            row.get::<_, Option<String>>(2)
+                                .map(|s| s.map(|s| s.into_bytes()))
+                                .unwrap_or(None)
+                        })
+                    } else {
+                        // Uncompressed: read as TEXT, compress for local DB
+                        let text: Option<String> = row.get(2)?;
+                        text.map(|s| compress_text(&s))
+                    };
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        redo,
+                        row.get::<_, String>(3)?,
+                    ))
+                }).optional()? {
+                    let (sid, msg_id, redo, created) = revert;
+                    insert_revert.execute(params![sid, msg_id, redo, created])?;
+                }
+
+                // messages
+                let msg_rows = msg_stmt.query_map(params![&session.id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,   // id
+                        row.get::<_, String>(1)?,   // session_id
+                        row.get::<_, String>(2)?,   // role
+                        if is_compressed {
+                            // Already compressed BLOB
+                            row.get::<_, Vec<u8>>(3)?
+                        } else {
+                            // TEXT -> compress
+                            let text: String = row.get(3)?;
+                            compress_text(&text)
+                        },
+                        row.get::<_, String>(4)?,   // attachments (always TEXT)
+                        if is_compressed {
+                            row.get::<_, Option<Vec<u8>>>(5)?
+                        } else {
+                            let text: Option<String> = row.get(5)?;
+                            text.map(|s| compress_text(&s))
+                        },
+                        if is_compressed {
+                            // tool_calls: read raw, could be BLOB or TEXT
+                            read_blob_maybe_text_bytes(row, 6)?
+                        } else {
+                            let text: String = row.get(6)?;
+                            compress_text(&text)
+                        },
+                        row.get::<_, Option<String>>(7)?,    // tool_call_id
+                        row.get::<_, Option<String>>(8)?,    // tool_name
+                        if is_compressed {
+                            read_blob_maybe_text_bytes(row, 9)?
+                        } else {
+                            let text: String = row.get(9)?;
+                            compress_text(&text)
+                        },
+                        row.get::<_, String>(10)?,  // created_at
+                        row.get::<_, Option<String>>(11)?,   // completed_at
+                        row.get::<_, i64>(12)?,     // streaming
+                        row.get::<_, Option<i64>>(13)?,      // input_tokens
+                        row.get::<_, Option<i64>>(14)?,      // output_tokens
+                        row.get::<_, Option<i64>>(15)?,      // total_tokens
+                        row.get::<_, Option<i64>>(16)?,      // cache_read_tokens
+                        row.get::<_, Option<i64>>(17)?,      // cache_write_tokens
+                        row.get::<_, Option<String>>(18)?,   // model_id
+                        row.get::<_, Option<f64>>(19)?,      // tokens_per_second
+                        row.get::<_, Option<String>>(20)?,   // snapshot_hash
+                        if is_compressed {
+                            read_opt_blob_maybe_text(row, 21)?
+                        } else {
+                            let text: Option<String> = row.get(21)?;
+                            text.map(|s| compress_text(&s))
+                        },
+                        if is_compressed {
+                            read_opt_blob_maybe_text(row, 22)?
+                        } else {
+                            let text: Option<String> = row.get(22)?;
+                            text.map(|s| compress_text(&s))
+                        },
+                        row.get::<_, Option<String>>(23)?,   // mode
+                        row.get::<_, i64>(24)?,    // rtk_rewritten
+                        row.get::<_, Option<String>>(25)?,   // thinking_level
+                    ))
+                })?;
+                for row in msg_rows {
+                    let (id, sid, role, content, attachments, reasoning, tool_calls,
+                         tool_call_id, tool_name, metadata, created_at, completed_at,
+                         streaming, input_tokens, output_tokens, total_tokens,
+                         cache_read_tokens, cache_write_tokens, model_id, tokens_per_second,
+                         snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten,
+                         thinking_level) = row?;
+                    insert_message.execute(params![
+                        id, sid, role, content, attachments, reasoning, tool_calls,
+                        tool_call_id, tool_name, metadata, created_at, completed_at,
+                        streaming, input_tokens, output_tokens, total_tokens,
+                        cache_read_tokens, cache_write_tokens, model_id, tokens_per_second,
+                        snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten,
+                        thinking_level,
+                    ])?;
+                }
+
+                // todos
+                let todo_rows = todo_stmt.query_map(params![&session.id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                })?;
+                for row in todo_rows {
+                    let (sid, pos, content, status) = row?;
+                    insert_todo.execute(params![sid, pos, content, status])?;
+                }
+
+                // tool_permissions
+                let perm_rows = perm_stmt.query_map(params![&session.id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                })?;
+                for row in perm_rows {
+                    let (sid, name, allowed, created) = row?;
+                    insert_tool_permission.execute(params![sid, name, allowed, created])?;
+                }
+
+                // file_reads
+                let file_rows = file_stmt.query_map(params![&session.id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<i64>>(3)?,
+                        row.get::<_, Option<i64>>(4)?,
+                    ))
+                })?;
+                for row in file_rows {
+                    let (sid, path, read_at, mtime, size) = row?;
+                    insert_file_read.execute(params![sid, path, read_at, mtime, size])?;
+                }
+
+                // gateway_chat_sessions
+                let gw_rows = gw_session_stmt.query_map(params![&session.id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                })?;
+                for row in gw_rows {
+                    let (platform, chat_key, sid, updated) = row?;
+                    import_gateway_session.execute(params![platform, chat_key, sid, updated])?;
+                }
+
+                imported_count += 1;
+            }
+
+            guard.execute_batch("COMMIT")?;
+            Ok(imported_count)
+        })();
+
+        // Ensure the transaction is rolled back on error
+        match result {
+            Ok(count) => Ok(count),
+            Err(e) => {
+                // Attempt rollback, but ignore errors during rollback
+                let _ = guard.execute_batch("ROLLBACK");
+                Err(e)
+            }
+        }
     }
 
     /// Export session messages to JSONL format.

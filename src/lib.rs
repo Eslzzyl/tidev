@@ -57,7 +57,7 @@ enum Command {
         #[arg(short, long)]
         workspace: Option<std::path::PathBuf>,
     },
-    /// Export session(s) to a plain SQLite database (without zstd compression)
+    /// Export session(s) to a SQLite database
     Export {
         /// Session UUID(s) to export (repeat the flag for multiple sessions)
         #[arg(short, long)]
@@ -68,6 +68,20 @@ enum Command {
         /// Output SQLite database file path
         #[arg(short, long, default_value = "./export.sqlite")]
         output: std::path::PathBuf,
+        /// Keep zstd compression (smaller file, for sync/import)
+        #[arg(short, long)]
+        compress: bool,
+    },
+    /// Import session(s) from an exported SQLite database
+    Import {
+        /// Path to the exported SQLite file
+        input: std::path::PathBuf,
+        /// Only import specific sessions (by UUID); omit to import all
+        #[arg(short, long)]
+        session: Vec<String>,
+        /// Replace existing sessions with the same UUID
+        #[arg(long)]
+        replace: bool,
     },
     /// Manage temporary files created by tidev
     Tmp {
@@ -137,6 +151,7 @@ pub fn run() -> anyhow::Result<()> {
             session,
             all,
             output,
+            compress,
         }) => {
             if session.is_empty() && !all {
                 anyhow::bail!(
@@ -166,12 +181,26 @@ pub fn run() -> anyhow::Result<()> {
                 anyhow::bail!("No sessions to export");
             }
 
-            store.export_to_sqlite(&session_ids, &output)?;
+            store.export_to_sqlite(&session_ids, &output, compress)?;
             eprintln!(
                 "Exported {} session(s) to {}",
                 session_ids.len(),
                 output.display()
             );
+            Ok(())
+        }
+        Some(Command::Import {
+            input,
+            session,
+            replace,
+        }) => {
+            if !input.exists() {
+                anyhow::bail!("Import file not found: {}", input.display());
+            }
+            let paths = crate::config::ConfigPaths::discover()?;
+            let store = storage::SessionStore::open(paths.database_file)?;
+            let count = store.import_from_sqlite(&input, &session, replace)?;
+            eprintln!("Imported {} session(s) from {}", count, input.display());
             Ok(())
         }
         Some(Command::Tmp { action }) => match action {
