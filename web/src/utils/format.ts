@@ -63,6 +63,40 @@ export function formatToken(n: number): string {
 }
 
 /**
+ * Strip all `<system-reminder>…</system-reminder>` blocks from the
+ * given text. These tags are injected into user-message content for LLM
+ * prefix cache consistency and must not be visible in the UI.
+ */
+export function stripSystemReminderTags(text: string): string {
+  let result = "";
+  let rest = text;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const start = rest.indexOf("<system-reminder");
+    if (start === -1) {
+      result += rest;
+      break;
+    }
+    // Push content before the tag
+    result += rest.slice(0, start);
+    // Find the closing tag
+    const end = rest.slice(start).indexOf("</system-reminder>");
+    if (end === -1) {
+      // No closing tag — keep the rest as-is
+      result += rest.slice(start);
+      break;
+    }
+    const afterClose = start + end + "</system-reminder>".length;
+    rest = rest.slice(afterClose);
+    // Skip trailing whitespace/newlines after the closing tag
+    while (rest.startsWith("\n") || rest.startsWith("\r") || rest.startsWith(" ")) {
+      rest = rest.slice(1);
+    }
+  }
+  return result;
+}
+
+/**
  * Format workspace path (replace home with ~)
  */
 export function formatWorkspace(path: string): string {
