@@ -245,7 +245,7 @@ fn file_change_output(
     };
 
     let output = if patch.hunks().is_empty() {
-        format!("{action} {relative} (no content changes)")
+        String::from("No content changes")
     } else {
         metadata.diff = Some(patch.to_string());
         format!("{action} {relative}")
