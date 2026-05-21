@@ -13,6 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::prompts::{SessionMode, default_system_prompt, gateway_system_prompt};
+use crate::sync::SyncConfig;
 use crate::theme::ThemeName;
 use crate::tooling::ToolPermission;
 
@@ -170,6 +171,8 @@ pub struct AppConfig {
     pub websearch: WebSearchConfig,
     #[serde(default)]
     pub memory: MemoryConfig,
+    #[serde(default)]
+    pub sync: SyncConfig,
     #[serde(skip)]
     pub bundled_providers: BTreeMap<String, ProviderConfig>,
 }
@@ -200,6 +203,7 @@ impl Default for AppConfig {
             hooks: crate::hooks::HooksConfig::default(),
             websearch: WebSearchConfig::default(),
             memory: MemoryConfig::default(),
+            sync: SyncConfig::default(),
             bundled_providers: bundled_provider_catalog().unwrap_or_default(),
         }
     }

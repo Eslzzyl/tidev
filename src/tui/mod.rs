@@ -136,6 +136,7 @@ struct App {
     agents_panel: Option<ui::agents_panel::AgentsPanelState>,
     skills_panel: Option<ui::skills_panel::SkillsPanelState>,
     sandbox_panel: Option<ui::sandbox_panel::SandboxPanelState>,
+    sync_panel: Option<ui::sync_panel::SyncPanelState>,
     search_panel: Option<ui::search_panel::SearchPanelState>,
     at_mention: AtMentionState,
     snippet_state: SnippetState,

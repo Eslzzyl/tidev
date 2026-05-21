@@ -19,6 +19,7 @@ pub mod shared;
 pub mod snapshot;
 pub mod stats;
 pub mod storage;
+pub mod sync;
 pub mod system_info;
 pub mod theme;
 pub mod tmp;
@@ -95,6 +96,11 @@ enum Command {
         #[command(subcommand)]
         action: DbCommand,
     },
+    /// Sync sessions with remote machines via SSH
+    Sync {
+        #[command(subcommand)]
+        action: SyncCommand,
+    },
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -122,6 +128,52 @@ enum DbCommand {
     Migrate,
     /// Show migration status (current version vs. latest)
     Status,
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum SyncCommand {
+    /// Add or update a remote machine configuration
+    AddRemote {
+        /// Name for this remote (e.g. "devbox")
+        name: String,
+        /// SSH host alias or user@host (e.g. "devbox" or "eslzzyl@192.168.1.100")
+        host: String,
+        /// Override tidev binary path on remote
+        #[arg(long)]
+        tidev_path: Option<String>,
+    },
+    /// Remove a remote machine configuration
+    Remove {
+        /// Name of the remote to remove
+        name: String,
+    },
+    /// List configured remote machines
+    List,
+    /// Push local session(s) to a remote machine
+    Push {
+        /// Remote machine name
+        remote: String,
+        /// Session UUID(s) to push (repeat the flag for multiple sessions)
+        #[arg(short, long)]
+        session: Vec<String>,
+        /// Push all sessions
+        #[arg(short, long)]
+        all: bool,
+        /// Replace existing sessions on remote
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Pull session(s) from a remote machine
+    Pull {
+        /// Remote machine name
+        remote: String,
+        /// Session UUID(s) to pull (omit to pull all)
+        #[arg(short, long)]
+        session: Vec<String>,
+        /// Replace existing local sessions
+        #[arg(long)]
+        replace: bool,
+    },
 }
 pub fn run() -> anyhow::Result<()> {
     match Cli::parse().command {
@@ -289,6 +341,112 @@ pub fn run() -> anyhow::Result<()> {
                 println!("Current version: {}", status.current_version);
                 println!("Latest version:  {}", status.latest_version);
                 println!("Pending:         {}", status.pending_count);
+                Ok(())
+            }
+        },
+        Some(Command::Sync { action }) => match action {
+            SyncCommand::List => {
+                let paths = crate::config::ConfigPaths::discover()?;
+                let config = crate::config::AppConfig::load_or_create(&paths)?;
+                if config.sync.remotes.is_empty() {
+                    println!("No remotes configured. Use 'tidev sync add-remote' to add one.");
+                } else {
+                    println!("Configured remotes:");
+                    for remote in &config.sync.remotes {
+                        let last = remote
+                            .last_sync_at
+                            .as_deref()
+                            .unwrap_or("never");
+                        println!("  {}  {}  ({})", remote.name, remote.display_name(), last);
+                    }
+                }
+                Ok(())
+            }
+            SyncCommand::AddRemote {
+                name,
+                host,
+                tidev_path,
+            } => {
+                let paths = crate::config::ConfigPaths::discover()?;
+                let mut config = crate::config::AppConfig::load_or_create(&paths)?;
+
+                let remote = crate::sync::RemoteMachine {
+                    name: name.clone(),
+                    host: host.clone(),
+                    tidev_path,
+                    last_sync_at: None,
+                };
+
+                config.sync.remotes.push(remote);
+                config.save(&paths)?;
+                eprintln!("Remote '{}' added successfully.", name);
+                Ok(())
+            }
+            SyncCommand::Remove { name } => {
+                let paths = crate::config::ConfigPaths::discover()?;
+                let mut config = crate::config::AppConfig::load_or_create(&paths)?;
+                let len = config.sync.remotes.len();
+                config.sync.remotes.retain(|r| r.name != name);
+                if config.sync.remotes.len() < len {
+                    config.save(&paths)?;
+                    eprintln!("Remote '{}' removed.", name);
+                } else {
+                    anyhow::bail!("Remote '{}' not found.", name);
+                }
+                Ok(())
+            }
+            SyncCommand::Push {
+                remote,
+                session,
+                all,
+                replace,
+            } => {
+                let paths = crate::config::ConfigPaths::discover()?;
+                let config = crate::config::AppConfig::load_or_create(&paths)?;
+                let store = storage::SessionStore::open(&paths.database_file)?;
+                let manager = crate::sync::SyncManager::new(config.sync.clone(), store);
+
+                let session_ids: Vec<uuid::Uuid> = if all {
+                    manager
+                        .store
+                        .load_all_sessions()?
+                        .into_iter()
+                        .map(|s| s.session_id)
+                        .collect()
+                } else if !session.is_empty() {
+                    session
+                        .into_iter()
+                        .map(|s| {
+                            uuid::Uuid::parse_str(&s)
+                                .with_context(|| format!("invalid session UUID: {s}"))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
+                } else {
+                    anyhow::bail!("Specify --session or --all to select sessions to push.");
+                };
+
+                let summary = manager.push(&session_ids, &remote, replace)?;
+                eprintln!(
+                    "Pushed {} session(s) to '{}' ({} bytes)",
+                    summary.sessions_count, summary.remote_name, summary.total_bytes
+                );
+                Ok(())
+            }
+            SyncCommand::Pull {
+                remote,
+                session,
+                replace,
+            } => {
+                let paths = crate::config::ConfigPaths::discover()?;
+                let config = crate::config::AppConfig::load_or_create(&paths)?;
+                let store = storage::SessionStore::open(&paths.database_file)?;
+                let manager = crate::sync::SyncManager::new(config.sync.clone(), store);
+
+                let summary = manager.pull(&session, &remote, replace)?;
+                eprintln!(
+                    "Pulled {} session(s) from '{}' ({} bytes)",
+                    summary.sessions_count, summary.remote_name, summary.total_bytes
+                );
                 Ok(())
             }
         },

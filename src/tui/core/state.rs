@@ -227,6 +227,7 @@ pub(crate) struct UiStateSnapshot {
     pub(crate) agents_panel: Option<AgentsPanelState>,
     pub(crate) skills_panel: Option<SkillsPanelState>,
     pub(crate) sandbox_panel: Option<crate::tui::ui::sandbox_panel::SandboxPanelState>,
+    pub(crate) sync_panel: Option<crate::tui::ui::sync_panel::SyncPanelState>,
     pub(crate) search_panel: Option<SearchPanelState>,
     pub(crate) at_mention: AtMentionState,
     pub(crate) snippet_state: SnippetState,

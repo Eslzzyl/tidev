@@ -202,6 +202,7 @@ impl App {
             agents_panel: None,
             skills_panel: None,
             sandbox_panel: None,
+            sync_panel: None,
             search_panel: None,
             at_mention: AtMentionState::default(),
             snippet_state: SnippetState::default(),
@@ -559,6 +560,7 @@ impl App {
             agents_panel: self.agents_panel.clone(),
             skills_panel: self.skills_panel.clone(),
             sandbox_panel: self.sandbox_panel.clone(),
+            sync_panel: self.sync_panel.clone(),
             search_panel: self.search_panel.clone(),
             memory_panel: self.memory_panel.clone(),
             message_panel: self.message_panel.clone(),
@@ -588,6 +590,7 @@ impl App {
         self.agents_panel = snapshot.agents_panel;
         self.skills_panel = snapshot.skills_panel;
         self.sandbox_panel = snapshot.sandbox_panel;
+        self.sync_panel = snapshot.sync_panel;
         self.search_panel = snapshot.search_panel;
         self.at_mention = snapshot.at_mention;
         self.snippet_state = snapshot.snippet_state;

@@ -122,6 +122,9 @@ impl App {
             self.render_session_panel(frame, area, panel);
             self.render_session_panel_dialog(frame, area, panel);
         }
+        if let Some(panel) = &self.sync_panel {
+            self.render_sync_panel(frame, area, panel);
+        }
         if let Some(panel) = &self.stats_panel
             && panel.active
         {
