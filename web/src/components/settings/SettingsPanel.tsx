@@ -56,7 +56,7 @@ export function SettingsPanel() {
   if (!settingsPanelOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center motion-safe:animate-fade-in bg-black/50 p-4">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center motion-safe:animate-fade-in bg-black/50 p-4">
       <div
         ref={panelRef}
         className="motion-safe:animate-scale-fade flex max-h-[80vh] w-full max-w-[680px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-neutral-900"

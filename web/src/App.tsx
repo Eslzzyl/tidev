@@ -318,7 +318,7 @@ function App() {
           {/* Kept mounted to avoid layout recalculation when switching tabs */}
           <div style={{ display: showSidebars ? "" : "none" }}>
             <aside
-              className={`fixed inset-y-0 left-0 z-50 transform border-r border-neutral-200 bg-white transition-transform duration-200 ease-in-out md:relative md:translate-x-0 dark:border-neutral-800 dark:bg-neutral-950 ${
+              className={`fixed inset-y-0 left-0 z-50 h-full transform border-r border-neutral-200 bg-white transition-transform duration-200 ease-in-out md:relative md:translate-x-0 dark:border-neutral-800 dark:bg-neutral-950 ${
                 mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
               }`}
               style={{ width: leftSidebarWidth, willChange: "width" }}
