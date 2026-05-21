@@ -1,5 +1,5 @@
 import { useCallback, useState, useRef, useEffect } from "react";
-import { Plus, Trash2, Search, MoreHorizontal, Pencil } from "lucide-react";
+import { Plus, Trash2, Search, Pencil } from "lucide-react";
 import { useSessionStore } from "../../stores/useSessionStore";
 import { useUIStore } from "../../stores/useUIStore";
 import { api } from "../../api/client";
@@ -126,24 +126,24 @@ export function LeftSidebar() {
   );
 
   return (
-    <div className="flex h-full flex-col bg-neutral-50 dark:bg-neutral-900">
+    <div className="flex h-full flex-col bg-white dark:bg-neutral-950">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] dark:border-neutral-800">
-        <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+      <div className="flex items-center justify-between border-b border-neutral-200 px-2 py-1.5 dark:border-neutral-800">
+        <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
           Sessions
-        </h2>
+        </span>
         <button
           onClick={handleNewSession}
-          className="flex items-center gap-1 rounded bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+          className="rounded p-1 text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
           aria-label="New session"
+          title="New session"
         >
-          <Plus className="h-4 w-4" />
-          <span>New</span>
+          <Plus className="h-3.5 w-3.5" />
         </button>
       </div>
 
       {/* Search */}
-      <div className="border-b border-neutral-200 px-3 py-2 dark:border-neutral-800">
+      <div className="border-b border-neutral-200 p-2 dark:border-neutral-800">
         <div className="relative">
           <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-400" />
           <input
@@ -151,7 +151,7 @@ export function LeftSidebar() {
             placeholder="Search sessions..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full rounded border border-neutral-200 bg-white py-1.5 pl-7 pr-2 text-xs outline-none focus:border-neutral-400 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100 dark:focus:border-neutral-500"
+            className="w-full rounded border border-neutral-200 bg-white py-1 pl-7 pr-2 text-xs outline-none focus:border-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:focus:border-neutral-500"
           />
         </div>
       </div>
@@ -159,8 +159,8 @@ export function LeftSidebar() {
       {/* Session List */}
       <div className="flex-1 overflow-y-auto">
         {isDraftSession && (
-          <div className="border-b border-neutral-200 dark:border-neutral-800">
-            <div className="flex w-full items-center bg-blue-50 px-4 py-3 text-left dark:bg-blue-950/30">
+          <div className="px-2 pt-2">
+            <div className="flex w-full items-center rounded-lg bg-blue-50 px-3 py-2.5 text-left dark:bg-blue-950/30">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-blue-900 dark:text-blue-100">
                   {draftTitle}
@@ -180,7 +180,7 @@ export function LeftSidebar() {
               : "No sessions yet"}
           </div>
         ) : (
-          <ul className="divide-y divide-neutral-100 dark:divide-neutral-800">
+          <ul className="flex flex-col gap-1 p-2">
             {filteredSessions.map((session) => {
               const isActive = currentSessionId === session.session_id;
               const isRenaming = renamingId === session.session_id;
@@ -188,7 +188,7 @@ export function LeftSidebar() {
               return (
                 <li key={session.session_id} className="group relative">
                   {isRenaming ? (
-                    <div className="flex items-center px-4 py-2">
+                    <div className="rounded-lg border border-blue-400 bg-white px-3 py-2 dark:border-blue-500 dark:bg-neutral-800">
                       <input
                         ref={renameInputRef}
                         type="text"
@@ -198,7 +198,7 @@ export function LeftSidebar() {
                           handleRenameKeyDown(e, session.session_id)
                         }
                         onBlur={() => handleConfirmRename(session.session_id)}
-                        className="w-full rounded border border-blue-400 bg-white px-2 py-1 text-sm outline-none dark:border-blue-500 dark:bg-neutral-800 dark:text-neutral-100"
+                        className="w-full bg-transparent text-sm outline-none dark:text-neutral-100"
                       />
                     </div>
                   ) : (
@@ -207,15 +207,15 @@ export function LeftSidebar() {
                       onDoubleClick={() =>
                         handleStartRename(session.session_id, session.title)
                       }
-                      className={`flex w-full items-center px-4 py-3 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
-                        isActive ? "bg-neutral-100 dark:bg-neutral-800" : ""
+                      className={`flex w-full items-center rounded-lg px-3 py-2.5 text-left transition-all duration-150 ${
+                        isActive
+                          ? "bg-neutral-100 font-medium text-neutral-900 shadow-sm ring-1 ring-neutral-200 dark:bg-neutral-800 dark:text-neutral-100 dark:ring-neutral-700"
+                          : "text-neutral-700 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                       }`}
                     >
                       <div className="min-w-0 flex-1 pr-8">
                         <div className="flex items-center gap-2">
-                          <p className="truncate text-sm font-medium text-neutral-900 dark:text-neutral-100">
-                            {session.title}
-                          </p>
+                          <p className="truncate text-sm">{session.title}</p>
                           {/* Status indicator */}
                           {isActive && isStreaming && (
                             <span className="shrink-0">
@@ -236,7 +236,7 @@ export function LeftSidebar() {
 
                   {/* Action buttons */}
                   {!isRenaming && (
-                    <div className="absolute right-3 top-1/2 flex -translate-y-1/2 gap-0.5 opacity-0 group-hover:opacity-100">
+                    <div className="absolute right-3 top-1/2 flex -translate-y-1/2 gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
                       <button
                         onClick={() =>
                           handleStartRename(session.session_id, session.title)

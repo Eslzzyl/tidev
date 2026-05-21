@@ -163,16 +163,16 @@ export function RightSidebar() {
   return (
     <div className="flex h-full flex-col bg-white dark:bg-neutral-950">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] dark:border-neutral-800">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
+      <div className="flex items-center justify-between border-b border-neutral-200 px-2 py-1.5 dark:border-neutral-800">
+        <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
           Info
-        </h2>
+        </span>
         <button
           onClick={closeMobileRightSidebar}
           className="rounded p-1 text-neutral-500 hover:bg-neutral-100 md:hidden dark:text-neutral-400 dark:hover:bg-neutral-800"
           aria-label="Close info panel"
         >
-          <X className="h-4 w-4" />
+          <X className="h-3.5 w-3.5" />
         </button>
       </div>
 

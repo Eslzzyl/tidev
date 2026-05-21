@@ -1,5 +1,5 @@
 import { useMemo, useEffect, useState, useCallback, useRef } from "react";
-import { Menu, Settings, Info, ArrowDown } from "lucide-react";
+import { ArrowDown } from "lucide-react";
 import { useSessionStore } from "../../stores/useSessionStore";
 import { useUIStore } from "../../stores/useUIStore";
 import { usePermissionStore } from "../../stores/usePermissionStore";
@@ -25,14 +25,6 @@ export function ChatPanel() {
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
   const currentSession = useSessionStore((s) => s.currentSession);
   const isDraftSession = useSessionStore((s) => s.isDraftSession);
-  const draftTitle = useSessionStore((s) => s.draftTitle);
-
-  const toggleMobileMenu = useUIStore((s) => s.toggleMobileMenu);
-  const toggleRightSidebar = useUIStore((s) => s.toggleRightSidebar);
-  const toggleMobileRightSidebar = useUIStore(
-    (s) => s.toggleMobileRightSidebar,
-  );
-  const toggleSettings = useUIStore((s) => s.toggleSettings);
 
   const streamingRound = useUIStore((s) => s.streamingRound);
 
@@ -87,12 +79,8 @@ export function ChatPanel() {
 
   // Virtual list + auto-scroll
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const {
-    virtualItems,
-    totalSize,
-    isVirtualized,
-    measureElement,
-  } = useMessageVirtualizer(scrollContainerRef, allRounds);
+  const { virtualItems, totalSize, isVirtualized, measureElement } =
+    useMessageVirtualizer(scrollContainerRef, allRounds);
 
   const isStreaming = !!streamingRound;
   const { handleScroll, scrollToBottom, showScrollButton, endRef } =
@@ -150,10 +138,7 @@ export function ChatPanel() {
     setUndoError(null);
 
     try {
-      await api.revertToMessage(
-        currentSessionId,
-        undoTargetMessageId,
-      );
+      await api.revertToMessage(currentSessionId, undoTargetMessageId);
 
       // Refresh messages and todos after revert
       const { messages: updatedMessages, todos: updatedTodos } =
@@ -270,71 +255,8 @@ export function ChatPanel() {
 
   return (
     <div className="flex h-full flex-col bg-white dark:bg-neutral-950">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] dark:border-neutral-800">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={toggleMobileMenu}
-            className="rounded p-1 text-neutral-600 hover:bg-neutral-100 md:hidden dark:text-neutral-400 dark:hover:bg-neutral-800"
-            aria-label="Open menu"
-          >
-            <Menu className="h-5 w-5" />
-          </button>
-
-          {isDraftSession ? (
-            <div>
-              <h1 className="text-sm font-semibold text-blue-600 dark:text-blue-400">
-                {draftTitle}
-              </h1>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                Draft Session
-              </p>
-            </div>
-          ) : currentSession ? (
-            <div>
-              <h1 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
-                {currentSession.title}
-              </h1>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                {currentSession.model_display_name}
-              </p>
-            </div>
-          ) : (
-            <h1 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
-              Select a session
-            </h1>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* Settings button */}
-          <button
-            onClick={toggleSettings}
-            className="rounded p-2 text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
-            aria-label="Settings"
-          >
-            <Settings className="h-5 w-5" />
-          </button>
-
-          {/* Right sidebar toggle (desktop) */}
-          <button
-            onClick={toggleRightSidebar}
-            className="hidden rounded p-2 text-neutral-600 hover:bg-neutral-100 md:block dark:text-neutral-400 dark:hover:bg-neutral-800"
-            aria-label="Toggle info panel"
-          >
-            <Info className="h-5 w-5" />
-          </button>
-
-          {/* Mobile right sidebar toggle */}
-          <button
-            onClick={toggleMobileRightSidebar}
-            className="rounded p-2 text-neutral-600 hover:bg-neutral-100 md:hidden dark:text-neutral-400 dark:hover:bg-neutral-800"
-            aria-label="Open info panel"
-          >
-            <Info className="h-5 w-5" />
-          </button>
-        </div>
-      </div>
+      {/* Top safe-area spacer (replaces removed header spacing) */}
+      <div className="h-0 pt-[max(0.25rem,env(safe-area-inset-top))]" />
 
       {/* Messages Area */}
       <div className="relative flex-1 overflow-hidden">
