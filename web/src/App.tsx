@@ -8,7 +8,7 @@ import {
 import { useAuthStore } from "./stores/useAuthStore";
 import { api } from "./api/client";
 import { AuthGate } from "./components/AuthGate";
-import { Settings } from "./components/Settings";
+import { SettingsPanel } from "./components/settings/SettingsPanel";
 import { WelcomePage } from "./components/WelcomePage";
 import { LeftSidebar } from "./components/layout/LeftSidebar";
 import { RightSidebar } from "./components/layout/RightSidebar";
@@ -22,11 +22,6 @@ import { useSSE } from "./hooks/useSSE";
 const FilesView = lazy(() =>
   import("./components/views/FilesView").then((m) => ({
     default: m.FilesView,
-  })),
-);
-const SettingsView = lazy(() =>
-  import("./components/views/SettingsView").then((m) => ({
-    default: m.SettingsView,
   })),
 );
 const TerminalView = lazy(() =>
@@ -59,8 +54,6 @@ function App() {
   useSSE(currentSessionId);
   const theme = useUIStore((s) => s.theme);
   const activeTab = useUIStore((s) => s.activeTab);
-  const setActiveTab = useUIStore((s) => s.setActiveTab);
-  const navigateToChat = useUIStore((s) => s.navigateToChat);
   const leftSidebarWidth = useUIStore((s) => s.leftSidebarWidth);
   const rightSidebarWidth = useUIStore((s) => s.rightSidebarWidth);
   const rightSidebarOpen = useUIStore((s) => s.rightSidebarOpen);
@@ -131,15 +124,19 @@ function App() {
       const hash = window.location.hash.replace(/^#/, "");
       const parts = hash.split("/").filter(Boolean);
       const tab = parts[0] as MainTab | undefined;
-      if (tab && ["chat", "files", "settings"].includes(tab)) {
-        setActiveTab(tab);
+      if (tab === "settings") {
+        // Open settings panel, fall back to chat
+        useUIStore.getState().openSettingsPanel();
+        useUIStore.getState().setActiveTab("chat");
+      } else if (tab && ["chat", "files"].includes(tab)) {
+        useUIStore.getState().setActiveTab(tab);
       }
     };
     window.addEventListener("hashchange", handleHashChange);
     // Initial sync from URL
     handleHashChange();
     return () => window.removeEventListener("hashchange", handleHashChange);
-  }, [setActiveTab]);
+  }, []);
 
   // Update URL hash when activeTab changes
   useEffect(() => {
@@ -282,7 +279,7 @@ function App() {
 
   return (
     <>
-      <Settings />
+      <SettingsPanel />
 
       <div className="flex h-[100dvh] flex-col bg-white dark:bg-neutral-950">
         {/* Header navigation - always visible */}
@@ -337,7 +334,6 @@ function App() {
                 </div>
               )}
               {activeTab === "git" && <GitView />}
-              {activeTab === "settings" && <SettingsView />}
             </Suspense>
           </main>
 

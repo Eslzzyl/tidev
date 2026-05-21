@@ -16,7 +16,6 @@ const tabs: { id: MainTab; label: string; icon: React.ReactNode }[] = [
   { id: "files", label: "Files", icon: <FolderTree className="h-4 w-4" /> },
   { id: "terminal", label: "Terminal", icon: <Terminal className="h-4 w-4" /> },
   { id: "git", label: "Git", icon: <GitBranch className="h-4 w-4" /> },
-  { id: "settings", label: "Settings", icon: <Settings className="h-4 w-4" /> },
 ];
 
 const pageLabels: Record<MainTab, string> = {
@@ -32,7 +31,7 @@ export function Header() {
   const setActiveTab = useUIStore((s) => s.setActiveTab);
   const toggleMobileMenu = useUIStore((s) => s.toggleMobileMenu);
   const toggleRightSidebar = useUIStore((s) => s.toggleRightSidebar);
-  const toggleSettings = useUIStore((s) => s.toggleSettings);
+  const openSettingsPanel = useUIStore((s) => s.openSettingsPanel);
   const toggleMobileRightSidebar = useUIStore(
     (s) => s.toggleMobileRightSidebar,
   );
@@ -103,17 +102,19 @@ export function Header() {
         )}
       </div>
 
-      {/* Right: action buttons (only for chat tab) */}
+      {/* Right: action buttons */}
       <div className="flex items-center gap-1">
+        {/* Settings gear — always visible */}
+        <button
+          onClick={openSettingsPanel}
+          className="rounded p-1.5 text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
+          aria-label="Settings"
+        >
+          <Settings className="h-4 w-4" />
+        </button>
+
         {activeTab === "chat" && (
           <>
-            <button
-              onClick={toggleSettings}
-              className="rounded p-1.5 text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
-              aria-label="Settings"
-            >
-              <Settings className="h-4 w-4" />
-            </button>
             <button
               onClick={toggleRightSidebar}
               className="hidden rounded p-1.5 text-neutral-500 hover:bg-neutral-100 md:block dark:text-neutral-400 dark:hover:bg-neutral-800"

@@ -5,7 +5,6 @@ import {
   Clock,
   MoreHorizontal,
   X,
-  Settings,
 } from "lucide-react";
 import { useSessionStore } from "../stores/useSessionStore";
 import { useUIStore } from "../stores/useUIStore";
@@ -32,7 +31,6 @@ export function WelcomePage() {
   const setLoading = useSessionStore((s) => s.setLoading);
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
   const currentRequestId = useSessionStore((s) => s.currentRequestId);
-  const toggleSettings = useUIStore((s) => s.toggleSettings);
   const isStreaming = useUIStore((s) => s.isStreaming);
   const setStreaming = useUIStore((s) => s.setStreaming);
 
@@ -226,15 +224,6 @@ export function WelcomePage() {
 
   return (
     <div className="relative flex h-full flex-col items-center justify-center bg-white px-4 dark:bg-neutral-950">
-      {/* Settings Button */}
-      <button
-        onClick={toggleSettings}
-        className="absolute right-4 top-[max(1rem,env(safe-area-inset-top))] rounded-lg p-2 text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
-        aria-label="Settings"
-      >
-        <Settings className="h-5 w-5" />
-      </button>
-
       {/* Logo/Title */}
       <div className="mb-12 text-center">
         <h1 className="mb-2 text-4xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100">

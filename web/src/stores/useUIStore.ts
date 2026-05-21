@@ -16,7 +16,7 @@ export interface SettingsState {
 export interface UIState {
   sidebarOpen: boolean;
   rightSidebarOpen: boolean;
-  settingsOpen: boolean;
+  settingsPanelOpen: boolean;
   mobileMenuOpen: boolean;
   mobileRightSidebarOpen: boolean;
   theme: Theme;
@@ -38,8 +38,8 @@ export interface UIActions {
   toggleRightSidebar: () => void;
   openRightSidebar: () => void;
   closeRightSidebar: () => void;
-  toggleSettings: () => void;
-  closeSettings: () => void;
+  openSettingsPanel: () => void;
+  closeSettingsPanel: () => void;
   toggleMobileMenu: () => void;
   closeMobileMenu: () => void;
   toggleMobileRightSidebar: () => void;
@@ -55,7 +55,6 @@ export interface UIActions {
   setActiveTab: (tab: MainTab) => void;
   navigateToChat: (sessionId?: string) => void;
   navigateToFiles: () => void;
-  navigateToSettings: () => void;
   navigateToTerminal: () => void;
   navigateToGit: () => void;
   updateSettings: (partial: Partial<SettingsState>) => void;
@@ -123,7 +122,7 @@ const persisted = loadLocalStorage();
 const initialState: UIState = {
   sidebarOpen: true,
   rightSidebarOpen: persisted.rightSidebarOpen,
-  settingsOpen: false,
+  settingsPanelOpen: false,
   mobileMenuOpen: false,
   mobileRightSidebarOpen: false,
   theme: persisted.theme,
@@ -166,8 +165,8 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
     set({ rightSidebarOpen: false });
   },
 
-  toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
-  closeSettings: () => set({ settingsOpen: false }),
+  openSettingsPanel: () => set({ settingsPanelOpen: true }),
+  closeSettingsPanel: () => set({ settingsPanelOpen: false }),
 
   toggleMobileMenu: () => set((s) => ({ mobileMenuOpen: !s.mobileMenuOpen })),
   closeMobileMenu: () => set({ mobileMenuOpen: false }),
@@ -212,11 +211,6 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   navigateToFiles: () => {
     set({ activeTab: "files" });
     localStorage.setItem("activeTab", "files");
-  },
-
-  navigateToSettings: () => {
-    set({ activeTab: "settings" });
-    localStorage.setItem("activeTab", "settings");
   },
 
   navigateToTerminal: () => {
