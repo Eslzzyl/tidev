@@ -324,7 +324,7 @@ fn message_render_cache_invalidation_refreshes_updated_content() {
     app.conversation
         .push(Message::new(MessageRole::Assistant, "old cached content"));
 
-    let (before, _, _, _, _, _, _) = app.messages_text(Some(80));
+    let (before, _, _, _, _, _, _, _) = app.messages_text(Some(80));
     let before_text = text_lines_to_string(&before.lines);
     assert!(before_text.contains("old cached content"));
 
@@ -332,7 +332,7 @@ fn message_render_cache_invalidation_refreshes_updated_content() {
     app.conversation.messages[0].content = "new refreshed content".to_string();
     app.invalidate_active_message_render_cache_for(message_id);
 
-    let (after, _, _, _, _, _, _) = app.messages_text(Some(80));
+    let (after, _, _, _, _, _, _, _) = app.messages_text(Some(80));
     let after_text = text_lines_to_string(&after.lines);
     assert!(after_text.contains("new refreshed content"));
 }
@@ -351,7 +351,7 @@ fn virtualized_render_clamps_scroll_and_keeps_content_visible() {
         ));
     }
 
-    let (text, total_lines, _, _, _, _, _) = app.messages_text(Some(80));
+    let (text, total_lines, _, _, _, _, _, _) = app.messages_text(Some(80));
 
     assert!(total_lines > 0);
     assert!(!text.lines.is_empty());
