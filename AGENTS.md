@@ -119,3 +119,4 @@ Triggered by pushing a `v*` tag. CI workflow (`.github/workflows/release.yml`):
 - Database columns with large content (messages, tool events) are zstd-compressed at the application layer
 - Emoji is STRICTLY FORBIDDEN at ANY code in this project
 - NEVER automatically simplify the implementation of a plan. If you believe simplification is necessary, stop and solicit feedback from users.
+- ALWAYS use English commit message.
