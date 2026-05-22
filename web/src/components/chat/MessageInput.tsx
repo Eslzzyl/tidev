@@ -93,10 +93,7 @@ export function MessageInput({
   const updateThinkingLevels = useCallback((model: ModelInfo) => {
     currentModelRef.current = model.id;
 
-    if (
-      model.thinking_supported &&
-      model.thinking_options.length > 0
-    ) {
+    if (model.thinking_supported && model.thinking_options.length > 0) {
       const options = model.thinking_options.map((opt) => {
         const parts = opt.split(":");
         const label = parts[1]
@@ -162,11 +159,8 @@ export function MessageInput({
         }
       })
       .catch(() => {});
-    // NOTE: updateThinkingLevels intentionally excluded from deps to avoid a
-    // circular loop: it depends on `models`, which this effect sets, and
-    // including it would cause an infinite re-fetch cycle.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedModelId, currentSession]);
+  }, [currentSession]);
 
   // Close dropdowns on click outside
   useEffect(() => {
@@ -665,6 +659,17 @@ export function MessageInput({
 
   // Called when the ModelPanel's General tab selects a new model
   function handleModelPanelChange(model: ModelInfo) {
+    // Save old model's thinking level before switching
+    if (selectedProviderId && selectedModelId && selectedThinking) {
+      api
+        .setModelThinkingLevel({
+          provider_id: selectedProviderId,
+          model_id: selectedModelId,
+          thinking_level: selectedThinking,
+        })
+        .catch(() => {});
+    }
+
     setSelectedModelId(model.id);
     setSelectedProviderId(model.provider_id);
     updateThinkingLevels(model);

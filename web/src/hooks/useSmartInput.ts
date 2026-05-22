@@ -63,7 +63,7 @@ export interface UseSmartInputReturn {
   setSelectedThinking: (thinking: string) => void;
   thinkingDropdownOpen: boolean;
   setThinkingDropdownOpen: (open: boolean) => void;
-  updateThinkingLevels: (modelId: string) => void;
+  updateThinkingLevels: (model: ModelInfo) => void;
 
   // File mention (@) state
   fileMention: FileMentionState;
@@ -178,35 +178,45 @@ export function useSmartInput(
   // Refs
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement | null>(null);
+  const currentModelRef = useRef<string | null>(null);
 
   // Update thinking levels based on model - use data from API model info
-  const updateThinkingLevels = useCallback(
-    (modelId: string) => {
-      const model = models.find((m) => m.id === modelId);
-      if (
-        model &&
-        model.thinking_supported &&
-        model.thinking_options.length > 0
-      ) {
-        const options = model.thinking_options.map((opt) => {
-          const parts = opt.split(":");
-          const label = parts[1]
-            ? parts[1].charAt(0).toUpperCase() + parts[1].slice(1)
-            : opt;
-          return { label, value: opt };
-        });
-        setThinkingOptions(options);
-        const defaultTl = model.thinking_options.includes(model.thinking_level)
-          ? model.thinking_level
-          : model.thinking_options[0];
-        setSelectedThinkingState(defaultTl);
-      } else {
-        setThinkingOptions([]);
-        setSelectedThinkingState("");
-      }
-    },
-    [models],
-  );
+  const updateThinkingLevels = useCallback((model: ModelInfo) => {
+    currentModelRef.current = model.id;
+    if (model.thinking_supported && model.thinking_options.length > 0) {
+      const options = model.thinking_options.map((opt) => {
+        const parts = opt.split(":");
+        const label = parts[1]
+          ? parts[1].charAt(0).toUpperCase() + parts[1].slice(1)
+          : opt;
+        return { label, value: opt };
+      });
+      setThinkingOptions(options);
+      // Start with model default, then load stored preference
+      const defaultTl = model.thinking_options.includes(model.thinking_level)
+        ? model.thinking_level
+        : model.thinking_options[0];
+      setSelectedThinkingState(defaultTl);
+
+      // Load stored thinking level preference from backend
+      api
+        .getModelThinkingLevel(model.provider_id, model.id)
+        .then((resp) => {
+          // Guard: ignore stale responses if model changed while loading
+          if (currentModelRef.current !== model.id) return;
+          if (
+            resp.thinking_level &&
+            model.thinking_options.includes(resp.thinking_level)
+          ) {
+            setSelectedThinkingState(resp.thinking_level);
+          }
+        })
+        .catch(() => {});
+    } else {
+      setThinkingOptions([]);
+      setSelectedThinkingState("");
+    }
+  }, []);
 
   // Fetch models and default model on mount
   useEffect(() => {
@@ -240,7 +250,7 @@ export function useSmartInput(
           if (modelToSelect) {
             setSelectedModelId(modelToSelect.id);
             setSelectedProviderId(modelToSelect.provider_id);
-            updateThinkingLevels(modelToSelect.id);
+            updateThinkingLevels(modelToSelect);
             onModelChange?.(modelToSelect);
           }
         }
@@ -283,11 +293,22 @@ export function useSmartInput(
   // Handle model selection
   const handleModelSelect = useCallback(
     (model: ModelInfo) => {
+      // Save old model's thinking level before switching
+      if (selectedProviderId && selectedModelId && selectedThinking) {
+        api
+          .setModelThinkingLevel({
+            provider_id: selectedProviderId,
+            model_id: selectedModelId,
+            thinking_level: selectedThinking,
+          })
+          .catch(() => {});
+      }
+
       setSelectedModelId(model.id);
       setSelectedProviderId(model.provider_id);
       setModelDropdownOpen(false);
       setModelSearchQuery("");
-      updateThinkingLevels(model.id);
+      updateThinkingLevels(model);
 
       // Save as default model in config
       api
@@ -301,7 +322,7 @@ export function useSmartInput(
 
       onModelChange?.(model);
     },
-    [onModelChange, updateThinkingLevels],
+    [onModelChange, selectedProviderId, selectedModelId, selectedThinking],
   );
 
   // Close command palette

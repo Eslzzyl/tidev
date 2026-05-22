@@ -5,6 +5,7 @@ import { useAutoResizeTextarea } from "../hooks/useAutoResizeTextarea";
 import { FileMentionPopover } from "./chat/FileMentionPopover";
 import { commandFragment, getSuggestions } from "../commands";
 import { ModelPanel } from "./chat/ModelPanel";
+import { api } from "../api/client";
 
 export interface SmartInputProps {
   /** Called when user submits the input */
@@ -94,6 +95,8 @@ export function SmartInput({
     mode,
     toggleMode,
     selectedModelDisplay,
+    selectedProviderId,
+    selectedModelId,
     handleModelSelect,
     thinkingOptions,
     selectedThinking,
@@ -533,6 +536,16 @@ export function SmartInput({
                     onClick={() => {
                       setSelectedThinking(option.value);
                       setThinkingDropdownOpen(false);
+                      // Persist thinking level preference to backend
+                      if (selectedProviderId && selectedModelId) {
+                        api
+                          .setModelThinkingLevel({
+                            provider_id: selectedProviderId,
+                            model_id: selectedModelId,
+                            thinking_level: option.value,
+                          })
+                          .catch(() => {});
+                      }
                     }}
                     className={`flex w-full px-3 py-2 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
                       selectedThinking === option.value
