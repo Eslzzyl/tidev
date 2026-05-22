@@ -97,7 +97,7 @@ export function Header({ className }: HeaderProps) {
               className={`relative z-10 flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
                 activeTab === tab.id
                   ? "text-neutral-900 dark:text-neutral-100"
-                  : "text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-300"
+                  : "text-neutral-500 hover:bg-neutral-100/40 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800/40 dark:hover:text-neutral-300"
               }`}
             >
               {tab.icon}
