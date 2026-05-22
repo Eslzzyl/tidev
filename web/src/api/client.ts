@@ -38,6 +38,11 @@ import type {
   GitMessageResponse,
   GitShowResponse,
   GitFileDiffResponse,
+  StatsSummary,
+  StatsTimeSeries,
+  ModelUsageEntry,
+  ProviderUsageEntry,
+  SessionUsageEntry,
 } from "../types/api";
 
 const API_BASE = "/api";
@@ -401,4 +406,56 @@ export const api = {
     fetchJson<GitMessageResponse>(`${API_BASE}/git/stash/pop`, {
       method: "POST",
     }),
+
+  // ── Stats ──────────────────────────────────────────────────────────
+
+  getStatsSummary: () =>
+    fetchJson<StatsSummary>(`${API_BASE}/stats/summary`),
+
+  getStatsTimeSeries: (params?: {
+    granularity?: string;
+    start?: string;
+    end?: string;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.granularity) searchParams.set("granularity", params.granularity);
+    if (params?.start) searchParams.set("start", params.start);
+    if (params?.end) searchParams.set("end", params.end);
+    const qs = searchParams.toString();
+    return fetchJson<StatsTimeSeries>(
+      `${API_BASE}/stats/timeseries${qs ? `?${qs}` : ""}`,
+    );
+  },
+
+  getStatsModels: (params?: { start?: string; end?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.start) searchParams.set("start", params.start);
+    if (params?.end) searchParams.set("end", params.end);
+    const qs = searchParams.toString();
+    return fetchJson<{ entries: ModelUsageEntry[] }>(
+      `${API_BASE}/stats/models${qs ? `?${qs}` : ""}`,
+    );
+  },
+
+  getStatsProviders: (params?: { start?: string; end?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.start) searchParams.set("start", params.start);
+    if (params?.end) searchParams.set("end", params.end);
+    const qs = searchParams.toString();
+    return fetchJson<{ entries: ProviderUsageEntry[] }>(
+      `${API_BASE}/stats/providers${qs ? `?${qs}` : ""}`,
+    );
+  },
+
+  getStatsSessions: (params?: { limit?: number; offset?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.limit !== undefined)
+      searchParams.set("limit", String(params.limit));
+    if (params?.offset !== undefined)
+      searchParams.set("offset", String(params.offset));
+    const qs = searchParams.toString();
+    return fetchJson<{ entries: SessionUsageEntry[]; total: number }>(
+      `${API_BASE}/stats/sessions${qs ? `?${qs}` : ""}`,
+    );
+  },
 };

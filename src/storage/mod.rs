@@ -1793,14 +1793,16 @@ impl SessionStore {
             },
             |row| {
                 Ok(map_row!(ModelUsageEntry, row,
-                    provider_id: 0,
-                    model_id: 1,
-                    input_tokens: 2,
-                    output_tokens: 3,
-                    cache_read_tokens: 4,
-                    cache_write_tokens: 5,
-                    total_tokens: 6,
-                    request_count: 7,
+                    provider_id: 0 => row.get(0)?,
+                    model_id: 1 => row.get(1)?,
+                    input_tokens: 2 => row.get(2)?,
+                    output_tokens: 3 => row.get(3)?,
+                    cache_read_tokens: 4 => row.get(4)?,
+                    cache_write_tokens: 5 => row.get(5)?,
+                    total_tokens: 6 => row.get(6)?,
+                    request_count: 7 => row.get(7)?,
+                    model_display_name: 8 => String::new(),
+                    provider_display_name: 9 => String::new(),
                 ))
             },
         )
@@ -1827,6 +1829,7 @@ impl SessionStore {
                     total_cache_write_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or(0),
                     total_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or(0),
                     total_requests: row.get::<_, Option<i64>>(5)?.unwrap_or(0),
+                    ..Default::default()
                 })
             },
         )

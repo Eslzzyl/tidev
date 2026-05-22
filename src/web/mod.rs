@@ -150,8 +150,10 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
 
     crate::log_info!("Agent runtime created");
     // Create app state
+    let database_path = paths.database_file.clone();
     let state = AppState::new(
         store,
+        database_path,
         event_bus,
         llm_client,
         config,

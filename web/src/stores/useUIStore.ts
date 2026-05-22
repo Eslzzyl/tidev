@@ -54,6 +54,7 @@ export interface UIActions {
   navigateToFiles: () => void;
   navigateToTerminal: () => void;
   navigateToGit: () => void;
+  navigateToStats: () => void;
   updateSettings: (partial: Partial<SettingsState>) => void;
 }
 
@@ -216,6 +217,11 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   navigateToGit: () => {
     set({ activeTab: "git" });
     localStorage.setItem("activeTab", "git");
+  },
+
+  navigateToStats: () => {
+    set({ activeTab: "stats" });
+    localStorage.setItem("activeTab", "stats");
   },
 
   updateSettings: (partial) =>

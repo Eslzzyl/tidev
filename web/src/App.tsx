@@ -32,6 +32,11 @@ const TerminalView = lazy(() =>
 const GitView = lazy(() =>
   import("./components/views/GitView").then((m) => ({ default: m.GitView })),
 );
+const StatsView = lazy(() =>
+  import("./components/views/StatsView").then((m) => ({
+    default: m.StatsView,
+  })),
+);
 
 function App() {
   const [isLoading, setIsLoading] = useState(true);
@@ -376,6 +381,12 @@ function App() {
                 style={{ display: activeTab === "git" ? "" : "none" }}
               >
                 <GitView />
+              </div>
+              <div
+                className="h-full"
+                style={{ display: activeTab === "stats" ? "" : "none" }}
+              >
+                <StatsView />
               </div>
             </Suspense>
           </main>

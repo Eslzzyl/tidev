@@ -1,6 +1,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Datelike, Duration, Local, Timelike, Utc};
 use rusqlite::{Connection, params};
+use serde::Serialize;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Granularity {
@@ -139,12 +140,43 @@ pub struct StatsEntry {
 pub struct ModelUsageEntry {
     pub provider_id: String,
     pub model_id: String,
+    pub model_display_name: String,
+    pub provider_display_name: String,
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub cache_read_tokens: i64,
     pub cache_write_tokens: i64,
     pub total_tokens: i64,
     pub request_count: i64,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct ProviderUsageEntry {
+    pub provider_id: String,
+    pub provider_display_name: String,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub total_tokens: i64,
+    pub request_count: i64,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct SessionUsageEntry {
+    pub session_id: String,
+    pub title: String,
+    pub provider_id: String,
+    pub model_id: String,
+    pub model_display_name: String,
+    pub message_count: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub total_tokens: i64,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -155,6 +187,8 @@ pub struct UsageSummary {
     pub total_cache_write_tokens: i64,
     pub total_tokens: i64,
     pub total_requests: i64,
+    pub total_sessions: i64,
+    pub first_usage_date: Option<String>,
 }
 
 impl UsageSummary {
@@ -359,6 +393,7 @@ impl UsageStatsService {
                     cache_write_tokens: row.get(5)?,
                     total_tokens: row.get(6)?,
                     request_count: row.get(7)?,
+                    ..Default::default()
                 })
             },
         )
@@ -385,6 +420,145 @@ impl UsageStatsService {
                     total_cache_write_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or(0),
                     total_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or(0),
                     total_requests: row.get::<_, Option<i64>>(5)?.unwrap_or(0),
+                    ..Default::default()
+                })
+            },
+        )
+    }
+
+    /// Get summary including total session count and first usage date.
+    pub fn get_enhanced_summary(&self) -> Result<UsageSummary> {
+        let mut summary = self.get_all_time_summary()?;
+
+        // Count sessions that have at least one message with token usage
+        let session_count: i64 = self.query_row(
+            r#"
+            SELECT COUNT(DISTINCT session_id)
+            FROM messages
+            WHERE total_tokens IS NOT NULL AND total_tokens > 0
+            "#,
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+        summary.total_sessions = session_count;
+
+        // Earliest usage date from usage_stats
+        let first_date: Option<String> = self.query_row(
+            r#"
+            SELECT MIN(created_at) FROM usage_stats
+            "#,
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .unwrap_or(None);
+        summary.first_usage_date = first_date;
+
+        Ok(summary)
+    }
+
+    /// Get per-session aggregated usage stats.
+    pub fn get_session_usage_stats(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<(Vec<SessionUsageEntry>, i64)> {
+        // Total count
+        let total: i64 = self
+            .query_row(
+                r#"
+                SELECT COUNT(*) FROM (
+                    SELECT session_id FROM messages
+                    WHERE total_tokens IS NOT NULL AND total_tokens > 0
+                    GROUP BY session_id
+                )
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        // Paginated results
+        let entries = self.query(
+            r#"
+            SELECT
+                m.session_id,
+                COALESCE(s.title, '') as title,
+                COALESCE(s.provider_id, '') as provider_id,
+                COALESCE(s.model_id, '') as model_id,
+                COUNT(m.id) as message_count,
+                COALESCE(SUM(m.input_tokens), 0) as input_tokens,
+                COALESCE(SUM(m.output_tokens), 0) as output_tokens,
+                COALESCE(SUM(m.cache_read_tokens), 0) as cache_read_tokens,
+                COALESCE(SUM(m.cache_write_tokens), 0) as cache_write_tokens,
+                COALESCE(SUM(m.total_tokens), 0) as total_tokens,
+                COALESCE(MIN(m.created_at), '') as created_at,
+                COALESCE(MAX(m.created_at), '') as updated_at
+            FROM messages m
+            LEFT JOIN sessions s ON m.session_id = s.id
+            WHERE m.total_tokens IS NOT NULL AND m.total_tokens > 0
+            GROUP BY m.session_id
+            ORDER BY total_tokens DESC
+            LIMIT ?1 OFFSET ?2
+            "#,
+            params![limit as i64, offset as i64],
+            |row| {
+                Ok(SessionUsageEntry {
+                    session_id: row.get(0)?,
+                    title: row.get(1)?,
+                    provider_id: row.get(2)?,
+                    model_id: row.get(3)?,
+                    message_count: row.get(4)?,
+                    input_tokens: row.get(5)?,
+                    output_tokens: row.get(6)?,
+                    cache_read_tokens: row.get(7)?,
+                    cache_write_tokens: row.get(8)?,
+                    total_tokens: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
+                    ..Default::default()
+                })
+            },
+        )?;
+
+        Ok((entries, total))
+    }
+
+    /// Get per-provider aggregated usage stats.
+    pub fn get_provider_usage_stats(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<ProviderUsageEntry>> {
+        let start_text = start.to_rfc3339();
+        let end_text = end.to_rfc3339();
+
+        self.query(
+            r#"
+            SELECT
+                provider_id,
+                SUM(input_tokens) as input_tokens,
+                SUM(output_tokens) as output_tokens,
+                SUM(cache_read_tokens) as cache_read_tokens,
+                SUM(cache_write_tokens) as cache_write_tokens,
+                SUM(total_tokens) as total_tokens,
+                SUM(request_count) as request_count
+            FROM usage_stats
+            WHERE created_at >= ?1 AND created_at <= ?2
+            GROUP BY provider_id
+            ORDER BY total_tokens DESC
+            "#,
+            params![start_text, end_text],
+            |row| {
+                Ok(ProviderUsageEntry {
+                    provider_id: row.get(0)?,
+                    input_tokens: row.get(1)?,
+                    output_tokens: row.get(2)?,
+                    cache_read_tokens: row.get(3)?,
+                    cache_write_tokens: row.get(4)?,
+                    total_tokens: row.get(5)?,
+                    request_count: row.get(6)?,
+                    ..Default::default()
                 })
             },
         )

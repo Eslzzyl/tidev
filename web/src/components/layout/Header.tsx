@@ -5,6 +5,7 @@ import {
   Settings,
   Terminal,
   GitBranch,
+  BarChart3,
   Menu,
   PanelRightClose,
   Info,
@@ -17,6 +18,7 @@ const tabs: { id: MainTab; label: string; icon: React.ReactNode }[] = [
   { id: "files", label: "Files", icon: <FolderTree className="h-4 w-4" /> },
   { id: "terminal", label: "Terminal", icon: <Terminal className="h-4 w-4" /> },
   { id: "git", label: "Git", icon: <GitBranch className="h-4 w-4" /> },
+  { id: "stats", label: "Stats", icon: <BarChart3 className="h-4 w-4" /> },
 ];
 
 const pageLabels: Record<MainTab, string> = {
@@ -25,6 +27,7 @@ const pageLabels: Record<MainTab, string> = {
   terminal: "Terminal",
   git: "Git",
   settings: "Settings",
+  stats: "Statistics",
 };
 
 export function Header() {

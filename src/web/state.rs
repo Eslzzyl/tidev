@@ -25,6 +25,8 @@ use super::event_bus::EventBus;
 pub struct AppState {
     /// Database store for sessions
     pub store: Arc<Mutex<SessionStore>>,
+    /// Path to the SQLite database file (for opening read-only connections)
+    pub database_path: PathBuf,
     /// Event bus for SSE
     pub event_bus: EventBus,
     /// LLM client
@@ -60,6 +62,7 @@ impl AppState {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         store: SessionStore,
+        database_path: PathBuf,
         event_bus: EventBus,
         llm_client: LlmClient,
         config: AppConfig,
@@ -79,6 +82,7 @@ impl AppState {
 
         Ok(Self {
             store: Arc::new(Mutex::new(store)),
+            database_path,
             event_bus,
             llm_client,
             config: Arc::new(RwLock::new(config)),

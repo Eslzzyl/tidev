@@ -331,3 +331,73 @@ export interface ReadBase64Response {
   data: string;
   mime: string;
 }
+
+// ── Stats types ──────────────────────────────────────────────────────────
+
+export interface StatsSummary {
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cache_read_tokens: number;
+  total_cache_write_tokens: number;
+  total_tokens: number;
+  total_requests: number;
+  cache_hit_rate: number;
+  total_sessions: number;
+  first_usage_date: string | null;
+}
+
+export interface StatsTimeSeriesEntry {
+  time_bucket: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  total_tokens: number;
+  request_count: number;
+}
+
+export interface StatsTimeSeries {
+  granularity: string;
+  entries: StatsTimeSeriesEntry[];
+  summary: StatsSummary;
+}
+
+export interface ModelUsageEntry {
+  provider_id: string;
+  provider_display_name: string;
+  model_id: string;
+  model_display_name: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  total_tokens: number;
+  request_count: number;
+}
+
+export interface ProviderUsageEntry {
+  provider_id: string;
+  provider_display_name: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  total_tokens: number;
+  request_count: number;
+}
+
+export interface SessionUsageEntry {
+  session_id: string;
+  title: string;
+  provider_id: string;
+  model_id: string;
+  model_display_name: string;
+  message_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  total_tokens: number;
+  created_at: string;
+  updated_at: string;
+}
