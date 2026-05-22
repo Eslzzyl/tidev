@@ -296,13 +296,13 @@ tool_args! {
 
 tool_args! {
     pub struct MemoryArgs {
-        operation: string("Operation: store, update, search, list, read, or delete"),
-        memory_type: optional_string("Memory type: user, project, feedback, reference (required for store)"),
-        title: optional_string("Memory title (required for store)"),
-        content: optional_string("Memory content in markdown (required for store)"),
+        operation: string("Operation: remember, search, list, read, forget, observations. Slots: slot_list, slot_get, slot_set, slot_append, slot_delete. Eviction: evict."),
+        memory_type: optional_string("Memory type: user, project, feedback, reference (optional, defaults to fact)"),
+        title: optional_string("Memory title (optional, defaults to first 80 chars of content)"),
+        content: optional_string("Memory content in markdown (required for remember)"),
         tags: optional_string("Comma-separated tags or JSON array of tags (optional)"),
         query: optional_string("Search query (required for search)"),
-        memory_id: optional_string("Memory UUID (required for read, delete, update)"),
+        memory_id: optional_string("Memory UUID (required for read, forget)"),
     }
 }
 
