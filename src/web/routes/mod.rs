@@ -8,6 +8,7 @@ pub mod messages;
 pub mod models;
 pub mod providers;
 pub mod sessions;
+pub mod shell;
 pub mod skills;
 pub mod stats;
 pub mod static_file;
@@ -57,6 +58,8 @@ pub fn api_routes() -> Router<AppState> {
         .route("/sessions/{id}/redo", post(messages::redo_last_undo))
         .route("/sessions/{id}/compact", post(messages::compact_session))
         .route("/sessions/{id}/rename", post(sessions::rename_session))
+        // Shell
+        .route("/sessions/{id}/shell", post(shell::execute_shell_command))
         // Init prompt
         .route("/init", get(sessions::get_init_prompt))
         // Models

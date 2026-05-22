@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import type { VirtualItem } from "@tanstack/react-virtual";
-import type { Round, SystemMessageBlock } from "../../types/round";
+import type { Round, SystemMessageBlock, ShellBlock } from "../../types/round";
 import { MessageRound } from "./MessageRound";
 import { SystemMessageBlock as SystemMessageBlockComponent } from "../renderers/SystemMessageBlock";
+import { ShellBlock as ShellBlockComponent } from "../renderers/ShellBlock";
 
-export type VirtualEntry = Round | SystemMessageBlock;
+export type VirtualEntry = Round | SystemMessageBlock | ShellBlock;
 
 interface Props {
   entries: VirtualEntry[];
@@ -110,8 +111,13 @@ function renderEntry(
   canUndo?: boolean,
   staggerIndex?: number,
 ) {
-  if ("kind" in entry && entry.kind === "system") {
-    return <SystemMessageBlockComponent message={entry.message} />;
+  if ("kind" in entry) {
+    if (entry.kind === "shell") {
+      return <ShellBlockComponent block={entry as ShellBlock} />;
+    }
+    if (entry.kind === "system") {
+      return <SystemMessageBlockComponent message={entry.message} />;
+    }
   }
   return (
     <MessageRound

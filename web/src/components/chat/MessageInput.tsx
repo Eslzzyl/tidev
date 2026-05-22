@@ -29,7 +29,9 @@ export function MessageInput({
 }: MessageInputProps) {
   const [inputValue, setInputValue] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [shellMode, setShellMode] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const prevInputRef = useRef("");
 
   // File mention (@) state
   const [fileMention, setFileMention] = useState<{
@@ -304,6 +306,14 @@ export function MessageInput({
       toggleMode();
       return;
     }
+
+    // Shell mode: Escape to exit
+    if (shellMode && event.key === "Escape") {
+      event.preventDefault();
+      setShellMode(false);
+      setInputValue("");
+      return;
+    }
     if (
       event.key === "Enter" &&
       !event.shiftKey &&
@@ -322,6 +332,57 @@ export function MessageInput({
     // Check for slash commands
     if (content.startsWith("/")) {
       handleSlashCommand(content);
+      return;
+    }
+
+    // Shell mode: send as shell command
+    if (shellMode) {
+      setIsSubmitting(true);
+      setStreaming(true);
+
+      try {
+        let sessionId = currentSessionId;
+
+        // If draft session, create one first
+        if (!sessionId) {
+          const workspace = await api.getWorkspace();
+          const { session_id } = await api.createSession({
+            workspace_root: workspace.workspace_root,
+            title: `$ ${content.slice(0, 48)}`,
+            provider_id: selectedProviderId ?? undefined,
+            model_id: selectedModelId ?? undefined,
+          });
+          sessionId = session_id;
+
+          const [session, { messages, todos }] = await Promise.all([
+            api.getSession(sessionId),
+            api.listMessages(sessionId),
+          ]);
+          commitDraftSession(session);
+          setMessages(messages);
+          useSessionStore.getState().setTodos(todos ?? []);
+          setCurrentSessionId(sessionId);
+
+          const url = new URL(window.location.href);
+          url.searchParams.set("session", sessionId);
+          window.history.replaceState({}, "", url.toString());
+        }
+
+        // Optimistically add the shell user message
+        useSessionStore.getState().addMessage({
+          id: `shell-cmd-${Date.now()}`,
+          role: "shell",
+          content: `$ ${content}`,
+          created_at: new Date().toISOString(),
+        });
+
+        // Send to backend
+        await api.sendShellCommand(sessionId, content);
+        setInputValue("");
+        setShellMode(false);
+      } finally {
+        setIsSubmitting(false);
+      }
       return;
     }
 
@@ -601,7 +662,23 @@ export function MessageInput({
   // Handle input change with @ detection and /command detection
   function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     const value = e.target.value;
+    const prev = prevInputRef.current;
+    prevInputRef.current = value;
     const cursor = e.target.selectionStart || 0;
+
+    // Detect ! shell mode: user typed "!" when input was empty
+    if (!shellMode && prev === "" && value === "!") {
+      setShellMode(true);
+      setInputValue("");
+      return;
+    }
+
+    // Auto-exit shell mode when input is cleared
+    if (shellMode && value === "") {
+      setShellMode(false);
+      setInputValue("");
+      return;
+    }
 
     setInputValue(value);
 
@@ -907,15 +984,21 @@ export function MessageInput({
             onCompositionStart={handleCompositionStart}
             onCompositionEnd={handleCompositionEnd}
             placeholder={
-              isDraftSession
-                ? "Type your first message to create the session..."
-                : currentSessionId
-                  ? "Type a message..."
-                  : "Select or create a session to start"
+              shellMode
+                ? "Enter a shell command..."
+                : isDraftSession
+                  ? "Type your first message to create the session..."
+                  : currentSessionId
+                    ? "Type a message..."
+                    : "Select or create a session to start"
             }
             rows={1}
             disabled={!isInputEnabled}
-            className="min-h-[44px] w-full resize-none rounded-xl border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 placeholder-neutral-400 outline-none transition-all duration-150 focus:border-neutral-500 focus:ring-2 focus:ring-neutral-500/30 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500 dark:focus:border-neutral-400 dark:focus:ring-neutral-500/30"
+            className={`min-h-[44px] w-full resize-none rounded-xl border px-3 py-2.5 text-sm text-neutral-900 placeholder-neutral-400 outline-none transition-all duration-150 disabled:opacity-50 dark:text-neutral-100 dark:placeholder-neutral-500 ${
+              shellMode
+                ? "border-green-400 bg-white ring-2 ring-green-500/20 focus:border-green-500 focus:ring-green-500/30 dark:border-green-600 dark:bg-neutral-900 dark:focus:border-green-500"
+                : "border-neutral-300 bg-white focus:border-neutral-500 focus:ring-2 focus:ring-neutral-500/30 dark:border-neutral-700 dark:bg-neutral-900 dark:focus:border-neutral-400 dark:focus:ring-neutral-500/30"
+            }`}
           />
 
           {/* Send/Stop button */}

@@ -5,7 +5,7 @@ import {
   type VirtualItem,
   type Virtualizer,
 } from "@tanstack/react-virtual";
-import type { Round, SystemMessageBlock } from "../types/round";
+import type { Round, SystemMessageBlock, ShellBlock } from "../types/round";
 
 /** Only enable virtual scrolling when there are more than this many entries. */
 const VIRTUALIZE_THRESHOLD = 30;
@@ -13,7 +13,7 @@ const VIRTUALIZE_THRESHOLD = 30;
 /** Number of extra items rendered above/below the visible viewport. */
 const OVERSCAN = 6;
 
-export type VirtualEntry = Round | SystemMessageBlock;
+export type VirtualEntry = Round | SystemMessageBlock | ShellBlock;
 
 export interface UseMessageVirtualizerResult {
   /** The @tanstack/react-virtual Virtualizer instance. */
@@ -34,6 +34,16 @@ export interface UseMessageVirtualizerResult {
  */
 function estimateEntryHeight(entry: VirtualEntry | undefined): number {
   if (!entry) return 160;
+
+  // Shell blocks
+  if ("kind" in entry && entry.kind === "shell") {
+    const shell = entry as ShellBlock;
+    // Header ≈ 40px + output text ≈ 0.5px per char + padding
+    let height = 80;
+    const outputLen = shell.output.content?.length || 0;
+    height += Math.min(outputLen * 0.5 + 20, 800);
+    return height;
+  }
 
   // System message blocks are compact
   if ("kind" in entry && entry.kind === "system") {

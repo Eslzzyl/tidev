@@ -175,6 +175,14 @@ export interface SendMessageResponse {
   request_id: number;
 }
 
+export interface ShellCommandRequest {
+  command: string;
+}
+
+export interface ShellCommandResponse {
+  request_id: number;
+}
+
 export interface AbortRequest {
   request_id: number;
 }

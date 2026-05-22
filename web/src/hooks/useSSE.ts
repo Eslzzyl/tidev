@@ -185,6 +185,8 @@ export function useSSE(sessionId: string | null) {
       if (event.type !== "shell_output") return;
       const { content, finished, exit_code } = event;
 
+      // Try 1: bash tool path — find bash tool call in the streaming assistant
+      let handled = false;
       updateStreamingAssistant((msg) => {
         const toolCalls = msg.tool_calls ? [...msg.tool_calls] : [];
         // Find the most recently added bash tool call
@@ -196,6 +198,7 @@ export function useSSE(sessionId: string | null) {
           }
         }
         if (targetIdx < 0) return msg;
+        handled = true;
 
         // Parse exit code from content if present
         let exitCode: number | null = exit_code ?? null;
@@ -233,6 +236,46 @@ export function useSSE(sessionId: string | null) {
 
         return { ...msg, tool_calls: toolCalls };
       });
+
+      if (handled) return;
+
+      // Try 2: ! shell mode path — find or create a shell output message
+      const state = useSessionStore.getState();
+      const msgs = [...state.messages];
+
+      // Find the last shell message with streaming state (might have been optimistically created)
+      let found = false;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        // Look for a shell message that has no content yet (streaming placeholder),
+        // or the last shell message that's not the command ($ prefix)
+        if (msgs[i].role === "shell" && msgs[i].streaming) {
+          msgs[i] = {
+            ...msgs[i],
+            content,
+            streaming: !finished,
+            completed_at: finished ? new Date().toISOString() : undefined,
+          };
+          found = true;
+          break;
+        }
+      }
+
+      if (found) {
+        state.setMessages(msgs);
+        return;
+      }
+
+      // No existing streaming shell message — create a new one
+      if (finished) {
+        const shellOutput: Message = {
+          id: `shell-out-${Date.now()}`,
+          role: "shell",
+          content,
+          created_at: new Date().toISOString(),
+          completed_at: new Date().toISOString(),
+        };
+        state.setMessages([...msgs, shellOutput]);
+      }
     };
 
     const handleMessageComplete = () => {

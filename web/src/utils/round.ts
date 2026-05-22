@@ -4,18 +4,42 @@ import type {
   ToolCallEntry,
   RoundSegment,
   SystemMessageBlock,
+  ShellBlock,
 } from "../types/round";
 
 /**
- * Build a list of Rounds and SystemMessageBlocks from a flat list of Messages.
+ * Build a list of Rounds, SystemMessageBlocks and ShellBlocks
+ * from a flat list of Messages.
  */
 export function buildRounds(
   messages: Message[],
-): (Round | SystemMessageBlock)[] {
-  const rounds: (Round | SystemMessageBlock)[] = [];
+): (Round | SystemMessageBlock | ShellBlock)[] {
+  const rounds: (Round | SystemMessageBlock | ShellBlock)[] = [];
   let currentRound: Round | null = null;
+  let pendingShellCmd: Message | null = null;
 
   for (const msg of messages) {
+    // ── Shell command (starts with "$ ") ──
+    if (msg.role === "shell" && msg.content.startsWith("$ ")) {
+      pendingShellCmd = msg;
+      continue;
+    }
+
+    // ── Shell output (pairs with pending shell command) ──
+    if (msg.role === "shell" && pendingShellCmd) {
+      const exitCode = parseExitCode(msg.content);
+      rounds.push({
+        id: `shell-${pendingShellCmd.id}`,
+        command: pendingShellCmd,
+        output: msg,
+        exitCode,
+        kind: "shell",
+      });
+      pendingShellCmd = null;
+      continue;
+    }
+
+    // ── User message ──
     if (msg.role === "user") {
       currentRound = {
         id: `round-${msg.id}`,
@@ -111,9 +135,8 @@ export function buildRounds(
           });
         }
       }
-    } else {
-      // Unknown role (error, shell, etc.) — render as a system message
-      // so it doesn't appear as a spurious user round.
+    } else if (msg.role === "shell") {
+      // Orphan shell message (no preceding command) — render as system block
       rounds.push({
         id: `system-${msg.id}`,
         message: msg,
@@ -123,6 +146,15 @@ export function buildRounds(
   }
 
   return rounds;
+}
+
+/**
+ * Extract exit code from shell output content.
+ * Looks for "Exit code: N" at the end of the content.
+ */
+function parseExitCode(content: string): number | null {
+  const match = content.match(/Exit code:\s*(-?\d+)/);
+  return match ? parseInt(match[1], 10) : null;
 }
 
 export type { Round, ToolCallEntry, RoundSegment, SystemMessageBlock };

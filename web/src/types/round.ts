@@ -50,6 +50,17 @@ export interface SystemMessageBlock {
 }
 
 /**
+ * A shell command execution block.
+ */
+export interface ShellBlock {
+  id: string;
+  command: Message;
+  output: Message;
+  exitCode: number | null;
+  kind: "shell";
+}
+
+/**
  * Get all tool call entries from a round in segment order.
  */
 export function orderedToolCalls(round: Round): ToolCallEntry[] {
