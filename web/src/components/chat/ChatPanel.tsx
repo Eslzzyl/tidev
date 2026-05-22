@@ -252,14 +252,14 @@ export function ChatPanel() {
           <div ref={endRef} />
         </div>
 
-        {/* "Back to latest" floating button */}
+        {/* Scroll-to-bottom floating button */}
         {showScrollButton && (
           <button
             onClick={() => scrollToBottom()}
-            className="absolute bottom-4 right-6 z-10 flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm text-white shadow-lg transition-all hover:bg-blue-700 active:scale-95"
+            className="absolute bottom-4 right-6 z-10 flex items-center justify-center rounded-full bg-neutral-500/60 p-2.5 text-white shadow-lg backdrop-blur-sm transition-all hover:bg-neutral-500/80 active:scale-95 dark:bg-neutral-500/60 dark:hover:bg-neutral-500/80"
+            aria-label="Scroll to latest"
           >
             <ArrowDown className="h-4 w-4" />
-            Back to latest
           </button>
         )}
       </div>
