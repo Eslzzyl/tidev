@@ -79,7 +79,7 @@ export function buildRounds(
         if (msg.completed_at) {
           currentRound.completedAt = msg.completed_at;
         }
-        currentRound.status = "complete";
+        currentRound.status = msg.streaming ? "streaming" : "complete";
       } else if (msg.role === "tool" && msg.tool_call_id) {
         const entry = currentRound.toolCallMap[msg.tool_call_id];
         if (entry) {

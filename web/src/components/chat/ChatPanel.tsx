@@ -26,36 +26,18 @@ export function ChatPanel() {
   const currentSession = useSessionStore((s) => s.currentSession);
   const isDraftSession = useSessionStore((s) => s.isDraftSession);
 
-  const streamingRound = useUIStore((s) => s.streamingRound);
+  const isStreaming = useUIStore((s) => s.isStreaming);
 
-  const completedRounds = useMemo(() => buildRounds(messages), [messages]);
-
-  const allRounds = useMemo(() => {
-    const rounds: (Round | SystemMessageBlockType)[] = [...completedRounds];
-    if (streamingRound) {
-      // Replace the last completed round that has a userMessage with the
-      // streaming round, so the user message appears only once.  Using
-      // position (rather than userMessage.id comparison) avoids a race
-      // where the messages store is refreshed (e.g. via SSE reconnect)
-      // and the pending message ID no longer matches the real one.
-      for (let i = rounds.length - 1; i >= 0; i--) {
-        if ("userMessage" in rounds[i]) {
-          // Preserve the original id so React keeps the same key and
-          // updates the MessageRound in-place instead of remounting it.
-          rounds[i] = { ...streamingRound, id: rounds[i].id } as Round;
-          break;
-        }
-      }
-    }
-    return rounds;
-  }, [completedRounds, streamingRound]);
+  // buildRounds directly from messages — streaming assistant messages
+  // (with streaming: true) naturally produce a streaming-status round.
+  // No separate streamingRound merging needed.
+  const rounds = useMemo(() => buildRounds(messages), [messages]);
 
   // Virtual list + auto-scroll
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const { virtualItems, totalSize, isVirtualized, measureElement } =
-    useMessageVirtualizer(scrollContainerRef, allRounds);
+    useMessageVirtualizer(scrollContainerRef, rounds);
 
-  const isStreaming = !!streamingRound;
   const { handleScroll, scrollToBottom, showScrollButton, endRef } =
     useChatAutoScroll(scrollContainerRef, isStreaming);
 
@@ -65,12 +47,12 @@ export function ChatPanel() {
     if (
       currentSessionId &&
       currentSessionId !== scrolledSessionRef.current &&
-      allRounds.length > 0
+      rounds.length > 0
     ) {
       scrolledSessionRef.current = currentSessionId;
       scrollToBottom(true);
     }
-  }, [currentSessionId, allRounds.length, scrollToBottom]);
+  }, [currentSessionId, rounds.length, scrollToBottom]);
 
   // Undo state
   const [undoDialogOpen, setUndoDialogOpen] = useState(false);
@@ -224,7 +206,7 @@ export function ChatPanel() {
   }, []);
 
   // Determine if undo should be disabled (during streaming or when there's no session)
-  const canUndo = !!currentSessionId && !streamingRound;
+  const canUndo = !!currentSessionId && !isStreaming;
 
   return (
     <div className="flex h-full flex-col bg-white dark:bg-neutral-950">
@@ -246,7 +228,7 @@ export function ChatPanel() {
                 </p>
               </div>
             </div>
-          ) : allRounds.length === 0 && !streamingRound ? (
+          ) : rounds.length === 0 && !isStreaming ? (
             <div className="flex h-full items-center justify-center">
               <div className="text-center">
                 <p className="text-neutral-500 dark:text-neutral-400">
@@ -258,7 +240,7 @@ export function ChatPanel() {
             </div>
           ) : (
             <VirtualMessageList
-              entries={allRounds}
+              entries={rounds}
               virtualItems={virtualItems}
               totalSize={totalSize}
               isVirtualized={isVirtualized}

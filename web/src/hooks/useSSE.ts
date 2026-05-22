@@ -1,65 +1,92 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef } from "react";
 import { sseClient } from "../api/sse";
 import { usePermissionStore } from "../stores/usePermissionStore";
 import { useSessionStore } from "../stores/useSessionStore";
 import { useUIStore } from "../stores/useUIStore";
 import { api } from "../api/client";
 import type { AppEvent } from "../types/events";
-import type { Round, ToolCallEntry } from "../types/round";
 import type { UsageStatsData } from "../stores/useSessionStore";
 import type { Message, ToolCall } from "../types/api";
 
 export function useSSE(sessionId: string | null) {
   const setMessages = useSessionStore((s) => s.setMessages);
   const setStreaming = useUIStore((s) => s.setStreaming);
-  const setStreamingRound = useUIStore((s) => s.setStreamingRound);
   const setConnectionStatus = useUIStore((s) => s.setConnectionStatus);
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
 
-  // Mutable ref for synchronous access from event handlers
-  const streamingRef = useRef<Round | null>(null);
+  // Tracks the request_id of the current LLM turn.
+  // When a new turn starts (new request_id), we create a fresh streaming assistant message.
+  const currentRequestIdRef = useRef<number | null>(null);
 
-  const updateStreamingRound = useCallback(
-    (updater: (prev: Round | null) => Round | null) => {
-      const prev = streamingRef.current;
-      const next = updater(prev);
-      streamingRef.current = next;
-      useUIStore.getState().setStreamingRound(next);
-    },
-    [],
-  );
+  // Tracks the message ID of the currently-streaming assistant message.
+  // Used by handlers to quickly locate the message to update.
+  const streamingAssistantIdRef = useRef<string | null>(null);
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Ensure a streaming assistant message exists for the given request_id.
+   * If request_id matches the current turn, the existing message is reused.
+   * If it's a new turn, a fresh assistant message is appended to the messages store.
+   */
+  function ensureStreamingAssistant(request_id: number): void {
+    if (request_id === currentRequestIdRef.current && streamingAssistantIdRef.current) {
+      return; // Same turn, assistant already exists
+    }
+
+    // New turn — create a fresh streaming assistant message
+    currentRequestIdRef.current = request_id;
+
+    const state = useSessionStore.getState();
+    const msgs = [...state.messages];
+
+    const newMsg: Message = {
+      id: `stream-asst-${request_id}-${Date.now()}`,
+      role: "assistant",
+      content: "",
+      created_at: new Date().toISOString(),
+      reasoning: undefined,
+      tool_calls: undefined,
+      streaming: true,
+    };
+
+    streamingAssistantIdRef.current = newMsg.id;
+    msgs.push(newMsg);
+    state.setMessages(msgs);
+
+    console.log(
+      "[SSE] new streaming assistant (request_id=%s): %s",
+      request_id,
+      newMsg.id.substring(0, 20),
+    );
+  }
+
+  /**
+   * Update the streaming assistant message in the store by applying `updater`
+   * to the current message (identified by streamingAssistantIdRef).
+   * Silently no-ops if the streaming assistant is not found (race with abort/error).
+   */
+  function updateStreamingAssistant(
+    updater: (msg: Message) => Message,
+  ): void {
+    const id = streamingAssistantIdRef.current;
+    if (!id) return;
+
+    const state = useSessionStore.getState();
+    const msgs = state.messages.map((m) => (m.id === id ? updater(m) : m));
+    state.setMessages(msgs);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Event handlers (defined inside useEffect so they see the latest closure)
+  // ---------------------------------------------------------------------------
 
   useEffect(() => {
     if (!sessionId) return;
 
     setConnectionStatus("connecting");
-
-    const createStreamingRound = (): Round | null => {
-      const state = useSessionStore.getState();
-      const messages = state.messages;
-      const lastUserMsg = [...messages]
-        .reverse()
-        .find((m) => m.role === "user");
-      if (!lastUserMsg) {
-        console.log(
-          "[SSE] createStreamingRound: no user message found, messages:",
-          messages.length,
-        );
-        return null;
-      }
-      console.log(
-        "[SSE] createStreamingRound: found user msg id:",
-        lastUserMsg.id.substring(0, 20),
-      );
-
-      return {
-        id: `streaming-${lastUserMsg.id}`,
-        userMessage: lastUserMsg,
-        segments: [],
-        toolCallMap: {},
-        status: "streaming",
-      };
-    };
 
     const handleUsageStats = (event: AppEvent) => {
       if (event.type !== "usage_stats") return;
@@ -74,113 +101,98 @@ export function useSSE(sessionId: string | null) {
       useSessionStore.getState().setCurrentUsageStats(stats);
     };
 
+    const handleMessageChunk = (event: AppEvent) => {
+      if (event.type !== "message_chunk") return;
+      ensureStreamingAssistant(event.request_id);
+      updateStreamingAssistant((msg) => ({
+        ...msg,
+        content: msg.content + event.content,
+      }));
+    };
+
+    const handleReasoningChunk = (event: AppEvent) => {
+      if (event.type !== "reasoning_chunk") return;
+      ensureStreamingAssistant(event.request_id);
+      updateStreamingAssistant((msg) => ({
+        ...msg,
+        reasoning: (msg.reasoning ?? "") + event.content,
+      }));
+    };
+
     const handleToolCall = (event: AppEvent) => {
       if (event.type !== "tool_call") return;
-      const { tool_call_id, tool_name, arguments: args } = event;
+      ensureStreamingAssistant(event.request_id);
 
-      updateStreamingRound((prev) => {
-        const round = prev ?? createStreamingRound();
-        if (!round) return null;
+      updateStreamingAssistant((msg) => {
+        const toolCalls = [...(msg.tool_calls ?? [])];
+        const existingIdx = toolCalls.findIndex(
+          (tc) => tc.id === event.tool_call_id,
+        );
 
-        const toolCallMap = { ...round.toolCallMap };
-        const existing = toolCallMap[tool_call_id];
-
-        if (existing) {
-          const mergedArgs =
-            args && args !== existing.arguments
-              ? args
-              : existing.arguments;
-          let argsComplete = false;
-          try {
-            JSON.parse(mergedArgs);
-            argsComplete = true;
-          } catch {
-            // Still streaming
-          }
-          toolCallMap[tool_call_id] = {
-            ...existing,
-            arguments: mergedArgs,
-            argumentsComplete: argsComplete,
+        if (existingIdx >= 0) {
+          // Update arguments of an existing tool call (streaming args)
+          toolCalls[existingIdx] = {
+            ...toolCalls[existingIdx],
+            arguments: event.arguments || toolCalls[existingIdx].arguments,
           };
         } else {
-          let argsComplete = false;
-          try {
-            JSON.parse(args || "");
-            argsComplete = true;
-          } catch {
-            // Still streaming
-          }
-
-          toolCallMap[tool_call_id] = {
-            id: tool_call_id,
-            name: tool_name,
-            arguments: args || "",
-            argumentsComplete: argsComplete,
-            resultComplete: false,
-          };
+          // New tool call
+          toolCalls.push({
+            id: event.tool_call_id,
+            name: event.tool_name,
+            arguments: event.arguments ?? "",
+          });
         }
 
-        return {
-          ...round,
-          toolCallMap,
-          segments: !existing
-            ? [...round.segments, { type: "tool_call", toolCallId: tool_call_id }]
-            : round.segments,
-        };
+        return { ...msg, tool_calls: toolCalls };
       });
     };
 
     const handleToolResult = (event: AppEvent) => {
       if (event.type !== "tool_result") return;
-      const { tool_call_id, output, diff, filepath, rtk_rewritten } = event;
 
-      updateStreamingRound((prev) => {
-        if (!prev) return prev;
+      const state = useSessionStore.getState();
+      const msgs = [...state.messages];
 
-        const toolCallMap = { ...prev.toolCallMap };
-        const entry = toolCallMap[tool_call_id];
+      // Append a tool result message so buildRounds can link it to the tool call
+      const toolMsg: Message = {
+        id: `tool-${event.tool_call_id}-${Date.now()}`,
+        role: "tool",
+        content: event.output,
+        tool_call_id: event.tool_call_id,
+        tool_name: undefined,
+        created_at: new Date().toISOString(),
+        diff: event.diff,
+        filepath: event.filepath,
+        rtk_rewritten: event.rtk_rewritten ?? false,
+      };
+      msgs.push(toolMsg);
+      state.setMessages(msgs);
 
-        if (entry) {
-          toolCallMap[tool_call_id] = {
-            ...entry,
-            result: {
-              output,
-              diff: diff || undefined,
-              filepath: filepath || undefined,
-              rtk_rewritten: rtk_rewritten || false,
-              isError: false,
-            },
-            resultComplete: true,
-            argumentsComplete: true,
-          };
-        }
-
-        return { ...prev, toolCallMap };
-      });
+      console.log(
+        "[SSE] tool result for %s (output: %d chars)",
+        event.tool_call_id.substring(0, 12),
+        event.output.length,
+      );
     };
 
     const handleShellOutput = (event: AppEvent) => {
       if (event.type !== "shell_output") return;
       const { content, finished, exit_code } = event;
 
-      updateStreamingRound((prev) => {
-        if (!prev) return prev;
-
-        // Find the most recently added bash tool call (the actively running one)
-        // by scanning segments backward.  This avoids applying output to ALL
-        // bash entries when multiple concurrent bash calls exist.
-        const toolCallMap = { ...prev.toolCallMap };
-        let targetId: string | null = null;
-        for (let i = prev.segments.length - 1; i >= 0; i--) {
-          const seg = prev.segments[i];
-          if (seg.type === "tool_call" && toolCallMap[seg.toolCallId]?.name === "bash") {
-            targetId = seg.toolCallId;
+      updateStreamingAssistant((msg) => {
+        const toolCalls = msg.tool_calls ? [...msg.tool_calls] : [];
+        // Find the most recently added bash tool call
+        let targetIdx = -1;
+        for (let i = toolCalls.length - 1; i >= 0; i--) {
+          if (toolCalls[i].name === "bash") {
+            targetIdx = i;
             break;
           }
         }
-        if (!targetId) return prev;
+        if (targetIdx < 0) return msg;
 
-        // Parse exit code from content if present (format: "[exit N]\n...")
+        // Parse exit code from content if present
         let exitCode: number | null = exit_code ?? null;
         let cleanContent = content;
         const exitMatch = content.match(/^\[exit\s*(-?\d+)\]\n/);
@@ -189,280 +201,100 @@ export function useSSE(sessionId: string | null) {
           cleanContent = content.slice(exitMatch[0].length);
         }
 
-        toolCallMap[targetId] = {
-          ...toolCallMap[targetId],
-          result: {
-            output: cleanContent,
-            exitCode,
-            isError: exitCode !== null && exitCode !== 0,
-          },
-          resultComplete: finished,
-          argumentsComplete: true,
+        const isError = exitCode !== null && exitCode !== 0;
+
+        // Store shell output inline in the tool call's arguments (as JSON)
+        // so ToolCallRow can display it.
+        // We keep the original command and add output fields.
+        let argsObj: Record<string, unknown> = {};
+        try {
+          argsObj = JSON.parse(toolCalls[targetIdx].arguments || "{}");
+        } catch {
+          // Not valid JSON yet; keep as-is
+        }
+
+        if (finished) {
+          argsObj._output = cleanContent;
+          argsObj._exitCode = exitCode;
+          argsObj._isError = isError;
+        } else {
+          argsObj._partialOutput = cleanContent;
+        }
+
+        toolCalls[targetIdx] = {
+          ...toolCalls[targetIdx],
+          arguments: JSON.stringify(argsObj),
         };
 
-        return { ...prev, toolCallMap };
-      });
-    };
-
-    const handleMessageChunk = (event: AppEvent) => {
-      if (event.type !== "message_chunk") return;
-
-      updateStreamingRound((prev) => {
-        if (prev) {
-          const segments = [...prev.segments];
-          const lastIdx = segments.length - 1;
-          const lastSeg = segments[lastIdx];
-          if (lastSeg && lastSeg.type === "text") {
-            // Create a new segment object (immutable) to avoid mutating prev state
-            segments[lastIdx] = {
-              ...lastSeg,
-              content: lastSeg.content + event.content,
-            };
-          } else {
-            segments.push({ type: "text", content: event.content });
-          }
-          return { ...prev, segments };
-        }
-
-        // Create new streaming round with this content
-        const state = useSessionStore.getState();
-        const messages = state.messages;
-        const lastUserMsg = [...messages]
-          .reverse()
-          .find((m) => m.role === "user");
-        if (!lastUserMsg) {
-          console.log(
-            "[SSE] handleMessageChunk: no user msg found in store, messages:",
-            messages.length,
-          );
-          return null;
-        }
-        console.log(
-          "[SSE] handleMessageChunk: creating streaming round with user msg:",
-          lastUserMsg.id.substring(0, 20),
-        );
-
-        return {
-          id: `streaming-${lastUserMsg.id}`,
-          userMessage: lastUserMsg,
-          segments: [{ type: "text", content: event.content }],
-          toolCallMap: {},
-          status: "streaming",
-        };
-      });
-    };
-
-    const handleReasoningChunk = (event: AppEvent) => {
-      if (event.type !== "reasoning_chunk") return;
-
-      updateStreamingRound((prev) => {
-        if (prev) {
-          // Append reasoning to the last reasoning segment, or push a new one
-          const segments = [...prev.segments];
-          const lastIdx = segments.length - 1;
-          const lastSeg = segments[lastIdx];
-          if (lastSeg && lastSeg.type === "reasoning") {
-            // Create a new segment object (immutable) to avoid mutating prev state
-            segments[lastIdx] = {
-              ...lastSeg,
-              content: lastSeg.content + event.content,
-            };
-          } else {
-            segments.push({ type: "reasoning", content: event.content });
-          }
-          return { ...prev, segments };
-        }
-
-        // Create new streaming round with this reasoning segment
-        const state = useSessionStore.getState();
-        const messages = state.messages;
-        const lastUserMsg = [...messages]
-          .reverse()
-          .find((m) => m.role === "user");
-        if (!lastUserMsg) {
-          console.log(
-            "[SSE] handleReasoningChunk: no user msg found, messages:",
-            messages.length,
-          );
-          return null;
-        }
-        console.log(
-          "[SSE] handleReasoningChunk: creating streaming round, user msg:",
-          lastUserMsg.id.substring(0, 20),
-        );
-
-        return {
-          id: `streaming-${lastUserMsg.id}`,
-          userMessage: lastUserMsg,
-          segments: [{ type: "reasoning", content: event.content }],
-          toolCallMap: {},
-          status: "streaming",
-        };
+        return { ...msg, tool_calls: toolCalls };
       });
     };
 
     const handleMessageComplete = () => {
-      console.log(
-        "[SSE] message.complete fired, currentSessionId:",
-        currentSessionId,
-      );
-      setStreaming(false);
-
-      // The backend persists the assistant to the database before sending
-      // message.complete, so the API response includes all messages.
-      // We still build a local version from streamed segments as the
-      // authoritative source for the current turn's display content.
-      const round = streamingRef.current;
-
-      if (currentSessionId && round) {
-        const textContent = round.segments
-          .filter((s) => s.type === "text")
-          .map((s) => s.content)
-          .join("");
-        const reasoningContent = round.segments
-          .filter((s) => s.type === "reasoning")
-          .map((s) => s.content)
-          .join("\n\n");
-
-        // Collect tool calls that were fully streamed
-        const toolCalls: ToolCall[] = Object.values(round.toolCallMap)
-          .filter((e) => e.argumentsComplete)
-          .map((e) => ({ id: e.id, name: e.name, arguments: e.arguments }));
-
-        const assistantMsg: Message = {
-          id: `stream-final-${Date.now()}`,
-          role: "assistant",
-          content: textContent || "",
-          ...(reasoningContent ? { reasoning: reasoningContent } : {}),
-          ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
-          created_at: new Date().toISOString(),
+      // Mark the streaming assistant as complete
+      if (streamingAssistantIdRef.current) {
+        updateStreamingAssistant((msg) => ({
+          ...msg,
           completed_at: new Date().toISOString(),
-        };
-
-        console.log(
-          "[SSE] constructing assistant from stream, text:",
-          textContent.length,
-          "chars, toolCalls:",
-          toolCalls.length,
-        );
-
-        // Fetch messages from the API (backend now persists the assistant
-        // before sending message.complete, so apiMessages includes all
-        // user + assistant messages).  Replace the last assistant with our
-        // locally-constructed version to ensure the displayed content matches
-        // exactly what was streamed.
-        api.listMessages(currentSessionId).then(({ messages: apiMessages }) => {
-          // Guard against stale callbacks: the session may have changed
-          // while the API call was in-flight.
-          if (useSessionStore.getState().currentSessionId !== currentSessionId) return;
-
-          const msgs = [...apiMessages];
-          const lastIdx = msgs.length - 1;
-          if (lastIdx >= 0 && msgs[lastIdx].role === "assistant") {
-            msgs[lastIdx] = assistantMsg;
-          } else {
-            msgs.push(assistantMsg);
-          }
-          console.log(
-            "[SSE] merging API msgs (",
-            apiMessages.length,
-            ") with constructed assistant, total:",
-            msgs.length,
-          );
-          setMessages(msgs);
-          useSessionStore.getState().setCurrentUsageStats(null);
-          // Clear streaming state AFTER messages are updated so that
-          // allRounds transitions from streamingRound to completedRounds
-          // in a single render, avoiding an intermediate state where the
-          // streaming content disappears before the API data arrives.
-          streamingRef.current = null;
-          setStreamingRound(null);
-        }).catch((err) => {
-          console.error("[SSE] failed to refresh messages after completion:", err);
-          // Even on failure, clean up so the UI doesn't get stuck waiting
-          streamingRef.current = null;
-          setStreamingRound(null);
-        });
-      } else {
-        streamingRef.current = null;
-        setStreamingRound(null);
-        useSessionStore.getState().setCurrentUsageStats(null);
+          streaming: false,
+        }));
+        streamingAssistantIdRef.current = null;
       }
 
-      // was: streamingRef.current = null; setStreamingRound(null);
+      setStreaming(false);
+      useSessionStore.getState().setCurrentUsageStats(null);
     };
 
     const handleErrorEvent = (event: AppEvent) => {
       if (!event || event.type !== "error") return;
       setStreaming(false);
-      // Add error content to streaming round and mark it complete so
-      // the user can see what went wrong.  Keep the round in place so
-      // the error is visible — do NOT clear it here.
-      const round = streamingRef.current;
-      if (round) {
-        updateStreamingRound((prev) => {
-          if (!prev) return null;
-          const errorMsg = event.message || "An error occurred";
-          return {
-            ...prev,
-            segments: [
-              ...prev.segments,
-              { type: "text" as const, content: `\n\n**Error**: ${errorMsg}` },
-            ],
-            status: "complete" as const,
-          };
-        });
+
+      if (streamingAssistantIdRef.current) {
+        updateStreamingAssistant((msg) => ({
+          ...msg,
+          content: msg.content
+            ? `${msg.content}\n\n**Error**: ${event.message || "An error occurred"}`
+            : `**Error**: ${event.message || "An error occurred"}`,
+          completed_at: new Date().toISOString(),
+          streaming: false,
+        }));
+        streamingAssistantIdRef.current = null;
       }
     };
 
     const handleRetrying = (event: AppEvent) => {
       if (event.type !== "retrying") return;
-      // Show retry status in the streaming round so user knows what's happening
-      updateStreamingRound((prev) => {
-        if (!prev) return prev;
-        // Remove any existing retry-status segment, then add current one
-        const filtered = prev.segments.filter(
-          (s) => s.type !== "text" || !s.content.startsWith("\n\n_Retrying"),
-        );
-        const statusLine = `\n\n_Retrying (${event.attempt}/${event.max_attempts}): ${event.reason}..._`;
-        return {
-          ...prev,
-          segments: [
-            ...filtered,
-            { type: "text" as const, content: statusLine },
-          ],
-        };
-      });
+      // Show retry info on the UI store level
     };
 
     const handleAborted = () => {
       setStreaming(false);
-      setStreamingRound(null);
-      streamingRef.current = null;
+
+      if (streamingAssistantIdRef.current) {
+        // Mark the streaming assistant as complete (keep what was generated)
+        updateStreamingAssistant((msg) => ({
+          ...msg,
+          completed_at: new Date().toISOString(),
+          streaming: false,
+        }));
+        streamingAssistantIdRef.current = null;
+      }
     };
 
     const handleConnected = () => {
       setConnectionStatus("connected");
-      // Refresh messages after reconnect to catch any events that
-      // were missed during the disconnection (e.g. message.complete).
-      if (currentSessionId) {
-        api.listMessages(currentSessionId).then(({ messages, todos }) => {
-          setMessages(messages);
-          useSessionStore.getState().setTodos(todos ?? []);
-          // If streaming was active but the backend already finished
-          // (e.g. SSE reconnected after message.complete was sent),
-          // clear the stale streaming round so the UI shows final data.
-          const lastMsg = messages[messages.length - 1];
-          if (lastMsg?.role === "assistant" && lastMsg.completed_at) {
-            streamingRef.current = null;
-            setStreamingRound(null);
-          }
-        });
-      }
+    };
+
+    const handleDisconnected = () => {
+      setConnectionStatus("disconnected");
+      setStreaming(false);
     };
 
     const handleMessagesUpdated = () => {
-      // Refresh messages from API (e.g. after compaction completes)
+      // Refresh messages from API (e.g. after compaction completes).
+      // Ignore during streaming to avoid wiping local streaming state.
+      if (streamingAssistantIdRef.current) return;
+
       if (currentSessionId) {
         api.listMessages(currentSessionId).then(({ messages, todos }) => {
           setMessages(messages);
@@ -476,11 +308,11 @@ export function useSSE(sessionId: string | null) {
     };
 
     // Register SSE listeners
+    sseClient.on("message.chunk", handleMessageChunk);
+    sseClient.on("reasoning.chunk", handleReasoningChunk);
     sseClient.on("tool.call", handleToolCall);
     sseClient.on("tool.result", handleToolResult);
     sseClient.on("shell.output", handleShellOutput);
-    sseClient.on("message.chunk", handleMessageChunk);
-    sseClient.on("reasoning.chunk", handleReasoningChunk);
     sseClient.on("message.complete", handleMessageComplete);
     sseClient.on("usage.stats", handleUsageStats);
     sseClient.on("error", handleErrorEvent);
@@ -493,12 +325,13 @@ export function useSSE(sessionId: string | null) {
     // Connect
     sseClient.connect(sessionId);
 
+    // Cleanup
     return () => {
+      sseClient.off("message.chunk", handleMessageChunk);
+      sseClient.off("reasoning.chunk", handleReasoningChunk);
       sseClient.off("tool.call", handleToolCall);
       sseClient.off("tool.result", handleToolResult);
       sseClient.off("shell.output", handleShellOutput);
-      sseClient.off("message.chunk", handleMessageChunk);
-      sseClient.off("reasoning.chunk", handleReasoningChunk);
       sseClient.off("message.complete", handleMessageComplete);
       sseClient.off("usage.stats", handleUsageStats);
       sseClient.off("error", handleErrorEvent);
@@ -508,8 +341,8 @@ export function useSSE(sessionId: string | null) {
       sseClient.off("messages.updated", handleMessagesUpdated);
       sseClient.off("permission.request", handlePermissionRequest);
       sseClient.disconnect();
-      setStreamingRound(null);
-      streamingRef.current = null;
+      streamingAssistantIdRef.current = null;
+      currentRequestIdRef.current = null;
     };
   }, [
     sessionId,
@@ -517,9 +350,5 @@ export function useSSE(sessionId: string | null) {
     setMessages,
     setStreaming,
     setConnectionStatus,
-    updateStreamingRound,
   ]);
-
-  // No return value — streamingRound is stored in the UI store for
-  // global access (so SSE stays connected even when ChatPanel isn't mounted).
 }

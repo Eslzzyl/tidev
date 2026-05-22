@@ -54,6 +54,8 @@ export interface Message {
   content: string;
   created_at: string;
   completed_at?: string;
+  /** Local-only flag set during SSE streaming; not persisted by the API. */
+  streaming?: boolean;
   file_diffs?: FileDiff[];
   todos?: TodoItem[];
   token_usage?: TokenUsage;

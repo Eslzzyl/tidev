@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import type { MainTab } from "../lib/router";
-import type { Round } from "../types/round";
 
 export type { MainTab } from "../lib/router";
 export type Theme = "light" | "dark" | "system";
@@ -28,7 +27,6 @@ export interface UIState {
   rightSidebarWidth: number;
   activeTab: MainTab;
   settings: SettingsState;
-  streamingRound: Round | null;
 }
 
 export interface UIActions {
@@ -50,7 +48,6 @@ export interface UIActions {
   setInputValue: (value: string) => void;
   setLoading: (isLoading: boolean) => void;
   setStreaming: (isStreaming: boolean) => void;
-  setStreamingRound: (round: Round | null) => void;
   setConnectionStatus: (status: UIState["connectionStatus"]) => void;
   setActiveTab: (tab: MainTab) => void;
   navigateToChat: (sessionId?: string) => void;
@@ -129,7 +126,6 @@ const initialState: UIState = {
   inputValue: "",
   isLoading: false,
   isStreaming: false,
-  streamingRound: null,
   connectionStatus: "disconnected",
   leftSidebarWidth: persisted.leftSidebarWidth,
   rightSidebarWidth: persisted.rightSidebarWidth,
@@ -195,7 +191,6 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
   setInputValue: (value) => set({ inputValue: value }),
   setLoading: (isLoading) => set({ isLoading }),
   setStreaming: (isStreaming) => set({ isStreaming }),
-  setStreamingRound: (round) => set({ streamingRound: round }),
   setConnectionStatus: (status) => set({ connectionStatus: status }),
 
   setActiveTab: (tab) => {
