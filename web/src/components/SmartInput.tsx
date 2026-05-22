@@ -418,7 +418,7 @@ export function SmartInput({
       )}
 
       {/* Input Container */}
-      <div className="relative rounded-2xl border border-neutral-200 bg-white shadow-lg dark:border-neutral-800 dark:bg-neutral-900">
+      <div className="relative rounded-2xl border border-neutral-200 bg-white shadow-lg transition-all duration-200 ease-smooth focus-within:border-neutral-400 focus-within:shadow-[0_0_0_3px_rgba(0,0,0,0.04)] dark:border-neutral-800 dark:bg-neutral-900 dark:focus-within:border-neutral-600 dark:focus-within:shadow-[0_0_0_3px_rgba(255,255,255,0.04)]">
         {/* Input Element */}
         {multiline ? (
           <textarea
@@ -431,7 +431,7 @@ export function SmartInput({
             placeholder={finalPlaceholder}
             rows={1}
             disabled={!isInputEnabled}
-            className={`min-h-[44px] w-full resize-none rounded-2xl bg-transparent px-4 py-3 pr-12 text-sm text-neutral-900 placeholder-neutral-400 outline-none transition-colors focus:border-neutral-500 disabled:opacity-50 dark:text-neutral-100 dark:placeholder-neutral-500 ${inputClassName}`}
+            className={`min-h-[44px] w-full resize-none rounded-2xl bg-transparent px-4 py-3 pr-12 text-sm text-neutral-900 placeholder-neutral-400 outline-none disabled:opacity-50 dark:text-neutral-100 dark:placeholder-neutral-500 ${inputClassName}`}
           />
         ) : (
           <input
@@ -444,7 +444,7 @@ export function SmartInput({
             onCompositionEnd={handleCompositionEnd}
             placeholder={finalPlaceholder}
             disabled={!isInputEnabled}
-            className={`w-full rounded-2xl bg-transparent px-4 py-3 pr-12 text-sm text-neutral-900 placeholder-neutral-400 outline-none transition-colors focus:border-neutral-500 disabled:opacity-50 dark:text-neutral-100 dark:placeholder-neutral-500 ${inputClassName}`}
+            className={`w-full rounded-2xl bg-transparent px-4 py-3 pr-12 text-sm text-neutral-900 placeholder-neutral-400 outline-none disabled:opacity-50 dark:text-neutral-100 dark:placeholder-neutral-500 ${inputClassName}`}
           />
         )}
 
