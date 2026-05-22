@@ -127,6 +127,28 @@ export interface SetAgentModelRequest {
   thinking_level?: string;
 }
 
+export interface GetMemoryModelResponse {
+  role: string;
+  model_str: string | null;
+}
+
+export interface SetMemoryModelRequest {
+  role: string;
+  model_str: string;
+}
+
+export interface GetModelThinkingLevelResponse {
+  provider_id: string;
+  model_id: string;
+  thinking_level: string | null;
+}
+
+export interface SetModelThinkingLevelRequest {
+  provider_id: string;
+  model_id: string;
+  thinking_level: string;
+}
+
 export interface SetDefaultModelRequest {
   provider_id: string;
   model_id: string;

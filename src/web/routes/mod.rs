@@ -70,6 +70,14 @@ pub fn api_routes() -> Router<AppState> {
             "/config/agent-models",
             get(config::get_agent_models).post(config::set_agent_model),
         )
+        .route(
+            "/config/memory-model",
+            get(config::get_memory_model).post(config::set_memory_model),
+        )
+        .route(
+            "/config/model-thinking-level",
+            get(config::get_model_thinking_level).post(config::set_model_thinking_level),
+        )
         // Providers
         .route(
             "/providers",

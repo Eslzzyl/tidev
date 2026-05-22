@@ -235,3 +235,146 @@ pub async fn set_agent_model(
 
     Ok(Json(SetAgentModelResponse { success: true }))
 }
+
+/// --- Memory Model (consolidation) ---
+
+/// Get memory model response
+#[derive(Serialize)]
+pub struct GetMemoryModelResponse {
+    pub role: String,
+    pub model_str: Option<String>,
+}
+
+/// Set memory model request
+#[derive(Deserialize)]
+pub struct SetMemoryModelRequest {
+    pub role: String,
+    /// "provider_id/model_id" or empty string to clear the override.
+    pub model_str: String,
+}
+
+#[derive(Serialize)]
+pub struct SetMemoryModelResponse {
+    pub success: bool,
+}
+
+/// Get the current memory model override for a role.
+pub async fn get_memory_model(
+    State(state): State<AppState>,
+) -> Result<Json<GetMemoryModelResponse>, AppError> {
+    let config = state.config.read().await;
+    let model_str = config.memory_model_label("consolidation").map(|s| s.to_string());
+    Ok(Json(GetMemoryModelResponse {
+        role: "consolidation".to_string(),
+        model_str,
+    }))
+}
+
+/// Set (or clear) the memory model override for a role.
+pub async fn set_memory_model(
+    State(state): State<AppState>,
+    Json(body): Json<SetMemoryModelRequest>,
+) -> Result<Json<SetMemoryModelResponse>, AppError> {
+    let role = body.role.trim().to_ascii_lowercase();
+    if role != "consolidation" {
+        return Err(AppError::BadRequest(format!(
+            "Unknown memory role '{}'. Valid roles: consolidation",
+            body.role
+        )));
+    }
+
+    // If model_str is not empty, validate the provider and model exist
+    if !body.model_str.is_empty() {
+        let parts: Vec<&str> = body.model_str.splitn(2, '/').collect();
+        if parts.len() != 2 {
+            return Err(AppError::BadRequest(
+                "model_str must be in 'provider_id/model_id' format".to_string(),
+            ));
+        }
+        let provider_id = parts[0];
+        let model_id = parts[1];
+
+        let config = state.config.read().await;
+        let provider = config
+            .provider(provider_id)
+            .ok_or_else(|| AppError::BadRequest(format!("Provider '{}' not found", provider_id)))?;
+        if !provider.models.contains_key(model_id) {
+            return Err(AppError::BadRequest(format!(
+                "Model '{}' not found for provider '{}'",
+                model_id, provider_id
+            )));
+        }
+        drop(config);
+    }
+
+    // Update config and persist
+    let mut config = state.config.write().await;
+    config.set_memory_model(&state.config_paths, &role, &body.model_str)?;
+    drop(config);
+
+    Ok(Json(SetMemoryModelResponse { success: true }))
+}
+
+/// --- Model Thinking Level Preference ---
+
+/// Get stored thinking level preference response
+#[derive(Serialize)]
+pub struct GetModelThinkingLevelResponse {
+    pub provider_id: String,
+    pub model_id: String,
+    pub thinking_level: Option<String>,
+}
+
+/// Set thinking level preference request
+#[derive(Deserialize)]
+pub struct SetModelThinkingLevelRequest {
+    pub provider_id: String,
+    pub model_id: String,
+    pub thinking_level: String,
+}
+
+#[derive(Serialize)]
+pub struct SetModelThinkingLevelResponse {
+    pub success: bool,
+}
+
+/// Get the stored thinking level preference for a specific model.
+pub async fn get_model_thinking_level(
+    State(state): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> Result<Json<GetModelThinkingLevelResponse>, AppError> {
+    let provider_id = params.get("provider_id").ok_or_else(|| {
+        AppError::BadRequest("Missing 'provider_id' query parameter".to_string())
+    })?;
+    let model_id = params.get("model_id").ok_or_else(|| {
+        AppError::BadRequest("Missing 'model_id' query parameter".to_string())
+    })?;
+
+    let store = state.store.lock().await;
+    let thinking_level = store
+        .load_model_thinking_level(provider_id, model_id)
+        .ok()
+        .flatten();
+
+    Ok(Json(GetModelThinkingLevelResponse {
+        provider_id: provider_id.clone(),
+        model_id: model_id.clone(),
+        thinking_level,
+    }))
+}
+
+/// Save a thinking level preference for a specific model.
+pub async fn set_model_thinking_level(
+    State(state): State<AppState>,
+    Json(body): Json<SetModelThinkingLevelRequest>,
+) -> Result<Json<SetModelThinkingLevelResponse>, AppError> {
+    let store = state.store.lock().await;
+    store
+        .save_model_thinking_level(&body.provider_id, &body.model_id, &body.thinking_level)
+        .map_err(|e| {
+            crate::log_error!("Failed to save thinking level preference: {}", e);
+            AppError::Internal("Failed to save thinking level preference".to_string())
+        })?;
+
+    Ok(Json(SetModelThinkingLevelResponse { success: true }))
+}

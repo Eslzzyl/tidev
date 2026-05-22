@@ -65,6 +65,7 @@ export function MessageInput({
 
   const thinkingDropdownRef = useRef<HTMLDivElement>(null);
   const todoDropdownRef = useRef<HTMLDivElement>(null);
+  const currentModelRef = useRef<string | null>(null);
 
   // Todos state
   const [todos, setTodos] = useState<TodoItem[]>([]);
@@ -88,34 +89,47 @@ export function MessageInput({
   const isInputEnabled = currentSessionId !== null || isDraftSession;
 
   // Update thinking levels based on model - use data from API model info
-  const updateThinkingLevels = useCallback(
-    (modelId: string) => {
-      const model = models.find((m) => m.id === modelId);
-      if (
-        model &&
-        model.thinking_supported &&
-        model.thinking_options.length > 0
-      ) {
-        const options = model.thinking_options.map((opt) => {
-          const parts = opt.split(":");
-          const label = parts[1]
-            ? parts[1].charAt(0).toUpperCase() + parts[1].slice(1)
-            : opt;
-          return { label, value: opt };
-        });
-        setThinkingOptions(options);
-        // Prefer the model's default thinking level, fall back to first option
-        const defaultTl = model.thinking_options.includes(model.thinking_level)
-          ? model.thinking_level
-          : model.thinking_options[0];
-        setSelectedThinking(defaultTl);
-      } else {
-        setThinkingOptions([]);
-        setSelectedThinking("");
-      }
-    },
-    [models],
-  );
+  const updateThinkingLevels = useCallback((model: ModelInfo) => {
+    currentModelRef.current = model.id;
+
+    if (
+      model.thinking_supported &&
+      model.thinking_options.length > 0
+    ) {
+      const options = model.thinking_options.map((opt) => {
+        const parts = opt.split(":");
+        const label = parts[1]
+          ? parts[1].charAt(0).toUpperCase() + parts[1].slice(1)
+          : opt;
+        return { label, value: opt };
+      });
+      setThinkingOptions(options);
+
+      // Set model default as initial, then load stored preference
+      const defaultTl = model.thinking_options.includes(model.thinking_level)
+        ? model.thinking_level
+        : model.thinking_options[0];
+      setSelectedThinking(defaultTl);
+
+      // Load stored thinking level preference from backend
+      api
+        .getModelThinkingLevel(model.provider_id, model.id)
+        .then((resp) => {
+          // Ignore stale responses if model changed while loading
+          if (currentModelRef.current !== model.id) return;
+          if (
+            resp.thinking_level &&
+            model.thinking_options.includes(resp.thinking_level)
+          ) {
+            setSelectedThinking(resp.thinking_level);
+          }
+        })
+        .catch(() => {});
+    } else {
+      setThinkingOptions([]);
+      setSelectedThinking("");
+    }
+  }, []);
 
   // Load models and set initial selection
   useEffect(() => {
@@ -139,11 +153,11 @@ export function MessageInput({
         if (sessionModel) {
           setSelectedModelId(sessionModel.id);
           setSelectedProviderId(sessionModel.provider_id);
-          updateThinkingLevels(sessionModel.id);
+          updateThinkingLevels(sessionModel);
         } else if (!selectedModelId && modelList.length > 0) {
           setSelectedModelId(modelList[0].id);
           setSelectedProviderId(modelList[0].provider_id);
-          updateThinkingLevels(modelList[0].id);
+          updateThinkingLevels(modelList[0]);
         }
       })
       .catch(() => {});
@@ -658,7 +672,7 @@ export function MessageInput({
   function handleModelPanelChange(model: ModelInfo) {
     setSelectedModelId(model.id);
     setSelectedProviderId(model.provider_id);
-    updateThinkingLevels(model.id);
+    updateThinkingLevels(model);
   }
 
   const selectedModelDisplay = selectedModelId
@@ -724,6 +738,16 @@ export function MessageInput({
                       onClick={() => {
                         setSelectedThinking(option.value);
                         setThinkingDropdownOpen(false);
+                        // Persist thinking level preference to backend
+                        if (selectedProviderId && selectedModelId) {
+                          api
+                            .setModelThinkingLevel({
+                              provider_id: selectedProviderId,
+                              model_id: selectedModelId,
+                              thinking_level: option.value,
+                            })
+                            .catch(() => {});
+                        }
                       }}
                       className={`flex w-full px-3 py-2 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 ${selectedThinking === option.value ? "bg-neutral-100 dark:bg-neutral-800 font-medium" : ""}`}
                     >

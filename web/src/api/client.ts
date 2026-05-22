@@ -22,6 +22,10 @@ import type {
   GetDefaultModelResponse,
   GetAgentModelsResponse,
   SetAgentModelRequest,
+  GetMemoryModelResponse,
+  SetMemoryModelRequest,
+  GetModelThinkingLevelResponse,
+  SetModelThinkingLevelRequest,
   DirectoryEntry,
   ListDirResponse,
   ReadFileResponse,
@@ -228,6 +232,30 @@ export const api = {
 
   setAgentModel: (data: SetAgentModelRequest) =>
     fetchJson<{ success: boolean }>(`${API_BASE}/config/agent-models`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  // Memory model
+  getMemoryModel: () =>
+    fetchJson<GetMemoryModelResponse>(`${API_BASE}/config/memory-model`),
+
+  setMemoryModel: (data: SetMemoryModelRequest) =>
+    fetchJson<{ success: boolean }>(`${API_BASE}/config/memory-model`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  // Thinking level preference
+  getModelThinkingLevel: (providerId: string, modelId: string) => {
+    const params = new URLSearchParams({ provider_id: providerId, model_id: modelId });
+    return fetchJson<GetModelThinkingLevelResponse>(
+      `${API_BASE}/config/model-thinking-level?${params}`,
+    );
+  },
+
+  setModelThinkingLevel: (data: SetModelThinkingLevelRequest) =>
+    fetchJson<{ success: boolean }>(`${API_BASE}/config/model-thinking-level`, {
       method: "POST",
       body: JSON.stringify(data),
     }),
