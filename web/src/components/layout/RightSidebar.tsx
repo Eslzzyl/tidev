@@ -161,7 +161,7 @@ export function RightSidebar() {
   };
 
   return (
-    <div className="flex h-full flex-col bg-white dark:bg-neutral-950">
+    <div className="flex h-full min-h-0 flex-col bg-white dark:bg-neutral-950">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-neutral-200 px-2 py-1.5 dark:border-neutral-800">
         <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">

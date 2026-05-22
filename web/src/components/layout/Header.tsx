@@ -30,7 +30,11 @@ const pageLabels: Record<MainTab, string> = {
   stats: "Statistics",
 };
 
-export function Header() {
+interface HeaderProps {
+  className?: string;
+}
+
+export function Header({ className }: HeaderProps) {
   const activeTab = useUIStore((s) => s.activeTab);
   const setActiveTab = useUIStore((s) => s.setActiveTab);
   const toggleMobileMenu = useUIStore((s) => s.toggleMobileMenu);
@@ -65,7 +69,7 @@ export function Header() {
   }, [activeTab]);
 
   return (
-    <header className="flex h-11 items-center justify-between border-b border-neutral-200 bg-white px-3 dark:border-neutral-800 dark:bg-neutral-950">
+    <header className={`relative z-10 flex h-12 items-center justify-between border-b border-neutral-100/80 bg-white/95 px-3 shadow-[0_1px_2px_-1px_rgba(0,0,0,0.05)] backdrop-blur-sm dark:border-neutral-800/60 dark:bg-neutral-950/95 dark:shadow-[0_1px_2px_-1px_rgba(0,0,0,0.3)] ${className ?? ""}`}>
       {/* Left: mobile menu + nav tabs */}
       <div className="flex items-center gap-1">
         {/* Mobile menu toggle */}
@@ -102,7 +106,7 @@ export function Header() {
           ))}
           {/* Animated background pill — slides to the active tab */}
           <div
-            className="absolute inset-y-0.5 rounded-md bg-neutral-100 motion-safe:transition-all motion-safe:duration-200 motion-safe:ease-smooth dark:bg-neutral-800"
+            className="absolute inset-y-0.5 rounded-md bg-neutral-100/80 shadow-[0_1px_2px_rgba(0,0,0,0.04)] ring-1 ring-neutral-200/50 motion-safe:transition-all motion-safe:duration-200 motion-safe:ease-smooth dark:bg-neutral-800/80 dark:shadow-black/20 dark:ring-neutral-700/50"
             style={{
               left: `${indicator.left}px`,
               width: `${indicator.width}px`,

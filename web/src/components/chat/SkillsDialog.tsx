@@ -158,9 +158,9 @@ export function SkillsDialog({ isOpen, onClose, onSelect }: SkillsDialogProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 motion-safe:animate-fade-in p-4">
       <div
-        className="flex h-[85vh] w-full max-w-3xl flex-col rounded-lg bg-white shadow-lg dark:bg-neutral-900"
+        className="motion-safe:animate-scale-fade flex h-[85vh] w-full max-w-3xl flex-col rounded-lg bg-white shadow-lg dark:bg-neutral-900"
         onKeyDown={handleKeyDown}
       >
         {/* Header */}
@@ -173,7 +173,7 @@ export function SkillsDialog({ isOpen, onClose, onSelect }: SkillsDialogProps) {
           </div>
           <button
             onClick={onClose}
-            className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+            className="rounded p-1 text-neutral-400 transition-all duration-150 hover:bg-neutral-100 hover:text-neutral-600 active:scale-95 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
           >
             <X className="h-5 w-5" />
           </button>
@@ -250,7 +250,7 @@ export function SkillsDialog({ isOpen, onClose, onSelect }: SkillsDialogProps) {
                     onMouseEnter={() =>
                       dispatch({ type: "SELECT_INDEX", index })
                     }
-                    className={`w-full px-4 py-3 text-left transition-colors ${
+                    className={`w-full px-4 py-3 text-left transition-all duration-150 active:scale-[0.99] ${
                       index === state.selectedIndex
                         ? "bg-blue-50 dark:bg-blue-900/30"
                         : "hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
@@ -316,7 +316,7 @@ export function SkillsDialog({ isOpen, onClose, onSelect }: SkillsDialogProps) {
                   <div className="mt-4">
                     <button
                       onClick={() => onSelect(selectedSkill.name)}
-                      className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600"
+                      className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-all duration-150 hover:bg-blue-700 active:scale-[0.98] dark:bg-blue-700 dark:hover:bg-blue-600"
                     >
                       Load "{selectedSkill.name}"
                     </button>

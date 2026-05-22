@@ -38,13 +38,12 @@ export function FileTabs({
             {file.isDirty && (
               <span className="h-2 w-2 shrink-0 rounded-full bg-amber-400" />
             )}
-            <span
-              onClick={(e) => onClose(file.path, e)}
-              className="ml-0.5 rounded p-0.5 text-neutral-400 opacity-0 hover:bg-neutral-200 hover:text-neutral-600 group-hover:opacity-100 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
-              role="button"
-              aria-label={`Close ${file.path}`}
-            >
-              <X className="h-3 w-3" />
+<span
+  onClick={(e) => onClose(file.path, e)}
+  className="ml-0.5 cursor-pointer rounded p-0.5 text-neutral-400 opacity-0 hover:bg-neutral-200 hover:text-neutral-600 group-hover:opacity-100 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
+  role="button"
+  aria-label={`Close ${file.path}`}
+>              <X className="h-3 w-3" />
             </span>
           </button>
         );

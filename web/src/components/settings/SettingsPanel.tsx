@@ -130,7 +130,7 @@ export function SettingsPanel() {
                 key={cat.id}
                 data-cat-id={cat.id}
                 onClick={() => setActiveCategory(cat.id)}
-                className={`relative flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors duration-150 ${
+                className={`relative flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-all duration-150 active:scale-[0.97] ${
                   activeCategory === cat.id
                     ? "font-medium text-neutral-900 dark:text-neutral-100"
                     : "text-neutral-500 hover:bg-neutral-50 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800/50 dark:hover:text-neutral-300"

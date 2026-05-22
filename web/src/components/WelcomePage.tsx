@@ -223,7 +223,7 @@ export function WelcomePage() {
   const hasMoreSessions = sessions.length > MAX_RECENT_SESSIONS;
 
   return (
-    <div className="relative flex h-full flex-col items-center justify-center bg-white px-4 dark:bg-neutral-950">
+    <div className="relative flex h-full flex-col items-center justify-center bg-white px-4 motion-safe:animate-fade-in-up dark:bg-neutral-950">
       {/* Logo/Title */}
       <div className="mb-12 text-center">
         <h1 className="mb-2 text-4xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100">
@@ -251,7 +251,10 @@ export function WelcomePage() {
 
       {/* Recent Sessions */}
       {sessions.length > 0 && (
-        <div className="mt-12 w-full max-w-2xl">
+        <div
+          className="mt-12 w-full max-w-2xl motion-safe:animate-fade-in-up"
+          style={{ animationDelay: "50ms" }}
+        >
           <div className="mb-3 flex items-center justify-between">
             <h2 className="flex items-center gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-300">
               <Clock className="h-4 w-4" />

@@ -680,14 +680,14 @@ export function MessageInput({
     : null;
 
   return (
-    <div className="border-t border-neutral-200 bg-white px-4 py-3 dark:border-neutral-800 dark:bg-neutral-950">
+    <div className="border-t border-neutral-100/80 bg-white px-4 py-3 shadow-[0_-1px_3px_-1px_rgba(0,0,0,0.05)] dark:border-neutral-800/60 dark:bg-neutral-950">
       <div className="mx-auto flex max-w-4xl flex-col gap-2">
         {/* Controls row */}
         <div className="flex items-center gap-2">
           {/* Mode toggle */}
           <button
             onClick={toggleMode}
-            className={`rounded px-2 py-1 text-xs font-medium transition-all duration-150 hover:scale-105 ${
+            className={`rounded px-2 py-1 text-xs font-medium transition-all duration-150 hover:scale-105 active:scale-95 ${
               mode === "plan"
                 ? "bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-300"
                 : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300"
@@ -699,7 +699,7 @@ export function MessageInput({
           {/* Model selector - opens ModelPanel */}
           <button
             onClick={() => setModelPanelOpen(true)}
-            className="flex items-center gap-1 rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 transition-all duration-150 hover:scale-105 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+            className="flex items-center gap-1 rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 transition-all duration-150 hover:scale-105 active:scale-95 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
           >
             <span className="max-w-[120px] truncate">
               {selectedModelDisplay?.display_name || "Select model"}
@@ -721,7 +721,7 @@ export function MessageInput({
             <div ref={thinkingDropdownRef} className="relative">
               <button
                 onClick={() => setThinkingDropdownOpen(!thinkingDropdownOpen)}
-                className="flex items-center gap-1 rounded bg-amber-50 px-2 py-1 text-xs text-amber-700 hover:bg-amber-100 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/50"
+                className="flex items-center gap-1 rounded bg-amber-50 px-2 py-1 text-xs text-amber-700 transition-all duration-150 hover:bg-amber-100 active:scale-95 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/50"
               >
                 <span>
                   {thinkingOptions.find((t) => t.value === selectedThinking)
@@ -923,7 +923,7 @@ export function MessageInput({
             {isStreaming ? (
               <button
                 onClick={handleStop}
-                className="mb-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-red-100 text-red-600 transition-all duration-150 hover:scale-105 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50"
+                className="mb-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-red-100 text-red-600 transition-all duration-150 hover:scale-105 active:scale-95 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50"
                 aria-label="Stop streaming"
               >
                 <Square className="h-4 w-4" fill="currentColor" />
@@ -932,7 +932,7 @@ export function MessageInput({
               <button
                 onClick={handleSubmit}
                 disabled={!inputValue.trim() || !isInputEnabled || isSubmitting}
-                className="mb-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-neutral-900 text-white transition-all duration-150 hover:scale-105 hover:bg-neutral-800 disabled:opacity-50 disabled:hover:scale-100 disabled:hover:bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+                className="mb-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-neutral-900 text-white transition-all duration-150 hover:scale-105 active:scale-95 hover:bg-neutral-800 disabled:opacity-50 disabled:hover:scale-100 disabled:hover:bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
                 aria-label="Send message"
               >
                 <ArrowUp className="h-4 w-4" />

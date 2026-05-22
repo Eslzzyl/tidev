@@ -335,44 +335,37 @@ function App() {
     <>
       <SettingsPanel />
 
-      <div className="flex h-[100dvh] flex-col bg-white dark:bg-neutral-950">
-        {/* Header navigation - always visible */}
-        <Header />
+      <div className="flex h-[100dvh] flex-col bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-neutral-100 via-white to-white dark:from-neutral-900 dark:via-neutral-950 dark:to-neutral-950">
+        {/* ── Floating Header Card ── */}
+        {/* Desktop: mx-3 mt-3 rounded-xl border shadow. Mobile: full-bleed. */}
+        <div className="mx-3 mt-3 max-md:mx-0 max-md:mt-0">
+          <Header className="md:rounded-xl md:border md:border-neutral-200/60 md:shadow-sm dark:md:border-neutral-800/60 dark:md:shadow-black/20 md:bg-white/95 md:dark:bg-neutral-900/95 max-md:border-b" />
+        </div>
 
-        {/* Main content area */}
-        <div className="flex flex-1 min-h-0">
-          {/* Left Sidebar - stays mounted but hidden outside chat tab */}
-          {/* Kept mounted to avoid layout recalculation when switching tabs */}
-          <div style={{ display: showSidebars ? "" : "none" }}>
+        {/* ── Desktop: floating cards layout ── */}
+        {/* Cards always same width as header. Sidebars only show in chat tab. */}
+        <div className="flex flex-1 px-3 pb-3 pt-2 min-h-0 max-md:p-0 max-md:pt-0">
+          {/* ── Left Sidebar (Desktop floating card) ── */}
+          {showSidebars && (
             <aside
-              className={`fixed inset-y-0 left-0 z-50 h-full transform border-r border-neutral-200 bg-white transition-transform duration-200 ease-in-out md:relative md:translate-x-0 dark:border-neutral-800 dark:bg-neutral-950 ${
-                mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
-              }`}
+              className="flex h-full min-h-0 flex-shrink-0 flex-col overflow-hidden rounded-xl border border-neutral-200/60 bg-white shadow-sm max-md:hidden dark:border-neutral-800/60 dark:bg-neutral-900 dark:shadow-black/20"
               style={{ width: leftSidebarWidth, willChange: "width" }}
             >
               <LeftSidebar />
             </aside>
+          )}
 
-            {/* Left Resize Handle */}
+          {/* Left Resize Handle */}
+          {showSidebars && (
             <ResizeHandle
               onResizeStart={handleLeftResizeStart}
               isResizing={isResizingLeft}
             />
+          )}
 
-            {/* Mobile overlay */}
-            {mobileMenuOpen && (
-              <button
-                onClick={closeMobileMenu}
-                className="fixed inset-0 z-40 bg-black/50 md:hidden"
-                aria-label="Close menu"
-              />
-            )}
-          </div>
-
-          {/* Main content - all views stay mounted, hidden via display:none */}
-          {/* ChatPanel must stay mounted to preserve virtualizer state across */}
-          {/* tab switches — otherwise every switch triggers a full remount. */}
-          <main className="relative flex-1 min-w-0">
+          {/* ── Main Content (floating card) ── */}
+          {/* All views stay mounted, hidden via display:none to preserve state */}
+          <main className="relative flex flex-1 flex-col min-h-0 overflow-hidden rounded-xl border border-neutral-200/60 bg-white shadow-sm dark:border-neutral-800/60 dark:bg-neutral-950 dark:shadow-black/10 max-md:rounded-none max-md:border-0 max-md:shadow-none">
             <Suspense
               fallback={
                 <div className="flex h-full items-center justify-center text-sm text-neutral-400">
@@ -413,42 +406,65 @@ function App() {
             </Suspense>
           </main>
 
-          {/* Right Sidebar - stays mounted but hidden outside chat tab */}
-          <div style={{ display: showRightSidebar ? "" : "none" }}>
+          {/* Right Resize Handle */}
+          {showRightSidebar && (
             <ResizeHandle
               onResizeStart={handleRightResizeStart}
               isResizing={isResizingRight}
             />
+          )}
 
+          {/* ── Right Sidebar (Desktop floating card) ── */}
+          {showRightSidebar && (
             <aside
-              className="hidden border-l border-neutral-200 bg-white md:block dark:border-neutral-800 dark:bg-neutral-950"
+              className="flex h-full min-h-0 flex-shrink-0 flex-col overflow-hidden rounded-xl border border-neutral-200/60 bg-white shadow-sm motion-safe:animate-fade-in max-md:hidden dark:border-neutral-800/60 dark:bg-neutral-900 dark:shadow-black/20"
               style={{ width: rightSidebarWidth, willChange: "width" }}
             >
               <RightSidebar />
             </aside>
-          </div>
+          )}
+        </div>
 
-          {/* Mobile Right Sidebar */}
-          <div style={{ display: showSidebars ? "" : "none" }}>
+        {/* ── Mobile Overlays (fixed, outside flex flow) ── */}
+        {/* Mobile Left Sidebar */}
+        {showSidebars && (
+          <>
             <aside
-              className={`fixed inset-y-0 right-0 z-50 transform border-l border-neutral-200 bg-white transition-transform duration-200 ease-in-out md:hidden dark:border-neutral-800 dark:bg-neutral-950 ${
+              className={`fixed inset-y-0 left-0 z-50 flex w-[85vw] max-w-[320px] flex-col border-r border-neutral-200/80 bg-white transition-transform duration-200 ease-in-out md:hidden dark:border-neutral-800/60 dark:bg-neutral-950 ${
+                mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+              }`}
+            >
+              <LeftSidebar />
+            </aside>
+            {mobileMenuOpen && (
+              <button
+                onClick={closeMobileMenu}
+                className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm md:hidden"
+                aria-label="Close menu"
+              />
+            )}
+          </>
+        )}
+
+        {/* Mobile Right Sidebar */}
+        {showSidebars && (
+          <>
+            <aside
+              className={`fixed inset-y-0 right-0 z-50 flex w-[85vw] max-w-[320px] flex-col border-l border-neutral-200/80 bg-white transition-transform duration-200 ease-in-out md:hidden dark:border-neutral-800/60 dark:bg-neutral-950 ${
                 mobileRightSidebarOpen ? "translate-x-0" : "translate-x-full"
               }`}
-              style={{ width: 280 }}
             >
               <RightSidebar />
             </aside>
-          </div>
-
-          {/* Mobile overlay for right sidebar */}
-          {showSidebars && mobileRightSidebarOpen && (
-            <button
-              onClick={closeMobileRightSidebar}
-              className="fixed inset-0 z-40 bg-black/50 md:hidden"
-              aria-label="Close info panel"
-            />
-          )}
-        </div>
+            {mobileRightSidebarOpen && (
+              <button
+                onClick={closeMobileRightSidebar}
+                className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm md:hidden"
+                aria-label="Close info panel"
+              />
+            )}
+          </>
+        )}
       </div>
       <ToastContainer />
     </>
