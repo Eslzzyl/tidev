@@ -89,7 +89,11 @@ export function stripSystemReminderTags(text: string): string {
     const afterClose = start + end + "</system-reminder>".length;
     rest = rest.slice(afterClose);
     // Skip trailing whitespace/newlines after the closing tag
-    while (rest.startsWith("\n") || rest.startsWith("\r") || rest.startsWith(" ")) {
+    while (
+      rest.startsWith("\n") ||
+      rest.startsWith("\r") ||
+      rest.startsWith(" ")
+    ) {
       rest = rest.slice(1);
     }
   }

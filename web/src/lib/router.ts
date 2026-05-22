@@ -10,14 +10,27 @@
  * - `#chat/session-id` — Chat with specific session
  */
 
-export type MainTab = "chat" | "files" | "settings" | "terminal" | "git" | "stats";
+export type MainTab =
+  | "chat"
+  | "files"
+  | "settings"
+  | "terminal"
+  | "git"
+  | "stats";
 
 export interface RouteState {
   tab: MainTab;
   sessionId: string | null;
 }
 
-const VALID_TABS: MainTab[] = ["chat", "files", "settings", "terminal", "git", "stats"];
+const VALID_TABS: MainTab[] = [
+  "chat",
+  "files",
+  "settings",
+  "terminal",
+  "git",
+  "stats",
+];
 
 function isMainTab(value: string): value is MainTab {
   return (VALID_TABS as readonly string[]).includes(value);

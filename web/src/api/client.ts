@@ -248,7 +248,10 @@ export const api = {
 
   // Thinking level preference
   getModelThinkingLevel: (providerId: string, modelId: string) => {
-    const params = new URLSearchParams({ provider_id: providerId, model_id: modelId });
+    const params = new URLSearchParams({
+      provider_id: providerId,
+      model_id: modelId,
+    });
     return fetchJson<GetModelThinkingLevelResponse>(
       `${API_BASE}/config/model-thinking-level?${params}`,
     );
@@ -437,8 +440,7 @@ export const api = {
 
   // ── Stats ──────────────────────────────────────────────────────────
 
-  getStatsSummary: () =>
-    fetchJson<StatsSummary>(`${API_BASE}/stats/summary`),
+  getStatsSummary: () => fetchJson<StatsSummary>(`${API_BASE}/stats/summary`),
 
   getStatsTimeSeries: (params?: {
     granularity?: string;
@@ -446,7 +448,8 @@ export const api = {
     end?: string;
   }) => {
     const searchParams = new URLSearchParams();
-    if (params?.granularity) searchParams.set("granularity", params.granularity);
+    if (params?.granularity)
+      searchParams.set("granularity", params.granularity);
     if (params?.start) searchParams.set("start", params.start);
     if (params?.end) searchParams.set("end", params.end);
     const qs = searchParams.toString();

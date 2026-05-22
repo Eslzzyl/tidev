@@ -1,4 +1,11 @@
-import { useState, useEffect, useCallback, lazy, Suspense, useRef } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  lazy,
+  Suspense,
+  useRef,
+} from "react";
 import { useSessionStore } from "./stores/useSessionStore";
 import {
   useUIStore,
@@ -299,7 +306,8 @@ function App() {
             Unable to Connect
           </h2>
           <p className="mb-2 text-sm leading-relaxed text-neutral-500 dark:text-neutral-400">
-            {loadError === "Unknown error" || loadError === "Failed to load sessions"
+            {loadError === "Unknown error" ||
+            loadError === "Failed to load sessions"
               ? "The server is not responding. Please ensure the backend is running and retry."
               : loadError}
           </p>

@@ -933,11 +933,12 @@ function HistoryPanel({
   return (
     <div className="p-4">
       <div className="space-y-2">
-          {commits.map((commit) => (
+        {commits.map((commit) => (
           <button
             key={commit.sha}
             onClick={() => onSelectCommit(commit.sha)}
-            className={`motion-safe:animate-slide-up-fade w-full rounded-lg border p-3 text-left transition-colors ${              selectedSha === commit.sha
+            className={`motion-safe:animate-slide-up-fade w-full rounded-lg border p-3 text-left transition-colors ${
+              selectedSha === commit.sha
                 ? "border-neutral-500 bg-neutral-100 dark:border-neutral-500 dark:bg-neutral-800"
                 : "border-neutral-200 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900"
             }`}

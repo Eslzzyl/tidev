@@ -1,5 +1,16 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { X, Search, Check, Bot, Book, Eye, Palette, Wrench, Database, Sparkles } from "lucide-react";
+import {
+  X,
+  Search,
+  Check,
+  Bot,
+  Book,
+  Eye,
+  Palette,
+  Wrench,
+  Database,
+  Sparkles,
+} from "lucide-react";
 import { api } from "../../api/client";
 import type { ModelInfo } from "../../types/api";
 
@@ -21,16 +32,18 @@ interface TabInfo {
 }
 
 const AGENT_TAB_ITEMS: TabInfo[] = [
-  { id: "general",   label: "General",   icon: <Bot className="h-4 w-4" /> },
-  { id: "explorer",  label: "Explorer",  icon: <Search className="h-4 w-4" /> },
+  { id: "general", label: "General", icon: <Bot className="h-4 w-4" /> },
+  { id: "explorer", label: "Explorer", icon: <Search className="h-4 w-4" /> },
   { id: "librarian", label: "Librarian", icon: <Book className="h-4 w-4" /> },
-  { id: "oracle",    label: "Oracle",    icon: <Sparkles className="h-4 w-4" /> },
-  { id: "designer",  label: "Designer",  icon: <Palette className="h-4 w-4" /> },
-  { id: "fixer",     label: "Fixer",     icon: <Wrench className="h-4 w-4" /> },
+  { id: "oracle", label: "Oracle", icon: <Sparkles className="h-4 w-4" /> },
+  { id: "designer", label: "Designer", icon: <Palette className="h-4 w-4" /> },
+  { id: "fixer", label: "Fixer", icon: <Wrench className="h-4 w-4" /> },
 ];
 
 const MEMORY_TAB_ITEM: TabInfo = {
-  id: "memory", label: "Memory", icon: <Database className="h-4 w-4" />,
+  id: "memory",
+  label: "Memory",
+  icon: <Database className="h-4 w-4" />,
 };
 
 export function ModelPanel({
@@ -49,7 +62,10 @@ export function ModelPanel({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLDivElement>(null);
-  const [activeRect, setActiveRect] = useState<{ top: number; height: number } | null>(null);
+  const [activeRect, setActiveRect] = useState<{
+    top: number;
+    height: number;
+  } | null>(null);
 
   // Fetch models, agent config, and memory config when panel opens
   useEffect(() => {
@@ -116,7 +132,8 @@ export function ModelPanel({
       if (tabId === "general") {
         if (currentModelId && currentProviderId) {
           const m = models.find(
-            (m) => m.id === currentModelId && m.provider_id === currentProviderId,
+            (m) =>
+              m.id === currentModelId && m.provider_id === currentProviderId,
           );
           return m?.display_name || `${currentProviderId}/${currentModelId}`;
         }
@@ -187,7 +204,14 @@ export function ModelPanel({
       model_id: modelId,
       label: m?.display_name || overrideStr,
     };
-  }, [activeTab, currentModelId, currentProviderId, models, agentModels, memoryModelStr]);
+  }, [
+    activeTab,
+    currentModelId,
+    currentProviderId,
+    models,
+    agentModels,
+    memoryModelStr,
+  ]);
 
   // Filter models by search query
   const filteredModels = useMemo(() => {
@@ -295,7 +319,9 @@ export function ModelPanel({
 
   const isSelectedModel = (model: ModelInfo): boolean => {
     if (activeTab === "general") {
-      return model.id === currentModelId && model.provider_id === currentProviderId;
+      return (
+        model.id === currentModelId && model.provider_id === currentProviderId
+      );
     }
     if (activeTab === "memory") {
       return memoryModelStr === `${model.provider_id}/${model.id}`;
@@ -427,7 +453,9 @@ export function ModelPanel({
                     Consolidation
                   </span>
                   <span className="text-[10px] text-neutral-400">
-                    {memoryModelStr ? memoryModelStr.split("/").pop() : "<inherit>"}
+                    {memoryModelStr
+                      ? memoryModelStr.split("/").pop()
+                      : "<inherit>"}
                   </span>
                 </div>
               </div>
@@ -460,7 +488,9 @@ export function ModelPanel({
                             <button
                               onClick={() => handleSelectModel(model)}
                               className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-xs transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
-                                isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                                isSelected
+                                  ? "bg-blue-50 dark:bg-blue-900/20"
+                                  : ""
                               }`}
                             >
                               <span

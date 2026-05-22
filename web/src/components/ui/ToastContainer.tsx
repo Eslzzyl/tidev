@@ -77,7 +77,9 @@ export function ToastContainer() {
             className={`pointer-events-auto flex items-center gap-2 rounded-lg border px-3 py-2 shadow-lg motion-safe:transition-all motion-safe:duration-200 motion-safe:ease-smooth ${
               bgMap[toast.type]
             } ${textMap[toast.type]} ${
-              isExiting ? "motion-safe:animate-toast-out" : "motion-safe:animate-toast-in"
+              isExiting
+                ? "motion-safe:animate-toast-out"
+                : "motion-safe:animate-toast-in"
             }`}
             style={{
               minWidth: "200px",

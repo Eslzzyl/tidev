@@ -3,10 +3,7 @@ import { useUIStore } from "../../stores/useUIStore";
 function ConnectionStatus() {
   const connectionStatus = useUIStore((s) => s.connectionStatus);
 
-  const statusConfig: Record<
-    string,
-    { color: string; label: string }
-  > = {
+  const statusConfig: Record<string, { color: string; label: string }> = {
     connected: { color: "text-green-600", label: "Connected" },
     disconnected: { color: "text-red-600", label: "Disconnected" },
     connecting: { color: "text-yellow-600", label: "Connecting..." },

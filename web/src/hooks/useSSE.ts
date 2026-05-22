@@ -32,7 +32,10 @@ export function useSSE(sessionId: string | null) {
    * If it's a new turn, a fresh assistant message is appended to the messages store.
    */
   function ensureStreamingAssistant(request_id: number): void {
-    if (request_id === currentRequestIdRef.current && streamingAssistantIdRef.current) {
+    if (
+      request_id === currentRequestIdRef.current &&
+      streamingAssistantIdRef.current
+    ) {
       return; // Same turn, assistant already exists
     }
 
@@ -72,9 +75,7 @@ export function useSSE(sessionId: string | null) {
    * to the current message (identified by streamingAssistantIdRef).
    * Silently no-ops if the streaming assistant is not found (race with abort/error).
    */
-  function updateStreamingAssistant(
-    updater: (msg: Message) => Message,
-  ): void {
+  function updateStreamingAssistant(updater: (msg: Message) => Message): void {
     const id = streamingAssistantIdRef.current;
     if (!id) return;
 

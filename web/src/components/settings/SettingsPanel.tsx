@@ -8,7 +8,12 @@ import { InteractionSection } from "./InteractionSection";
 import { SecuritySection } from "./SecuritySection";
 import { AboutSection } from "./AboutSection";
 
-type CategoryId = "appearance" | "editor" | "interaction" | "security" | "about";
+type CategoryId =
+  | "appearance"
+  | "editor"
+  | "interaction"
+  | "security"
+  | "about";
 
 interface Category {
   id: CategoryId;
@@ -17,9 +22,17 @@ interface Category {
 }
 
 const categories: Category[] = [
-  { id: "appearance", label: "Appearance", icon: <Palette className="h-4 w-4" /> },
+  {
+    id: "appearance",
+    label: "Appearance",
+    icon: <Palette className="h-4 w-4" />,
+  },
   { id: "editor", label: "Editor", icon: <Type className="h-4 w-4" /> },
-  { id: "interaction", label: "Interaction", icon: <Keyboard className="h-4 w-4" /> },
+  {
+    id: "interaction",
+    label: "Interaction",
+    icon: <Keyboard className="h-4 w-4" />,
+  },
   { id: "security", label: "Security", icon: <Lock className="h-4 w-4" /> },
   { id: "about", label: "About", icon: <Info className="h-4 w-4" /> },
 ];
@@ -27,11 +40,15 @@ const categories: Category[] = [
 export function SettingsPanel() {
   const settingsPanelOpen = useUIStore((s) => s.settingsPanelOpen);
   const closeSettingsPanel = useUIStore((s) => s.closeSettingsPanel);
-  const [activeCategory, setActiveCategory] = useState<CategoryId>("appearance");
+  const [activeCategory, setActiveCategory] =
+    useState<CategoryId>("appearance");
 
   const panelRef = useClickOutside(closeSettingsPanel);
   const navRef = useRef<HTMLDivElement>(null);
-  const [activeRect, setActiveRect] = useState<{ top: number; height: number } | null>(null);
+  const [activeRect, setActiveRect] = useState<{
+    top: number;
+    height: number;
+  } | null>(null);
 
   // Measure active button position for sliding highlight indicator
   useEffect(() => {
@@ -126,7 +143,10 @@ export function SettingsPanel() {
           </nav>
 
           {/* Content */}
-          <div key={activeCategory} className="flex-1 overflow-y-auto p-5 motion-safe:animate-fade-in">
+          <div
+            key={activeCategory}
+            className="flex-1 overflow-y-auto p-5 motion-safe:animate-fade-in"
+          >
             {activeCategory === "appearance" && <AppearanceSection />}
             {activeCategory === "editor" && <EditorSection />}
             {activeCategory === "interaction" && <InteractionSection />}

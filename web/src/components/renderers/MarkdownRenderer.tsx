@@ -230,7 +230,9 @@ function isMermaidCode(language: string, content: string): boolean {
   );
 }
 
-export const MarkdownRenderer = memo(function MarkdownRenderer({ content }: Props) {
+export const MarkdownRenderer = memo(function MarkdownRenderer({
+  content,
+}: Props) {
   if (!content) return null;
 
   return (

@@ -186,10 +186,7 @@ export function LeftSidebar() {
               const isRenaming = renamingId === session.session_id;
 
               return (
-                <li
-                  key={session.session_id}
-                  className="group relative"
-                >
+                <li key={session.session_id} className="group relative">
                   {isRenaming ? (
                     <div className="rounded-lg border border-blue-400 bg-white px-3 py-2 dark:border-blue-500 dark:bg-neutral-800">
                       <input

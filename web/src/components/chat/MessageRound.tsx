@@ -5,7 +5,11 @@ import { ThinkingBlock } from "../renderers/ThinkingBlock";
 import { ToolCallRow } from "../renderers/ToolCallRow";
 import { CopyButton } from "../ui/CopyButton";
 import { UndoButton } from "./UndoButton";
-import { formatTime, getDuration, stripSystemReminderTags } from "../../utils/format";
+import {
+  formatTime,
+  getDuration,
+  stripSystemReminderTags,
+} from "../../utils/format";
 
 interface Props {
   round: Round;
@@ -16,7 +20,12 @@ interface Props {
   staggerIndex?: number;
 }
 
-export const MessageRound = memo(function MessageRound({ round, onUndoRequest, canUndo = true, staggerIndex }: Props) {
+export const MessageRound = memo(function MessageRound({
+  round,
+  onUndoRequest,
+  canUndo = true,
+  staggerIndex,
+}: Props) {
   function getFooterParts(): string[] {
     const parts: string[] = [];
     if (round.modelName) parts.push(round.modelName);
@@ -53,9 +62,10 @@ export const MessageRound = memo(function MessageRound({ round, onUndoRequest, c
   // Stagger entrance animation — messages animate in sequentially from oldest
   // (low index) to newest (high index), creating a visible cascade when the
   // chat panel is remounted (e.g. switching tabs).
-  const staggerDelay = staggerIndex !== undefined
-    ? `${Math.min(staggerIndex * 20, 500)}ms`
-    : undefined;
+  const staggerDelay =
+    staggerIndex !== undefined
+      ? `${Math.min(staggerIndex * 20, 500)}ms`
+      : undefined;
 
   return (
     <div
@@ -78,11 +88,15 @@ export const MessageRound = memo(function MessageRound({ round, onUndoRequest, c
             <span className="text-xs text-neutral-400 dark:text-neutral-600">
               {formatTime(round.userMessage.created_at)}
             </span>
-            <CopyButton content={stripSystemReminderTags(round.userMessage.content)} />
+            <CopyButton
+              content={stripSystemReminderTags(round.userMessage.content)}
+            />
             {showUndoButton && <UndoButton onClick={handleUndo} />}
           </div>
           <div className="w-full rounded-2xl rounded-tl-sm bg-neutral-100 px-4 py-2.5 text-sm leading-relaxed text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100">
-            <p className="whitespace-pre-wrap">{stripSystemReminderTags(round.userMessage.content)}</p>
+            <p className="whitespace-pre-wrap">
+              {stripSystemReminderTags(round.userMessage.content)}
+            </p>
           </div>
         </div>
       </div>
@@ -117,7 +131,9 @@ export const MessageRound = memo(function MessageRound({ round, onUndoRequest, c
                 </span>
               )}
               {round.status === "complete" && assistantContent && (
-                <CopyButton content={stripSystemReminderTags(assistantContent)} />
+                <CopyButton
+                  content={stripSystemReminderTags(assistantContent)}
+                />
               )}
             </div>
 
@@ -129,7 +145,9 @@ export const MessageRound = memo(function MessageRound({ round, onUndoRequest, c
                     <ThinkingBlock content={segment.content} />
                   )}
                   {segment.type === "text" && segment.content && (
-                    <MarkdownRenderer content={stripSystemReminderTags(segment.content)} />
+                    <MarkdownRenderer
+                      content={stripSystemReminderTags(segment.content)}
+                    />
                   )}
                   {segment.type === "tool_call" &&
                     round.toolCallMap[segment.toolCallId] && (

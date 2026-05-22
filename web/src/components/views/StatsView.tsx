@@ -72,10 +72,7 @@ function formatNumber(n: number): string {
   return n.toLocaleString();
 }
 
-function formatTokenBucket(
-  granularity: string,
-  bucket: string,
-): string {
+function formatTokenBucket(granularity: string, bucket: string): string {
   const d = new Date(bucket);
   switch (granularity) {
     case "hour":
@@ -153,7 +150,13 @@ function ChartTooltip({
 // happens when the tab starts as display:none).  This wrapper defers
 // rendering children until the container has non-zero dimensions.
 
-function ChartContainer({ children, className }: { children: React.ReactNode; className?: string }) {
+function ChartContainer({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
 
@@ -279,9 +282,8 @@ export function StatsView() {
       Input: e.input_tokens,
       Output: e.output_tokens,
       "Cache Read": e.cache_read_tokens,
-      cacheHitRate: e.input_tokens > 0
-        ? (e.cache_read_tokens / e.input_tokens) * 100
-        : 0,
+      cacheHitRate:
+        e.input_tokens > 0 ? (e.cache_read_tokens / e.input_tokens) * 100 : 0,
     }));
   }, [timeSeries]);
 
@@ -414,16 +416,40 @@ export function StatsView() {
               <AreaChart data={totalTokenData}>
                 <defs>
                   <linearGradient id="gradInput" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={CHART_COLORS[2]} stopOpacity={0.3} />
-                    <stop offset="95%" stopColor={CHART_COLORS[2]} stopOpacity={0} />
+                    <stop
+                      offset="5%"
+                      stopColor={CHART_COLORS[2]}
+                      stopOpacity={0.3}
+                    />
+                    <stop
+                      offset="95%"
+                      stopColor={CHART_COLORS[2]}
+                      stopOpacity={0}
+                    />
                   </linearGradient>
                   <linearGradient id="gradOutput" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={CHART_COLORS[1]} stopOpacity={0.3} />
-                    <stop offset="95%" stopColor={CHART_COLORS[1]} stopOpacity={0} />
+                    <stop
+                      offset="5%"
+                      stopColor={CHART_COLORS[1]}
+                      stopOpacity={0.3}
+                    />
+                    <stop
+                      offset="95%"
+                      stopColor={CHART_COLORS[1]}
+                      stopOpacity={0}
+                    />
                   </linearGradient>
                   <linearGradient id="gradCache" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={CHART_COLORS[0]} stopOpacity={0.3} />
-                    <stop offset="95%" stopColor={CHART_COLORS[0]} stopOpacity={0} />
+                    <stop
+                      offset="5%"
+                      stopColor={CHART_COLORS[0]}
+                      stopOpacity={0.3}
+                    />
+                    <stop
+                      offset="95%"
+                      stopColor={CHART_COLORS[0]}
+                      stopOpacity={0}
+                    />
                   </linearGradient>
                 </defs>
                 <CartesianGrid
@@ -453,13 +479,8 @@ export function StatsView() {
                   axisLine={false}
                   tickLine={false}
                 />
-                <Tooltip
-                  content={<ChartTooltip granularity={granularity} />}
-                />
-                <Legend
-                  wrapperStyle={{ fontSize: 12 }}
-                  iconType="circle"
-                />
+                <Tooltip content={<ChartTooltip granularity={granularity} />} />
+                <Legend wrapperStyle={{ fontSize: 12 }} iconType="circle" />
                 <Area
                   yAxisId="left"
                   type="monotone"
@@ -523,9 +544,7 @@ export function StatsView() {
                   axisLine={false}
                   tickLine={false}
                 />
-                <Tooltip
-                  content={<ChartTooltip granularity={granularity} />}
-                />
+                <Tooltip content={<ChartTooltip granularity={granularity} />} />
                 <Bar
                   dataKey="request_count"
                   fill={CHART_COLORS[0]}
@@ -569,9 +588,10 @@ export function StatsView() {
                       content={({ active, payload }) => {
                         if (!active || !payload?.length) return null;
                         const d = payload[0].payload;
-                        const pct = totalTokens > 0
-                          ? ((d.value / totalTokens) * 100).toFixed(1)
-                          : "0";
+                        const pct =
+                          totalTokens > 0
+                            ? ((d.value / totalTokens) * 100).toFixed(1)
+                            : "0";
                         return (
                           <div className="rounded-lg border border-neutral-200 bg-white p-3 shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
                             <p className="text-xs font-medium text-neutral-900 dark:text-neutral-100">
@@ -587,10 +607,7 @@ export function StatsView() {
                         );
                       }}
                     />
-                    <Legend
-                      wrapperStyle={{ fontSize: 11 }}
-                      iconType="circle"
-                    />
+                    <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" />
                   </PieChart>
                 </ResponsiveContainer>
               </ChartContainer>
@@ -612,7 +629,10 @@ export function StatsView() {
                   <BarChart
                     data={providers.map((p) => ({
                       ...p,
-                      freshInput: Math.max(0, p.input_tokens - p.cache_read_tokens),
+                      freshInput: Math.max(
+                        0,
+                        p.input_tokens - p.cache_read_tokens,
+                      ),
                       shortName: p.provider_display_name || p.provider_id,
                     }))}
                     layout="vertical"
@@ -641,7 +661,9 @@ export function StatsView() {
                     <Tooltip
                       content={({ active, payload }) => {
                         if (!active || !payload?.length) return null;
-                        const d = payload[0].payload as ProviderUsageEntry & { freshInput: number };
+                        const d = payload[0].payload as ProviderUsageEntry & {
+                          freshInput: number;
+                        };
                         return (
                           <div className="rounded-lg border border-neutral-200 bg-white p-3 shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
                             <p className="text-xs font-medium text-neutral-900 dark:text-neutral-100">
@@ -654,7 +676,13 @@ export function StatsView() {
                               Output: {formatNumber(d.output_tokens)}
                             </p>
                             <p className="text-xs text-blue-600">
-                              Fresh Input: {formatNumber(Math.max(0, d.input_tokens - d.cache_read_tokens))}
+                              Fresh Input:{" "}
+                              {formatNumber(
+                                Math.max(
+                                  0,
+                                  d.input_tokens - d.cache_read_tokens,
+                                ),
+                              )}
                             </p>
                             <p className="text-xs text-blue-500">
                               Cache Read: {formatNumber(d.cache_read_tokens)}
@@ -666,10 +694,7 @@ export function StatsView() {
                         );
                       }}
                     />
-                    <Legend
-                      wrapperStyle={{ fontSize: 11 }}
-                      iconType="rect"
-                    />
+                    <Legend wrapperStyle={{ fontSize: 11 }} iconType="rect" />
                     <Bar
                       stackId="a"
                       dataKey="output_tokens"
@@ -712,14 +737,30 @@ export function StatsView() {
             <table className="w-full text-left text-xs">
               <thead>
                 <tr className="border-b border-neutral-100 dark:border-neutral-800">
-                  <th className="px-4 py-2 font-medium text-neutral-500">Session</th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">Model</th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">Messages</th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">Total Tokens</th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">Input</th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">Output</th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">Cache Hit Rate</th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">Last Active</th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">
+                    Session
+                  </th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">
+                    Model
+                  </th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">
+                    Messages
+                  </th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">
+                    Total Tokens
+                  </th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">
+                    Input
+                  </th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">
+                    Output
+                  </th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">
+                    Cache Hit Rate
+                  </th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">
+                    Last Active
+                  </th>
                 </tr>
               </thead>
               <tbody>

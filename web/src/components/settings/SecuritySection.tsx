@@ -184,7 +184,9 @@ export function SecuritySection() {
 
             {error && <p className="text-sm text-red-500">{error}</p>}
             {success && (
-              <p className="text-sm text-green-500">Password set successfully</p>
+              <p className="text-sm text-green-500">
+                Password set successfully
+              </p>
             )}
 
             <button

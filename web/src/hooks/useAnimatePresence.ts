@@ -17,7 +17,11 @@ import { useState, useEffect, useRef } from "react";
 export function useAnimatePresence(
   show: boolean,
   exitDuration = 200,
-): { mounted: boolean; visible: boolean; stage: "entering" | "entered" | "exiting" } {
+): {
+  mounted: boolean;
+  visible: boolean;
+  stage: "entering" | "entered" | "exiting";
+} {
   const [mounted, setMounted] = useState(show);
   const [visible, setVisible] = useState(show);
   const [stage, setStage] = useState<"entering" | "entered" | "exiting">(
