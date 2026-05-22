@@ -56,10 +56,10 @@ export function SettingsPanel() {
   if (!settingsPanelOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center motion-safe:animate-fade-in bg-black/50 p-4">
+    <div className="fixed inset-0 z-60 flex items-center justify-center motion-safe:animate-fade-in bg-black/50 p-4">
       <div
         ref={panelRef}
-        className="motion-safe:animate-scale-fade flex max-h-[80vh] w-full max-w-[680px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-neutral-900"
+        className="motion-safe:animate-scale-fade flex h-[60vh] w-full max-w-200 flex-col overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-neutral-900"
       >
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-neutral-200 px-5 py-3 dark:border-neutral-800">
@@ -78,7 +78,7 @@ export function SettingsPanel() {
         {/* Body: sidebar + content */}
         <div className="flex min-h-0 flex-1">
           {/* Sidebar */}
-          <nav className="w-36 shrink-0 border-r border-neutral-200 p-2 dark:border-neutral-800">
+          <nav className="w-36 shrink-0 overflow-y-auto border-r border-neutral-200 p-2 dark:border-neutral-800">
             {categories.map((cat) => (
               <button
                 key={cat.id}
