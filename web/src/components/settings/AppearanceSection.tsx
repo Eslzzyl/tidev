@@ -6,9 +6,9 @@ import {
 } from "../../stores/useUIStore";
 
 const themes: { value: Theme; label: string; icon: React.ReactNode }[] = [
-  { value: "light", label: "Light", icon: <Sun className="h-8 w-8" /> },
-  { value: "dark", label: "Dark", icon: <Moon className="h-8 w-8" /> },
-  { value: "system", label: "System", icon: <Monitor className="h-8 w-8" /> },
+  { value: "light", label: "Light", icon: <Sun className="h-8 w-8 text-neutral-900 dark:text-neutral-100" /> },
+  { value: "dark", label: "Dark", icon: <Moon className="h-8 w-8 text-neutral-900 dark:text-neutral-100" /> },
+  { value: "system", label: "System", icon: <Monitor className="h-8 w-8 text-neutral-900 dark:text-neutral-100" /> },
 ];
 
 export function AppearanceSection() {
