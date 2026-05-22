@@ -4,9 +4,6 @@ import {
   CheckCircle2,
   Circle,
   Clock,
-  Plus,
-  Minus,
-  Pencil,
 } from "lucide-react";
 import { useSessionStore } from "../../stores/useSessionStore";
 import { useUIStore } from "../../stores/useUIStore";
@@ -135,31 +132,6 @@ export function RightSidebar() {
     }
   };
 
-  // File status icon matching TUI style
-  const getFileStatusIcon = (status: string) => {
-    switch (status) {
-      case "added":
-        return <Plus className="h-4 w-4 text-green-600 dark:text-green-400" />;
-      case "deleted":
-        return <Minus className="h-4 w-4 text-red-600 dark:text-red-400" />;
-      default:
-        return (
-          <Pencil className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-        );
-    }
-  };
-
-  const getFileStatusColor = (status: string) => {
-    switch (status) {
-      case "added":
-        return "text-green-700 dark:text-green-400";
-      case "deleted":
-        return "text-red-700 dark:text-red-400";
-      default:
-        return "text-amber-700 dark:text-amber-400";
-    }
-  };
-
   return (
     <div className="flex h-full min-h-0 flex-col bg-white dark:bg-neutral-950">
       {/* Header */}
@@ -259,19 +231,21 @@ export function RightSidebar() {
               ) : (
                 <ul className="space-y-1">
                   {fileDiffs.map((diff, idx) => (
-                    <li key={idx} className="flex items-center gap-1.5 text-sm">
-                      <span className="flex-shrink-0">
-                        {getFileStatusIcon(diff.status)}
-                      </span>
-                      <span
-                        className={`flex-1 truncate ${getFileStatusColor(diff.status)}`}
-                      >
+                    <li key={idx} className="flex w-full items-baseline justify-between text-sm">
+                      <span className="truncate text-neutral-800 dark:text-neutral-200">
                         {diff.path.split("/").pop() || diff.path}
                       </span>
-                      <span
-                        className={`flex-shrink-0 text-xs ${getFileStatusColor(diff.status)}`}
-                      >
-                        +{diff.additions}/-{diff.deletions}
+                      <span className="ml-auto flex flex-shrink-0 gap-0.5 whitespace-nowrap text-xs leading-none">
+                        {diff.additions > 0 && (
+                          <span className="text-green-600 dark:text-green-400">
+                            +{diff.additions}
+                          </span>
+                        )}
+                        {diff.deletions > 0 && (
+                          <span className="text-red-600 dark:text-red-400">
+                            -{diff.deletions}
+                          </span>
+                        )}
                       </span>
                     </li>
                   ))}
