@@ -2055,19 +2055,19 @@ impl SessionStore {
                 for sid in &session_id_strs {
                     let rows = msg_stmt.query_map(params![sid], |row| {
                         Ok((
-                            row.get::<_, String>(0)?,   // id
-                            row.get::<_, String>(1)?,   // session_id
-                            row.get::<_, String>(2)?,   // role
-                            row.get::<_, Vec<u8>>(3)?,  // content (BLOB, keep compressed)
-                            row.get::<_, String>(4)?,   // attachments
-                            row.get::<_, Option<Vec<u8>>>(5)?, // reasoning (BLOB)
+                            row.get::<_, String>(0)?,            // id
+                            row.get::<_, String>(1)?,            // session_id
+                            row.get::<_, String>(2)?,            // role
+                            row.get::<_, Vec<u8>>(3)?,           // content (BLOB, keep compressed)
+                            row.get::<_, String>(4)?,            // attachments
+                            row.get::<_, Option<Vec<u8>>>(5)?,   // reasoning (BLOB)
                             read_blob_maybe_text_bytes(row, 6)?, // tool_calls (BLOB or TEXT)
                             row.get::<_, Option<String>>(7)?,    // tool_call_id
                             row.get::<_, Option<String>>(8)?,    // tool_name
                             read_blob_maybe_text_bytes(row, 9)?, // metadata (BLOB or TEXT)
-                            row.get::<_, String>(10)?,  // created_at
+                            row.get::<_, String>(10)?,           // created_at
                             row.get::<_, Option<String>>(11)?,   // completed_at
-                            row.get::<_, i64>(12)?,     // streaming
+                            row.get::<_, i64>(12)?,              // streaming
                             row.get::<_, Option<i64>>(13)?,      // input_tokens
                             row.get::<_, Option<i64>>(14)?,      // output_tokens
                             row.get::<_, Option<i64>>(15)?,      // total_tokens
@@ -2079,23 +2079,65 @@ impl SessionStore {
                             read_opt_blob_maybe_text(row, 21)?,  // patch_files (BLOB or TEXT)
                             read_opt_blob_maybe_text(row, 22)?,  // file_diffs (BLOB or TEXT)
                             row.get::<_, Option<String>>(23)?,   // mode
-                            row.get::<_, i64>(24)?,    // rtk_rewritten
+                            row.get::<_, i64>(24)?,              // rtk_rewritten
                             row.get::<_, Option<String>>(25)?,   // thinking_level
                         ))
                     })?;
                     for row in rows {
-                        let (id, sid2, role, content, attachments, reasoning, tool_calls,
-                             tool_call_id, tool_name, metadata, created_at, completed_at,
-                             streaming, input_tokens, output_tokens, total_tokens,
-                             cache_read_tokens, cache_write_tokens, model_id, tokens_per_second,
-                             snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten,
-                             thinking_level) = row?;
+                        let (
+                            id,
+                            sid2,
+                            role,
+                            content,
+                            attachments,
+                            reasoning,
+                            tool_calls,
+                            tool_call_id,
+                            tool_name,
+                            metadata,
+                            created_at,
+                            completed_at,
+                            streaming,
+                            input_tokens,
+                            output_tokens,
+                            total_tokens,
+                            cache_read_tokens,
+                            cache_write_tokens,
+                            model_id,
+                            tokens_per_second,
+                            snapshot_hash,
+                            patch_files,
+                            file_diffs,
+                            mode,
+                            rtk_rewritten,
+                            thinking_level,
+                        ) = row?;
                         insert.execute(params![
-                            id, sid2, role, content, attachments, reasoning, tool_calls,
-                            tool_call_id, tool_name, metadata, created_at, completed_at,
-                            streaming, input_tokens, output_tokens, total_tokens,
-                            cache_read_tokens, cache_write_tokens, model_id, tokens_per_second,
-                            snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten,
+                            id,
+                            sid2,
+                            role,
+                            content,
+                            attachments,
+                            reasoning,
+                            tool_calls,
+                            tool_call_id,
+                            tool_name,
+                            metadata,
+                            created_at,
+                            completed_at,
+                            streaming,
+                            input_tokens,
+                            output_tokens,
+                            total_tokens,
+                            cache_read_tokens,
+                            cache_write_tokens,
+                            model_id,
+                            tokens_per_second,
+                            snapshot_hash,
+                            patch_files,
+                            file_diffs,
+                            mode,
+                            rtk_rewritten,
                             thinking_level,
                         ])?;
                     }
@@ -2387,24 +2429,26 @@ impl SessionStore {
         let mut stmt = import_conn.prepare(
             "SELECT id, parent_session_id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at, status, ended_at, context_summary, context_retained_from, system_prompt FROM sessions ORDER BY created_at ASC",
         )?;
-        let all_import_sessions: Vec<ImportSession> = stmt.query_map([], |row| {
-            Ok(ImportSession {
-                id: row.get(0)?,
-                parent_session_id: row.get(1)?,
-                provider_id: row.get(2)?,
-                provider_display_name: row.get(3)?,
-                model_id: row.get(4)?,
-                model_display_name: row.get(5)?,
-                title: row.get(6)?,
-                created_at: row.get(7)?,
-                updated_at: row.get(8)?,
-                status: row.get(9)?,
-                ended_at: row.get(10)?,
-                context_summary: row.get(11)?,
-                context_retained_from: row.get(12)?,
-                system_prompt: row.get(13)?,
-            })
-        })?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let all_import_sessions: Vec<ImportSession> = stmt
+            .query_map([], |row| {
+                Ok(ImportSession {
+                    id: row.get(0)?,
+                    parent_session_id: row.get(1)?,
+                    provider_id: row.get(2)?,
+                    provider_display_name: row.get(3)?,
+                    model_id: row.get(4)?,
+                    model_display_name: row.get(5)?,
+                    title: row.get(6)?,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
+                    status: row.get(9)?,
+                    ended_at: row.get(10)?,
+                    context_summary: row.get(11)?,
+                    context_retained_from: row.get(12)?,
+                    system_prompt: row.get(13)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
 
         // Build filter set
         let filter_set: std::collections::HashSet<String> =
@@ -2459,12 +2503,10 @@ impl SessionStore {
             )?;
 
             // Pre-compile queries against import_conn
-            let mut ws_stmt = import_conn.prepare(
-                "SELECT workspace_root FROM session_workspaces WHERE session_id = ?1",
-            )?;
-            let mut instr_stmt = import_conn.prepare(
-                "SELECT source FROM session_instruction_sources WHERE session_id = ?1",
-            )?;
+            let mut ws_stmt = import_conn
+                .prepare("SELECT workspace_root FROM session_workspaces WHERE session_id = ?1")?;
+            let mut instr_stmt = import_conn
+                .prepare("SELECT source FROM session_instruction_sources WHERE session_id = ?1")?;
             let mut msg_stmt = import_conn.prepare(
                 "SELECT id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
             )?;
@@ -2506,10 +2548,7 @@ impl SessionStore {
                         continue;
                     }
                     // Delete existing session (cascading due to foreign keys)
-                    guard.execute(
-                        "DELETE FROM sessions WHERE id = ?1",
-                        params![&session.id],
-                    )?;
+                    guard.execute("DELETE FROM sessions WHERE id = ?1", params![&session.id])?;
                 }
 
                 // Insert session record
@@ -2531,41 +2570,44 @@ impl SessionStore {
                 ])?;
 
                 // session_workspaces
-                if let Some(root) = ws_stmt.query_row(params![&session.id], |row| {
-                    row.get::<_, String>(0)
-                }).optional()? {
+                if let Some(root) = ws_stmt
+                    .query_row(params![&session.id], |row| row.get::<_, String>(0))
+                    .optional()?
+                {
                     insert_workspace.execute(params![&session.id, root])?;
                 }
 
                 // session_instruction_sources
-                let instr_rows = instr_stmt.query_map(params![&session.id], |row| {
-                    row.get::<_, String>(0)
-                })?;
+                let instr_rows =
+                    instr_stmt.query_map(params![&session.id], |row| row.get::<_, String>(0))?;
                 for source in instr_rows {
                     let source = source?;
                     insert_instruction_sources.execute(params![&session.id, source])?;
                 }
 
                 // session_reverts
-                if let Some(revert) = revert_stmt.query_row(params![&session.id], |row| {
-                    let redo: Option<Vec<u8>> = if is_compressed {
-                        row.get::<_, Option<Vec<u8>>>(2).unwrap_or_else(|_| {
-                            row.get::<_, Option<String>>(2)
-                                .map(|s| s.map(|s| s.into_bytes()))
-                                .unwrap_or(None)
-                        })
-                    } else {
-                        // Uncompressed: read as TEXT, compress for local DB
-                        let text: Option<String> = row.get(2)?;
-                        text.map(|s| compress_text(&s))
-                    };
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        redo,
-                        row.get::<_, String>(3)?,
-                    ))
-                }).optional()? {
+                if let Some(revert) = revert_stmt
+                    .query_row(params![&session.id], |row| {
+                        let redo: Option<Vec<u8>> = if is_compressed {
+                            row.get::<_, Option<Vec<u8>>>(2).unwrap_or_else(|_| {
+                                row.get::<_, Option<String>>(2)
+                                    .map(|s| s.map(|s| s.into_bytes()))
+                                    .unwrap_or(None)
+                            })
+                        } else {
+                            // Uncompressed: read as TEXT, compress for local DB
+                            let text: Option<String> = row.get(2)?;
+                            text.map(|s| compress_text(&s))
+                        };
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            redo,
+                            row.get::<_, String>(3)?,
+                        ))
+                    })
+                    .optional()?
+                {
                     let (sid, msg_id, redo, created) = revert;
                     insert_revert.execute(params![sid, msg_id, redo, created])?;
                 }
@@ -2573,9 +2615,9 @@ impl SessionStore {
                 // messages
                 let msg_rows = msg_stmt.query_map(params![&session.id], |row| {
                     Ok((
-                        row.get::<_, String>(0)?,   // id
-                        row.get::<_, String>(1)?,   // session_id
-                        row.get::<_, String>(2)?,   // role
+                        row.get::<_, String>(0)?, // id
+                        row.get::<_, String>(1)?, // session_id
+                        row.get::<_, String>(2)?, // role
                         if is_compressed {
                             // Already compressed BLOB
                             row.get::<_, Vec<u8>>(3)?
@@ -2584,7 +2626,7 @@ impl SessionStore {
                             let text: String = row.get(3)?;
                             compress_text(&text)
                         },
-                        row.get::<_, String>(4)?,   // attachments (always TEXT)
+                        row.get::<_, String>(4)?, // attachments (always TEXT)
                         if is_compressed {
                             row.get::<_, Option<Vec<u8>>>(5)?
                         } else {
@@ -2598,25 +2640,25 @@ impl SessionStore {
                             let text: String = row.get(6)?;
                             compress_text(&text)
                         },
-                        row.get::<_, Option<String>>(7)?,    // tool_call_id
-                        row.get::<_, Option<String>>(8)?,    // tool_name
+                        row.get::<_, Option<String>>(7)?, // tool_call_id
+                        row.get::<_, Option<String>>(8)?, // tool_name
                         if is_compressed {
                             read_blob_maybe_text_bytes(row, 9)?
                         } else {
                             let text: String = row.get(9)?;
                             compress_text(&text)
                         },
-                        row.get::<_, String>(10)?,  // created_at
-                        row.get::<_, Option<String>>(11)?,   // completed_at
-                        row.get::<_, i64>(12)?,     // streaming
-                        row.get::<_, Option<i64>>(13)?,      // input_tokens
-                        row.get::<_, Option<i64>>(14)?,      // output_tokens
-                        row.get::<_, Option<i64>>(15)?,      // total_tokens
-                        row.get::<_, Option<i64>>(16)?,      // cache_read_tokens
-                        row.get::<_, Option<i64>>(17)?,      // cache_write_tokens
-                        row.get::<_, Option<String>>(18)?,   // model_id
-                        row.get::<_, Option<f64>>(19)?,      // tokens_per_second
-                        row.get::<_, Option<String>>(20)?,   // snapshot_hash
+                        row.get::<_, String>(10)?,         // created_at
+                        row.get::<_, Option<String>>(11)?, // completed_at
+                        row.get::<_, i64>(12)?,            // streaming
+                        row.get::<_, Option<i64>>(13)?,    // input_tokens
+                        row.get::<_, Option<i64>>(14)?,    // output_tokens
+                        row.get::<_, Option<i64>>(15)?,    // total_tokens
+                        row.get::<_, Option<i64>>(16)?,    // cache_read_tokens
+                        row.get::<_, Option<i64>>(17)?,    // cache_write_tokens
+                        row.get::<_, Option<String>>(18)?, // model_id
+                        row.get::<_, Option<f64>>(19)?,    // tokens_per_second
+                        row.get::<_, Option<String>>(20)?, // snapshot_hash
                         if is_compressed {
                             read_opt_blob_maybe_text(row, 21)?
                         } else {
@@ -2629,24 +2671,66 @@ impl SessionStore {
                             let text: Option<String> = row.get(22)?;
                             text.map(|s| compress_text(&s))
                         },
-                        row.get::<_, Option<String>>(23)?,   // mode
-                        row.get::<_, i64>(24)?,    // rtk_rewritten
-                        row.get::<_, Option<String>>(25)?,   // thinking_level
+                        row.get::<_, Option<String>>(23)?, // mode
+                        row.get::<_, i64>(24)?,            // rtk_rewritten
+                        row.get::<_, Option<String>>(25)?, // thinking_level
                     ))
                 })?;
                 for row in msg_rows {
-                    let (id, sid, role, content, attachments, reasoning, tool_calls,
-                         tool_call_id, tool_name, metadata, created_at, completed_at,
-                         streaming, input_tokens, output_tokens, total_tokens,
-                         cache_read_tokens, cache_write_tokens, model_id, tokens_per_second,
-                         snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten,
-                         thinking_level) = row?;
+                    let (
+                        id,
+                        sid,
+                        role,
+                        content,
+                        attachments,
+                        reasoning,
+                        tool_calls,
+                        tool_call_id,
+                        tool_name,
+                        metadata,
+                        created_at,
+                        completed_at,
+                        streaming,
+                        input_tokens,
+                        output_tokens,
+                        total_tokens,
+                        cache_read_tokens,
+                        cache_write_tokens,
+                        model_id,
+                        tokens_per_second,
+                        snapshot_hash,
+                        patch_files,
+                        file_diffs,
+                        mode,
+                        rtk_rewritten,
+                        thinking_level,
+                    ) = row?;
                     insert_message.execute(params![
-                        id, sid, role, content, attachments, reasoning, tool_calls,
-                        tool_call_id, tool_name, metadata, created_at, completed_at,
-                        streaming, input_tokens, output_tokens, total_tokens,
-                        cache_read_tokens, cache_write_tokens, model_id, tokens_per_second,
-                        snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten,
+                        id,
+                        sid,
+                        role,
+                        content,
+                        attachments,
+                        reasoning,
+                        tool_calls,
+                        tool_call_id,
+                        tool_name,
+                        metadata,
+                        created_at,
+                        completed_at,
+                        streaming,
+                        input_tokens,
+                        output_tokens,
+                        total_tokens,
+                        cache_read_tokens,
+                        cache_write_tokens,
+                        model_id,
+                        tokens_per_second,
+                        snapshot_hash,
+                        patch_files,
+                        file_diffs,
+                        mode,
+                        rtk_rewritten,
                         thinking_level,
                     ])?;
                 }

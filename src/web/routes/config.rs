@@ -263,7 +263,9 @@ pub async fn get_memory_model(
     State(state): State<AppState>,
 ) -> Result<Json<GetMemoryModelResponse>, AppError> {
     let config = state.config.read().await;
-    let model_str = config.memory_model_label("consolidation").map(|s| s.to_string());
+    let model_str = config
+        .memory_model_label("consolidation")
+        .map(|s| s.to_string());
     Ok(Json(GetMemoryModelResponse {
         role: "consolidation".to_string(),
         model_str,
@@ -343,12 +345,12 @@ pub async fn get_model_thinking_level(
     State(state): State<AppState>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> Result<Json<GetModelThinkingLevelResponse>, AppError> {
-    let provider_id = params.get("provider_id").ok_or_else(|| {
-        AppError::BadRequest("Missing 'provider_id' query parameter".to_string())
-    })?;
-    let model_id = params.get("model_id").ok_or_else(|| {
-        AppError::BadRequest("Missing 'model_id' query parameter".to_string())
-    })?;
+    let provider_id = params
+        .get("provider_id")
+        .ok_or_else(|| AppError::BadRequest("Missing 'provider_id' query parameter".to_string()))?;
+    let model_id = params
+        .get("model_id")
+        .ok_or_else(|| AppError::BadRequest("Missing 'model_id' query parameter".to_string()))?;
 
     let store = state.store.lock().await;
     let thinking_level = store

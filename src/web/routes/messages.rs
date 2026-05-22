@@ -158,9 +158,10 @@ pub async fn list_messages(
     // Respect revert state: hide messages after the revert point,
     // matching TUI's Conversation::visible_message_count() logic.
     if let Some(revert_id) = store.load_revert_message_id(session_id)?
-        && let Some(pos) = messages_db.iter().position(|m| m.id == revert_id) {
-            messages_db.truncate(pos + 1);
-        }
+        && let Some(pos) = messages_db.iter().position(|m| m.id == revert_id)
+    {
+        messages_db.truncate(pos + 1);
+    }
 
     // Load session-level todos
     let todos_db = store.load_todos(session_id)?;

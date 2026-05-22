@@ -17,7 +17,10 @@ use crate::storage::SessionStore;
 /// Platform-agnostic: uses `sh -c` on Unix, `powershell -Command` on Windows.
 pub fn execute_shell(command: &str) -> (String, Option<i32>) {
     let (shell, arg) = shell_command();
-    let result = std::process::Command::new(shell).arg(arg).arg(command).output();
+    let result = std::process::Command::new(shell)
+        .arg(arg)
+        .arg(command)
+        .output();
 
     match result {
         Ok(output) => {

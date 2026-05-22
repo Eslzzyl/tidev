@@ -530,7 +530,8 @@ impl TelegramChannel {
         shell::persist_shell_messages(&self.store, session_id, command, &formatted_db)?;
 
         // Send HTML reply via Telegram
-        self.send_reply_chunks(source_message, &formatted_html).await?;
+        self.send_reply_chunks(source_message, &formatted_html)
+            .await?;
 
         Ok(())
     }

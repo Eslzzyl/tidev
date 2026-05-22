@@ -431,27 +431,29 @@ impl UsageStatsService {
         let mut summary = self.get_all_time_summary()?;
 
         // Count sessions that have at least one message with token usage
-        let session_count: i64 = self.query_row(
-            r#"
+        let session_count: i64 = self
+            .query_row(
+                r#"
             SELECT COUNT(DISTINCT session_id)
             FROM messages
             WHERE total_tokens IS NOT NULL AND total_tokens > 0
             "#,
-            [],
-            |row| row.get(0),
-        )
-        .unwrap_or(0);
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
         summary.total_sessions = session_count;
 
         // Earliest usage date from usage_stats
-        let first_date: Option<String> = self.query_row(
-            r#"
+        let first_date: Option<String> = self
+            .query_row(
+                r#"
             SELECT MIN(created_at) FROM usage_stats
             "#,
-            [],
-            |row| row.get::<_, Option<String>>(0),
-        )
-        .unwrap_or(None);
+                [],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .unwrap_or(None);
         summary.first_usage_date = first_date;
 
         Ok(summary)

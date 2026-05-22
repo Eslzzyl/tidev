@@ -59,7 +59,8 @@ impl SearchProvider for GoogleProvider {
         let url = Url::parse_with_params(GOOGLE_URL, &query_params)
             .context("failed to build Google Custom Search URL")?;
 
-        let response = params.http
+        let response = params
+            .http
             .get(url.as_str())
             .send()
             .await

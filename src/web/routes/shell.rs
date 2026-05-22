@@ -47,9 +47,9 @@ pub async fn execute_shell_command(
     // Verify session exists
     {
         let store = state.store.lock().await;
-        store.load_session_record(session_id)?.ok_or_else(|| {
-            AppError::NotFound(format!("Session {} not found", session_id))
-        })?;
+        store
+            .load_session_record(session_id)?
+            .ok_or_else(|| AppError::NotFound(format!("Session {} not found", session_id)))?;
     }
 
     // Generate request ID

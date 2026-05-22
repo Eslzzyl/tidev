@@ -119,11 +119,14 @@ impl Database {
     /// This is safe to call concurrently with the shared write connection
     /// because SQLite in WAL mode supports multiple concurrent readers.
     pub fn open_read_connection(&self) -> Result<Connection> {
-        let conn = Connection::open_with_flags(
-            &self.path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )
-        .with_context(|| format!("failed to open read-only connection to {}", self.path.display()))?;
+        let conn =
+            Connection::open_with_flags(&self.path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .with_context(|| {
+                    format!(
+                        "failed to open read-only connection to {}",
+                        self.path.display()
+                    )
+                })?;
         Ok(conn)
     }
 }

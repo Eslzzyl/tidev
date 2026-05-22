@@ -49,7 +49,8 @@ impl SearchProvider for TavilyProvider {
             "include_answer": true,
         });
 
-        let response = params.http
+        let response = params
+            .http
             .post(TAVILY_URL)
             .json(&payload)
             .send()

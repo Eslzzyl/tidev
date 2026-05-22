@@ -1394,12 +1394,14 @@ impl App {
                         .iter()
                         .enumerate()
                         .map(|(i, r)| {
-                            let prefix = if i == panel.selected_index { "> " } else { "  " };
+                            let prefix = if i == panel.selected_index {
+                                "> "
+                            } else {
+                                "  "
+                            };
                             let last = r.last_sync_at.as_deref().unwrap_or("never");
-                            let text = format!(
-                                "{}{}  ({})  last sync: {}",
-                                prefix, r.name, r.host, last
-                            );
+                            let text =
+                                format!("{}{}  ({})  last sync: {}", prefix, r.name, r.host, last);
                             let style = if i == panel.selected_index {
                                 Style::default().fg(palette.accent)
                             } else {
@@ -1567,7 +1569,9 @@ impl App {
                 );
 
                 let prompt = match step {
-                    AddRemoteStep::Host => "SSH host alias or user@host (e.g. devbox or eslzzyl@192.168.1.100):",
+                    AddRemoteStep::Host => {
+                        "SSH host alias or user@host (e.g. devbox or eslzzyl@192.168.1.100):"
+                    }
                     AddRemoteStep::Name => "Friendly name (or empty to use host):",
                 };
 
@@ -1578,9 +1582,7 @@ impl App {
 
                 let hint = match step {
                     AddRemoteStep::Host => "Enter: continue  Esc: cancel",
-                    AddRemoteStep::Name => {
-                        "Enter: confirm  Backspace: previous step  Esc: cancel"
-                    }
+                    AddRemoteStep::Name => "Enter: confirm  Backspace: previous step  Esc: cancel",
                 };
                 frame.render_widget(
                     Paragraph::new(hint)
@@ -1651,8 +1653,7 @@ impl App {
                 );
 
                 frame.render_widget(
-                    Paragraph::new(message.as_str())
-                        .style(Style::default().fg(palette.text)),
+                    Paragraph::new(message.as_str()).style(Style::default().fg(palette.text)),
                     sections[1],
                 );
 
@@ -1667,7 +1668,8 @@ impl App {
     }
 }
 
-pub(super) fn pretty_tool_arguments(arguments: &str) -> String {    match serde_json::from_str::<serde_json::Value>(arguments) {
+pub(super) fn pretty_tool_arguments(arguments: &str) -> String {
+    match serde_json::from_str::<serde_json::Value>(arguments) {
         Ok(value) => serde_json::to_string_pretty(&value).unwrap_or_else(|_| arguments.to_string()),
         Err(_) => arguments.to_string(),
     }

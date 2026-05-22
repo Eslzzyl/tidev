@@ -34,7 +34,10 @@ impl SearchProvider for BraveProvider {
         // Fetch extra results to account for offset
         let count = (base_num + offset).clamp(1, 20);
 
-        let mut query_params = vec![("q", params.query.to_string()), ("count", count.to_string())];
+        let mut query_params = vec![
+            ("q", params.query.to_string()),
+            ("count", count.to_string()),
+        ];
 
         if let Some("fast") = params.search_type {
             query_params.push(("freshness", "pw".to_string())); // past week
@@ -43,7 +46,8 @@ impl SearchProvider for BraveProvider {
         let url = Url::parse_with_params(BRAVE_URL, &query_params)
             .context("failed to build Brave Search URL")?;
 
-        let response = params.http
+        let response = params
+            .http
             .get(url.as_str())
             .header("X-Subscription-Token", api_key)
             .send()

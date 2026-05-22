@@ -184,8 +184,10 @@ impl SyncManager {
         let remote_tmp = Path::new("/tmp/tidev-sync.sqlite");
 
         if session_filter.is_empty() {
-            let export_cmd =
-                remote_tidev_command(remote, &format!("tidev export --all -c -o {}", remote_tmp.display()));
+            let export_cmd = remote_tidev_command(
+                remote,
+                &format!("tidev export --all -c -o {}", remote_tmp.display()),
+            );
             transport
                 .exec(&export_cmd)
                 .context("remote export failed")?;
@@ -193,7 +195,11 @@ impl SyncManager {
             let ids = session_filter.join(" --session ");
             let export_cmd = remote_tidev_command(
                 remote,
-                &format!("tidev export --session {} -c -o {}", ids, remote_tmp.display()),
+                &format!(
+                    "tidev export --session {} -c -o {}",
+                    ids,
+                    remote_tmp.display()
+                ),
             );
             transport
                 .exec(&export_cmd)

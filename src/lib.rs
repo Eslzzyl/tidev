@@ -353,10 +353,7 @@ pub fn run() -> anyhow::Result<()> {
                 } else {
                     println!("Configured remotes:");
                     for remote in &config.sync.remotes {
-                        let last = remote
-                            .last_sync_at
-                            .as_deref()
-                            .unwrap_or("never");
+                        let last = remote.last_sync_at.as_deref().unwrap_or("never");
                         println!("  {}  {}  ({})", remote.name, remote.display_name(), last);
                     }
                 }

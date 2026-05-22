@@ -972,10 +972,7 @@ impl App {
         frame.render_widget(footer_paragraph, footer_area);
     }
 
-    fn messages_text(
-        &mut self,
-        content_width: Option<usize>,
-    ) -> MessagesTextResult {
+    fn messages_text(&mut self, content_width: Option<usize>) -> MessagesTextResult {
         let started_at = Instant::now();
         let palette = self.palette();
         let width = content_width.unwrap_or(1).max(1);

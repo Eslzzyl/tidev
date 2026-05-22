@@ -6,10 +6,7 @@ use std::collections::HashMap;
 use crate::stats::{
     Granularity, ProviderUsageEntry, SessionUsageEntry, UsageStatsService, UsageSummary,
 };
-use crate::web::{
-    error::AppError,
-    state::AppState,
-};
+use crate::web::{error::AppError, state::AppState};
 
 /// ─── Request query types ────────────────────────────────────────────────
 
@@ -156,7 +153,9 @@ fn parse_time_range(query: &TimeRangeQuery) -> (DateTime<Utc>, DateTime<Utc>) {
 // ─── Shared helpers ────────────────────────────────────────────────────
 
 /// Build a (provider_id, model_id) → model_display_name lookup from config.
-fn build_model_lookup(config: &crate::config::AppConfig) -> HashMap<String, HashMap<String, String>> {
+fn build_model_lookup(
+    config: &crate::config::AppConfig,
+) -> HashMap<String, HashMap<String, String>> {
     let mut lookup: HashMap<String, HashMap<String, String>> = HashMap::new();
     for m in config.available_models() {
         lookup
@@ -227,9 +226,7 @@ fn populate_model_entries(
 // ─── Route handlers ─────────────────────────────────────────────────────
 
 /// GET /api/stats/summary
-pub async fn get_summary(
-    State(state): State<AppState>,
-) -> Result<Json<SummaryResponse>, AppError> {
+pub async fn get_summary(State(state): State<AppState>) -> Result<Json<SummaryResponse>, AppError> {
     let conn = rusqlite::Connection::open_with_flags(
         &state.database_path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
@@ -341,13 +338,13 @@ pub async fn get_provider_usage(
     // Aggregate by provider_id
     let mut map: HashMap<String, crate::stats::ProviderUsageEntry> = HashMap::new();
     for m in models {
-        let entry = map.entry(m.provider_id.clone()).or_insert_with(|| {
-            crate::stats::ProviderUsageEntry {
-                provider_id: m.provider_id.clone(),
-                provider_display_name: m.provider_display_name.clone(),
-                ..Default::default()
-            }
-        });
+        let entry =
+            map.entry(m.provider_id.clone())
+                .or_insert_with(|| crate::stats::ProviderUsageEntry {
+                    provider_id: m.provider_id.clone(),
+                    provider_display_name: m.provider_display_name.clone(),
+                    ..Default::default()
+                });
         entry.input_tokens += m.input_tokens;
         entry.output_tokens += m.output_tokens;
         entry.cache_read_tokens += m.cache_read_tokens;

@@ -1500,9 +1500,12 @@ impl App {
                 } else {
                     // No running bash tool — this is from the ! shell mode.
                     // Find the last streaming Shell message and update it.
-                    if let Some(idx) = self.conversation.messages.iter().rposition(|m| {
-                        m.role == MessageRole::Shell && m.streaming
-                    }) {
+                    if let Some(idx) = self
+                        .conversation
+                        .messages
+                        .iter()
+                        .rposition(|m| m.role == MessageRole::Shell && m.streaming)
+                    {
                         self.conversation.messages[idx].content = content.clone();
                         if finished {
                             self.conversation.messages[idx].streaming = false;

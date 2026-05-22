@@ -58,7 +58,8 @@ impl SearchProvider for ExaProvider {
         });
 
         let body = tokio::time::timeout(SEARCH_TIMEOUT, async {
-            let response = params.http
+            let response = params
+                .http
                 .post(exa_url)
                 .header(ACCEPT, "application/json, text/event-stream")
                 .json(&payload)

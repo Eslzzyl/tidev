@@ -15,9 +15,7 @@ pub enum SyncView {
     /// Main list of configured remotes.
     RemoteList,
     /// Actions available for a selected remote.
-    RemoteActions {
-        remote_index: usize,
-    },
+    RemoteActions { remote_index: usize },
     /// Multi-select sessions for push/pull.
     SessionPicker {
         remote_index: usize,
@@ -37,10 +35,7 @@ pub enum SyncView {
         on_confirm: Box<SyncView>,
     },
     /// Operation result.
-    Result {
-        message: String,
-        success: bool,
-    },
+    Result { message: String, success: bool },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,9 +87,10 @@ impl App {
 
         // Reload config to pick up CLI-side changes
         if let Ok(paths) = ConfigPaths::discover()
-            && let Ok(config) = crate::config::AppConfig::load_or_create(&paths) {
-                self.config = config;
-            }
+            && let Ok(config) = crate::config::AppConfig::load_or_create(&paths)
+        {
+            self.config = config;
+        }
 
         let sessions = self.store.load_all_sessions().unwrap_or_default();
 
@@ -139,7 +135,12 @@ impl App {
                 selected_indices,
                 cursor,
             } => self.handle_session_picker_key(
-                panel, key, remote_index, action, selected_indices, cursor,
+                panel,
+                key,
+                remote_index,
+                action,
+                selected_indices,
+                cursor,
             ),
             SyncView::AddRemote { .. } => self.handle_add_remote_key(panel, key),
             SyncView::Confirm { on_confirm, .. } => {
@@ -188,8 +189,7 @@ impl App {
                     step: AddRemoteStep::Host,
                 };
                 self.composer.clear();
-                self.composer
-                    .set_placeholder("SSH host alias or user@host");
+                self.composer.set_placeholder("SSH host alias or user@host");
                 self.sync_panel = Some(panel);
                 Ok(())
             }
@@ -246,10 +246,7 @@ impl App {
                         }
                         Err(e) => {
                             panel.view = SyncView::Result {
-                                message: format!(
-                                    "Connection to '{}' failed:\n{}",
-                                    remote.name, e
-                                ),
+                                message: format!("Connection to '{}' failed:\n{}", remote.name, e),
                                 success: false,
                             };
                         }
@@ -306,16 +303,15 @@ impl App {
                 };
                 self.sync_panel = Some(panel);
             }
-            KeyCode::Down
-                if cursor < max => {
-                    panel.view = SyncView::SessionPicker {
-                        remote_index,
-                        action,
-                        selected_indices,
-                        cursor: cursor + 1,
-                    };
-                    self.sync_panel = Some(panel);
-                }
+            KeyCode::Down if cursor < max => {
+                panel.view = SyncView::SessionPicker {
+                    remote_index,
+                    action,
+                    selected_indices,
+                    cursor: cursor + 1,
+                };
+                self.sync_panel = Some(panel);
+            }
             KeyCode::Char(' ') => {
                 let mut new_selected = selected_indices.clone();
                 if let Some(pos) = new_selected.iter().position(|i| *i == cursor) {
@@ -394,8 +390,7 @@ impl App {
                                 step: AddRemoteStep::Host,
                             };
                             self.sync_panel = Some(panel);
-                            self.last_notice =
-                                Some("Host cannot be empty".to_string());
+                            self.last_notice = Some("Host cannot be empty".to_string());
                             return Ok(());
                         }
                         let new_name = if !name.is_empty() { name } else { text.clone() };
@@ -441,8 +436,7 @@ impl App {
                 };
                 self.composer.clear();
                 self.composer.set_text(host.clone());
-                self.composer
-                    .set_placeholder("SSH host alias or user@host");
+                self.composer.set_placeholder("SSH host alias or user@host");
                 self.sync_panel = Some(panel);
             }
             _ => {}
@@ -472,9 +466,7 @@ impl App {
                         selected_indices,
                         ..
                     } => {
-                        self.execute_sync_action(
-                            panel, remote_index, action, selected_indices,
-                        )?;
+                        self.execute_sync_action(panel, remote_index, action, selected_indices)?;
                     }
                     SyncView::RemoteActions { remote_index } => {
                         // Delete remote
@@ -561,7 +553,11 @@ impl App {
             Ok(summary) => {
                 let paths = ConfigPaths::discover()?;
                 let mut config = crate::config::AppConfig::load_or_create(&paths)?;
-                if let Some(r) = config.sync.remotes.iter_mut().find(|r| r.name == remote_name)
+                if let Some(r) = config
+                    .sync
+                    .remotes
+                    .iter_mut()
+                    .find(|r| r.name == remote_name)
                 {
                     r.last_sync_at = Some(chrono::Utc::now().to_rfc3339());
                 }
