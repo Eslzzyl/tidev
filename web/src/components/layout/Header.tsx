@@ -69,7 +69,9 @@ export function Header({ className }: HeaderProps) {
   }, [activeTab]);
 
   return (
-    <header className={`relative z-10 flex h-12 items-center justify-between border-b border-neutral-100/80 bg-white/95 px-3 shadow-[0_1px_2px_-1px_rgba(0,0,0,0.05)] backdrop-blur-sm dark:border-neutral-800/60 dark:bg-neutral-950/95 dark:shadow-[0_1px_2px_-1px_rgba(0,0,0,0.3)] ${className ?? ""}`}>
+    <header
+      className={`relative z-10 flex h-12 items-center justify-between border-b border-neutral-100/80 bg-white/95 px-3 shadow-[0_1px_2px_-1px_rgba(0,0,0,0.05)] backdrop-blur-sm dark:border-neutral-800/60 dark:bg-neutral-950/95 dark:shadow-[0_1px_2px_-1px_rgba(0,0,0,0.3)] ${className ?? ""}`}
+    >
       {/* Left: mobile menu + nav tabs */}
       <div className="flex items-center gap-1">
         {/* Mobile menu toggle */}

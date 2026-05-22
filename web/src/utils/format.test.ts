@@ -21,7 +21,7 @@ describe("formatSessionDate", () => {
     vi.useRealTimers();
   });
 
-  it('returns time string for today', () => {
+  it("returns time string for today", () => {
     const today = new Date().toISOString();
     const result = formatSessionDate(today);
     // Should contain hour:minute digits (locale-dependent but always has colon)
@@ -33,7 +33,7 @@ describe("formatSessionDate", () => {
     expect(formatSessionDate(yesterday)).toBe("Yesterday");
   });
 
-  it('returns weekday name for 2-6 days ago', () => {
+  it("returns weekday name for 2-6 days ago", () => {
     const threeDaysAgo = new Date(
       Date.now() - 3 * 24 * 60 * 60 * 1000,
     ).toISOString();
@@ -45,7 +45,7 @@ describe("formatSessionDate", () => {
     expect(result.length).toBeGreaterThan(0);
   });
 
-  it('returns month + day for 7+ days ago', () => {
+  it("returns month + day for 7+ days ago", () => {
     const tenDaysAgo = new Date(
       Date.now() - 10 * 24 * 60 * 60 * 1000,
     ).toISOString();
@@ -118,35 +118,35 @@ describe("formatNumber", () => {
 // ─── formatToken ─────────────────────────────────────────────────
 
 describe("formatToken", () => {
-  it('returns raw number when < 1000', () => {
+  it("returns raw number when < 1000", () => {
     expect(formatToken(0)).toBe("0");
     expect(formatToken(500)).toBe("500");
     expect(formatToken(999)).toBe("999");
   });
 
-  it('appends K suffix for thousands', () => {
+  it("appends K suffix for thousands", () => {
     expect(formatToken(1000)).toBe("1.0K");
     expect(formatToken(15234)).toBe("15.2K");
     expect(formatToken(999999)).toBe("1000.0K");
   });
 
-  it('appends M suffix for millions', () => {
+  it("appends M suffix for millions", () => {
     expect(formatToken(1_000_000)).toBe("1.0M");
     expect(formatToken(2_500_000)).toBe("2.5M");
     expect(formatToken(999_999_999)).toBe("1000.0M");
   });
 
-  it('appends B suffix for billions', () => {
+  it("appends B suffix for billions", () => {
     expect(formatToken(1_000_000_000)).toBe("1.0B");
     expect(formatToken(500_000_000_000)).toBe("500.0B");
   });
 
-  it('appends T suffix for trillions', () => {
+  it("appends T suffix for trillions", () => {
     expect(formatToken(1_000_000_000_000)).toBe("1.0T");
     expect(formatToken(9_000_000_000_000)).toBe("9.0T");
   });
 
-  it('handles boundary at 999', () => {
+  it("handles boundary at 999", () => {
     expect(formatToken(999)).toBe("999");
     expect(formatToken(1000)).toBe("1.0K");
   });
@@ -161,8 +161,7 @@ describe("stripSystemReminderTags", () => {
   });
 
   it("removes trailing whitespace after the closing tag", () => {
-    const input =
-      "hello<system-reminder>foo</system-reminder>\n\nworld";
+    const input = "hello<system-reminder>foo</system-reminder>\n\nworld";
     expect(stripSystemReminderTags(input)).toBe("helloworld");
   });
 
@@ -173,7 +172,9 @@ describe("stripSystemReminderTags", () => {
 
   it("handles unclosed tag gracefully", () => {
     const input = "text<system-reminder no close";
-    expect(stripSystemReminderTags(input)).toBe("text<system-reminder no close");
+    expect(stripSystemReminderTags(input)).toBe(
+      "text<system-reminder no close",
+    );
   });
 
   it("returns same string when no tags present", () => {
@@ -196,7 +197,9 @@ describe("stripSystemReminderTags", () => {
   });
 
   it("handles text that is entirely a system-reminder block", () => {
-    expect(stripSystemReminderTags("<system-reminder>full</system-reminder>")).toBe("");
+    expect(
+      stripSystemReminderTags("<system-reminder>full</system-reminder>"),
+    ).toBe("");
   });
 
   it("handles \\r\\n line endings after closing tag", () => {
@@ -208,15 +211,19 @@ describe("stripSystemReminderTags", () => {
 // ─── formatWorkspace ─────────────────────────────────────────────
 
 describe("formatWorkspace", () => {
-  it('replaces /home/username with ~/username', () => {
-    expect(formatWorkspace("/home/user/projects/myapp")).toBe("~/projects/myapp");
+  it("replaces /home/username with ~/username", () => {
+    expect(formatWorkspace("/home/user/projects/myapp")).toBe(
+      "~/projects/myapp",
+    );
   });
 
-  it('replaces /Users/username with ~/username', () => {
-    expect(formatWorkspace("/Users/john/Work/rust/tidev")).toBe("~/Work/rust/tidev");
+  it("replaces /Users/username with ~/username", () => {
+    expect(formatWorkspace("/Users/john/Work/rust/tidev")).toBe(
+      "~/Work/rust/tidev",
+    );
   });
 
-  it('returns path unchanged if not a home path', () => {
+  it("returns path unchanged if not a home path", () => {
     expect(formatWorkspace("/var/www/html")).toBe("/var/www/html");
   });
 
@@ -224,7 +231,7 @@ describe("formatWorkspace", () => {
     expect(formatWorkspace("")).toBe("-");
   });
 
-  it('returns path unchanged if home path has fewer than 3 parts', () => {
+  it("returns path unchanged if home path has fewer than 3 parts", () => {
     expect(formatWorkspace("/Users")).toBe("/Users");
   });
 });

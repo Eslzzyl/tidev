@@ -156,13 +156,10 @@ export const api = {
     }),
 
   sendShellCommand: (sessionId: string, command: string) =>
-    fetchJson<ShellCommandResponse>(
-      `${API_BASE}/sessions/${sessionId}/shell`,
-      {
-        method: "POST",
-        body: JSON.stringify({ command }),
-      },
-    ),
+    fetchJson<ShellCommandResponse>(`${API_BASE}/sessions/${sessionId}/shell`, {
+      method: "POST",
+      body: JSON.stringify({ command }),
+    }),
 
   // Models
   listModels: () => fetchJson<{ models: ModelInfo[] }>(`${API_BASE}/models`),
