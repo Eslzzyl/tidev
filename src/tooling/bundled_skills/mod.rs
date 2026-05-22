@@ -24,8 +24,8 @@ pub fn load() -> Vec<SkillInfo> {
 }
 
 fn skill_from_str(content: &'static str, dir_name: &str) -> SkillInfo {
-    let (name, description) =
-        parse_frontmatter(content).expect("bundled SKILL.md must have valid YAML frontmatter");
+    let (name, description, _body) =
+        super::skills::parse_frontmatter(content).expect("bundled SKILL.md must have valid YAML frontmatter");
 
     SkillInfo {
         name,
@@ -35,29 +35,6 @@ fn skill_from_str(content: &'static str, dir_name: &str) -> SkillInfo {
         content: content.to_string(),
         companion_files: Vec::new(),
     }
-}
-
-/// Minimal YAML frontmatter parser.
-///
-/// Extracts only the `name` and `description` fields from the `---` delimited
-/// block at the start of a SKILL.md file.  This avoids a full YAML dependency
-/// for bundled skills while keeping the data in a human-readable file.
-fn parse_frontmatter(content: &str) -> Option<(String, String)> {
-    let body = content.strip_prefix("---\n")?;
-    let (frontmatter, _rest) = body.split_once("\n---\n")?;
-
-    let mut name: Option<String> = None;
-    let mut description: Option<String> = None;
-
-    for line in frontmatter.lines() {
-        if let Some(stripped) = line.strip_prefix("name: ") {
-            name = Some(stripped.trim().to_string());
-        } else if let Some(stripped) = line.strip_prefix("description: ") {
-            description = Some(stripped.trim().to_string());
-        }
-    }
-
-    Some((name?, description?))
 }
 
 #[cfg(test)]
@@ -91,15 +68,16 @@ mod tests {
     #[test]
     fn test_parse_frontmatter_valid() {
         let content = "---\nname: test-skill\ndescription: A test skill\n---\n\nBody text";
-        let (name, desc) = parse_frontmatter(content).expect("valid frontmatter");
+        let (name, desc, body) = skills::parse_frontmatter(content).expect("valid frontmatter");
         assert_eq!(name, "test-skill");
         assert_eq!(desc, "A test skill");
+        assert_eq!(body.trim(), "Body text");
     }
 
     #[test]
     fn test_parse_frontmatter_missing() {
-        assert!(parse_frontmatter("no frontmatter").is_none());
-        assert!(parse_frontmatter("---\nname: only\n---\nno description").is_none());
+        assert!(skills::parse_frontmatter("no frontmatter").is_err());
+        assert!(skills::parse_frontmatter("---\nname: only\n---\nno description").is_err());
     }
 
     #[test]

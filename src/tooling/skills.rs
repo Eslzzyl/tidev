@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
-use serde::Deserialize;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use std::{
@@ -35,12 +34,6 @@ struct SkillCatalogInner {
 #[derive(Clone, Debug, Default)]
 pub struct SkillCatalog {
     inner: Arc<SkillCatalogInner>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct SkillFrontmatter {
-    name: String,
-    description: String,
 }
 
 fn discover_inner(
@@ -395,24 +388,18 @@ fn parse_skill_content(
 ) -> Result<SkillInfo, ()> {
     crate::log_debug!("parse_skill_content: location={}", location.display());
     let normalized_content = raw_content.replace("\r\n", "\n");
-    let (frontmatter, body) = split_frontmatter(&normalized_content).ok_or_else(|| {
+    let (name, description, body) = parse_frontmatter(&normalized_content).map_err(|e| {
         crate::log_debug!(
-            "parse_skill_content: no frontmatter found in {}",
-            location.display()
-        );
-    })?;
-    let parsed: SkillFrontmatter = serde_yaml::from_str(frontmatter).map_err(|e| {
-        crate::log_debug!(
-            "parse_skill_content: yaml parse error for {}: {}",
+            "parse_skill_content: frontmatter parse error for {}: {}",
             location.display(),
             e
         );
     })?;
 
-    if !is_valid_skill_name(&parsed.name) {
+    if !is_valid_skill_name(&name) {
         crate::log_debug!(
             "parse_skill_content: invalid skill name '{}' in {}",
-            parsed.name,
+            name,
             location.display()
         );
         return Err(());
@@ -434,11 +421,11 @@ fn parse_skill_content(
                 );
             })?;
 
-        if directory_name != parsed.name {
+        if directory_name != name {
             crate::log_debug!(
                 "parse_skill_content: directory name '{}' does not match skill name '{}' in {}",
                 directory_name,
-                parsed.name,
+                name,
                 location.display()
             );
             return Err(());
@@ -447,13 +434,13 @@ fn parse_skill_content(
 
     crate::log_debug!(
         "parse_skill_content: success name='{}', description='{}', companion_files={}",
-        parsed.name,
-        parsed.description,
+        name,
+        description,
         companion_files.len()
     );
     Ok(SkillInfo {
-        name: parsed.name,
-        description: parsed.description,
+        name,
+        description,
         directory: directory.unwrap_or_else(|| location.clone()),
         location,
         content: body.trim().to_string(),
@@ -523,10 +510,39 @@ fn fetch_remote_skill(url: &str) -> Result<SkillInfo, ()> {
     parse_skill_content(PathBuf::from(url), None, content)
 }
 
-fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
-    let content = content.strip_prefix("---\n")?;
-    let (frontmatter, body) = content.split_once("\n---\n")?;
-    Some((frontmatter, body))
+/// Parse YAML frontmatter from a SKILL.md file.
+///
+/// Extracts `name` and `description` from the `---` delimited block
+/// at the start of the content, returning them along with the body
+/// text (everything after the frontmatter).
+///
+/// This avoids pulling in the full `serde_yaml` crate, which is
+/// deprecated and no longer maintained.
+pub(crate) fn parse_frontmatter(content: &str) -> Result<(String, String, &str), String> {
+    let content = content
+        .strip_prefix("---\n")
+        .ok_or_else(|| "missing opening `---`".to_string())?;
+    let (frontmatter, body) = content
+        .split_once("\n---\n")
+        .ok_or_else(|| "missing closing `---`".to_string())?;
+
+    let mut name: Option<&str> = None;
+    let mut description: Option<&str> = None;
+
+    for line in frontmatter.lines() {
+        if let Some(stripped) = line.strip_prefix("name: ") {
+            name = Some(stripped.trim());
+        } else if let Some(stripped) = line.strip_prefix("description: ") {
+            description = Some(stripped.trim());
+        }
+    }
+
+    let name = name
+        .ok_or_else(|| "missing 'name' field".to_string())?;
+    let description = description
+        .ok_or_else(|| "missing 'description' field".to_string())?;
+
+    Ok((name.to_string(), description.to_string(), body))
 }
 
 fn collect_companion_files(skill_dir: &Path, skill_file: &Path) -> Vec<PathBuf> {

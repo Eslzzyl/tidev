@@ -45,7 +45,6 @@ image = { version = "0.25.10", default-features = false, features = ["png"] }
 rusqlite = { version = "0.39.0", features = ["bundled", "functions", "vtab"] }
 serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde_json = "1.0.149"
-serde_yaml = "0.9.34"
 async-trait = "0.1"
 syntect = "5.3.0"
 two-face = { version = "0.5.1", default-features = false, features = [
