@@ -127,24 +127,9 @@ export function LeftSidebar() {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-white dark:bg-neutral-950">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-neutral-200 px-2 py-1.5 dark:border-neutral-800">
-        <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-          Sessions
-        </span>
-        <button
-          onClick={handleNewSession}
-          className="rounded p-1 text-neutral-400 transition-all duration-150 hover:bg-neutral-100 active:scale-95 dark:hover:bg-neutral-800"
-          aria-label="New session"
-          title="New session"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </button>
-      </div>
-
-      {/* Search */}
-      <div className="border-b border-neutral-200 p-2 dark:border-neutral-800">
-        <div className="relative">
+      {/* Header: search + new session */}
+      <div className="flex items-center gap-1 border-b border-neutral-200 p-2 dark:border-neutral-800">
+        <div className="relative flex-1">
           <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-400" />
           <input
             type="text"
@@ -154,6 +139,14 @@ export function LeftSidebar() {
             className="w-full rounded border border-neutral-200 bg-white py-1 pl-7 pr-2 text-xs outline-none transition-all duration-150 focus:border-neutral-400 focus:ring-1 focus:ring-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:focus:border-neutral-500 dark:focus:ring-neutral-600"
           />
         </div>
+        <button
+          onClick={handleNewSession}
+          className="flex shrink-0 items-center justify-center rounded p-1 text-neutral-400 transition-all duration-150 hover:bg-neutral-100 active:scale-95 dark:hover:bg-neutral-800"
+          aria-label="New session"
+          title="New session"
+        >
+          <Plus className="h-4 w-4" />
+        </button>
       </div>
 
       {/* Session List */}
