@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useAutoResizeTextarea } from "../../hooks/useAutoResizeTextarea";
 import {
   ChevronDown,
   Square,
@@ -209,14 +210,8 @@ export function MessageInput({
       });
   }, [currentSessionId]);
 
-  // Auto-resize textarea
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height =
-        Math.min(textareaRef.current.scrollHeight, 200) + "px";
-    }
-  }, [inputValue]);
+  // Auto-resize textarea as content grows (up to 200px, then scrolls)
+  useAutoResizeTextarea(textareaRef, inputValue, 200);
 
   // Handle skill insert
   useEffect(() => {
@@ -915,7 +910,7 @@ export function MessageInput({
             }
             rows={1}
             disabled={!isInputEnabled}
-            className="min-h-[44px] max-h-[200px] w-full resize-none rounded-xl border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 placeholder-neutral-400 outline-none transition-colors focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500 dark:focus:border-neutral-400"
+            className="min-h-[44px] w-full resize-none rounded-xl border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 placeholder-neutral-400 outline-none transition-colors focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500 dark:focus:border-neutral-400"
           />
 
           {/* Send/Stop button */}

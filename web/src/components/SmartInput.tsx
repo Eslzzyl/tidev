@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useState, useRef } from "react";
 import { ChevronDown, ArrowUp, Square, Loader2 } from "lucide-react";
 import { useSmartInput } from "../hooks/useSmartInput";
+import { useAutoResizeTextarea } from "../hooks/useAutoResizeTextarea";
 import { FileMentionPopover } from "./chat/FileMentionPopover";
 import { commandFragment, getSuggestions } from "../commands";
 import { ModelPanel } from "./chat/ModelPanel";
@@ -335,6 +336,13 @@ export function SmartInput({
   // Determine if input is effectively enabled
   const isInputEnabled = !disabled;
 
+  // Auto-resize textarea when in multiline mode (up to 200px, then scrolls)
+  useAutoResizeTextarea(
+    inputRef as React.RefObject<HTMLTextAreaElement | null>,
+    inputValue,
+    200,
+  );
+
   return (
     <div className={`relative ${className}`}>
       {/* Command Palette */}
@@ -423,8 +431,7 @@ export function SmartInput({
             placeholder={finalPlaceholder}
             rows={1}
             disabled={!isInputEnabled}
-            className={`min-h-[44px] max-h-[200px] w-full resize-none rounded-2xl bg-transparent px-4 py-3 pr-12 text-sm text-neutral-900 placeholder-neutral-400 outline-none transition-colors focus:border-neutral-500 disabled:opacity-50 dark:text-neutral-100 dark:placeholder-neutral-500 ${inputClassName}`}
-            style={{ fieldSizing: "content" }}
+            className={`min-h-[44px] w-full resize-none rounded-2xl bg-transparent px-4 py-3 pr-12 text-sm text-neutral-900 placeholder-neutral-400 outline-none transition-colors focus:border-neutral-500 disabled:opacity-50 dark:text-neutral-100 dark:placeholder-neutral-500 ${inputClassName}`}
           />
         ) : (
           <input

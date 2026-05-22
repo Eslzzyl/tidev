@@ -240,7 +240,7 @@ export function WelcomePage() {
           onSubmit={handleSubmit}
           onSlashCommand={handleSlashCommand}
           placeholder="What would you like to work on?"
-          multiline={false}
+          multiline={true}
           autoFocus
           className="w-full"
           workspacePath={workspaceRoot}
