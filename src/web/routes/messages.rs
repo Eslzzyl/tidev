@@ -153,7 +153,15 @@ pub async fn list_messages(
     let store = state.store.lock().await;
 
     // Load messages for the session
-    let messages_db = store.load_messages(session_id)?;
+    let mut messages_db = store.load_messages(session_id)?;
+
+    // Respect revert state: hide messages after the revert point,
+    // matching TUI's Conversation::visible_message_count() logic.
+    if let Some(revert_id) = store.load_revert_message_id(session_id)? {
+        if let Some(pos) = messages_db.iter().position(|m| m.id == revert_id) {
+            messages_db.truncate(pos + 1);
+        }
+    }
 
     // Load session-level todos
     let todos_db = store.load_todos(session_id)?;
