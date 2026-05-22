@@ -174,4 +174,46 @@ impl QQClient {
 
         Ok(())
     }
+
+    /// Send a message with Markdown format to a C2C (direct message) user.
+    /// Uses the QQ v2 API endpoint: POST /v2/users/{openid}/messages
+    pub async fn send_c2c_message_markdown(
+        &self,
+        openid: &str,
+        markdown_content: &str,
+        msg_id: Option<&str>,
+        msg_seq: u32,
+    ) -> Result<()> {
+        let token = self.get_access_token().await?;
+        let url = format!("{}/v2/users/{}/messages", self.base_url(), openid);
+
+        let mut body = serde_json::json!({
+            "msg_type": 2,
+            "msg_seq": msg_seq,
+            "markdown": {
+                "content": markdown_content,
+            },
+        });
+
+        if let Some(mid) = msg_id {
+            body.as_object_mut()
+                .unwrap()
+                .insert("msg_id".to_string(), mid.into());
+        }
+
+        let resp = self
+            .client
+            .post(url)
+            .header("Authorization", format!("QQBot {}", token))
+            .json(&body)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let error_text = resp.text().await?;
+            bail!("QQ send_c2c_message_markdown failed: {}", error_text);
+        }
+
+        Ok(())
+    }
 }

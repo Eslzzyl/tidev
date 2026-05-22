@@ -150,21 +150,29 @@ impl QQChannel {
     }
 
     /// Send a text message with Markdown format.
+    /// If `recipient` starts with "user:", sends via C2C API.
+    /// Otherwise sends via guild channel API.
     async fn send_markdown(
         &mut self,
-        channel_id: &str,
+        recipient: &str,
         content: &str,
         msg_id: Option<&str>,
     ) -> Result<()> {
         crate::log_info!(
-            "QQ sending message: channel_id={}, content_len={}",
-            channel_id,
+            "QQ sending message: recipient={}, content_len={}",
+            recipient,
             content.len()
         );
         self.msg_seq += 1;
-        self.client
-            .send_message_markdown(channel_id, content, msg_id, self.msg_seq)
-            .await
+        if let Some(openid) = recipient.strip_prefix("user:") {
+            self.client
+                .send_c2c_message_markdown(openid, content, msg_id, self.msg_seq)
+                .await
+        } else {
+            self.client
+                .send_message_markdown(recipient, content, msg_id, self.msg_seq)
+                .await
+        }
     }
 
     async fn run_loop(&mut self) -> Result<()> {
@@ -217,7 +225,7 @@ impl QQChannel {
                 "op": 2,
                 "d": {
                     "token": format!("QQBot {}", token),
-                    "intents": 1 << 30, // GUILD_MESSAGES / AT_MESSAGES
+                    "intents": (1 << 25) | (1 << 30), // C2C_MESSAGE_CREATE + AT_MESSAGE_CREATE
                     "shard": [0, 1],
                 }
             })
@@ -255,10 +263,12 @@ impl QQChannel {
                                                 self.session_id = Some(ready.session_id);
                                                 crate::log_info!("QQ Ready, session_id: {}", self.session_id.as_ref().unwrap());
                                             }
-                                            "AT_MESSAGE_CREATE" | "MESSAGE_CREATE" => {
-                                                self.handle_message(payload.d.unwrap()).await?;
+                                            "AT_MESSAGE_CREATE" | "MESSAGE_CREATE" | "C2C_MESSAGE_CREATE" => {
+                                                self.handle_message(t, payload.d.unwrap()).await?;
                                             }
-                                            _ => {}
+                                            _ => {
+                                                crate::log_warn!("QQ unhandled event type: {}", t);
+                                            }
                                         }
                                     }
                                 }
@@ -283,20 +293,39 @@ impl QQChannel {
         }
     }
 
-    async fn handle_message(&mut self, data: serde_json::Value) -> Result<()> {
-        let channel_id = data["channel_id"]
-            .as_str()
-            .context("missing channel_id")?
-            .to_string();
-        let author_id = data["author"]["id"].as_str().context("missing author id")?;
+    async fn handle_message(&mut self, event_type: &str, data: serde_json::Value) -> Result<()> {
+        // C2C (direct message) and guild channel messages have different payload structures.
+        // C2C: uses user_openid as identifier, no channel_id field.
+        // Guild: uses channel_id and author.id.
+        let (channel_id, author_id) = if event_type == "C2C_MESSAGE_CREATE" {
+            let user_openid = data["author"]["user_openid"]
+                .as_str()
+                .context("missing user_openid in C2C message")?
+                .to_string();
+            // Prefix with "user:" so send_markdown can route to the C2C API
+            (format!("user:{}", user_openid), user_openid)
+        } else {
+            let cid = data["channel_id"]
+                .as_str()
+                .context("missing channel_id")?
+                .to_string();
+            let aid = data["author"]["id"]
+                .as_str()
+                .context("missing author id")?
+                .to_string();
+            (cid, aid)
+        };
         let msg_id = data["id"]
             .as_str()
             .context("missing message id")?
             .to_string();
         let content = data["content"].as_str().unwrap_or_default().trim();
 
-        if !self.allowlist.contains(author_id) {
-            crate::log_info!("QQ Message from unauthorized user: {}", author_id);
+        if !self.allowlist.contains(&author_id) && !self.allowlist.contains("*") {
+            crate::log_info!(
+                "QQ Message from unauthorized user: {} (add this user_openid to gateway.qq.allowlist, or use \"*\" to allow all)",
+                author_id
+            );
             return Ok(());
         }
 
