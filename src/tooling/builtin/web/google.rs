@@ -7,12 +7,9 @@
 
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
-use reqwest::Client;
 use url::Url;
 
-use crate::config::AuthStore;
-use crate::config::WebSearchProviderConfig;
-use crate::tooling::builtin::web::SearchProvider;
+use crate::tooling::builtin::web::{SearchParams, SearchProvider};
 
 const GOOGLE_URL: &str = "https://www.googleapis.com/customsearch/v1";
 
@@ -24,17 +21,8 @@ impl SearchProvider for GoogleProvider {
         "google"
     }
 
-    async fn search(
-        &self,
-        http: &Client,
-        auth: &AuthStore,
-        _provider_config: Option<&WebSearchProviderConfig>,
-        query: &str,
-        num_results: Option<i64>,
-        search_type: Option<&str>,
-        offset: Option<i64>,
-    ) -> Result<String> {
-        let api_key = auth.search_api_key("google").ok_or_else(|| {
+    async fn search(&self, params: SearchParams<'_>) -> Result<String> {
+        let api_key = params.auth.search_api_key("google").ok_or_else(|| {
             anyhow::anyhow!(
                 "Google Custom Search requires an API key. \
                      Set it in ~/.local/share/tidev/auth.json under \
@@ -42,7 +30,7 @@ impl SearchProvider for GoogleProvider {
             )
         })?;
 
-        let cx = auth.google_cx().ok_or_else(|| {
+        let cx = params.auth.google_cx().ok_or_else(|| {
             anyhow::anyhow!(
                 "Google Custom Search requires a Search Engine ID (cx). \
                      Set it in ~/.local/share/tidev/auth.json under \
@@ -51,27 +39,27 @@ impl SearchProvider for GoogleProvider {
         })?;
 
         // Google allows max 10 results per request.
-        let num = num_results.unwrap_or(8).clamp(1, 10);
+        let num = params.num_results.unwrap_or(8).clamp(1, 10);
         // Google 'start' is 1-indexed; offset is 0-indexed
-        let start = offset.map(|o| o + 1).unwrap_or(1).max(1);
+        let start = params.offset.map(|o| o + 1).unwrap_or(1).max(1);
 
-        let mut params: Vec<(&str, String)> = vec![
+        let mut query_params: Vec<(&str, String)> = vec![
             ("key", api_key.to_string()),
             ("cx", cx.to_string()),
-            ("q", query.to_string()),
+            ("q", params.query.to_string()),
             ("num", num.to_string()),
             ("start", start.to_string()),
         ];
 
         // "fast" → sort by date
-        if search_type == Some("fast") {
-            params.push(("sort", "date".to_string()));
+        if params.search_type == Some("fast") {
+            query_params.push(("sort", "date".to_string()));
         }
 
-        let url = Url::parse_with_params(GOOGLE_URL, &params)
+        let url = Url::parse_with_params(GOOGLE_URL, &query_params)
             .context("failed to build Google Custom Search URL")?;
 
-        let response = http
+        let response = params.http
             .get(url.as_str())
             .send()
             .await

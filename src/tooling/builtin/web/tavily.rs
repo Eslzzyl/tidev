@@ -7,12 +7,9 @@
 
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
-use reqwest::Client;
 use serde_json::json;
 
-use crate::config::AuthStore;
-use crate::config::WebSearchProviderConfig;
-use crate::tooling::builtin::web::SearchProvider;
+use crate::tooling::builtin::web::{SearchParams, SearchProvider};
 
 const TAVILY_URL: &str = "https://api.tavily.com/search";
 
@@ -24,17 +21,8 @@ impl SearchProvider for TavilyProvider {
         "tavily"
     }
 
-    async fn search(
-        &self,
-        http: &Client,
-        auth: &AuthStore,
-        _provider_config: Option<&WebSearchProviderConfig>,
-        query: &str,
-        num_results: Option<i64>,
-        search_type: Option<&str>,
-        offset: Option<i64>,
-    ) -> Result<String> {
-        let api_key = auth.search_api_key("tavily").ok_or_else(|| {
+    async fn search(&self, params: SearchParams<'_>) -> Result<String> {
+        let api_key = params.auth.search_api_key("tavily").ok_or_else(|| {
             anyhow::anyhow!(
                 "Tavily Search requires an API key. \
                      Set it in ~/.local/share/tidev/auth.json under \
@@ -43,25 +31,25 @@ impl SearchProvider for TavilyProvider {
         })?;
 
         // "fast" → basic depth, otherwise advanced
-        let depth = match search_type {
+        let depth = match params.search_type {
             Some("fast") => "basic",
             _ => "advanced",
         };
 
-        let offset = offset.unwrap_or(0).max(0);
-        let base_num = num_results.unwrap_or(8);
+        let offset = params.offset.unwrap_or(0).max(0);
+        let base_num = params.num_results.unwrap_or(8);
         // Fetch extra results to account for offset
         let max_results = (base_num + offset).clamp(1, 20);
 
         let payload = json!({
             "api_key": api_key,
-            "query": query,
+            "query": params.query,
             "search_depth": depth,
             "max_results": max_results,
             "include_answer": true,
         });
 
-        let response = http
+        let response = params.http
             .post(TAVILY_URL)
             .json(&payload)
             .send()

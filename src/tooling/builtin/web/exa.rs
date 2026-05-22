@@ -5,13 +5,10 @@
 
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
-use reqwest::Client;
 use reqwest::header::ACCEPT;
 use serde_json::json;
 
-use crate::config::AuthStore;
-use crate::config::WebSearchProviderConfig;
-use crate::tooling::builtin::web::SearchProvider;
+use crate::tooling::builtin::web::{SearchParams, SearchProvider};
 
 const EXA_URL: &str = "https://mcp.exa.ai/mcp";
 const SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(25);
@@ -24,31 +21,23 @@ impl SearchProvider for ExaProvider {
         "exa"
     }
 
-    async fn search(
-        &self,
-        http: &Client,
-        _auth: &AuthStore,
-        provider_config: Option<&WebSearchProviderConfig>,
-        query: &str,
-        num_results: Option<i64>,
-        search_type: Option<&str>,
-        offset: Option<i64>,
-    ) -> Result<String> {
+    async fn search(&self, params: SearchParams<'_>) -> Result<String> {
         // Resolve the endpoint URL: provider_config -> env var -> default
-        let exa_url = provider_config
+        let exa_url = params
+            .provider_config
             .and_then(|c| c.endpoint.as_deref())
             .map(|s| s.to_string())
             .or_else(|| std::env::var("WEBTOOLS_EXA_URL").ok())
             .unwrap_or_else(|| EXA_URL.to_string());
 
-        let st = match search_type {
+        let st = match params.search_type {
             Some("fast") => "fast",
             Some("deep") => "deep",
             _ => "auto",
         };
 
-        let offset = offset.unwrap_or(0).max(0);
-        let base_num = num_results.unwrap_or(8);
+        let offset = params.offset.unwrap_or(0).max(0);
+        let base_num = params.num_results.unwrap_or(8);
         // Fetch extra results to account for offset
         let num_results_val = base_num + offset;
 
@@ -59,7 +48,7 @@ impl SearchProvider for ExaProvider {
             "params": {
                 "name": "web_search_exa",
                 "arguments": {
-                    "query": query,
+                    "query": params.query,
                     "type": st,
                     "numResults": num_results_val,
                     "livecrawl": "fallback",
@@ -69,7 +58,7 @@ impl SearchProvider for ExaProvider {
         });
 
         let body = tokio::time::timeout(SEARCH_TIMEOUT, async {
-            let response = http
+            let response = params.http
                 .post(exa_url)
                 .header(ACCEPT, "application/json, text/event-stream")
                 .json(&payload)

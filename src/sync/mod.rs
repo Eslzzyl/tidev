@@ -152,7 +152,7 @@ impl SyncManager {
         } else {
             format!("tidev import {}", remote_tmp.display())
         };
-        let remote_cmd = remote_tidev_command(&remote, &import_cmd);
+        let remote_cmd = remote_tidev_command(remote, &import_cmd);
         transport
             .exec(&remote_cmd)
             .context("remote import failed")?;

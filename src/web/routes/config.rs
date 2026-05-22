@@ -236,7 +236,7 @@ pub async fn set_agent_model(
     Ok(Json(SetAgentModelResponse { success: true }))
 }
 
-/// --- Memory Model (consolidation) ---
+// --- Memory Model (consolidation) ---
 
 /// Get memory model response
 #[derive(Serialize)]
@@ -315,7 +315,7 @@ pub async fn set_memory_model(
     Ok(Json(SetMemoryModelResponse { success: true }))
 }
 
-/// --- Model Thinking Level Preference ---
+// --- Model Thinking Level Preference ---
 
 /// Get stored thinking level preference response
 #[derive(Serialize)]

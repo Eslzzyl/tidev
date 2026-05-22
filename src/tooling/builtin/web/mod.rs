@@ -26,6 +26,18 @@ use crate::tooling::{ToolDefinition, ToolPermission};
 // Provider trait
 // ---------------------------------------------------------------------------
 
+/// Parameters for a web search operation.
+#[derive(Debug, Clone)]
+pub struct SearchParams<'a> {
+    pub http: &'a Client,
+    pub auth: &'a AuthStore,
+    pub provider_config: Option<&'a WebSearchProviderConfig>,
+    pub query: &'a str,
+    pub num_results: Option<i64>,
+    pub search_type: Option<&'a str>,
+    pub offset: Option<i64>,
+}
+
 /// A single web search provider.
 #[async_trait]
 pub trait SearchProvider: Send + Sync {
@@ -33,16 +45,7 @@ pub trait SearchProvider: Send + Sync {
     fn name(&self) -> &'static str;
 
     /// Execute a search and return a formatted text result.
-    async fn search(
-        &self,
-        http: &Client,
-        auth: &AuthStore,
-        provider_config: Option<&WebSearchProviderConfig>,
-        query: &str,
-        num_results: Option<i64>,
-        search_type: Option<&str>,
-        offset: Option<i64>,
-    ) -> Result<String>;
+    async fn search(&self, params: SearchParams<'_>) -> Result<String>;
 }
 
 // ---------------------------------------------------------------------------
@@ -168,14 +171,14 @@ async fn execute_search(
         .context("failed to construct web tools HTTP client")?;
 
     provider
-        .search(
-            &http,
+        .search(SearchParams {
+            http: &http,
             auth,
             provider_config,
             query,
-            args.num_results,
-            args.search_type.as_deref(),
-            args.offset,
-        )
+            num_results: args.num_results,
+            search_type: args.search_type.as_deref(),
+            offset: args.offset,
+        })
         .await
 }

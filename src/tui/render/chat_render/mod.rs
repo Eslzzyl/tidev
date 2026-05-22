@@ -69,6 +69,18 @@ struct RenderContext<'a> {
     mode: SessionMode,
 }
 
+/// Return type of [App::messages_text].
+type MessagesTextResult = (
+    Text<'static>,
+    usize,
+    Vec<ToolResultCardRange>,
+    Vec<(Uuid, usize, usize)>,
+    Vec<SelectableRegionRange>,
+    bool,
+    usize,
+    Vec<RunningCardRange>,
+);
+
 impl App {
     pub(super) fn render_chat(&mut self, frame: &mut Frame<'_>) {
         let area = frame.area();
@@ -963,16 +975,7 @@ impl App {
     fn messages_text(
         &mut self,
         content_width: Option<usize>,
-    ) -> (
-        Text<'static>,
-        usize,
-        Vec<ToolResultCardRange>,
-        Vec<(Uuid, usize, usize)>, // user card ranges: (message_id, start_line, end_line)
-        Vec<SelectableRegionRange>,
-        bool,
-        usize,
-        Vec<RunningCardRange>,
-    ) {
+    ) -> MessagesTextResult {
         let started_at = Instant::now();
         let palette = self.palette();
         let width = content_width.unwrap_or(1).max(1);

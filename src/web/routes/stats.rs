@@ -133,7 +133,7 @@ pub struct SessionUsageResponse {
     pub total: i64,
 }
 
-/// ─── Helper to parse time range ─────────────────────────────────────────
+// ─── Helper to parse time range ─────────────────────────────────────────
 
 fn parse_time_range(query: &TimeRangeQuery) -> (DateTime<Utc>, DateTime<Utc>) {
     let end = query
@@ -153,7 +153,7 @@ fn parse_time_range(query: &TimeRangeQuery) -> (DateTime<Utc>, DateTime<Utc>) {
     (start, end)
 }
 
-/// ─── Shared helpers ────────────────────────────────────────────────────
+// ─── Shared helpers ────────────────────────────────────────────────────
 
 /// Build a (provider_id, model_id) → model_display_name lookup from config.
 fn build_model_lookup(config: &crate::config::AppConfig) -> HashMap<String, HashMap<String, String>> {
@@ -224,7 +224,7 @@ fn populate_model_entries(
     }
 }
 
-/// ─── Route handlers ─────────────────────────────────────────────────────
+// ─── Route handlers ─────────────────────────────────────────────────────
 
 /// GET /api/stats/summary
 pub async fn get_summary(
@@ -342,10 +342,11 @@ pub async fn get_provider_usage(
     let mut map: HashMap<String, crate::stats::ProviderUsageEntry> = HashMap::new();
     for m in models {
         let entry = map.entry(m.provider_id.clone()).or_insert_with(|| {
-            let mut e = crate::stats::ProviderUsageEntry::default();
-            e.provider_id = m.provider_id.clone();
-            e.provider_display_name = m.provider_display_name.clone();
-            e
+            crate::stats::ProviderUsageEntry {
+                provider_id: m.provider_id.clone(),
+                provider_display_name: m.provider_display_name.clone(),
+                ..Default::default()
+            }
         });
         entry.input_tokens += m.input_tokens;
         entry.output_tokens += m.output_tokens;
@@ -356,7 +357,7 @@ pub async fn get_provider_usage(
     }
 
     let mut entries: Vec<_> = map.into_values().collect();
-    entries.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
+    entries.sort_by_key(|b| std::cmp::Reverse(b.total_tokens));
 
     Ok(Json(ProviderUsageResponse { entries }))
 }

@@ -6,12 +6,9 @@
 
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
-use reqwest::Client;
 use url::Url;
 
-use crate::config::AuthStore;
-use crate::config::WebSearchProviderConfig;
-use crate::tooling::builtin::web::SearchProvider;
+use crate::tooling::builtin::web::{SearchParams, SearchProvider};
 
 const BRAVE_URL: &str = "https://api.search.brave.com/res/v1/web/search";
 
@@ -23,17 +20,8 @@ impl SearchProvider for BraveProvider {
         "brave"
     }
 
-    async fn search(
-        &self,
-        http: &Client,
-        auth: &AuthStore,
-        _provider_config: Option<&WebSearchProviderConfig>,
-        query: &str,
-        num_results: Option<i64>,
-        search_type: Option<&str>,
-        offset: Option<i64>,
-    ) -> Result<String> {
-        let api_key = auth.search_api_key("brave").ok_or_else(|| {
+    async fn search(&self, params: SearchParams<'_>) -> Result<String> {
+        let api_key = params.auth.search_api_key("brave").ok_or_else(|| {
             anyhow::anyhow!(
                 "Brave Search requires an API key. \
                      Set it in ~/.local/share/tidev/auth.json under \
@@ -41,21 +29,21 @@ impl SearchProvider for BraveProvider {
             )
         })?;
 
-        let offset = offset.unwrap_or(0).max(0);
-        let base_num = num_results.unwrap_or(8);
+        let offset = params.offset.unwrap_or(0).max(0);
+        let base_num = params.num_results.unwrap_or(8);
         // Fetch extra results to account for offset
         let count = (base_num + offset).clamp(1, 20);
 
-        let mut params = vec![("q", query.to_string()), ("count", count.to_string())];
+        let mut query_params = vec![("q", params.query.to_string()), ("count", count.to_string())];
 
-        if let Some("fast") = search_type {
-            params.push(("freshness", "pw".to_string())); // past week
+        if let Some("fast") = params.search_type {
+            query_params.push(("freshness", "pw".to_string())); // past week
         }
 
-        let url = Url::parse_with_params(BRAVE_URL, &params)
+        let url = Url::parse_with_params(BRAVE_URL, &query_params)
             .context("failed to build Brave Search URL")?;
 
-        let response = http
+        let response = params.http
             .get(url.as_str())
             .header("X-Subscription-Token", api_key)
             .send()

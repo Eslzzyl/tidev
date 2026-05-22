@@ -35,13 +35,13 @@ pub fn execute_shell(command: &str) -> (String, Option<i32>) {
                 }
             } else {
                 if !output.stdout.is_empty() {
-                    content.push_str(&String::from_utf8_lossy(&output.stdout).trim_end());
+                    content.push_str(String::from_utf8_lossy(&output.stdout).trim_end());
                 }
                 if !output.stderr.is_empty() {
                     if !content.is_empty() {
                         content.push('\n');
                     }
-                    content.push_str(&String::from_utf8_lossy(&output.stderr).trim_end());
+                    content.push_str(String::from_utf8_lossy(&output.stderr).trim_end());
                 }
             }
 

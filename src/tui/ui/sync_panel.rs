@@ -91,11 +91,10 @@ impl App {
         self.command_palette.clear();
 
         // Reload config to pick up CLI-side changes
-        if let Ok(paths) = ConfigPaths::discover() {
-            if let Ok(config) = crate::config::AppConfig::load_or_create(&paths) {
+        if let Ok(paths) = ConfigPaths::discover()
+            && let Ok(config) = crate::config::AppConfig::load_or_create(&paths) {
                 self.config = config;
             }
-        }
 
         let sessions = self.store.load_all_sessions().unwrap_or_default();
 
@@ -307,8 +306,8 @@ impl App {
                 };
                 self.sync_panel = Some(panel);
             }
-            KeyCode::Down => {
-                if cursor < max {
+            KeyCode::Down
+                if cursor < max => {
                     panel.view = SyncView::SessionPicker {
                         remote_index,
                         action,
@@ -317,7 +316,6 @@ impl App {
                     };
                     self.sync_panel = Some(panel);
                 }
-            }
             KeyCode::Char(' ') => {
                 let mut new_selected = selected_indices.clone();
                 if let Some(pos) = new_selected.iter().position(|i| *i == cursor) {
