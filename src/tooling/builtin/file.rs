@@ -981,8 +981,8 @@ fn whitespace_normalized_replacer(content: &str, find: &str) -> Vec<String> {
     }
 
     let find_lines: Vec<&str> = find.lines().collect();
-    if find_lines.len() > 1 {
-        for start in 0..=lines.len().saturating_sub(find_lines.len()) {
+    if find_lines.len() > 1 && find_lines.len() <= lines.len() {
+        for start in 0..=lines.len() - find_lines.len() {
             let block = lines[start..start + find_lines.len()].concat();
             if normalize_whitespace(trim_newline(&block)) == normalized_find {
                 results.push(block);
@@ -999,14 +999,12 @@ fn indentation_flexible_replacer(content: &str, find: &str) -> Vec<String> {
     let mut results = Vec::new();
     let find_count = split_lines_inclusive(find).len();
 
-    if find_count == 0 {
-        return results;
-    }
-
-    for start in 0..=lines.len().saturating_sub(find_count) {
-        let block = lines[start..start + find_count].concat();
-        if remove_indentation(&block) == normalized_find {
-            results.push(block);
+    if find_count > 0 && find_count <= lines.len() {
+        for start in 0..=lines.len() - find_count {
+            let block = lines[start..start + find_count].concat();
+            if remove_indentation(&block) == normalized_find {
+                results.push(block);
+            }
         }
     }
 
@@ -1023,8 +1021,8 @@ fn escape_normalized_replacer(content: &str, find: &str) -> Vec<String> {
 
     let lines = split_lines_inclusive(content);
     let find_lines = split_lines_inclusive(&unescaped_find);
-    if find_lines.len() > 1 {
-        for start in 0..=lines.len().saturating_sub(find_lines.len()) {
+    if find_lines.len() > 1 && find_lines.len() <= lines.len() {
+        for start in 0..=lines.len() - find_lines.len() {
             let block = lines[start..start + find_lines.len()].concat();
             if unescape_string(&block) == unescaped_find {
                 results.push(block);
@@ -1048,14 +1046,12 @@ fn trimmed_boundary_replacer(content: &str, find: &str) -> Vec<String> {
 
     let lines = split_lines_inclusive(content);
     let find_count = split_lines_inclusive(find).len();
-    if find_count == 0 {
-        return results;
-    }
-
-    for start in 0..=lines.len().saturating_sub(find_count) {
-        let block = lines[start..start + find_count].concat();
-        if block.trim() == trimmed_find {
-            results.push(block);
+    if find_count > 0 && find_count <= lines.len() {
+        for start in 0..=lines.len() - find_count {
+            let block = lines[start..start + find_count].concat();
+            if block.trim() == trimmed_find {
+                results.push(block);
+            }
         }
     }
 
@@ -1257,4 +1253,51 @@ pub fn read_file_for_at_reference(
     );
 
     Ok((output, cut || more))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Reproduces a panic in escape_normalized_replacer:
+    /// when `find` (after unescaping) has more lines than `content`,
+    /// the slice `lines[start..start + find_lines.len()]` goes out of bounds.
+    #[test]
+    fn test_escape_normalized_replacer_find_longer_than_content() {
+        // content has 1 line, find unescapes to 2 lines
+        let content = "short content";
+        let find = "\\n\\n";
+        let result = escape_normalized_replacer(content, find);
+        assert!(result.is_empty());
+    }
+
+    /// Reproduces a similar panic in whitespace_normalized_replacer:
+    /// when `find` has more lines than `content`.
+    #[test]
+    fn test_whitespace_normalized_replacer_find_longer_than_content() {
+        let content = "short content";
+        let find = "a\nb\nc";
+        let result = whitespace_normalized_replacer(content, find);
+        assert!(result.is_empty());
+    }
+
+    /// Reproduces a similar panic in indentation_flexible_replacer:
+    /// when `find` has more lines than `content`.
+    #[test]
+    fn test_indentation_flexible_replacer_find_longer_than_content() {
+        let content = "short content";
+        let find = "a\nb\nc";
+        let result = indentation_flexible_replacer(content, find);
+        assert!(result.is_empty());
+    }
+
+    /// Reproduces a similar panic in trimmed_boundary_replacer:
+    /// when `find` (with trimmable boundary) has more lines than `content`.
+    #[test]
+    fn test_trimmed_boundary_replacer_find_longer_than_content() {
+        let content = "short content";
+        let find = "  a\nb\nc  ";
+        let result = trimmed_boundary_replacer(content, find);
+        assert!(result.is_empty());
+    }
 }
