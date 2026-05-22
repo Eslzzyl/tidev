@@ -1497,6 +1497,35 @@ impl App {
                         self.message_layout_index.borrow_mut().valid = false;
                         self.clear_message_render_cache();
                     }
+                } else {
+                    // No running bash tool — this is from the ! shell mode.
+                    // Find the last streaming Shell message and update it.
+                    if let Some(idx) = self.conversation.messages.iter().rposition(|m| {
+                        m.role == MessageRole::Shell && m.streaming
+                    }) {
+                        self.conversation.messages[idx].content = content.clone();
+                        if finished {
+                            self.conversation.messages[idx].streaming = false;
+                        }
+                        self.invalidate_active_message_render_cache_for(
+                            self.conversation.messages[idx].id,
+                        );
+                        if finished {
+                            let persisted = self.conversation.messages[idx].clone();
+                            if let Err(e) = self
+                                .store
+                                .append_message(self.conversation.session_id, &persisted)
+                            {
+                                crate::log_warn!(
+                                    "ShellOutput: failed to persist shell message: {}",
+                                    e
+                                );
+                            }
+                        }
+                        // Force layout rebuild since content size may have changed
+                        self.message_layout_index.borrow_mut().valid = false;
+                        self.clear_message_render_cache();
+                    }
                 }
             }
             BackendEvent::TurnStarting {
