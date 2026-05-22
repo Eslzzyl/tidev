@@ -39,6 +39,10 @@ export function useSSE(sessionId: string | null) {
     // New turn — create a fresh streaming assistant message
     currentRequestIdRef.current = request_id;
 
+    // Ensure streaming is active — message_complete may have cleared it
+    // after the previous turn, but the agent loop continues with more turns.
+    setStreaming(true);
+
     const state = useSessionStore.getState();
     const msgs = [...state.messages];
 
@@ -231,17 +235,33 @@ export function useSSE(sessionId: string | null) {
     };
 
     const handleMessageComplete = () => {
-      // Mark the streaming assistant as complete
+      // Mark the streaming assistant as complete.
+      // Keep isStreaming = true only if there are tool_calls → more turns follow.
+      // If no tool_calls, this is the final turn → end streaming.
       if (streamingAssistantIdRef.current) {
+        // Check if the completed assistant requested tools (more turns coming)
+        const state = useSessionStore.getState();
+        const completedMsg = state.messages.find(
+          (m) => m.id === streamingAssistantIdRef.current,
+        );
+        const hasToolCalls =
+          completedMsg?.tool_calls && completedMsg.tool_calls.length > 0;
+
+        if (!hasToolCalls) {
+          setStreaming(false);
+        }
+
         updateStreamingAssistant((msg) => ({
           ...msg,
           completed_at: new Date().toISOString(),
           streaming: false,
         }));
         streamingAssistantIdRef.current = null;
+      } else {
+        // No streaming assistant — clean up streaming state
+        setStreaming(false);
       }
 
-      setStreaming(false);
       useSessionStore.getState().setCurrentUsageStats(null);
     };
 
@@ -341,6 +361,7 @@ export function useSSE(sessionId: string | null) {
       sseClient.off("messages.updated", handleMessagesUpdated);
       sseClient.off("permission.request", handlePermissionRequest);
       sseClient.disconnect();
+      setStreaming(false);
       streamingAssistantIdRef.current = null;
       currentRequestIdRef.current = null;
     };

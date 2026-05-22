@@ -58,22 +58,27 @@ export function useChatAutoScroll(
     [containerRef],
   );
 
-  // Auto-scroll when streaming content grows and user is pinned to bottom.
-  // This runs via useEffect so it happens *after* React commits new content
-  // (ResizeObserver from virtualizer ensures height is already updated).
+  // Auto-scroll loop during streaming.
+  // Uses a continuous requestAnimationFrame loop so it fires on EVERY frame
+  // while streaming is active, not just when React dependencies happen to change.
+  // This ensures the viewport stays pinned to the bottom as content grows
+  // incrementally within a single round (text chunks, tool calls, etc.).
   useEffect(() => {
-    if (!isStreaming || !isPinnedRef.current) return;
-    const el = containerRef.current;
-    if (!el) return;
-    // Use requestAnimationFrame to avoid layout thrashing
-    requestAnimationFrame(() => {
+    if (!isStreaming) return;
+
+    let rafId: number;
+    const tick = () => {
       if (isPinnedRef.current && containerRef.current) {
         containerRef.current.scrollTo({
           top: containerRef.current.scrollHeight,
-          behavior: "smooth",
+          behavior: "instant",
         });
       }
-    });
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+
+    return () => cancelAnimationFrame(rafId);
   }, [isStreaming, containerRef]);
 
   return {
