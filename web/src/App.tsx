@@ -16,6 +16,7 @@ import { ResizeHandle } from "./components/layout/ResizeHandle";
 import { Header } from "./components/layout/Header";
 import { ChatPanel } from "./components/chat/ChatPanel";
 import { ToastContainer } from "./components/ui/ToastContainer";
+import { CloudOff, RefreshCw } from "lucide-react";
 import { useSSE } from "./hooks/useSSE";
 
 // Lazy-loaded views — each will be loaded on first render of that tab
@@ -288,13 +289,26 @@ function App() {
   if (loadError) {
     return (
       <div className="flex h-[100dvh] items-center justify-center bg-white dark:bg-neutral-950">
-        <div className="text-center">
-          <p className="mb-2 text-red-600 dark:text-red-400">{loadError}</p>
+        <div className="mx-auto max-w-sm px-6 text-center">
+          <div className="mb-6 flex justify-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-red-50 dark:bg-red-900/20">
+              <CloudOff className="h-8 w-8 text-red-500" />
+            </div>
+          </div>
+          <h2 className="mb-2 text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+            Unable to Connect
+          </h2>
+          <p className="mb-2 text-sm leading-relaxed text-neutral-500 dark:text-neutral-400">
+            {loadError === "Unknown error" || loadError === "Failed to load sessions"
+              ? "The server is not responding. Please ensure the backend is running and retry."
+              : loadError}
+          </p>
           <button
             onClick={() => window.location.reload()}
-            className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+            className="inline-flex items-center gap-2 rounded-lg bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-neutral-800 active:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200 dark:active:bg-neutral-300"
           >
-            Retry
+            <RefreshCw className="h-4 w-4" />
+            Retry Connection
           </button>
         </div>
       </div>
