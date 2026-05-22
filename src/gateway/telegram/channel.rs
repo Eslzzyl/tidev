@@ -143,11 +143,12 @@ impl TelegramChannel {
     }
 
     async fn bootstrap_offset(&mut self) -> Result<()> {
+        crate::log_info!("Telegram bootstrapping offset...");
         let updates = self.bot.get_updates(0, 0).await?;
         if let Some(last) = updates.last() {
             self.offset = last.update_id.saturating_add(1);
+            crate::log_info!("Telegram bootstrap offset set to {}", self.offset);
         }
-
         self.register_commands().await?;
         Ok(())
     }
@@ -1454,16 +1455,30 @@ impl Channel for TelegramChannel {
             .thread_ts
             .as_ref()
             .and_then(|s| s.parse::<i64>().ok());
+        crate::log_info!(
+            "Telegram send draft: chat_id={}, content_len={}",
+            chat_id,
+            message.content.len()
+        );
         let sent = self
             .bot
             .send_message(chat_id, thread_id, &message.content, None)
             .await?;
 
+        crate::log_info!(
+            "Telegram draft sent: message_id={}",
+            sent.message_id
+        );
         Ok(Some(sent.message_id.to_string()))
     }
 
     async fn update_draft(&mut self, _recipient: &str, message_id: &str, text: &str) -> Result<()> {
         let msg_id: i64 = message_id.parse().context("invalid message_id")?;
+        crate::log_debug!(
+            "Telegram update draft: message_id={}, content_len={}",
+            message_id,
+            text.len()
+        );
         self.bot.edit_message_text_html(0, msg_id, text).await?;
         Ok(())
     }
@@ -1475,6 +1490,11 @@ impl Channel for TelegramChannel {
         status: &str,
     ) -> Result<()> {
         let msg_id: i64 = message_id.parse().context("invalid message_id")?;
+        crate::log_debug!(
+            "Telegram draft progress: message_id={}, status_len={}",
+            message_id,
+            status.len()
+        );
         self.bot.edit_message_text_html(0, msg_id, status).await?;
         Ok(())
     }
@@ -1486,12 +1506,18 @@ impl Channel for TelegramChannel {
         text: &str,
     ) -> Result<()> {
         let msg_id: i64 = message_id.parse().context("invalid message_id")?;
+        crate::log_info!(
+            "Telegram finalize draft: message_id={}, content_len={}",
+            message_id,
+            text.len()
+        );
         self.bot.edit_message_text_html(0, msg_id, text).await?;
         Ok(())
     }
 
     async fn cancel_draft(&mut self, _recipient: &str, message_id: &str) -> Result<()> {
         let msg_id: i64 = message_id.parse().context("invalid message_id")?;
+        crate::log_info!("Telegram cancel draft: message_id={}", message_id);
         self.bot.delete_message(0, msg_id).await?;
         Ok(())
     }

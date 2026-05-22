@@ -55,7 +55,16 @@ impl ChannelOrchestrator {
         for channel in channels.iter_mut() {
             if let Some(store) = channel.store() {
                 match channel.restore_sessions(store.clone()) {
-                    Ok(count) => total_restored += count,
+                    Ok(count) => {
+                        if count > 0 {
+                            crate::log_info!(
+                                "Restored {} session(s) for {}",
+                                count,
+                                channel.name()
+                            );
+                        }
+                        total_restored += count;
+                    }
                     Err(e) => {
                         crate::log_error!(
                             "Failed to restore sessions for {}: {}",

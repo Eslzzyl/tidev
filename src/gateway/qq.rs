@@ -156,6 +156,11 @@ impl QQChannel {
         content: &str,
         msg_id: Option<&str>,
     ) -> Result<()> {
+        crate::log_info!(
+            "QQ sending message: channel_id={}, content_len={}",
+            channel_id,
+            content.len()
+        );
         self.msg_seq += 1;
         self.client
             .send_message_markdown(channel_id, content, msg_id, self.msg_seq)
@@ -260,7 +265,12 @@ impl QQChannel {
                                 11 => { // Heartbeat ACK
                                     _last_heartbeat_ack = Instant::now();
                                 }
-                                _ => {}
+                                _ => {
+                                    crate::log_warn!(
+                                        "QQ received unknown opcode: {}",
+                                        payload.op
+                                    );
+                                }
                             }
                         }
                         Some(Ok(WsMessage::Close(_))) | None => {
