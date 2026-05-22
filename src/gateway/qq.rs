@@ -28,6 +28,7 @@ use crate::{
 use super::channel::Channel;
 use super::commands::{CommandInvocation, format_status_summary, gateway_help_text, parse_command};
 use super::qq_client::QQClient;
+use crate::gateway::shell;
 
 pub const GATEWAY_PLATFORM_QQ: &str = "qq";
 
@@ -298,6 +299,14 @@ impl QQChannel {
 
         crate::log_info!("QQ Message from {}: {}", author_id, clean_content);
 
+        // Shell command: messages starting with `!` are executed directly.
+        if let Some(cmd) = clean_content.strip_prefix('!') {
+            let cmd = cmd.trim();
+            if !cmd.is_empty() {
+                return self.handle_shell_command(&channel_id, &msg_id, cmd).await;
+            }
+        }
+
         // Check if user is in interactive model selection state.
         // If so, handle selection input instead of normal message processing.
         if let Some(state) = self.model_selection_states.get(&channel_id).cloned() {
@@ -313,7 +322,6 @@ impl QQChannel {
             let mut active_model = self.config.resolve_active_model_for_gateway(&self.auth)?;
             let chat_key = format!("qq:{}", channel_id);
             let mut conversation = self.load_or_create_conversation(&chat_key, &active_model)?;
-
             // Load the session's static system prompt onto the model.
             // Legacy sessions (no stored prompt) get composed now.
             match self
@@ -562,6 +570,32 @@ impl QQChannel {
             self.send_markdown(channel_id, &last_msg.content, Some(msg_id))
                 .await?;
         }
+
+        Ok(())
+    }
+
+    /// Handle a `!` shell command: execute it and send back the result.
+    async fn handle_shell_command(
+        &mut self,
+        channel_id: &str,
+        msg_id: &str,
+        command: &str,
+    ) -> Result<()> {
+        let chat_key = format!("qq:{}", channel_id);
+        let active_model = self.config.resolve_active_model_for_gateway(&self.auth)?;
+        let conversation = self.load_or_create_conversation(&chat_key, &active_model)?;
+        let session_id = conversation.session_id;
+
+        // Execute and format
+        let (content, exit_code) = shell::execute_shell(command);
+        let formatted = shell::format_shell_output(&content, exit_code);
+
+        // Persist both messages (Markdown format — consistent with web/TUI)
+        shell::persist_shell_messages(&self.store, session_id, command, &formatted)?;
+
+        // Send Markdown reply via QQ
+        self.send_markdown(channel_id, &formatted, Some(msg_id))
+            .await?;
 
         Ok(())
     }

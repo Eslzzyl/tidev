@@ -32,6 +32,7 @@ use crate::gateway::channel::SendMessage;
 use crate::gateway::commands::{
     CommandInvocation, GATEWAY_COMMANDS, format_status_summary, gateway_help_text, parse_command,
 };
+use crate::gateway::shell;
 
 pub const GATEWAY_PLATFORM_TELEGRAM: &str = "telegram";
 pub const TELEGRAM_MAX_MESSAGE_LENGTH: usize = 4096;
@@ -234,6 +235,14 @@ impl TelegramChannel {
             );
             return Ok(());
         };
+
+        // Shell command: messages starting with `!` are executed directly.
+        if let Some(cmd) = content.strip_prefix('!') {
+            let cmd = cmd.trim();
+            if !cmd.is_empty() {
+                return self.handle_shell_command(&message, cmd).await;
+            }
+        }
 
         // Check if user is in interactive model selection state.
         // If so, handle selection input instead of normal message processing.
@@ -497,6 +506,31 @@ impl TelegramChannel {
                 self.send_reply_chunks(source_message, &final_text).await?;
             }
         }
+
+        Ok(())
+    }
+
+    /// Handle a `!` shell command: execute it and send back the result.
+    async fn handle_shell_command(
+        &mut self,
+        source_message: &TelegramMessage,
+        command: &str,
+    ) -> Result<()> {
+        let chat_key = self.chat_key(source_message);
+        let active_model = self.resolve_chat_model(&chat_key)?;
+        let conversation = self.load_or_create_chat_conversation(&chat_key, &active_model)?;
+        let session_id = conversation.session_id;
+
+        // Execute and format
+        let (content, exit_code) = shell::execute_shell(command);
+        let formatted_db = shell::format_shell_output(&content, exit_code);
+        let formatted_html = shell::format_shell_output_html(&content, exit_code);
+
+        // Persist both messages (Markdown format — consistent with web/TUI)
+        shell::persist_shell_messages(&self.store, session_id, command, &formatted_db)?;
+
+        // Send HTML reply via Telegram
+        self.send_reply_chunks(source_message, &formatted_html).await?;
 
         Ok(())
     }

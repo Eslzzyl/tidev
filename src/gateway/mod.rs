@@ -4,6 +4,7 @@ mod orchestrator;
 mod qq;
 mod qq_client;
 mod shared;
+pub mod shell;
 pub mod telegram;
 
 use std::env;
