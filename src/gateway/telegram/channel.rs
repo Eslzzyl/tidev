@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::{
     agent::runtime::AgentRuntime,
-    config::{ActiveModel, AppConfig, AuthStore},
+    config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
     context::ContextManager,
     llm::LlmClient,
     prompts::{SessionMode, gateway_system_prompt},
@@ -31,21 +31,12 @@ use crate::gateway::channel::Channel;
 use crate::gateway::channel::SendMessage;
 use crate::gateway::commands::{
     CommandInvocation, GATEWAY_COMMANDS, format_status_summary, gateway_help_text, parse_command,
-};
+};use crate::gateway::model_selection::{self, ModelSelectionIO, ModelSelectionState};
 use crate::gateway::shell;
 
 pub const GATEWAY_PLATFORM_TELEGRAM: &str = "telegram";
 pub const TELEGRAM_MAX_MESSAGE_LENGTH: usize = 4096;
 const TELEGRAM_DRAFT_EDIT_INTERVAL_MS: u64 = 1200;
-
-/// Interactive model selection state for a chat.
-#[derive(Debug, Clone)]
-enum ModelSelectionState {
-    /// Waiting for user to select a provider (1, 2, 3, ...)
-    WaitingForProvider,
-    /// Waiting for user to select a model (1, 2, 3, ...) for the given provider.
-    WaitingForModel { provider_id: String },
-}
 
 /// Interactive balance selection state for a chat.
 #[derive(Debug, Clone)]
@@ -59,6 +50,7 @@ pub struct TelegramChannel {
     pub workspace_root: PathBuf,
     pub config: AppConfig,
     pub auth: AuthStore,
+    pub config_paths: ConfigPaths,
     pub store: SessionStore,
     pub llm: LlmClient,
     pub tools: ToolRegistry,
@@ -124,6 +116,7 @@ impl TelegramChannel {
             workspace_root,
             config,
             auth,
+            config_paths: paths.clone(),
             store,
             llm,
             tools,
@@ -141,7 +134,61 @@ impl TelegramChannel {
             compacting_sessions: HashSet::new(),
         }
     }
+}
 
+// ── ModelSelectionIO trait implementation ──
+
+#[async_trait]
+impl ModelSelectionIO for TelegramChannel {
+    type Id = i64;
+
+    async fn send_message(&mut self, id: &i64, text: &str) -> Result<()> {
+        // Send as a new message (not a threaded reply) to the chat.
+        self.bot.send_message_html(*id, None, text, None).await?;
+        Ok(())
+    }
+
+    fn get_state(&self, id: &i64) -> Option<ModelSelectionState> {
+        self.model_selection_states.get(id).cloned()
+    }
+
+    fn set_state(&mut self, id: i64, state: ModelSelectionState) {
+        self.model_selection_states.insert(id, state);
+    }
+
+    fn remove_state(&mut self, id: &i64) {
+        self.model_selection_states.remove(id);
+    }
+
+    fn chat_key(&self, id: &i64) -> String {
+        format!("telegram:{}", id)
+    }
+
+    fn platform(&self) -> &'static str {
+        GATEWAY_PLATFORM_TELEGRAM
+    }
+
+    fn config(&self) -> &AppConfig { &self.config }
+    fn config_mut(&mut self) -> &mut AppConfig { &mut self.config }
+    fn config_paths(&self) -> &ConfigPaths { &self.config_paths }
+    fn auth(&self) -> &AuthStore { &self.auth }
+    fn store(&self) -> &SessionStore { &self.store }
+
+    fn get_available_providers(&self) -> Vec<(String, String)> {
+        self.get_available_providers()
+    }
+
+    fn get_models_for_provider(&self, provider_id: &str) -> Vec<(String, String)> {
+        self.get_models_for_provider(provider_id)
+    }
+
+    fn resolve_chat_model(&self, chat_key: &str) -> Result<ActiveModel> {
+        self.resolve_chat_model(chat_key)
+    }
+}
+
+// ── TelegramChannel methods ──
+impl TelegramChannel {
     async fn bootstrap_offset(&mut self) -> Result<()> {
         crate::log_info!("Telegram bootstrapping offset...");
         let updates = self.bot.get_updates(0, 0).await?;
@@ -838,135 +885,17 @@ impl TelegramChannel {
     }
 
     async fn handle_model_command(&mut self, message: &TelegramMessage) -> Result<()> {
-        let providers = self.get_available_providers();
-
-        if providers.is_empty() {
-            self.send_reply_chunks(
-                message,
-                "No providers available. Configure API keys in auth.json.",
-            )
-            .await?;
-            return Ok(());
-        }
-
-        // Format provider list
-        let mut text = String::from("Select a provider (enter number):\n\n");
-        for (i, (id, name)) in providers.iter().enumerate() {
-            text.push_str(&format!("{}. {} ({})\n", i + 1, name, id));
-        }
-        text.push_str("\n(Enter any other number to cancel)");
-
-        self.send_reply_chunks(message, &text).await?;
-
-        // Set state to waiting for provider selection
-        self.model_selection_states
-            .insert(message.chat.id, ModelSelectionState::WaitingForProvider);
-
-        Ok(())
+        model_selection::start_model_selection(self, &message.chat.id).await
     }
 
+    /// Handle interactive model selection input.
     async fn handle_model_selection(
         &mut self,
         message: &TelegramMessage,
         state: &ModelSelectionState,
     ) -> Result<()> {
         let content = message.text.as_deref().unwrap_or_default().trim();
-
-        match state {
-            ModelSelectionState::WaitingForProvider => {
-                let providers = self.get_available_providers();
-                let selection: usize = match content.parse() {
-                    Ok(n) => n,
-                    Err(_) => {
-                        self.model_selection_states.remove(&message.chat.id);
-                        self.send_reply_chunks(
-                            message,
-                            "Invalid selection. Selection cancelled. Send /model to try again.",
-                        )
-                        .await?;
-                        return Ok(());
-                    }
-                };
-
-                if selection < 1 || selection > providers.len() {
-                    self.model_selection_states.remove(&message.chat.id);
-                    self.send_reply_chunks(
-                        message,
-                        "Selection cancelled. Send /model to try again.",
-                    )
-                    .await?;
-                    return Ok(());
-                }
-
-                let (provider_id, _provider_name) = &providers[selection - 1];
-
-                // Format model list
-                let mut text = format!("Select a model for {} (enter number):\n\n", provider_id);
-                for (i, model) in self.get_models_for_provider(provider_id).iter().enumerate() {
-                    text.push_str(&format!("{}. {}\n", i + 1, model.1));
-                }
-                text.push_str("\n(Enter any other number to cancel)");
-
-                self.send_reply_chunks(message, &text).await?;
-
-                // Set state to waiting for model selection
-                self.model_selection_states.insert(
-                    message.chat.id,
-                    ModelSelectionState::WaitingForModel {
-                        provider_id: provider_id.clone(),
-                    },
-                );
-            }
-            ModelSelectionState::WaitingForModel { provider_id } => {
-                // Parse model selection
-                let selection: usize = match content.parse() {
-                    Ok(n) => n,
-                    Err(_) => {
-                        self.model_selection_states.remove(&message.chat.id);
-                        self.send_reply_chunks(
-                            message,
-                            "Invalid selection. Selection cancelled. Send /model to try again.",
-                        )
-                        .await?;
-                        return Ok(());
-                    }
-                };
-
-                let models = self.get_models_for_provider(provider_id);
-                if selection < 1 || selection > models.len() {
-                    self.model_selection_states.remove(&message.chat.id);
-                    self.send_reply_chunks(
-                        message,
-                        "Selection cancelled. Send /model to try again.",
-                    )
-                    .await?;
-                    return Ok(());
-                }
-
-                let (_model_id, _model_name) = &models[selection - 1];
-
-                // Save the model selection
-                let chat_key = format!("telegram:{}", message.chat.id);
-                self.store.set_gateway_chat_model(
-                    GATEWAY_PLATFORM_TELEGRAM,
-                    &chat_key,
-                    provider_id,
-                    _model_id,
-                )?;
-
-                // Clear state
-                self.model_selection_states.remove(&message.chat.id);
-
-                // Send success message
-                let success_text = format!(
-                    "Model switched to {}/{}\n\nSend /model to change again.",
-                    provider_id, _model_id
-                );
-                self.send_reply_chunks(message, &success_text).await?;
-            }
-        }
-
-        Ok(())
+        model_selection::handle_step(self, &message.chat.id, state, content).await
     }
 
     /// Get available providers (user config + bundled) that have valid auth.
@@ -1021,6 +950,29 @@ impl TelegramChannel {
         models
     }
 
+    fn resolve_chat_model(&self, chat_key: &str) -> Result<ActiveModel> {
+        if let Some((provider_id, model_id)) = self
+            .store
+            .load_gateway_chat_model(GATEWAY_PLATFORM_TELEGRAM, chat_key)?
+        {
+            match self
+                .config
+                .resolve_model_by_ids(&self.auth, &provider_id, &model_id)
+            {
+                Ok(mut model) => {
+                    model.system_prompt = gateway_system_prompt();
+                    return Ok(model);
+                }
+                Err(_) => {
+                    self.store
+                        .clear_gateway_chat_model(GATEWAY_PLATFORM_TELEGRAM, chat_key)?;
+                }
+            }
+        }
+
+        self.config.resolve_active_model_for_gateway(&self.auth)
+    }
+
     fn load_or_create_chat_conversation(
         &self,
         chat_key: &str,
@@ -1060,29 +1012,6 @@ impl TelegramChannel {
             conversation.session_id,
         )?;
         Ok(conversation)
-    }
-
-    fn resolve_chat_model(&self, chat_key: &str) -> Result<ActiveModel> {
-        if let Some((provider_id, model_id)) = self
-            .store
-            .load_gateway_chat_model(GATEWAY_PLATFORM_TELEGRAM, chat_key)?
-        {
-            match self
-                .config
-                .resolve_model_by_ids(&self.auth, &provider_id, &model_id)
-            {
-                Ok(mut model) => {
-                    model.system_prompt = gateway_system_prompt();
-                    return Ok(model);
-                }
-                Err(_) => {
-                    self.store
-                        .clear_gateway_chat_model(GATEWAY_PLATFORM_TELEGRAM, chat_key)?;
-                }
-            }
-        }
-
-        self.config.resolve_active_model_for_gateway(&self.auth)
     }
 
     fn create_gateway_session(&self, active_model: &ActiveModel) -> Result<Conversation> {

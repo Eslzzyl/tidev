@@ -1,5 +1,6 @@
 mod channel;
 mod commands;
+pub mod model_selection;
 mod orchestrator;
 mod qq;
 mod qq_client;

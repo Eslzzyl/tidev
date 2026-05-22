@@ -35,7 +35,7 @@ pub const GATEWAY_COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "model",
-        description: "Switch provider or model",
+        description: "Configure model for chat, agents, or memory",
     },
     CommandSpec {
         name: "status",
@@ -99,7 +99,7 @@ pub fn gateway_help_text() -> String {
         "Gateway command help",
         "/new - start a fresh session",
         "/session - show current session status",
-        "/model - switch provider or model",
+        "/model - configure model for chat, agents, or memory",
         "/balance - query provider balance",
         "/status - show session statistics",
         "/stop - stop current task",
