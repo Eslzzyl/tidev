@@ -225,10 +225,28 @@ pub struct GatewayConfig {
     /// When enabled, sessions are persisted to SQLite and restored on restart.
     #[serde(default = "default_gateway_session_persistence")]
     pub session_persistence: bool,
+    /// Default session mode for new gateway conversations: "plan" or "build".
+    /// Defaults to "build".
+    #[serde(default = "default_gateway_default_mode")]
+    pub default_mode: String,
 }
 
 fn default_gateway_session_persistence() -> bool {
     true
+}
+
+fn default_gateway_default_mode() -> String {
+    "build".to_string()
+}
+
+impl GatewayConfig {
+    /// Parse `default_mode` into a `SessionMode`.
+    pub fn parsed_default_mode(&self) -> SessionMode {
+        match self.default_mode.to_ascii_lowercase().as_str() {
+            "plan" => SessionMode::Plan,
+            _ => SessionMode::Build,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

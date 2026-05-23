@@ -97,42 +97,6 @@ impl QQClient {
         Ok(resp.url)
     }
 
-    pub async fn send_message(
-        &self,
-        channel_id: &str,
-        content: &str,
-        msg_id: Option<&str>,
-    ) -> Result<()> {
-        let token = self.get_access_token().await?;
-        let url = format!("{}/channels/{}/messages", self.base_url(), channel_id);
-
-        let mut body = serde_json::json!({
-            "msg_type": 0,
-            "content": content,
-        });
-
-        if let Some(mid) = msg_id {
-            body.as_object_mut()
-                .unwrap()
-                .insert("msg_id".to_string(), mid.into());
-        }
-
-        let resp = self
-            .client
-            .post(url)
-            .header("Authorization", format!("QQBot {}", token))
-            .json(&body)
-            .send()
-            .await?;
-
-        if !resp.status().is_success() {
-            let error_text = resp.text().await?;
-            bail!("QQ send_message failed: {}", error_text);
-        }
-
-        Ok(())
-    }
-
     /// Send a message with Markdown format.
     /// msg_type 2 indicates Markdown format.
     pub async fn send_message_markdown(

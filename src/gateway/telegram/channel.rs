@@ -32,6 +32,7 @@ use crate::gateway::channel::SendMessage;
 use crate::gateway::commands::{
     CommandInvocation, GATEWAY_COMMANDS, format_status_summary, gateway_help_text, parse_command,
 };use crate::gateway::model_selection::{self, ModelSelectionIO, ModelSelectionState};
+use crate::gateway::shared::ModeManager;
 use crate::gateway::shell;
 
 pub const GATEWAY_PLATFORM_TELEGRAM: &str = "telegram";
@@ -76,6 +77,8 @@ pub struct TelegramChannel {
     balance_selection_states: HashMap<i64, BalanceSelectionState>,
     /// Sessions that are currently compacting.
     compacting_sessions: HashSet<Uuid>,
+    /// Per-chat session mode tracking (Plan / Build).
+    mode_manager: ModeManager,
 }
 
 impl TelegramChannel {
@@ -112,6 +115,7 @@ impl TelegramChannel {
             auto_approve_permissions: false,
             hooks: crate::hooks::HookEngine::new(config.hooks.clone(), workspace_root.clone()),
         };
+        let default_mode = config.gateway.parsed_default_mode();
         Self {
             workspace_root,
             config,
@@ -132,6 +136,7 @@ impl TelegramChannel {
             model_selection_states: HashMap::new(),
             balance_selection_states: HashMap::new(),
             compacting_sessions: HashSet::new(),
+            mode_manager: ModeManager::new(default_mode),
         }
     }
 }
@@ -316,6 +321,11 @@ impl TelegramChannel {
         let mut active_model = self.resolve_chat_model(&chat_key)?;
         let mut conversation = self.load_or_create_chat_conversation(&chat_key, &active_model)?;
 
+        // Restore session mode from persisted messages so the in-memory
+        // tracker reflects the actual mode (important after gateway restart).
+        self.mode_manager
+            .restore_from_messages(&chat_key, &conversation.messages);
+
         // Load the session's immutable static system prompt.
         // Legacy sessions (no stored prompt) get composed now.
         match self
@@ -364,7 +374,8 @@ impl TelegramChannel {
 
         // Persist user message (agent loop will inject
         // instructions and memory context before the LLM turn).
-        let user_message = Message::new(MessageRole::User, content);
+        let mut user_message = Message::new(MessageRole::User, content);
+        user_message.mode = Some(self.mode_manager.get(&chat_key));
         conversation.push(user_message.clone());
         self.store
             .append_message(conversation.session_id, &user_message)?;
@@ -497,13 +508,14 @@ impl TelegramChannel {
         });
 
         // Run the complete agent loop
+        let current_mode = self.mode_manager.get(&self.chat_key(source_message));
         let result = self
             .agent
             .run_agent_loop(crate::agent::runtime::AgentLoopConfig {
                 session_id,
                 model: active_model.clone(),
                 context_manager: &mut context_manager,
-                mode: SessionMode::Build,
+                mode: current_mode,
                 thinking_level: active_model.thinking_level.clone(),
                 event_tx,
                 cancel_token: Some(cancel_token.clone()),
@@ -595,8 +607,40 @@ impl TelegramChannel {
         match command.name.as_str() {
             "new" => {
                 *conversation = self.rotate_chat_session(chat_key, active_model)?;
-                self.send_reply_chunks(source_message, "Started a fresh session.")
-                    .await?;
+                self.mode_manager.reset(chat_key);
+                let mode = self.mode_manager.get(chat_key);
+                self.send_reply_chunks(
+                    source_message,
+                    &format!("Started a fresh session in {} mode.", mode.title()),
+                )
+                .await?;
+                Ok(true)
+            }
+            "plan" | "p" => {
+                self.mode_manager.set(chat_key, SessionMode::Plan);
+                self.send_reply_chunks(
+                    source_message,
+                    ModeManager::switch_message(SessionMode::Plan),
+                )
+                .await?;
+                Ok(true)
+            }
+            "build" | "b" => {
+                self.mode_manager.set(chat_key, SessionMode::Build);
+                self.send_reply_chunks(
+                    source_message,
+                    ModeManager::switch_message(SessionMode::Build),
+                )
+                .await?;
+                Ok(true)
+            }
+            "mode" => {
+                let mode = self.mode_manager.get(chat_key);
+                self.send_reply_chunks(
+                    source_message,
+                    &format!("Current mode: **{}** — {}", mode.title(), mode.description()),
+                )
+                .await?;
                 Ok(true)
             }
             "session" => {

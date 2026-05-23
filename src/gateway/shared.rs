@@ -1,6 +1,9 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::config::ConfigPaths;
+use crate::prompts::SessionMode;
+use crate::session::Message;
 
 /// Compose the instruction prompt from config and instruction files.
 /// Shared by all gateway channels.
@@ -68,7 +71,69 @@ pub fn parse_target(entry: &str) -> Option<ModelSelectionTarget> {
     }
 }
 
-/// Get thinking level option strings for a model ID.
+/// Manages session mode (Plan/Build) tracking per gateway chat.
+///
+/// Each gateway chat (identified by a `chat_key`) has an independent mode
+/// that can be toggled via `/plan` / `/build` commands.  New chats use the
+/// configured `default_mode`.
+#[derive(Debug, Clone)]
+pub struct ModeManager {
+    /// Per-chat session mode.  Chat keys are platform-specific
+    /// (e.g. `"telegram:12345"`, `"qq:user:xxx"`).
+    modes: HashMap<String, SessionMode>,
+    /// Default mode for new / freshly-rotated chats.
+    default_mode: SessionMode,
+}
+
+impl ModeManager {
+    /// Create a new manager with the given default mode.
+    pub fn new(default_mode: SessionMode) -> Self {
+        Self {
+            modes: HashMap::new(),
+            default_mode,
+        }
+    }
+
+    /// Get the current mode for `chat_key`, falling back to `default_mode`.
+    pub fn get(&self, chat_key: &str) -> SessionMode {
+        self.modes.get(chat_key).copied().unwrap_or(self.default_mode)
+    }
+
+    /// Set the mode for `chat_key`.
+    pub fn set(&mut self, chat_key: &str, mode: SessionMode) {
+        self.modes.insert(chat_key.to_string(), mode);
+    }
+
+    /// Reset `chat_key` back to the configured default mode.
+    pub fn reset(&mut self, chat_key: &str) {
+        self.modes.remove(chat_key);
+    }
+
+    /// Restore the mode for `chat_key` from a slice of conversation messages.
+    ///
+    /// Looks for the **most recent** user message that carries a `mode` tag
+    /// and sets it as the current mode.  If none is found the mode is left
+    /// at its existing value (default or previously set).
+    pub fn restore_from_messages(&mut self, chat_key: &str, messages: &[Message]) {
+        if let Some(last_user_with_mode) = messages
+            .iter()
+            .rev()
+            .find(|m| m.role == crate::session::MessageRole::User && m.mode.is_some())
+        {
+            if let Some(mode) = last_user_with_mode.mode {
+                self.set(chat_key, mode);
+            }
+        }
+    }
+
+    /// The display text shown when switching to a given mode.
+    pub fn switch_message(mode: SessionMode) -> &'static str {
+        match mode {
+            SessionMode::Plan => "🔍 Switched to Plan mode (read-only).",
+            SessionMode::Build => "🔧 Switched to Build mode (full tools).",
+        }
+    }
+}
 /// Returns empty vec if the model does not support thinking levels.
 pub fn thinking_options_for_model_id(model_id: &str) -> Vec<&'static str> {
     let id = model_id.to_ascii_lowercase();

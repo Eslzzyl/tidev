@@ -31,6 +31,7 @@ use super::commands::{
 };
 use super::model_selection::{self, ModelSelectionIO, ModelSelectionState};
 use super::qq_client::QQClient;
+use crate::gateway::shared::ModeManager;
 use crate::gateway::shell;
 
 pub const GATEWAY_PLATFORM_QQ: &str = "qq";
@@ -86,6 +87,8 @@ pub struct QQChannel {
     model_selection_states: HashMap<String, ModelSelectionState>,
     /// Sessions that are currently compacting.
     compacting_sessions: HashSet<Uuid>,
+    /// Per-chat session mode tracking (Plan / Build).
+    mode_manager: ModeManager,
 }
 
 impl QQChannel {
@@ -123,6 +126,7 @@ impl QQChannel {
             auto_approve_permissions: false,
             hooks: crate::hooks::HookEngine::new(config.hooks.clone(), workspace_root.clone()),
         };
+        let default_mode = config.gateway.parsed_default_mode();
         Self {
             workspace_root,
             config,
@@ -142,6 +146,7 @@ impl QQChannel {
             cancellation_tokens: HashMap::new(),
             model_selection_states: HashMap::new(),
             compacting_sessions: HashSet::new(),
+            mode_manager: ModeManager::new(default_mode),
         }
     }
 }
@@ -480,7 +485,13 @@ impl QQChannel {
             crate::log_info!("QQ Executing command: /{} {:?}", command.name, command.args);
             let mut active_model = self.config.resolve_active_model_for_gateway(&self.auth)?;
             let chat_key = format!("qq:{}", channel_id);
-            let mut conversation = self.load_or_create_conversation(&chat_key, &active_model)?;
+        let mut conversation = self.load_or_create_conversation(&chat_key, &active_model)?;
+
+        // Restore session mode from persisted messages.
+        self.mode_manager
+            .restore_from_messages(&chat_key, &conversation.messages);            // Restore session mode from persisted messages.
+            self.mode_manager
+                .restore_from_messages(&chat_key, &conversation.messages);
             // Load the session's static system prompt onto the model.
             // Legacy sessions (no stored prompt) get composed now.
             match self
@@ -550,7 +561,8 @@ impl QQChannel {
 
         // Persist user message (agent loop will inject
         // instructions and memory context before the LLM turn).
-        let user_message = Message::new(MessageRole::User, clean_content);
+        let mut user_message = Message::new(MessageRole::User, clean_content);
+        user_message.mode = Some(self.mode_manager.get(&chat_key));
         conversation.push(user_message.clone());
         self.store
             .append_message(conversation.session_id, &user_message)?;
@@ -687,13 +699,15 @@ impl QQChannel {
         let session_id = conversation.session_id;
         let (event_tx, _event_rx) = unbounded_channel();
 
+        let chat_key = format!("qq:{}", channel_id);
+        let current_mode = self.mode_manager.get(&chat_key);
         let result = self
             .agent
             .run_agent_loop(crate::agent::runtime::AgentLoopConfig {
                 session_id,
                 model: active_model.clone(),
                 context_manager: &mut context_manager,
-                mode: SessionMode::Build,
+                mode: current_mode,
                 thinking_level: active_model.thinking_level.clone(),
                 event_tx,
                 cancel_token: Some(cancel_token.clone()),
@@ -771,8 +785,44 @@ impl QQChannel {
         match command.name.as_str() {
             "new" => {
                 *conversation = self.rotate_chat_session(chat_key, active_model)?;
-                self.send_markdown(channel_id, "Started a fresh session.", Some(msg_id))
-                    .await?;
+                self.mode_manager.reset(chat_key);
+                let mode = self.mode_manager.get(chat_key);
+                self.send_markdown(
+                    channel_id,
+                    &format!("Started a fresh session in {} mode.", mode.title()),
+                    Some(msg_id),
+                )
+                .await?;
+                Ok(true)
+            }
+            "plan" | "p" => {
+                self.mode_manager.set(chat_key, SessionMode::Plan);
+                self.send_markdown(
+                    channel_id,
+                    ModeManager::switch_message(SessionMode::Plan),
+                    Some(msg_id),
+                )
+                .await?;
+                Ok(true)
+            }
+            "build" | "b" => {
+                self.mode_manager.set(chat_key, SessionMode::Build);
+                self.send_markdown(
+                    channel_id,
+                    ModeManager::switch_message(SessionMode::Build),
+                    Some(msg_id),
+                )
+                .await?;
+                Ok(true)
+            }
+            "mode" => {
+                let mode = self.mode_manager.get(chat_key);
+                self.send_markdown(
+                    channel_id,
+                    &format!("Current mode: **{}** — {}", mode.title(), mode.description()),
+                    Some(msg_id),
+                )
+                .await?;
                 Ok(true)
             }
             "session" => {

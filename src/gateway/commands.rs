@@ -57,6 +57,18 @@ pub const GATEWAY_COMMANDS: &[CommandSpec] = &[
         name: "init",
         description: "Analyze project and create AGENTS.md",
     },
+    CommandSpec {
+        name: "plan",
+        description: "Switch to Plan mode (read-only, no file edits)",
+    },
+    CommandSpec {
+        name: "build",
+        description: "Switch to Build mode (full tool access)",
+    },
+    CommandSpec {
+        name: "mode",
+        description: "Show current session mode (Plan / Build)",
+    },
 ];
 
 /// Parse a slash command from message content.
@@ -105,6 +117,9 @@ pub fn gateway_help_text() -> String {
         "/stop - stop current task",
         "/compact - compact session context to save tokens",
         "/init - analyze project and create AGENTS.md",
+        "/plan, /p - switch to Plan mode (read-only)",
+        "/build, /b - switch to Build mode (full tools)",
+        "/mode - show current session mode (Plan / Build)",
     ]
     .join("\n")
 }
