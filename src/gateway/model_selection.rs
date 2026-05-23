@@ -33,7 +33,10 @@ pub enum ModelSelectionState {
     /// Step 2: waiting for user to select a provider for the given target.
     WaitingForProviderWithTarget { target: ModelSelectionTarget },
     /// Step 3: waiting for user to select a model.
-    WaitingForModelWithTarget { target: ModelSelectionTarget, provider_id: String },
+    WaitingForModelWithTarget {
+        target: ModelSelectionTarget,
+        provider_id: String,
+    },
     /// Step 4 (optional): waiting for user to select a thinking level.
     WaitingForThinkingLevel {
         target: ModelSelectionTarget,
@@ -93,10 +96,7 @@ pub trait ModelSelectionIO: Send {
 // ── Shared handler functions ──
 
 /// Handle the /model command: show current config overview and start target selection.
-pub async fn start_model_selection<IO: ModelSelectionIO>(
-    io: &mut IO,
-    id: &IO::Id,
-) -> Result<()> {
+pub async fn start_model_selection<IO: ModelSelectionIO>(io: &mut IO, id: &IO::Id) -> Result<()> {
     let overview = format_model_config_overview(io, id);
     let entries = all_target_entries();
 
@@ -165,15 +165,14 @@ pub async fn handle_step<IO: ModelSelectionIO>(
     }
 
     match state {
-        ModelSelectionState::WaitingForTarget => {
-            handle_target_selection(io, id, content).await
-        }
+        ModelSelectionState::WaitingForTarget => handle_target_selection(io, id, content).await,
         ModelSelectionState::WaitingForProviderWithTarget { target } => {
             handle_provider_selection(io, id, target, content).await
         }
-        ModelSelectionState::WaitingForModelWithTarget { target, provider_id } => {
-            handle_model_selection(io, id, target, provider_id, content).await
-        }
+        ModelSelectionState::WaitingForModelWithTarget {
+            target,
+            provider_id,
+        } => handle_model_selection(io, id, target, provider_id, content).await,
         ModelSelectionState::WaitingForThinkingLevel {
             target,
             provider_id,
@@ -182,7 +181,13 @@ pub async fn handle_step<IO: ModelSelectionIO>(
             ..
         } => {
             handle_thinking_level_selection(
-                io, id, target, provider_id, model_id, thinking_options, content,
+                io,
+                id,
+                target,
+                provider_id,
+                model_id,
+                thinking_options,
+                content,
             )
             .await
         }
@@ -210,8 +215,11 @@ async fn handle_target_selection<IO: ModelSelectionIO>(
         Ok(n) => n,
         Err(_) => {
             io.remove_state(id);
-            io.send_message(id, "Invalid selection. Selection cancelled. Send /model to try again.")
-                .await?;
+            io.send_message(
+                id,
+                "Invalid selection. Selection cancelled. Send /model to try again.",
+            )
+            .await?;
             return Ok(());
         }
     };
@@ -271,8 +279,11 @@ async fn handle_provider_selection<IO: ModelSelectionIO>(
         Ok(n) => n,
         Err(_) => {
             io.remove_state(id);
-            io.send_message(id, "Invalid selection. Selection cancelled. Send /model to try again.")
-                .await?;
+            io.send_message(
+                id,
+                "Invalid selection. Selection cancelled. Send /model to try again.",
+            )
+            .await?;
             return Ok(());
         }
     };
@@ -288,8 +299,11 @@ async fn handle_provider_selection<IO: ModelSelectionIO>(
     let models = io.get_models_for_provider(provider_id);
     if models.is_empty() {
         io.remove_state(id);
-        io.send_message(id, "No models available for this provider. Selection cancelled.")
-            .await?;
+        io.send_message(
+            id,
+            "No models available for this provider. Selection cancelled.",
+        )
+        .await?;
         return Ok(());
     }
 
@@ -323,16 +337,22 @@ async fn handle_model_selection<IO: ModelSelectionIO>(
         Ok(n) => n,
         Err(_) => {
             io.remove_state(id);
-            io.send_message(id, "Invalid selection. Selection cancelled. Send /model to try again.")
-                .await?;
+            io.send_message(
+                id,
+                "Invalid selection. Selection cancelled. Send /model to try again.",
+            )
+            .await?;
             return Ok(());
         }
     };
 
     if selection < 1 || selection > models.len() {
         io.remove_state(id);
-        io.send_message(id, "Invalid selection. Selection cancelled. Send /model to try again.")
-            .await?;
+        io.send_message(
+            id,
+            "Invalid selection. Selection cancelled. Send /model to try again.",
+        )
+        .await?;
         return Ok(());
     }
 
@@ -459,8 +479,11 @@ async fn handle_legacy_provider_selection<IO: ModelSelectionIO>(
         Ok(n) => n,
         Err(_) => {
             io.remove_state(id);
-            io.send_message(id, "Invalid selection. Selection cancelled. Send /model to try again.")
-                .await?;
+            io.send_message(
+                id,
+                "Invalid selection. Selection cancelled. Send /model to try again.",
+            )
+            .await?;
             return Ok(());
         }
     };
@@ -476,8 +499,11 @@ async fn handle_legacy_provider_selection<IO: ModelSelectionIO>(
     let models = io.get_models_for_provider(provider_id);
     if models.is_empty() {
         io.remove_state(id);
-        io.send_message(id, "No models available for this provider. Selection cancelled.")
-            .await?;
+        io.send_message(
+            id,
+            "No models available for this provider. Selection cancelled.",
+        )
+        .await?;
         return Ok(());
     }
 
@@ -509,16 +535,22 @@ async fn handle_legacy_model_selection<IO: ModelSelectionIO>(
         Ok(n) => n,
         Err(_) => {
             io.remove_state(id);
-            io.send_message(id, "Invalid selection. Selection cancelled. Send /model to try again.")
-                .await?;
+            io.send_message(
+                id,
+                "Invalid selection. Selection cancelled. Send /model to try again.",
+            )
+            .await?;
             return Ok(());
         }
     };
 
     if selection < 1 || selection > models.len() {
         io.remove_state(id);
-        io.send_message(id, "Invalid selection. Selection cancelled. Send /model to try again.")
-            .await?;
+        io.send_message(
+            id,
+            "Invalid selection. Selection cancelled. Send /model to try again.",
+        )
+        .await?;
         return Ok(());
     }
 

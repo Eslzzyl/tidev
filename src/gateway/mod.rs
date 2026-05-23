@@ -143,7 +143,8 @@ async fn run_async() -> Result<()> {
             allowlist.len()
         );
 
-        let res = ChannelResources::new(&db, &config, &default_model, &workspace_root, &paths, &auth)?;
+        let res =
+            ChannelResources::new(&db, &config, &default_model, &workspace_root, &paths, &auth)?;
 
         let channel = telegram::TelegramChannel::new(
             workspace_root.clone(),
@@ -187,7 +188,8 @@ async fn run_async() -> Result<()> {
 
         crate::log_info!("QQ channel enabled, allowlist: {} entries", allowlist.len());
 
-        let res = ChannelResources::new(&db, &config, &default_model, &workspace_root, &paths, &auth)?;
+        let res =
+            ChannelResources::new(&db, &config, &default_model, &workspace_root, &paths, &auth)?;
 
         let channel = qq::QQChannel::new(
             workspace_root.clone(),
@@ -231,7 +233,8 @@ async fn run_async() -> Result<()> {
             allowlist.len()
         );
 
-        let res = ChannelResources::new(&db, &config, &default_model, &workspace_root, &paths, &auth)?;
+        let res =
+            ChannelResources::new(&db, &config, &default_model, &workspace_root, &paths, &auth)?;
 
         let channel = discord::DiscordChannel::new(
             workspace_root.clone(),
@@ -280,7 +283,8 @@ async fn run_async() -> Result<()> {
             allowlist.len()
         );
 
-        let res = ChannelResources::new(&db, &config, &default_model, &workspace_root, &paths, &auth)?;
+        let res =
+            ChannelResources::new(&db, &config, &default_model, &workspace_root, &paths, &auth)?;
 
         let channel = lark::LarkChannel::new(
             workspace_root.clone(),

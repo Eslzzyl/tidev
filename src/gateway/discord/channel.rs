@@ -3,8 +3,10 @@
 //! Connects to the Discord Gateway via WebSocket for real-time message
 //! reception and uses the REST API for sending replies.
 
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
+use rand::RngExt;
 use serde_json::json;
 use std::collections::HashSet;
 use std::future::Future;
@@ -12,8 +14,6 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use tokio::time::{Duration, Instant, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
-use anyhow::{Context, Result};
-use rand::RngExt;
 
 use crate::config::{ActiveModel, AppConfig, AuthStore, ConfigPaths};
 use crate::storage::SessionStore;
@@ -24,10 +24,10 @@ use crate::gateway::commands::parse_command;
 use crate::gateway::model_selection::{self, ModelSelectionIO, ModelSelectionState};
 use crate::session::{Message, MessageRole};
 
-use super::client::{DiscordClient, DISCORD_MAX_MESSAGE_LENGTH};
+use super::client::{DISCORD_MAX_MESSAGE_LENGTH, DiscordClient};
 use super::types::{
-    DiscordMessage, GatewayPayload, HelloData,
-    DEFAULT_INTENTS, OP_DISPATCH, OP_HEARTBEAT, OP_HEARTBEAT_ACK, OP_HELLO, OP_IDENTIFY,
+    DEFAULT_INTENTS, DiscordMessage, GatewayPayload, HelloData, OP_DISPATCH, OP_HEARTBEAT,
+    OP_HEARTBEAT_ACK, OP_HELLO, OP_IDENTIFY,
 };
 
 pub const GATEWAY_PLATFORM_DISCORD: &str = "discord";
@@ -120,9 +120,7 @@ impl DiscordChannel {
             }
         }
         // Channel filter
-        if !self.channel_ids.is_empty()
-            && !self.channel_ids.iter().any(|c| c == channel_id)
-        {
+        if !self.channel_ids.is_empty() && !self.channel_ids.iter().any(|c| c == channel_id) {
             return false;
         }
         true
@@ -201,11 +199,13 @@ impl DiscordChannel {
 
         let hello_payload: GatewayPayload = serde_json::from_str(&hello_msg.to_string())?;
         if hello_payload.op != OP_HELLO {
-            anyhow::bail!("Discord: expected Hello (op 10), got op {}", hello_payload.op);
+            anyhow::bail!(
+                "Discord: expected Hello (op 10), got op {}",
+                hello_payload.op
+            );
         }
-        let hello_data: HelloData = serde_json::from_value(
-            hello_payload.d.context("Discord: Hello missing data")?,
-        )?;
+        let hello_data: HelloData =
+            serde_json::from_value(hello_payload.d.context("Discord: Hello missing data")?)?;
         let heartbeat_interval = Duration::from_millis(hello_data.heartbeat_interval);
 
         // Send Identify (opcode 2)
@@ -331,12 +331,13 @@ impl DiscordChannel {
         }
 
         // Clean content (strip bot mention from the beginning)
-        let clean_content = if self.mention_only || content.starts_with(&format!("<@{}>", self.bot_user_id)) {
-            let mention = format!("<@{}>", self.bot_user_id);
-            content.replace(&mention, "").trim().to_string()
-        } else {
-            content.to_string()
-        };
+        let clean_content =
+            if self.mention_only || content.starts_with(&format!("<@{}>", self.bot_user_id)) {
+                let mention = format!("<@{}>", self.bot_user_id);
+                content.replace(&mention, "").trim().to_string()
+            } else {
+                content.to_string()
+            };
 
         if clean_content.is_empty() {
             return Ok(());
@@ -375,11 +376,13 @@ impl DiscordChannel {
                 return Ok(());
             }
 
-            let mut active_model =
-                self.core.resolve_chat_model(&format!("discord:{channel_id}"))?;
+            let mut active_model = self
+                .core
+                .resolve_chat_model(&format!("discord:{channel_id}"))?;
             let chat_key = format!("discord:{channel_id}");
-            let mut conversation =
-                self.core.load_or_create_conversation(&chat_key, &active_model)?;
+            let mut conversation = self
+                .core
+                .load_or_create_conversation(&chat_key, &active_model)?;
             self.core
                 .load_system_prompt(&conversation, &mut active_model);
             self.core
@@ -408,10 +411,13 @@ impl DiscordChannel {
         }
 
         // Regular message → run agent
-        let mut active_model = self.core.resolve_chat_model(&format!("discord:{channel_id}"))?;
+        let mut active_model = self
+            .core
+            .resolve_chat_model(&format!("discord:{channel_id}"))?;
         let chat_key = format!("discord:{channel_id}");
-        let mut conversation =
-            self.core.load_or_create_conversation(&chat_key, &active_model)?;
+        let mut conversation = self
+            .core
+            .load_or_create_conversation(&chat_key, &active_model)?;
         self.core
             .load_system_prompt(&conversation, &mut active_model);
         self.core
@@ -454,10 +460,7 @@ impl DiscordChannel {
             self.core
                 .store
                 .append_message(conversation.session_id, &error_message)?;
-            let _ = self
-                .client
-                .send_message(channel_id, &error_text)
-                .await;
+            let _ = self.client.send_message(channel_id, &error_text).await;
         } else {
             typing_handle.abort();
         }
@@ -496,7 +499,12 @@ impl DiscordChannel {
     }
 
     /// Send a message to a Discord channel, handling chunking for the 2000 char limit.
-    async fn send_markdown(&mut self, recipient: &str, content: &str, _msg_id: Option<&str>) -> Result<()> {
+    async fn send_markdown(
+        &mut self,
+        recipient: &str,
+        content: &str,
+        _msg_id: Option<&str>,
+    ) -> Result<()> {
         let chunks = Self::chunk_content(content);
         for chunk in &chunks {
             self.client.send_message(recipient, chunk).await?;
@@ -542,27 +550,20 @@ impl MessageSender for DiscordSender<'_> {
         Ok(Some(msg_id))
     }
 
-    async fn update_draft(
-        &mut self,
-        recipient: &str,
-        msg_id: &str,
-        text: &str,
-    ) -> Result<()> {
+    async fn update_draft(&mut self, recipient: &str, msg_id: &str, text: &str) -> Result<()> {
         // Discord has a 2000 char limit on edits too
         let content = if text.len() > DISCORD_MAX_MESSAGE_LENGTH {
-            format!("{}...\n*(truncated, full response below)*", &text[..DISCORD_MAX_MESSAGE_LENGTH - 50])
+            format!(
+                "{}...\n*(truncated, full response below)*",
+                &text[..DISCORD_MAX_MESSAGE_LENGTH - 50]
+            )
         } else {
             text.to_string()
         };
         self.client.edit_message(recipient, msg_id, &content).await
     }
 
-    async fn finalize_draft(
-        &mut self,
-        recipient: &str,
-        msg_id: &str,
-        text: &str,
-    ) -> Result<()> {
+    async fn finalize_draft(&mut self, recipient: &str, msg_id: &str, text: &str) -> Result<()> {
         // Finalize with the complete content (edit the draft + send remaining chunks)
         let chunks = DiscordChannel::chunk_content(text);
         if let Some(first) = chunks.first() {
@@ -571,7 +572,9 @@ impl MessageSender for DiscordSender<'_> {
             } else {
                 first.to_string()
             };
-            self.client.edit_message(recipient, msg_id, &content).await?;
+            self.client
+                .edit_message(recipient, msg_id, &content)
+                .await?;
         }
         // Send remaining chunks
         for chunk in chunks.iter().skip(1) {
@@ -679,22 +682,23 @@ impl Channel for DiscordChannel {
         DISCORD_DRAFT_EDIT_INTERVAL_MS
     }
 
-    async fn send_draft(&mut self, message: &crate::gateway::channel::SendMessage) -> Result<Option<String>> {
+    async fn send_draft(
+        &mut self,
+        message: &crate::gateway::channel::SendMessage,
+    ) -> Result<Option<String>> {
         let content = if message.content.len() > DISCORD_MAX_MESSAGE_LENGTH {
             &message.content[..DISCORD_MAX_MESSAGE_LENGTH]
         } else {
             &message.content
         };
-        let msg_id = self.client.send_message(&message.recipient, content).await?;
+        let msg_id = self
+            .client
+            .send_message(&message.recipient, content)
+            .await?;
         Ok(Some(msg_id))
     }
 
-    async fn update_draft(
-        &mut self,
-        recipient: &str,
-        message_id: &str,
-        text: &str,
-    ) -> Result<()> {
+    async fn update_draft(&mut self, recipient: &str, message_id: &str, text: &str) -> Result<()> {
         self.client.edit_message(recipient, message_id, text).await
     }
 
@@ -707,7 +711,9 @@ impl Channel for DiscordChannel {
         // Edit draft + send remaining chunks
         let chunks = DiscordChannel::chunk_content(text);
         if let Some(first) = chunks.first() {
-            self.client.edit_message(recipient, message_id, first).await?;
+            self.client
+                .edit_message(recipient, message_id, first)
+                .await?;
         }
         for chunk in chunks.iter().skip(1) {
             self.client.send_message(recipient, chunk).await?;

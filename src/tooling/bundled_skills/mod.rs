@@ -24,8 +24,8 @@ pub fn load() -> Vec<SkillInfo> {
 }
 
 fn skill_from_str(content: &'static str, dir_name: &str) -> SkillInfo {
-    let (name, description, _body) =
-        super::skills::parse_frontmatter(content).expect("bundled SKILL.md must have valid YAML frontmatter");
+    let (name, description, _body) = super::skills::parse_frontmatter(content)
+        .expect("bundled SKILL.md must have valid YAML frontmatter");
 
     SkillInfo {
         name,

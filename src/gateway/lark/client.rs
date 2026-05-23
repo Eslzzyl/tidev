@@ -7,9 +7,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant};
 
-use super::types::{
-    BotInfoResp, SendMessageResp, TenantAccessTokenResp, WsEndpointResp,
-};
+use super::types::{BotInfoResp, SendMessageResp, TenantAccessTokenResp, WsEndpointResp};
 
 /// Lark/Feishu REST API client.
 pub struct LarkClient {
@@ -40,11 +38,14 @@ impl LarkClient {
     }
 
     fn ws_base(&self) -> String {
-        format!("https://{}", if self.use_feishu {
-            "open.feishu.cn"
-        } else {
-            "open.larksuite.com"
-        })
+        format!(
+            "https://{}",
+            if self.use_feishu {
+                "open.feishu.cn"
+            } else {
+                "open.larksuite.com"
+            }
+        )
     }
 
     /// Get a cached or fresh tenant_access_token.
@@ -68,7 +69,10 @@ impl LarkClient {
 
         let resp = self
             .client
-            .post(format!("{}/auth/v3/tenant_access_token/internal", self.api_base()))
+            .post(format!(
+                "{}/auth/v3/tenant_access_token/internal",
+                self.api_base()
+            ))
             .json(&json!({
                 "app_id": self.app_id,
                 "app_secret": self.app_secret,
@@ -248,10 +252,7 @@ impl LarkClient {
             }
         };
 
-        let url = format!(
-            "{}/im/v1/messages/{message_id}/reactions",
-            self.api_base()
-        );
+        let url = format!("{}/im/v1/messages/{message_id}/reactions", self.api_base());
 
         let body = json!({
             "reaction_type": { "emoji_type": emoji_type }

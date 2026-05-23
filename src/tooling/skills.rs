@@ -537,10 +537,8 @@ pub(crate) fn parse_frontmatter(content: &str) -> Result<(String, String, &str),
         }
     }
 
-    let name = name
-        .ok_or_else(|| "missing 'name' field".to_string())?;
-    let description = description
-        .ok_or_else(|| "missing 'description' field".to_string())?;
+    let name = name.ok_or_else(|| "missing 'name' field".to_string())?;
+    let description = description.ok_or_else(|| "missing 'description' field".to_string())?;
 
     Ok((name.to_string(), description.to_string(), body))
 }

@@ -3,9 +3,11 @@
 //! Connects via WebSocket with Protobuf-framed protocol for receiving events
 //! and uses the REST API for sending replies.
 
+use anyhow::Result;
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use prost::Message as ProstMessage;
+use serde_json::Value;
 use std::collections::HashSet;
 use std::future::Future;
 use std::path::PathBuf;
@@ -13,8 +15,6 @@ use std::pin::Pin;
 use std::time::Instant;
 use tokio::time::{Duration, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
-use anyhow::Result;
-use serde_json::Value;
 
 use crate::config::{ActiveModel, AppConfig, AuthStore, ConfigPaths};
 use crate::session::{Message, MessageRole};
@@ -26,9 +26,7 @@ use crate::gateway::commands::parse_command;
 use crate::gateway::model_selection::{self, ModelSelectionIO, ModelSelectionState};
 
 use super::client::LarkClient;
-use super::types::{
-    EventMessage, EventPayload, PbFrame,
-};
+use super::types::{EventMessage, EventPayload, PbFrame};
 
 pub const GATEWAY_PLATFORM_LARK: &str = "lark";
 const WS_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -124,7 +122,9 @@ impl LarkChannel {
                                 if let Some(tag) = elem.get("tag").and_then(|t| t.as_str()) {
                                     match tag {
                                         "text" | "md" => {
-                                            if let Some(txt) = elem.get("text").and_then(|t| t.as_str()) {
+                                            if let Some(txt) =
+                                                elem.get("text").and_then(|t| t.as_str())
+                                            {
                                                 text.push_str(txt);
                                             }
                                         }
@@ -160,7 +160,10 @@ impl LarkChannel {
 
         loop {
             if let Err(e) = self.connect_and_listen().await {
-                crate::log_error!("Lark WS connection error: {e}, reconnecting in {}s", WS_RECONNECT_DELAY.as_secs());
+                crate::log_error!(
+                    "Lark WS connection error: {e}, reconnecting in {}s",
+                    WS_RECONNECT_DELAY.as_secs()
+                );
                 sleep(WS_RECONNECT_DELAY).await;
             }
         }
@@ -187,9 +190,10 @@ impl LarkChannel {
             log_id: 0,
             service: 0,
             method: 0,
-            headers: vec![
-                super::types::PbHeader { key: "type".into(), value: "ping".into() },
-            ],
+            headers: vec![super::types::PbHeader {
+                key: "type".into(),
+                value: "ping".into(),
+            }],
             payload: None,
         };
         write
@@ -323,11 +327,13 @@ impl LarkChannel {
         }
 
         // Mention-only check for group chats
-        if msg.chat_type == "group" && self.mention_only
+        if msg.chat_type == "group"
+            && self.mention_only
             && let Some(ref bot_id) = self.bot_open_id
-                && !Self::is_mentioned(&content, bot_id) {
-                    return Ok(());
-                }
+            && !Self::is_mentioned(&content, bot_id)
+        {
+            return Ok(());
+        }
 
         // Clean @mention from content
         let clean_content = if let Some(ref bot_id) = self.bot_open_id {
@@ -341,9 +347,7 @@ impl LarkChannel {
             return Ok(());
         }
 
-        crate::log_info!(
-            "Lark Message from {sender_open_id} in {chat_id}: {clean_content}"
-        );
+        crate::log_info!("Lark Message from {sender_open_id} in {chat_id}: {clean_content}");
 
         // Add ack reaction (best-effort)
         let _ = self.client.add_reaction(message_id, "OK").await;
@@ -370,11 +374,11 @@ impl LarkChannel {
                 return Ok(());
             }
 
-            let mut active_model =
-                self.core.resolve_chat_model(&format!("lark:{chat_id}"))?;
+            let mut active_model = self.core.resolve_chat_model(&format!("lark:{chat_id}"))?;
             let chat_key = format!("lark:{chat_id}");
-            let mut conversation =
-                self.core.load_or_create_conversation(&chat_key, &active_model)?;
+            let mut conversation = self
+                .core
+                .load_or_create_conversation(&chat_key, &active_model)?;
             self.core
                 .load_system_prompt(&conversation, &mut active_model);
             self.core
@@ -405,7 +409,9 @@ impl LarkChannel {
         // Regular message → run agent
         let mut active_model = self.core.resolve_chat_model(&format!("lark:{chat_id}"))?;
         let chat_key = format!("lark:{chat_id}");
-        let mut conversation = self.core.load_or_create_conversation(&chat_key, &active_model)?;
+        let mut conversation = self
+            .core
+            .load_or_create_conversation(&chat_key, &active_model)?;
         self.core
             .load_system_prompt(&conversation, &mut active_model);
         self.core
@@ -510,32 +516,18 @@ impl MessageSender for LarkSender<'_> {
         Ok(Some(msg_id))
     }
 
-    async fn update_draft(
-        &mut self,
-        _recipient: &str,
-        _msg_id: &str,
-        _text: &str,
-    ) -> Result<()> {
+    async fn update_draft(&mut self, _recipient: &str, _msg_id: &str, _text: &str) -> Result<()> {
         // Lark does not support editing messages via the API.
         // We re-send instead (the draft is replaced with a new message).
         Ok(())
     }
 
-    async fn finalize_draft(
-        &mut self,
-        recipient: &str,
-        _msg_id: &str,
-        text: &str,
-    ) -> Result<()> {
+    async fn finalize_draft(&mut self, recipient: &str, _msg_id: &str, text: &str) -> Result<()> {
         // Send the final response (draft editing is not supported, send fresh)
         self.send_message(recipient, text, None).await
     }
 
-    async fn cancel_draft(
-        &mut self,
-        _recipient: &str,
-        _msg_id: &str,
-    ) -> Result<()> {
+    async fn cancel_draft(&mut self, _recipient: &str, _msg_id: &str) -> Result<()> {
         // Cannot delete messages via Lark API; just ignore
         Ok(())
     }
@@ -627,9 +619,15 @@ impl Channel for LarkChannel {
         false
     }
 
-    async fn send_draft(&mut self, message: &crate::gateway::channel::SendMessage) -> Result<Option<String>> {
+    async fn send_draft(
+        &mut self,
+        message: &crate::gateway::channel::SendMessage,
+    ) -> Result<Option<String>> {
         // Lark doesn't support editing, so send as regular message
-        let msg_id = self.client.send_text_message(&message.recipient, &message.content).await?;
+        let msg_id = self
+            .client
+            .send_text_message(&message.recipient, &message.content)
+            .await?;
         Ok(Some(msg_id))
     }
 

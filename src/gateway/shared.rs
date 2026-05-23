@@ -61,12 +61,24 @@ pub fn all_target_entries() -> Vec<(&'static str, &'static str)> {
 pub fn parse_target(entry: &str) -> Option<ModelSelectionTarget> {
     match entry {
         "chat" => Some(ModelSelectionTarget::Chat),
-        "agent:explorer" => Some(ModelSelectionTarget::Agent { agent_type: "explorer".to_string() }),
-        "agent:librarian" => Some(ModelSelectionTarget::Agent { agent_type: "librarian".to_string() }),
-        "agent:oracle" => Some(ModelSelectionTarget::Agent { agent_type: "oracle".to_string() }),
-        "agent:designer" => Some(ModelSelectionTarget::Agent { agent_type: "designer".to_string() }),
-        "agent:fixer" => Some(ModelSelectionTarget::Agent { agent_type: "fixer".to_string() }),
-        "memory:consolidation" => Some(ModelSelectionTarget::Memory { role: "consolidation".to_string() }),
+        "agent:explorer" => Some(ModelSelectionTarget::Agent {
+            agent_type: "explorer".to_string(),
+        }),
+        "agent:librarian" => Some(ModelSelectionTarget::Agent {
+            agent_type: "librarian".to_string(),
+        }),
+        "agent:oracle" => Some(ModelSelectionTarget::Agent {
+            agent_type: "oracle".to_string(),
+        }),
+        "agent:designer" => Some(ModelSelectionTarget::Agent {
+            agent_type: "designer".to_string(),
+        }),
+        "agent:fixer" => Some(ModelSelectionTarget::Agent {
+            agent_type: "fixer".to_string(),
+        }),
+        "memory:consolidation" => Some(ModelSelectionTarget::Memory {
+            role: "consolidation".to_string(),
+        }),
         _ => None,
     }
 }
@@ -96,7 +108,10 @@ impl ModeManager {
 
     /// Get the current mode for `chat_key`, falling back to `default_mode`.
     pub fn get(&self, chat_key: &str) -> SessionMode {
-        self.modes.get(chat_key).copied().unwrap_or(self.default_mode)
+        self.modes
+            .get(chat_key)
+            .copied()
+            .unwrap_or(self.default_mode)
     }
 
     /// Set the mode for `chat_key`.

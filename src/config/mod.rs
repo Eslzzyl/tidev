@@ -407,8 +407,7 @@ pub struct QQGatewayConfig {
     pub sandbox: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct DiscordGatewayConfig {
     /// Enable Discord gateway mode.
     #[serde(default)]
@@ -426,7 +425,6 @@ pub struct DiscordGatewayConfig {
     #[serde(default)]
     pub mention_only: bool,
 }
-
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LarkGatewayConfig {

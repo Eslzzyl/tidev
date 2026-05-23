@@ -35,25 +35,47 @@ use super::shell;
 #[async_trait]
 pub trait MessageSender {
     /// Send a text message. `reply_to` is an optional platform message ID.
-    async fn send_message(&mut self, recipient: &str, text: &str, reply_to: Option<&str>) -> Result<()>;
+    async fn send_message(
+        &mut self,
+        recipient: &str,
+        text: &str,
+        reply_to: Option<&str>,
+    ) -> Result<()>;
 
     /// Whether this platform supports progressive message updates.
-    fn supports_draft(&self) -> bool { false }
+    fn supports_draft(&self) -> bool {
+        false
+    }
 
     /// Send an initial draft (placeholder) message. Returns a platform message ID.
-    async fn send_draft(&mut self, _recipient: &str, _text: &str) -> Result<Option<String>> { Ok(None) }
+    async fn send_draft(&mut self, _recipient: &str, _text: &str) -> Result<Option<String>> {
+        Ok(None)
+    }
 
     /// Update a draft message with new accumulated content.
-    async fn update_draft(&mut self, _recipient: &str, _msg_id: &str, _text: &str) -> Result<()> { Ok(()) }
+    async fn update_draft(&mut self, _recipient: &str, _msg_id: &str, _text: &str) -> Result<()> {
+        Ok(())
+    }
 
     /// Show a one-line progress / tool status update.
-    async fn update_draft_progress(&mut self, _recipient: &str, _msg_id: &str, _text: &str) -> Result<()> { Ok(()) }
+    async fn update_draft_progress(
+        &mut self,
+        _recipient: &str,
+        _msg_id: &str,
+        _text: &str,
+    ) -> Result<()> {
+        Ok(())
+    }
 
     /// Finalise a draft with the complete response.
-    async fn finalize_draft(&mut self, _recipient: &str, _msg_id: &str, _text: &str) -> Result<()> { Ok(()) }
+    async fn finalize_draft(&mut self, _recipient: &str, _msg_id: &str, _text: &str) -> Result<()> {
+        Ok(())
+    }
 
     /// Cancel / delete a draft message.
-    async fn cancel_draft(&mut self, _recipient: &str, _msg_id: &str) -> Result<()> { Ok(()) }
+    async fn cancel_draft(&mut self, _recipient: &str, _msg_id: &str) -> Result<()> {
+        Ok(())
+    }
 }
 
 // ── ChannelCore ─────────────────────────────────────────────────────────────
@@ -110,7 +132,10 @@ impl ChannelCore {
                 std::collections::VecDeque::new(),
             )),
             auto_approve_permissions: false,
-            hooks: crate::hooks::HookEngine::new(config.hooks.clone(), workspace_root.to_path_buf()),
+            hooks: crate::hooks::HookEngine::new(
+                config.hooks.clone(),
+                workspace_root.to_path_buf(),
+            ),
         }
     }
 
@@ -217,7 +242,8 @@ impl ChannelCore {
             crate::log_warn!("failed to persist static system prompt: {}", e);
         }
 
-        self.store.set_gateway_chat_session(self.platform(), chat_key, session_id)?;
+        self.store
+            .set_gateway_chat_session(self.platform(), chat_key, session_id)?;
         Ok(conversation)
     }
 
@@ -228,7 +254,8 @@ impl ChannelCore {
         active_model: &ActiveModel,
     ) -> Result<Conversation> {
         let conversation = self.create_gateway_session(active_model)?;
-        self.store.set_gateway_chat_session(self.platform(), chat_key, conversation.session_id)?;
+        self.store
+            .set_gateway_chat_session(self.platform(), chat_key, conversation.session_id)?;
         Ok(conversation)
     }
 
@@ -289,27 +316,45 @@ impl ChannelCore {
                 count += 1;
                 crate::log_info!(
                     "Restored {} session: chat_key={}, session_id={}, messages={}",
-                    self.platform(), chat_key, session_id, messages.len()
+                    self.platform(),
+                    chat_key,
+                    session_id,
+                    messages.len()
                 );
             }
         }
 
         if count > 0 {
-            crate::log_info!("Restored {} {} session(s) from disk", count, self.platform());
+            crate::log_info!(
+                "Restored {} {} session(s) from disk",
+                count,
+                self.platform()
+            );
         }
         if orphans_closed > 0 {
-            crate::log_info!("Closed {} orphaned session turn(s) from previous crash", orphans_closed);
+            crate::log_info!(
+                "Closed {} orphaned session turn(s) from previous crash",
+                orphans_closed
+            );
         }
         Ok(count)
     }
 
     /// Load the session's static system prompt onto the model.
     pub fn load_system_prompt(&self, conversation: &Conversation, active_model: &mut ActiveModel) {
-        match self.store.load_session_system_prompt(conversation.session_id) {
+        match self
+            .store
+            .load_session_system_prompt(conversation.session_id)
+        {
             Ok(stored) if !stored.is_empty() => active_model.system_prompt = stored,
             _ => {
-                let composed = self.agent.compose_static_system_prompt(&active_model.system_prompt);
-                if let Err(e) = self.store.update_session_system_prompt(conversation.session_id, &composed) {
+                let composed = self
+                    .agent
+                    .compose_static_system_prompt(&active_model.system_prompt);
+                if let Err(e) = self
+                    .store
+                    .update_session_system_prompt(conversation.session_id, &composed)
+                {
                     crate::log_warn!("failed to persist static system prompt: {}", e);
                 }
                 active_model.system_prompt = composed;
@@ -318,15 +363,22 @@ impl ChannelCore {
     }
 
     /// Persist a user message, update title on first message.
-    pub fn persist_user_message(&self, conversation: &mut Conversation, chat_key: &str, content: &str) -> Result<()> {
+    pub fn persist_user_message(
+        &self,
+        conversation: &mut Conversation,
+        chat_key: &str,
+        content: &str,
+    ) -> Result<()> {
         let mut user_message = Message::new(MessageRole::User, content);
         user_message.mode = Some(self.mode_manager.get(chat_key));
         conversation.push(user_message.clone());
-        self.store.append_message(conversation.session_id, &user_message)?;
+        self.store
+            .append_message(conversation.session_id, &user_message)?;
 
         if conversation.messages.len() == 1 || conversation.title == "Untitled session" {
             conversation.update_title_from_prompt(content);
-            self.store.update_session_title(conversation.session_id, &conversation.title)?;
+            self.store
+                .update_session_title(conversation.session_id, &conversation.title)?;
         }
         Ok(())
     }
@@ -344,7 +396,9 @@ impl ChannelCore {
             }
         }
         for (id, config) in &self.config.bundled_providers {
-            if self.config.providers.contains_key(id) { continue; }
+            if self.config.providers.contains_key(id) {
+                continue;
+            }
             if let Some(auth) = self.auth.providers.get(id)
                 && auth.api_key.as_ref().is_some_and(|k| !k.trim().is_empty())
             {
@@ -362,7 +416,9 @@ impl ChannelCore {
                 models.push((id.clone(), model_config.display_name.clone()));
             }
         }
-        if models.is_empty() && let Some(config) = self.config.bundled_providers.get(provider_id) {
+        if models.is_empty()
+            && let Some(config) = self.config.bundled_providers.get(provider_id)
+        {
             for (id, model_config) in &config.models {
                 models.push((id.clone(), model_config.display_name.clone()));
             }
@@ -372,14 +428,21 @@ impl ChannelCore {
 
     /// Resolve the active model for a chat, falling back to the default.
     pub fn resolve_chat_model(&self, chat_key: &str) -> Result<ActiveModel> {
-        if let Some((provider_id, model_id)) = self.store.load_gateway_chat_model(self.platform(), chat_key)? {
-            match self.config.resolve_model_by_ids(&self.auth, &provider_id, &model_id) {
+        if let Some((provider_id, model_id)) = self
+            .store
+            .load_gateway_chat_model(self.platform(), chat_key)?
+        {
+            match self
+                .config
+                .resolve_model_by_ids(&self.auth, &provider_id, &model_id)
+            {
                 Ok(mut model) => {
                     model.system_prompt = gateway_system_prompt();
                     return Ok(model);
                 }
                 Err(_) => {
-                    self.store.clear_gateway_chat_model(self.platform(), chat_key)?;
+                    self.store
+                        .clear_gateway_chat_model(self.platform(), chat_key)?;
                 }
             }
         }
@@ -427,22 +490,50 @@ impl ChannelCore {
                 *conversation = self.rotate_chat_session(chat_key, active_model)?;
                 self.mode_manager.reset(chat_key);
                 let mode = self.mode_manager.get(chat_key);
-                sender.send_message(recipient, &format!("Started a fresh session in {} mode.", mode.title()), reply_to).await?;
+                sender
+                    .send_message(
+                        recipient,
+                        &format!("Started a fresh session in {} mode.", mode.title()),
+                        reply_to,
+                    )
+                    .await?;
                 Ok(true)
             }
             "plan" | "p" => {
                 self.mode_manager.set(chat_key, SessionMode::Plan);
-                sender.send_message(recipient, ModeManager::switch_message(SessionMode::Plan), reply_to).await?;
+                sender
+                    .send_message(
+                        recipient,
+                        ModeManager::switch_message(SessionMode::Plan),
+                        reply_to,
+                    )
+                    .await?;
                 Ok(true)
             }
             "build" | "b" => {
                 self.mode_manager.set(chat_key, SessionMode::Build);
-                sender.send_message(recipient, ModeManager::switch_message(SessionMode::Build), reply_to).await?;
+                sender
+                    .send_message(
+                        recipient,
+                        ModeManager::switch_message(SessionMode::Build),
+                        reply_to,
+                    )
+                    .await?;
                 Ok(true)
             }
             "mode" => {
                 let mode = self.mode_manager.get(chat_key);
-                sender.send_message(recipient, &format!("Current mode: **{}** — {}", mode.title(), mode.description()), reply_to).await?;
+                sender
+                    .send_message(
+                        recipient,
+                        &format!(
+                            "Current mode: **{}** — {}",
+                            mode.title(),
+                            mode.description()
+                        ),
+                        reply_to,
+                    )
+                    .await?;
                 Ok(true)
             }
             "session" => {
@@ -452,7 +543,9 @@ impl ChannelCore {
                         sender.send_message(recipient, &text, reply_to).await?;
                     }
                     _ => {
-                        sender.send_message(recipient, &gateway_help_text(), reply_to).await?;
+                        sender
+                            .send_message(recipient, &gateway_help_text(), reply_to)
+                            .await?;
                     }
                 }
                 Ok(true)
@@ -461,11 +554,15 @@ impl ChannelCore {
                 // Note: Model selection is handled by the channel directly because
                 // it needs to implement ModelSelectionIO (which requires Send)
                 // We delegate back through the sender or handle it separately.
-                sender.send_message(recipient, "Use /model in your platform channel.", reply_to).await?;
+                sender
+                    .send_message(recipient, "Use /model in your platform channel.", reply_to)
+                    .await?;
                 Ok(true)
             }
             "help" => {
-                sender.send_message(recipient, &gateway_help_text(), reply_to).await?;
+                sender
+                    .send_message(recipient, &gateway_help_text(), reply_to)
+                    .await?;
                 Ok(true)
             }
             "status" => {
@@ -477,19 +574,31 @@ impl ChannelCore {
                 let chat_id = recipient.to_string();
                 if let Some(token) = self.cancellation_tokens.get(&chat_id) {
                     token.cancel();
-                    sender.send_message(recipient, "🛑 Stopping...", reply_to).await?;
+                    sender
+                        .send_message(recipient, "🛑 Stopping...", reply_to)
+                        .await?;
                 } else {
-                    sender.send_message(recipient, "No active task to stop.", reply_to).await?;
+                    sender
+                        .send_message(recipient, "No active task to stop.", reply_to)
+                        .await?;
                 }
                 Ok(true)
             }
             "compact" => {
                 if self.compacting_sessions.contains(&conversation.session_id) {
-                    sender.send_message(recipient, "⏳ Already compacting this session...", reply_to).await?;
+                    sender
+                        .send_message(recipient, "⏳ Already compacting this session...", reply_to)
+                        .await?;
                     return Ok(true);
                 }
                 self.compacting_sessions.insert(conversation.session_id);
-                sender.send_message(recipient, "Compacting session context... This may take a moment.", reply_to).await?;
+                sender
+                    .send_message(
+                        recipient,
+                        "Compacting session context... This may take a moment.",
+                        reply_to,
+                    )
+                    .await?;
 
                 let store = self.store.clone();
                 let session_id = conversation.session_id;
@@ -517,7 +626,9 @@ impl ChannelCore {
                         Ok(true) => {
                             if let Some(summary) = &context_manager.summary {
                                 let _ = store.update_session_context_state(
-                                    session_id, Some(summary), context_manager.retained_from,
+                                    session_id,
+                                    Some(summary),
+                                    context_manager.retained_from,
                                 );
                             }
                             let text = format!(
@@ -525,15 +636,25 @@ impl ChannelCore {
                                 context_manager.retained_from,
                                 context_manager.summary.as_deref().unwrap_or("(none)")
                             );
-                            let _ = store.append_message(session_id, &Message::new(MessageRole::System, text));
+                            let _ = store.append_message(
+                                session_id,
+                                &Message::new(MessageRole::System, text),
+                            );
                         }
                         Ok(false) => {
-                            let text = "ℹ️ No compaction needed (context already compact)".to_string();
-                            let _ = store.append_message(session_id, &Message::new(MessageRole::System, text));
+                            let text =
+                                "ℹ️ No compaction needed (context already compact)".to_string();
+                            let _ = store.append_message(
+                                session_id,
+                                &Message::new(MessageRole::System, text),
+                            );
                         }
                         Err(e) => {
                             let text = format!("❌ Compaction failed: {}", e);
-                            let _ = store.append_message(session_id, &Message::new(MessageRole::System, text));
+                            let _ = store.append_message(
+                                session_id,
+                                &Message::new(MessageRole::System, text),
+                            );
                         }
                     }
                 });
@@ -549,11 +670,17 @@ impl ChannelCore {
                 Ok(true)
             }
             _ => {
-                sender.send_message(
-                    recipient,
-                    &format!("Unknown command: {}\n\n{}", command.name, &gateway_help_text()),
-                    reply_to,
-                ).await?;
+                sender
+                    .send_message(
+                        recipient,
+                        &format!(
+                            "Unknown command: {}\n\n{}",
+                            command.name,
+                            &gateway_help_text()
+                        ),
+                        reply_to,
+                    )
+                    .await?;
                 Ok(true)
             }
         }
@@ -561,13 +688,33 @@ impl ChannelCore {
 
     // ── Status helpers ─────────────────────────────────────────────────────
 
-    pub fn format_session_status(&self, conversation: &Conversation, active_model: &ActiveModel) -> String {
-        let user_count = conversation.messages.iter().filter(|m| m.role == MessageRole::User).count();
-        let asst_count = conversation.messages.iter().filter(|m| m.role == MessageRole::Assistant).count();
-        let tool_count = conversation.messages.iter().filter(|m| m.role == MessageRole::Tool).count();
-        let token_stats = self.store
+    pub fn format_session_status(
+        &self,
+        conversation: &Conversation,
+        active_model: &ActiveModel,
+    ) -> String {
+        let user_count = conversation
+            .messages
+            .iter()
+            .filter(|m| m.role == MessageRole::User)
+            .count();
+        let asst_count = conversation
+            .messages
+            .iter()
+            .filter(|m| m.role == MessageRole::Assistant)
+            .count();
+        let tool_count = conversation
+            .messages
+            .iter()
+            .filter(|m| m.role == MessageRole::Tool)
+            .count();
+        let token_stats = self
+            .store
             .get_session_token_stats(conversation.session_id)
-            .unwrap_or(crate::storage::SessionTokenStats { input_tokens: 0, output_tokens: 0 });
+            .unwrap_or(crate::storage::SessionTokenStats {
+                input_tokens: 0,
+                output_tokens: 0,
+            });
 
         format_status_summary(&crate::gateway::commands::SessionStats {
             session_id: &conversation.session_id.to_string(),
@@ -586,11 +733,18 @@ impl ChannelCore {
         })
     }
 
-    pub fn format_session_summary(&self, conversation: &Conversation, active_model: &ActiveModel) -> String {
+    pub fn format_session_summary(
+        &self,
+        conversation: &Conversation,
+        active_model: &ActiveModel,
+    ) -> String {
         format!(
             "Session status\n- session_id: {}\n- title: {}\n- message_count: {}\n- model: {}/{}",
-            conversation.session_id, conversation.title,
-            conversation.messages.len(), active_model.provider_id, active_model.model_id
+            conversation.session_id,
+            conversation.title,
+            conversation.messages.len(),
+            active_model.provider_id,
+            active_model.model_id
         )
     }
 
@@ -612,11 +766,14 @@ impl ChannelCore {
     ) -> Result<()> {
         crate::log_info!(
             "Agent: recipient={}, model={}, session={}",
-            recipient, active_model.label(), conversation.session_id
+            recipient,
+            active_model.label(),
+            conversation.session_id
         );
 
         let cancel_token = CancellationToken::new();
-        self.cancellation_tokens.insert(recipient.to_string(), cancel_token.clone());
+        self.cancellation_tokens
+            .insert(recipient.to_string(), cancel_token.clone());
 
         self.tools.set_active_model(active_model.clone());
 
@@ -629,26 +786,33 @@ impl ChannelCore {
         let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
         let current_mode = self.mode_manager.get(chat_key);
 
-        let result = self.agent.run_agent_loop(crate::agent::runtime::AgentLoopConfig {
-            session_id,
-            model: active_model.clone(),
-            context_manager: &mut context_manager,
-            mode: current_mode,
-            thinking_level: active_model.thinking_level.clone(),
-            event_tx,
-            cancel_token: Some(cancel_token.clone()),
-        }).await;
+        let result = self
+            .agent
+            .run_agent_loop(crate::agent::runtime::AgentLoopConfig {
+                session_id,
+                model: active_model.clone(),
+                context_manager: &mut context_manager,
+                mode: current_mode,
+                thinking_level: active_model.thinking_level.clone(),
+                event_tx,
+                cancel_token: Some(cancel_token.clone()),
+            })
+            .await;
 
         self.cancellation_tokens.remove(recipient);
 
         if let Err(ref e) = result {
             crate::log_error!("Agent loop failed: {}", e);
-            sender.send_message(recipient, &format!("Error: {e}"), reply_to).await?;
+            sender
+                .send_message(recipient, &format!("Error: {e}"), reply_to)
+                .await?;
             return Ok(());
         }
 
         if cancel_token.is_cancelled() {
-            sender.send_message(recipient, "🛑 Task stopped.", reply_to).await?;
+            sender
+                .send_message(recipient, "🛑 Task stopped.", reply_to)
+                .await?;
             return Ok(());
         }
 
@@ -658,7 +822,9 @@ impl ChannelCore {
             && !last_msg.content.trim().is_empty()
         {
             let final_text = normalize_assistant_output(&last_msg.content);
-            sender.send_message(recipient, &final_text, reply_to).await?;
+            sender
+                .send_message(recipient, &final_text, reply_to)
+                .await?;
         }
 
         Ok(())
@@ -679,7 +845,10 @@ impl ChannelCore {
     }
 
     /// Format DeepSeek balance for display.
-    pub fn format_deepseek_balance(&self, balance: &crate::balance::DeepSeekBalanceResponse) -> String {
+    pub fn format_deepseek_balance(
+        &self,
+        balance: &crate::balance::DeepSeekBalanceResponse,
+    ) -> String {
         let mut text = String::from("💰 DeepSeek Balance\n\n");
         if !balance.is_available {
             text.push_str("Account is not available.\n");
@@ -687,20 +856,39 @@ impl ChannelCore {
         }
         for info in &balance.balance_infos {
             text.push_str(&format!("Currency: {}\n", info.currency));
-            text.push_str(&format!("Total: {} {}\n", info.total_balance, info.currency));
-            text.push_str(&format!("Granted: {} {}\n", info.granted_balance, info.currency));
-            text.push_str(&format!("Topped Up: {} {}\n", info.topped_up_balance, info.currency));
+            text.push_str(&format!(
+                "Total: {} {}\n",
+                info.total_balance, info.currency
+            ));
+            text.push_str(&format!(
+                "Granted: {} {}\n",
+                info.granted_balance, info.currency
+            ));
+            text.push_str(&format!(
+                "Topped Up: {} {}\n",
+                info.topped_up_balance, info.currency
+            ));
         }
         text
     }
 
     /// Format SiliconFlow balance for display.
-    pub fn format_siliconflow_balance(&self, balance: &crate::balance::SiliconFlowBalanceResponse) -> String {
-        format!("💰 SiliconFlow Balance\n\nTotal: {} CNY", balance.data.total_balance)
+    pub fn format_siliconflow_balance(
+        &self,
+        balance: &crate::balance::SiliconFlowBalanceResponse,
+    ) -> String {
+        format!(
+            "💰 SiliconFlow Balance\n\nTotal: {} CNY",
+            balance.data.total_balance
+        )
     }
 }
 
 fn normalize_assistant_output(value: &str) -> String {
     let trimmed = value.trim();
-    if trimmed.is_empty() { "(no content)".to_string() } else { trimmed.to_string() }
+    if trimmed.is_empty() {
+        "(no content)".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }

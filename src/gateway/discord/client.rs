@@ -63,9 +63,7 @@ impl DiscordClient {
         message_id: &str,
         content: &str,
     ) -> Result<()> {
-        let url = self.api_url(&format!(
-            "/channels/{channel_id}/messages/{message_id}"
-        ));
+        let url = self.api_url(&format!("/channels/{channel_id}/messages/{message_id}"));
         let body = json!({ "content": content });
 
         let resp = self
@@ -90,9 +88,7 @@ impl DiscordClient {
 
     /// Delete a message.
     pub async fn delete_message(&self, channel_id: &str, message_id: &str) -> Result<()> {
-        let url = self.api_url(&format!(
-            "/channels/{channel_id}/messages/{message_id}"
-        ));
+        let url = self.api_url(&format!("/channels/{channel_id}/messages/{message_id}"));
 
         let resp = self
             .client
