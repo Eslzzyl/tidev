@@ -217,6 +217,8 @@ pub struct GatewayConfig {
     pub qq: QQGatewayConfig,
     #[serde(default)]
     pub discord: DiscordGatewayConfig,
+    #[serde(default)]
+    pub lark: LarkGatewayConfig,
     /// Default provider for gateway mode (falls back to global default if empty).
     #[serde(default)]
     pub default_provider: String,
@@ -432,6 +434,37 @@ impl Default for DiscordGatewayConfig {
             guild_ids: Vec::new(),
             channel_ids: Vec::new(),
             mention_only: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LarkGatewayConfig {
+    /// Enable Lark/Feishu gateway mode.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Allowed Lark user IDs (open_id).
+    #[serde(default)]
+    pub allowlist: Vec<String>,
+    /// Only respond to @-mentions in group chats.
+    #[serde(default)]
+    pub mention_only: bool,
+    /// Use Feishu (CN) instead of Lark (international).
+    #[serde(default = "default_lark_use_feishu")]
+    pub use_feishu: bool,
+}
+
+fn default_lark_use_feishu() -> bool {
+    true
+}
+
+impl Default for LarkGatewayConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            allowlist: Vec::new(),
+            mention_only: false,
+            use_feishu: true,
         }
     }
 }

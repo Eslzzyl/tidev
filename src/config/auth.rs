@@ -166,6 +166,21 @@ impl AuthStore {
             .and_then(|channel| channel.api_key.as_deref())
             .filter(|value| !value.trim().is_empty())
     }
+
+    pub fn lark_app_id(&self) -> Option<&str> {
+        self.channels
+            .get("lark")
+            .and_then(|channel| channel.api_key.as_deref())
+            .filter(|value| !value.trim().is_empty())
+    }
+
+    pub fn lark_app_secret(&self) -> Option<&str> {
+        self.channels
+            .get("lark")
+            .and_then(|channel| channel.extra.get("app_secret"))
+            .and_then(|v| v.as_str())
+            .filter(|value| !value.trim().is_empty())
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

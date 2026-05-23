@@ -2,6 +2,7 @@ mod channel;
 mod channel_core;
 mod commands;
 pub mod discord;
+pub mod lark;
 pub mod model_selection;
 mod orchestrator;
 mod qq;
@@ -251,9 +252,58 @@ async fn run_async() -> Result<()> {
         orchestrator.add(Box::new(channel));
     }
 
+    if config.gateway.lark.enabled {
+        let allowlist = config
+            .gateway
+            .lark
+            .allowlist
+            .iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect::<std::collections::HashSet<_>>();
+
+        if allowlist.is_empty() {
+            bail!("gateway.lark.allowlist is empty; configure at least one Lark user open_id");
+        }
+
+        let app_id = auth
+            .lark_app_id()
+            .context("missing Lark AppID in auth.json for channel 'lark'")?
+            .to_string();
+        let app_secret = auth
+            .lark_app_secret()
+            .context("missing Lark AppSecret in auth.json for channel 'lark'")?
+            .to_string();
+
+        crate::log_info!(
+            "Lark channel enabled, allowlist: {} entries",
+            allowlist.len()
+        );
+
+        let res = ChannelResources::new(&db, &config, &default_model, &workspace_root, &paths, &auth)?;
+
+        let channel = lark::LarkChannel::new(
+            workspace_root.clone(),
+            config.clone(),
+            auth.clone(),
+            res.store,
+            res.llm,
+            res.tools,
+            instruction_prompt.clone(),
+            allowlist,
+            app_id,
+            app_secret,
+            config.gateway.lark.mention_only,
+            config.gateway.lark.use_feishu,
+            &paths,
+        );
+
+        orchestrator.add(Box::new(channel));
+    }
+
     if orchestrator.is_empty() {
         bail!(
-            "No gateway enabled; set gateway.telegram.enabled, gateway.qq.enabled, or gateway.discord.enabled to true in config.toml"
+            "No gateway enabled; set gateway.telegram.enabled, gateway.qq.enabled, gateway.discord.enabled, or gateway.lark.enabled to true in config.toml"
         );
     }
 
