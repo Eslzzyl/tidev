@@ -408,6 +408,7 @@ pub struct QQGatewayConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct DiscordGatewayConfig {
     /// Enable Discord gateway mode.
     #[serde(default)]
@@ -426,17 +427,6 @@ pub struct DiscordGatewayConfig {
     pub mention_only: bool,
 }
 
-impl Default for DiscordGatewayConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            allowlist: Vec::new(),
-            guild_ids: Vec::new(),
-            channel_ids: Vec::new(),
-            mention_only: false,
-        }
-    }
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LarkGatewayConfig {

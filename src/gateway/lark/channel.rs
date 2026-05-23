@@ -323,13 +323,11 @@ impl LarkChannel {
         }
 
         // Mention-only check for group chats
-        if msg.chat_type == "group" && self.mention_only {
-            if let Some(ref bot_id) = self.bot_open_id {
-                if !Self::is_mentioned(&content, bot_id) {
+        if msg.chat_type == "group" && self.mention_only
+            && let Some(ref bot_id) = self.bot_open_id
+                && !Self::is_mentioned(&content, bot_id) {
                     return Ok(());
                 }
-            }
-        }
 
         // Clean @mention from content
         let clean_content = if let Some(ref bot_id) = self.bot_open_id {
