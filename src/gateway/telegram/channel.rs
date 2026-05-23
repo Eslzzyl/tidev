@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
-    session::{BackendEvent, Conversation, MessageRole},
+    session::{BackendEvent, Conversation, Message, MessageRole},
     storage::SessionStore,
 };
 
@@ -248,6 +248,11 @@ impl TelegramChannel {
             if command.name == "model" {
                 return self.handle_model_command(&message).await;
             }
+            if command.name == "compact" {
+                return self
+                    .handle_compact_command(&message, &mut conversation, &mut active_model)
+                    .await;
+            }
 
             let handled = self
                 .core
@@ -478,6 +483,157 @@ impl TelegramChannel {
                     .cancel_draft_message(&recipient, &draft_message_id)
                     .await;
                 self.send_reply_chunks(source_message, &final_text).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    // ── Compact command (Telegram-specific, streaming via bot.edit) ────────
+
+    async fn handle_compact_command(
+        &mut self,
+        message: &TelegramMessage,
+        conversation: &mut Conversation,
+        active_model: &mut ActiveModel,
+    ) -> Result<()> {
+        let chat_key = self.chat_key(message);
+
+        // Build recipient string
+        let recipient = if let Some(thread_id) = message.message_thread_id {
+            format!("{}:{}", message.chat.id, thread_id)
+        } else {
+            message.chat.id.to_string()
+        };
+
+        // Send initial draft
+        let draft_id = match self.send_draft_message(&recipient, "Compacting session context...").await? {
+            Some(id) => id,
+            None => {
+                self.send_reply_chunks(message, "Compacting session context...")
+                    .await?;
+                return Ok(());
+            }
+        };
+
+        // Save prior state for metadata (used by undo)
+        let prior_summary = conversation.context_summary.clone();
+        let prior_retained_from = conversation.context_retained_from;
+        let session_id = conversation.session_id;
+
+        // Build context manager from existing state (preserves prefix cache)
+        let mut context_manager = crate::context::ContextManager::from_state(
+            conversation.context_summary.clone(),
+            conversation.context_retained_from,
+        );
+
+        // Ensure tool registry is synced (preserves prefix cache)
+        self.core.tools.set_active_model(active_model.clone());
+        let tools = self.core.tools.all_definitions();
+        let current_mode = self.core.mode_manager.get(&chat_key);
+
+        // Create streaming channel
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let request_id = rand::random::<u64>();
+
+        // Clone bot for the listener task
+        let bot = self.bot.clone();
+        let listener_draft_id = draft_id.clone();
+
+        // Spawn listener to stream compaction summary in real-time
+        let listener_handle = tokio::task::spawn_local(async move {
+            let mut accumulated = String::new();
+            let mut last_edit =
+                Instant::now() - Duration::from_millis(TELEGRAM_DRAFT_EDIT_INTERVAL_MS);
+            let msg_id: i64 = match listener_draft_id.parse() {
+                Ok(id) => id,
+                Err(_) => return String::new(),
+            };
+
+            while let Some(event) = event_rx.recv().await {
+                match event {
+                    BackendEvent::Delta { content, .. } => {
+                        accumulated.push_str(&content);
+                        let preview = preview_for_streaming(&accumulated);
+                        let now = Instant::now();
+                        if now.duration_since(last_edit).as_millis() as u64
+                            >= TELEGRAM_DRAFT_EDIT_INTERVAL_MS
+                            || accumulated.len() >= TELEGRAM_MAX_MESSAGE_LENGTH
+                        {
+                            let _ = bot.edit_message_text_html(0, msg_id, &preview).await;
+                            last_edit = now;
+                        }
+                    }
+                    BackendEvent::Finished { .. } => break,
+                    BackendEvent::Failed { .. } => break,
+                    _ => {}
+                }
+            }
+            accumulated
+        });
+
+        // Run compaction with streaming
+        let result = context_manager
+            .compact(crate::context::CompactionConfig {
+                llm: &self.core.llm,
+                model: active_model,
+                conversation: &*conversation,
+                manual: true,
+                stream_ctx: Some((request_id, event_tx)),
+                tools: &tools,
+                mode: current_mode,
+            })
+            .await;
+
+        // Wait for listener to finish
+        let accumulated = listener_handle.await.unwrap_or_default();
+
+        match result {
+            Ok(true) => {
+                if let Some(summary) = &context_manager.summary {
+                    let mut compact_msg = Message::compaction(summary);
+                    compact_msg.metadata.prior_summary = prior_summary;
+                    compact_msg.metadata.prior_retained_from = Some(prior_retained_from);
+
+                    let _ = self.core.store.append_message(session_id, &compact_msg);
+                    let _ = self.core.store.update_session_context_state(
+                        session_id,
+                        Some(summary),
+                        context_manager.retained_from,
+                    );
+                }
+
+                // Finalize draft with the full (possibly truncated) summary
+                if accumulated.is_empty() {
+                    // No streaming content; send the summary directly
+                    let text = context_manager
+                        .summary
+                        .as_deref()
+                        .unwrap_or("✅ Context compacted.");
+                    let _ = self
+                        .finalize_draft_message(&recipient, &draft_id, text)
+                        .await;
+                } else {
+                    let _ = self
+                        .finalize_draft_message(&recipient, &draft_id, &accumulated)
+                        .await;
+                }
+            }
+            Ok(false) => {
+                let _ = self
+                    .finalize_draft_message(
+                        &recipient,
+                        &draft_id,
+                        "ℹ️ No compaction needed (context already compact).",
+                    )
+                    .await;
+            }
+            Err(e) => {
+                let _ = self
+                    .cancel_draft_message(&recipient, &draft_id)
+                    .await;
+                self.send_reply_chunks(message, &format!("❌ Compaction failed: {e}"))
+                    .await?;
             }
         }
 

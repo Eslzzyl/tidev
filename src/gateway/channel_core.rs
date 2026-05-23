@@ -592,6 +592,24 @@ impl ChannelCore {
                     return Ok(true);
                 }
                 self.compacting_sessions.insert(conversation.session_id);
+
+                // Save prior state for compaction message metadata (used by undo).
+                let prior_summary = conversation.context_summary.clone();
+                let prior_retained_from = conversation.context_retained_from;
+                let session_id = conversation.session_id;
+
+                // Build context manager from existing state so we preserve the
+                // current summary (if any).  Creating a fresh ContextManager
+                // would lose it and break prefix caching.
+                let mut context_manager = crate::context::ContextManager::from_state(
+                    conversation.context_summary.clone(),
+                    conversation.context_retained_from,
+                );
+
+                self.tools.set_active_model(active_model.clone());
+                let tools = self.tools.all_definitions();
+                let current_mode = self.mode_manager.get(chat_key);
+
                 sender
                     .send_message(
                         recipient,
@@ -600,64 +618,59 @@ impl ChannelCore {
                     )
                     .await?;
 
-                let store = self.store.clone();
-                let session_id = conversation.session_id;
-                let active_model = active_model.clone();
-                let conv = conversation.clone();
-                let tools = self.tools.all_definitions();
-                let llm = self.llm.clone();
-                let current_mode = self.mode_manager.get(chat_key);
+                // Run compaction inline (non-streaming).  This is safe because
+                // /compact is a low-frequency manual command; the LLM call is
+                // the dominant latency and blocking the handler for a few
+                // seconds is acceptable.
+                let result = context_manager
+                    .compact(crate::context::CompactionConfig {
+                        llm: &self.llm,
+                        model: active_model,
+                        conversation: &*conversation,
+                        manual: true,
+                        stream_ctx: None,
+                        tools: &tools,
+                        mode: current_mode,
+                    })
+                    .await;
 
-                tokio::task::spawn(async move {
-                    let mut context_manager = crate::context::ContextManager::new();
-                    let result = context_manager
-                        .compact(crate::context::CompactionConfig {
-                            llm: &llm,
-                            model: &active_model,
-                            conversation: &conv,
-                            manual: true,
-                            stream_ctx: None,
-                            tools: &tools,
-                            mode: current_mode,
-                        })
-                        .await;
+                match result {
+                    Ok(true) => {
+                        if let Some(summary) = &context_manager.summary {
+                            let mut compact_msg = Message::compaction(summary);
+                            compact_msg.metadata.prior_summary = prior_summary;
+                            compact_msg.metadata.prior_retained_from =
+                                Some(prior_retained_from);
 
-                    match result {
-                        Ok(true) => {
-                            if let Some(summary) = &context_manager.summary {
-                                let _ = store.update_session_context_state(
-                                    session_id,
-                                    Some(summary),
-                                    context_manager.retained_from,
-                                );
-                            }
-                            let text = format!(
-                                "✅ Session context compacted.\nMessages retained: {}\nSummary: {}",
+                            let _ = self.store.append_message(session_id, &compact_msg);
+                            let _ = self.store.update_session_context_state(
+                                session_id,
+                                Some(summary),
                                 context_manager.retained_from,
-                                context_manager.summary.as_deref().unwrap_or("(none)")
-                            );
-                            let _ = store.append_message(
-                                session_id,
-                                &Message::new(MessageRole::System, text),
                             );
                         }
-                        Ok(false) => {
-                            let text =
-                                "ℹ️ No compaction needed (context already compact)".to_string();
-                            let _ = store.append_message(
-                                session_id,
-                                &Message::new(MessageRole::System, text),
-                            );
-                        }
-                        Err(e) => {
-                            let text = format!("❌ Compaction failed: {}", e);
-                            let _ = store.append_message(
-                                session_id,
-                                &Message::new(MessageRole::System, text),
-                            );
-                        }
+                        sender
+                            .send_message(recipient, "✅ Session context compacted.", reply_to)
+                            .await?;
                     }
-                });
+                    Ok(false) => {
+                        sender
+                            .send_message(
+                                recipient,
+                                "ℹ️ No compaction needed (context already compact).",
+                                reply_to,
+                            )
+                            .await?;
+                    }
+                    Err(e) => {
+                        let text = format!("❌ Compaction failed: {}", e);
+                        sender
+                            .send_message(recipient, &text, reply_to)
+                            .await?;
+                    }
+                }
+
+                self.compacting_sessions.remove(&session_id);
                 Ok(true)
             }
             "init" => {

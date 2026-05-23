@@ -949,7 +949,7 @@ pub async fn compact_session(
     let event_bus = state.event_bus.clone();
     let tools = state.agent.tool_definitions();
 
-    // Spawn compaction in background
+    // Spawn compaction in background with streaming
     tokio::spawn(async move {
         crate::log_info!(
             "Starting compaction background task for session {}",
@@ -959,17 +959,53 @@ pub async fn compact_session(
         let prior_summary = context_manager.summary.clone();
         let prior_retained_from = context_manager.retained_from;
 
-        let result = context_manager
-            .compact(crate::context::CompactionConfig {
-                llm: &llm,
-                model: &active_model,
-                conversation: &conversation,
-                manual: true,
-                stream_ctx: None,
-                tools: &tools,
-                mode: crate::prompts::SessionMode::Build,
-            })
-            .await;
+        // Create a channel so compact() streams Delta events back to us.
+        let (event_tx, mut event_rx) = unbounded_channel::<crate::session::BackendEvent>();
+        let stream_request_id = rand::random::<u64>();
+
+        // Spawn the actual compaction in a sub-task.  compact() will run the
+        // LLM call and forward every token as a BackendEvent::Delta through
+        // event_tx, then send Finished/Failed when done.
+        let compact_handle = tokio::spawn(async move {
+            let result = context_manager
+                .compact(crate::context::CompactionConfig {
+                    llm: &llm,
+                    model: &active_model,
+                    conversation: &conversation,
+                    manual: true,
+                    stream_ctx: Some((stream_request_id, event_tx)),
+                    tools: &tools,
+                    mode: crate::prompts::SessionMode::Build,
+                })
+                .await;
+            (context_manager, result)
+        });
+
+        // Relay streamed compaction chunks to SSE clients in real time.
+        while let Some(event) = event_rx.recv().await {
+            match &event {
+                BackendEvent::Delta { content, .. } => {
+                    event_bus.publish(AppEvent::CompactionChunk {
+                        session_id,
+                        request_id: stream_request_id,
+                        content: content.clone(),
+                    });
+                }
+                BackendEvent::Finished { .. } => break,
+                BackendEvent::Failed { .. } => break,
+                _ => {}
+            }
+        }
+
+        // Wait for compact to finish and take back the context_manager.
+        let (context_manager, result) = match compact_handle.await {
+            Ok(pair) => pair,
+            Err(e) => {
+                crate::log_warn!("Compact task panicked: {}", e);
+                event_bus.publish(AppEvent::MessagesUpdated { session_id });
+                return;
+            }
+        };
 
         match result {
             Ok(true) => {

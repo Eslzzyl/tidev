@@ -80,6 +80,12 @@ pub enum AppEvent {
     },
     /// Messages were updated (e.g., after revert)
     MessagesUpdated { session_id: Uuid },
+    /// Compaction summary chunk (streaming)
+    CompactionChunk {
+        session_id: Uuid,
+        request_id: u64,
+        content: String,
+    },
     /// Error occurred
     Error {
         session_id: Uuid,
@@ -117,6 +123,7 @@ impl AppEvent {
             AppEvent::Error { session_id, .. } => Some(*session_id),
             AppEvent::Retrying { session_id, .. } => Some(*session_id),
             AppEvent::MessagesUpdated { session_id } => Some(*session_id),
+            AppEvent::CompactionChunk { session_id, .. } => Some(*session_id),
         }
     }
 }

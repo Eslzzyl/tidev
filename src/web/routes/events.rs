@@ -36,6 +36,7 @@ fn event_type_str(event: &AppEvent) -> &'static str {
         AppEvent::Error { .. } => "error",
         AppEvent::Retrying { .. } => "retrying",
         AppEvent::MessagesUpdated { .. } => "messages.updated",
+        AppEvent::CompactionChunk { .. } => "compaction.chunk",
         AppEvent::ShellOutput { .. } => "shell.output",
     }
 }
@@ -117,6 +118,7 @@ pub async fn events_stream(
                         AppEvent::Retrying { session_id: sid, .. } => *sid == session_id,
                         AppEvent::ShellOutput { session_id: sid, .. } => *sid == session_id,
                         AppEvent::MessagesUpdated { session_id: sid } => *sid == session_id,
+                        AppEvent::CompactionChunk { session_id: sid, .. } => *sid == session_id,
                     };
 
                     if !matches_session {
