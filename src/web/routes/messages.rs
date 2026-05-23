@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::{
     config::reasoning::ThinkingLevelType,
     context::ContextManager,
-    prompts::{self, SessionMode},
+    prompts::{self, default_system_prompt, SessionMode},
     session::{BackendEvent, Conversation, Message, MessageRole, ToolCall},
     web::{
         error::{AppError, WebResult},
@@ -429,7 +429,9 @@ pub async fn send_message(
         context_window: model_config.context_window,
         max_output_tokens: model_config.max_output_tokens,
         supports_images: model_config.supports_images,
-        system_prompt: model_config.system_prompt.clone().unwrap_or_default(),
+        system_prompt: model_config.system_prompt.clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(default_system_prompt),
         extra_body: model_config.extra_body.clone(),
         thinking_level: thinking_level.clone(),
     };
@@ -936,7 +938,9 @@ pub async fn compact_session(
         context_window: model_config.context_window,
         max_output_tokens: model_config.max_output_tokens,
         supports_images: model_config.supports_images,
-        system_prompt: model_config.system_prompt.clone().unwrap_or_default(),
+        system_prompt: model_config.system_prompt.clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(default_system_prompt),
         extra_body: model_config.extra_body.clone(),
         thinking_level: ThinkingLevelType::None,
     };
