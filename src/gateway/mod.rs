@@ -1,6 +1,7 @@
 mod channel;
 mod channel_core;
 mod commands;
+pub mod discord;
 pub mod model_selection;
 mod orchestrator;
 mod qq;
@@ -205,9 +206,54 @@ async fn run_async() -> Result<()> {
         orchestrator.add(Box::new(channel));
     }
 
+    if config.gateway.discord.enabled {
+        let allowlist = config
+            .gateway
+            .discord
+            .allowlist
+            .iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect::<std::collections::HashSet<_>>();
+
+        if allowlist.is_empty() {
+            bail!("gateway.discord.allowlist is empty; configure at least one Discord user ID");
+        }
+
+        let bot_token = auth
+            .discord_bot_token()
+            .context("missing Discord bot token in auth.json for channel 'discord'")?
+            .to_string();
+
+        crate::log_info!(
+            "Discord channel enabled, allowlist: {} entries",
+            allowlist.len()
+        );
+
+        let res = ChannelResources::new(&db, &config, &default_model, &workspace_root, &paths, &auth)?;
+
+        let channel = discord::DiscordChannel::new(
+            workspace_root.clone(),
+            config.clone(),
+            auth.clone(),
+            res.store,
+            res.llm,
+            res.tools,
+            instruction_prompt.clone(),
+            allowlist,
+            bot_token,
+            config.gateway.discord.guild_ids.clone(),
+            config.gateway.discord.channel_ids.clone(),
+            config.gateway.discord.mention_only,
+            &paths,
+        );
+
+        orchestrator.add(Box::new(channel));
+    }
+
     if orchestrator.is_empty() {
         bail!(
-            "No gateway enabled; set either gateway.telegram.enabled or gateway.qq.enabled to true in config.toml"
+            "No gateway enabled; set gateway.telegram.enabled, gateway.qq.enabled, or gateway.discord.enabled to true in config.toml"
         );
     }
 

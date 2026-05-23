@@ -151,6 +151,21 @@ impl AuthStore {
             .and_then(|v| v.as_str())
             .filter(|value| !value.trim().is_empty())
     }
+
+    pub fn set_discord_bot_token(&mut self, token: impl Into<String>) {
+        let token = token.into();
+        self.channels
+            .entry("discord".to_string())
+            .or_default()
+            .api_key = Some(token);
+    }
+
+    pub fn discord_bot_token(&self) -> Option<&str> {
+        self.channels
+            .get("discord")
+            .and_then(|channel| channel.api_key.as_deref())
+            .filter(|value| !value.trim().is_empty())
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

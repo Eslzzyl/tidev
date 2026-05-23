@@ -215,6 +215,8 @@ pub struct GatewayConfig {
     pub telegram: TelegramGatewayConfig,
     #[serde(default)]
     pub qq: QQGatewayConfig,
+    #[serde(default)]
+    pub discord: DiscordGatewayConfig,
     /// Default provider for gateway mode (falls back to global default if empty).
     #[serde(default)]
     pub default_provider: String,
@@ -401,6 +403,37 @@ pub struct QQGatewayConfig {
     /// Whether to use sandbox environment.
     #[serde(default)]
     pub sandbox: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DiscordGatewayConfig {
+    /// Enable Discord gateway mode.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Allowed Discord user IDs.
+    #[serde(default)]
+    pub allowlist: Vec<String>,
+    /// Restrict to specific guild IDs (empty = all guilds).
+    #[serde(default)]
+    pub guild_ids: Vec<String>,
+    /// Restrict to specific channel IDs (empty = all channels).
+    #[serde(default)]
+    pub channel_ids: Vec<String>,
+    /// Only respond when the bot is @mentioned.
+    #[serde(default)]
+    pub mention_only: bool,
+}
+
+impl Default for DiscordGatewayConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            allowlist: Vec::new(),
+            guild_ids: Vec::new(),
+            channel_ids: Vec::new(),
+            mention_only: false,
+        }
+    }
 }
 
 impl Default for TelegramGatewayConfig {
