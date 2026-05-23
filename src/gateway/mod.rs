@@ -1,12 +1,14 @@
 mod channel;
+mod channel_core;
 mod commands;
 pub mod model_selection;
 mod orchestrator;
 mod qq;
-mod qq_client;
 mod shared;
 pub mod shell;
 pub mod telegram;
+
+pub use channel_core::{ChannelCore, MessageSender};
 
 use std::env;
 use std::path::Path;
@@ -25,6 +27,55 @@ use crate::{
 
 use orchestrator::ChannelOrchestrator;
 use shared::compose_instruction_prompt;
+
+/// Per-channel resources that need to be created independently
+/// for each channel (each channel gets its own store, tools, etc.).
+struct ChannelResources {
+    store: crate::storage::SessionStore,
+    llm: LlmClient,
+    tools: ToolRegistry,
+}
+
+impl ChannelResources {
+    fn new(
+        db: &Database,
+        config: &AppConfig,
+        default_model: &crate::config::ActiveModel,
+        workspace_root: &Path,
+        paths: &ConfigPaths,
+        auth: &AuthStore,
+    ) -> Result<Self> {
+        let store = db.create_session_store()?;
+        let memory_store = Arc::new(db.create_memory_store()?);
+        let llm = LlmClient::new(&config.logging)?;
+        memory_store.set_models(llm.clone(), default_model.clone(), None);
+        crate::memory::start_background_tasks(
+            memory_store.clone(),
+            &tokio::runtime::Handle::current(),
+            &workspace_root.to_string_lossy(),
+            &config.memory,
+        );
+        let mcp = McpManager::new(workspace_root.to_path_buf(), config.mcp.servers.clone());
+        let file_read_tracker = Arc::new(FileReadTracker::new());
+        let worktree = find_git_worktree(workspace_root);
+        let mut tools = ToolRegistry::new(
+            workspace_root.to_path_buf(),
+            paths.config_dir.clone(),
+            config.skills.clone(),
+            mcp,
+            config.permissions.clone(),
+            file_read_tracker,
+            memory_store,
+            config.rtk.enabled,
+            worktree,
+            config.websearch.clone(),
+            Arc::new(auth.clone()),
+        );
+        tools.set_active_model(default_model.clone());
+        tools.set_sandbox_policy(Some(crate::sandbox::SandboxPolicy::default()));
+        Ok(Self { store, llm, tools })
+    }
+}
 
 /// Find the git worktree root by looking for a .git directory,
 /// starting from the given path and walking up to the ancestors.
@@ -90,44 +141,15 @@ async fn run_async() -> Result<()> {
             allowlist.len()
         );
 
-        // Each channel gets its own resources
-        let store = db.create_session_store()?;
-        let memory_store = Arc::new(db.create_memory_store()?);
-        let llm = LlmClient::new(&config.logging)?;
-        memory_store.set_models(llm.clone(), default_model.clone(), None);
-        crate::memory::start_background_tasks(
-            memory_store.clone(),
-            &tokio::runtime::Handle::current(),
-            &workspace_root.to_string_lossy(),
-            &config.memory,
-        );
-        let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
-        let file_read_tracker = Arc::new(FileReadTracker::new());
-        let worktree = find_git_worktree(&workspace_root);
-        let mut tools = ToolRegistry::new(
-            workspace_root.clone(),
-            paths.config_dir.clone(),
-            config.skills.clone(),
-            mcp,
-            config.permissions.clone(),
-            file_read_tracker,
-            memory_store,
-            config.rtk.enabled,
-            worktree,
-            config.websearch.clone(),
-            Arc::new(auth.clone()),
-        );
-        tools.set_active_model(default_model.clone());
-        // Use default sandbox policy for gateway mode
-        tools.set_sandbox_policy(Some(crate::sandbox::SandboxPolicy::default()));
+        let res = ChannelResources::new(&db, &config, &default_model, &workspace_root, &paths, &auth)?;
 
         let channel = telegram::TelegramChannel::new(
             workspace_root.clone(),
             config.clone(),
             auth.clone(),
-            store,
-            llm,
-            tools,
+            res.store,
+            res.llm,
+            res.tools,
             instruction_prompt.clone(),
             allowlist,
             config.gateway.telegram.poll_timeout_secs.max(1),
@@ -163,44 +185,15 @@ async fn run_async() -> Result<()> {
 
         crate::log_info!("QQ channel enabled, allowlist: {} entries", allowlist.len());
 
-        // Each channel gets its own resources
-        let store = db.create_session_store()?;
-        let memory_store2 = Arc::new(db.create_memory_store()?);
-        let llm = LlmClient::new(&config.logging)?;
-        memory_store2.set_models(llm.clone(), default_model.clone(), None);
-        crate::memory::start_background_tasks(
-            memory_store2.clone(),
-            &tokio::runtime::Handle::current(),
-            &workspace_root.to_string_lossy(),
-            &config.memory,
-        );
-        let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
-        let file_read_tracker = Arc::new(FileReadTracker::new());
-        let worktree2 = find_git_worktree(&workspace_root);
-        let mut tools = ToolRegistry::new(
-            workspace_root.clone(),
-            paths.config_dir.clone(),
-            config.skills.clone(),
-            mcp,
-            config.permissions.clone(),
-            file_read_tracker,
-            memory_store2,
-            config.rtk.enabled,
-            worktree2,
-            config.websearch.clone(),
-            Arc::new(auth.clone()),
-        );
-        tools.set_active_model(default_model.clone());
-        // Use default sandbox policy for gateway mode
-        tools.set_sandbox_policy(Some(crate::sandbox::SandboxPolicy::default()));
+        let res = ChannelResources::new(&db, &config, &default_model, &workspace_root, &paths, &auth)?;
 
         let channel = qq::QQChannel::new(
             workspace_root.clone(),
             config.clone(),
             auth.clone(),
-            store,
-            llm,
-            tools,
+            res.store,
+            res.llm,
+            res.tools,
             instruction_prompt.clone(),
             allowlist,
             app_id,

@@ -350,7 +350,7 @@ async fn handle_model_selection<IO: ModelSelectionIO>(
         );
         for (i, opt) in tl_options.iter().enumerate() {
             // Strip prefix for cleaner display (e.g. "deepseek:High" → "High")
-            let display = opt.split(':').last().unwrap_or(opt);
+            let display = opt.split(':').next_back().unwrap_or(opt);
             text.push_str(&format!("{}. {}\n", i + 1, display));
         }
         text.push_str("\n(Enter any other number to skip / use auto-detect)");
@@ -543,7 +543,7 @@ async fn handle_legacy_model_selection<IO: ModelSelectionIO>(
             model_label,
         );
         for (i, opt) in tl_options.iter().enumerate() {
-            let display = opt.split(':').last().unwrap_or(opt);
+            let display = opt.split(':').next_back().unwrap_or(opt);
             text.push_str(&format!("{}. {}\n", i + 1, display));
         }
         text.push_str("\n(Enter any other number to skip / use auto-detect)");

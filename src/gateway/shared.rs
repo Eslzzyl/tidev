@@ -119,10 +119,9 @@ impl ModeManager {
             .iter()
             .rev()
             .find(|m| m.role == crate::session::MessageRole::User && m.mode.is_some())
+            && let Some(mode) = last_user_with_mode.mode
         {
-            if let Some(mode) = last_user_with_mode.mode {
-                self.set(chat_key, mode);
-            }
+            self.set(chat_key, mode);
         }
     }
 

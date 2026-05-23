@@ -2,38 +2,27 @@
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use tokio::sync::mpsc::unbounded_channel;
 use tokio::time::{Duration, sleep};
 use tokio_util::sync::CancellationToken;
-use uuid::Uuid;
 
 use crate::{
-    agent::runtime::AgentRuntime,
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
-    context::ContextManager,
-    llm::LlmClient,
-    prompts::{SessionMode, gateway_system_prompt},
-    session::{BackendEvent, Conversation, Message, MessageRole},
+    session::{BackendEvent, Conversation, MessageRole},
     storage::SessionStore,
-    tooling::ToolRegistry,
 };
 
-use super::bot::TelegramBot;
-use super::types::TelegramMessage;
+use crate::gateway::telegram::bot::TelegramBot;
+use crate::gateway::telegram::types::TelegramMessage;
 use crate::gateway::channel::Channel;
 use crate::gateway::channel::SendMessage;
-use crate::gateway::commands::{
-    CommandInvocation, GATEWAY_COMMANDS, format_status_summary, gateway_help_text, parse_command,
-};use crate::gateway::model_selection::{self, ModelSelectionIO, ModelSelectionState};
-use crate::gateway::shared::ModeManager;
-use crate::gateway::shell;
+use crate::gateway::channel_core::{ChannelCore, MessageSender};
+use crate::gateway::commands::{GATEWAY_COMMANDS, parse_command};
+use crate::gateway::model_selection::{self, ModelSelectionIO, ModelSelectionState};
 
 pub const GATEWAY_PLATFORM_TELEGRAM: &str = "telegram";
 pub const TELEGRAM_MAX_MESSAGE_LENGTH: usize = 4096;
@@ -42,158 +31,59 @@ const TELEGRAM_DRAFT_EDIT_INTERVAL_MS: u64 = 1200;
 /// Interactive balance selection state for a chat.
 #[derive(Debug, Clone)]
 enum BalanceSelectionState {
-    /// Waiting for user to select a provider (1, 2, 3, ...)
     WaitingForProvider,
 }
 
 /// Telegram gateway channel implementation.
 pub struct TelegramChannel {
-    pub workspace_root: PathBuf,
-    pub config: AppConfig,
-    pub auth: AuthStore,
-    pub config_paths: ConfigPaths,
-    pub store: SessionStore,
-    pub llm: LlmClient,
-    pub tools: ToolRegistry,
-    /// Shared AgentRuntime for compose_static_system_prompt / build_request_messages / execute_tool_calls.
-    pub agent: AgentRuntime,
-    pub instruction_prompt: String,
-    pub allowlist: HashSet<String>,
-    pub poll_timeout_secs: u64,
+    pub core: ChannelCore,
     pub bot: TelegramBot,
+    pub poll_timeout_secs: u64,
     pub offset: i64,
     pub request_seq: u64,
-    /// Gateway start time for uptime calculation.
-    pub start_time: Instant,
-    /// Cancellation tokens per chat_id for /stop command.
-    cancellation_tokens: HashMap<i64, CancellationToken>,
-    /// Interactive model selection state per chat_id.
-    /// When a user is in this state, their next message is handled as selection input,
-    /// not sent to the agent.
-    model_selection_states: HashMap<i64, ModelSelectionState>,
-    /// Interactive balance selection state per chat_id.
-    /// When a user is in this state, their next message is handled as selection input,
-    /// not sent to the agent.
+    /// Telegram-specific balance selection state.
     balance_selection_states: HashMap<i64, BalanceSelectionState>,
-    /// Sessions that are currently compacting.
-    compacting_sessions: HashSet<Uuid>,
-    /// Per-chat session mode tracking (Plan / Build).
-    mode_manager: ModeManager,
 }
 
 impl TelegramChannel {
-    /// Create a new Telegram channel.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        workspace_root: PathBuf,
+        workspace_root: std::path::PathBuf,
         config: AppConfig,
         auth: AuthStore,
         store: SessionStore,
-        llm: LlmClient,
-        tools: ToolRegistry,
+        llm: crate::llm::LlmClient,
+        tools: crate::tooling::ToolRegistry,
         instruction_prompt: String,
         allowlist: HashSet<String>,
         poll_timeout_secs: u64,
         bot_token: String,
-        paths: &crate::config::ConfigPaths,
+        paths: &ConfigPaths,
     ) -> Self {
-        // Build shared AgentRuntime from the same resources
-        let agent = AgentRuntime {
-            workspace_root: workspace_root.clone(),
-            config_dir: paths.config_dir.clone(),
-            config_paths: paths.clone(),
-            config: config.clone(),
-            auth: auth.clone(),
-            store: Arc::new(tokio::sync::Mutex::new(store.clone())),
-            llm_client: llm.clone(),
-            tools: tools.clone(),
-            instructions: config.instructions.clone(),
-            instruction_content_cache: std::collections::HashMap::new(),
-            queued_messages: std::sync::Arc::new(std::sync::Mutex::new(
-                std::collections::VecDeque::new(),
-            )),
-            auto_approve_permissions: false,
-            hooks: crate::hooks::HookEngine::new(config.hooks.clone(), workspace_root.clone()),
-        };
-        let default_mode = config.gateway.parsed_default_mode();
-        Self {
+        let core = ChannelCore::new(
+            GATEWAY_PLATFORM_TELEGRAM,
             workspace_root,
             config,
             auth,
-            config_paths: paths.clone(),
+            paths,
             store,
             llm,
             tools,
-            agent,
             instruction_prompt,
             allowlist,
-            poll_timeout_secs,
+        );
+        Self {
+            core,
             bot: TelegramBot::new(bot_token),
+            poll_timeout_secs,
             offset: 0,
             request_seq: 0,
-            start_time: Instant::now(),
-            cancellation_tokens: HashMap::new(),
-            model_selection_states: HashMap::new(),
             balance_selection_states: HashMap::new(),
-            compacting_sessions: HashSet::new(),
-            mode_manager: ModeManager::new(default_mode),
         }
     }
-}
 
-// ── ModelSelectionIO trait implementation ──
+    // ── Telegram-specific event loop ──────────────────────────────────────
 
-#[async_trait]
-impl ModelSelectionIO for TelegramChannel {
-    type Id = i64;
-
-    async fn send_message(&mut self, id: &i64, text: &str) -> Result<()> {
-        // Send as a new message (not a threaded reply) to the chat.
-        self.bot.send_message_html(*id, None, text, None).await?;
-        Ok(())
-    }
-
-    fn get_state(&self, id: &i64) -> Option<ModelSelectionState> {
-        self.model_selection_states.get(id).cloned()
-    }
-
-    fn set_state(&mut self, id: i64, state: ModelSelectionState) {
-        self.model_selection_states.insert(id, state);
-    }
-
-    fn remove_state(&mut self, id: &i64) {
-        self.model_selection_states.remove(id);
-    }
-
-    fn chat_key(&self, id: &i64) -> String {
-        format!("telegram:{}", id)
-    }
-
-    fn platform(&self) -> &'static str {
-        GATEWAY_PLATFORM_TELEGRAM
-    }
-
-    fn config(&self) -> &AppConfig { &self.config }
-    fn config_mut(&mut self) -> &mut AppConfig { &mut self.config }
-    fn config_paths(&self) -> &ConfigPaths { &self.config_paths }
-    fn auth(&self) -> &AuthStore { &self.auth }
-    fn store(&self) -> &SessionStore { &self.store }
-
-    fn get_available_providers(&self) -> Vec<(String, String)> {
-        self.get_available_providers()
-    }
-
-    fn get_models_for_provider(&self, provider_id: &str) -> Vec<(String, String)> {
-        self.get_models_for_provider(provider_id)
-    }
-
-    fn resolve_chat_model(&self, chat_key: &str) -> Result<ActiveModel> {
-        self.resolve_chat_model(chat_key)
-    }
-}
-
-// ── TelegramChannel methods ──
-impl TelegramChannel {
     async fn bootstrap_offset(&mut self) -> Result<()> {
         crate::log_info!("Telegram bootstrapping offset...");
         let updates = self.bot.get_updates(0, 0).await?;
@@ -216,11 +106,7 @@ impl TelegramChannel {
 
     async fn run_loop(&mut self) -> Result<()> {
         loop {
-            let updates = match self
-                .bot
-                .get_updates(self.offset, self.poll_timeout_secs)
-                .await
-            {
+            let updates = match self.bot.get_updates(self.offset, self.poll_timeout_secs).await {
                 Ok(updates) => updates,
                 Err(error) => {
                     crate::log_error!("Telegram getUpdates failed: {error}");
@@ -235,9 +121,7 @@ impl TelegramChannel {
 
             for update in updates {
                 self.offset = update.update_id.saturating_add(1);
-                let Some(message) = update.message else {
-                    continue;
-                };
+                let Some(message) = update.message else { continue; };
 
                 crate::log_info!(
                     "Received message: chat_id={}, msg_id={}, user={}",
@@ -253,43 +137,50 @@ impl TelegramChannel {
         }
     }
 
+    // ── Message handling ──────────────────────────────────────────────────
+
     async fn handle_message(&mut self, message: TelegramMessage) -> Result<()> {
-        if !self.is_allowed(&message) {
-            crate::log_debug!(
-                "Message from chat_id={} not in allowlist, skipping",
-                message.chat.id
-            );
-            return Ok(());
+        // Allowlist check
+        let chat_id = message.chat.id;
+        let chat_id_str = chat_id.to_string();
+        if !self.core.is_allowed(&chat_id_str) {
+            let allowed_by_user = message
+                .from
+                .as_ref()
+                .map(|u| {
+                    self.core.is_allowed(&u.id.to_string())
+                        || u.username.as_ref().is_some_and(|un| self.core.is_allowed(un))
+                })
+                .unwrap_or(false);
+            if !allowed_by_user {
+                crate::log_debug!("Message from chat_id={} not in allowlist, skipping", chat_id);
+                return Ok(());
+            }
         }
 
         // Add receipt reaction
-        if let Err(e) = self
-            .bot
-            .set_message_reaction(message.chat.id, message.message_id, "👀")
-            .await
-        {
-            crate::log_warn!(
-                "Failed to set message reaction for chat_id={}: {}",
-                message.chat.id,
-                e
-            );
+        if let Err(e) = self.bot.set_message_reaction(chat_id, message.message_id, "👀").await {
+            crate::log_warn!("Failed to set message reaction for chat_id={}: {}", chat_id, e);
         }
 
-        let Some(content) = message
-            .text
-            .as_deref()
-            .or(message.caption.as_deref())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        else {
-            crate::log_debug!(
-                "Message chat_id={} has no text content, skipping",
-                message.chat.id
-            );
+        let content = message.text.as_deref().unwrap_or_default().trim().to_string();
+        if content.is_empty() {
             return Ok(());
-        };
+        }
 
-        // Shell command: messages starting with `!` are executed directly.
+        // Balance selection state
+        if let Some(state) = self.balance_selection_states.get(&chat_id).cloned() {
+            self.balance_selection_states.remove(&chat_id);
+            return self.handle_balance_selection(&message, &state, &content).await;
+        }
+
+        // Model selection state
+        if let Some(state) = self.core.model_selection_states.get(&chat_id_str).cloned() {
+            crate::log_info!("Handling model selection input: chat_id={}", chat_id);
+            return self.handle_model_selection(&message, &state, &content).await;
+        }
+
+        // Shell command
         if let Some(cmd) = content.strip_prefix('!') {
             let cmd = cmd.trim();
             if !cmd.is_empty() {
@@ -297,114 +188,69 @@ impl TelegramChannel {
             }
         }
 
-        // Check if user is in interactive model selection state.
-        // If so, handle selection input instead of normal message processing.
-        if let Some(state) = self.model_selection_states.get(&message.chat.id).cloned() {
-            crate::log_info!(
-                "Handling model selection input: chat_id={}",
-                message.chat.id
-            );
-            return self.handle_model_selection(&message, &state).await;
+        // Parse command
+        if let Some(command) = parse_command(&content) {
+            crate::log_info!("Telegram executing command: /{} {:?}", command.name, command.args);
+            let chat_key = self.chat_key(&message);
+            let mut active_model = self.core.resolve_chat_model(&chat_key)?;
+            let mut conversation = self.core.load_or_create_conversation(&chat_key, &active_model)?;
+            self.core.load_system_prompt(&conversation, &mut active_model);
+            self.core.mode_manager.restore_from_messages(&chat_key, &conversation.messages);
+
+            let mut sender = TelegramSender {
+                bot: &self.bot,
+                chat_id,
+                thread_id: message.message_thread_id,
+                reply_to_msg_id: Some(message.message_id),
+            };
+
+            // Handle balance and model commands specially (platform-specific ModelSelectionIO)
+            if command.name == "balance" {
+                return self.handle_balance_command(&message).await;
+            }
+            if command.name == "model" {
+                return self.handle_model_command(&message).await;
+            }
+
+            let handled = self.core.handle_command(
+                &mut sender, &chat_id_str, Some(&message.message_id.to_string()),
+                &chat_key, &mut conversation, &mut active_model, command,
+            ).await?;
+
+            if handled { return Ok(()); }
         }
 
-        // Check if user is in interactive balance selection state.
-        // If so, handle selection input instead of normal message processing.
-        if let Some(state) = self.balance_selection_states.get(&message.chat.id).cloned() {
-            crate::log_info!(
-                "Handling balance selection input: chat_id={}",
-                message.chat.id
-            );
-            return self.handle_balance_selection(&message, &state).await;
-        }
-
+        // Regular message → run agent with streaming
         let chat_key = self.chat_key(&message);
-        let mut active_model = self.resolve_chat_model(&chat_key)?;
-        let mut conversation = self.load_or_create_chat_conversation(&chat_key, &active_model)?;
+        let mut active_model = self.core.resolve_chat_model(&chat_key)?;
+        let mut conversation = self.core.load_or_create_conversation(&chat_key, &active_model)?;
+        self.core.load_system_prompt(&conversation, &mut active_model);
+        self.core.mode_manager.restore_from_messages(&chat_key, &conversation.messages);
+        self.core.persist_user_message(&mut conversation, &chat_key, &content)?;
 
-        // Restore session mode from persisted messages so the in-memory
-        // tracker reflects the actual mode (important after gateway restart).
-        self.mode_manager
-            .restore_from_messages(&chat_key, &conversation.messages);
-
-        // Load the session's immutable static system prompt.
-        // Legacy sessions (no stored prompt) get composed now.
-        match self
-            .store
-            .load_session_system_prompt(conversation.session_id)
-        {
-            Ok(stored) if !stored.is_empty() => {
-                active_model.system_prompt = stored;
-            }
-            _ => {
-                let composed = self
-                    .agent
-                    .compose_static_system_prompt(&active_model.system_prompt);
-                if let Err(e) = self
-                    .store
-                    .update_session_system_prompt(conversation.session_id, &composed)
-                {
-                    crate::log_warn!("failed to persist static system prompt: {}", e);
-                }
-                active_model.system_prompt = composed;
-            }
-        }
-
-        crate::log_info!(
-            "Processing message: chat_id={}, session_id={}, content_len={}",
-            message.chat.id,
-            conversation.session_id,
-            content.len()
-        );
-
-        if let Some(command) = parse_command(content) {
-            crate::log_info!("Executing command: /{} {:?}", command.name, command.args);
-            if self
-                .handle_command(
-                    &message,
-                    &chat_key,
-                    &mut conversation,
-                    &mut active_model,
-                    command,
-                )
-                .await?
-            {
-                return Ok(());
-            }
-        }
-
-        // Persist user message (agent loop will inject
-        // instructions and memory context before the LLM turn).
-        let mut user_message = Message::new(MessageRole::User, content);
-        user_message.mode = Some(self.mode_manager.get(&chat_key));
-        conversation.push(user_message.clone());
-        self.store
-            .append_message(conversation.session_id, &user_message)?;
-
-        if conversation.messages.len() == 1 || conversation.title == "Untitled session" {
-            conversation.update_title_from_prompt(content);
-            self.store
-                .update_session_title(conversation.session_id, &conversation.title)?;
-        }
-
-        if let Err(error) = self
-            .run_agent_with_tools(&message, &mut conversation, &active_model)
-            .await
-        {
-            let error_text = format!("Gateway error: {error}");
-            let error_message = Message::new(MessageRole::Error, error_text.clone());
-            self.store
-                .append_message(conversation.session_id, &error_message)?;
-            self.send_reply_chunks(&message, &error_text).await?;
-        }
-
-        Ok(())
+        self.run_agent_with_tools(&message, &mut conversation, &active_model).await
     }
 
-    /// Run the full agent loop using shared AgentRuntime.
-    ///
-    /// Replaces run_agent_with_tools + run_single_streaming_turn + execute_tool_calls.
-    /// Handles draft editing for streaming and sends tool results in real-time via
-    /// a spawned event handler task.
+    // ── Shell command ─────────────────────────────────────────────────────
+
+    async fn handle_shell_command(&mut self, message: &TelegramMessage, command: &str) -> Result<()> {
+        let chat_key = self.chat_key(message);
+        let active_model = self.core.resolve_chat_model(&chat_key)?;
+        let conversation = self.core.load_or_create_conversation(&chat_key, &active_model)?;
+        let session_id = conversation.session_id;
+
+        let (content, exit_code) = crate::gateway::shell::execute_shell(command);
+        let formatted_db = crate::gateway::shell::format_shell_output(&content, exit_code);
+        let formatted_html = crate::gateway::shell::format_shell_output_html(&content, exit_code);
+
+        crate::gateway::shell::persist_shell_messages(&self.core.store, session_id, command, &formatted_db)?;
+
+        self.send_reply_chunks(message, &formatted_html).await
+    }
+
+    // ── Agent loop with streaming ─────────────────────────────────────────
+
+    /// Run the full agent loop with Telegram-specific streaming draft editing.
     async fn run_agent_with_tools(
         &mut self,
         source_message: &TelegramMessage,
@@ -418,7 +264,7 @@ impl TelegramChannel {
             conversation.session_id
         );
 
-        // Build recipient string: chat_id:thread_id (if thread exists)
+        // Build recipient string
         let recipient = if let Some(thread_id) = source_message.message_thread_id {
             format!("{}:{}", source_message.chat.id, thread_id)
         } else {
@@ -427,35 +273,34 @@ impl TelegramChannel {
 
         // Send initial draft message
         let draft_message_id = match self
-            .send_draft(&SendMessage::new("Thinking...", &recipient))
+            .send_draft_message(&recipient, "Thinking...")
             .await?
         {
             Some(id) => id,
             None => {
-                self.send_reply_chunks(source_message, "Thinking...")
-                    .await?;
+                self.send_reply_chunks(source_message, "Thinking...").await?;
                 return Ok(());
             }
         };
 
         // Set up cancellation
         let cancel_token = CancellationToken::new();
-        self.cancellation_tokens
-            .insert(source_message.chat.id, cancel_token.clone());
+        self.core.cancellation_tokens
+            .insert(source_message.chat.id.to_string(), cancel_token.clone());
 
         // Ensure tools have the active model
-        self.agent.tools.set_active_model(active_model.clone());
+        self.core.tools.set_active_model(active_model.clone());
 
-        // Build context manager from conversation state
-        let mut context_manager = ContextManager::from_state(
+        // Build context manager
+        let mut context_manager = crate::context::ContextManager::from_state(
             conversation.context_summary.clone(),
             conversation.context_retained_from,
         );
 
         let session_id = conversation.session_id;
-        let (event_tx, mut event_rx) = unbounded_channel();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        // Clone resources for the event handler task
+        // Clone resources for event handler task
         let bot = self.bot.clone();
         let chat_id = source_message.chat.id;
         let thread_id = source_message.message_thread_id;
@@ -463,10 +308,9 @@ impl TelegramChannel {
         let draft_id = draft_message_id.clone();
 
         // Spawn event handler for real-time draft updates and tool results
-        let event_handle = tokio::spawn(async move {
+        let event_handle = tokio::task::spawn_local(async move {
             let mut streamed = String::new();
-            let mut last_edit =
-                Instant::now() - Duration::from_millis(TELEGRAM_DRAFT_EDIT_INTERVAL_MS);
+            let mut last_edit = Instant::now() - Duration::from_millis(TELEGRAM_DRAFT_EDIT_INTERVAL_MS);
             let draft_id: i64 = match draft_id.parse() {
                 Ok(id) => id,
                 Err(_) => return,
@@ -478,61 +322,51 @@ impl TelegramChannel {
                         streamed.push_str(&content);
                         let preview = preview_for_streaming(&streamed);
                         let now = Instant::now();
-                        if now.duration_since(last_edit).as_millis() as u64
-                            >= TELEGRAM_DRAFT_EDIT_INTERVAL_MS
+                        if now.duration_since(last_edit).as_millis() as u64 >= TELEGRAM_DRAFT_EDIT_INTERVAL_MS
                             || streamed.len() >= TELEGRAM_MAX_MESSAGE_LENGTH
                         {
                             let _ = bot.edit_message_text_html(0, draft_id, &preview).await;
                             last_edit = now;
                         }
                     }
-                    BackendEvent::ToolCompleted {
-                        tool_call, result, ..
-                    } => {
+                    BackendEvent::ToolCompleted { tool_call, result, .. } => {
                         let display = result.preview_for_storage(Some(tool_call.name.as_str()));
                         let text = format!(
                             "🔧 <b>{}</b>\n<pre><code class=\"language-text\">{}</code></pre>",
                             tool_call.name,
                             truncate_for_html(&display.output)
                         );
-                        let _ = bot
-                            .send_message_html(chat_id, thread_id, &text, Some(msg_id))
-                            .await;
-                    }
-                    BackendEvent::Finished { .. } => {
-                        // Agent loop will handle finalization after run_agent_loop returns
+                        let _ = bot.send_message_html(chat_id, thread_id, &text, Some(msg_id)).await;
                     }
                     _ => {}
                 }
             }
         });
 
-        // Run the complete agent loop
-        let current_mode = self.mode_manager.get(&self.chat_key(source_message));
-        let result = self
-            .agent
-            .run_agent_loop(crate::agent::runtime::AgentLoopConfig {
-                session_id,
-                model: active_model.clone(),
-                context_manager: &mut context_manager,
-                mode: current_mode,
-                thinking_level: active_model.thinking_level.clone(),
-                event_tx,
-                cancel_token: Some(cancel_token.clone()),
-            })
-            .await;
+        // Run the agent loop
+        let chat_key = self.chat_key(source_message);
+        let current_mode = self.core.mode_manager.get(&chat_key);
+        let result = self.core.agent.run_agent_loop(crate::agent::runtime::AgentLoopConfig {
+            session_id,
+            model: active_model.clone(),
+            context_manager: &mut context_manager,
+            mode: current_mode,
+            thinking_level: active_model.thinking_level.clone(),
+            event_tx,
+            cancel_token: Some(cancel_token.clone()),
+        }).await;
 
         // Clean up cancellation token
-        self.cancellation_tokens.remove(&source_message.chat.id);
+        self.core.cancellation_tokens.remove(&source_message.chat.id.to_string());
 
-        // Wait for event handler to finish
+        // Wait for event handler
         let _ = event_handle.await;
 
         // Handle errors
         if let Err(ref e) = result {
             crate::log_error!("Telegram agent loop failed: {}", e);
             let error_msg = format!("Error: {e}");
-            let _ = self.cancel_draft(&recipient, &draft_message_id).await;
+            let _ = self.cancel_draft_message(&recipient, &draft_message_id).await;
             self.send_reply_chunks(source_message, &error_msg).await?;
             return Ok(());
         }
@@ -544,7 +378,7 @@ impl TelegramChannel {
         }
 
         // Send final response
-        if let Ok(messages) = self.store.load_messages(session_id)
+        if let Ok(messages) = self.core.store.load_messages(session_id)
             && let Some(last_msg) = messages.last()
             && last_msg.role == MessageRole::Assistant
             && !last_msg.content.trim().is_empty()
@@ -553,16 +387,12 @@ impl TelegramChannel {
 
             if last_msg.tool_calls.is_empty() {
                 // No tool calls — finalize the draft message
-                if self
-                    .finalize_draft(&recipient, &draft_message_id, &final_text)
-                    .await
-                    .is_err()
-                {
+                if self.finalize_draft_message(&recipient, &draft_message_id, &final_text).await.is_err() {
                     self.send_reply_chunks(source_message, &final_text).await?;
                 }
             } else {
                 // Had tool calls — delete draft and send as new message
-                let _ = self.cancel_draft(&recipient, &draft_message_id).await;
+                let _ = self.cancel_draft_message(&recipient, &draft_message_id).await;
                 self.send_reply_chunks(source_message, &final_text).await?;
             }
         }
@@ -570,264 +400,7 @@ impl TelegramChannel {
         Ok(())
     }
 
-    /// Handle a `!` shell command: execute it and send back the result.
-    async fn handle_shell_command(
-        &mut self,
-        source_message: &TelegramMessage,
-        command: &str,
-    ) -> Result<()> {
-        let chat_key = self.chat_key(source_message);
-        let active_model = self.resolve_chat_model(&chat_key)?;
-        let conversation = self.load_or_create_chat_conversation(&chat_key, &active_model)?;
-        let session_id = conversation.session_id;
-
-        // Execute and format
-        let (content, exit_code) = shell::execute_shell(command);
-        let formatted_db = shell::format_shell_output(&content, exit_code);
-        let formatted_html = shell::format_shell_output_html(&content, exit_code);
-
-        // Persist both messages (Markdown format — consistent with web/TUI)
-        shell::persist_shell_messages(&self.store, session_id, command, &formatted_db)?;
-
-        // Send HTML reply via Telegram
-        self.send_reply_chunks(source_message, &formatted_html)
-            .await?;
-
-        Ok(())
-    }
-
-    async fn handle_command(
-        &mut self,
-        source_message: &TelegramMessage,
-        chat_key: &str,
-        conversation: &mut Conversation,
-        active_model: &mut ActiveModel,
-        command: CommandInvocation,
-    ) -> Result<bool> {
-        match command.name.as_str() {
-            "new" => {
-                *conversation = self.rotate_chat_session(chat_key, active_model)?;
-                self.mode_manager.reset(chat_key);
-                let mode = self.mode_manager.get(chat_key);
-                self.send_reply_chunks(
-                    source_message,
-                    &format!("Started a fresh session in {} mode.", mode.title()),
-                )
-                .await?;
-                Ok(true)
-            }
-            "plan" | "p" => {
-                self.mode_manager.set(chat_key, SessionMode::Plan);
-                self.send_reply_chunks(
-                    source_message,
-                    ModeManager::switch_message(SessionMode::Plan),
-                )
-                .await?;
-                Ok(true)
-            }
-            "build" | "b" => {
-                self.mode_manager.set(chat_key, SessionMode::Build);
-                self.send_reply_chunks(
-                    source_message,
-                    ModeManager::switch_message(SessionMode::Build),
-                )
-                .await?;
-                Ok(true)
-            }
-            "mode" => {
-                let mode = self.mode_manager.get(chat_key);
-                self.send_reply_chunks(
-                    source_message,
-                    &format!("Current mode: **{}** — {}", mode.title(), mode.description()),
-                )
-                .await?;
-                Ok(true)
-            }
-            "session" => {
-                if let Some(new_model) = self
-                    .handle_session_command(
-                        source_message,
-                        chat_key,
-                        conversation,
-                        active_model,
-                        command.args,
-                        None,
-                    )
-                    .await?
-                {
-                    *active_model = new_model;
-                }
-                Ok(true)
-            }
-            "model" => {
-                self.handle_model_command(source_message).await?;
-                Ok(true)
-            }
-            "help" => {
-                self.send_reply_chunks(source_message, &gateway_help_text())
-                    .await?;
-                Ok(true)
-            }
-            "status" => {
-                self.handle_status_command(source_message, conversation, active_model)
-                    .await?;
-                Ok(true)
-            }
-            "balance" => {
-                self.handle_balance_command(source_message).await?;
-                Ok(true)
-            }
-            "stop" => {
-                self.handle_stop_command(source_message, chat_key).await?;
-                Ok(true)
-            }
-            "compact" => {
-                self.handle_compact_command(source_message, chat_key, conversation, active_model)
-                    .await?;
-                Ok(true)
-            }
-            "init" => {
-                self.handle_init_command(source_message).await?;
-                Ok(true)
-            }
-            _ => {
-                self.send_reply_chunks(
-                    source_message,
-                    &format!(
-                        "Unknown command: {}\n\n{}",
-                        command.name,
-                        gateway_help_text()
-                    ),
-                )
-                .await?;
-                Ok(true)
-            }
-        }
-    }
-
-    async fn handle_session_command(
-        &self,
-        source_message: &TelegramMessage,
-        _chat_key: &str,
-        conversation: &Conversation,
-        active_model: &ActiveModel,
-        args: Vec<String>,
-        new_active_model: Option<ActiveModel>,
-    ) -> Result<Option<ActiveModel>> {
-        let updated_model = new_active_model;
-
-        match args.first().map(|s| s.as_str()) {
-            None | Some("") => {
-                let text = format_session_summary(conversation, active_model);
-                self.send_reply_chunks(source_message, &text).await?;
-                Ok(updated_model)
-            }
-            Some("new") => {
-                let new_conversation = self.rotate_chat_session("session:new", active_model)?;
-                self.send_reply_chunks(
-                    source_message,
-                    &format!(
-                        "Session rotated. New session_id: {}",
-                        new_conversation.session_id
-                    ),
-                )
-                .await?;
-                Ok(updated_model)
-            }
-            Some("clear") => {
-                let new_conversation = self.rotate_chat_session("session:clear", active_model)?;
-                self.send_reply_chunks(
-                    source_message,
-                    &format!(
-                        "Session cleared. New session_id: {}",
-                        new_conversation.session_id
-                    ),
-                )
-                .await?;
-                Ok(updated_model)
-            }
-            Some("title") => {
-                if args.len() < 2 {
-                    self.send_reply_chunks(source_message, "Usage: /session title <new_title>")
-                        .await?;
-                    return Ok(updated_model);
-                }
-                let new_title = args[1..].join(" ");
-                self.store
-                    .update_session_title(conversation.session_id, &new_title)?;
-                self.send_reply_chunks(
-                    source_message,
-                    &format!("Session title updated: {}", new_title),
-                )
-                .await?;
-                Ok(updated_model)
-            }
-            _ => {
-                self.send_reply_chunks(
-                    source_message,
-                    "Usage: /session (show | new | clear | title <new_title>)",
-                )
-                .await?;
-                Ok(updated_model)
-            }
-        }
-    }
-
-    /// Get providers that support balance queries and have API keys configured.
-    fn get_balance_providers(&self) -> Vec<(&str, &str)> {
-        let mut providers = Vec::new();
-
-        // DeepSeek
-        if self.auth.api_key("deepseek").is_some() {
-            providers.push(("deepseek", "DeepSeek"));
-        }
-
-        // SiliconFlow
-        if self.auth.api_key("siliconflow-cn").is_some() {
-            providers.push(("siliconflow-cn", "SiliconFlow"));
-        }
-
-        providers
-    }
-
-    /// Format DeepSeek balance for display.
-    fn format_deepseek_balance(&self, balance: &crate::balance::DeepSeekBalanceResponse) -> String {
-        let mut text = String::from("💰 DeepSeek Balance\n\n");
-
-        if !balance.is_available {
-            text.push_str("Account is not available.\n");
-            return text;
-        }
-
-        for info in &balance.balance_infos {
-            text.push_str(&format!("Currency: {}\n", info.currency));
-            text.push_str(&format!(
-                "Total: {} {}\n",
-                info.total_balance, info.currency
-            ));
-            text.push_str(&format!(
-                "Granted: {} {}\n",
-                info.granted_balance, info.currency
-            ));
-            text.push_str(&format!(
-                "Topped Up: {} {}\n",
-                info.topped_up_balance, info.currency
-            ));
-        }
-
-        text
-    }
-
-    /// Format SiliconFlow balance for display.
-    fn format_siliconflow_balance(
-        &self,
-        balance: &crate::balance::SiliconFlowBalanceResponse,
-    ) -> String {
-        format!(
-            "💰 SiliconFlow Balance\n\nTotal: {} CNY",
-            balance.data.total_balance
-        )
-    }
+    // ── Balance command (Telegram-specific) ───────────────────────────────
 
     async fn handle_balance_command(&mut self, message: &TelegramMessage) -> Result<()> {
         let providers = self.get_balance_providers();
@@ -836,12 +409,10 @@ impl TelegramChannel {
             self.send_reply_chunks(
                 message,
                 "No providers available for balance queries.\nConfigure API keys for DeepSeek or SiliconFlow.",
-            )
-            .await?;
+            ).await?;
             return Ok(());
         }
 
-        // Format provider list
         let mut text = String::from("Select a provider to query balance (enter number):\n\n");
         for (i, (_, name)) in providers.iter().enumerate() {
             text.push_str(&format!("{}. {}\n", i + 1, name));
@@ -849,435 +420,263 @@ impl TelegramChannel {
         text.push_str("\n(Enter any other number to cancel)");
 
         self.send_reply_chunks(message, &text).await?;
-
-        // Set state to waiting for provider selection
-        self.balance_selection_states
-            .insert(message.chat.id, BalanceSelectionState::WaitingForProvider);
-
+        self.balance_selection_states.insert(message.chat.id, BalanceSelectionState::WaitingForProvider);
         Ok(())
+    }
+
+    fn get_balance_providers(&self) -> Vec<(&str, &str)> {
+        let mut providers = Vec::new();
+        if self.core.auth.api_key("deepseek").is_some() {
+            providers.push(("deepseek", "DeepSeek"));
+        }
+        if self.core.auth.api_key("siliconflow-cn").is_some() {
+            providers.push(("siliconflow-cn", "SiliconFlow"));
+        }
+        providers
     }
 
     async fn handle_balance_selection(
         &mut self,
         message: &TelegramMessage,
-        state: &BalanceSelectionState,
+        _state: &BalanceSelectionState,
+        content: &str,
     ) -> Result<()> {
-        let content = message.text.as_deref().unwrap_or_default().trim();
-
-        match state {
-            BalanceSelectionState::WaitingForProvider => {
-                let providers = self.get_balance_providers();
-                let selection: usize = match content.parse() {
-                    Ok(n) => n,
-                    Err(_) => {
-                        self.balance_selection_states.remove(&message.chat.id);
-                        self.send_reply_chunks(
-                            message,
-                            "Invalid selection. Selection cancelled. Send /balance to try again.",
-                        )
-                        .await?;
-                        return Ok(());
-                    }
-                };
-
-                if selection < 1 || selection > providers.len() {
-                    self.balance_selection_states.remove(&message.chat.id);
-                    self.send_reply_chunks(
-                        message,
-                        "Selection cancelled. Send /balance to try again.",
-                    )
-                    .await?;
-                    return Ok(());
-                }
-
-                let (provider_id, _provider_name) = providers[selection - 1];
-
-                // Query balance
-                let result = self.query_balance_for_provider(provider_id).await;
-
-                self.balance_selection_states.remove(&message.chat.id);
-
-                let text = match result {
-                    Ok(info) => info,
-                    Err(e) => format!("Failed to query balance: {}", e),
-                };
-
-                self.send_reply_chunks(message, &text).await?;
-                Ok(())
+        let providers = self.get_balance_providers();
+        let selection: usize = match content.trim().parse() {
+            Ok(n) => n,
+            Err(_) => {
+                self.send_reply_chunks(message, "Invalid number. Balance query cancelled.").await?;
+                return Ok(());
             }
-        }
-    }
+        };
 
-    async fn query_balance_for_provider(&self, provider_id: &str) -> Result<String> {
-        let http = self.llm.http();
-        let api_key = self
-            .auth
-            .api_key(provider_id)
+        if selection == 0 || selection > providers.len() {
+            self.send_reply_chunks(message, "Balance query cancelled.").await?;
+            return Ok(());
+        }
+
+        let (provider_id, _) = providers[selection - 1];
+        let http = self.core.llm.http();
+        let api_key = self.core.auth.api_key(provider_id)
             .context("API key not found")?;
 
         match provider_id {
             "deepseek" => {
-                let balance = crate::balance::query_deepseek_balance(http, api_key).await?;
-                Ok(self.format_deepseek_balance(&balance))
+                match crate::balance::query_deepseek_balance(http, api_key).await {
+                    Ok(balance) => {
+                        let text = self.core.format_deepseek_balance(&balance);
+                        self.send_reply_chunks(message, &text).await?;
+                    }
+                    Err(e) => {
+                        self.send_reply_chunks(message, &format!("❌ Failed to query DeepSeek balance: {e}")).await?;
+                    }
+                }
             }
             "siliconflow-cn" => {
-                let balance = crate::balance::query_siliconflow_balance(http, api_key).await?;
-                Ok(self.format_siliconflow_balance(&balance))
+                match crate::balance::query_siliconflow_balance(http, api_key).await {
+                    Ok(balance) => {
+                        let text = self.core.format_siliconflow_balance(&balance);
+                        self.send_reply_chunks(message, &text).await?;
+                    }
+                    Err(e) => {
+                        self.send_reply_chunks(message, &format!("❌ Failed to query SiliconFlow balance: {e}")).await?;
+                    }
+                }
             }
-            _ => anyhow::bail!("Unsupported provider: {}", provider_id),
+            _ => {
+                self.send_reply_chunks(message, &format!("Balance query for '{}' is not yet implemented.", provider_id)).await?;
+            }
         }
+
+        Ok(())
     }
+
+    // ── Model selection ───────────────────────────────────────────────────
 
     async fn handle_model_command(&mut self, message: &TelegramMessage) -> Result<()> {
         model_selection::start_model_selection(self, &message.chat.id).await
     }
 
-    /// Handle interactive model selection input.
     async fn handle_model_selection(
         &mut self,
         message: &TelegramMessage,
         state: &ModelSelectionState,
+        content: &str,
     ) -> Result<()> {
-        let content = message.text.as_deref().unwrap_or_default().trim();
         model_selection::handle_step(self, &message.chat.id, state, content).await
     }
 
-    /// Get available providers (user config + bundled) that have valid auth.
-    fn get_available_providers(&self) -> Vec<(String, String)> {
-        let mut providers = Vec::new();
-
-        // Check user-configured providers
-        for (id, config) in &self.config.providers {
-            if let Some(auth) = self.auth.providers.get(id)
-                && auth.api_key.as_ref().is_some_and(|k| !k.trim().is_empty())
-            {
-                providers.push((id.clone(), config.display_name.clone()));
-            }
-        }
-
-        // Check bundled providers
-        for (id, config) in &self.config.bundled_providers {
-            // Skip if already added from user config
-            if self.config.providers.contains_key(id) {
-                continue;
-            }
-            if let Some(auth) = self.auth.providers.get(id)
-                && auth.api_key.as_ref().is_some_and(|k| !k.trim().is_empty())
-            {
-                providers.push((id.clone(), config.display_name.clone()));
-            }
-        }
-
-        providers
-    }
-
-    /// Get models for a specific provider.
-    fn get_models_for_provider(&self, provider_id: &str) -> Vec<(String, String)> {
-        let mut models = Vec::new();
-
-        // Check user-configured providers first
-        if let Some(config) = self.config.providers.get(provider_id) {
-            for (id, model_config) in &config.models {
-                models.push((id.clone(), model_config.display_name.clone()));
-            }
-        }
-
-        // Check bundled providers if not found
-        if models.is_empty()
-            && let Some(config) = self.config.bundled_providers.get(provider_id)
-        {
-            for (id, model_config) in &config.models {
-                models.push((id.clone(), model_config.display_name.clone()));
-            }
-        }
-
-        models
-    }
-
-    fn resolve_chat_model(&self, chat_key: &str) -> Result<ActiveModel> {
-        if let Some((provider_id, model_id)) = self
-            .store
-            .load_gateway_chat_model(GATEWAY_PLATFORM_TELEGRAM, chat_key)?
-        {
-            match self
-                .config
-                .resolve_model_by_ids(&self.auth, &provider_id, &model_id)
-            {
-                Ok(mut model) => {
-                    model.system_prompt = gateway_system_prompt();
-                    return Ok(model);
-                }
-                Err(_) => {
-                    self.store
-                        .clear_gateway_chat_model(GATEWAY_PLATFORM_TELEGRAM, chat_key)?;
-                }
-            }
-        }
-
-        self.config.resolve_active_model_for_gateway(&self.auth)
-    }
-
-    fn load_or_create_chat_conversation(
-        &self,
-        chat_key: &str,
-        active_model: &ActiveModel,
-    ) -> Result<Conversation> {
-        if let Some(session_id) = self
-            .store
-            .load_gateway_chat_session(GATEWAY_PLATFORM_TELEGRAM, chat_key)?
-        {
-            if let Some(conversation) = self.store.load_conversation(session_id)? {
-                return Ok(conversation);
-            }
-
-            self.store
-                .clear_gateway_chat_session(GATEWAY_PLATFORM_TELEGRAM, chat_key)?;
-        }
-
-        let conversation = self.create_gateway_session(active_model)?;
-        self.store.set_gateway_chat_session(
-            GATEWAY_PLATFORM_TELEGRAM,
-            chat_key,
-            conversation.session_id,
-        )?;
-
-        Ok(conversation)
-    }
-
-    fn rotate_chat_session(
-        &self,
-        chat_key: &str,
-        active_model: &ActiveModel,
-    ) -> Result<Conversation> {
-        let conversation = self.create_gateway_session(active_model)?;
-        self.store.set_gateway_chat_session(
-            GATEWAY_PLATFORM_TELEGRAM,
-            chat_key,
-            conversation.session_id,
-        )?;
-        Ok(conversation)
-    }
-
-    fn create_gateway_session(&self, active_model: &ActiveModel) -> Result<Conversation> {
-        let session_id = Uuid::new_v4();
-        let conversation = Conversation::new(
-            session_id,
-            self.workspace_root.display().to_string(),
-            active_model.provider_id.clone(),
-            active_model.provider_display_name.clone(),
-            active_model.model_id.clone(),
-            active_model.display_name.clone(),
-            "Untitled session",
-        );
-
-        self.store.create_session(
-            session_id,
-            self.workspace_root.as_path(),
-            &active_model.provider_id,
-            &active_model.provider_display_name,
-            &active_model.model_id,
-            &active_model.display_name,
-            &conversation.title,
-        )?;
-
-        // Compose the immutable static system prompt and persist it.
-        let static_prompt = self
-            .agent
-            .compose_static_system_prompt(&active_model.system_prompt);
-        if let Err(e) = self
-            .store
-            .update_session_system_prompt(session_id, &static_prompt)
-        {
-            crate::log_warn!("failed to persist static system prompt: {}", e);
-        }
-
-        Ok(conversation)
-    }
-
-    fn is_allowed(&self, message: &TelegramMessage) -> bool {
-        let chat_id = message.chat.id.to_string();
-        if self.allowlist.contains(&chat_id) {
-            return true;
-        }
-
-        message
-            .from
-            .as_ref()
-            .map(|user| {
-                let user_id = user.id.to_string();
-                if self.allowlist.contains(&user_id) {
-                    return true;
-                }
-                if let Some(ref username) = user.username
-                    && self.allowlist.contains(username)
-                {
-                    return true;
-                }
-                false
-            })
-            .unwrap_or(false)
-    }
+    // ── Chat helpers ──────────────────────────────────────────────────────
 
     fn chat_key(&self, message: &TelegramMessage) -> String {
         match message.message_thread_id {
-            Some(thread_id) => format!("{}:{thread_id}", message.chat.id),
+            Some(thread_id) => format!("{}:{}", message.chat.id, thread_id),
             None => message.chat.id.to_string(),
         }
     }
 
+    // ── Sending ───────────────────────────────────────────────────────────
     async fn send_reply_chunks(&self, message: &TelegramMessage, text: &str) -> Result<()> {
         let chunks = split_message_for_telegram(text);
-        crate::log_info!(
-            "Sending reply: chat_id={}, chunks={}, total_len={}",
-            message.chat.id,
-            chunks.len(),
-            text.len()
-        );
-
         for (index, chunk) in chunks.iter().enumerate() {
             self.bot
                 .send_message_html(
                     message.chat.id,
                     message.message_thread_id,
                     chunk,
-                    if index == 0 {
-                        Some(message.message_id)
-                    } else {
-                        None
-                    },
+                    if index == 0 { Some(message.message_id) } else { None },
                 )
                 .await?;
         }
         Ok(())
     }
 
-    /// Handle /status command - show session statistics.
-    async fn handle_status_command(
-        &self,
-        source_message: &TelegramMessage,
-        conversation: &Conversation,
-        active_model: &ActiveModel,
-    ) -> Result<()> {
-        // Count messages by role
-        let user_message_count = conversation
-            .messages
-            .iter()
-            .filter(|m| m.role == MessageRole::User)
-            .count();
-        let assistant_message_count = conversation
-            .messages
-            .iter()
-            .filter(|m| m.role == MessageRole::Assistant)
-            .count();
-
-        // Get tool call count from messages
-        let tool_call_count = conversation
-            .messages
-            .iter()
-            .filter(|m| m.role == MessageRole::Tool)
-            .count();
-
-        // Get token stats from database
-        let token_stats = self
-            .store
-            .get_session_token_stats(conversation.session_id)
-            .unwrap_or(crate::storage::SessionTokenStats {
-                input_tokens: 0,
-                output_tokens: 0,
-            });
-
-        let text = format_status_summary(&crate::gateway::commands::SessionStats {
-            session_id: &conversation.session_id.to_string(),
-            title: &conversation.title,
-            message_count: conversation.messages.len(),
-            user_message_count,
-            assistant_message_count,
-            tool_call_count,
-            provider_id: &active_model.provider_id,
-            model_id: &active_model.model_id,
-            context_window: active_model.context_window,
-            input_tokens: token_stats.input_tokens,
-            output_tokens: token_stats.output_tokens,
-            start_time: self.start_time,
-            avg_response_time_ms: None,
-        });
-
-        self.send_reply_chunks(source_message, &text).await
+    async fn send_draft_message(&mut self, recipient: &str, text: &str) -> Result<Option<String>> {
+        let chat_id: i64 = recipient.parse::<i64>().unwrap_or(0);
+        let sent = self.bot.send_message(chat_id, None, text, None).await?;
+        Ok(Some(sent.message_id.to_string()))
     }
 
-    /// Handle /stop command - set cancellation flag for current task.
-    async fn handle_stop_command(
-        &mut self,
-        source_message: &TelegramMessage,
-        _chat_key: &str,
-    ) -> Result<()> {
-        if let Some(token) = self.cancellation_tokens.get(&source_message.chat.id) {
-            token.cancel();
-            // The "Stopped." message is sent by run_agent_with_tools after
-            // the agent loop returns.
-            self.send_reply_chunks(source_message, "🛑 Stopping...")
-                .await?;
-        } else {
-            self.send_reply_chunks(source_message, "No active task to stop.")
+    async fn finalize_draft_message(&mut self, _recipient: &str, message_id: &str, text: &str) -> Result<()> {
+        let msg_id: i64 = message_id.parse().context("invalid message_id")?;
+        self.bot.edit_message_text_html(0, msg_id, text).await
+    }
+
+    async fn cancel_draft_message(&mut self, _recipient: &str, message_id: &str) -> Result<()> {
+        let msg_id: i64 = message_id.parse().context("invalid message_id")?;
+        self.bot.delete_message(0, msg_id).await
+    }
+}
+
+// ── Telegram MessageSender ──────────────────────────────────────────────────
+
+struct TelegramSender<'a> {
+    bot: &'a TelegramBot,
+    chat_id: i64,
+    thread_id: Option<i64>,
+    reply_to_msg_id: Option<i64>,
+}
+
+#[async_trait]
+impl MessageSender for TelegramSender<'_> {
+    async fn send_message(&mut self, _recipient: &str, text: &str, _reply_to: Option<&str>) -> Result<()> {
+        // Split long messages into chunks for Telegram
+        let chunks = split_message_for_telegram(text);
+        for (index, chunk) in chunks.iter().enumerate() {
+            self.bot
+                .send_message_html(
+                    self.chat_id,
+                    self.thread_id,
+                    chunk,
+                    if index == 0 { self.reply_to_msg_id } else { None },
+                )
                 .await?;
         }
         Ok(())
     }
+}
 
-    /// Finalize draft message with final content.
-    async fn finalize_draft(
-        &mut self,
-        _recipient: &str,
-        message_id: &str,
-        text: &str,
-    ) -> Result<()> {
-        let msg_id: i64 = message_id.parse().context("invalid message_id")?;
-        self.bot.edit_message_text_html(0, msg_id, text).await?;
+// ── ModelSelectionIO for TelegramChannel ────────────────────────────────────
+
+#[async_trait]
+impl ModelSelectionIO for TelegramChannel {
+    type Id = i64;
+
+    async fn send_message(&mut self, id: &i64, text: &str) -> Result<()> {
+        self.bot.send_message_html(*id, None, text, None).await?;
         Ok(())
     }
 
-    /// Cancel draft by deleting the message.
+    fn get_state(&self, id: &i64) -> Option<ModelSelectionState> {
+        self.core.model_selection_states.get(&id.to_string()).cloned()
+    }
+
+    fn set_state(&mut self, id: i64, state: ModelSelectionState) {
+        self.core.model_selection_states.insert(id.to_string(), state);
+    }
+
+    fn remove_state(&mut self, id: &i64) {
+        self.core.model_selection_states.remove(&id.to_string());
+    }
+
+    fn chat_key(&self, id: &i64) -> String {
+        format!("{}:{}", self.core.platform_name, id)
+    }
+
+    fn platform(&self) -> &'static str { GATEWAY_PLATFORM_TELEGRAM }
+    fn config(&self) -> &AppConfig { &self.core.config }
+    fn config_mut(&mut self) -> &mut AppConfig { &mut self.core.config }
+    fn config_paths(&self) -> &ConfigPaths { &self.core.config_paths }
+    fn auth(&self) -> &AuthStore { &self.core.auth }
+    fn store(&self) -> &SessionStore { &self.core.store }
+
+    fn get_available_providers(&self) -> Vec<(String, String)> {
+        self.core.get_available_providers()
+    }
+
+    fn get_models_for_provider(&self, provider_id: &str) -> Vec<(String, String)> {
+        self.core.get_models_for_provider(provider_id)
+    }
+
+    fn resolve_chat_model(&self, chat_key: &str) -> Result<ActiveModel> {
+        self.core.resolve_chat_model(chat_key)
+    }
+}
+
+// ── Channel trait implementation ────────────────────────────────────────────
+
+#[async_trait]
+impl Channel for TelegramChannel {
+    fn name(&self) -> &'static str { GATEWAY_PLATFORM_TELEGRAM }
+
+    fn store(&self) -> Option<&SessionStore> { Some(&self.core.store) }
+
+    fn run(&mut self) -> Pin<Box<dyn Future<Output = Result<()>> + '_>> {
+        Box::pin(async move {
+            crate::log_info!("Telegram channel ready");
+            self.bootstrap_offset().await?;
+            self.run_loop().await
+        })
+    }
+
+    fn restore_sessions(&mut self, store: SessionStore) -> Result<usize> {
+        self.core.restore_sessions(store)
+    }
+
+    fn supports_draft_updates(&self) -> bool { true }
+
+    async fn send_draft(&mut self, message: &SendMessage) -> Result<Option<String>> {
+        let chat_id: i64 = message.recipient.parse().unwrap_or(0);
+        let sent = self.bot.send_message(chat_id, None, &message.content, None).await?;
+        Ok(Some(sent.message_id.to_string()))
+    }
+
+    async fn update_draft(&mut self, _recipient: &str, message_id: &str, text: &str) -> Result<()> {
+        let msg_id: i64 = message_id.parse().context("invalid message_id")?;
+        self.bot.edit_message_text_html(0, msg_id, text).await
+    }
+
+    async fn update_draft_progress(&mut self, _recipient: &str, message_id: &str, status: &str) -> Result<()> {
+        let msg_id: i64 = message_id.parse().context("invalid message_id")?;
+        self.bot.edit_message_text_html(0, msg_id, status).await
+    }
+
+    async fn finalize_draft(&mut self, _recipient: &str, message_id: &str, text: &str) -> Result<()> {
+        let msg_id: i64 = message_id.parse().context("invalid message_id")?;
+        self.bot.edit_message_text_html(0, msg_id, text).await
+    }
+
     async fn cancel_draft(&mut self, _recipient: &str, message_id: &str) -> Result<()> {
         let msg_id: i64 = message_id.parse().context("invalid message_id")?;
-        self.bot.delete_message(0, msg_id).await?;
-        Ok(())
+        self.bot.delete_message(0, msg_id).await
     }
 }
 
-// ===========================================================================
-// Helper functions
-// ===========================================================================
-
-fn format_session_summary(conversation: &Conversation, active_model: &ActiveModel) -> String {
-    format!(
-        "Session status\n- session_id: {}\n- title: {}\n- message_count: {}\n- model: {}/{}",
-        conversation.session_id,
-        conversation.title,
-        conversation.messages.len(),
-        active_model.provider_id,
-        active_model.model_id
-    )
-}
+// ── Helper functions ────────────────────────────────────────────────────────
 
 fn normalize_assistant_output(value: &str) -> String {
     let trimmed = value.trim();
-    if trimmed.is_empty() {
-        "(no content)".to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
-#[allow(dead_code)]
-fn trim_for_telegram(value: &str) -> String {
-    let mut out = String::new();
-    for ch in value.chars().take(240) {
-        out.push(ch);
-    }
-    if value.chars().count() > 240 {
-        out.push_str("...");
-    }
-    out
+    if trimmed.is_empty() { "(no content)".to_string() } else { trimmed.to_string() }
 }
 
 fn truncate_for_html(value: &str) -> String {
@@ -1292,9 +691,7 @@ fn truncate_for_html(value: &str) -> String {
             _ => out.push(ch),
         }
     }
-    if value.chars().count() > MAX_CHARS {
-        out.push_str("\n... (truncated)");
-    }
+    if value.chars().count() > MAX_CHARS { out.push_str("\n... (truncated)"); }
     out
 }
 
@@ -1303,14 +700,7 @@ fn preview_for_streaming(text: &str) -> String {
     if normalized.chars().count() <= TELEGRAM_MAX_MESSAGE_LENGTH {
         return normalized;
     }
-
-    let mut preview = String::new();
-    for ch in normalized
-        .chars()
-        .take(TELEGRAM_MAX_MESSAGE_LENGTH.saturating_sub(3))
-    {
-        preview.push(ch);
-    }
+    let mut preview: String = normalized.chars().take(TELEGRAM_MAX_MESSAGE_LENGTH.saturating_sub(3)).collect();
     preview.push_str("...");
     preview
 }
@@ -1319,7 +709,6 @@ fn split_message_for_telegram(message: &str) -> Vec<String> {
     if message.trim().is_empty() {
         return vec!["(no content)".to_string()];
     }
-
     if message.chars().count() <= TELEGRAM_MAX_MESSAGE_LENGTH {
         return vec![message.to_string()];
     }
@@ -1337,279 +726,24 @@ fn split_message_for_telegram(message: &str) -> Vec<String> {
             .char_indices()
             .nth(TELEGRAM_MAX_MESSAGE_LENGTH)
             .map_or(remaining.len(), |(idx, _)| idx);
-
         let search_area = &remaining[..split_at];
-        let mut chunk_end = search_area
+        let chunk_end = search_area
             .rfind('\n')
             .or_else(|| search_area.rfind(' '))
             .unwrap_or(split_at);
 
         if chunk_end == 0 {
-            chunk_end = split_at;
+            let chunk = &remaining[..split_at].trim();
+            if !chunk.is_empty() { chunks.push(chunk.to_string()); }
+            remaining = remaining[split_at..].trim_start();
+        } else {
+            let chunk = &remaining[..chunk_end].trim();
+            if !chunk.is_empty() { chunks.push(chunk.to_string()); }
+            remaining = remaining[chunk_end..].trim_start();
         }
-
-        let chunk = remaining[..chunk_end].trim();
-        if !chunk.is_empty() {
-            chunks.push(chunk.to_string());
-        }
-
-        remaining = remaining[chunk_end..].trim_start();
     }
 
-    if chunks.is_empty() {
-        vec!["(no content)".to_string()]
-    } else {
-        chunks
-    }
-}
-
-// ===========================================================================
-// Channel trait implementation
-// ===========================================================================
-
-#[async_trait]
-impl Channel for TelegramChannel {
-    fn name(&self) -> &'static str {
-        GATEWAY_PLATFORM_TELEGRAM
-    }
-
-    fn store(&self) -> Option<&SessionStore> {
-        Some(&self.store)
-    }
-
-    fn run(&mut self) -> Pin<Box<dyn Future<Output = Result<()>> + '_>> {
-        Box::pin(async move {
-            crate::log_info!("Telegram channel ready");
-            self.bootstrap_offset().await?;
-            self.run_loop().await
-        })
-    }
-
-    fn restore_sessions(&mut self, store: SessionStore) -> Result<usize> {
-        let sessions = store.list_gateway_chat_sessions(GATEWAY_PLATFORM_TELEGRAM)?;
-        let mut count = 0;
-        let mut orphans_closed = 0;
-
-        for (_chat_key, session_id) in sessions {
-            if let Some(_conversation) = store.load_conversation(session_id)? {
-                let messages = store.load_messages(session_id)?;
-
-                // Check for orphaned user turn (crash mid-query)
-                if let Some(last) = messages.last()
-                    && last.role == MessageRole::User
-                {
-                    crate::log_info!("Found orphaned user turn in session {}", session_id);
-                    orphans_closed += 1;
-                }
-
-                count += 1;
-            }
-        }
-
-        crate::log_info!(
-            "Telegram channel restored {} session(s), closed {} orphaned session(s)",
-            count,
-            orphans_closed
-        );
-
-        Ok(count)
-    }
-
-    fn supports_draft_updates(&self) -> bool {
-        true
-    }
-
-    async fn send_draft(&mut self, message: &SendMessage) -> Result<Option<String>> {
-        let chat_id = message
-            .recipient
-            .parse::<i64>()
-            .context("invalid chat_id")?;
-        let thread_id = message
-            .thread_ts
-            .as_ref()
-            .and_then(|s| s.parse::<i64>().ok());
-        crate::log_info!(
-            "Telegram send draft: chat_id={}, content_len={}",
-            chat_id,
-            message.content.len()
-        );
-        let sent = self
-            .bot
-            .send_message(chat_id, thread_id, &message.content, None)
-            .await?;
-
-        crate::log_info!(
-            "Telegram draft sent: message_id={}",
-            sent.message_id
-        );
-        Ok(Some(sent.message_id.to_string()))
-    }
-
-    async fn update_draft(&mut self, _recipient: &str, message_id: &str, text: &str) -> Result<()> {
-        let msg_id: i64 = message_id.parse().context("invalid message_id")?;
-        crate::log_debug!(
-            "Telegram update draft: message_id={}, content_len={}",
-            message_id,
-            text.len()
-        );
-        self.bot.edit_message_text_html(0, msg_id, text).await?;
-        Ok(())
-    }
-
-    async fn update_draft_progress(
-        &mut self,
-        _recipient: &str,
-        message_id: &str,
-        status: &str,
-    ) -> Result<()> {
-        let msg_id: i64 = message_id.parse().context("invalid message_id")?;
-        crate::log_debug!(
-            "Telegram draft progress: message_id={}, status_len={}",
-            message_id,
-            status.len()
-        );
-        self.bot.edit_message_text_html(0, msg_id, status).await?;
-        Ok(())
-    }
-
-    async fn finalize_draft(
-        &mut self,
-        _recipient: &str,
-        message_id: &str,
-        text: &str,
-    ) -> Result<()> {
-        let msg_id: i64 = message_id.parse().context("invalid message_id")?;
-        crate::log_info!(
-            "Telegram finalize draft: message_id={}, content_len={}",
-            message_id,
-            text.len()
-        );
-        self.bot.edit_message_text_html(0, msg_id, text).await?;
-        Ok(())
-    }
-
-    async fn cancel_draft(&mut self, _recipient: &str, message_id: &str) -> Result<()> {
-        let msg_id: i64 = message_id.parse().context("invalid message_id")?;
-        crate::log_info!("Telegram cancel draft: message_id={}", message_id);
-        self.bot.delete_message(0, msg_id).await?;
-        Ok(())
-    }
-}
-
-impl TelegramChannel {
-    /// Handle /compact command - compact session context.
-    async fn handle_compact_command(
-        &mut self,
-        source_message: &TelegramMessage,
-        _chat_key: &str,
-        conversation: &Conversation,
-        active_model: &ActiveModel,
-    ) -> Result<()> {
-        use crate::context::ContextManager;
-
-        let session_id = conversation.session_id;
-
-        // Check if already compacting
-        if self.compacting_sessions.contains(&session_id) {
-            self.send_reply_chunks(source_message, "Already compacting session. Please wait...")
-                .await?;
-            return Ok(());
-        }
-
-        self.compacting_sessions.insert(session_id);
-
-        self.send_reply_chunks(
-            source_message,
-            "Compacting session context... This may take a moment.",
-        )
-        .await?;
-
-        // Clone required data for async operation
-        // Sync the tool registry's active model so the tool list is
-        // byte-for-byte identical to normal requests (preserving prefix cache).
-        self.tools.set_active_model(active_model.clone());
-        let llm = self.llm.clone();
-        let store = self.store.clone();
-        let session_id_for_compact = session_id;
-        let active_model_for_compact = active_model.clone();
-        let conversation_for_compact = conversation.clone();
-        let tools = self.tools.all_definitions();
-
-        // Spawn compaction task
-        tokio::spawn(async move {
-            let mut context_manager = ContextManager::new();
-
-            let result = context_manager
-                .compact(crate::context::CompactionConfig {
-                    llm: &llm,
-                    model: &active_model_for_compact,
-                    conversation: &conversation_for_compact,
-                    manual: true,
-                    stream_ctx: None,
-                    tools: &tools,
-                    mode: crate::prompts::SessionMode::Build,
-                })
-                .await;
-
-            match result {
-                Ok(true) => {
-                    let summary = context_manager.summary.clone();
-                    let retained_from = context_manager.retained_from;
-
-                    // Save compacted context state
-                    if let Some(summary) = &summary {
-                        let _ = store.update_session_context_state(
-                            session_id_for_compact,
-                            Some(summary),
-                            retained_from,
-                        );
-                    }
-
-                    // Send success message
-                    let text = format!(
-                        "✅ Session context compacted.\n\
-                         Messages retained: {}\n\
-                         Summary: {}",
-                        retained_from,
-                        summary.as_deref().unwrap_or("(none)")
-                    );
-                    let _ = store.append_message(
-                        session_id_for_compact,
-                        &crate::session::Message::new(crate::session::MessageRole::System, text),
-                    );
-                }
-                Ok(false) => {
-                    let text = "ℹ️ No compaction needed (context already compact)".to_string();
-                    let _ = store.append_message(
-                        session_id_for_compact,
-                        &crate::session::Message::new(crate::session::MessageRole::System, text),
-                    );
-                }
-                Err(e) => {
-                    let text = format!("❌ Compaction failed: {}", e);
-                    let _ = store.append_message(
-                        session_id_for_compact,
-                        &crate::session::Message::new(crate::session::MessageRole::System, text),
-                    );
-                }
-            }
-        });
-
-        Ok(())
-    }
-
-    /// Handle /init command - load init prompt for project analysis.
-    async fn handle_init_command(&self, source_message: &TelegramMessage) -> Result<()> {
-        let init_prompt = crate::prompts::init_command();
-        let text = format!(
-            "📁 Project Analysis Prompt\n\n\
-             Copy and send this prompt to analyze your project:\n\n\
-             ```\n{}\n```",
-            init_prompt
-        );
-        self.send_reply_chunks(source_message, &text).await?;
-        Ok(())
-    }
+    if chunks.is_empty() { vec!["(no content)".to_string()] } else { chunks }
 }
 
 #[cfg(test)]
@@ -1620,7 +754,6 @@ mod tests {
     fn split_message_respects_telegram_limit() {
         let source = "x".repeat(TELEGRAM_MAX_MESSAGE_LENGTH + 50);
         let chunks = split_message_for_telegram(&source);
-
         assert_eq!(chunks.len(), 2);
         assert!(chunks.iter().all(|chunk| {
             chunk.chars().count() <= TELEGRAM_MAX_MESSAGE_LENGTH && !chunk.is_empty()

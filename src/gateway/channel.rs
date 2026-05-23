@@ -26,6 +26,7 @@ pub struct SendMessage {
 
 impl SendMessage {
     /// Create a new message with content and recipient.
+    #[allow(dead_code)]
     pub fn new(content: impl Into<String>, recipient: impl Into<String>) -> Self {
         Self {
             content: content.into(),
