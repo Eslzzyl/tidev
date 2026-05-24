@@ -38,6 +38,7 @@ impl<'a> RtOptions<'a> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn line_ending(self, line_ending: textwrap::LineEnding) -> Self {
         Self {
             line_ending,
@@ -45,6 +46,7 @@ impl<'a> RtOptions<'a> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn width(self, width: usize) -> Self {
         Self { width, ..self }
     }
@@ -77,6 +79,7 @@ impl<'a> RtOptions<'a> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn wrap_algorithm(self, wrap_algorithm: textwrap::WrapAlgorithm) -> Self {
         Self {
             wrap_algorithm,

@@ -20,13 +20,3 @@ pub fn push_owned_lines<'a>(src: &[Line<'a>], out: &mut Vec<Line<'static>>) {
         out.push(line_to_static(line));
     }
 }
-
-pub fn is_blank_line_spaces_only(line: &Line<'_>) -> bool {
-    if line.spans.is_empty() {
-        return true;
-    }
-
-    line.spans
-        .iter()
-        .all(|span| span.content.is_empty() || span.content.chars().all(|ch| ch == ' '))
-}

@@ -19,7 +19,6 @@ pub use highlight::set_syntax_theme_by_name;
 pub use highlight::spawn_background_load;
 pub(crate) use highlight::highlight_code_to_lines;
 pub use highlight::highlight_code_to_lines_for_path;
-pub use line::is_blank_line_spaces_only;
 use line::push_owned_lines;
 use wrap::{RtOptions, adaptive_wrap_line};
 pub use wrap::{RtOptions as WrapOptions, adaptive_wrap_lines, word_wrap_line};
@@ -30,10 +29,12 @@ use links::{render_local_link_target, should_render_link_destination};
 use styles::MarkdownStyles;
 use table::TableState;
 
+#[cfg(test)]
 pub fn render_markdown_text(input: &str) -> Text<'static> {
     render_markdown_text_with_width(input, None)
 }
 
+#[cfg(test)]
 pub(crate) fn render_markdown_text_with_width(input: &str, width: Option<usize>) -> Text<'static> {
     let cwd = std::env::current_dir().ok();
     render_markdown_text_with_width_and_cwd(input, width, cwd.as_deref())
