@@ -4003,8 +4003,10 @@ dependencies = [
  "tempfile",
  "textwrap",
  "tidev-engine",
+ "tidev-gateway",
  "tidev-tui",
  "tidev-types",
+ "tidev-web",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
@@ -4088,6 +4090,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "tidev-gateway"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64",
+ "futures-util",
+ "log",
+ "prost",
+ "rand 0.10.1",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tidev-engine",
+ "tidev-types",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "urlencoding",
+ "uuid",
+]
+
+[[package]]
 name = "tidev-tui"
 version = "0.4.0"
 dependencies = [
@@ -4124,6 +4149,34 @@ dependencies = [
  "chrono",
  "log",
  "serde",
+ "uuid",
+]
+
+[[package]]
+name = "tidev-web"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "axum",
+ "base64",
+ "bytes",
+ "chrono",
+ "futures-util",
+ "log",
+ "mime_guess",
+ "portable-pty",
+ "rand 0.10.1",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tidev-engine",
+ "tidev-types",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "toml",
+ "tower-http",
  "uuid",
 ]
 

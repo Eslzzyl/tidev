@@ -5,6 +5,8 @@ members = [
     "tidev-engine",
     "tidev-cli",
     "tidev-tui",
+    "tidev-web",
+    "tidev-gateway",
 ]
 default-members = ["tidev-cli"]
 resolver = "2"
@@ -122,6 +124,8 @@ log = "0.4.29"
 tidev-types = { path = "tidev-types" }
 tidev-engine = { path = "tidev-engine" }
 tidev-tui = { path = "tidev-tui" }
+tidev-web = { path = "tidev-web" }
+tidev-gateway = { path = "tidev-gateway" }
 
 [dev-dependencies]
 tempfile = "3.27"

@@ -1,6 +1,3 @@
-pub mod gateway;
-pub mod web;
-
 use anyhow::Context;
 use clap::Parser;
 use std::time::Duration;
@@ -157,7 +154,7 @@ pub fn run() -> anyhow::Result<()> {
         }
         Some(Command::Gateway) => {
             auto_cleanup_on_startup();
-            gateway::run()
+            tidev_gateway::run()
         }
         Some(Command::Tui) => {
             auto_cleanup_on_startup();
@@ -171,7 +168,7 @@ pub fn run() -> anyhow::Result<()> {
         }) => {
             auto_cleanup_on_startup();
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(web::run(web::WebOptions {
+            rt.block_on(tidev_web::run(tidev_web::WebOptions {
                 host,
                 port,
                 dev_fs,
