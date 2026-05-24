@@ -60,6 +60,8 @@ pub use ui::theme_panel;
 
 use core::state::*;
 
+use tidev_types::prompts::{SessionMode, init_command};
+
 use crate::{
     agent::runtime::{AgentRuntime, PendingToolApproval},
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
@@ -69,7 +71,6 @@ use crate::{
     mcp::McpManager,
     memory::MemoryStore,
     notifications,
-    prompts::{SessionMode, init_command},
     provider_setup::ConnectDialog,
     session::{
         AssistantTurn, BackendEvent, COMPACTION_MESSAGE_LABEL, Conversation, Message,
@@ -554,10 +555,10 @@ impl App {
             Arc::new(self.auth.clone()),
         );
         // Set sandbox policy based on current mode
-        let sandbox_policy = self.mode.sandbox_policy(&self.config.sandbox);
+        let sandbox_policy = self.config.sandbox.to_policy();
         self.tools.set_sandbox_policy(Some(sandbox_policy));
         // Also sync to the agent's ToolRegistry (separate copy at init)
-        let agent_policy = self.mode.sandbox_policy(&self.config.sandbox);
+        let agent_policy = self.config.sandbox.to_policy();
         self.agent.tools.set_sandbox_policy(Some(agent_policy));
     }
 
@@ -605,7 +606,7 @@ impl App {
             }
         }
 
-        crate::log_info!(
+        log::info!(
             "update_loaded_instruction_sources: sources={:?} canonical={:?} loaded={:?} newly_loaded={:?}",
             sources,
             canonical_sources,
@@ -639,7 +640,7 @@ impl App {
                         .store
                         .append_instruction_source(self.conversation.session_id, &source)
                     {
-                        crate::log_warn!("Failed to save instruction source to database: {}", e);
+                        log::warn!("Failed to save instruction source to database: {}", e);
                     }
                     self.loaded_instruction_sources.push(source);
                 }
@@ -658,7 +659,7 @@ impl App {
             && let Ok(rel) = path.strip_prefix(&self.workspace_root)
         {
             let result = rel.display().to_string();
-            crate::log_info!(
+            log::info!(
                 "display_instruction_source: abs->rel  {} -> {}",
                 source,
                 result,
@@ -666,7 +667,7 @@ impl App {
             return result;
         }
 
-        crate::log_info!("display_instruction_source: passthrough {}", source,);
+        log::info!("display_instruction_source: passthrough {}", source,);
         source.to_string()
     }
 
@@ -763,7 +764,7 @@ impl App {
         // Take ownership of the receiver to avoid borrow conflicts.
         if let Some(mut rx) = self.pending_permission_rx.take() {
             while let Ok(approval) = rx.try_recv() {
-                crate::log_info!(
+                log::info!(
                     "process_backend_events: received PendingToolApproval with {} tool call(s)",
                     approval.tool_calls.len()
                 );
@@ -862,16 +863,16 @@ impl App {
             BackendEvent::ReasoningDelta { .. } => "ReasoningDelta",
             BackendEvent::ToolCallUpdated { .. } => "ToolCallUpdated",
             BackendEvent::Finished { request_id, .. } => {
-                crate::log_info!("handle_backend_event: Finished request_id={}", request_id);
+                log::info!("handle_backend_event: Finished request_id={}", request_id);
                 "Finished"
             }
             BackendEvent::Retrying { .. } => "Retrying",
             BackendEvent::Failed { request_id, .. } => {
-                crate::log_info!("handle_backend_event: Failed request_id={}", request_id);
+                log::info!("handle_backend_event: Failed request_id={}", request_id);
                 "Failed"
             }
             BackendEvent::ToolCompleted { request_id, .. } => {
-                crate::log_info!(
+                log::info!(
                     "handle_backend_event: ToolCompleted request_id={}",
                     request_id
                 );
@@ -896,7 +897,7 @@ impl App {
             && event_type != "InstructionsLoaded"
             && event_type != "SubagentToolResult"
         {
-            crate::log_debug!("handle_backend_event: {}", event_type);
+            log::debug!("handle_backend_event: {}", event_type);
         }
         match event {
             BackendEvent::Delta {
@@ -1009,7 +1010,7 @@ impl App {
                         .iter()
                         .any(|e| e.request_id == request_id)
                     {
-                        crate::log_info!(
+                        log::info!(
                             "Failed event for subagent child session request_id={}, cleaning up",
                             request_id
                         );
@@ -1099,7 +1100,7 @@ impl App {
                                 "bash",
                                 &result.output,
                             ) {
-                                crate::log_warn!("Failed to save full bash output: {e}");
+                                log::warn!("Failed to save full bash output: {e}");
                             }
 
                             let display_result = result.preview_for_storage(Some("bash"));
@@ -1126,7 +1127,7 @@ impl App {
                                 .store
                                 .append_message(self.conversation.session_id, &persisted)
                             {
-                                crate::log_warn!("ToolCompleted/bash: failed to persist: {}", e);
+                                log::warn!("ToolCompleted/bash: failed to persist: {}", e);
                             }
                         } else {
                             // Fallback: no streaming message existed
@@ -1147,7 +1148,7 @@ impl App {
                         && let Err(error) =
                             self.finalize_snapshot_for_last_user_message_sync(runtime)
                     {
-                        crate::log_warn!("ToolCompleted: failed to finalize snapshot: {}", error);
+                        log::warn!("ToolCompleted: failed to finalize snapshot: {}", error);
                     }
 
                     // Also clean up running_subagent_executions for task tools.
@@ -1247,7 +1248,7 @@ impl App {
                 child_session_id,
                 result,
             } => {
-                crate::log_info!(
+                log::info!(
                     "SubagentCompleted: request_id={}, active_request_id={}, child_session_id={}, tool_call_id={}",
                     request_id,
                     self.active_request_id,
@@ -1255,7 +1256,7 @@ impl App {
                     tool_call.id
                 );
                 if !self.is_active_request(request_id) {
-                    crate::log_warn!(
+                    log::warn!(
                         "SubagentCompleted ignored: request_id {} != active_request_id {}",
                         request_id,
                         self.active_request_id
@@ -1278,7 +1279,7 @@ impl App {
                 };
 
                 if let Some(parent_session_id) = parent_session_id {
-                    crate::log_info!(
+                    log::info!(
                         "Removed running_subagent_execution, remaining count={}, parent_session_id={}",
                         self.running_subagent_executions.len(),
                         parent_session_id
@@ -1292,7 +1293,7 @@ impl App {
                         // User switched to the child session view.
                         // ToolCompleted may not have processed the result
                         // for the parent session, so write it to DB directly.
-                        crate::log_info!(
+                        log::info!(
                             "SubagentCompleted: user switched away from parent session, writing to database directly"
                         );
                         let display_result = if tool_call.name == "task" {
@@ -1307,7 +1308,7 @@ impl App {
                         );
                         self.store.append_message(parent_session_id, &message)?;
                         self.pending_assistant_turns.insert(parent_session_id);
-                        crate::log_info!(
+                        log::info!(
                             "SubagentCompleted: marked parent_session_id={} as pending assistant turn",
                             parent_session_id
                         );
@@ -1405,7 +1406,7 @@ impl App {
                 message_id,
                 file_diffs_json,
             } => {
-                crate::log_info!(
+                log::info!(
                     "handle_backend_event: SidebarSnapshotReady message_id={}",
                     message_id
                 );
@@ -1423,7 +1424,7 @@ impl App {
                         message_id,
                         &file_diffs_json,
                     ) {
-                        crate::log_warn!(
+                        log::warn!(
                             "SidebarSnapshotReady: failed to persist file_diffs: {}",
                             e
                         );
@@ -1483,7 +1484,7 @@ impl App {
                                 .store
                                 .append_message(self.conversation.session_id, &persisted)
                             {
-                                crate::log_warn!("ShellOutput: failed to persist message: {}", e);
+                                log::warn!("ShellOutput: failed to persist message: {}", e);
                             }
                         }
                     } else {
@@ -1519,7 +1520,7 @@ impl App {
                                 .store
                                 .append_message(self.conversation.session_id, &persisted)
                             {
-                                crate::log_warn!(
+                                log::warn!(
                                     "ShellOutput: failed to persist shell message: {}",
                                     e
                                 );
@@ -1535,7 +1536,7 @@ impl App {
                 session_id,
                 request_id,
             } => {
-                crate::log_info!(
+                log::info!(
                     "TurnStarting: new request_id={}, previous active_request_id={}",
                     request_id,
                     self.active_request_id
@@ -1555,7 +1556,7 @@ impl App {
                 // loop.  If no cancel token exists, no agent loop is
                 // running to serve this turn.
                 if self.request_cancel_token.is_none() {
-                    crate::log_info!(
+                    log::info!(
                         "TurnStarting ignored: no active cancel token (request was aborted)"
                     );
                     return Ok(());
@@ -1577,14 +1578,14 @@ impl App {
                         self.conversation.push(user_message);
 
                         // Show "Loaded instructions" notification below the user message
-                        crate::log_info!(
+                        log::info!(
                             "TurnStarting: queued instruction_sources={:?}",
                             queued.instruction_sources,
                         );
                         if let Err(e) =
                             self.update_loaded_instruction_sources(&queued.instruction_sources)
                         {
-                            crate::log_warn!(
+                            log::warn!(
                                 "Failed to update instruction sources for queued prompt: {}",
                                 e
                             );
@@ -1611,7 +1612,7 @@ impl App {
     }
 
     fn finish_assistant_turn(&mut self, turn: AssistantTurn, runtime: &Runtime) -> Result<()> {
-        crate::log_info!(
+        log::info!(
             "finish_assistant_turn: tool_calls_count={}, finish_reason={:?}",
             turn.tool_calls.len(),
             turn.finish_reason
@@ -1668,7 +1669,7 @@ impl App {
             }
 
             if let Err(error) = self.finalize_snapshot_for_last_user_message_sync(runtime) {
-                crate::log_warn!("failed to finalize snapshot: {}", error);
+                log::warn!("failed to finalize snapshot: {}", error);
             }
 
             if !self.processing_child_session {
@@ -1755,14 +1756,14 @@ impl App {
                     &self.active_model.display_name,
                     "Untitled session",
                 )?;
-                crate::log_info!("agent: create_session took {:?}", _t_create.elapsed());
+                log::info!("agent: create_session took {:?}", _t_create.elapsed());
 
                 // Compose the immutable static system prompt and persist it.
                 let _t_prompt = std::time::Instant::now();
                 let static_prompt = self
                     .agent
                     .compose_static_system_prompt(&self.active_model.system_prompt);
-                crate::log_info!(
+                log::info!(
                     "agent: compose_static_system_prompt took {:?}",
                     _t_prompt.elapsed()
                 );
@@ -1771,10 +1772,10 @@ impl App {
                     .store
                     .update_session_system_prompt(session_id, &static_prompt)
                 {
-                    crate::log_warn!("failed to persist static system prompt: {}", e);
+                    log::warn!("failed to persist static system prompt: {}", e);
                 }
             }
-            crate::log_info!("agent: session init took {:?}", _t_session.elapsed());
+            log::info!("agent: session init took {:?}", _t_session.elapsed());
             self.context_manager = ContextManager::new();
             self.pending_tool_execution = None;
             self.permission_dialog = None;
@@ -1813,12 +1814,12 @@ impl App {
         // Persist and display nearby instruction sources from @ references
         // below the user message, so the notification appears after the user's
         // message card rather than above it.
-        crate::log_info!(
+        log::info!(
             "submit_prompt_now: @-ref instruction_sources={:?}",
             instruction_sources,
         );
         if let Err(e) = self.update_loaded_instruction_sources(&instruction_sources) {
-            crate::log_warn!("Failed to update instruction sources for prompt: {}", e);
+            log::warn!("Failed to update instruction sources for prompt: {}", e);
         }
 
         self.draft_attachments.clear();
@@ -1837,7 +1838,7 @@ impl App {
 
         self.schedule_context_compaction_for_session(self.conversation.session_id, runtime, None);
 
-        crate::log_info!(
+        log::info!(
             "submit_prompt_now: before instruction load, instruction_content_cache keys={:?}",
             self.instruction_content_cache.keys().collect::<Vec<_>>(),
         );
@@ -1857,12 +1858,12 @@ impl App {
         self.instruction_content_cache = new_cache.clone();
         self.agent.instruction_content_cache = new_cache;
 
-        crate::log_info!(
+        log::info!(
             "submit_prompt_now: after instruction load, sources={:?}",
             sources,
         );
 
-        crate::log_info!("agent: submit_prompt_now took {:?}", _t_submit.elapsed());
+        log::info!("agent: submit_prompt_now took {:?}", _t_submit.elapsed());
         self.spawn_agent_loop(runtime)
     }
 
@@ -1872,7 +1873,7 @@ impl App {
     /// `run_agent_loop_with_permission_channel` to handle the full
     /// LLM + tool execution loop.
     fn spawn_agent_loop(&mut self, runtime: &Runtime) -> Result<()> {
-        crate::log_info!(
+        log::info!(
             "spawn_agent_loop: session_id={}, message_count={}",
             self.conversation.session_id,
             self.conversation.messages.len()
@@ -1890,7 +1891,7 @@ impl App {
         // Clear display queue — runtime will pick up queued messages
         self.pending_prompt_queue.clear();
         let request_id = self.active_request_id;
-        crate::log_info!("spawn_agent_loop: new request_id={}", request_id);
+        log::info!("spawn_agent_loop: new request_id={}", request_id);
 
         self.last_notice = Some(match self.mode {
             SessionMode::Plan => "Planning...".to_string(),
@@ -1945,10 +1946,10 @@ impl App {
                 )
                 .await
             {
-                crate::log_error!("spawn_agent_loop: agent loop failed: {}", e);
+                log::error!("spawn_agent_loop: agent loop failed: {}", e);
             }
 
-            crate::log_info!(
+            log::info!(
                 "spawn_agent_loop: agent loop completed for session {}",
                 session_id
             );

@@ -218,7 +218,7 @@ impl MemoryStore {
             ],
         ) {
             let _ = db.execute_batch("ROLLBACK");
-            crate::log_warn!("memory: failed to update FTS5 index in add(): {}", e);
+            log::warn!("memory: failed to update FTS5 index in add(): {}", e);
             return Err(e.into());
         }
         db.execute_batch("COMMIT")?;
@@ -258,7 +258,7 @@ impl MemoryStore {
                 serde_json::to_string(&entry.files)?,
             ],
         ) {
-            crate::log_warn!("memory: failed to update FTS5 index: {}", e);
+            log::warn!("memory: failed to update FTS5 index: {}", e);
         }
         Ok(())
     }
@@ -275,7 +275,7 @@ impl MemoryStore {
             "DELETE FROM memories_fts WHERE rowid = (SELECT rowid FROM memories WHERE id = ?1)",
             rusqlite::params![id.to_string()],
         ) {
-            crate::log_warn!("memory: failed to delete from FTS5 index: {}", e);
+            log::warn!("memory: failed to delete from FTS5 index: {}", e);
         }
         Ok(())
     }

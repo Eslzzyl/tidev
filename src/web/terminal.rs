@@ -107,7 +107,7 @@ impl TerminalManager {
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                     Err(e) => {
-                        crate::log_error!("[terminal {}] read error: {e}", sid);
+                        log::error!("[terminal {}] read error: {e}", sid);
                         let _ = tx_clone.send(TerminalOutput {
                             session_id: sid,
                             data: Vec::new(),
@@ -186,10 +186,10 @@ impl TerminalManager {
         let mut sessions = self.sessions.lock().await;
         let ids: Vec<Uuid> = sessions.keys().copied().collect();
         for id in ids {
-            crate::log_info!("Shutting down terminal session {id}");
+            log::info!("Shutting down terminal session {id}");
             Self::close_session_inner(&mut sessions, id).await;
         }
-        crate::log_info!("All terminal sessions shut down");
+        log::info!("All terminal sessions shut down");
     }
 
     /// Internal helper: close one session. Lock is held by the caller.

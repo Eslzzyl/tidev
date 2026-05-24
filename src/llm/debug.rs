@@ -11,7 +11,7 @@ pub fn save_request_for_debugging(request_body: &str, enabled: bool, max_files: 
 
     let dir = std::path::Path::new("/tmp/tidev-requests");
     if let Err(e) = std::fs::create_dir_all(dir) {
-        crate::log_debug!("debug_request: failed to create dir: {}", e);
+        log::debug!("debug_request: failed to create dir: {}", e);
         return;
     }
 
@@ -41,6 +41,6 @@ pub fn save_request_for_debugging(request_body: &str, enabled: bool, max_files: 
     let filename = format!("{}_{}.json", now_cst.format("%Y%m%d_%H%M%S_%3f"), suffix);
     let filepath = dir.join(&filename);
     if let Err(e) = std::fs::write(&filepath, request_body) {
-        crate::log_debug!("debug_request: failed to write {}: {}", filename, e);
+        log::debug!("debug_request: failed to write {}: {}", filename, e);
     }
 }

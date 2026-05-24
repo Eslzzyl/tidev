@@ -11,7 +11,6 @@ pub mod markdown_render;
 pub mod mcp;
 pub mod memory;
 pub mod notifications;
-pub mod prompts;
 pub mod provider_setup;
 pub mod sandbox;
 pub mod session;
@@ -468,7 +467,7 @@ fn auto_cleanup_on_startup() {
         && let Ok(count) = store.delete_expired_tool_outputs(7)
         && count > 0
     {
-        crate::log_info!("Cleaned up {count} old tool output(s)");
+        log::info!("Cleaned up {count} old tool output(s)");
     }
 }
 

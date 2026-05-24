@@ -5,7 +5,7 @@ use crate::tui::App;
 
 impl App {
     pub(crate) fn handle_key_event(&mut self, key: KeyEvent, runtime: &Runtime) -> Result<()> {
-        crate::log_debug!(
+        log::debug!(
             "KeyEvent: code={:?}, modifiers={:?}",
             key.code,
             key.modifiers
@@ -296,7 +296,7 @@ impl App {
                 &self.active_model.model_id,
                 &self.thinking_level.to_string(),
             ) {
-                crate::log_warn!("failed to save thinking level preference: {}", e);
+                log::warn!("failed to save thinking level preference: {}", e);
             }
             return Ok(());
         }
@@ -309,7 +309,7 @@ impl App {
                 &self.active_model.model_id,
                 &self.thinking_level.to_string(),
             ) {
-                crate::log_warn!("failed to save thinking level preference: {}", e);
+                log::warn!("failed to save thinking level preference: {}", e);
             }
             return Ok(());
         }

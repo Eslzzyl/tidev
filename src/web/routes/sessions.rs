@@ -103,14 +103,14 @@ pub struct SessionDetail {
 
 /// List all sessions for the current workspace
 pub async fn list_sessions(State(state): State<AppState>) -> WebResult<Json<SessionsResponse>> {
-    crate::log_debug!(
+    log::debug!(
         "Listing sessions for workspace: {}",
         state.workspace_root.display()
     );
     let store = state.store.lock().await;
     let records = store.load_sessions_for_workspace(&state.workspace_root)?;
     let sessions: Vec<SessionInfo> = records.into_iter().map(Into::into).collect();
-    crate::log_info!("Listed {} sessions for workspace", sessions.len());
+    log::info!("Listed {} sessions for workspace", sessions.len());
     Ok(Json(SessionsResponse { sessions }))
 }
 
@@ -119,7 +119,7 @@ pub async fn create_session(
     State(state): State<AppState>,
     Json(body): Json<CreateSessionRequest>,
 ) -> WebResult<(StatusCode, Json<CreateSessionResponse>)> {
-    crate::log_info!("Creating new session in workspace: {}", body.workspace_root);
+    log::info!("Creating new session in workspace: {}", body.workspace_root);
 
     // Get default provider and model from config
     let config = state.config.read().await;
@@ -164,7 +164,7 @@ pub async fn create_session(
     )?;
     drop(store);
 
-    crate::log_info!(
+    log::info!(
         "Created session {} with provider {} and model {}",
         session_id,
         provider_id,
@@ -181,16 +181,16 @@ pub async fn get_session(
     State(state): State<AppState>,
     AxumPath(session_id): AxumPath<Uuid>,
 ) -> WebResult<Json<SessionDetail>> {
-    crate::log_debug!("Getting session details for {}", session_id);
+    log::debug!("Getting session details for {}", session_id);
     let store = state.store.lock().await;
     let record = store.load_session_record(session_id)?.ok_or_else(|| {
-        crate::log_warn!("Session {} not found", session_id);
+        log::warn!("Session {} not found", session_id);
         AppError::NotFound(format!("Session {} not found", session_id))
     })?;
     let revert_message_id = store.load_revert_message_id(session_id)?;
     drop(store);
 
-    crate::log_debug!("Retrieved session {} details", session_id);
+    log::debug!("Retrieved session {} details", session_id);
     Ok(Json(SessionDetail {
         session_id: record.session_id,
         parent_session_id: record.parent_session_id,
@@ -213,10 +213,10 @@ pub async fn delete_session(
     State(state): State<AppState>,
     AxumPath(session_id): AxumPath<Uuid>,
 ) -> WebResult<StatusCode> {
-    crate::log_info!("Deleting session {}", session_id);
+    log::info!("Deleting session {}", session_id);
     let store = state.store.lock().await;
     store.delete_session(session_id)?;
-    crate::log_info!("Deleted session {}", session_id);
+    log::info!("Deleted session {}", session_id);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -227,7 +227,7 @@ pub async fn fork_session(
     AxumPath(session_id): AxumPath<Uuid>,
     Json(body): Json<ForkSessionRequest>,
 ) -> WebResult<(StatusCode, Json<ForkSessionResponse>)> {
-    crate::log_info!(
+    log::info!(
         "Fork request for session {} from message {}",
         session_id,
         body.message_id
@@ -288,7 +288,7 @@ pub async fn fork_session(
     let message_count = messages_to_copy.len();
     drop(store);
 
-    crate::log_info!(
+    log::info!(
         "Forked session {} → new session {} with {} messages",
         session_id,
         new_session_id,
@@ -326,7 +326,7 @@ pub struct InitPromptResponse {
 /// Get the init prompt for creating AGENTS.md
 pub async fn get_init_prompt() -> Json<InitPromptResponse> {
     Json(InitPromptResponse {
-        prompt: crate::prompts::init_command().to_string(),
+        prompt: tidev_types::prompts::init_command().to_string(),
     })
 }
 
@@ -336,7 +336,7 @@ pub async fn rename_session(
     AxumPath(session_id): AxumPath<Uuid>,
     Json(body): Json<RenameSessionRequest>,
 ) -> WebResult<Json<RenameSessionResponse>> {
-    crate::log_info!("Renaming session {} to '{}'", session_id, body.title);
+    log::info!("Renaming session {} to '{}'", session_id, body.title);
 
     let title = if body.title.trim().is_empty() {
         "Untitled session".to_string()
@@ -348,7 +348,7 @@ pub async fn rename_session(
     store.update_session_title(session_id, &title)?;
     drop(store);
 
-    crate::log_info!("Session {} renamed to '{}'", session_id, title);
+    log::info!("Session {} renamed to '{}'", session_id, title);
     Ok(Json(RenameSessionResponse {
         success: true,
         title,
@@ -363,7 +363,7 @@ pub struct WorkspaceInfo {
 
 /// Get current workspace info
 pub async fn get_workspace(State(state): State<AppState>) -> WebResult<Json<WorkspaceInfo>> {
-    crate::log_debug!("Getting workspace info: {}", state.workspace_root.display());
+    log::debug!("Getting workspace info: {}", state.workspace_root.display());
     Ok(Json(WorkspaceInfo {
         workspace_root: state.workspace_root.display().to_string(),
     }))

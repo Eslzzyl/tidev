@@ -6,10 +6,12 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use super::tools::{MemoryArgs, QuestionArgs, SkillArgs};
 use super::{SkillCatalog, ToolDefinition, ToolPermission, canonical_tool_name};
+use tidev_types::prompts::SessionMode;
+
 use crate::config::AuthStore;
 use crate::config::WebSearchConfig;
 use crate::session::BackendEvent;
-use crate::{prompts::SessionMode, session::ToolCall, storage::SessionStore};
+use crate::{session::ToolCall, storage::SessionStore};
 
 /// Context for executing a tool call — groups all shared configuration
 /// that is independent of the specific tool being invoked.

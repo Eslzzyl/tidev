@@ -1,7 +1,7 @@
 use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
 
-use crate::prompts::SessionMode;
+use tidev_types::prompts::SessionMode;
 
 mod contrast;
 mod dark;

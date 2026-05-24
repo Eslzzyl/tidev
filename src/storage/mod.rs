@@ -189,7 +189,7 @@ impl RawMessageRow {
     /// Decompress `content`/`reasoning`, parse JSON fields, build `Message`.
     fn into_message(self) -> Result<Message> {
         use crate::config::reasoning::ThinkingLevelType;
-        use crate::prompts::SessionMode;
+        use tidev_types::prompts::SessionMode;
         use crate::session::ToolMetadata;
 
         let content = decompress_text(&self.content);
@@ -1540,11 +1540,11 @@ impl SessionStore {
                     named_params! { ":cutoff": cutoff },
                 ) {
                     Ok(count) if count > 0 => {
-                        crate::log_info!("Cleaned up {count} old tool output(s)");
+                        log::info!("Cleaned up {count} old tool output(s)");
                     }
                     Ok(_) => {}
                     Err(e) => {
-                        crate::log_warn!("Failed to clean old tool outputs: {e}");
+                        log::warn!("Failed to clean old tool outputs: {e}");
                     }
                 }
             }

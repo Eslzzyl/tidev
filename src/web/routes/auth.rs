@@ -75,6 +75,6 @@ pub async fn auth_configure(
             .map_err(|e| AppError::Internal(format!("Failed to save auth store: {}", e)))?;
     }
 
-    crate::log_info!("Web auth token updated");
+    log::info!("Web auth token updated");
     Ok(Json(AuthConfigureResponse { success: true }))
 }

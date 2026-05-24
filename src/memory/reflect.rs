@@ -141,7 +141,7 @@ impl ReflectService {
                 .unwrap_or(0)
             };
             if retry_count >= 3 {
-                crate::log_warn!(
+                log::warn!(
                     "reflect: skipping cluster at {} after {} consecutive failures",
                     cluster_max_time,
                     retry_count
@@ -176,7 +176,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 {
                     Ok(r) => r,
                     Err(e) => {
-                        crate::log_warn!("reflect LLM call failed (attempt {}): {}", attempt, e);
+                        log::warn!("reflect LLM call failed (attempt {}): {}", attempt, e);
                         continue;
                     }
                 };
@@ -187,7 +187,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                     break;
                 }
                 if attempt == 0 {
-                    crate::log_warn!(
+                    log::warn!(
                         "reflect: unparseable response, retrying with stricter prompt"
                     );
                 }
@@ -216,7 +216,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                     &tags,
                     None, // source_session_id
                 ) {
-                    crate::log_warn!("failed to remember insight: {}", e);
+                    log::warn!("failed to remember insight: {}", e);
                     all_saved = false;
                     break;
                 }
@@ -239,7 +239,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                     "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
                     rusqlite::params![&retry_key, new_count.to_string()],
                 );
-                crate::log_warn!(
+                log::warn!(
                     "reflect: cluster at {} failed (attempt {}/3), will retry",
                     cluster_max_time,
                     new_count

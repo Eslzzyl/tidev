@@ -73,7 +73,7 @@ pub struct CreateProviderRequest {
 pub async fn list_providers(
     State(state): State<AppState>,
 ) -> WebResult<Json<ListProvidersResponse>> {
-    crate::log_debug!("Listing all providers");
+    log::debug!("Listing all providers");
 
     let config = state.config.read().await;
     let auth = state.auth.read().await;
@@ -114,7 +114,7 @@ pub async fn list_providers(
         })
         .collect();
 
-    crate::log_info!("Listed {} providers", providers.len());
+    log::info!("Listed {} providers", providers.len());
     Ok(Json(ListProvidersResponse { providers }))
 }
 
@@ -124,7 +124,7 @@ pub async fn connect_provider(
     Path(provider_id): Path<String>,
     Json(body): Json<ConnectProviderRequest>,
 ) -> WebResult<StatusCode> {
-    crate::log_debug!("Connecting provider: {}", provider_id);
+    log::debug!("Connecting provider: {}", provider_id);
 
     // Validate provider exists
     {
@@ -150,7 +150,7 @@ pub async fn connect_provider(
             .map_err(|e| AppError::Internal(format!("Failed to save auth: {}", e)))?;
     }
 
-    crate::log_info!("Connected provider: {}", provider_id);
+    log::info!("Connected provider: {}", provider_id);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -159,7 +159,7 @@ pub async fn disconnect_provider(
     State(state): State<AppState>,
     Path(provider_id): Path<String>,
 ) -> WebResult<StatusCode> {
-    crate::log_debug!("Disconnecting provider: {}", provider_id);
+    log::debug!("Disconnecting provider: {}", provider_id);
 
     // Remove API key
     {
@@ -169,7 +169,7 @@ pub async fn disconnect_provider(
             .map_err(|e| AppError::Internal(format!("Failed to save auth: {}", e)))?;
     }
 
-    crate::log_info!("Disconnected provider: {}", provider_id);
+    log::info!("Disconnected provider: {}", provider_id);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -178,7 +178,7 @@ pub async fn create_provider(
     State(state): State<AppState>,
     Json(body): Json<CreateProviderRequest>,
 ) -> WebResult<StatusCode> {
-    crate::log_debug!("Creating provider: {}", body.provider_id);
+    log::debug!("Creating provider: {}", body.provider_id);
 
     // Validate provider_id
     let provider_id = body.provider_id.trim().to_ascii_lowercase();
@@ -298,7 +298,7 @@ pub async fn create_provider(
             .map_err(|e| AppError::Internal(format!("Failed to save auth: {}", e)))?;
     }
 
-    crate::log_info!("Created provider: {}", provider_id);
+    log::info!("Created provider: {}", provider_id);
     Ok(StatusCode::CREATED)
 }
 
@@ -307,7 +307,7 @@ pub async fn delete_provider(
     State(state): State<AppState>,
     Path(provider_id): Path<String>,
 ) -> WebResult<StatusCode> {
-    crate::log_debug!("Deleting provider: {}", provider_id);
+    log::debug!("Deleting provider: {}", provider_id);
 
     // Check provider exists and is user-defined
     {
@@ -345,6 +345,6 @@ pub async fn delete_provider(
             .map_err(|e| AppError::Internal(format!("Failed to save auth: {}", e)))?;
     }
 
-    crate::log_info!("Deleted provider: {}", provider_id);
+    log::info!("Deleted provider: {}", provider_id);
     Ok(StatusCode::NO_CONTENT)
 }

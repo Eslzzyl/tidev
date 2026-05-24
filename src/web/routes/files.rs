@@ -31,7 +31,7 @@ pub async fn search_files(
 ) -> WebResult<Json<FileSearchResponse>> {
     let query = params.q.unwrap_or_default();
 
-    crate::log_debug!("File search request: query='{}'", query);
+    log::debug!("File search request: query='{}'", query);
 
     // Ensure background indexing is started
     state
@@ -56,6 +56,6 @@ pub async fn search_files(
         })
         .collect();
 
-    crate::log_debug!("File search returned {} suggestions", suggestions.len());
+    log::debug!("File search returned {} suggestions", suggestions.len());
     Ok(Json(FileSearchResponse { suggestions }))
 }

@@ -187,7 +187,7 @@ impl NotificationManager {
         };
 
         let condition = NotificationCondition::parse(&config.condition);
-        crate::log_info!(
+        log::info!(
             "NotificationManager: enabled={}, method={}, condition={:?}",
             config.enabled,
             config.method,
@@ -204,14 +204,14 @@ impl NotificationManager {
 
     /// Update terminal focus state.
     pub fn set_focused(&self, focused: bool) {
-        crate::log_debug!("NotificationManager::set_focused({})", focused);
+        log::debug!("NotificationManager::set_focused({})", focused);
         self.focused.store(focused, Ordering::Relaxed);
     }
 
     /// Check if notification should be emitted based on condition and focus state.
     fn should_emit(&self) -> bool {
         if !self.enabled {
-            crate::log_debug!("NotificationManager::should_emit: disabled");
+            log::debug!("NotificationManager::should_emit: disabled");
             return false;
         }
 
@@ -220,7 +220,7 @@ impl NotificationManager {
             NotificationCondition::Unfocused => !focused,
             NotificationCondition::Always => true,
         };
-        crate::log_debug!(
+        log::debug!(
             "NotificationManager::should_emit: focused={}, condition={:?}, result={}",
             focused,
             self.condition,
@@ -232,25 +232,25 @@ impl NotificationManager {
     /// Send a desktop notification.
     /// Returns true if notification was sent.
     pub fn notify(&mut self, message: &str) -> bool {
-        crate::log_info!("NotificationManager::notify({:?})", message);
+        log::info!("NotificationManager::notify({:?})", message);
 
         if !self.should_emit() {
-            crate::log_info!("NotificationManager::notify: skipped (should_emit=false)");
+            log::info!("NotificationManager::notify: skipped (should_emit=false)");
             return false;
         }
 
         let Some(backend) = self.backend.as_mut() else {
-            crate::log_info!("NotificationManager::notify: skipped (no backend)");
+            log::info!("NotificationManager::notify: skipped (no backend)");
             return false;
         };
 
         match backend.notify(message) {
             Ok(()) => {
-                crate::log_info!("NotificationManager::notify: sent successfully");
+                log::info!("NotificationManager::notify: sent successfully");
                 true
             }
             Err(err) => {
-                crate::log_warn!(
+                log::warn!(
                     "Failed to emit notification: {}, disabling future notifications",
                     err
                 );

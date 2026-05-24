@@ -183,7 +183,7 @@ pub struct AgentDefinition {
 impl AgentDefinition {
     /// Create a new agent definition with defaults for the given type.
     pub fn new(agent_type: AgentType) -> Self {
-        let system_prompt = prompts::system_prompt(agent_type);
+        let system_prompt = crate::agent::prompts::system_prompt(agent_type);
         Self {
             agent_type,
             display_name: agent_type.display_name().to_string(),

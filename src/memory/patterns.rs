@@ -50,7 +50,7 @@ fn save_cursor(db: &Connection, value: &str) {
         "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
         rusqlite::params![META_KEY, value],
     ) {
-        crate::log_warn!("failed to save pattern mining cursor: {}", e);
+        log::warn!("failed to save pattern mining cursor: {}", e);
     }
 }
 
@@ -354,7 +354,7 @@ impl PatternMiningService {
                 &tags,
                 None,
             ) {
-                crate::log_warn!("failed to save co-change pattern: {}", e);
+                log::warn!("failed to save co-change pattern: {}", e);
                 continue;
             }
             added += 1;
@@ -493,7 +493,7 @@ impl PatternMiningService {
                 &tags,
                 None,
             ) {
-                crate::log_warn!("failed to save error-repeat pattern: {}", e);
+                log::warn!("failed to save error-repeat pattern: {}", e);
                 continue;
             }
             added += 1;

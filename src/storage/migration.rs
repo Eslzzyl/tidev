@@ -180,7 +180,7 @@ pub fn run_pending(conn: &Connection) -> Result<i64> {
         Some(v) => v,
         None => {
             // Fresh database — write the initial schema version.
-            crate::log_info!("Fresh database, setting schema version to {SCHEMA_VERSION}");
+            log::info!("Fresh database, setting schema version to {SCHEMA_VERSION}");
             set_version(conn, SCHEMA_VERSION).context("failed to write initial schema version")?;
             return Ok(SCHEMA_VERSION);
         }
@@ -194,12 +194,12 @@ pub fn run_pending(conn: &Connection) -> Result<i64> {
     }
 
     if current == SCHEMA_VERSION {
-        crate::log_debug!("Database already at schema version {SCHEMA_VERSION}, nothing to do");
+        log::debug!("Database already at schema version {SCHEMA_VERSION}, nothing to do");
         return Ok(current);
     }
 
     // ── Apply pending migrations ────────────────────────────────────────
-    crate::log_info!(
+    log::info!(
         "Database at schema version {current}, target {SCHEMA_VERSION} — applying {} migration(s)",
         MIGRATIONS
             .iter()
@@ -215,7 +215,7 @@ pub fn run_pending(conn: &Connection) -> Result<i64> {
             break;
         }
 
-        crate::log_info!("Applying migration v{}: {} …", m.version, m.description);
+        log::info!("Applying migration v{}: {} …", m.version, m.description);
 
         // Each migration is wrapped in its own transaction so partial
         // failures are rolled back atomically and do not corrupt the DB.
@@ -231,7 +231,7 @@ pub fn run_pending(conn: &Connection) -> Result<i64> {
         tx.commit()
             .with_context(|| format!("failed to commit migration v{}", m.version))?;
 
-        crate::log_info!("Migration v{} applied successfully", m.version);
+        log::info!("Migration v{} applied successfully", m.version);
     }
 
     // One final sanity write (harmless if already set by the loop).

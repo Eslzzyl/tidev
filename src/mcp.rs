@@ -11,9 +11,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tokio::process::Command;
 
-use crate::config::PermissionConfig;
+use tidev_types::types::PermissionConfig;
 use crate::config::mcp::McpServerConfig;
-use crate::prompts::SessionMode;
+use tidev_types::prompts::SessionMode;
 use crate::session::{MessageAttachment, ToolCall, ToolExecutionResult, ToolMetadata};
 use crate::tooling::{ToolDefinition, ToolPermission};
 

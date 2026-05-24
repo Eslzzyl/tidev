@@ -38,7 +38,7 @@ pub fn start_background_tasks(
     config: &MemoryConfig,
 ) {
     if !config.enabled || !config.auto_learn {
-        crate::log_info!("memory: background tasks disabled by config");
+        log::info!("memory: background tasks disabled by config");
         return;
     }
 
@@ -50,9 +50,9 @@ pub fn start_background_tasks(
         // Run once on startup
         let _t_evict = std::time::Instant::now();
         if let Err(e) = evict_store.run_eviction() {
-            crate::log_warn!("memory: initial eviction failed: {}", e);
+            log::warn!("memory: initial eviction failed: {}", e);
         } else {
-            crate::log_info!(
+            log::info!(
                 "memory: initial eviction completed in {:?}",
                 _t_evict.elapsed()
             );
@@ -60,11 +60,11 @@ pub fn start_background_tasks(
         let mut interval = tokio::time::interval(Duration::from_secs(3600));
         loop {
             interval.tick().await;
-            crate::log_info!("memory: running eviction");
+            log::info!("memory: running eviction");
             if let Err(e) = evict_store.run_eviction() {
-                crate::log_warn!("memory: eviction failed: {}", e);
+                log::warn!("memory: eviction failed: {}", e);
             } else {
-                crate::log_info!("memory: eviction completed");
+                log::info!("memory: eviction completed");
             }
         }
     });
@@ -89,19 +89,19 @@ pub fn start_background_tasks(
                 now - ts
             });
             if elapsed.is_none_or(|d| d >= 1800) {
-                crate::log_info!(
+                log::info!(
                     "memory: running consolidation (last run: {}s ago)",
                     elapsed.unwrap_or(-1)
                 );
                 if let Err(e) = cons_store.run_consolidation(&cons_ws).await {
-                    crate::log_warn!("memory: consolidation failed: {}", e);
+                    log::warn!("memory: consolidation failed: {}", e);
                 } else {
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs();
                     let _ = cons_store.meta_set("consolidation_last_run", &now.to_string());
-                    crate::log_info!("memory: consolidation completed");
+                    log::info!("memory: consolidation completed");
                 }
             }
         }
@@ -127,19 +127,19 @@ pub fn start_background_tasks(
                 now - ts
             });
             if elapsed.is_none_or(|d| d >= 1800) {
-                crate::log_info!(
+                log::info!(
                     "memory: running reflection (last run: {}s ago)",
                     elapsed.unwrap_or(-1)
                 );
                 if let Err(e) = refl_store.run_reflect(&refl_ws).await {
-                    crate::log_warn!("memory: reflection failed: {}", e);
+                    log::warn!("memory: reflection failed: {}", e);
                 } else {
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs();
                     let _ = refl_store.meta_set("reflection_last_run", &now.to_string());
-                    crate::log_info!("memory: reflection completed");
+                    log::info!("memory: reflection completed");
                 }
             }
         }

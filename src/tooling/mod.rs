@@ -15,29 +15,7 @@ pub use tools::TodoItem;
 pub use tools::ToolArgs;
 pub(crate) use tools::{QuestionArgs, QuestionInfo, SkillArgs, TaskArgs};
 
-use crate::config::PermissionConfig;
-use crate::prompts::SessionMode;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolPermission {
-    Read,
-    Search,
-    Write,
-    Edit,
-    Execute,
-    Session,
-}
-
-impl ToolPermission {
-    pub fn is_allowed_in(self, mode: SessionMode, permission_config: &PermissionConfig) -> bool {
-        permission_config.is_allowed(mode, self)
-    }
-
-    pub fn needs_confirmation(self) -> bool {
-        false
-    }
-}
+pub use tidev_types::types::ToolPermission;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ToolOrigin {

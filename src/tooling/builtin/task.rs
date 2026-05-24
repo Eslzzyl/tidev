@@ -4,7 +4,7 @@ use std::path::Path;
 use uuid::Uuid;
 
 use crate::agent::AgentType;
-use crate::prompts::SessionMode;
+use tidev_types::prompts::SessionMode;
 use crate::storage::SessionStore;
 use crate::tooling::tools::{TaskArgs, decode_tool_args};
 use crate::tooling::{ToolDefinition, ToolPermission};

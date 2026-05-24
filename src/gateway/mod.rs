@@ -100,15 +100,15 @@ async fn run_async() -> Result<()> {
     let workspace_root = env::current_dir().context("failed to determine workspace root")?;
     let paths = ConfigPaths::discover()?;
     let config = AppConfig::load_with_project_overlay(&paths, &workspace_root)?;
-    crate::log_info!("Gateway starting, config loaded");
+    log::info!("Gateway starting, config loaded");
 
     let mut logging_config = config.logging.clone();
     logging_config.console = true;
-    crate::logging::init(&paths.data_dir, logging_config);
-    crate::log_info!("Logging initialized (console: true)");
+    crate::logging::init(&paths.data_dir, logging_config).ok();
+    log::info!("Logging initialized (console: true)");
 
     let auth = AuthStore::load_or_create(&paths)?;
-    crate::log_info!("Auth store loaded");
+    log::info!("Auth store loaded");
 
     let default_model = config.resolve_active_model_for_gateway(&auth)?;
     let instruction_prompt = compose_instruction_prompt(&workspace_root, &paths, &config);
@@ -138,7 +138,7 @@ async fn run_async() -> Result<()> {
             .context("missing Telegram bot token in auth.json for channel 'telegram'")?
             .to_string();
 
-        crate::log_info!(
+        log::info!(
             "Telegram channel enabled, allowlist: {} entries",
             allowlist.len()
         );
@@ -186,7 +186,7 @@ async fn run_async() -> Result<()> {
             .context("missing QQ AppSecret in auth.json")?
             .to_string();
 
-        crate::log_info!("QQ channel enabled, allowlist: {} entries", allowlist.len());
+        log::info!("QQ channel enabled, allowlist: {} entries", allowlist.len());
 
         let res =
             ChannelResources::new(&db, &config, &default_model, &workspace_root, &paths, &auth)?;
@@ -228,7 +228,7 @@ async fn run_async() -> Result<()> {
             .context("missing Discord bot token in auth.json for channel 'discord'")?
             .to_string();
 
-        crate::log_info!(
+        log::info!(
             "Discord channel enabled, allowlist: {} entries",
             allowlist.len()
         );
@@ -278,7 +278,7 @@ async fn run_async() -> Result<()> {
             .context("missing Lark AppSecret in auth.json for channel 'lark'")?
             .to_string();
 
-        crate::log_info!(
+        log::info!(
             "Lark channel enabled, allowlist: {} entries",
             allowlist.len()
         );
@@ -311,7 +311,7 @@ async fn run_async() -> Result<()> {
         );
     }
 
-    crate::log_info!(
+    log::info!(
         "Gateway ready, starting {} channel(s): {}",
         orchestrator.channel_names().len(),
         orchestrator.channel_names().join(", ")

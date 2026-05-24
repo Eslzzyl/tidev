@@ -1,10 +1,24 @@
-[package]
-name = "tidev"
+[workspace]
+members = [
+    ".",
+    "tidev-types",
+    "tidev-cli",
+]
+default-members = ["tidev-cli"]
+resolver = "2"
+
+[workspace.package]
 version = "0.4.0"
 edition = "2024"
-
 authors = ["Eslzzyl"]
 license = "Apache-2.0"
+
+[package]
+name = "tidev"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 description = "A terminal-based AI coding agent"
 
 repository = "https://github.com/Eslzzyl/tidev"
@@ -102,15 +116,17 @@ libc = "0.2.186"
 bytes = "1.11.1"
 hex = "0.4.3"
 prost = { version = "0.14", default-features = false, features = ["derive"] }
+log = "0.4.29"
+tidev-types = { path = "tidev-types" }
 
 [dev-dependencies]
 tempfile = "3.27"
 
 [profile.dev]
-incremental = true # Compile your binary in smaller steps.
+incremental = true
 
 [profile.release]
-codegen-units = 1 # Allows LLVM to perform better optimization.
-lto = true        # Enables link-time-optimizations.
-opt-level = "s"   # Prioritizes small binary size. Use `3` if you prefer speed.
-strip = true      # Ensures debug symbols are removed.
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

@@ -403,7 +403,7 @@ pub struct Message {
     #[serde(default)]
     pub file_diffs: Option<String>,
     #[serde(default)]
-    pub mode: Option<crate::prompts::SessionMode>,
+    pub mode: Option<tidev_types::prompts::SessionMode>,
     #[serde(default)]
     pub rtk_rewritten: bool,
     #[serde(default)]

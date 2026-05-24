@@ -25,7 +25,7 @@ pub async fn get_todos(
     State(state): State<AppState>,
     AxumPath(session_id): AxumPath<Uuid>,
 ) -> WebResult<Json<TodosResponse>> {
-    crate::log_debug!("Getting todos for session {}", session_id);
+    log::debug!("Getting todos for session {}", session_id);
     let store = state.store.lock().await;
     let todos = store.load_todos(session_id)?;
     drop(store);
@@ -38,6 +38,6 @@ pub async fn get_todos(
         })
         .collect();
 
-    crate::log_debug!("Retrieved {} todos for session {}", todos.len(), session_id);
+    log::debug!("Retrieved {} todos for session {}", todos.len(), session_id);
     Ok(Json(TodosResponse { todos }))
 }

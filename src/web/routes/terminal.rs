@@ -172,7 +172,7 @@ async fn terminal_events(
             tokio::select! {
                 // Check for shutdown signal
                 _ = cancel_token.cancelled() => {
-                    crate::log_debug!("terminal SSE closing due to shutdown for session {}", session_id);
+                    log::debug!("terminal SSE closing due to shutdown for session {}", session_id);
                     break;
                 }
                 result = rx.recv() => {
@@ -180,7 +180,7 @@ async fn terminal_events(
                         Ok(o) => o,
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            crate::log_warn!("terminal SSE lagged by {} for session {}", n, session_id);
+                            log::warn!("terminal SSE lagged by {} for session {}", n, session_id);
                             continue;
                         }
                     };
@@ -200,7 +200,7 @@ async fn terminal_events(
             }
         }
 
-        crate::log_debug!("terminal SSE stream ended for session {}", session_id);
+        log::debug!("terminal SSE stream ended for session {}", session_id);
     };
 
     Ok(Sse::new(stream))
@@ -234,7 +234,7 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {
         let msg = match tokio::time::timeout(std::time::Duration::from_secs(10), ws.recv()).await {
             Ok(Some(Ok(msg))) => msg,
             Ok(Some(Err(e))) => {
-                crate::log_warn!("terminal WS recv error before bind: {e}");
+                log::warn!("terminal WS recv error before bind: {e}");
                 return;
             }
             Ok(None) | Err(_) => {
@@ -315,7 +315,7 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {
                         Ok(_) => {}
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            crate::log_warn!("terminal WS lagged by {n} for session {sid}");
+                            log::warn!("terminal WS lagged by {n} for session {sid}");
                             continue;
                         }
                     }
@@ -335,7 +335,7 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {
                 let ws_msg = match ws_msg {
                     Some(Ok(msg)) => msg,
                     Some(Err(e)) => {
-                        crate::log_warn!("terminal WS recv error: {e}");
+                        log::warn!("terminal WS recv error: {e}");
                         break;
                     }
                     None => break,

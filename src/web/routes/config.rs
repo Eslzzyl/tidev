@@ -29,7 +29,7 @@ pub async fn set_default_model(
     State(state): State<AppState>,
     Json(body): Json<SetDefaultModelRequest>,
 ) -> Result<Json<SetDefaultModelResponse>, AppError> {
-    crate::log_info!(
+    log::info!(
         "Setting default model to {}/{}",
         body.provider_id,
         body.model_id
@@ -58,7 +58,7 @@ pub async fn set_default_model(
 
     // Save config to file
     if let Err(e) = config.save(&state.config_paths) {
-        crate::log_error!("Failed to save config: {}", e);
+        log::error!("Failed to save config: {}", e);
         return Err(AppError::Internal(format!("Failed to save config: {}", e)));
     }
     drop(config);
@@ -71,7 +71,7 @@ pub async fn set_default_model(
         let _ = store.save_model_thinking_level(&body.provider_id, &body.model_id, tl);
     }
 
-    crate::log_info!(
+    log::info!(
         "Default model set to {} ({}) / {} ({})",
         body.provider_id,
         provider_display_name,
@@ -374,7 +374,7 @@ pub async fn set_model_thinking_level(
     store
         .save_model_thinking_level(&body.provider_id, &body.model_id, &body.thinking_level)
         .map_err(|e| {
-            crate::log_error!("Failed to save thinking level preference: {}", e);
+            log::error!("Failed to save thinking level preference: {}", e);
             AppError::Internal("Failed to save thinking level preference".to_string())
         })?;
 

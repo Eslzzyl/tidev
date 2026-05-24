@@ -32,11 +32,11 @@ impl App {
                 self.clear_message_render_cache();
             }
             Event::FocusGained => {
-                crate::log_debug!("Event::FocusGained received");
+                log::debug!("Event::FocusGained received");
                 self.notifications.set_focused(true);
             }
             Event::FocusLost => {
-                crate::log_debug!("Event::FocusLost received");
+                log::debug!("Event::FocusLost received");
                 self.notifications.set_focused(false);
             }
             _ => {}

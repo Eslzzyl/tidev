@@ -21,13 +21,14 @@ use super::theme_panel::ThemePanelState;
 use crate::tui::ui::agents_panel::AgentsPanelState;
 use crate::tui::ui::rename::RenameSessionDialogState;
 use crate::tui::ui::search_panel::SearchPanelState;
+use tidev_types::prompts::SessionMode;
+
 use crate::tui::ui::skills_panel::SkillsPanelState;
 use crate::tui::ui::workspace_boundary::WorkspaceBoundaryDialogState;
 use crate::{
     config::ActiveModel,
     config::reasoning::ThinkingLevelType,
     context::ContextManager,
-    prompts::SessionMode,
     provider_setup::ConnectDialog,
     session::{Conversation, MessageAttachment},
     tooling::TodoItem,

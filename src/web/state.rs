@@ -71,7 +71,7 @@ impl AppState {
         paths: &ConfigPaths,
         agent: AgentRuntime,
     ) -> anyhow::Result<Self> {
-        crate::log_debug!("Creating new AppState");
+        log::debug!("Creating new AppState");
 
         // Create snapshot service for undo operations
         let snapshot = SnapshotService::new(&workspace_root, paths)?;
@@ -102,7 +102,7 @@ impl AppState {
 
     /// Track an active request
     pub async fn track_request(&self, session_id: uuid::Uuid, request_id: u64) {
-        crate::log_debug!("Tracking request {} for session {}", request_id, session_id);
+        log::debug!("Tracking request {} for session {}", request_id, session_id);
         let mut requests = self.active_requests.write().await;
         requests.insert(session_id, request_id);
     }
@@ -111,7 +111,7 @@ impl AppState {
     pub async fn get_active_request(&self, session_id: uuid::Uuid) -> Option<u64> {
         let requests = self.active_requests.read().await;
         let result = requests.get(&session_id).copied();
-        crate::log_debug!(
+        log::debug!(
             "Getting active request for session {}: {:?}",
             session_id,
             result
@@ -121,7 +121,7 @@ impl AppState {
 
     /// Remove an active request
     pub async fn remove_request(&self, session_id: uuid::Uuid) {
-        crate::log_debug!("Removing active request for session {}", session_id);
+        log::debug!("Removing active request for session {}", session_id);
         let mut requests = self.active_requests.write().await;
         requests.remove(&session_id);
     }

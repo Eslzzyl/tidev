@@ -247,7 +247,7 @@ impl LarkClient {
         let token = match self.get_tenant_access_token().await {
             Ok(t) => t,
             Err(e) => {
-                crate::log_warn!("Lark add_reaction: token refresh failed: {e}");
+                log::warn!("Lark add_reaction: token refresh failed: {e}");
                 return Ok(());
             }
         };
@@ -269,7 +269,7 @@ impl LarkClient {
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            crate::log_warn!("Lark add_reaction failed: {text}");
+            log::warn!("Lark add_reaction failed: {text}");
         }
         Ok(())
     }

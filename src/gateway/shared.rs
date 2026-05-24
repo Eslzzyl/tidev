@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::config::ConfigPaths;
-use crate::prompts::SessionMode;
+use tidev_types::prompts::SessionMode;
 use crate::session::Message;
 
 /// Compose the instruction prompt from config and instruction files.

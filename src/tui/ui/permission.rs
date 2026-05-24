@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 
 use crate::agent::runtime::ApprovedTool;
-use crate::prompts::SessionMode;
+use tidev_types::prompts::SessionMode;
 use crate::session::{ToolCall, ToolExecutionResult};
 use crate::tooling::QuestionArgs;
 
@@ -219,7 +219,7 @@ impl App {
         };
 
         if !self.running_tool_executions.is_empty() {
-            crate::log_info!("process_pending_tool_execution: waiting for running_tool_executions");
+            log::info!("process_pending_tool_execution: waiting for running_tool_executions");
             return Ok(());
         }
 
@@ -231,10 +231,10 @@ impl App {
             let Some((tool_call, current_index, total, effective_mode)) =
                 self.pending_tool_snapshot()
             else {
-                crate::log_info!("process_pending_tool_execution: no more tool_calls in snapshot");
+                log::info!("process_pending_tool_execution: no more tool_calls in snapshot");
                 break;
             };
-            crate::log_info!(
+            log::info!(
                 "process_pending_tool_execution: processing tool {} ({}/{}) id={}",
                 tool_call.name,
                 current_index,
@@ -260,7 +260,7 @@ impl App {
                 .load_tool_permission(self.conversation.session_id, &permission_key)?
             {
                 if remembered {
-                    crate::log_info!(
+                    log::info!(
                         "process_pending_tool_execution: remembered permission allowed for {}",
                         tool_call.name
                     );
@@ -470,7 +470,7 @@ impl App {
             .as_ref()
             .is_some_and(PendingToolExecution::is_finished)
         {
-            crate::log_info!(
+            log::info!(
                 "process_pending_tool_execution: finished, running_subagent_executions={}",
                 self.running_subagent_executions.len()
             );
@@ -478,7 +478,7 @@ impl App {
             // All tools rejected — send empty approval to continue the loop
             return self.send_permission_approval(ready_calls, rejected, runtime);
         } else {
-            crate::log_info!(
+            log::info!(
                 "process_pending_tool_execution: loop ended but not finished, pending_tool_execution={}, running_subagent_executions={}",
                 self.pending_tool_execution.is_some(),
                 self.running_subagent_executions.len()
@@ -495,7 +495,7 @@ impl App {
         mut rejected: Vec<(ToolCall, ToolExecutionResult)>,
         _runtime: &Runtime,
     ) -> Result<()> {
-        crate::log_info!(
+        log::info!(
             "send_permission_approval: ready_calls={}, rejected={}",
             ready_calls.len(),
             rejected.len(),
@@ -542,7 +542,7 @@ impl App {
             });
         }
 
-        crate::log_info!(
+        log::info!(
             "send_permission_approval: sending {} approvals ({} approved)",
             approvals.len(),
             approvals.iter().filter(|a| a.rejection.is_none()).count()
@@ -660,7 +660,7 @@ impl App {
                 &result.output,
             )
         {
-            crate::log_warn!("Failed to save full tool output: {e}");
+            log::warn!("Failed to save full tool output: {e}");
         }
 
         // Persistence is handled by AgentRuntime::persist_tool_result.

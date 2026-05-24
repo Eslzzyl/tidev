@@ -1,5 +1,5 @@
 use crate::config::{AppConfig, AuthStore};
-use crate::prompts::SessionMode;
+use tidev_types::prompts::SessionMode;
 use crate::session::{Conversation, Message, MessageRole};
 use crate::theme::ThemePalette;
 use crate::tui::App;

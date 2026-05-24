@@ -26,7 +26,7 @@ pub struct ListModelsResponse {
 
 /// List all available models that have API keys configured
 pub async fn list_models(State(state): State<AppState>) -> WebResult<Json<ListModelsResponse>> {
-    crate::log_debug!("Listing available models");
+    log::debug!("Listing available models");
     let config = state.config.read().await;
     let auth = state.auth.read().await;
 
@@ -63,7 +63,7 @@ pub async fn list_models(State(state): State<AppState>) -> WebResult<Json<ListMo
         })
         .collect();
 
-    crate::log_info!("Listed {} models with API keys configured", models.len());
+    log::info!("Listed {} models with API keys configured", models.len());
     Ok(Json(ListModelsResponse { models }))
 }
 

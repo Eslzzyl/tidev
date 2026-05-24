@@ -7,10 +7,11 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use crossterm::style::{Color, Stylize};
+use log::{Level, LevelFilter, Log, Metadata, Record, SetLoggerError};
 
 use crate::config::LogConfig;
 
-static LOG_STATE: OnceLock<Mutex<LogState>> = OnceLock::new();
+static LOGGER: TidevLogger = TidevLogger;
 
 struct LogState {
     config: LogConfig,
@@ -18,45 +19,107 @@ struct LogState {
     file: Option<std::fs::File>,
 }
 
-impl LogState {
-    fn new(config: LogConfig, log_path: PathBuf, file: std::fs::File) -> Self {
-        Self {
-            config,
-            log_path,
-            file: Some(file),
+static LOG_STATE: OnceLock<Mutex<LogState>> = OnceLock::new();
+
+struct TidevLogger;
+
+impl Log for TidevLogger {
+    fn enabled(&self, _metadata: &Metadata) -> bool {
+        true // top-level filtering handled by set_max_level
+    }
+
+    fn log(&self, record: &Record) {
+        let Some(mutex) = LOG_STATE.get() else {
+            return;
+        };
+        let Ok(mut guard) = mutex.lock() else {
+            return;
+        };
+
+        rotate_if_needed(&mut guard);
+
+        let level = record.level().as_str();
+        let target = record.target();
+        let message = record.args().to_string();
+        let timestamp: DateTime<Utc> = Utc::now();
+        let formatted_timestamp = timestamp.format("%Y-%m-%d %H:%M:%S%.3f").to_string();
+
+        // Write to file (always uncolored)
+        if let Some(ref mut file) = guard.file {
+            let file_line =
+                format!("[{} {} {}] {}", formatted_timestamp, level, target, message);
+            let _ = file.write_all(file_line.as_bytes());
+            let _ = file.write_all(b"\n");
+            let _ = file.flush();
+        }
+
+        // Write to console (stderr) if enabled
+        if guard.config.console {
+            let colored_level = match record.level() {
+                Level::Debug => level.with(Color::Grey),
+                Level::Info => level.with(Color::Green),
+                Level::Warn => level.with(Color::Yellow),
+                Level::Error => level.with(Color::Red),
+                _ => level.stylize(),
+            };
+
+            let colored_target = target.with(Color::Cyan);
+            let colored_timestamp = formatted_timestamp.with(Color::DarkGrey);
+
+            eprintln!(
+                "[{}] [{}] [{}] {}",
+                colored_timestamp, colored_level, colored_target, message
+            );
+        }
+    }
+
+    fn flush(&self) {
+        let Some(mutex) = LOG_STATE.get() else {
+            return;
+        };
+        let Ok(mut guard) = mutex.lock() else {
+            return;
+        };
+        if let Some(ref mut file) = guard.file {
+            let _ = file.flush();
         }
     }
 }
 
-fn level_to_int(level: &str) -> u8 {
+fn level_to_filter(level: &str) -> LevelFilter {
     match level.to_uppercase().as_str() {
-        "DEBUG" => 0,
-        "INFO" => 1,
-        "WARN" => 2,
-        "ERROR" => 3,
-        _ => 1,
+        "ERROR" => LevelFilter::Error,
+        "WARN" => LevelFilter::Warn,
+        "INFO" => LevelFilter::Info,
+        "DEBUG" => LevelFilter::Debug,
+        _ => LevelFilter::Info,
     }
 }
 
-pub fn init(data_dir: &Path, config: LogConfig) {
-    if !config.enabled {
-        return;
+pub fn init(data_dir: &Path, config: LogConfig) -> Result<(), SetLoggerError> {
+    if config.enabled {
+        let log_path = data_dir.join("tidev.log");
+        if let Some(parent) = log_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .ok();
+
+        if let Some(file) = file {
+            let _ = LOG_STATE.set(Mutex::new(LogState {
+                config: config.clone(),
+                log_path,
+                file: Some(file),
+            }));
+        }
     }
 
-    let log_path = data_dir.join("tidev.log");
-    if let Some(parent) = log_path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-        .ok();
-
-    if let Some(file) = file {
-        let _ = LOG_STATE.set(Mutex::new(LogState::new(config, log_path, file)));
-    }
+    let max_level = level_to_filter(&config.level);
+    log::set_logger(&LOGGER).map(|()| log::set_max_level(max_level))
 }
 
 fn rotate_if_needed(state: &mut LogState) {
@@ -104,75 +167,4 @@ fn rotate_if_needed(state: &mut LogState) {
             .open(&state.log_path)
             .expect("failed to create log file"),
     );
-}
-
-pub fn log(level: &str, target: &str, message: &str) {
-    if let Some(mutex) = LOG_STATE.get()
-        && let Ok(mut guard) = mutex.lock()
-    {
-        let min_level = level_to_int(&guard.config.level);
-        if level_to_int(level) < min_level {
-            return;
-        }
-
-        rotate_if_needed(&mut guard);
-
-        let timestamp: DateTime<Utc> = Utc::now();
-        let formatted_timestamp = timestamp.format("%Y-%m-%d %H:%M:%S%.3f").to_string();
-
-        // Write to file (always uncolored)
-        if let Some(ref mut file) = guard.file {
-            let file_line = format!("[{} {} {}] {}", formatted_timestamp, level, target, message);
-            let _ = file.write_all(file_line.as_bytes());
-            let _ = file.write_all(b"\n");
-            let _ = file.flush();
-        }
-
-        // Write to console (stderr) if enabled
-        if guard.config.console {
-            let colored_level = match level.to_uppercase().as_str() {
-                "DEBUG" => level.with(Color::Grey),
-                "INFO" => level.with(Color::Green),
-                "WARN" => level.with(Color::Yellow),
-                "ERROR" => level.with(Color::Red),
-                _ => level.stylize(),
-            };
-
-            let colored_target = target.with(Color::Cyan);
-            let colored_timestamp = formatted_timestamp.with(Color::DarkGrey);
-
-            eprintln!(
-                "[{}] [{}] [{}] {}",
-                colored_timestamp, colored_level, colored_target, message
-            );
-        }
-    }
-}
-
-#[macro_export]
-macro_rules! log_debug {
-    ($($arg:tt)*) => {
-        $crate::logging::log("DEBUG", module_path!(), &format!($($arg)*))
-    };
-}
-
-#[macro_export]
-macro_rules! log_info {
-    ($($arg:tt)*) => {
-        $crate::logging::log("INFO", module_path!(), &format!($($arg)*))
-    };
-}
-
-#[macro_export]
-macro_rules! log_warn {
-    ($($arg:tt)*) => {
-        $crate::logging::log("WARN", module_path!(), &format!($($arg)*))
-    };
-}
-
-#[macro_export]
-macro_rules! log_error {
-    ($($arg:tt)*) => {
-        $crate::logging::log("ERROR", module_path!(), &format!($($arg)*))
-    };
 }

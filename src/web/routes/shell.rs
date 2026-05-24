@@ -124,7 +124,7 @@ pub async fn execute_shell_command(
                 {
                     let store = store_arc.lock().await;
                     if let Err(e) = store.append_message(session_id, &msg) {
-                        crate::log_warn!("ShellOutput: failed to persist message: {}", e);
+                        log::warn!("ShellOutput: failed to persist message: {}", e);
                     }
                 }
                 return;
@@ -162,7 +162,7 @@ pub async fn execute_shell_command(
         {
             let store = store_arc.lock().await;
             if let Err(e) = store.append_message(session_id, &msg) {
-                crate::log_warn!("ShellOutput: failed to persist message: {}", e);
+                log::warn!("ShellOutput: failed to persist message: {}", e);
             }
         }
     });

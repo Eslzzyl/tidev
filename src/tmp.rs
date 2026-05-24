@@ -90,7 +90,7 @@ pub fn auto_cleanup(config: &crate::config::TmpConfig) {
     match clean_temp_files(max_age, false) {
         Ok(removed) => {
             if !removed.is_empty() {
-                crate::log_info!(
+                log::info!(
                     "Cleaned up {} temp file(s) older than {}h",
                     removed.len(),
                     config.max_age_hours
@@ -98,7 +98,7 @@ pub fn auto_cleanup(config: &crate::config::TmpConfig) {
             }
         }
         Err(e) => {
-            crate::log_warn!("Failed to auto-clean temp files: {e}");
+            log::warn!("Failed to auto-clean temp files: {e}");
         }
     }
 }

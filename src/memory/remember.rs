@@ -131,7 +131,7 @@ impl RememberService {
             ],
         ) {
             let _ = db.execute_batch("ROLLBACK");
-            crate::log_warn!("memory: failed to update FTS5 index: {}", e);
+            log::warn!("memory: failed to update FTS5 index: {}", e);
             return Err(e.into());
         }
         db.execute_batch("COMMIT")?;

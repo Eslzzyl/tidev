@@ -12,10 +12,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use crate::prompts::{SessionMode, gateway_system_prompt, general_system_prompt};
+use tidev_types::prompts::{SessionMode, gateway_system_prompt, general_system_prompt};
 use crate::sync::SyncConfig;
 use crate::theme::ThemeName;
-use crate::tooling::ToolPermission;
+use tidev_types::types::PermissionConfig;
 
 use self::reasoning::{ThinkingLevelType, ThinkingMatcher};
 
@@ -490,75 +490,6 @@ impl Default for NotificationConfig {
             enabled: true,
             method: "auto".to_string(),
             condition: "unfocused".to_string(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-pub struct PermissionSettings {
-    #[serde(default)]
-    pub read: bool,
-    #[serde(default)]
-    pub search: bool,
-    #[serde(default)]
-    pub write: bool,
-    #[serde(default)]
-    pub edit: bool,
-    #[serde(default)]
-    pub execute: bool,
-    #[serde(default)]
-    pub session: bool,
-}
-
-impl PermissionSettings {
-    pub fn is_allowed(&self, permission: ToolPermission) -> bool {
-        match permission {
-            ToolPermission::Read => self.read,
-            ToolPermission::Search => self.search,
-            ToolPermission::Write => self.write,
-            ToolPermission::Edit => self.edit,
-            ToolPermission::Execute => self.execute,
-            ToolPermission::Session => self.session,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PermissionConfig {
-    #[serde(default)]
-    pub plan: PermissionSettings,
-    #[serde(default)]
-    pub build: PermissionSettings,
-}
-
-impl PermissionConfig {
-    pub fn is_allowed(&self, mode: SessionMode, permission: ToolPermission) -> bool {
-        match mode {
-            SessionMode::Plan => self.plan.is_allowed(permission),
-            SessionMode::Build => self.build.is_allowed(permission),
-        }
-    }
-}
-
-impl Default for PermissionConfig {
-    fn default() -> Self {
-        Self {
-            plan: PermissionSettings {
-                read: true,
-                search: true,
-                write: false,
-                edit: false,
-                execute: true,
-                session: true,
-            },
-            build: PermissionSettings {
-                read: true,
-                search: true,
-                write: true,
-                edit: true,
-                execute: true,
-                session: true,
-            },
         }
     }
 }
@@ -1315,6 +1246,7 @@ pub(crate) fn top_level_toml_keys(toml_str: &str) -> std::collections::BTreeSet<
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+    use tidev_types::types::ToolPermission;
 
     #[test]
     fn bundled_provider_catalog_loads() {
@@ -1443,7 +1375,8 @@ mod tests {
 
     #[test]
     fn gateway_mode_uses_separate_system_prompt() {
-        use crate::prompts::{default_system_prompt, gateway_system_prompt};
+        use crate::agent::prompts::default_system_prompt;
+        use tidev_types::prompts::{gateway_system_prompt};
 
         let auth = AuthStore::default();
         let mut config = AppConfig::default();

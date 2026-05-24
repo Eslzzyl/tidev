@@ -28,12 +28,13 @@ use std::time::Duration;
 use tokio::sync::{Mutex, mpsc::UnboundedSender, oneshot};
 use tokio_util::sync::CancellationToken;
 
+use tidev_types::prompts::SessionMode;
+
 use crate::{
     agent::{AgentDefinition, AgentType},
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths, reasoning::ThinkingLevelType},
     context::ContextManager,
     instructions,
-    prompts::SessionMode,
     session::{
         AssistantTurn, BackendEvent, Message, MessageAttachment, MessageRole, ToolCall,
         ToolExecutionResult,
@@ -52,7 +53,7 @@ use crate::{
 pub struct QueuedUserMessage {
     pub content: String,
     pub attachments: Vec<MessageAttachment>,
-    pub mode: Option<crate::prompts::SessionMode>,
+    pub mode: Option<tidev_types::prompts::SessionMode>,
     pub thinking_level: Option<ThinkingLevelType>,
 }
 
@@ -255,7 +256,7 @@ impl AgentRuntime {
             .filter(|s| !already_injected.contains(s))
             .collect();
 
-        crate::log_info!(
+        log::info!(
             "inject_new_instructions: already_injected_raw={:?} already_injected_norm={:?} sources={:?} new_sources={:?}",
             already_injected_raw,
             already_injected,
@@ -293,7 +294,7 @@ impl AgentRuntime {
         }
         drop(store);
 
-        crate::log_info!(
+        log::info!(
             "injected {} new instruction file(s) into user message {}",
             new_sources.len(),
             last_user_msg.id
@@ -323,9 +324,9 @@ impl AgentRuntime {
                 let _start = std::time::Instant::now();
                 let _result = $body;
                 let _elapsed = _start.elapsed();
-                crate::log_debug!("inject_first_turn_memory: {} took {:?}", $label, _elapsed);
+                log::debug!("inject_first_turn_memory: {} took {:?}", $label, _elapsed);
                 if _elapsed > std::time::Duration::from_millis(500) {
-                    crate::log_warn!(
+                    log::warn!(
                         "inject_first_turn_memory: {} took {:?} (slow)",
                         $label,
                         _elapsed
@@ -433,7 +434,7 @@ impl AgentRuntime {
         store.update_message_content(last_user_msg.id, &last_user_msg.content)?;
         drop(store);
 
-        crate::log_info!(
+        log::info!(
             "injected first-turn memory context into user message {}",
             last_user_msg.id
         );
@@ -456,9 +457,9 @@ impl AgentRuntime {
         let reminder = if !prior_mode_seen {
             current_mode.reminder().to_string()
         } else if current_mode == SessionMode::Plan && !was_plan_mode {
-            crate::prompts::plan_switch_reminder()
+            tidev_types::prompts::plan_switch_reminder()
         } else if current_mode == SessionMode::Build && was_plan_mode {
-            crate::prompts::build_switch_reminder()
+            tidev_types::prompts::build_switch_reminder()
         } else {
             return Ok(false);
         };
@@ -469,7 +470,7 @@ impl AgentRuntime {
         store.update_message_content(last_user_msg.id, &last_user_msg.content)?;
         drop(store);
 
-        crate::log_info!(
+        log::info!(
             "injected mode reminder into user message {}",
             last_user_msg.id
         );
@@ -543,7 +544,7 @@ impl AgentRuntime {
 
         while let Some(event) = rx.recv().await {
             if first_event {
-                crate::log_info!(
+                log::info!(
                     "run_single_turn: first event received after {:?} from spawn",
                     _t_spawn.elapsed()
                 );
@@ -680,7 +681,7 @@ impl AgentRuntime {
         let mut filtered: Vec<(&ToolCall, bool, bool)> = Vec::with_capacity(tool_calls.len());
         for (call, allow_outside, sensitive_file_approved) in tool_calls {
             if !self.tools.can_execute(&call.name, mode) {
-                crate::log_info!(
+                log::info!(
                     "execute_tool_calls: rejecting '{}' — not allowed in {:?} mode",
                     call.name,
                     mode
@@ -701,7 +702,7 @@ impl AgentRuntime {
             // don't have "task" in their tool lists) from hallucinating
             // a task call and getting a fake "Started ..." result.
             if call.name == "task" || canonical_tool_name(&call.name) == Some("task") {
-                crate::log_info!(
+                log::info!(
                     "execute_tool_calls: rejecting '{}' — not allowed through execute_tool_calls",
                     call.name
                 );
@@ -719,7 +720,7 @@ impl AgentRuntime {
                 && let Some(def) = self.tools.definition_for(&call.name)
                 && def.needs_confirmation()
             {
-                crate::log_info!(
+                log::info!(
                     "execute_tool_calls: rejecting '{}' — needs confirmation and auto_approve is off",
                     call.name
                 );
@@ -974,7 +975,7 @@ impl AgentRuntime {
                         if let Err(e) =
                             store.delete_messages_by_tool_call_id(session_id, &tool_call.id)
                         {
-                            crate::log_warn!(
+                            log::warn!(
                                 "delete_messages_by_tool_call_id (sandbox retry cleanup): {e}"
                             );
                         }
@@ -1043,12 +1044,12 @@ impl AgentRuntime {
             store.append_message(session_id, &tool_msg)?;
         }
         let _t_elapsed = _t_start.elapsed();
-        crate::log_debug!(
+        log::debug!(
             "persist_tool_result: store.lock + append_message took {:?}",
             _t_elapsed
         );
         if _t_elapsed > std::time::Duration::from_millis(200) {
-            crate::log_warn!(
+            log::warn!(
                 "persist_tool_result: store.lock + append_message took {:?} (slow)",
                 _t_elapsed
             );
@@ -1097,12 +1098,12 @@ impl AgentRuntime {
         let store = self.store.lock().await;
         store.append_message(session_id, &msg)?;
         let _t_elapsed = _t_start.elapsed();
-        crate::log_debug!(
+        log::debug!(
             "persist_assistant_message: store.lock + append_message took {:?}",
             _t_elapsed
         );
         if _t_elapsed > std::time::Duration::from_millis(200) {
-            crate::log_warn!(
+            log::warn!(
                 "persist_assistant_message: store.lock + append_message took {:?} (slow)",
                 _t_elapsed
             );
@@ -1292,7 +1293,7 @@ impl AgentRuntime {
 
         // ── Compose the STATIC system prompt ONCE for the subagent ─────────
         let static_system_prompt = self.compose_static_system_prompt(&child_model.system_prompt);
-        crate::log_info!(
+        log::info!(
             "run_subagent: static system prompt composed ({} chars)",
             static_system_prompt.len()
         );
@@ -1302,7 +1303,7 @@ impl AgentRuntime {
             if let Some(ref ct) = cancel_token
                 && ct.is_cancelled()
             {
-                crate::log_info!("run_subagent: cancelled");
+                log::info!("run_subagent: cancelled");
                 anyhow::bail!("Subagent was cancelled by user");
             }
 
@@ -1312,7 +1313,7 @@ impl AgentRuntime {
                 let store = self.store.lock().await;
                 store.load_messages(child_session_id)?
             };
-            crate::log_debug!(
+            log::debug!(
                 "run_subagent: loaded {} messages in {:?}",
                 db_messages.len(),
                 _t_sub_load.elapsed()
@@ -1338,7 +1339,7 @@ impl AgentRuntime {
                     }
                 }
             }
-            crate::log_debug!(
+            log::debug!(
                 "run_subagent: context injection took {:?}",
                 _t_sub_inject.elapsed()
             );
@@ -1348,7 +1349,7 @@ impl AgentRuntime {
                 crate::session::Conversation::new(child_session_id, "", "", "", "", "", "");
             conv.messages = db_messages;
             let request_messages = child_context.build_request_messages(&conv, SessionMode::Build);
-            crate::log_debug!(
+            log::debug!(
                 "run_subagent: build_request_messages took {:?}",
                 _t_sub_build.elapsed()
             );
@@ -1356,7 +1357,7 @@ impl AgentRuntime {
             let _t_sub_prep = std::time::Instant::now();
             let mut model_for_turn = child_model.clone();
             model_for_turn.system_prompt = static_system_prompt.clone();
-            crate::log_debug!(
+            log::debug!(
                 "run_subagent: model_for_turn setup took {:?}",
                 _t_sub_prep.elapsed()
             );
@@ -1370,7 +1371,7 @@ impl AgentRuntime {
                 session_id: child_session_id,
                 request_id: request_sequence,
             });
-            crate::log_debug!(
+            log::debug!(
                 "run_subagent: TurnStarting send took {:?}",
                 _t_sub_ts.elapsed()
             );
@@ -1404,7 +1405,7 @@ impl AgentRuntime {
                 )
                 .await;
             });
-            crate::log_debug!(
+            log::debug!(
                 "run_subagent: LLM spawn overhead took {:?}",
                 _t_sub_spawn.elapsed()
             );
@@ -1447,7 +1448,7 @@ impl AgentRuntime {
                     };
 
                 if first_event {
-                    crate::log_info!(
+                    log::info!(
                         "run_subagent: first event received after {:?} from spawn",
                         _t_sub_spawn.elapsed()
                     );
@@ -1579,7 +1580,7 @@ impl AgentRuntime {
                 // execute_tool_calls rejection below.
                 if tool_call.name == "task" || canonical_tool_name(&tool_call.name) == Some("task")
                 {
-                    crate::log_info!(
+                    log::info!(
                         "run_subagent: rejecting phantom '{}' call from subagent LLM",
                         tool_call.name
                     );
@@ -1644,10 +1645,10 @@ impl AgentRuntime {
                 send_status(event_tx, "Working".to_string(), None, None, None);
             }
 
-            crate::log_debug!("run_subagent: tool loop completed");
+            log::debug!("run_subagent: tool loop completed");
             let _t_sub_loopback = std::time::Instant::now();
             request_sequence = request_sequence.wrapping_add(1);
-            crate::log_debug!(
+            log::debug!(
                 "run_subagent: loop-back overhead took {:?}",
                 _t_sub_loopback.elapsed()
             );
@@ -1728,7 +1729,7 @@ impl AgentRuntime {
         // here — doing so would re-capture SystemInfo (date, …) and break prefix
         // caching across turns.
         let static_system_prompt = model.system_prompt.clone();
-        crate::log_info!(
+        log::info!(
             "run_agent_loop: using static system prompt ({} chars)",
             static_system_prompt.len()
         );
@@ -1738,7 +1739,7 @@ impl AgentRuntime {
             if let Some(ref ct) = cancel_token
                 && ct.is_cancelled()
             {
-                crate::log_info!("run_agent_loop: cancelled");
+                log::info!("run_agent_loop: cancelled");
                 return Ok(());
             }
 
@@ -1748,7 +1749,7 @@ impl AgentRuntime {
                 let store = self.store.lock().await;
                 store.load_messages(session_id)?
             };
-            crate::log_info!(
+            log::info!(
                 "agent_loop: loaded {} messages in {:?}",
                 db_messages.len(),
                 _t_load.elapsed()
@@ -1806,7 +1807,7 @@ impl AgentRuntime {
                     }
                 }
             }
-            crate::log_info!(
+            log::info!(
                 "agent_loop: context injection took {:?}",
                 _t_inject.elapsed()
             );
@@ -1816,7 +1817,7 @@ impl AgentRuntime {
             let mut conv = crate::session::Conversation::new(session_id, "", "", "", "", "", "");
             conv.messages = db_messages;
             let request_messages = context_manager.build_request_messages(&conv, mode);
-            crate::log_info!(
+            log::info!(
                 "agent_loop: built {} request messages in {:?}",
                 request_messages.len(),
                 _t_build.elapsed()
@@ -1830,11 +1831,11 @@ impl AgentRuntime {
             let _t_prep_model = std::time::Instant::now();
             let mut model_for_turn = model.clone();
             model_for_turn.system_prompt = static_system_prompt.clone();
-            crate::log_debug!(
+            log::debug!(
                 "agent_loop: model_for_turn setup took {:?}",
                 _t_prep_model.elapsed()
             );
-            crate::log_info!(
+            log::info!(
                 "agent_loop: pre-LLM overhead {:?} — run_single_turn starting",
                 _t_prep_model.elapsed()
             );
@@ -1850,7 +1851,7 @@ impl AgentRuntime {
                     &event_tx,
                 )
                 .await?;
-            crate::log_info!(
+            log::info!(
                 "agent_loop: run_single_turn completed in {:?}",
                 _t_turn.elapsed()
             );
@@ -1861,7 +1862,7 @@ impl AgentRuntime {
             if let Some(ref ct) = cancel_token
                 && ct.is_cancelled()
             {
-                crate::log_info!(
+                log::info!(
                     "run_agent_loop: cancelled after turn, discarding assistant message"
                 );
                 // The old agent loop is done; a new one has been spawned
@@ -1879,7 +1880,7 @@ impl AgentRuntime {
             if turn.tool_calls.is_empty() {
                 let next_msg = self.queued_messages.lock().unwrap().pop_front();
                 if let Some(qmsg) = next_msg {
-                    crate::log_info!(
+                    log::info!(
                         "run_agent_loop: processing queued message ({} chars)",
                         qmsg.content.len()
                     );
@@ -1902,7 +1903,7 @@ impl AgentRuntime {
                     if let Some(ref ct) = cancel_token
                         && ct.is_cancelled()
                     {
-                        crate::log_info!("run_agent_loop: cancelled before TurnStarting (queued)");
+                        log::info!("run_agent_loop: cancelled before TurnStarting (queued)");
                         return Ok(());
                     }
 
@@ -1920,7 +1921,7 @@ impl AgentRuntime {
                     _ => return Ok(()),
                 };
                 if context_manager.needs_compaction(&conversation, &model) {
-                    crate::log_info!(
+                    log::info!(
                         "run_agent_loop: compacting inline for session {}",
                         session_id
                     );
@@ -1949,7 +1950,7 @@ impl AgentRuntime {
                         Ok(true) => true,
                         Ok(false) => false,
                         Err(e) => {
-                            crate::log_warn!("run_agent_loop: compaction failed: {}", e);
+                            log::warn!("run_agent_loop: compaction failed: {}", e);
                             let _ = event_tx.send(BackendEvent::ContextCompacted {
                                 session_id,
                                 compacted: false,
@@ -2038,7 +2039,7 @@ impl AgentRuntime {
                         }
                     }
                     Err(_) => {
-                        crate::log_info!(
+                        log::info!(
                             "run_agent_loop: permission channel closed, stopping loop"
                         );
                         return Ok(());
@@ -2059,7 +2060,7 @@ impl AgentRuntime {
             if let Some(ref ct) = cancel_token
                 && ct.is_cancelled()
             {
-                crate::log_info!("run_agent_loop: cancelled before tool execution");
+                log::info!("run_agent_loop: cancelled before tool execution");
                 return Ok(());
             }
 
@@ -2195,7 +2196,7 @@ impl AgentRuntime {
             if let Some(ref ct) = cancel_token
                 && ct.is_cancelled()
             {
-                crate::log_info!("run_agent_loop: cancelled before TurnStarting");
+                log::info!("run_agent_loop: cancelled before TurnStarting");
                 return Ok(());
             }
 
@@ -2205,7 +2206,7 @@ impl AgentRuntime {
                 session_id,
                 request_id,
             });
-            crate::log_info!(
+            log::info!(
                 "agent_loop: post-tools to TurnStarting took {:?}",
                 _t_post_tools.elapsed()
             );
@@ -2296,10 +2297,11 @@ mod tests {
 
     use uuid::Uuid;
 
+    use tidev_types::prompts::SessionMode;
+
     use crate::{
         config::ConfigPaths,
         context::ContextManager,
-        prompts::SessionMode,
         session::{Conversation, Message, MessageRole, ToolCall, ToolExecutionResult},
         storage::SessionStore,
     };
@@ -2356,7 +2358,7 @@ mod tests {
                 tmp.path().join("config"),
                 vec![],
                 crate::mcp::McpManager::new(tmp.path().join("workspace"), Default::default()),
-                crate::config::PermissionConfig::default(),
+                tidev_types::types::PermissionConfig::default(),
                 std::sync::Arc::new(crate::tooling::FileReadTracker::new()),
                 std::sync::Arc::new(crate::memory::MemoryStore::open(&db_path).unwrap()),
                 false,

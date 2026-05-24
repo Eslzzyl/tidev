@@ -181,7 +181,7 @@ impl FileSearchIndex {
         ) {
             Ok(watcher) => watcher,
             Err(error) => {
-                crate::log_warn!("failed to initialize file search watcher: {}", error);
+                log::warn!("failed to initialize file search watcher: {}", error);
                 return;
             }
         };
@@ -226,7 +226,7 @@ impl FileSearchIndex {
         // Set up recursive inotify watches in the background thread
         // so the main thread does not block on filesystem traversal.
         if let Err(error) = watcher.watch(&workspace_root, RecursiveMode::Recursive) {
-            crate::log_warn!(
+            log::warn!(
                 "failed to watch workspace for file search refreshes: {}",
                 error,
             );
@@ -275,7 +275,7 @@ impl FileSearchIndex {
                     }
                 }
                 Ok(Err(error)) => {
-                    crate::log_warn!("file search watcher event error: {}", error);
+                    log::warn!("file search watcher event error: {}", error);
                 }
                 Err(RecvTimeoutError::Timeout) => {
                     if !pending_dirs.is_empty() {
@@ -346,7 +346,7 @@ impl FileSearchIndex {
 
         self.completed_generation
             .store(generation, Ordering::Release);
-        crate::log_info!(
+        log::info!(
             "file search index built for {:?}, {} entries",
             workspace_root,
             self.snapshot.lock().unwrap().flat_cache.len()

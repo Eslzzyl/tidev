@@ -28,10 +28,11 @@ use uuid::Uuid;
 
 use crate::{
     config::ActiveModel,
-    log_debug, log_error,
     session::{BackendEvent, Message, MessageAttachment, MessageRole, ToolCall},
     tooling::ToolDefinition,
 };
+
+use log::{debug as log_debug, error as log_error};
 
 use super::attachments::{image_attachments, message_text_with_file_references};
 use super::debug::save_request_for_debugging;

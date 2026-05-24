@@ -156,11 +156,11 @@ impl LarkChannel {
     async fn run_loop(&mut self) -> Result<()> {
         // Resolve bot open_id at startup
         self.bot_open_id = self.client.get_bot_info().await.ok();
-        crate::log_info!("Lark bot open_id: {:?}", self.bot_open_id);
+        log::info!("Lark bot open_id: {:?}", self.bot_open_id);
 
         loop {
             if let Err(e) = self.connect_and_listen().await {
-                crate::log_error!(
+                log::error!(
                     "Lark WS connection error: {e}, reconnecting in {}s",
                     WS_RECONNECT_DELAY.as_secs()
                 );
@@ -174,7 +174,7 @@ impl LarkChannel {
         let (ws_url, client_config) = self.client.get_ws_endpoint().await?;
         let ping_interval = Duration::from_secs(client_config.ping_interval.unwrap_or(120).max(10));
 
-        crate::log_info!("Lark connecting to WS endpoint...");
+        log::info!("Lark connecting to WS endpoint...");
         let (ws_stream, _) = connect_async(&ws_url).await?;
         let (mut write, mut read) = ws_stream.split();
 
@@ -212,7 +212,7 @@ impl LarkChannel {
                         payload: None,
                     };
                     if write.send(WsMessage::Binary(ping.encode_to_vec().into())).await.is_err() {
-                        crate::log_warn!("Lark ping send failed, reconnecting");
+                        log::warn!("Lark ping send failed, reconnecting");
                         break;
                     }
                 }
@@ -235,12 +235,12 @@ impl LarkChannel {
                                     }
                                 }
                                 Err(e) => {
-                                    crate::log_warn!("Lark WS frame decode error: {e}");
+                                    log::warn!("Lark WS frame decode error: {e}");
                                 }
                             }
                         }
                         Some(Ok(WsMessage::Close(_))) => {
-                            crate::log_info!("Lark WS closed, reconnecting...");
+                            log::info!("Lark WS closed, reconnecting...");
                             break;
                         }
                         Some(Ok(WsMessage::Ping(data))) => {
@@ -253,7 +253,7 @@ impl LarkChannel {
 
                     // Timeout check
                     if last_recv.elapsed() > WS_HEARTBEAT_TIMEOUT {
-                        crate::log_warn!("Lark WS heartbeat timeout, reconnecting");
+                        log::warn!("Lark WS heartbeat timeout, reconnecting");
                         break;
                     }
                 }
@@ -316,7 +316,7 @@ impl LarkChannel {
 
         // Allowlist check
         if !self.core.is_allowed(&sender_open_id) {
-            crate::log_info!("Lark unauthorized user: {sender_open_id}");
+            log::info!("Lark unauthorized user: {sender_open_id}");
             return Ok(());
         }
 
@@ -347,7 +347,7 @@ impl LarkChannel {
             return Ok(());
         }
 
-        crate::log_info!("Lark Message from {sender_open_id} in {chat_id}: {clean_content}");
+        log::info!("Lark Message from {sender_open_id} in {chat_id}: {clean_content}");
 
         // Add ack reaction (best-effort)
         let _ = self.client.add_reaction(message_id, "OK").await;
@@ -606,7 +606,7 @@ impl Channel for LarkChannel {
 
     fn run(&mut self) -> Pin<Box<dyn Future<Output = Result<()>> + '_>> {
         Box::pin(async move {
-            crate::log_info!("Lark channel ready");
+            log::info!("Lark channel ready");
             self.run_loop().await
         })
     }

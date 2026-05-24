@@ -5,18 +5,16 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
 use crate::config::AuthStore;
-use crate::config::{PermissionConfig, WebSearchConfig};
+use tidev_types::prompts::SessionMode;
+
+use crate::config::WebSearchConfig;
+use tidev_types::types::PermissionConfig;
 use crate::mcp::McpManager;
 use crate::memory::MemoryStore;
 use crate::sandbox::SandboxPolicy;
 use crate::session::BackendEvent;
 use crate::tooling::SkillCatalog;
-use crate::{
-    prompts::SessionMode,
-    session::{ToolCall, ToolExecutionResult},
-    storage::SessionStore,
-};
-
+use crate::{session::{ToolCall, ToolExecutionResult}, storage::SessionStore};
 use super::tools::tool_definitions;
 use super::{FileReadTracker, ToolDefinition, canonical_tool_name};
 

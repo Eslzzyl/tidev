@@ -6,9 +6,10 @@ mod utils;
 
 pub(crate) use content::strip_system_reminder_tags;
 
+use tidev_types::prompts::SessionMode;
+
 use crate::{
     config::{AppConfig, AuthStore},
-    prompts::SessionMode,
     session::{Conversation, Message, MessageRole, ToolCall},
     theme::ThemePalette,
     tooling::canonical_tool_name,
@@ -1164,7 +1165,7 @@ impl App {
         let elapsed = started_at.elapsed();
         if elapsed > Duration::from_millis(12) {
             let (hits, misses, entries) = self.message_render_cache_stats();
-            crate::log_debug!(
+            log::debug!(
                 "messages_text: messages={}, visible_blocks={}, width={}, took={:?}, cache_hits={}, cache_misses={}, cache_entries={}",
                 messages.len(),
                 visible_blocks.len(),

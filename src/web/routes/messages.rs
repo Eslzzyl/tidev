@@ -8,10 +8,12 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::unbounded_channel;
 use uuid::Uuid;
 
+use crate::agent::prompts::default_system_prompt;
+use tidev_types::prompts::SessionMode;
+
 use crate::{
     config::reasoning::ThinkingLevelType,
     context::ContextManager,
-    prompts::{self, default_system_prompt, SessionMode},
     session::{BackendEvent, Conversation, Message, MessageRole, ToolCall},
     web::{
         error::{AppError, WebResult},
@@ -149,7 +151,7 @@ pub async fn list_messages(
     State(state): State<AppState>,
     AxumPath(session_id): AxumPath<Uuid>,
 ) -> WebResult<Json<ListMessagesResponse>> {
-    crate::log_debug!("Listing messages for session {}", session_id);
+    log::debug!("Listing messages for session {}", session_id);
     let store = state.store.lock().await;
 
     // Load messages for the session
@@ -175,7 +177,7 @@ pub async fn list_messages(
 
     // Check if session exists by trying to load the record
     let _ = store.load_session_record(session_id)?.ok_or_else(|| {
-        crate::log_warn!("Session {} not found when listing messages", session_id);
+        log::warn!("Session {} not found when listing messages", session_id);
         AppError::NotFound(format!("Session {} not found", session_id))
     })?;
     drop(store);
@@ -188,7 +190,7 @@ pub async fn list_messages(
                 serde_json::from_str::<Vec<crate::snapshot::FileDiff>>(json_str).ok()
             });
 
-            crate::log_debug!(
+            log::debug!(
                 "list_messages: msg role={} cache_read_tokens={:?} total_tokens={:?}",
                 msg.role.db_value(),
                 msg.cache_read_tokens,
@@ -246,7 +248,7 @@ pub async fn list_messages(
         })
         .collect();
 
-    crate::log_debug!(
+    log::debug!(
         "Listed {} messages for session {}",
         messages.len(),
         session_id
@@ -260,7 +262,7 @@ pub async fn send_message(
     AxumPath(session_id): AxumPath<Uuid>,
     Json(body): Json<SendMessageRequest>,
 ) -> WebResult<(StatusCode, Json<SendMessageResponse>)> {
-    crate::log_info!(
+    log::info!(
         "Sending message to session {} (content length: {})",
         session_id,
         body.content.len()
@@ -270,14 +272,14 @@ pub async fn send_message(
     let record = {
         let store = state.store.lock().await;
         store.load_session_record(session_id)?.ok_or_else(|| {
-            crate::log_warn!("Session {} not found when sending message", session_id);
+            log::warn!("Session {} not found when sending message", session_id);
             AppError::NotFound(format!("Session {} not found", session_id))
         })?
     };
 
     // Generate request ID
     let request_id = rand::random::<u64>();
-    crate::log_debug!(
+    log::debug!(
         "Generated request ID {} for session {}",
         request_id,
         session_id
@@ -313,8 +315,8 @@ pub async fn send_message(
     let content = if let Some(prev) = prev_mode {
         if prev != mode {
             let reminder = match mode {
-                SessionMode::Plan => prompts::plan_switch_reminder(),
-                SessionMode::Build => prompts::build_switch_reminder(),
+                SessionMode::Plan => tidev_types::prompts::plan_switch_reminder(),
+                SessionMode::Build => tidev_types::prompts::build_switch_reminder(),
             };
             format!("{}\n\n{}", reminder, body.content)
         } else {
@@ -448,7 +450,7 @@ pub async fn send_message(
                 .agent
                 .compose_static_system_prompt(&model.system_prompt);
             if let Err(e) = store.update_session_system_prompt(session_id, &composed) {
-                crate::log_warn!("failed to persist static system prompt: {}", e);
+                log::warn!("failed to persist static system prompt: {}", e);
             }
             model.system_prompt = composed;
         }
@@ -466,7 +468,7 @@ pub async fn send_message(
         // Create a context manager for message preprocessing
         let mut context_manager = ContextManager::new();
 
-        crate::log_info!("Starting agent loop for session {}", session_id);
+        log::info!("Starting agent loop for session {}", session_id);
 
         if let Err(e) = agent
             .run_agent_loop(crate::agent::runtime::AgentLoopConfig {
@@ -480,12 +482,12 @@ pub async fn send_message(
             })
             .await
         {
-            crate::log_error!("Agent loop failed for session {}: {}", session_id, e);
+            log::error!("Agent loop failed for session {}: {}", session_id, e);
         }
 
         // Clean up request tracking
         state_for_spawn.remove_request(session_id).await;
-        crate::log_info!("Agent loop completed for session {}", session_id);
+        log::info!("Agent loop completed for session {}", session_id);
     });
 
     // Spawn task to forward BackendEvents to SSE AppEvents.
@@ -630,7 +632,7 @@ pub async fn abort_request(
     AxumPath(session_id): AxumPath<Uuid>,
     Json(body): Json<AbortRequest>,
 ) -> WebResult<StatusCode> {
-    crate::log_info!(
+    log::info!(
         "Abort request for session {} request {}",
         session_id,
         body.request_id
@@ -645,13 +647,13 @@ pub async fn abort_request(
             session_id,
             request_id: body.request_id,
         });
-        crate::log_info!(
+        log::info!(
             "Aborted request {} for session {}",
             body.request_id,
             session_id
         );
     } else {
-        crate::log_warn!(
+        log::warn!(
             "No active request {} found for session {}",
             body.request_id,
             session_id
@@ -683,7 +685,7 @@ pub async fn revert_to_message(
     AxumPath(session_id): AxumPath<Uuid>,
     Json(body): Json<RevertRequest>,
 ) -> WebResult<Json<RevertResponse>> {
-    crate::log_info!(
+    log::info!(
         "Revert request for session {} to message {}",
         session_id,
         body.message_id
@@ -713,28 +715,28 @@ pub async fn revert_to_message(
 
     // Collect patches from messages after the target
     let patches = crate::shared::undo::collect_patches_after_message(&messages, body.message_id)?;
-    crate::log_info!("Collected {} patches to revert", patches.len());
+    log::info!("Collected {} patches to revert", patches.len());
 
     // Capture redo snapshot (current state) if not already saved
     let redo_snapshot = match store.load_redo_snapshot(session_id)? {
         Some(existing) => {
-            crate::log_info!("Using existing redo snapshot");
+            log::info!("Using existing redo snapshot");
             existing
         }
         None => {
-            crate::log_info!("Capturing new redo snapshot");
+            log::info!("Capturing new redo snapshot");
             drop(store); // Release lock before async operation
             match state.snapshot.track().await {
                 Ok(Some(hash)) => {
-                    crate::log_info!("Captured redo snapshot hash={}", hash);
+                    log::info!("Captured redo snapshot hash={}", hash);
                     hash
                 }
                 Ok(None) => {
-                    crate::log_info!("No changes to snapshot");
+                    log::info!("No changes to snapshot");
                     String::new()
                 }
                 Err(error) => {
-                    crate::log_warn!("Failed to capture redo snapshot: {}", error);
+                    log::warn!("Failed to capture redo snapshot: {}", error);
                     String::new()
                 }
             }
@@ -744,17 +746,17 @@ pub async fn revert_to_message(
     // Restore files using redo snapshot first (to undo previous reverts)
     let store = state.store.lock().await;
     if let Some(existing_snapshot) = store.load_redo_snapshot(session_id)? {
-        crate::log_info!("Restoring redo snapshot");
+        log::info!("Restoring redo snapshot");
         if let Err(error) = state.snapshot.restore(&existing_snapshot).await {
-            crate::log_warn!("Failed to restore redo snapshot: {}", error);
+            log::warn!("Failed to restore redo snapshot: {}", error);
         }
     }
 
     // Apply revert patches
     if !patches.is_empty() {
-        crate::log_info!("Reverting {} patches", patches.len());
+        log::info!("Reverting {} patches", patches.len());
         if let Err(error) = state.snapshot.revert(&patches).await {
-            crate::log_warn!("Revert partially failed: {}", error);
+            log::warn!("Revert partially failed: {}", error);
         }
     }
 
@@ -783,7 +785,7 @@ pub async fn revert_to_message(
         .event_bus
         .publish(AppEvent::MessagesUpdated { session_id });
 
-    crate::log_info!(
+    log::info!(
         "Revert completed: session {} reverted to message {}, {} messages hidden",
         session_id,
         body.message_id,
@@ -809,7 +811,7 @@ pub async fn redo_last_undo(
     State(state): State<AppState>,
     AxumPath(session_id): AxumPath<Uuid>,
 ) -> WebResult<Json<RedoResponse>> {
-    crate::log_info!("Redo request for session {}", session_id);
+    log::info!("Redo request for session {}", session_id);
 
     let store = state.store.lock().await;
 
@@ -825,9 +827,9 @@ pub async fn redo_last_undo(
 
     // Restore files from the redo snapshot
     if !snapshot_hash.is_empty() {
-        crate::log_info!("Restoring redo snapshot {}", snapshot_hash);
+        log::info!("Restoring redo snapshot {}", snapshot_hash);
         if let Err(error) = state.snapshot.restore(&snapshot_hash).await {
-            crate::log_warn!("Redo restore failed: {}", error);
+            log::warn!("Redo restore failed: {}", error);
         }
     }
 
@@ -840,7 +842,7 @@ pub async fn redo_last_undo(
         .event_bus
         .publish(AppEvent::MessagesUpdated { session_id });
 
-    crate::log_info!("Redo completed for session {}", session_id);
+    log::info!("Redo completed for session {}", session_id);
 
     Ok(Json(RedoResponse {
         success: true,
@@ -859,7 +861,7 @@ pub async fn compact_session(
     State(mut state): State<AppState>,
     AxumPath(session_id): AxumPath<Uuid>,
 ) -> WebResult<(StatusCode, Json<CompactSessionResponse>)> {
-    crate::log_info!("Compacting session {}", session_id);
+    log::info!("Compacting session {}", session_id);
 
     // Load session record
     let record = {
@@ -955,7 +957,7 @@ pub async fn compact_session(
 
     // Spawn compaction in background with streaming
     tokio::spawn(async move {
-        crate::log_info!(
+        log::info!(
             "Starting compaction background task for session {}",
             session_id
         );
@@ -979,7 +981,7 @@ pub async fn compact_session(
                     manual: true,
                     stream_ctx: Some((stream_request_id, event_tx)),
                     tools: &tools,
-                    mode: crate::prompts::SessionMode::Build,
+                    mode: tidev_types::prompts::SessionMode::Build,
                 })
                 .await;
             (context_manager, result)
@@ -1005,7 +1007,7 @@ pub async fn compact_session(
         let (context_manager, result) = match compact_handle.await {
             Ok(pair) => pair,
             Err(e) => {
-                crate::log_warn!("Compact task panicked: {}", e);
+                log::warn!("Compact task panicked: {}", e);
                 event_bus.publish(AppEvent::MessagesUpdated { session_id });
                 return;
             }
@@ -1023,26 +1025,26 @@ pub async fn compact_session(
                     {
                         let store = store.lock().await;
                         if let Err(e) = store.append_message(session_id, &system_msg) {
-                            crate::log_warn!("Failed to persist compaction message: {}", e);
+                            log::warn!("Failed to persist compaction message: {}", e);
                         }
                         if let Err(e) = store.update_session_context_state(
                             session_id,
                             context_manager.summary.as_deref(),
                             context_manager.retained_from,
                         ) {
-                            crate::log_warn!("Failed to persist compacted context state: {}", e);
+                            log::warn!("Failed to persist compacted context state: {}", e);
                         }
                     }
-                    crate::log_info!("Compaction completed for session {}", session_id);
+                    log::info!("Compaction completed for session {}", session_id);
                 } else {
-                    crate::log_info!("Compaction produced no summary for session {}", session_id);
+                    log::info!("Compaction produced no summary for session {}", session_id);
                 }
             }
             Ok(false) => {
-                crate::log_info!("Compaction skipped (not needed) for session {}", session_id);
+                log::info!("Compaction skipped (not needed) for session {}", session_id);
             }
             Err(e) => {
-                crate::log_warn!("Compaction failed for session {}: {}", session_id, e);
+                log::warn!("Compaction failed for session {}: {}", session_id, e);
             }
         }
 

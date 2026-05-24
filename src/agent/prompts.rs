@@ -1,5 +1,5 @@
 use super::AgentType;
-use crate::prompts::{base_instruction, general_system_prompt};
+use tidev_types::prompts::{base_instruction, general_system_prompt};
 
 /// Return the system prompt for a given agent type.
 pub fn system_prompt(agent_type: AgentType) -> String {
@@ -11,6 +11,11 @@ pub fn system_prompt(agent_type: AgentType) -> String {
         AgentType::Designer => designer_prompt(),
         AgentType::Fixer => fixer_prompt(),
     }
+}
+
+/// Return the default system prompt (General agent).
+pub fn default_system_prompt() -> String {
+    system_prompt(AgentType::General)
 }
 
 fn explorer_prompt() -> String {

@@ -3982,6 +3982,7 @@ dependencies = [
  "ignore",
  "image",
  "libc",
+ "log",
  "lru 0.18.0",
  "mime_guess",
  "notify",
@@ -4001,6 +4002,7 @@ dependencies = [
  "syntect",
  "tempfile",
  "textwrap",
+ "tidev-types",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
@@ -4013,6 +4015,24 @@ dependencies = [
  "urlencoding",
  "uuid",
  "zstd",
+]
+
+[[package]]
+name = "tidev-cli"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "tidev",
+]
+
+[[package]]
+name = "tidev-types"
+version = "0.4.0"
+dependencies = [
+ "chrono",
+ "log",
+ "serde",
+ "uuid",
 ]
 
 [[package]]

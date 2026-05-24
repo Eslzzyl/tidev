@@ -2,10 +2,11 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 
+use tidev_types::prompts::SessionMode;
+
 use crate::{
     config::ActiveModel,
     llm::LlmClient,
-    prompts::SessionMode,
     session::{Conversation, Message, MessageAttachment, MessageRole, ToolExecutionResult},
     tooling::ToolDefinition,
 };
@@ -170,7 +171,7 @@ impl ContextManager {
                     // before the user message, so the provider doesn't see an
                     // assistant(tool_calls) without corresponding tool results.
                     for (tool_call_id, tool_name) in pending_tool_calls.drain() {
-                        crate::log_warn!(
+                        log::warn!(
                             "build_request_messages: injecting synthetic failure for orphaned \
                              tool call id={} name={} before user message",
                             tool_call_id,
@@ -200,7 +201,7 @@ impl ContextManager {
                     // is overwritten below.
                     if !message.tool_calls.is_empty() && !pending_tool_calls.is_empty() {
                         for (tool_call_id, tool_name) in pending_tool_calls.drain() {
-                            crate::log_warn!(
+                            log::warn!(
                                 "build_request_messages: injecting synthetic failure for orphaned \
                                  tool call id={} name={} before next assistant tool_calls",
                                 tool_call_id,
@@ -241,7 +242,7 @@ impl ContextManager {
         // corresponding result message was found). This can happen if tool execution was
         // interrupted or if the conversation state is inconsistent.
         for (tool_call_id, tool_name) in &pending_tool_calls {
-            crate::log_warn!(
+            log::warn!(
                 "build_request_messages: orphaned tool call id={} name={}, injecting synthetic failure",
                 tool_call_id,
                 tool_name

@@ -46,7 +46,7 @@ impl ChannelOrchestrator {
         }
 
         let names = self.channel_names();
-        crate::log_info!("Starting {} channel(s): {}", names.len(), names.join(", "));
+        log::info!("Starting {} channel(s): {}", names.len(), names.join(", "));
 
         // Restore sessions from persistent storage before starting channels.
         // Each channel has its own SessionStore, so we call restore_sessions on each.
@@ -57,7 +57,7 @@ impl ChannelOrchestrator {
                 match channel.restore_sessions(store.clone()) {
                     Ok(count) => {
                         if count > 0 {
-                            crate::log_info!(
+                            log::info!(
                                 "Restored {} session(s) for {}",
                                 count,
                                 channel.name()
@@ -66,7 +66,7 @@ impl ChannelOrchestrator {
                         total_restored += count;
                     }
                     Err(e) => {
-                        crate::log_error!(
+                        log::error!(
                             "Failed to restore sessions for {}: {}",
                             channel.name(),
                             e
@@ -76,7 +76,7 @@ impl ChannelOrchestrator {
             }
         }
         if total_restored > 0 {
-            crate::log_info!("Restored {} session(s) from disk", total_restored);
+            log::info!("Restored {} session(s) from disk", total_restored);
         }
 
         // Spawn each channel in its own local task
@@ -85,7 +85,7 @@ impl ChannelOrchestrator {
             let handle = tokio::task::spawn_local(async move {
                 let name = channel.name();
                 if let Err(e) = channel.run().await {
-                    crate::log_error!("Channel {} failed: {}", name, e);
+                    log::error!("Channel {} failed: {}", name, e);
                     Err(e)
                 } else {
                     Ok(())
@@ -106,7 +106,7 @@ impl ChannelOrchestrator {
                     }
                 }
                 Err(e) => {
-                    crate::log_error!("Channel task panicked: {}", e);
+                    log::error!("Channel task panicked: {}", e);
                     if any_error.is_none() {
                         any_error = Some(anyhow::anyhow!("Channel task panicked: {}", e));
                     }

@@ -539,7 +539,7 @@ impl App {
                     .tools
                     .sandbox_policy()
                     .map(|p| p.label())
-                    .unwrap_or_else(|| self.mode.sandbox_policy(&self.config.sandbox).label());
+                    .unwrap_or_else(|| self.config.sandbox.to_policy().label());
                 meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
                 let sandbox_style =
                     if sandbox_label.contains("off") || sandbox_label.contains("read") {

@@ -68,7 +68,7 @@ pub async fn events_stream(
     drop(auth);
 
     let session_id = query.session;
-    crate::log_info!("SSE connection established for session {}", session_id);
+    log::info!("SSE connection established for session {}", session_id);
 
     // Atomically subscribe + drain the per-session event buffer.
     // This ensures we don't lose events published before the subscription.
@@ -92,7 +92,7 @@ pub async fn events_stream(
             tokio::select! {
                 // Check for shutdown signal
                 _ = cancel_token.cancelled() => {
-                    crate::log_debug!("SSE connection closing due to shutdown for session {}", session_id);
+                    log::debug!("SSE connection closing due to shutdown for session {}", session_id);
                     break;
                 }
                 // Wait for next event
@@ -133,7 +133,7 @@ pub async fn events_stream(
             }
         }
 
-        crate::log_info!("SSE connection closed for session {}", session_id);
+        log::info!("SSE connection closed for session {}", session_id);
     };
 
     Ok(Sse::new(stream).keep_alive(

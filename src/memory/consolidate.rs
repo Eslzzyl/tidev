@@ -83,7 +83,7 @@ impl ConsolidationService {
                     report.co_change_patterns = p_report.co_change_added;
                     report.error_repeat_patterns = p_report.error_repeat_added;
                 }
-                Err(e) => crate::log_warn!("pattern mining failed: {}", e),
+                Err(e) => log::warn!("pattern mining failed: {}", e),
             }
         }
 
@@ -94,7 +94,7 @@ impl ConsolidationService {
             for summary in &summaries {
                 let sid = summary.session_id.to_string();
                 if let Err(e) = graph::extract_from_session_summary(&db, summary, &sid) {
-                    crate::log_warn!("graph extraction failed for summary {}: {}", sid, e);
+                    log::warn!("graph extraction failed for summary {}: {}", sid, e);
                 }
             }
         }
@@ -102,13 +102,13 @@ impl ConsolidationService {
         // Tier 1
         match Self::consolidate_semantic(db_path, llm, model, project).await {
             Ok(n) => report.semantic_facts_added = n,
-            Err(e) => crate::log_warn!("semantic consolidation failed: {}", e),
+            Err(e) => log::warn!("semantic consolidation failed: {}", e),
         }
 
         // Tier 2
         match Self::extract_procedural(db_path, llm, model, project).await {
             Ok(n) => report.procedural_patterns_added = n,
-            Err(e) => crate::log_warn!("procedural extraction failed: {}", e),
+            Err(e) => log::warn!("procedural extraction failed: {}", e),
         }
 
         if report.semantic_facts_added == 0 && report.procedural_patterns_added == 0 {
@@ -182,7 +182,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
             {
                 Ok(r) => r,
                 Err(e) => {
-                    crate::log_warn!(
+                    log::warn!(
                         "semantic consolidation LLM call failed (attempt {}): {}",
                         attempt,
                         e
@@ -197,7 +197,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 break;
             }
             if attempt == 0 {
-                crate::log_warn!(
+                log::warn!(
                     "semantic consolidation: unparseable response, retrying with stricter prompt"
                 );
             }
@@ -224,7 +224,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
             None => 0,
         };
         if retry_count >= 3 {
-            crate::log_warn!(
+            log::warn!(
                 "consolidation: skipping semantic batch at {} after {} consecutive failures",
                 cursor_val.as_deref().unwrap_or("?"),
                 retry_count
@@ -250,7 +250,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 &tags,
                 None, // source_session_id — multiple sources, leave generic
             ) {
-                crate::log_warn!("failed to remember consolidated fact: {}", e);
+                log::warn!("failed to remember consolidated fact: {}", e);
                 continue;
             }
             written += 1;
@@ -275,7 +275,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                     rusqlite::params![key, new_count.to_string()],
                 );
             }
-            crate::log_warn!(
+            log::warn!(
                 "consolidation: semantic batch failed (attempt {}/3), will retry",
                 new_count
             );
@@ -348,7 +348,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
             {
                 Ok(r) => r,
                 Err(e) => {
-                    crate::log_warn!(
+                    log::warn!(
                         "procedural extraction LLM call failed (attempt {}): {}",
                         attempt,
                         e
@@ -363,7 +363,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 break;
             }
             if attempt == 0 {
-                crate::log_warn!(
+                log::warn!(
                     "procedural extraction: unparseable response, retrying with stricter prompt"
                 );
             }
@@ -390,7 +390,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
             None => 0,
         };
         if retry_count >= 3 {
-            crate::log_warn!(
+            log::warn!(
                 "consolidation: skipping procedural batch at {} after {} consecutive failures",
                 cursor_val.as_deref().unwrap_or("?"),
                 retry_count
@@ -417,7 +417,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 &tags,
                 None,
             ) {
-                crate::log_warn!("failed to remember procedure: {}", e);
+                log::warn!("failed to remember procedure: {}", e);
                 continue;
             }
             written += 1;
@@ -442,7 +442,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                     rusqlite::params![key, new_count.to_string()],
                 );
             }
-            crate::log_warn!(
+            log::warn!(
                 "consolidation: procedural batch failed (attempt {}/3), will retry",
                 new_count
             );

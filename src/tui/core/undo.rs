@@ -15,20 +15,20 @@ impl App {
         &mut self,
         runtime: &Runtime,
     ) -> Result<()> {
-        crate::log_info!("finalize_snapshot: starting");
+        log::info!("finalize_snapshot: starting");
 
         let last_user_message_id = {
             let Some(last_user_message) = self.conversation.last_visible_user_message() else {
-                crate::log_info!("finalize_snapshot: no visible user message");
+                log::info!("finalize_snapshot: no visible user message");
                 return Ok(());
             };
 
             let Some(hash) = last_user_message.snapshot_hash.clone() else {
-                crate::log_info!("finalize_snapshot: message has no snapshot_hash");
+                log::info!("finalize_snapshot: message has no snapshot_hash");
                 return Ok(());
             };
 
-            crate::log_info!(
+            log::info!(
                 "finalize_snapshot: message id={}, snapshot_hash={}",
                 last_user_message.id,
                 hash
@@ -43,13 +43,13 @@ impl App {
                 .iter()
                 .find(|m| m.id == last_user_message_id)
             else {
-                crate::log_warn!("finalize_snapshot: message not found in messages list");
+                log::warn!("finalize_snapshot: message not found in messages list");
                 return Ok(());
             };
             match msg.snapshot_hash.clone() {
                 Some(h) => h,
                 None => {
-                    crate::log_info!("finalize_snapshot: snapshot_hash is None");
+                    log::info!("finalize_snapshot: snapshot_hash is None");
                     return Ok(());
                 }
             }
@@ -59,7 +59,7 @@ impl App {
         let step_hashes: Vec<String> = self.step_snapshot_hashes.drain(..).collect();
         let cached_file_lists: Vec<Vec<String>> = self.step_cached_file_lists.drain(..).collect();
 
-        crate::log_info!(
+        log::info!(
             "finalize_snapshot: {} cached step patches, {} step hashes",
             cached_file_lists.len(),
             step_hashes.len()
@@ -71,7 +71,7 @@ impl App {
             for (i, files) in cached_file_lists.iter().enumerate() {
                 if !files.is_empty() {
                     let hash = step_hashes.get(i).cloned().unwrap_or_default();
-                    crate::log_info!(
+                    log::info!(
                         "finalize_snapshot: cached step {} hash={} files={}",
                         i + 1,
                         hash,
@@ -87,11 +87,11 @@ impl App {
         } else {
             // Fallback: no cached patches. Compute patch for the initial hash
             // to capture changes made since the initial snapshot (e.g., direct file edits).
-            crate::log_info!("finalize_snapshot: no cached patches, computing from snapshot");
+            log::info!("finalize_snapshot: no cached patches, computing from snapshot");
             match runtime.block_on(self.snapshot.patch(&initial_hash)) {
                 Ok(patch) => {
                     if !patch.files.is_empty() {
-                        crate::log_info!(
+                        log::info!(
                             "finalize_snapshot: fallback patch: {} files",
                             patch.files.len()
                         );
@@ -103,14 +103,14 @@ impl App {
                     }
                 }
                 Err(e) => {
-                    crate::log_warn!("finalize_snapshot: fallback patch failed: {}", e);
+                    log::warn!("finalize_snapshot: fallback patch failed: {}", e);
                 }
             }
         }
 
         if !step_patches.is_empty() {
             let patch_files_json = serde_json::to_string(&step_patches)?;
-            crate::log_info!(
+            log::info!(
                 "finalize_snapshot: saving patch_files, steps={}",
                 step_patches.len()
             );
@@ -150,7 +150,7 @@ impl App {
         self.step_cached_file_diffs = None;
         self.step_prev_hash = None;
 
-        crate::log_info!("finalize_snapshot: completed (async diff_full dispatched)");
+        log::info!("finalize_snapshot: completed (async diff_full dispatched)");
         Ok(())
     }
 
@@ -169,11 +169,11 @@ impl App {
         let request_id = self.active_request_id;
 
         runtime.spawn(async move {
-            crate::log_info!("async diff_full: starting from={} to={}", from, to);
+            log::info!("async diff_full: starting from={} to={}", from, to);
             match snapshot.diff_full(&from, &to).await {
                 Ok(file_diffs) => match serde_json::to_string(&file_diffs) {
                     Ok(diffs_json) => {
-                        crate::log_info!("async diff_full: completed, {} files", file_diffs.len());
+                        log::info!("async diff_full: completed, {} files", file_diffs.len());
                         let _ = tx.send(BackendEvent::SidebarSnapshotReady {
                             session_id,
                             request_id,
@@ -182,44 +182,44 @@ impl App {
                         });
                     }
                     Err(e) => {
-                        crate::log_warn!("async diff_full: serialization failed: {}", e);
+                        log::warn!("async diff_full: serialization failed: {}", e);
                     }
                 },
                 Err(e) => {
-                    crate::log_warn!("async diff_full: failed: {}", e);
+                    log::warn!("async diff_full: failed: {}", e);
                 }
             }
         });
     }
 
     pub(crate) fn undo_last_user_message(&mut self, runtime: &Runtime) -> Result<()> {
-        crate::log_info!("undo_last_user_message: starting");
+        log::info!("undo_last_user_message: starting");
 
         if self.pending_request {
             self.abort_current_request();
         }
 
         let message = if let Some(current_revert) = self.conversation.revert_message_id {
-            crate::log_info!(
+            log::info!(
                 "undo_last_user_message: already in revert state, looking for prev user message before {}",
                 current_revert
             );
             self.conversation.prev_user_message_before(current_revert)
         } else {
-            crate::log_info!(
+            log::info!(
                 "undo_last_user_message: not in revert state, looking for last visible user message"
             );
             self.conversation.last_visible_user_message()
         };
 
         let Some(message) = message else {
-            crate::log_info!("undo_last_user_message: no user message found");
+            log::info!("undo_last_user_message: no user message found");
             self.last_notice = Some("No earlier user message to undo".to_string());
             return Ok(());
         };
 
         let message = message.clone();
-        crate::log_info!(
+        log::info!(
             "undo_last_user_message: found message id={}, content_len={}",
             message.id,
             message.content.len()
@@ -227,30 +227,30 @@ impl App {
 
         self.revert_to_message(message.id, message.content.clone(), runtime)?;
         self.last_notice = Some("Undid previous user message".to_string());
-        crate::log_info!("undo_last_user_message: completed successfully");
+        log::info!("undo_last_user_message: completed successfully");
         Ok(())
     }
 
     pub(crate) fn redo_last_user_message(&mut self, runtime: &Runtime) -> Result<()> {
-        crate::log_info!("redo_last_user_message: starting");
+        log::info!("redo_last_user_message: starting");
 
         if self.pending_request {
             self.abort_current_request();
         }
 
         let Some(current_revert) = self.conversation.revert_message_id else {
-            crate::log_info!("redo_last_user_message: not in revert state");
+            log::info!("redo_last_user_message: not in revert state");
             self.last_notice = Some("Nothing to redo".to_string());
             return Ok(());
         };
 
-        crate::log_info!(
+        log::info!(
             "redo_last_user_message: looking for next user message after {}",
             current_revert
         );
 
         if let Some(next_message) = self.conversation.next_user_message_after(current_revert) {
-            crate::log_info!(
+            log::info!(
                 "redo_last_user_message: found next user message id={}",
                 next_message.id
             );
@@ -259,12 +259,12 @@ impl App {
             self.revert_to_message(message_id, content, runtime)?;
             self.last_notice = Some("Redo complete".to_string());
         } else {
-            crate::log_info!("redo_last_user_message: no next user message, unreverting");
+            log::info!("redo_last_user_message: no next user message, unreverting");
             self.unrevert(runtime)?;
             self.last_notice = Some("Redo complete".to_string());
         }
 
-        crate::log_info!("redo_last_user_message: completed successfully");
+        log::info!("redo_last_user_message: completed successfully");
         Ok(())
     }
 
@@ -274,11 +274,11 @@ impl App {
         message_content: String,
         runtime: &Runtime,
     ) -> Result<()> {
-        crate::log_info!("revert_to_message: message_id={}", message_id);
+        log::info!("revert_to_message: message_id={}", message_id);
 
         let patches = self.collect_patches_after_message(message_id)?;
 
-        crate::log_info!(
+        log::info!(
             "revert_to_message: patches.len()={}, revert_message_id={:?}",
             patches.len(),
             self.conversation.revert_message_id
@@ -290,21 +290,21 @@ impl App {
             .store
             .load_redo_snapshot(self.conversation.session_id)?
         {
-            crate::log_info!("revert_to_message: using existing redo_snapshot");
+            log::info!("revert_to_message: using existing redo_snapshot");
             existing
         } else {
-            crate::log_info!("revert_to_message: capturing new redo_snapshot");
+            log::info!("revert_to_message: capturing new redo_snapshot");
             match runtime.block_on(self.snapshot.track()) {
                 Ok(Some(hash)) => {
-                    crate::log_info!("revert_to_message: captured redo_snapshot hash={}", hash);
+                    log::info!("revert_to_message: captured redo_snapshot hash={}", hash);
                     hash
                 }
                 Ok(None) => {
-                    crate::log_info!("revert_to_message: track() returned None (no changes)");
+                    log::info!("revert_to_message: track() returned None (no changes)");
                     String::new()
                 }
                 Err(error) => {
-                    crate::log_warn!("revert_to_message: track() failed: {}", error);
+                    log::warn!("revert_to_message: track() failed: {}", error);
                     notice = Some(format!("Failed to capture redo snapshot: {error}"));
                     String::new()
                 }
@@ -315,19 +315,19 @@ impl App {
             .store
             .load_redo_snapshot(self.conversation.session_id)?
         {
-            crate::log_info!("revert_to_message: restoring redo_snapshot");
+            log::info!("revert_to_message: restoring redo_snapshot");
             runtime.block_on(self.snapshot.restore(&existing_snapshot))?;
         }
 
         if !patches.is_empty() {
-            crate::log_info!("revert_to_message: reverting {} patches", patches.len());
+            log::info!("revert_to_message: reverting {} patches", patches.len());
             if let Err(error) = runtime.block_on(self.snapshot.revert(&patches)) {
-                crate::log_warn!("revert_to_message: revert failed: {}", error);
+                log::warn!("revert_to_message: revert failed: {}", error);
                 notice = Some(format!("Revert partially failed: {error}"));
             }
         }
 
-        crate::log_info!("revert_to_message: setting revert_message_id and updating UI");
+        log::info!("revert_to_message: setting revert_message_id and updating UI");
         self.command_palette.clear();
 
         // If the hidden range includes a compaction message, restore the
@@ -358,20 +358,20 @@ impl App {
     }
 
     fn unrevert(&mut self, runtime: &Runtime) -> Result<()> {
-        crate::log_info!("unrevert: starting");
+        log::info!("unrevert: starting");
 
         let Some(redo_snapshot) = self
             .store
             .load_redo_snapshot(self.conversation.session_id)?
         else {
-            crate::log_info!("unrevert: no redo_snapshot found");
+            log::info!("unrevert: no redo_snapshot found");
             self.clear_revert_state()?;
             return Ok(());
         };
 
-        crate::log_info!("unrevert: restoring redo_snapshot");
+        log::info!("unrevert: restoring redo_snapshot");
         if let Err(error) = runtime.block_on(self.snapshot.restore(&redo_snapshot)) {
-            crate::log_warn!("unrevert: restore failed: {}", error);
+            log::warn!("unrevert: restore failed: {}", error);
             self.last_notice = Some(format!("Redo failed: {error}"));
         }
 
@@ -381,7 +381,7 @@ impl App {
         self.composer.clear();
         self.screen = Screen::Chat;
         self.scroll_messages_to_bottom();
-        crate::log_info!("unrevert: completed");
+        log::info!("unrevert: completed");
         Ok(())
     }
 
@@ -389,10 +389,10 @@ impl App {
     /// These are used at round end to compute per-step patches for undo/redo,
     /// and to provide lightweight sidebar diffs showing changed files in real-time.
     pub(crate) fn capture_step_snapshot(&mut self, runtime: &Runtime) {
-        crate::log_info!("capture_step_snapshot: starting");
+        log::info!("capture_step_snapshot: starting");
         match runtime.block_on(self.snapshot.track()) {
             Ok(Some(hash)) => {
-                crate::log_info!("capture_step_snapshot: captured hash={}", hash);
+                log::info!("capture_step_snapshot: captured hash={}", hash);
                 self.step_snapshot_hashes.push(hash.clone());
 
                 let prev_hash = self.step_prev_hash.clone().or_else(|| {
@@ -417,7 +417,7 @@ impl App {
                             self.merge_step_diffs(diffs);
                         }
                         Err(e) => {
-                            crate::log_warn!(
+                            log::warn!(
                                 "capture_step_snapshot: diff_lightweight failed: {}",
                                 e
                             );
@@ -425,17 +425,17 @@ impl App {
                         }
                     }
                 } else {
-                    crate::log_info!("capture_step_snapshot: no previous hash available");
+                    log::info!("capture_step_snapshot: no previous hash available");
                     self.step_cached_file_lists.push(Vec::new());
                 }
 
                 self.step_prev_hash = Some(hash);
             }
             Ok(None) => {
-                crate::log_info!("capture_step_snapshot: track() returned None (no changes)");
+                log::info!("capture_step_snapshot: track() returned None (no changes)");
             }
             Err(error) => {
-                crate::log_warn!("capture_step_snapshot: track() failed: {}", error);
+                log::warn!("capture_step_snapshot: track() failed: {}", error);
             }
         }
     }
@@ -499,7 +499,7 @@ impl App {
                     .find(|m| m.id == msg_id)
                 && let Ok(json) = serde_json::to_string(&merged)
             {
-                crate::log_info!(
+                log::info!(
                     "merge_step_diffs: updating msg.file_diffs with {} files",
                     merged.len()
                 );
@@ -510,7 +510,7 @@ impl App {
                     msg_id,
                     &json,
                 ) {
-                    crate::log_warn!("merge_step_diffs: failed to persist file_diffs: {}", e);
+                    log::warn!("merge_step_diffs: failed to persist file_diffs: {}", e);
                 }
                 self.invalidate_active_message_render_cache_for(msg_id);
             }
@@ -522,7 +522,7 @@ impl App {
         message_id: Uuid,
         runtime: &Runtime,
     ) -> Result<()> {
-        crate::log_info!("capture_prompt_snapshot: message_id={}", message_id);
+        log::info!("capture_prompt_snapshot: message_id={}", message_id);
 
         // Clear intermediate step tracking from any previous rounds
         self.step_snapshot_hashes.clear();
@@ -532,7 +532,7 @@ impl App {
 
         match runtime.block_on(self.snapshot.track()) {
             Ok(Some(hash)) => {
-                crate::log_info!("capture_prompt_snapshot: captured hash={}", hash);
+                log::info!("capture_prompt_snapshot: captured hash={}", hash);
                 self.store.update_message_snapshot(
                     self.conversation.session_id,
                     message_id,
@@ -552,12 +552,12 @@ impl App {
                 self.step_prev_hash = Some(hash);
             }
             Ok(None) => {
-                crate::log_info!(
+                log::info!(
                     "capture_prompt_snapshot: track() returned None (not a git repo or no changes)"
                 );
             }
             Err(error) => {
-                crate::log_warn!("capture_prompt_snapshot: track() failed: {}", error);
+                log::warn!("capture_prompt_snapshot: track() failed: {}", error);
             }
         }
 
@@ -588,12 +588,12 @@ impl App {
     }
 
     fn collect_patches_after_message(&self, message_id: Uuid) -> Result<Vec<Patch>> {
-        crate::log_info!("collect_patches: looking for message_id={}", message_id);
+        log::info!("collect_patches: looking for message_id={}", message_id);
         let patches = crate::shared::undo::collect_patches_after_message(
             &self.conversation.messages,
             message_id,
         )?;
-        crate::log_info!("collect_patches: returning {} patches", patches.len());
+        log::info!("collect_patches: returning {} patches", patches.len());
         Ok(patches)
     }
 
@@ -627,7 +627,7 @@ impl App {
         if let Some((prior_summary, prior_retained_from)) =
             crate::session::find_compaction_prior_state(&self.conversation.messages, revert_to_id)
         {
-            crate::log_info!(
+            log::info!(
                 "restore_context_from_undo_compaction: found compaction msg, \
                  restoring retained_from={} summary={}",
                 prior_retained_from,

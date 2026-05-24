@@ -550,12 +550,12 @@ impl App {
         {
             let export_dir = self.paths.data_dir.join("export");
 
-            crate::log_info!("Export dir: {}", export_dir.display());
+            log::info!("Export dir: {}", export_dir.display());
 
             for session_id in &session_ids {
                 match self.store.export_session_to_jsonl(*session_id, &export_dir) {
-                    Ok(path) => crate::log_info!("Exported: {}", path.display()),
-                    Err(e) => crate::log_error!("Export failed: {}", e),
+                    Ok(path) => log::info!("Exported: {}", path.display()),
+                    Err(e) => log::error!("Export failed: {}", e),
                 }
             }
 
@@ -622,7 +622,7 @@ impl App {
         }
 
         if self.pending_assistant_turns.remove(&session_id) {
-            crate::log_info!(
+            log::info!(
                 "switch_session: session {} has pending assistant turn, starting now",
                 session_id
             );

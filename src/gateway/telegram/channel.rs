@@ -85,11 +85,11 @@ impl TelegramChannel {
     // ── Telegram-specific event loop ──────────────────────────────────────
 
     async fn bootstrap_offset(&mut self) -> Result<()> {
-        crate::log_info!("Telegram bootstrapping offset...");
+        log::info!("Telegram bootstrapping offset...");
         let updates = self.bot.get_updates(0, 0).await?;
         if let Some(last) = updates.last() {
             self.offset = last.update_id.saturating_add(1);
-            crate::log_info!("Telegram bootstrap offset set to {}", self.offset);
+            log::info!("Telegram bootstrap offset set to {}", self.offset);
         }
         self.register_commands().await?;
         Ok(())
@@ -113,7 +113,7 @@ impl TelegramChannel {
             {
                 Ok(updates) => updates,
                 Err(error) => {
-                    crate::log_error!("Telegram getUpdates failed: {error}");
+                    log::error!("Telegram getUpdates failed: {error}");
                     sleep(Duration::from_secs(2)).await;
                     continue;
                 }
@@ -129,7 +129,7 @@ impl TelegramChannel {
                     continue;
                 };
 
-                crate::log_info!(
+                log::info!(
                     "Received message: chat_id={}, msg_id={}, user={}",
                     message.chat.id,
                     message.message_id,
@@ -137,7 +137,7 @@ impl TelegramChannel {
                 );
 
                 if let Err(error) = self.handle_message(message).await {
-                    crate::log_error!("Message handling failed: {error}");
+                    log::error!("Message handling failed: {error}");
                 }
             }
         }
@@ -161,7 +161,7 @@ impl TelegramChannel {
                 })
                 .unwrap_or(false);
             if !allowed_by_user {
-                crate::log_debug!(
+                log::debug!(
                     "Message from chat_id={} not in allowlist, skipping",
                     chat_id
                 );
@@ -175,7 +175,7 @@ impl TelegramChannel {
             .set_message_reaction(chat_id, message.message_id, "👀")
             .await
         {
-            crate::log_warn!(
+            log::warn!(
                 "Failed to set message reaction for chat_id={}: {}",
                 chat_id,
                 e
@@ -202,7 +202,7 @@ impl TelegramChannel {
 
         // Model selection state
         if let Some(state) = self.core.model_selection_states.get(&chat_id_str).cloned() {
-            crate::log_info!("Handling model selection input: chat_id={}", chat_id);
+            log::info!("Handling model selection input: chat_id={}", chat_id);
             return self
                 .handle_model_selection(&message, &state, &content)
                 .await;
@@ -218,7 +218,7 @@ impl TelegramChannel {
 
         // Parse command
         if let Some(command) = parse_command(&content) {
-            crate::log_info!(
+            log::info!(
                 "Telegram executing command: /{} {:?}",
                 command.name,
                 command.args
@@ -327,7 +327,7 @@ impl TelegramChannel {
         conversation: &mut Conversation,
         active_model: &ActiveModel,
     ) -> Result<()> {
-        crate::log_info!(
+        log::info!(
             "Telegram agent: chat_id={}, model={}, session={}",
             source_message.chat.id,
             active_model.label(),
@@ -445,7 +445,7 @@ impl TelegramChannel {
 
         // Handle errors
         if let Err(ref e) = result {
-            crate::log_error!("Telegram agent loop failed: {}", e);
+            log::error!("Telegram agent loop failed: {}", e);
             let error_msg = format!("Error: {e}");
             let _ = self
                 .cancel_draft_message(&recipient, &draft_message_id)
@@ -931,7 +931,7 @@ impl Channel for TelegramChannel {
 
     fn run(&mut self) -> Pin<Box<dyn Future<Output = Result<()>> + '_>> {
         Box::pin(async move {
-            crate::log_info!("Telegram channel ready");
+            log::info!("Telegram channel ready");
             self.bootstrap_offset().await?;
             self.run_loop().await
         })

@@ -346,7 +346,7 @@ impl App {
                 .store
                 .update_session_system_prompt(new_session_id, &parent_prompt)
             {
-                crate::log_warn!("failed to persist static system prompt for fork: {}", e);
+                log::warn!("failed to persist static system prompt for fork: {}", e);
             }
         }
 
@@ -607,7 +607,7 @@ impl App {
             .store
             .update_session_system_prompt(session_id, &static_prompt)
         {
-            crate::log_warn!("failed to persist static system prompt: {}", e);
+            log::warn!("failed to persist static system prompt: {}", e);
         }
 
         self.scroll_messages_to_bottom();
@@ -666,7 +666,7 @@ impl App {
                     panel.last_refresh = Some(chrono::Utc::now());
                 }
                 Err(e) => {
-                    crate::log_error!("Failed to refresh stats: {}", e);
+                    log::error!("Failed to refresh stats: {}", e);
                 }
             }
         }

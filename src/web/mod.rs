@@ -77,8 +77,8 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     let mut logging_config = config.logging.clone();
     logging_config.console = true;
     std::fs::create_dir_all(&paths.data_dir)?;
-    crate::logging::init(&paths.data_dir, logging_config);
-    crate::log_info!("Starting TiDev web server...");
+    crate::logging::init(&paths.data_dir, logging_config).ok();
+    log::info!("Starting TiDev web server...");
 
     // Open database (use same path as TUI mode via ConfigPaths)
     let db = Database::open(&paths.database_file)?;
@@ -90,11 +90,11 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     // Create event bus
     let event_bus = EventBus::new(1024);
 
-    crate::log_info!("Workspace root: {}", workspace_root.display());
+    log::info!("Workspace root: {}", workspace_root.display());
 
     // Load auth store
     let auth = AuthStore::load_or_create(&paths)?;
-    crate::log_info!("Auth store loaded");
+    log::info!("Auth store loaded");
 
     // Create shared agent runtime (ToolRegistry, MemoryStore, etc.)
     let memory_store = Arc::new(db.create_memory_store()?);
@@ -148,7 +148,7 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
         hooks: crate::hooks::HookEngine::new(config.hooks.clone(), workspace_root.clone()),
     };
 
-    crate::log_info!("Agent runtime created");
+    log::info!("Agent runtime created");
     // Create app state
     let database_path = paths.database_file.clone();
     let state = AppState::new(
@@ -182,23 +182,23 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     // Log the mode
     if cfg!(debug_assertions) {
         if options.dev_fs {
-            crate::log_info!("Frontend mode: DevFs (serving from web/dist)");
+            log::info!("Frontend mode: DevFs (serving from web/dist)");
         } else {
-            crate::log_info!("Frontend mode: Dev (showing development page)");
-            crate::log_info!(
+            log::info!("Frontend mode: Dev (showing development page)");
+            log::info!(
                 "Tip: Run `cd web && pnpm dev` and visit http://localhost:5173 for HMR"
             );
-            crate::log_info!("     Or use --dev-fs to serve from web/dist");
+            log::info!("     Or use --dev-fs to serve from web/dist");
         }
     } else {
-        crate::log_info!("Frontend mode: Embedded (serving from binary)");
+        log::info!("Frontend mode: Embedded (serving from binary)");
     }
 
     // Start server
     start_server(state.clone(), server_config).await?;
 
     // Graceful shutdown complete; clean up terminal sessions.
-    crate::log_info!("Web server stopped, cleaning up terminal sessions...");
+    log::info!("Web server stopped, cleaning up terminal sessions...");
     state.terminal_manager.shutdown().await;
 
     Ok(())

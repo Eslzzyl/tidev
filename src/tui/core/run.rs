@@ -27,25 +27,25 @@ impl App {
         let _t0 = std::time::Instant::now();
         let workspace_root = env::current_dir().context("failed to determine workspace root")?;
         let config = AppConfig::load_with_project_overlay(&paths, &workspace_root)?;
-        crate::logging::init(&paths.data_dir, config.logging.clone());
-        crate::log_info!("App initializing, workspace={}", workspace_root.display());
-        crate::log_info!("startup: config loaded in {:?}", _t0.elapsed());
+        let _ = crate::logging::init(&paths.data_dir, config.logging.clone());
+        log::info!("App initializing, workspace={}", workspace_root.display());
+        log::info!("startup: config loaded in {:?}", _t0.elapsed());
         let _t1 = std::time::Instant::now();
         let auth = AuthStore::load_or_create(&paths)?;
-        crate::log_info!("startup: auth loaded in {:?}", _t1.elapsed());
+        log::info!("startup: auth loaded in {:?}", _t1.elapsed());
         let _t2 = std::time::Instant::now();
         let db = Database::open(paths.default_database_path())?;
-        crate::log_info!(
+        log::info!(
             "startup: Database::open (schema init) in {:?}",
             _t2.elapsed()
         );
         let _t3 = std::time::Instant::now();
         let store = db.create_session_store()?;
         let memory_store = Arc::new(db.create_memory_store()?);
-        crate::log_info!("startup: stores created in {:?}", _t3.elapsed());
+        log::info!("startup: stores created in {:?}", _t3.elapsed());
         let _t4 = std::time::Instant::now();
         let llm = LlmClient::new(&config.logging)?;
-        crate::log_info!("startup: LlmClient::new in {:?}", _t4.elapsed());
+        log::info!("startup: LlmClient::new in {:?}", _t4.elapsed());
         let http_client = Arc::new(llm.http().clone());
         let _t5 = std::time::Instant::now();
         let theme = ThemeManager::new(&config.theme);
@@ -53,7 +53,7 @@ impl App {
         let file_read_tracker = Arc::new(FileReadTracker::new());
         // Find git worktree root to limit skill discovery scope
         let worktree = find_git_worktree(&workspace_root);
-        crate::log_info!("startup: theme/mcp created in {:?}", _t5.elapsed());
+        log::info!("startup: theme/mcp created in {:?}", _t5.elapsed());
         let _t6 = std::time::Instant::now();
         let mut tools = ToolRegistry::new(
             workspace_root.clone(),
@@ -68,7 +68,7 @@ impl App {
             config.websearch.clone(),
             Arc::new(auth.clone()),
         );
-        crate::log_info!("startup: ToolRegistry created in {:?}", _t6.elapsed());
+        log::info!("startup: ToolRegistry created in {:?}", _t6.elapsed());
         #[allow(unused_variables)]
         let commands = CommandRegistry::new();
         let command_palette = CommandPaletteState::default();
@@ -130,9 +130,9 @@ impl App {
 
         let _t_mem = std::time::Instant::now();
         memory_store.set_models(llm.clone(), active_model.clone(), consolidation_override);
-        crate::log_info!("startup: memory set_models in {:?}", _t_mem.elapsed());
+        log::info!("startup: memory set_models in {:?}", _t_mem.elapsed());
         // Set sandbox policy based on session mode and config
-        let sandbox_policy = mode.sandbox_policy(&config.sandbox);
+        let sandbox_policy = config.sandbox.to_policy();
         tools.set_sandbox_policy(Some(sandbox_policy));
         // Build shared AgentRuntime from the same resources
         let agent = AgentRuntime {
@@ -310,7 +310,7 @@ impl App {
         // Start background file indexing so the @-mention panel is ready
         // when the user first presses the @ key.
         app.at_mention.start_background_indexing(&workspace_root);
-        crate::log_info!("startup: App::new_with_paths total in {:?}", _t0.elapsed());
+        log::info!("startup: App::new_with_paths total in {:?}", _t0.elapsed());
 
         Ok(app)
     }
@@ -320,16 +320,16 @@ impl App {
         let mcp_manager = self.tools.mcp_manager();
         runtime.spawn(async move {
             if let Err(e) = mcp_manager.refresh_all().await {
-                crate::log_warn!("MCP refresh failed: {}", e);
+                log::warn!("MCP refresh failed: {}", e);
             }
         });
-        crate::log_info!("startup: MCP refresh spawned in {:?}", _t_run.elapsed());
+        log::info!("startup: MCP refresh spawned in {:?}", _t_run.elapsed());
         self.terminal_session = Some(super::TerminalSession::enter()?);
-        crate::log_info!("startup: TerminalSession::enter in {:?}", _t_run.elapsed());
+        log::info!("startup: TerminalSession::enter in {:?}", _t_run.elapsed());
         let backend = CrosstermBackend::new(io::stdout());
         let mut terminal = Terminal::new(backend).context("failed to create terminal")?;
         terminal.clear().context("failed to clear terminal")?;
-        crate::log_info!("startup: terminal created in {:?}", _t_run.elapsed());
+        log::info!("startup: terminal created in {:?}", _t_run.elapsed());
 
         let snapshot = self.snapshot.clone();
         let cleanup_cancel = self.cleanup_cancel.clone();
@@ -341,21 +341,21 @@ impl App {
                     break;
                 }
                 if let Err(e) = snapshot.cleanup().await {
-                    crate::log_warn!("snapshot cleanup failed: {}", e);
+                    log::warn!("snapshot cleanup failed: {}", e);
                 }
                 tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
             }
         });
 
         // Start memory background tasks: eviction, consolidation, reflection.
-        crate::log_info!("memory: starting background tasks");
+        log::info!("memory: starting background tasks");
         crate::memory::start_background_tasks(
             self.memory_store.clone(),
             runtime.handle(),
             &self.workspace_root.to_string_lossy(),
             &self.config.memory,
         );
-        crate::log_info!(
+        log::info!(
             "startup: memory background tasks spawned in {:?}",
             _t_run.elapsed()
         );
@@ -380,21 +380,21 @@ impl App {
                         let ids = match check_store.find_inactive_sessions(&cutoff, current) {
                             Ok(ids) => ids,
                             Err(e) => {
-                                crate::log_warn!("inactivity check failed: {}", e);
+                                log::warn!("inactivity check failed: {}", e);
                                 continue;
                             }
                         };
-                        crate::log_debug!("inactivity check: found {} inactive sessions", ids.len());
+                        log::debug!("inactivity check: found {} inactive sessions", ids.len());
                         for id in ids {
-                            crate::log_info!("marking inactive session completed: {}", id);
+                            log::info!("marking inactive session completed: {}", id);
                             if let Err(e) = check_store.set_session_status(id, "completed") {
-                                crate::log_warn!("failed to mark session completed: {}", e);
+                                log::warn!("failed to mark session completed: {}", e);
                                 continue;
                             }
                             if memory_auto_learn
                                 && let Err(e) = check_mem_store.summarize_session(id, &check_ws).await
                             {
-                                crate::log_warn!("session summarisation failed: {}", e);
+                                log::warn!("session summarisation failed: {}", e);
                             }
                         }
                     }
@@ -402,12 +402,12 @@ impl App {
                 }
             }
         });
-        crate::log_info!(
+        log::info!(
             "startup: inactivity check spawned in {:?}",
             _t_run.elapsed()
         );
 
-        crate::log_info!(
+        log::info!(
             "startup: entering main event loop — total startup {:?}",
             _t_run.elapsed()
         );
@@ -705,7 +705,7 @@ impl App {
                     .insert(canonical_path.display().to_string(), content);
             }
         }
-        crate::log_info!(
+        log::info!(
             "restore_cached_session_runtime: loaded_instruction_sources={:?} cache_keys={:?}",
             self.loaded_instruction_sources,
             self.instruction_content_cache.keys().collect::<Vec<_>>(),
@@ -853,7 +853,7 @@ impl App {
                 .store
                 .update_session_system_prompt(session_id, &composed)
             {
-                crate::log_warn!("failed to persist static system prompt: {}", e);
+                log::warn!("failed to persist static system prompt: {}", e);
             }
             active_model.system_prompt = composed;
         }
@@ -895,7 +895,7 @@ impl App {
                 instruction_content_cache.insert(source.clone(), content);
             }
         }
-        crate::log_info!(
+        log::info!(
             "load_session_runtime_from_store: session={} loaded_instruction_sources={:?} cache_keys={:?}",
             session_id,
             loaded_instruction_sources,
@@ -937,7 +937,7 @@ impl App {
             .file_read_tracker
             .load_from_store(&self.store, session_id)
         {
-            crate::log_warn!(
+            log::warn!(
                 "Failed to load file reads for session {}: {}",
                 session_id,
                 e
@@ -1049,7 +1049,7 @@ impl App {
         let mode = if is_active {
             self.mode
         } else {
-            crate::prompts::SessionMode::Build
+            tidev_types::prompts::SessionMode::Build
         };
 
         self.compacting_sessions.insert(session_id);
@@ -1135,7 +1135,7 @@ impl App {
                     summary.as_deref(),
                     retained_from,
                 ) {
-                    crate::log_warn!("failed to persist compacted context state: {}", error);
+                    log::warn!("failed to persist compacted context state: {}", error);
                 }
                 if let Some(summary) = summary.as_ref() {
                     let mut updated_existing = false;
@@ -1159,7 +1159,7 @@ impl App {
                             .store
                             .append_message(self.conversation.session_id, last_msg)
                         {
-                            crate::log_warn!("failed to persist compaction message: {}", error);
+                            log::warn!("failed to persist compaction message: {}", error);
                         }
                     }
                     if !updated_existing {
@@ -1172,7 +1172,7 @@ impl App {
                             .store
                             .append_message(self.conversation.session_id, &compaction_message)
                         {
-                            crate::log_warn!("failed to persist compaction message: {}", error);
+                            log::warn!("failed to persist compaction message: {}", error);
                         }
                     }
                     self.scroll_messages_to_bottom();
@@ -1198,7 +1198,7 @@ impl App {
                 summary.as_deref(),
                 retained_from,
             ) {
-                crate::log_warn!("failed to persist compacted context state: {}", error);
+                log::warn!("failed to persist compacted context state: {}", error);
             }
         }
     }

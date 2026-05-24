@@ -110,7 +110,7 @@ impl QQChannel {
     async fn run_loop(&mut self) -> Result<()> {
         loop {
             if let Err(e) = self.connect_and_handle().await {
-                crate::log_error!("QQ Gateway connection error: {e}. Retrying in 5s...");
+                log::error!("QQ Gateway connection error: {e}. Retrying in 5s...");
                 sleep(Duration::from_secs(5)).await;
             }
         }
@@ -121,7 +121,7 @@ impl QQChannel {
         let (ws_stream, _) = connect_async(gateway_url.as_str()).await?;
         let (mut write, mut read) = ws_stream.split();
 
-        crate::log_info!("QQ Gateway connected to {}", gateway_url);
+        log::info!("QQ Gateway connected to {}", gateway_url);
 
         let mut heartbeat_interval = 45000;
         let mut _last_heartbeat_ack = Instant::now();
@@ -134,7 +134,7 @@ impl QQChannel {
                 if payload.op == 10 {
                     let hello: HelloData = serde_json::from_value(payload.d.unwrap())?;
                     heartbeat_interval = hello.heartbeat_interval;
-                    crate::log_info!("QQ Hello received, heartbeat: {}ms", heartbeat_interval);
+                    log::info!("QQ Hello received, heartbeat: {}ms", heartbeat_interval);
                 }
             }
         }
@@ -188,11 +188,11 @@ impl QQChannel {
                                     }
                                 }
                                 11 => { _last_heartbeat_ack = Instant::now(); }
-                                op => { crate::log_warn!("QQ unknown opcode: {op}"); }
+                                op => { log::warn!("QQ unknown opcode: {op}"); }
                             }
                         }
                         Some(Ok(WsMessage::Close(_))) => {
-                            crate::log_info!("QQ WebSocket closed, reconnecting...");
+                            log::info!("QQ WebSocket closed, reconnecting...");
                             break;
                         }
                         Some(Err(e)) => anyhow::bail!("QQ WS error: {e}"),
@@ -233,14 +233,14 @@ impl QQChannel {
 
         // Allowlist check
         if !self.core.is_allowed(&author_id) {
-            crate::log_info!("QQ unauthorized user: {author_id}");
+            log::info!("QQ unauthorized user: {author_id}");
             return Ok(());
         }
 
         // Strip @mention
         let clean_content = content.split(' ').next_back().unwrap_or(content);
 
-        crate::log_info!("QQ Message from {author_id}: {clean_content}");
+        log::info!("QQ Message from {author_id}: {clean_content}");
 
         // Shell command
         if let Some(cmd) = clean_content.strip_prefix('!') {
@@ -481,7 +481,7 @@ impl Channel for QQChannel {
 
     fn run(&mut self) -> Pin<Box<dyn Future<Output = Result<()>> + '_>> {
         Box::pin(async move {
-            crate::log_info!("QQ channel ready");
+            log::info!("QQ channel ready");
             self.run_loop().await
         })
     }

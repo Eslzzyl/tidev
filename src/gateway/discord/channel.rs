@@ -177,7 +177,7 @@ impl DiscordChannel {
     async fn run_loop(&mut self) -> Result<()> {
         loop {
             if let Err(e) = self.connect_and_listen().await {
-                crate::log_error!("Discord connection error: {e}, reconnecting in 5s...");
+                log::error!("Discord connection error: {e}, reconnecting in 5s...");
                 sleep(Duration::from_secs(5)).await;
             }
         }
@@ -187,7 +187,7 @@ impl DiscordChannel {
         let gw_url = self.client.get_gateway_url().await?;
         let ws_url = format!("{gw_url}/?v=10&encoding=json");
 
-        crate::log_info!("Discord connecting to gateway...");
+        log::info!("Discord connecting to gateway...");
         let (ws_stream, _) = connect_async(&ws_url).await?;
         let (mut write, mut read) = ws_stream.split();
 
@@ -236,7 +236,7 @@ impl DiscordChannel {
                 _ = heartbeat_timer.tick() => {
                     let hb = json!({ "op": OP_HEARTBEAT, "d": self.last_seq });
                     if let Err(e) = write.send(WsMessage::Text(hb.to_string().into())).await {
-                        crate::log_warn!("Discord heartbeat send failed: {e}");
+                        log::warn!("Discord heartbeat send failed: {e}");
                         break;
                     }
                 }
@@ -255,12 +255,12 @@ impl DiscordChannel {
                                                 if let Some(d) = payload.d {
                                                     let discord_msg: DiscordMessage = serde_json::from_value(d)?;
                                                     if let Err(e) = self.handle_message(discord_msg).await {
-                                                        crate::log_error!("Discord handle_message error: {e}");
+                                                        log::error!("Discord handle_message error: {e}");
                                                     }
                                                 }
                                             }
                                             "READY" => {
-                                                crate::log_info!("Discord gateway ready");
+                                                log::info!("Discord gateway ready");
                                             }
                                             _ => {
                                                 // Ignore other event types
@@ -272,17 +272,17 @@ impl DiscordChannel {
                                     self.last_heartbeat_ack = Instant::now();
                                 }
                                 op => {
-                                    crate::log_warn!("Discord unknown opcode: {op}");
+                                    log::warn!("Discord unknown opcode: {op}");
                                 }
                             }
                         }
                         Some(Ok(WsMessage::Close(_))) => {
-                            crate::log_info!("Discord WebSocket closed, reconnecting...");
+                            log::info!("Discord WebSocket closed, reconnecting...");
                             break;
                         }
                         Some(Ok(WsMessage::Ping(data))) => {
                             if let Err(e) = write.send(WsMessage::Pong(data)).await {
-                                crate::log_warn!("Discord pong failed: {e}");
+                                log::warn!("Discord pong failed: {e}");
                                 break;
                             }
                         }
@@ -320,7 +320,7 @@ impl DiscordChannel {
 
         // Allowlist check
         if !self.core.is_allowed(author_id) {
-            crate::log_info!("Discord unauthorized user: {author_id}");
+            log::info!("Discord unauthorized user: {author_id}");
             return Ok(());
         }
 
@@ -343,7 +343,7 @@ impl DiscordChannel {
             return Ok(());
         }
 
-        crate::log_info!("Discord Message from {author_id} in {channel_id}: {clean_content}");
+        log::info!("Discord Message from {author_id} in {channel_id}: {clean_content}");
 
         // Send typing indicator
         let _ = self.client.trigger_typing(channel_id).await;
@@ -661,7 +661,7 @@ impl Channel for DiscordChannel {
 
     fn run(&mut self) -> Pin<Box<dyn Future<Output = Result<()>> + '_>> {
         Box::pin(async move {
-            crate::log_info!("Discord channel ready");
+            log::info!("Discord channel ready");
             self.run_loop().await
         })
     }

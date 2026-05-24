@@ -42,7 +42,7 @@ fn discover_inner(
     extra_sources: &[String],
     worktree: Option<&Path>,
 ) -> SkillCatalogInner {
-    crate::log_debug!(
+    log::debug!(
         "discover_inner: start, worktree={:?}",
         worktree.map(|p| p.display().to_string())
     );
@@ -51,14 +51,14 @@ fn discover_inner(
     let mut seen_locations = HashSet::new();
 
     let roots = candidate_roots(workspace_root, config_dir, worktree);
-    crate::log_debug!(
+    log::debug!(
         "discover_inner: candidate_roots returned {} roots",
         roots.len()
     );
     for (i, root) in roots.iter().enumerate() {
-        crate::log_debug!("discover_inner: root[{}] = {}", i, root.display());
+        log::debug!("discover_inner: root[{}] = {}", i, root.display());
         for skill_file in discover_skill_files(root) {
-            crate::log_debug!(
+            log::debug!(
                 "discover_inner: found skill_file = {}",
                 skill_file.display()
             );
@@ -66,12 +66,12 @@ fn discover_inner(
                 .canonicalize()
                 .unwrap_or_else(|_| skill_file.clone());
             if !seen_locations.insert(canonical_location) {
-                crate::log_debug!("discover_inner: duplicate location, skip");
+                log::debug!("discover_inner: duplicate location, skip");
                 continue;
             }
 
             let Ok(skill) = parse_skill_file(&skill_file) else {
-                crate::log_debug!(
+                log::debug!(
                     "discover_inner: parse_skill_file failed for {}",
                     skill_file.display()
                 );
@@ -79,14 +79,14 @@ fn discover_inner(
             };
 
             if !seen_names.insert(skill.name.clone()) {
-                crate::log_debug!(
+                log::debug!(
                     "discover_inner: duplicate skill name '{}', skip",
                     skill.name
                 );
                 continue;
             }
 
-            crate::log_info!(
+            log::info!(
                 "discover_inner: loaded skill '{}' from {}",
                 skill.name,
                 skill_file.display()
@@ -96,9 +96,9 @@ fn discover_inner(
     }
 
     for raw_source in extra_sources {
-        crate::log_debug!("discover_inner: loading extra source = {}", raw_source);
+        log::debug!("discover_inner: loading extra source = {}", raw_source);
         let Some(skill) = load_additional_skill_source(raw_source, workspace_root) else {
-            crate::log_debug!(
+            log::debug!(
                 "discover_inner: load_additional_skill_source returned None for {}",
                 raw_source
             );
@@ -110,19 +110,19 @@ fn discover_inner(
             .canonicalize()
             .unwrap_or_else(|_| skill.location.clone());
         if !seen_locations.insert(canonical_location) {
-            crate::log_debug!("discover_inner: duplicate extra location, skip");
+            log::debug!("discover_inner: duplicate extra location, skip");
             continue;
         }
 
         if !seen_names.insert(skill.name.clone()) {
-            crate::log_debug!(
+            log::debug!(
                 "discover_inner: duplicate extra skill name '{}', skip",
                 skill.name
             );
             continue;
         }
 
-        crate::log_info!(
+        log::info!(
             "discover_inner: loaded extra skill '{}' from {}",
             skill.name,
             skill.location.display()
@@ -135,21 +135,21 @@ fn discover_inner(
     let bundled_count_before = skills.len();
     for skill in crate::tooling::bundled_skills::load() {
         if !seen_names.insert(skill.name.clone()) {
-            crate::log_debug!(
+            log::debug!(
                 "discover_inner: bundled skill '{}' skipped (duplicate name)",
                 skill.name
             );
             continue;
         }
-        crate::log_info!("discover_inner: loaded bundled skill '{}'", skill.name);
+        log::info!("discover_inner: loaded bundled skill '{}'", skill.name);
         skills.push(skill);
     }
     let bundled_count = skills.len() - bundled_count_before;
     if bundled_count > 0 {
-        crate::log_info!("discover_inner: loaded {} bundled skill(s)", bundled_count);
+        log::info!("discover_inner: loaded {} bundled skill(s)", bundled_count);
     }
 
-    crate::log_info!("discover_inner: done, total skills = {}", skills.len());
+    log::info!("discover_inner: done, total skills = {}", skills.len());
     SkillCatalogInner { skills }
 }
 
@@ -160,7 +160,7 @@ impl SkillCatalog {
         skill_sources: &[String],
         worktree: Option<&Path>,
     ) -> Self {
-        crate::log_debug!(
+        log::debug!(
             "SkillCatalog::discover: workspace_root={}, config_dir={}, skill_sources={:?}, SKILL_ROOTS={:?}, worktree={:?}",
             workspace_root.display(),
             config_dir.display(),
@@ -171,9 +171,9 @@ impl SkillCatalog {
         let inner = CATALOG
             .get_or_init(|| {
                 let start = std::time::Instant::now();
-                crate::log_info!("SkillCatalog::discover: initializing catalog (first call)");
+                log::info!("SkillCatalog::discover: initializing catalog (first call)");
                 let inner = discover_inner(workspace_root, config_dir, skill_sources, worktree);
-                crate::log_info!(
+                log::info!(
                     "SkillCatalog::discover: catalog initialized with {} skills in {:?}",
                     inner.skills.len(),
                     start.elapsed()
@@ -245,7 +245,7 @@ fn candidate_roots(
     config_dir: &Path,
     worktree: Option<&Path>,
 ) -> Vec<PathBuf> {
-    crate::log_debug!(
+    log::debug!(
         "candidate_roots: workspace_root={}, config_dir={}, worktree={:?}",
         workspace_root.display(),
         config_dir.display(),
@@ -258,25 +258,25 @@ fn candidate_roots(
         // Stop if we've reached the worktree boundary (if specified)
         if let Some(wt) = worktree {
             if ancestor == wt {
-                crate::log_debug!(
+                log::debug!(
                     "candidate_roots: reached worktree boundary at {}",
                     ancestor.display()
                 );
                 // Still check this directory (the worktree root itself)
             } else if !ancestor.starts_with(wt) {
-                crate::log_debug!("candidate_roots: passed worktree boundary, stopping traversal");
+                log::debug!("candidate_roots: passed worktree boundary, stopping traversal");
                 break;
             }
         }
 
         for root in SKILL_ROOTS {
             let candidate = ancestor.join(root);
-            crate::log_debug!(
+            log::debug!(
                 "candidate_roots: checking candidate={}",
                 candidate.display()
             );
             if !candidate.is_dir() {
-                crate::log_debug!("candidate_roots: not a directory, skip");
+                log::debug!("candidate_roots: not a directory, skip");
                 continue;
             }
 
@@ -284,13 +284,13 @@ fn candidate_roots(
                 .canonicalize()
                 .unwrap_or_else(|_| candidate.clone());
             if seen.insert(canonical.clone()) {
-                crate::log_info!(
+                log::info!(
                     "candidate_roots: found skill directory: {}",
                     canonical.display()
                 );
                 roots.push(canonical);
             } else {
-                crate::log_debug!("candidate_roots: already seen, skip");
+                log::debug!("candidate_roots: already seen, skip");
             }
         }
 
@@ -298,13 +298,13 @@ fn candidate_roots(
         if let Some(wt) = worktree
             && ancestor == wt
         {
-            crate::log_debug!("candidate_roots: stopping at worktree root");
+            log::debug!("candidate_roots: stopping at worktree root");
             break;
         }
     }
 
     let global_root = config_dir.join("skills");
-    crate::log_debug!(
+    log::debug!(
         "candidate_roots: checking global root={}",
         global_root.display()
     );
@@ -313,7 +313,7 @@ fn candidate_roots(
             .canonicalize()
             .unwrap_or_else(|_| global_root.clone());
         if seen.insert(canonical.clone()) {
-            crate::log_info!(
+            log::info!(
                 "candidate_roots: found global skill directory: {}",
                 canonical.display()
             );
@@ -321,12 +321,12 @@ fn candidate_roots(
         }
     }
 
-    crate::log_debug!("candidate_roots: returning {} roots", roots.len());
+    log::debug!("candidate_roots: returning {} roots", roots.len());
     roots
 }
 
 fn discover_skill_files(root: &Path) -> Vec<PathBuf> {
-    crate::log_debug!("discover_skill_files: root={}", root.display());
+    log::debug!("discover_skill_files: root={}", root.display());
     let walker = WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(true)
@@ -340,7 +340,7 @@ fn discover_skill_files(root: &Path) -> Vec<PathBuf> {
     for entry in walker {
         entry_count += 1;
         let Ok(entry) = entry else {
-            crate::log_debug!("discover_skill_files: walk error: {:?}", entry);
+            log::debug!("discover_skill_files: walk error: {:?}", entry);
             continue;
         };
 
@@ -353,7 +353,7 @@ fn discover_skill_files(root: &Path) -> Vec<PathBuf> {
         }
 
         if entry.file_name().to_string_lossy() == SKILL_FILE_NAME {
-            crate::log_debug!(
+            log::debug!(
                 "discover_skill_files: found SKILL.md at {}",
                 entry.path().display()
             );
@@ -361,7 +361,7 @@ fn discover_skill_files(root: &Path) -> Vec<PathBuf> {
         }
     }
 
-    crate::log_debug!(
+    log::debug!(
         "discover_skill_files: walked {} entries, found {} SKILL.md files",
         entry_count,
         files.len()
@@ -371,12 +371,12 @@ fn discover_skill_files(root: &Path) -> Vec<PathBuf> {
 }
 
 fn parse_skill_file(path: &Path) -> Result<SkillInfo, ()> {
-    crate::log_debug!("parse_skill_file: path={}", path.display());
+    log::debug!("parse_skill_file: path={}", path.display());
     let raw_content = fs::read_to_string(path).map_err(|e| {
-        crate::log_debug!("parse_skill_file: read error for {}: {}", path.display(), e);
+        log::debug!("parse_skill_file: read error for {}: {}", path.display(), e);
     })?;
     let parent = path.parent().ok_or_else(|| {
-        crate::log_debug!("parse_skill_file: no parent for {}", path.display());
+        log::debug!("parse_skill_file: no parent for {}", path.display());
     })?;
     parse_skill_content(path.to_path_buf(), Some(parent.to_path_buf()), raw_content)
 }
@@ -386,10 +386,10 @@ fn parse_skill_content(
     directory: Option<PathBuf>,
     raw_content: String,
 ) -> Result<SkillInfo, ()> {
-    crate::log_debug!("parse_skill_content: location={}", location.display());
+    log::debug!("parse_skill_content: location={}", location.display());
     let normalized_content = raw_content.replace("\r\n", "\n");
     let (name, description, body) = parse_frontmatter(&normalized_content).map_err(|e| {
-        crate::log_debug!(
+        log::debug!(
             "parse_skill_content: frontmatter parse error for {}: {}",
             location.display(),
             e
@@ -397,7 +397,7 @@ fn parse_skill_content(
     })?;
 
     if !is_valid_skill_name(&name) {
-        crate::log_debug!(
+        log::debug!(
             "parse_skill_content: invalid skill name '{}' in {}",
             name,
             location.display()
@@ -415,14 +415,14 @@ fn parse_skill_content(
             .file_name()
             .and_then(|name| name.to_str())
             .ok_or_else(|| {
-                crate::log_debug!(
+                log::debug!(
                     "parse_skill_content: invalid directory name in {}",
                     location.display()
                 );
             })?;
 
         if directory_name != name {
-            crate::log_debug!(
+            log::debug!(
                 "parse_skill_content: directory name '{}' does not match skill name '{}' in {}",
                 directory_name,
                 name,
@@ -432,7 +432,7 @@ fn parse_skill_content(
         }
     }
 
-    crate::log_debug!(
+    log::debug!(
         "parse_skill_content: success name='{}', description='{}', companion_files={}",
         name,
         description,
@@ -544,7 +544,7 @@ pub(crate) fn parse_frontmatter(content: &str) -> Result<(String, String, &str),
 }
 
 fn collect_companion_files(skill_dir: &Path, skill_file: &Path) -> Vec<PathBuf> {
-    crate::log_debug!(
+    log::debug!(
         "collect_companion_files: skill_dir={}, skill_file={}",
         skill_dir.display(),
         skill_file.display()
@@ -562,7 +562,7 @@ fn collect_companion_files(skill_dir: &Path, skill_file: &Path) -> Vec<PathBuf> 
     for entry in walker {
         entry_count += 1;
         let Ok(entry) = entry else {
-            crate::log_debug!("collect_companion_files: walk error: {:?}", entry);
+            log::debug!("collect_companion_files: walk error: {:?}", entry);
             continue;
         };
 
@@ -586,7 +586,7 @@ fn collect_companion_files(skill_dir: &Path, skill_file: &Path) -> Vec<PathBuf> 
         }
 
         if files.len() >= MAX_COMPANION_FILES {
-            crate::log_debug!(
+            log::debug!(
                 "collect_companion_files: reached max companion files ({})",
                 MAX_COMPANION_FILES
             );
@@ -595,7 +595,7 @@ fn collect_companion_files(skill_dir: &Path, skill_file: &Path) -> Vec<PathBuf> 
     }
 
     files.sort();
-    crate::log_debug!(
+    log::debug!(
         "collect_companion_files: walked {} entries, found {} companion files",
         entry_count,
         files.len()

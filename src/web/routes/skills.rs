@@ -21,7 +21,7 @@ pub struct ListSkillsResponse {
 
 /// List all available skills
 pub async fn list_skills(State(state): State<AppState>) -> WebResult<Json<ListSkillsResponse>> {
-    crate::log_debug!("Listing available skills");
+    log::debug!("Listing available skills");
 
     let config = state.config.read().await;
     let skill_sources = config.skills.clone();
@@ -44,6 +44,6 @@ pub async fn list_skills(State(state): State<AppState>) -> WebResult<Json<ListSk
         })
         .collect();
 
-    crate::log_info!("Listed {} skills", skills.len());
+    log::info!("Listed {} skills", skills.len());
     Ok(Json(ListSkillsResponse { skills }))
 }

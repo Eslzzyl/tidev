@@ -122,7 +122,7 @@ impl DiscordClient {
         if !resp.status().is_success() {
             // Typing indicator is best-effort
             let text = resp.text().await.unwrap_or_default();
-            crate::log_warn!("Discord trigger_typing failed: {text}");
+            log::warn!("Discord trigger_typing failed: {text}");
         }
         Ok(())
     }
@@ -149,7 +149,7 @@ impl DiscordClient {
         if !resp.status().is_success() {
             // Reactions are best-effort
             let text = resp.text().await.unwrap_or_default();
-            crate::log_warn!("Discord add_reaction failed: {text}");
+            log::warn!("Discord add_reaction failed: {text}");
         }
         Ok(())
     }

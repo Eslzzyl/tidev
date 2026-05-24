@@ -8,7 +8,7 @@ use crate::context::ContextManager;
 use crate::llm::LlmClient;
 use crate::memory::types::SessionSummary;
 use crate::memory::xml::{clean_llm_xml_response, get_xml_children_ci, get_xml_tag_ci};
-use crate::prompts::SessionMode;
+use tidev_types::prompts::SessionMode;
 use crate::session::{Conversation, Message, MessageRole};
 use crate::storage::load_session_messages;
 use crate::tooling::ToolDefinition;
@@ -148,7 +148,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
             {
                 Ok(r) => r,
                 Err(e) => {
-                    crate::log_warn!("LLM summarization failed (attempt {}): {}", attempt, e);
+                    log::warn!("LLM summarization failed (attempt {}): {}", attempt, e);
                     if attempt == 0 {
                         continue;
                     }
@@ -165,7 +165,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
             }
 
             if attempt == 0 {
-                crate::log_warn!(
+                log::warn!(
                     "LLM summarization response unparseable (attempt 0), retrying with stricter prompt"
                 );
             }
@@ -192,13 +192,13 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
         } else {
             let fb = Self::parse_summary_free_text(&response, session_id, project);
             if let Some(ref fb_title) = fb.title {
-                crate::log_info!(
+                log::info!(
                     "LLM summarization response unparseable, used free-text fallback (title=\"{}\")",
                     fb_title
                 );
                 fb
             } else {
-                crate::log_warn!(
+                log::warn!(
                     "LLM summarization failed or response unparseable, using synthetic fallback"
                 );
                 SessionSummary {

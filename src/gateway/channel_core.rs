@@ -14,11 +14,12 @@ use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use tidev_types::prompts::{SessionMode, gateway_system_prompt};
+
 use crate::{
     agent::runtime::AgentRuntime,
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
     llm::LlmClient,
-    prompts::{SessionMode, gateway_system_prompt},
     session::{Conversation, Message, MessageRole},
     storage::SessionStore,
     tooling::ToolRegistry,
@@ -239,7 +240,7 @@ impl ChannelCore {
             .store
             .update_session_system_prompt(session_id, &static_prompt)
         {
-            crate::log_warn!("failed to persist static system prompt: {}", e);
+            log::warn!("failed to persist static system prompt: {}", e);
         }
 
         self.store
@@ -289,7 +290,7 @@ impl ChannelCore {
             .store
             .update_session_system_prompt(session_id, &static_prompt)
         {
-            crate::log_warn!("failed to persist static system prompt: {}", e);
+            log::warn!("failed to persist static system prompt: {}", e);
         }
         Ok(conversation)
     }
@@ -314,7 +315,7 @@ impl ChannelCore {
                     orphans_closed += 1;
                 }
                 count += 1;
-                crate::log_info!(
+                log::info!(
                     "Restored {} session: chat_key={}, session_id={}, messages={}",
                     self.platform(),
                     chat_key,
@@ -325,14 +326,14 @@ impl ChannelCore {
         }
 
         if count > 0 {
-            crate::log_info!(
+            log::info!(
                 "Restored {} {} session(s) from disk",
                 count,
                 self.platform()
             );
         }
         if orphans_closed > 0 {
-            crate::log_info!(
+            log::info!(
                 "Closed {} orphaned session turn(s) from previous crash",
                 orphans_closed
             );
@@ -355,7 +356,7 @@ impl ChannelCore {
                     .store
                     .update_session_system_prompt(conversation.session_id, &composed)
                 {
-                    crate::log_warn!("failed to persist static system prompt: {}", e);
+                    log::warn!("failed to persist static system prompt: {}", e);
                 }
                 active_model.system_prompt = composed;
             }
@@ -674,7 +675,7 @@ impl ChannelCore {
                 Ok(true)
             }
             "init" => {
-                let init_prompt = crate::prompts::init_command();
+                let init_prompt = tidev_types::prompts::init_command();
                 let text = format!(
                     "📁 Project Analysis Prompt\n\nCopy and send this prompt to analyze your project:\n\n```\n{}\n```",
                     init_prompt
@@ -777,7 +778,7 @@ impl ChannelCore {
         conversation: &mut Conversation,
         active_model: &ActiveModel,
     ) -> Result<()> {
-        crate::log_info!(
+        log::info!(
             "Agent: recipient={}, model={}, session={}",
             recipient,
             active_model.label(),
@@ -815,7 +816,7 @@ impl ChannelCore {
         self.cancellation_tokens.remove(recipient);
 
         if let Err(ref e) = result {
-            crate::log_error!("Agent loop failed: {}", e);
+            log::error!("Agent loop failed: {}", e);
             sender
                 .send_message(recipient, &format!("Error: {e}"), reply_to)
                 .await?;

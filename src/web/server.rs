@@ -35,7 +35,7 @@ pub async fn start_server(state: AppState, config: ServerConfig) -> anyhow::Resu
     let app = create_router(state, config.static_config);
 
     let listener = TcpListener::bind(&addr).await?;
-    crate::log_info!("Web server listening on http://{}", addr);
+    log::info!("Web server listening on http://{}", addr);
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal(cancel_token))
@@ -64,10 +64,10 @@ async fn shutdown_signal(cancel_token: tokio_util::sync::CancellationToken) {
 
     tokio::select! {
         _ = ctrl_c => {
-            crate::log_info!("Received Ctrl+C, shutting down gracefully...");
+            log::info!("Received Ctrl+C, shutting down gracefully...");
         }
         _ = terminate => {
-            crate::log_info!("Received SIGTERM, shutting down gracefully...");
+            log::info!("Received SIGTERM, shutting down gracefully...");
         }
     }
 
