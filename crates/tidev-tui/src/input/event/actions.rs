@@ -1,5 +1,6 @@
 use super::*;
 use tidev_engine::agent::AgentType;
+use crate::theme::ThemeName;
 
 impl App {
     pub(crate) fn apply_theme_command(&mut self, args: &[String]) -> Result<()> {

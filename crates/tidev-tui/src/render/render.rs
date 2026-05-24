@@ -1,4 +1,4 @@
-use tidev_engine::theme::ThemePalette;
+use crate::theme::ThemePalette;
 use tidev_session::utils::TokenUsage;
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Position, Rect},

@@ -14,7 +14,7 @@ use std::path::Path;
 
 use tidev_types::prompts::{SessionMode, gateway_system_prompt, general_system_prompt};
 use crate::sync::SyncConfig;
-use crate::theme::ThemeName;
+use tidev_types::theme::ThemeName;
 use tidev_types::types::PermissionConfig;
 
 use self::reasoning::{ThinkingLevelType, ThinkingMatcher};

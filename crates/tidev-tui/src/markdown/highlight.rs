@@ -18,7 +18,7 @@ use syntect::highlighting::Theme;
 use syntect::highlighting::ThemeSet;
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 
-use crate::theme::ThemeName;
+use tidev_types::theme::ThemeName;
 const MAX_HIGHLIGHT_BYTES: usize = 512 * 1024;
 const MAX_HIGHLIGHT_LINES: usize = 10_000;
 

@@ -1,7 +1,7 @@
 use crate::render::render::shorten_single_line;
+use crate::markdown::render_markdown_text_with_width_and_cwd;
+use crate::theme::ThemePalette;
 use tidev_engine::{
-
-    markdown_render::render_markdown_text_with_width_and_cwd, theme::ThemePalette,
     tooling::builtin::utils::display_workspace_relative, tooling::canonical_tool_name,
 };
 use ratatui::{
@@ -20,7 +20,7 @@ pub(super) fn render_reasoning_markdown_lines(
     // Use 0.5 ratio for a balanced dimmed appearance that works consistently across terminals
     // This avoids the inconsistent behavior of Modifier::DIM which varies significantly
     // between Windows Terminal (strong dimming) and Ghostty (weak/no dimming)
-    let dimmed_color = tidev_engine::theme::mix_colors(palette.muted, palette.background, 0.5);
+    let dimmed_color = crate::theme::mix_colors(palette.muted, palette.background, 0.5);
     let label_style = Style::default().fg(dimmed_color);
     let label_italic_style = Style::default()
         .fg(dimmed_color)
@@ -72,7 +72,7 @@ pub(super) fn render_reasoning_markdown_lines(
             if let Some(fg) = span.style.fg {
                 span.style = span
                     .style
-                    .fg(tidev_engine::theme::mix_colors(fg, palette.background, 0.4));
+                    .fg(crate::theme::mix_colors(fg, palette.background, 0.4));
             } else {
                 span.style = span.style.patch(body_style);
             }
@@ -93,7 +93,7 @@ pub(super) fn render_reasoning_markdown_lines(
                     if let Some(fg) = span.style.fg {
                         span.style =
                             span.style
-                                .fg(tidev_engine::theme::mix_colors(fg, palette.background, 0.4));
+                                .fg(crate::theme::mix_colors(fg, palette.background, 0.4));
                     } else {
                         span.style = span.style.patch(body_style);
                     }

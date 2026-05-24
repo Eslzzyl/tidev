@@ -28,8 +28,10 @@ use uuid::Uuid;
 mod commands;
 mod core;
 mod input;
+mod markdown;
 mod panel_launcher;
 mod render;
+pub mod theme;
 mod ui;
 
 pub use commands::{CommandAction, CommandPaletteState, CommandRegistry};
@@ -79,10 +81,10 @@ use tidev_engine::{
     provider_setup::ConnectDialog,
     shared::file_search::current_at_fragment,
     snapshot::{FileDiff, SnapshotService},
-    theme::{ThemeManager, ThemeName},
     tooling::{FileReadTracker, TodoItem, ToolRegistry},
 };
 use tidev_llm::LlmClient;
+use crate::theme::ThemeManager;
 use tidev_session::session::{
     AssistantTurn, BackendEvent, COMPACTION_MESSAGE_LABEL, Conversation, Message,
     MessageAttachment, MessageRole, ToolCall, ToolExecutionResult,

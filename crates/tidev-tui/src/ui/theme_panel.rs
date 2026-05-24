@@ -1,4 +1,4 @@
-use tidev_engine::theme::ThemeName;
+use crate::theme::ThemeName;
 
 /// An item in the theme panel's display list.
 #[derive(Clone, Debug)]

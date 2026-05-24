@@ -1,7 +1,7 @@
 use tidev_engine::config::{AppConfig, AuthStore};
 use tidev_types::prompts::SessionMode;
 use tidev_session::session::{Conversation, Message, MessageRole};
-use tidev_engine::theme::ThemePalette;
+use crate::theme::ThemePalette;
 use crate::App;
 use crate::chat_render::RenderContext;
 use crate::chat_render::tool::{

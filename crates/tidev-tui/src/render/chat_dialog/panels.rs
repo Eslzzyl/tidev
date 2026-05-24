@@ -1869,7 +1869,7 @@ impl App {
                                         (preview_area, None)
                                     };
 
-                                use tidev_engine::markdown_render::render_markdown_text_with_width_and_cwd;
+                                use crate::markdown::render_markdown_text_with_width_and_cwd;
                                 let content_width =
                                     preview_content_area.width.saturating_sub(2) as usize;
 
@@ -2422,7 +2422,7 @@ impl App {
         area: Rect,
         panel: &SkillsPanelState,
     ) {
-        use tidev_engine::markdown_render::render_markdown_text_with_width_and_cwd;
+        use crate::markdown::render_markdown_text_with_width_and_cwd;
 
         let palette = self.palette();
 

@@ -10,9 +10,9 @@ use tidev_types::prompts::SessionMode;
 
 use tidev_engine::{
     config::{AppConfig, AuthStore},
-    theme::ThemePalette,
     tooling::canonical_tool_name,
 };
+use crate::theme::ThemePalette;
 use tidev_session::session::{Conversation, Message, MessageRole, ToolCall};
 use tidev_session::utils::{TokenUsage, format_token_count};
 use crate::{
