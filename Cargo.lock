@@ -4003,6 +4003,7 @@ dependencies = [
  "tempfile",
  "textwrap",
  "tidev-engine",
+ "tidev-tui",
  "tidev-types",
  "tokio",
  "tokio-stream",
@@ -4084,6 +4085,36 @@ dependencies = [
  "urlencoding",
  "uuid",
  "zstd",
+]
+
+[[package]]
+name = "tidev-tui"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "base64",
+ "chrono",
+ "crossterm",
+ "diffy",
+ "dirs",
+ "fancy-regex 0.18.0",
+ "image",
+ "log",
+ "ratatui",
+ "rayon",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "shlex 2.0.1",
+ "tempfile",
+ "textwrap",
+ "tidev-engine",
+ "tidev-types",
+ "tokio",
+ "tokio-util",
+ "unicode-width",
+ "uuid",
 ]
 
 [[package]]

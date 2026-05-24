@@ -1,5 +1,4 @@
 pub mod gateway;
-pub mod tui;
 pub mod web;
 
 use anyhow::Context;
@@ -154,7 +153,7 @@ pub fn run() -> anyhow::Result<()> {
         None => {
             // Auto-cleanup on startup (before TUI starts)
             auto_cleanup_on_startup();
-            tui::run()
+            tidev_tui::run()
         }
         Some(Command::Gateway) => {
             auto_cleanup_on_startup();
@@ -162,7 +161,7 @@ pub fn run() -> anyhow::Result<()> {
         }
         Some(Command::Tui) => {
             auto_cleanup_on_startup();
-            tui::run()
+            tidev_tui::run()
         }
         Some(Command::Web {
             host,

@@ -2,7 +2,9 @@
 members = [
     ".",
     "tidev-types",
+    "tidev-engine",
     "tidev-cli",
+    "tidev-tui",
 ]
 default-members = ["tidev-cli"]
 resolver = "2"
@@ -119,6 +121,7 @@ prost = { version = "0.14", default-features = false, features = ["derive"] }
 log = "0.4.29"
 tidev-types = { path = "tidev-types" }
 tidev-engine = { path = "tidev-engine" }
+tidev-tui = { path = "tidev-tui" }
 
 [dev-dependencies]
 tempfile = "3.27"
