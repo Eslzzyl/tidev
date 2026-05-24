@@ -144,7 +144,7 @@ pub struct SessionStats<'a> {
 
 /// Format status information for display.
 pub fn format_status_summary(stats: &SessionStats<'_>) -> String {
-    let token_usage = tidev_engine::utils::TokenUsage::new(stats.input_tokens, stats.output_tokens, 0, 0);
+    let token_usage = tidev_session::utils::TokenUsage::new(stats.input_tokens, stats.output_tokens, 0, 0);
     let total_tokens = token_usage.total();
     let context_usage_pct = token_usage.context_usage_pct(stats.context_window);
 

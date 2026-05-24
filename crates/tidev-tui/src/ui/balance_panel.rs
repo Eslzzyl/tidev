@@ -1,4 +1,4 @@
-use tidev_engine::balance::{DeepSeekBalanceResponse, SiliconFlowBalanceResponse};
+use tidev_session::balance::{DeepSeekBalanceResponse, SiliconFlowBalanceResponse};
 
 #[derive(Clone, Debug)]
 pub struct BalancePanelState {

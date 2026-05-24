@@ -17,10 +17,10 @@ use std::{
     time::Duration,
 };
 use uuid::Uuid;
+use tidev_session::stats::{Granularity, ModelUsageEntry, StatsEntry, TimeRangeStats, UsageSummary};
 
 use crate::{
     session::{Conversation, Message, MessageRole, ToolCall},
-    stats::{Granularity, ModelUsageEntry, StatsEntry, TimeRangeStats, UsageSummary},
     tooling::TodoItem,
 };
 

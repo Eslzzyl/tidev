@@ -812,25 +812,25 @@ impl App {
             }
             KeyCode::Char('1') => {
                 if let Some(panel) = &mut self.stats_panel {
-                    panel.granularity = tidev_engine::stats::Granularity::Hour;
+                    panel.granularity = tidev_session::stats::Granularity::Hour;
                     self.refresh_stats_panel();
                 }
             }
             KeyCode::Char('2') => {
                 if let Some(panel) = &mut self.stats_panel {
-                    panel.granularity = tidev_engine::stats::Granularity::Day;
+                    panel.granularity = tidev_session::stats::Granularity::Day;
                     self.refresh_stats_panel();
                 }
             }
             KeyCode::Char('3') => {
                 if let Some(panel) = &mut self.stats_panel {
-                    panel.granularity = tidev_engine::stats::Granularity::Week;
+                    panel.granularity = tidev_session::stats::Granularity::Week;
                     self.refresh_stats_panel();
                 }
             }
             KeyCode::Char('4') => {
                 if let Some(panel) = &mut self.stats_panel {
-                    panel.granularity = tidev_engine::stats::Granularity::Month;
+                    panel.granularity = tidev_session::stats::Granularity::Month;
                     self.refresh_stats_panel();
                 }
             }
@@ -876,7 +876,7 @@ impl App {
                         runtime.spawn(async move {
                             match selected_provider {
                                 crate::ui::balance_panel::ProviderTab::DeepSeek => {
-                                    match tidev_engine::balance::query_deepseek_balance(
+                                    match tidev_session::balance::query_deepseek_balance(
                                         &http,
                                         &api_key_clone,
                                     )
@@ -899,7 +899,7 @@ impl App {
                                     }
                                 }
                                 crate::ui::balance_panel::ProviderTab::SiliconFlow => {
-                                    match tidev_engine::balance::query_siliconflow_balance(
+                                    match tidev_session::balance::query_siliconflow_balance(
                                         &http,
                                         &api_key_clone,
                                     )
@@ -957,7 +957,7 @@ impl App {
                         runtime.spawn(async move {
                             match selected_provider {
                                 crate::ui::balance_panel::ProviderTab::DeepSeek => {
-                                    match tidev_engine::balance::query_deepseek_balance(
+                                    match tidev_session::balance::query_deepseek_balance(
                                         &http,
                                         &api_key_clone,
                                     )
@@ -980,7 +980,7 @@ impl App {
                                     }
                                 }
                                 crate::ui::balance_panel::ProviderTab::SiliconFlow => {
-                                    match tidev_engine::balance::query_siliconflow_balance(
+                                    match tidev_session::balance::query_siliconflow_balance(
                                         &http,
                                         &api_key_clone,
                                     )

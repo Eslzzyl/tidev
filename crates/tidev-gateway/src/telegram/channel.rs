@@ -707,7 +707,7 @@ impl TelegramChannel {
             .context("API key not found")?;
 
         match provider_id {
-            "deepseek" => match tidev_engine::balance::query_deepseek_balance(http, api_key).await {
+            "deepseek" => match tidev_session::balance::query_deepseek_balance(http, api_key).await {
                 Ok(balance) => {
                     let text = self.core.format_deepseek_balance(&balance);
                     self.send_reply_chunks(message, &text).await?;
@@ -721,7 +721,7 @@ impl TelegramChannel {
                 }
             },
             "siliconflow-cn" => {
-                match tidev_engine::balance::query_siliconflow_balance(http, api_key).await {
+                match tidev_session::balance::query_siliconflow_balance(http, api_key).await {
                     Ok(balance) => {
                         let text = self.core.format_siliconflow_balance(&balance);
                         self.send_reply_chunks(message, &text).await?;

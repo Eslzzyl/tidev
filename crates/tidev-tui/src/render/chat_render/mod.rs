@@ -13,8 +13,8 @@ use tidev_engine::{
     session::{Conversation, Message, MessageRole, ToolCall},
     theme::ThemePalette,
     tooling::canonical_tool_name,
-    utils::{TokenUsage, format_token_count},
 };
+use tidev_session::utils::{TokenUsage, format_token_count};
 use crate::{
 
     App,

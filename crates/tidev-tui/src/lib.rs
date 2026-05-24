@@ -86,8 +86,8 @@ use tidev_engine::{
     storage::SessionStore,
     theme::{ThemeManager, ThemeName},
     tooling::{FileReadTracker, TodoItem, ToolRegistry},
-    utils::TokenUsage,
 };
+use tidev_session::utils::TokenUsage;
 
 use crate::{
 

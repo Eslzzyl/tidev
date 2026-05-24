@@ -72,7 +72,7 @@ impl TokenUsage {
 /// # Examples
 ///
 /// ```
-/// use tidev_engine::utils::{sum_token_usage, TokenUsage};
+/// use tidev_session::utils::{sum_token_usage, TokenUsage};
 ///
 /// let items = [
 ///     TokenUsage::new(100, 50, 0, 0),
@@ -115,7 +115,7 @@ pub enum TokenUnit {
 /// # Examples
 ///
 /// ```
-/// use tidev_engine::utils::format_token_count;
+/// use tidev_session::utils::format_token_count;
 ///
 /// assert_eq!(format_token_count(500), "500");
 /// assert_eq!(format_token_count(1500), "1.5K");
@@ -149,7 +149,7 @@ pub fn format_token_count_u32(count: u32) -> String {
 /// # Examples
 ///
 /// ```
-/// use tidev_engine::utils::shorten;
+/// use tidev_session::utils::shorten;
 ///
 /// assert_eq!(shorten("hello", 10), "hello");
 /// assert_eq!(shorten("hello world!", 10), "hello worl...");

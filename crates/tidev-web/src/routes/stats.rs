@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use tidev_engine::stats::{
+use tidev_session::stats::{
     Granularity, ProviderUsageEntry, SessionUsageEntry, UsageStatsService, UsageSummary,
 };
 use crate::{error::AppError, state::AppState};
@@ -97,8 +97,8 @@ pub struct ModelUsageEntry {
     pub request_count: i64,
 }
 
-impl From<tidev_engine::stats::ModelUsageEntry> for ModelUsageEntry {
-    fn from(e: tidev_engine::stats::ModelUsageEntry) -> Self {
+impl From<tidev_session::stats::ModelUsageEntry> for ModelUsageEntry {
+    fn from(e: tidev_session::stats::ModelUsageEntry) -> Self {
         Self {
             provider_id: e.provider_id,
             provider_display_name: e.provider_display_name,
@@ -184,7 +184,7 @@ fn build_provider_lookup(config: &tidev_engine::config::AppConfig) -> HashMap<St
 /// (e.g. when a subagent uses a model from a different provider), so we
 /// prefer the prefix extracted from model_id when it matches a known provider.
 fn populate_model_entries(
-    models: &mut [tidev_engine::stats::ModelUsageEntry],
+    models: &mut [tidev_session::stats::ModelUsageEntry],
     model_lookup: &HashMap<String, HashMap<String, String>>,
     provider_lookup: &HashMap<String, String>,
 ) {
@@ -336,11 +336,11 @@ pub async fn get_provider_usage(
     populate_model_entries(&mut models, &model_lookup, &provider_lookup);
 
     // Aggregate by provider_id
-    let mut map: HashMap<String, tidev_engine::stats::ProviderUsageEntry> = HashMap::new();
+    let mut map: HashMap<String, tidev_session::stats::ProviderUsageEntry> = HashMap::new();
     for m in models {
         let entry =
             map.entry(m.provider_id.clone())
-                .or_insert_with(|| tidev_engine::stats::ProviderUsageEntry {
+                .or_insert_with(|| tidev_session::stats::ProviderUsageEntry {
                     provider_id: m.provider_id.clone(),
                     provider_display_name: m.provider_display_name.clone(),
                     ..Default::default()

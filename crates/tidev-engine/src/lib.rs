@@ -1,5 +1,4 @@
 pub mod agent;
-pub mod balance;
 pub mod config;
 pub mod context;
 pub mod hooks;
@@ -15,11 +14,8 @@ pub mod sandbox;
 pub mod session;
 pub mod shared;
 pub mod snapshot;
-pub mod stats;
 pub mod storage;
 pub mod sync;
-pub mod system_info;
 pub mod theme;
 pub mod tmp;
 pub mod tooling;
-pub mod utils;

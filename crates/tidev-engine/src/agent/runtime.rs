@@ -29,6 +29,7 @@ use tokio::sync::{Mutex, mpsc::UnboundedSender, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use tidev_types::prompts::SessionMode;
+use tidev_session::system_info::SystemInfo;
 
 use crate::{
     agent::{AgentDefinition, AgentType},
@@ -40,7 +41,6 @@ use crate::{
         ToolExecutionResult,
     },
     storage::SessionStore,
-    system_info::SystemInfo,
     tooling::{ToolDefinition, ToolRegistry, canonical_tool_name},
 };
 
@@ -176,7 +176,7 @@ impl AgentRuntime {
         let working_dir = std::env::current_dir()
             .map(|p| p.display().to_string())
             .unwrap_or_default();
-        let is_git = crate::system_info::is_git_repo(&self.workspace_root);
+        let is_git = tidev_session::system_info::is_git_repo(&self.workspace_root);
 
         let mut prompt = String::new();
         if !base_prompt.is_empty() {

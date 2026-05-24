@@ -862,7 +862,7 @@ impl ChannelCore {
     /// Format DeepSeek balance for display.
     pub fn format_deepseek_balance(
         &self,
-        balance: &tidev_engine::balance::DeepSeekBalanceResponse,
+        balance: &tidev_session::balance::DeepSeekBalanceResponse,
     ) -> String {
         let mut text = String::from("💰 DeepSeek Balance\n\n");
         if !balance.is_available {
@@ -890,7 +890,7 @@ impl ChannelCore {
     /// Format SiliconFlow balance for display.
     pub fn format_siliconflow_balance(
         &self,
-        balance: &tidev_engine::balance::SiliconFlowBalanceResponse,
+        balance: &tidev_session::balance::SiliconFlowBalanceResponse,
     ) -> String {
         format!(
             "💰 SiliconFlow Balance\n\nTotal: {} CNY",

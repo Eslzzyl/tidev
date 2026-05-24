@@ -1,0 +1,29 @@
+[package]
+name = "tidev-session"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "TiDev core data model and types"
+
+[lib]
+name = "tidev_session"
+
+[dependencies]
+anyhow = "1.0.102"
+chrono = { version = "0.4.44", features = ["serde"] }
+reqwest = { version = "0.13.3", default-features = false, features = [
+    "json",
+    "rustls",
+    "gzip",
+] }
+rusqlite = { version = "0.39.0", features = ["bundled", "functions", "vtab"] }
+serde = { version = "1.0.228", features = ["derive", "rc"] }
+serde_json = "1.0.149"
+tokio = { version = "=1.52.3", features = [
+    "rt-multi-thread",
+    "macros",
+] }
+uuid = { version = "1.23.1", features = ["v4", "serde"] }
+log = "0.4.29"
+tidev-types = { path = "../tidev-types" }

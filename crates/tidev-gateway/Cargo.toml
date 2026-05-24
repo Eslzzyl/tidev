@@ -12,6 +12,7 @@ name = "tidev_gateway"
 [dependencies]
 tidev-engine = { path = "../tidev-engine" }
 tidev-types = { path = "../tidev-types" }
+tidev-session = { path = "../tidev-session" }
 anyhow = "1.0.102"
 async-trait = "0.1"
 base64 = "0.22.1"

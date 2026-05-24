@@ -709,7 +709,7 @@ impl App {
             runtime.spawn(async move {
                 match selected_provider {
                     crate::ui::balance_panel::ProviderTab::DeepSeek => {
-                        match tidev_engine::balance::query_deepseek_balance(&http, &api_key_clone).await {
+                        match tidev_session::balance::query_deepseek_balance(&http, &api_key_clone).await {
                             Ok(balance) => {
                                 if let Ok(mut guard) = panel_ptr_clone.lock()
                                     && let Some(panel) = &mut *guard
@@ -727,7 +727,7 @@ impl App {
                         }
                     }
                     crate::ui::balance_panel::ProviderTab::SiliconFlow => {
-                        match tidev_engine::balance::query_siliconflow_balance(&http, &api_key_clone).await
+                        match tidev_session::balance::query_siliconflow_balance(&http, &api_key_clone).await
                         {
                             Ok(balance) => {
                                 if let Ok(mut guard) = panel_ptr_clone.lock()
@@ -799,7 +799,7 @@ impl App {
             runtime.spawn(async move {
                 match selected_provider {
                     crate::ui::balance_panel::ProviderTab::DeepSeek => {
-                        match tidev_engine::balance::query_deepseek_balance(&http, &api_key_clone).await {
+                        match tidev_session::balance::query_deepseek_balance(&http, &api_key_clone).await {
                             Ok(balance) => {
                                 if let Ok(mut guard) = panel_ptr_clone.lock()
                                     && let Some(panel) = &mut *guard
@@ -817,7 +817,7 @@ impl App {
                         }
                     }
                     crate::ui::balance_panel::ProviderTab::SiliconFlow => {
-                        match tidev_engine::balance::query_siliconflow_balance(&http, &api_key_clone).await
+                        match tidev_session::balance::query_siliconflow_balance(&http, &api_key_clone).await
                         {
                             Ok(balance) => {
                                 if let Ok(mut guard) = panel_ptr_clone.lock()
