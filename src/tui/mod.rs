@@ -62,7 +62,12 @@ use core::state::*;
 
 use tidev_types::prompts::{SessionMode, init_command};
 
-use crate::{
+use crate::tui::ui::permission::{
+    PendingToolExecution, PermissionDialogState, RunningSubagentExecution,
+    RunningToolExecution, SandboxElevationDialog,
+};
+
+use tidev_engine::{
     agent::runtime::{AgentRuntime, PendingToolApproval},
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
     context::ContextManager,
@@ -81,6 +86,10 @@ use crate::{
     storage::SessionStore,
     theme::{ThemeManager, ThemeName},
     tooling::{FileReadTracker, TodoItem, ToolRegistry},
+    utils::TokenUsage,
+};
+
+use crate::{
     tui::at_mention::{AtMentionKind, AtMentionState},
     tui::input::SnippetState,
     tui::input::shell_completion::ShellCompletionState,
@@ -89,17 +98,12 @@ use crate::{
     tui::message_panel::MessagePanelState,
     tui::model_panel::ModelPanelState,
     tui::mouse_selection::{ClipboardLease, MouseSelectionState},
-    tui::permission::{
-        PendingToolExecution, PermissionDialogState, RunningSubagentExecution,
-        RunningToolExecution, SandboxElevationDialog,
-    },
     tui::question::QuestionDialogState,
     tui::session_panel::SessionPanelState,
     tui::settings_panel::SettingsPanelState,
     tui::theme_panel::ThemePanelState,
     tui::ui::rename::RenameSessionDialogState,
     tui::ui::workspace_boundary::WorkspaceBoundaryDialogState,
-    utils::TokenUsage,
 };
 
 struct App {
@@ -262,12 +266,12 @@ struct App {
     /// Permission channel receiver — receives [`PendingToolApproval`] from
     /// the spawned `run_agent_loop` task when tool calls need approval.
     pending_permission_rx:
-        Option<tokio::sync::mpsc::UnboundedReceiver<crate::agent::runtime::PendingToolApproval>>,
+        Option<tokio::sync::mpsc::UnboundedReceiver<tidev_engine::agent::runtime::PendingToolApproval>>,
     /// The oneshot sender for the current pending permission approval.
     /// Set when we receive a `PendingToolApproval` and consumed when we
     /// send the response back to `run_agent_loop`.
     pending_permission_response:
-        Option<tokio::sync::oneshot::Sender<Vec<crate::agent::runtime::ApprovedTool>>>,
+        Option<tokio::sync::oneshot::Sender<Vec<tidev_engine::agent::runtime::ApprovedTool>>>,
     /// Buffer for rejected tool results during permission channel processing.
     /// Cleared when the approval response is sent.
     pending_rejected_tools: Vec<(ToolCall, ToolExecutionResult)>,
@@ -291,7 +295,7 @@ struct App {
     /// Whether the input is in shell command mode (triggered by `!` prefix).
     shell_mode: bool,
     /// DeepSeek thinking level for the current model
-    thinking_level: crate::config::reasoning::ThinkingLevelType,
+    thinking_level: tidev_engine::config::reasoning::ThinkingLevelType,
     /// Cross-session memory store
     memory_store: Arc<MemoryStore>,
     /// Memory management panel
@@ -362,7 +366,7 @@ impl App {
         &self,
         path: &str,
     ) -> Result<Option<(MessageAttachment, Vec<String>)>> {
-        use crate::tooling::builtin::file::read_file_for_at_reference;
+        use tidev_engine::tooling::builtin::file::read_file_for_at_reference;
 
         let absolute = self.resolve_workspace_path(path);
         let metadata = match std::fs::metadata(&absolute) {
@@ -1700,7 +1704,7 @@ impl App {
         let thinking_level = self.thinking_level.clone();
 
         // Queue via runtime for processing
-        let msg = crate::agent::runtime::QueuedUserMessage {
+        let msg = tidev_engine::agent::runtime::QueuedUserMessage {
             content: prompt.clone(),
             attachments: attachments.clone(),
             mode: Some(mode),
@@ -1932,7 +1936,7 @@ impl App {
 
             if let Err(e) = agent
                 .run_agent_loop_with_permission_channel(
-                    crate::agent::runtime::AgentLoopConfig {
+                    tidev_engine::agent::runtime::AgentLoopConfig {
                         session_id,
                         model,
                         context_manager: &mut context_manager,

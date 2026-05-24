@@ -5,7 +5,7 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph},
 };
 
-use crate::theme::ThemePalette;
+use tidev_engine::theme::ThemePalette;
 
 use super::App;
 use crate::tui::ui::balance_panel::{BalancePanelState, ProviderTab};

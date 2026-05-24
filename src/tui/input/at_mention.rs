@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::shared::file_search::{
+use tidev_engine::shared::file_search::{
     FileEntryKind, FileSearchIndex, FileSuggestion, current_at_fragment,
 };
 

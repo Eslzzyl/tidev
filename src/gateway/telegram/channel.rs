@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use tokio::time::{Duration, sleep};
 use tokio_util::sync::CancellationToken;
 
-use crate::{
+use tidev_engine::{
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
     session::{BackendEvent, Conversation, Message, MessageRole},
     storage::SessionStore,
@@ -52,8 +52,8 @@ impl TelegramChannel {
         config: AppConfig,
         auth: AuthStore,
         store: SessionStore,
-        llm: crate::llm::LlmClient,
-        tools: crate::tooling::ToolRegistry,
+        llm: tidev_engine::llm::LlmClient,
+        tools: tidev_engine::tooling::ToolRegistry,
         instruction_prompt: String,
         allowlist: HashSet<String>,
         poll_timeout_secs: u64,
@@ -361,7 +361,7 @@ impl TelegramChannel {
         self.core.tools.set_active_model(active_model.clone());
 
         // Build context manager
-        let mut context_manager = crate::context::ContextManager::from_state(
+        let mut context_manager = tidev_engine::context::ContextManager::from_state(
             conversation.context_summary.clone(),
             conversation.context_retained_from,
         );
@@ -424,7 +424,7 @@ impl TelegramChannel {
         let result = self
             .core
             .agent
-            .run_agent_loop(crate::agent::runtime::AgentLoopConfig {
+            .run_agent_loop(tidev_engine::agent::runtime::AgentLoopConfig {
                 session_id,
                 model: active_model.clone(),
                 context_manager: &mut context_manager,
@@ -522,7 +522,7 @@ impl TelegramChannel {
         let session_id = conversation.session_id;
 
         // Build context manager from existing state (preserves prefix cache)
-        let mut context_manager = crate::context::ContextManager::from_state(
+        let mut context_manager = tidev_engine::context::ContextManager::from_state(
             conversation.context_summary.clone(),
             conversation.context_retained_from,
         );
@@ -574,7 +574,7 @@ impl TelegramChannel {
 
         // Run compaction with streaming
         let result = context_manager
-            .compact(crate::context::CompactionConfig {
+            .compact(tidev_engine::context::CompactionConfig {
                 llm: &self.core.llm,
                 model: active_model,
                 conversation: &*conversation,
@@ -707,7 +707,7 @@ impl TelegramChannel {
             .context("API key not found")?;
 
         match provider_id {
-            "deepseek" => match crate::balance::query_deepseek_balance(http, api_key).await {
+            "deepseek" => match tidev_engine::balance::query_deepseek_balance(http, api_key).await {
                 Ok(balance) => {
                     let text = self.core.format_deepseek_balance(&balance);
                     self.send_reply_chunks(message, &text).await?;
@@ -721,7 +721,7 @@ impl TelegramChannel {
                 }
             },
             "siliconflow-cn" => {
-                match crate::balance::query_siliconflow_balance(http, api_key).await {
+                match tidev_engine::balance::query_siliconflow_balance(http, api_key).await {
                     Ok(balance) => {
                         let text = self.core.format_siliconflow_balance(&balance);
                         self.send_reply_chunks(message, &text).await?;

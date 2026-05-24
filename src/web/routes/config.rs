@@ -196,7 +196,7 @@ pub async fn set_agent_model(
     let agent_type = body.agent_type.trim().to_ascii_lowercase();
 
     // Validate the agent type is known
-    crate::agent::AgentType::parse(&agent_type).ok_or_else(|| {
+    tidev_engine::agent::AgentType::parse(&agent_type).ok_or_else(|| {
         AppError::BadRequest(format!(
             "Unknown agent type '{}'. Valid types: general, explorer, librarian, oracle, designer, fixer",
             body.agent_type

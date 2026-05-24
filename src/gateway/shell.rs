@@ -9,8 +9,8 @@
 use anyhow::Result;
 use uuid::Uuid;
 
-use crate::session::{Message, MessageRole};
-use crate::storage::SessionStore;
+use tidev_engine::session::{Message, MessageRole};
+use tidev_engine::storage::SessionStore;
 
 /// Execute a shell command and return (raw_output, exit_code).
 ///

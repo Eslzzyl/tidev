@@ -1,4 +1,4 @@
-use crate::agent::AgentType;
+use tidev_engine::agent::AgentType;
 
 #[derive(Clone, Debug)]
 #[allow(dead_code)]

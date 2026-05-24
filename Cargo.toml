@@ -118,6 +118,7 @@ hex = "0.4.3"
 prost = { version = "0.14", default-features = false, features = ["derive"] }
 log = "0.4.29"
 tidev-types = { path = "tidev-types" }
+tidev-engine = { path = "tidev-engine" }
 
 [dev-dependencies]
 tempfile = "3.27"

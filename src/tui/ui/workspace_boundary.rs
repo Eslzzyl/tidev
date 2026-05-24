@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use std::path::PathBuf;
 use tokio::runtime::Runtime;
 
-use crate::session::{ToolCall, ToolExecutionResult};
+use tidev_engine::session::{ToolCall, ToolExecutionResult};
 
 use super::App;
 
@@ -69,7 +69,7 @@ pub(crate) fn extract_boundary_violation_path(
 ) -> Option<PathBuf> {
     let args: serde_json::Value = serde_json::from_str(&tool_call.arguments).ok()?;
 
-    let canonical_name = crate::tooling::canonical_tool_name(&tool_call.name)?;
+    let canonical_name = tidev_engine::tooling::canonical_tool_name(&tool_call.name)?;
 
     let path_buf: PathBuf = match canonical_name {
         "read" | "write" | "edit" | "glob" | "grep" => {
@@ -82,20 +82,20 @@ pub(crate) fn extract_boundary_violation_path(
         }
         "apply_patch" => {
             let patch = args.get("patch_text")?.as_str()?;
-            PathBuf::from(crate::tooling::extract_file_path_from_patch(patch)?)
+            PathBuf::from(tidev_engine::tooling::extract_file_path_from_patch(patch)?)
         }
         "bash" => return None,
         _ => return None,
     };
 
-    if !crate::tooling::builtin::utils::is_path_outside_workspace(workspace_root, &path_buf) {
+    if !tidev_engine::tooling::builtin::utils::is_path_outside_workspace(workspace_root, &path_buf) {
         return None;
     }
 
     // Return the resolved path for consistent permission key.
     // Fall back to the raw path if resolution fails.
     Some(
-        crate::tooling::builtin::utils::resolve_path_unchecked(workspace_root, &path_buf)
+        tidev_engine::tooling::builtin::utils::resolve_path_unchecked(workspace_root, &path_buf)
             .unwrap_or(path_buf),
     )
 }
@@ -139,7 +139,7 @@ impl App {
         if allowed {
             // Handle "question" tool via dialog (needs TUI interaction)
             if dialog.pending.tool_call.name == "question" {
-                let args = match serde_json::from_str::<crate::tooling::QuestionArgs>(
+                let args = match serde_json::from_str::<tidev_engine::tooling::QuestionArgs>(
                     &dialog.pending.tool_call.arguments,
                 ) {
                     Ok(args) => args,

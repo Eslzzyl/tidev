@@ -16,7 +16,8 @@ use uuid::Uuid;
 
 use tidev_types::prompts::{SessionMode, gateway_system_prompt};
 
-use crate::{
+use tidev_engine::{
+
     agent::runtime::AgentRuntime,
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
     llm::LlmClient,
@@ -133,7 +134,7 @@ impl ChannelCore {
                 std::collections::VecDeque::new(),
             )),
             auto_approve_permissions: false,
-            hooks: crate::hooks::HookEngine::new(
+            hooks: tidev_engine::hooks::HookEngine::new(
                 config.hooks.clone(),
                 workspace_root.to_path_buf(),
             ),
@@ -602,7 +603,7 @@ impl ChannelCore {
                 // Build context manager from existing state so we preserve the
                 // current summary (if any).  Creating a fresh ContextManager
                 // would lose it and break prefix caching.
-                let mut context_manager = crate::context::ContextManager::from_state(
+                let mut context_manager = tidev_engine::context::ContextManager::from_state(
                     conversation.context_summary.clone(),
                     conversation.context_retained_from,
                 );
@@ -624,7 +625,7 @@ impl ChannelCore {
                 // the dominant latency and blocking the handler for a few
                 // seconds is acceptable.
                 let result = context_manager
-                    .compact(crate::context::CompactionConfig {
+                    .compact(tidev_engine::context::CompactionConfig {
                         llm: &self.llm,
                         model: active_model,
                         conversation: &*conversation,
@@ -725,7 +726,7 @@ impl ChannelCore {
         let token_stats = self
             .store
             .get_session_token_stats(conversation.session_id)
-            .unwrap_or(crate::storage::SessionTokenStats {
+            .unwrap_or(tidev_engine::storage::SessionTokenStats {
                 input_tokens: 0,
                 output_tokens: 0,
             });
@@ -791,7 +792,7 @@ impl ChannelCore {
 
         self.tools.set_active_model(active_model.clone());
 
-        let mut context_manager = crate::context::ContextManager::from_state(
+        let mut context_manager = tidev_engine::context::ContextManager::from_state(
             conversation.context_summary.clone(),
             conversation.context_retained_from,
         );
@@ -802,7 +803,7 @@ impl ChannelCore {
 
         let result = self
             .agent
-            .run_agent_loop(crate::agent::runtime::AgentLoopConfig {
+            .run_agent_loop(tidev_engine::agent::runtime::AgentLoopConfig {
                 session_id,
                 model: active_model.clone(),
                 context_manager: &mut context_manager,
@@ -861,7 +862,7 @@ impl ChannelCore {
     /// Format DeepSeek balance for display.
     pub fn format_deepseek_balance(
         &self,
-        balance: &crate::balance::DeepSeekBalanceResponse,
+        balance: &tidev_engine::balance::DeepSeekBalanceResponse,
     ) -> String {
         let mut text = String::from("💰 DeepSeek Balance\n\n");
         if !balance.is_available {
@@ -889,7 +890,7 @@ impl ChannelCore {
     /// Format SiliconFlow balance for display.
     pub fn format_siliconflow_balance(
         &self,
-        balance: &crate::balance::SiliconFlowBalanceResponse,
+        balance: &tidev_engine::balance::SiliconFlowBalanceResponse,
     ) -> String {
         format!(
             "💰 SiliconFlow Balance\n\nTotal: {} CNY",

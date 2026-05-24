@@ -1,18 +1,18 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::config::ConfigPaths;
+use tidev_engine::config::ConfigPaths;
 use tidev_types::prompts::SessionMode;
-use crate::session::Message;
+use tidev_engine::session::Message;
 
 /// Compose the instruction prompt from config and instruction files.
 /// Shared by all gateway channels.
 pub fn compose_instruction_prompt(
     workspace_root: &Path,
     paths: &ConfigPaths,
-    config: &crate::config::AppConfig,
+    config: &tidev_engine::config::AppConfig,
 ) -> String {
-    let (instruction_prompt, _) = crate::instructions::system_prompt_and_sources(
+    let (instruction_prompt, _) = tidev_engine::instructions::system_prompt_and_sources(
         workspace_root,
         &paths.config_dir,
         &config.instructions,
@@ -133,7 +133,7 @@ impl ModeManager {
         if let Some(last_user_with_mode) = messages
             .iter()
             .rev()
-            .find(|m| m.role == crate::session::MessageRole::User && m.mode.is_some())
+            .find(|m| m.role == tidev_engine::session::MessageRole::User && m.mode.is_some())
             && let Some(mode) = last_user_with_mode.mode
         {
             self.set(chat_key, mode);

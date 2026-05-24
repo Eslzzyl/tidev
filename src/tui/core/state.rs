@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 use uuid::Uuid;
 
-use crate::tooling::FileReadStamp;
+use tidev_engine::tooling::FileReadStamp;
 
 use super::at_mention::AtMentionState;
 use super::input::SnippetState;
@@ -25,13 +25,16 @@ use tidev_types::prompts::SessionMode;
 
 use crate::tui::ui::skills_panel::SkillsPanelState;
 use crate::tui::ui::workspace_boundary::WorkspaceBoundaryDialogState;
-use crate::{
-    config::ActiveModel,
+use tidev_engine::{
+config::ActiveModel,
     config::reasoning::ThinkingLevelType,
     context::ContextManager,
     provider_setup::ConnectDialog,
     session::{Conversation, MessageAttachment},
     tooling::TodoItem,
+};
+
+use crate::{
     tui::commands::CommandPaletteState,
     tui::input::Composer,
     tui::panel_launcher::PanelLauncherState,

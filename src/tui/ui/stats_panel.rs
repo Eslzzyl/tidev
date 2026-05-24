@@ -1,4 +1,4 @@
-use crate::stats::{Granularity, TimeRangeStats};
+use tidev_engine::stats::{Granularity, TimeRangeStats};
 use chrono::{DateTime, Utc};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

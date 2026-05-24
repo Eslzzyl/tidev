@@ -1,8 +1,8 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::config::ProviderSource;
-use crate::provider_setup::{
+use tidev_engine::config::ProviderSource;
+use tidev_engine::provider_setup::{
     ConnectDialog, EditModelStep, EditProviderDraft, EditProviderStep, NewProviderDraft,
     NewProviderStep,
 };

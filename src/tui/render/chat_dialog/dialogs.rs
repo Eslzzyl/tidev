@@ -2,9 +2,11 @@ use crate::tui::App;
 use crate::tui::render::render::centered_rect;
 use crate::tui::ui::connect::ProviderPickerItem;
 use crate::tui::ui::sensitive::SensitiveFileDialogState;
-use crate::{
+use tidev_engine::{
     config::ProviderSource,
     provider_setup::{ConnectDialog, EditProviderStep, NewProviderStep},
+};
+use crate::{
     tui::{
         permission::PermissionDialogState,
         question::QuestionDialogState,

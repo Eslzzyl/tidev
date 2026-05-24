@@ -4,7 +4,7 @@
 //! This overrides the config file value for the current session only.
 //! Available in both Plan and Build modes.
 
-use crate::sandbox::SandboxPolicy;
+use tidev_engine::sandbox::SandboxPolicy;
 
 use super::App;
 
@@ -99,10 +99,10 @@ impl App {
 
         // Persist to config file so the choice survives restarts
         self.config.sandbox.mode = match &item.policy {
-            crate::sandbox::SandboxPolicy::DangerFullAccess => "danger-full-access".to_string(),
-            crate::sandbox::SandboxPolicy::ReadOnly => "read-only".to_string(),
-            crate::sandbox::SandboxPolicy::ExternalSandbox => "external-sandbox".to_string(),
-            crate::sandbox::SandboxPolicy::WorkspaceWrite { .. } => "workspace-write".to_string(),
+            tidev_engine::sandbox::SandboxPolicy::DangerFullAccess => "danger-full-access".to_string(),
+            tidev_engine::sandbox::SandboxPolicy::ReadOnly => "read-only".to_string(),
+            tidev_engine::sandbox::SandboxPolicy::ExternalSandbox => "external-sandbox".to_string(),
+            tidev_engine::sandbox::SandboxPolicy::WorkspaceWrite { .. } => "workspace-write".to_string(),
         };
         let _ = self.config.save(&self.paths);
 

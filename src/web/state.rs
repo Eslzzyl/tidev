@@ -4,7 +4,8 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock, broadcast};
 use tokio_util::sync::CancellationToken;
 
-use crate::{
+use tidev_engine::{
+
     agent::runtime::AgentRuntime,
     config::{AppConfig, AuthStore},
     llm::LlmClient,
@@ -16,7 +17,7 @@ use crate::{
 use crate::web::terminal::{TerminalManager, TerminalOutput};
 
 // Re-export ConfigPaths for use in routes
-pub use crate::config::ConfigPaths;
+pub use tidev_engine::config::ConfigPaths;
 
 use super::event_bus::EventBus;
 
@@ -42,7 +43,7 @@ pub struct AppState {
     /// Config directory path (for SkillCatalog discovery)
     pub config_dir: PathBuf,
     /// Config paths for saving config/auth files
-    pub config_paths: crate::config::ConfigPaths,
+    pub config_paths: tidev_engine::config::ConfigPaths,
     /// Cancellation token for graceful shutdown
     pub cancel_token: CancellationToken,
     /// File search index for @-mention completion

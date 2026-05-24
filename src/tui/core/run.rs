@@ -1,5 +1,5 @@
 use super::*;
-use crate::storage::database::Database;
+use tidev_engine::storage::database::Database;
 use crate::tui::panel_launcher::PanelLauncherState;
 use chrono::Utc;
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -27,7 +27,7 @@ impl App {
         let _t0 = std::time::Instant::now();
         let workspace_root = env::current_dir().context("failed to determine workspace root")?;
         let config = AppConfig::load_with_project_overlay(&paths, &workspace_root)?;
-        let _ = crate::logging::init(&paths.data_dir, config.logging.clone());
+        let _ = tidev_engine::logging::init(&paths.data_dir, config.logging.clone());
         log::info!("App initializing, workspace={}", workspace_root.display());
         log::info!("startup: config loaded in {:?}", _t0.elapsed());
         let _t1 = std::time::Instant::now();
@@ -94,11 +94,11 @@ impl App {
             store.load_model_thinking_level(&active_model.provider_id, &active_model.model_id)
         {
             active_model.thinking_level =
-                crate::config::reasoning::ThinkingLevelType::from_string(&level_str);
+                tidev_engine::config::reasoning::ThinkingLevelType::from_string(&level_str);
         }
         tools.set_active_model(active_model.clone());
         // Attach LLM to memory store with model overrides
-        let mut consolidation_override: Option<crate::config::ActiveModel> = config
+        let mut consolidation_override: Option<tidev_engine::config::ActiveModel> = config
             .memory
             .consolidation_model
             .as_deref()
@@ -106,7 +106,7 @@ impl App {
         if let Some(ref mut model) = consolidation_override
             && let Some(tl_str) = config.memory.thinking_levels.get("consolidation")
         {
-            model.thinking_level = crate::config::reasoning::ThinkingLevelType::from_string(tl_str);
+            model.thinking_level = tidev_engine::config::reasoning::ThinkingLevelType::from_string(tl_str);
         }
 
         // Provide a model resolver so summarization can reuse the last
@@ -150,7 +150,7 @@ impl App {
                 std::collections::VecDeque::new(),
             )),
             auto_approve_permissions: true, // TUI handles permissions via channel
-            hooks: crate::hooks::HookEngine::new(config.hooks.clone(), workspace_root.clone())
+            hooks: tidev_engine::hooks::HookEngine::new(config.hooks.clone(), workspace_root.clone())
                 .with_memory_store(memory_store.clone()),
         };
         // Share current session ID for the background inactivity check.
@@ -349,7 +349,7 @@ impl App {
 
         // Start memory background tasks: eviction, consolidation, reflection.
         log::info!("memory: starting background tasks");
-        crate::memory::start_background_tasks(
+        tidev_engine::memory::start_background_tasks(
             self.memory_store.clone(),
             runtime.handle(),
             &self.workspace_root.to_string_lossy(),
@@ -504,7 +504,7 @@ impl App {
 
         // Force-kill any remaining child processes (e.g. bash subprocesses
         // whose tokio task was dropped before it could clean up).
-        crate::tooling::builtin::kill_all_children();
+        tidev_engine::tooling::builtin::kill_all_children();
 
         self.pending_permission_rx = None;
         self.pending_permission_response = None;
@@ -974,7 +974,7 @@ impl App {
             &runtime.active_model.model_id,
         ) {
             runtime.active_model.thinking_level =
-                crate::config::reasoning::ThinkingLevelType::from_string(&level_str);
+                tidev_engine::config::reasoning::ThinkingLevelType::from_string(&level_str);
         }
         if let Some(last_level) = runtime
             .conversation
@@ -988,7 +988,7 @@ impl App {
 
         // Restore mode from last user message
         if let Some(last_mode) = runtime.conversation.messages.iter().rev().find_map(|m| {
-            if matches!(m.role, crate::session::MessageRole::User) {
+            if matches!(m.role, tidev_engine::session::MessageRole::User) {
                 m.mode
             } else {
                 None
@@ -1064,7 +1064,7 @@ impl App {
         runtime.spawn(async move {
             let result = if let Some(request_id) = stream_request_id {
                 context_manager
-                    .compact(crate::context::CompactionConfig {
+                    .compact(tidev_engine::context::CompactionConfig {
                         llm: &llm,
                         model: &model,
                         conversation: &conversation,
@@ -1076,7 +1076,7 @@ impl App {
                     .await
             } else {
                 context_manager
-                    .compact_if_needed(crate::context::CompactionConfig {
+                    .compact_if_needed(tidev_engine::context::CompactionConfig {
                         llm: &llm,
                         model: &model,
                         conversation: &conversation,
@@ -1142,7 +1142,7 @@ impl App {
                     if manual
                         && let Some(last_msg) = self.conversation.messages.last_mut()
                         && last_msg.streaming
-                        && last_msg.role == crate::session::MessageRole::System
+                        && last_msg.role == tidev_engine::session::MessageRole::System
                     {
                         // Don't replace message content — Delta events during
                         // streaming have already accumulated the full summary
@@ -1164,7 +1164,7 @@ impl App {
                     }
                     if !updated_existing {
                         let mut compaction_message =
-                            crate::session::Message::compaction(summary.clone());
+                            tidev_engine::session::Message::compaction(summary.clone());
                         compaction_message.metadata.prior_summary = prior_summary;
                         compaction_message.metadata.prior_retained_from = Some(prior_retained_from);
                         self.conversation.push(compaction_message.clone());

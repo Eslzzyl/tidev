@@ -1,4 +1,4 @@
-use crate::{theme::ThemePalette, utils::TokenUsage};
+use tidev_engine::{theme::ThemePalette, utils::TokenUsage};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Position, Rect},
     prelude::{Frame, Modifier, Style, Text},

@@ -5,7 +5,7 @@ use ratatui::layout::Rect;
 use std::cell::Cell;
 use uuid::Uuid;
 
-use crate::memory::{MemoryEntry, MemoryStore, MemoryType};
+use tidev_engine::memory::{MemoryEntry, MemoryStore, MemoryType};
 use crate::tui::input::Composer;
 
 use super::App;

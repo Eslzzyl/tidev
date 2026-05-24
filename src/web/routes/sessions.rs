@@ -27,8 +27,8 @@ pub struct SessionInfo {
     pub updated_at: String,
 }
 
-impl From<crate::storage::SessionRecord> for SessionInfo {
-    fn from(record: crate::storage::SessionRecord) -> Self {
+impl From<tidev_engine::storage::SessionRecord> for SessionInfo {
+    fn from(record: tidev_engine::storage::SessionRecord) -> Self {
         Self {
             session_id: record.session_id,
             parent_session_id: record.parent_session_id,
@@ -250,7 +250,7 @@ pub async fn fork_session(
         .ok_or_else(|| AppError::NotFound(format!("Message {} not found", body.message_id)))?;
 
     // Verify target is a user message
-    if !matches!(messages[target_idx].role, crate::session::MessageRole::User) {
+    if !matches!(messages[target_idx].role, tidev_engine::session::MessageRole::User) {
         return Err(AppError::BadRequest(
             "Can only fork from user messages".to_string(),
         ));

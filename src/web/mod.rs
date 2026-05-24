@@ -13,7 +13,8 @@ use std::sync::Arc;
 use anyhow::Context;
 use tokio::sync::Mutex;
 
-use crate::{
+use tidev_engine::{
+
     agent::runtime::AgentRuntime,
     config::{AppConfig, AuthStore, ConfigPaths},
     llm::LlmClient,
@@ -67,7 +68,7 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     if project_config_path.exists() {
         let project_toml = std::fs::read_to_string(&project_config_path)
             .with_context(|| format!("failed to read {}", project_config_path.display()))?;
-        let keys = crate::config::top_level_toml_keys(&project_toml);
+        let keys = tidev_engine::config::top_level_toml_keys(&project_toml);
         let project_config: AppConfig = toml::from_str(&project_toml)
             .with_context(|| format!("failed to parse {}", project_config_path.display()))?;
         config.merge_overlay(project_config, &keys);
@@ -77,7 +78,7 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     let mut logging_config = config.logging.clone();
     logging_config.console = true;
     std::fs::create_dir_all(&paths.data_dir)?;
-    crate::logging::init(&paths.data_dir, logging_config).ok();
+    tidev_engine::logging::init(&paths.data_dir, logging_config).ok();
     log::info!("Starting TiDev web server...");
 
     // Open database (use same path as TUI mode via ConfigPaths)
@@ -102,7 +103,7 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     if let Ok(default_model) = config.resolve_active_model(&auth) {
         memory_store.set_models(llm_client.clone(), default_model, None);
     }
-    crate::memory::start_background_tasks(
+    tidev_engine::memory::start_background_tasks(
         memory_store.clone(),
         &tokio::runtime::Handle::current(),
         &workspace_root.to_string_lossy(),
@@ -130,7 +131,7 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
         tools.set_active_model(default_model);
     }
     // Web mode has full access — same as direct TUI usage
-    tools.set_sandbox_policy(Some(crate::sandbox::SandboxPolicy::DangerFullAccess));
+    tools.set_sandbox_policy(Some(tidev_engine::sandbox::SandboxPolicy::DangerFullAccess));
 
     let agent = AgentRuntime {
         workspace_root: workspace_root.clone(),
@@ -145,7 +146,7 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
         instruction_content_cache: std::collections::HashMap::new(),
         queued_messages: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
         auto_approve_permissions: false,
-        hooks: crate::hooks::HookEngine::new(config.hooks.clone(), workspace_root.clone()),
+        hooks: tidev_engine::hooks::HookEngine::new(config.hooks.clone(), workspace_root.clone()),
     };
 
     log::info!("Agent runtime created");

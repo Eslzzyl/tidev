@@ -1,7 +1,7 @@
 use crate::tui::App;
 use crate::tui::render::render::{centered_rect, render_scrollbar, shorten};
 use crate::{
-    tui::mcp_panel::McpPanelState,
+tui::mcp_panel::McpPanelState,
     tui::memory_panel::{EditField, MemoryPanelMode, MemoryPanelState, PanelFocus},
     tui::message_panel::MessagePanelState,
     tui::model_panel::{ModelPanelItem, ModelPanelState, thinking_options_for_model},
@@ -1867,7 +1867,7 @@ impl App {
                                         (preview_area, None)
                                     };
 
-                                use crate::markdown_render::render_markdown_text_with_width_and_cwd;
+                                use tidev_engine::markdown_render::render_markdown_text_with_width_and_cwd;
                                 let content_width =
                                     preview_content_area.width.saturating_sub(2) as usize;
 
@@ -1877,10 +1877,10 @@ impl App {
                                 // Line 1: [type] Title (with RO marker for system types)
                                 let is_system = matches!(
                                     entry.memory_type,
-                                    crate::memory::MemoryType::Fact
-                                        | crate::memory::MemoryType::Pattern
-                                        | crate::memory::MemoryType::Insight
-                                        | crate::memory::MemoryType::Lesson
+                                    tidev_engine::memory::MemoryType::Fact
+                                        | tidev_engine::memory::MemoryType::Pattern
+                                        | tidev_engine::memory::MemoryType::Insight
+                                        | tidev_engine::memory::MemoryType::Lesson
                                 );
                                 let title_prefix = if is_system { " [RO]" } else { "" };
                                 header_lines.push(Line::from(vec![
@@ -2420,7 +2420,7 @@ impl App {
         area: Rect,
         panel: &SkillsPanelState,
     ) {
-        use crate::markdown_render::render_markdown_text_with_width_and_cwd;
+        use tidev_engine::markdown_render::render_markdown_text_with_width_and_cwd;
 
         let palette = self.palette();
 

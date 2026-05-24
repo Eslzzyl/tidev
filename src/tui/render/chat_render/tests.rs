@@ -1,7 +1,7 @@
-use crate::config::{AppConfig, AuthStore};
+use tidev_engine::config::{AppConfig, AuthStore};
 use tidev_types::prompts::SessionMode;
-use crate::session::{Conversation, Message, MessageRole};
-use crate::theme::ThemePalette;
+use tidev_engine::session::{Conversation, Message, MessageRole};
+use tidev_engine::theme::ThemePalette;
 use crate::tui::App;
 use crate::tui::chat_render::RenderContext;
 use crate::tui::chat_render::tool::{
@@ -46,7 +46,7 @@ impl DerefMut for TestApp {
 
 fn test_app() -> TestApp {
     let temp_root = TempDir::new().expect("temp dir should be created");
-    let paths = crate::config::ConfigPaths {
+    let paths = tidev_engine::config::ConfigPaths {
         config_dir: temp_root.path().join(".config").join("tidev"),
         data_dir: temp_root.path().join(".local").join("share").join("tidev"),
         config_file: temp_root
@@ -105,8 +105,8 @@ fn reasoning_lines_preserve_empty_state() {
 
 #[test]
 fn render_tool_result_detail_lines_todowrite_formats_checkbox_list() {
-    use crate::session::{Message, ToolExecutionResult};
-    use crate::tooling::TodoItem;
+    use tidev_engine::session::{Message, ToolExecutionResult};
+    use tidev_engine::tooling::TodoItem;
 
     let todos = vec![
         TodoItem {
@@ -159,7 +159,7 @@ fn render_tool_result_detail_lines_todowrite_formats_checkbox_list() {
 
 #[test]
 fn streaming_tool_call_switches_to_summary_after_arguments_parse() {
-    use crate::session::ToolCall;
+    use tidev_engine::session::ToolCall;
 
     let tool_call = ToolCall {
         id: "tool-call-id".to_string(),

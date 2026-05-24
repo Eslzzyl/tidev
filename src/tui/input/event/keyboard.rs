@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::session::{BackendEvent, Message, MessageRole};
+use tidev_engine::session::{BackendEvent, Message, MessageRole};
 use crate::tui::App;
 
 impl App {

@@ -4,10 +4,10 @@ use crossterm::event::{KeyCode, KeyEvent};
 use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 
-use crate::agent::runtime::ApprovedTool;
+use tidev_engine::agent::runtime::ApprovedTool;
 use tidev_types::prompts::SessionMode;
-use crate::session::{ToolCall, ToolExecutionResult};
-use crate::tooling::QuestionArgs;
+use tidev_engine::session::{ToolCall, ToolExecutionResult};
+use tidev_engine::tooling::QuestionArgs;
 
 use super::App;
 
@@ -340,7 +340,7 @@ impl App {
             }
 
             // Check for sensitive file reads (only for the read tool)
-            if crate::tooling::canonical_tool_name(&tool_call.name) == Some("read") {
+            if tidev_engine::tooling::canonical_tool_name(&tool_call.name) == Some("read") {
                 // Extract the file path from arguments
                 let file_path: Option<String> =
                     serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
@@ -349,16 +349,16 @@ impl App {
 
                 if let Some(ref path_str) = file_path
                     && let Ok(resolved_path) =
-                        crate::tooling::builtin::utils::resolve_workspace_path(
+                        tidev_engine::tooling::builtin::utils::resolve_workspace_path(
                             &self.workspace_root,
                             std::path::Path::new(path_str),
                             false,
                         )
                 {
-                    let patterns = crate::tooling::builtin::sensitive::load_sensitive_patterns(
+                    let patterns = tidev_engine::tooling::builtin::sensitive::load_sensitive_patterns(
                         &self.workspace_root,
                     );
-                    if crate::tooling::builtin::sensitive::is_path_sensitive(
+                    if tidev_engine::tooling::builtin::sensitive::is_path_sensitive(
                         &self.workspace_root,
                         &resolved_path,
                         &patterns,
@@ -562,7 +562,7 @@ impl App {
                 // RunningSubagentExecution so the runtime's SubagentStatus
                 // events can update the subagent card in the UI.
                 if approval.tool_call.name == "task"
-                    && let Ok(args) = serde_json::from_str::<crate::tooling::TaskArgs>(
+                    && let Ok(args) = serde_json::from_str::<tidev_engine::tooling::TaskArgs>(
                         &approval.tool_call.arguments,
                     )
                 {
@@ -642,7 +642,7 @@ impl App {
         } else {
             result.preview_for_storage(Some(tool_call.name.as_str()))
         };
-        let message = crate::session::Message::tool_result(
+        let message = tidev_engine::session::Message::tool_result(
             tool_call.id,
             tool_call.name.clone(),
             display_result,

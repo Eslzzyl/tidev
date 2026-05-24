@@ -17,7 +17,8 @@ use ratatui::text::{Line, Span, Text};
 
 pub use highlight::set_syntax_theme_by_name;
 pub use highlight::spawn_background_load;
-pub(crate) use highlight::{highlight_code_to_lines, highlight_code_to_lines_for_path};
+pub(crate) use highlight::highlight_code_to_lines;
+pub use highlight::highlight_code_to_lines_for_path;
 pub use line::is_blank_line_spaces_only;
 use line::push_owned_lines;
 use wrap::{RtOptions, adaptive_wrap_line};
@@ -51,7 +52,7 @@ static MARKDOWN_RENDER_CACHE: LazyLock<
 /// Maximum number of entries in the markdown render cache.
 const MARKDOWN_RENDER_CACHE_MAX_ENTRIES: usize = 256;
 
-pub(crate) fn render_markdown_text_with_width_and_cwd(
+pub fn render_markdown_text_with_width_and_cwd(
     input: &str,
     width: Option<usize>,
     cwd: Option<&Path>,

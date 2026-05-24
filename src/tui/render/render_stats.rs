@@ -6,7 +6,8 @@ use ratatui::{
     widgets::{Bar, BarChart, Block, Borders, Clear, Paragraph},
 };
 
-use crate::{
+use tidev_engine::{
+
     stats::{Granularity, TimeRangeStats},
     theme::ThemePalette,
     utils::format_token_count,

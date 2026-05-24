@@ -1,4 +1,4 @@
-use crate::config::AppConfig;
+use tidev_engine::config::AppConfig;
 
 #[derive(Clone, Debug)]
 pub enum SettingType {

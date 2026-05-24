@@ -1,4 +1,4 @@
-use crate::config::ModelSummary;
+use tidev_engine::config::ModelSummary;
 use crate::tui::Composer;
 
 /// Memory tab sub-entry identifiers.

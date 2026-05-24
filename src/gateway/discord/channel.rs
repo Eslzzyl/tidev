@@ -15,14 +15,14 @@ use std::pin::Pin;
 use tokio::time::{Duration, Instant, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 
-use crate::config::{ActiveModel, AppConfig, AuthStore, ConfigPaths};
-use crate::storage::SessionStore;
+use tidev_engine::config::{ActiveModel, AppConfig, AuthStore, ConfigPaths};
+use tidev_engine::storage::SessionStore;
 
 use crate::gateway::channel::Channel;
 use crate::gateway::channel_core::{ChannelCore, MessageSender};
 use crate::gateway::commands::parse_command;
 use crate::gateway::model_selection::{self, ModelSelectionIO, ModelSelectionState};
-use crate::session::{Message, MessageRole};
+use tidev_engine::session::{Message, MessageRole};
 
 use super::client::{DISCORD_MAX_MESSAGE_LENGTH, DiscordClient};
 use super::types::{
@@ -56,8 +56,8 @@ impl DiscordChannel {
         config: AppConfig,
         auth: AuthStore,
         store: SessionStore,
-        llm: crate::llm::LlmClient,
-        tools: crate::tooling::ToolRegistry,
+        llm: tidev_engine::llm::LlmClient,
+        tools: tidev_engine::tooling::ToolRegistry,
         instruction_prompt: String,
         allowlist: HashSet<String>,
         bot_token: String,

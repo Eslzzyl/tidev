@@ -2,8 +2,8 @@ use anyhow::{Context, Result, bail};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::BTreeMap;
 
-use crate::config::McpServerConfig;
-use crate::mcp::McpServerSummary;
+use tidev_engine::config::McpServerConfig;
+use tidev_engine::mcp::McpServerSummary;
 
 use super::App;
 
@@ -194,8 +194,8 @@ impl App {
                 if let Some(selected) = panel.selected_item(&items) {
                     let name = selected.summary.name.clone();
                     let result = match selected.summary.status {
-                        crate::mcp::McpConnectionStatus::Connected
-                        | crate::mcp::McpConnectionStatus::Connecting => {
+                        tidev_engine::mcp::McpConnectionStatus::Connected
+                        | tidev_engine::mcp::McpConnectionStatus::Connecting => {
                             runtime.block_on(self.tools.disconnect_mcp_server(&name))
                         }
                         _ => runtime.block_on(self.tools.toggle_mcp_server(&name)),

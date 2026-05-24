@@ -1,4 +1,4 @@
-use crate::config::UiConfig;
+use tidev_engine::config::UiConfig;
 use uuid::Uuid;
 
 /// Known GUI editors that need `--wait` (or equivalent) when spawned
@@ -139,7 +139,7 @@ impl Drop for TempEditFile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::UiConfig;
+    use tidev_engine::config::UiConfig;
 
     #[test]
     fn resolve_editor_from_config() {

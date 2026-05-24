@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::path::Path;
 use uuid::Uuid;
 
-use crate::storage::SessionRecord;
+use tidev_engine::storage::SessionRecord;
 
 use super::App;
 

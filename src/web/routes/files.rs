@@ -48,9 +48,9 @@ pub async fn search_files(
             path: s.path,
             display: s.display,
             kind: match s.kind {
-                crate::shared::file_search::FileEntryKind::File => "file".to_string(),
-                crate::shared::file_search::FileEntryKind::Directory => "directory".to_string(),
-                crate::shared::file_search::FileEntryKind::Image => "image".to_string(),
+                tidev_engine::shared::file_search::FileEntryKind::File => "file".to_string(),
+                tidev_engine::shared::file_search::FileEntryKind::Directory => "directory".to_string(),
+                tidev_engine::shared::file_search::FileEntryKind::Image => "image".to_string(),
             },
             matched_indices: s.matched_indices,
         })

@@ -1,30 +1,5 @@
-pub mod agent;
-pub mod balance;
-pub mod config;
-pub mod context;
 pub mod gateway;
-pub mod hooks;
-pub mod instructions;
-pub mod llm;
-pub mod logging;
-pub mod markdown_render;
-pub mod mcp;
-pub mod memory;
-pub mod notifications;
-pub mod provider_setup;
-pub mod sandbox;
-pub mod session;
-pub mod shared;
-pub mod snapshot;
-pub mod stats;
-pub mod storage;
-pub mod sync;
-pub mod system_info;
-pub mod theme;
-pub mod tmp;
-pub mod tooling;
 pub mod tui;
-pub mod utils;
 pub mod web;
 
 use anyhow::Context;
@@ -215,8 +190,8 @@ pub fn run() -> anyhow::Result<()> {
                     "Please specify at least one --session UUID or --all to export all sessions"
                 );
             }
-            let paths = crate::config::ConfigPaths::discover()?;
-            let store = storage::SessionStore::open(paths.database_file)?;
+            let paths = tidev_engine::config::ConfigPaths::discover()?;
+            let store = tidev_engine::storage::SessionStore::open(paths.database_file)?;
 
             let session_ids: Vec<uuid::Uuid> = if all {
                 store
@@ -254,15 +229,15 @@ pub fn run() -> anyhow::Result<()> {
             if !input.exists() {
                 anyhow::bail!("Import file not found: {}", input.display());
             }
-            let paths = crate::config::ConfigPaths::discover()?;
-            let store = storage::SessionStore::open(paths.database_file)?;
+            let paths = tidev_engine::config::ConfigPaths::discover()?;
+            let store = tidev_engine::storage::SessionStore::open(paths.database_file)?;
             let count = store.import_from_sqlite(&input, &session, replace)?;
             eprintln!("Imported {} session(s) from {}", count, input.display());
             Ok(())
         }
         Some(Command::Tmp { action }) => match action {
             TmpCommand::List { min_age_minutes } => {
-                let entries = crate::tmp::scan_temp_files()?;
+                let entries = tidev_engine::tmp::scan_temp_files()?;
                 let min_age = Duration::from_secs(min_age_minutes * 60);
 
                 if entries.is_empty() {
@@ -289,7 +264,7 @@ pub fn run() -> anyhow::Result<()> {
                 dry_run,
             } => {
                 let max_age = Duration::from_secs(min_age_minutes * 60);
-                let removed = crate::tmp::clean_temp_files(max_age, dry_run)?;
+                let removed = tidev_engine::tmp::clean_temp_files(max_age, dry_run)?;
 
                 if removed.is_empty() {
                     println!("No temp files to clean");
@@ -318,25 +293,25 @@ pub fn run() -> anyhow::Result<()> {
         },
         Some(Command::Db { action }) => match action {
             DbCommand::Migrate => {
-                let paths = crate::config::ConfigPaths::discover()?;
-                let db = crate::storage::database::Database::open(&paths.database_file)?;
+                let paths = tidev_engine::config::ConfigPaths::discover()?;
+                let db = tidev_engine::storage::database::Database::open(&paths.database_file)?;
                 eprintln!("Database migrated successfully.");
                 drop(db);
                 Ok(())
             }
             DbCommand::Status => {
-                let paths = crate::config::ConfigPaths::discover()?;
+                let paths = tidev_engine::config::ConfigPaths::discover()?;
                 let db_path = &paths.database_file;
                 if !db_path.exists() {
                     println!("Database does not exist yet at: {}", db_path.display());
                     println!(
                         "Latest schema version: {}",
-                        crate::storage::schema::SCHEMA_VERSION
+                        tidev_engine::storage::schema::SCHEMA_VERSION
                     );
                     return Ok(());
                 }
                 let conn = rusqlite::Connection::open(db_path)?;
-                let status = crate::storage::migration::status(&conn)?;
+                let status = tidev_engine::storage::migration::status(&conn)?;
                 println!("Current version: {}", status.current_version);
                 println!("Latest version:  {}", status.latest_version);
                 println!("Pending:         {}", status.pending_count);
@@ -345,8 +320,8 @@ pub fn run() -> anyhow::Result<()> {
         },
         Some(Command::Sync { action }) => match action {
             SyncCommand::List => {
-                let paths = crate::config::ConfigPaths::discover()?;
-                let config = crate::config::AppConfig::load_or_create(&paths)?;
+                let paths = tidev_engine::config::ConfigPaths::discover()?;
+                let config = tidev_engine::config::AppConfig::load_or_create(&paths)?;
                 if config.sync.remotes.is_empty() {
                     println!("No remotes configured. Use 'tidev sync add-remote' to add one.");
                 } else {
@@ -363,10 +338,10 @@ pub fn run() -> anyhow::Result<()> {
                 host,
                 tidev_path,
             } => {
-                let paths = crate::config::ConfigPaths::discover()?;
-                let mut config = crate::config::AppConfig::load_or_create(&paths)?;
+                let paths = tidev_engine::config::ConfigPaths::discover()?;
+                let mut config = tidev_engine::config::AppConfig::load_or_create(&paths)?;
 
-                let remote = crate::sync::RemoteMachine {
+                let remote = tidev_engine::sync::RemoteMachine {
                     name: name.clone(),
                     host: host.clone(),
                     tidev_path,
@@ -379,8 +354,8 @@ pub fn run() -> anyhow::Result<()> {
                 Ok(())
             }
             SyncCommand::Remove { name } => {
-                let paths = crate::config::ConfigPaths::discover()?;
-                let mut config = crate::config::AppConfig::load_or_create(&paths)?;
+                let paths = tidev_engine::config::ConfigPaths::discover()?;
+                let mut config = tidev_engine::config::AppConfig::load_or_create(&paths)?;
                 let len = config.sync.remotes.len();
                 config.sync.remotes.retain(|r| r.name != name);
                 if config.sync.remotes.len() < len {
@@ -397,10 +372,10 @@ pub fn run() -> anyhow::Result<()> {
                 all,
                 replace,
             } => {
-                let paths = crate::config::ConfigPaths::discover()?;
-                let config = crate::config::AppConfig::load_or_create(&paths)?;
-                let store = storage::SessionStore::open(&paths.database_file)?;
-                let manager = crate::sync::SyncManager::new(config.sync.clone(), store);
+                let paths = tidev_engine::config::ConfigPaths::discover()?;
+                let config = tidev_engine::config::AppConfig::load_or_create(&paths)?;
+                let store = tidev_engine::storage::SessionStore::open(&paths.database_file)?;
+                let manager = tidev_engine::sync::SyncManager::new(config.sync.clone(), store);
 
                 let session_ids: Vec<uuid::Uuid> = if all {
                     manager
@@ -433,10 +408,10 @@ pub fn run() -> anyhow::Result<()> {
                 session,
                 replace,
             } => {
-                let paths = crate::config::ConfigPaths::discover()?;
-                let config = crate::config::AppConfig::load_or_create(&paths)?;
-                let store = storage::SessionStore::open(&paths.database_file)?;
-                let manager = crate::sync::SyncManager::new(config.sync.clone(), store);
+                let paths = tidev_engine::config::ConfigPaths::discover()?;
+                let config = tidev_engine::config::AppConfig::load_or_create(&paths)?;
+                let store = tidev_engine::storage::SessionStore::open(&paths.database_file)?;
+                let manager = tidev_engine::sync::SyncManager::new(config.sync.clone(), store);
 
                 let summary = manager.pull(&session, &remote, replace)?;
                 eprintln!(
@@ -452,18 +427,18 @@ pub fn run() -> anyhow::Result<()> {
 /// Try to perform auto-cleanup of old temp files on startup.
 /// Silently ignores errors (e.g., config file not found).
 fn auto_cleanup_on_startup() {
-    let paths = match crate::config::ConfigPaths::discover() {
+    let paths = match tidev_engine::config::ConfigPaths::discover() {
         Ok(p) => p,
         Err(_) => return,
     };
-    let config = match crate::config::AppConfig::load_or_create(&paths) {
+    let config = match tidev_engine::config::AppConfig::load_or_create(&paths) {
         Ok(c) => c,
         Err(_) => return,
     };
-    crate::tmp::auto_cleanup(&config.tmp);
+    tidev_engine::tmp::auto_cleanup(&config.tmp);
 
     // Clean tool outputs older than 7 days
-    if let Ok(store) = crate::storage::SessionStore::open(&paths.database_file)
+    if let Ok(store) = tidev_engine::storage::SessionStore::open(&paths.database_file)
         && let Ok(count) = store.delete_expired_tool_outputs(7)
         && count > 0
     {

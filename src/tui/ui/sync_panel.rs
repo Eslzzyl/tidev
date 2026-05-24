@@ -2,9 +2,9 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use uuid::Uuid;
 
-use crate::config::ConfigPaths;
-use crate::storage::SessionRecord;
-use crate::sync::{RemoteMachine, SyncManager};
+use tidev_engine::config::ConfigPaths;
+use tidev_engine::storage::SessionRecord;
+use tidev_engine::sync::{RemoteMachine, SyncManager};
 
 use super::App;
 
@@ -87,7 +87,7 @@ impl App {
 
         // Reload config to pick up CLI-side changes
         if let Ok(paths) = ConfigPaths::discover()
-            && let Ok(config) = crate::config::AppConfig::load_or_create(&paths)
+            && let Ok(config) = tidev_engine::config::AppConfig::load_or_create(&paths)
         {
             self.config = config;
         }
@@ -417,7 +417,7 @@ impl App {
                         };
 
                         let paths = ConfigPaths::discover()?;
-                        let mut config = crate::config::AppConfig::load_or_create(&paths)?;
+                        let mut config = tidev_engine::config::AppConfig::load_or_create(&paths)?;
                         config.sync.remotes.push(remote);
                         config.save(&paths)?;
                         self.config = config;
@@ -471,7 +471,7 @@ impl App {
                     SyncView::RemoteActions { remote_index } => {
                         // Delete remote
                         let paths = ConfigPaths::discover()?;
-                        let mut config = crate::config::AppConfig::load_or_create(&paths)?;
+                        let mut config = tidev_engine::config::AppConfig::load_or_create(&paths)?;
                         let remotes = self.sync_remotes();
                         if let Some(remote) = remotes.get(remote_index) {
                             config.sync.remotes.retain(|r| r.name != remote.name);
@@ -552,7 +552,7 @@ impl App {
         match result {
             Ok(summary) => {
                 let paths = ConfigPaths::discover()?;
-                let mut config = crate::config::AppConfig::load_or_create(&paths)?;
+                let mut config = tidev_engine::config::AppConfig::load_or_create(&paths)?;
                 if let Some(r) = config
                     .sync
                     .remotes

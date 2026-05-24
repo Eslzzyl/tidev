@@ -16,9 +16,9 @@ use std::time::Instant;
 use tokio::time::{Duration, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 
-use crate::config::{ActiveModel, AppConfig, AuthStore, ConfigPaths};
-use crate::session::{Message, MessageRole};
-use crate::storage::SessionStore;
+use tidev_engine::config::{ActiveModel, AppConfig, AuthStore, ConfigPaths};
+use tidev_engine::session::{Message, MessageRole};
+use tidev_engine::storage::SessionStore;
 
 use crate::gateway::channel::Channel;
 use crate::gateway::channel_core::{ChannelCore, MessageSender};
@@ -51,8 +51,8 @@ impl LarkChannel {
         config: AppConfig,
         auth: AuthStore,
         store: SessionStore,
-        llm: crate::llm::LlmClient,
-        tools: crate::tooling::ToolRegistry,
+        llm: tidev_engine::llm::LlmClient,
+        tools: tidev_engine::tooling::ToolRegistry,
         instruction_prompt: String,
         allowlist: HashSet<String>,
         app_id: String,

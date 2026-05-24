@@ -19,7 +19,8 @@ use tokio::runtime::Runtime;
 
 use anyhow::{Context, Result, bail};
 
-use crate::{
+use tidev_engine::{
+
     config::{AppConfig, AuthStore, ConfigPaths},
     llm::LlmClient,
     mcp::McpManager,
@@ -33,7 +34,7 @@ use shared::compose_instruction_prompt;
 /// Per-channel resources that need to be created independently
 /// for each channel (each channel gets its own store, tools, etc.).
 struct ChannelResources {
-    store: crate::storage::SessionStore,
+    store: tidev_engine::storage::SessionStore,
     llm: LlmClient,
     tools: ToolRegistry,
 }
@@ -42,7 +43,7 @@ impl ChannelResources {
     fn new(
         db: &Database,
         config: &AppConfig,
-        default_model: &crate::config::ActiveModel,
+        default_model: &tidev_engine::config::ActiveModel,
         workspace_root: &Path,
         paths: &ConfigPaths,
         auth: &AuthStore,
@@ -51,7 +52,7 @@ impl ChannelResources {
         let memory_store = Arc::new(db.create_memory_store()?);
         let llm = LlmClient::new(&config.logging)?;
         memory_store.set_models(llm.clone(), default_model.clone(), None);
-        crate::memory::start_background_tasks(
+        tidev_engine::memory::start_background_tasks(
             memory_store.clone(),
             &tokio::runtime::Handle::current(),
             &workspace_root.to_string_lossy(),
@@ -74,7 +75,7 @@ impl ChannelResources {
             Arc::new(auth.clone()),
         );
         tools.set_active_model(default_model.clone());
-        tools.set_sandbox_policy(Some(crate::sandbox::SandboxPolicy::default()));
+        tools.set_sandbox_policy(Some(tidev_engine::sandbox::SandboxPolicy::default()));
         Ok(Self { store, llm, tools })
     }
 }
@@ -104,7 +105,7 @@ async fn run_async() -> Result<()> {
 
     let mut logging_config = config.logging.clone();
     logging_config.console = true;
-    crate::logging::init(&paths.data_dir, logging_config).ok();
+    tidev_engine::logging::init(&paths.data_dir, logging_config).ok();
     log::info!("Logging initialized (console: true)");
 
     let auth = AuthStore::load_or_create(&paths)?;

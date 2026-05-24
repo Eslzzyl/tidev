@@ -12,11 +12,11 @@ impl App {
                             let _ = tx.send(true);
                         }
                         self.tools.set_sandbox_policy(Some(
-                            crate::sandbox::SandboxPolicy::DangerFullAccess,
+                            tidev_engine::sandbox::SandboxPolicy::DangerFullAccess,
                         ));
                         // Also sync to the agent's ToolRegistry (separate copy at init)
                         self.agent.tools.set_sandbox_policy(Some(
-                            crate::sandbox::SandboxPolicy::DangerFullAccess,
+                            tidev_engine::sandbox::SandboxPolicy::DangerFullAccess,
                         ));
                         self.last_notice =
                             Some("Sandbox policy elevated to full access for retry".to_string());
@@ -812,25 +812,25 @@ impl App {
             }
             KeyCode::Char('1') => {
                 if let Some(panel) = &mut self.stats_panel {
-                    panel.granularity = crate::stats::Granularity::Hour;
+                    panel.granularity = tidev_engine::stats::Granularity::Hour;
                     self.refresh_stats_panel();
                 }
             }
             KeyCode::Char('2') => {
                 if let Some(panel) = &mut self.stats_panel {
-                    panel.granularity = crate::stats::Granularity::Day;
+                    panel.granularity = tidev_engine::stats::Granularity::Day;
                     self.refresh_stats_panel();
                 }
             }
             KeyCode::Char('3') => {
                 if let Some(panel) = &mut self.stats_panel {
-                    panel.granularity = crate::stats::Granularity::Week;
+                    panel.granularity = tidev_engine::stats::Granularity::Week;
                     self.refresh_stats_panel();
                 }
             }
             KeyCode::Char('4') => {
                 if let Some(panel) = &mut self.stats_panel {
-                    panel.granularity = crate::stats::Granularity::Month;
+                    panel.granularity = tidev_engine::stats::Granularity::Month;
                     self.refresh_stats_panel();
                 }
             }
@@ -876,7 +876,7 @@ impl App {
                         runtime.spawn(async move {
                             match selected_provider {
                                 crate::tui::ui::balance_panel::ProviderTab::DeepSeek => {
-                                    match crate::balance::query_deepseek_balance(
+                                    match tidev_engine::balance::query_deepseek_balance(
                                         &http,
                                         &api_key_clone,
                                     )
@@ -899,7 +899,7 @@ impl App {
                                     }
                                 }
                                 crate::tui::ui::balance_panel::ProviderTab::SiliconFlow => {
-                                    match crate::balance::query_siliconflow_balance(
+                                    match tidev_engine::balance::query_siliconflow_balance(
                                         &http,
                                         &api_key_clone,
                                     )
@@ -957,7 +957,7 @@ impl App {
                         runtime.spawn(async move {
                             match selected_provider {
                                 crate::tui::ui::balance_panel::ProviderTab::DeepSeek => {
-                                    match crate::balance::query_deepseek_balance(
+                                    match tidev_engine::balance::query_deepseek_balance(
                                         &http,
                                         &api_key_clone,
                                     )
@@ -980,7 +980,7 @@ impl App {
                                     }
                                 }
                                 crate::tui::ui::balance_panel::ProviderTab::SiliconFlow => {
-                                    match crate::balance::query_siliconflow_balance(
+                                    match tidev_engine::balance::query_siliconflow_balance(
                                         &http,
                                         &api_key_clone,
                                     )
@@ -1050,7 +1050,7 @@ impl App {
 
 pub(super) fn agent_tab_active_model(
     panel: &crate::tui::model_panel::ModelPanelState,
-    default: &crate::config::ActiveModel,
+    default: &tidev_engine::config::ActiveModel,
 ) -> Option<(String, String)> {
     let tab = panel.current_tab()?;
     let label = &tab.current_label;

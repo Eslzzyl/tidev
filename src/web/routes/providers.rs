@@ -5,7 +5,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::config::{ModelConfig, ProviderConfig};
+use tidev_engine::config::{ModelConfig, ProviderConfig};
 use crate::web::{
     error::{AppError, WebResult},
     state::AppState,
@@ -104,8 +104,8 @@ pub async fn list_providers(
                 id: provider_id,
                 display_name: provider.display_name.clone(),
                 source: match source {
-                    crate::config::ProviderSource::Bundled => "bundled".to_string(),
-                    crate::config::ProviderSource::User => "user".to_string(),
+                    tidev_engine::config::ProviderSource::Bundled => "bundled".to_string(),
+                    tidev_engine::config::ProviderSource::User => "user".to_string(),
                 },
                 connected,
                 base_url: provider.base_url.clone(),
@@ -313,7 +313,7 @@ pub async fn delete_provider(
     {
         let config = state.config.read().await;
         match config.provider_source(&provider_id) {
-            Some(crate::config::ProviderSource::Bundled) => {
+            Some(tidev_engine::config::ProviderSource::Bundled) => {
                 return Err(AppError::BadRequest(
                     "Cannot delete bundled providers".to_string(),
                 ));

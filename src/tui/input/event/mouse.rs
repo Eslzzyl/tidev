@@ -1,5 +1,5 @@
 use super::*;
-use crate::mcp::McpConnectionStatus;
+use tidev_engine::mcp::McpConnectionStatus;
 use crate::tui::memory_panel::PanelFocus;
 use crate::tui::model_panel::{ModelPanelItem, selectable_indices, thinking_options_for_model};
 use crate::tui::theme_panel::DisplayItem;

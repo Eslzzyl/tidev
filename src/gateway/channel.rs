@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::storage::SessionStore;
+use tidev_engine::storage::SessionStore;
 
 /// Message to send through a channel.
 #[derive(Debug, Clone)]

@@ -8,13 +8,15 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::unbounded_channel;
 use uuid::Uuid;
 
-use crate::agent::prompts::default_system_prompt;
+use tidev_engine::agent::prompts::default_system_prompt;
 use tidev_types::prompts::SessionMode;
 
-use crate::{
+use tidev_engine::{
     config::reasoning::ThinkingLevelType,
     context::ContextManager,
     session::{BackendEvent, Conversation, Message, MessageRole, ToolCall},
+};
+use crate::{
     web::{
         error::{AppError, WebResult},
         event_bus::AppEvent,
@@ -187,7 +189,7 @@ pub async fn list_messages(
         .map(|msg| {
             // Parse file_diffs from the stored JSON string
             let file_diffs = msg.file_diffs.as_deref().and_then(|json_str| {
-                serde_json::from_str::<Vec<crate::snapshot::FileDiff>>(json_str).ok()
+                serde_json::from_str::<Vec<tidev_engine::snapshot::FileDiff>>(json_str).ok()
             });
 
             log::debug!(
@@ -410,7 +412,7 @@ pub async fn send_message(
         .filter(|value| !value.trim().is_empty());
     drop(auth);
 
-    let mut model = crate::config::ActiveModel {
+    let mut model = tidev_engine::config::ActiveModel {
         provider_id: provider_id.clone(),
         provider_display_name: provider.display_name.clone(),
         model_id: model_id.clone(),
@@ -422,10 +424,10 @@ pub async fn send_message(
         base_url: provider.base_url.clone(),
         api_key,
         api_type: match provider.api_type.as_deref() {
-            Some("anthropic") => crate::config::ApiType::Anthropic,
-            Some("openai_responses") => crate::config::ApiType::OpenAiResponses,
-            Some("google_gemini") => crate::config::ApiType::GoogleGemini,
-            _ => crate::config::ApiType::OpenAiChatCompletions,
+            Some("anthropic") => tidev_engine::config::ApiType::Anthropic,
+            Some("openai_responses") => tidev_engine::config::ApiType::OpenAiResponses,
+            Some("google_gemini") => tidev_engine::config::ApiType::GoogleGemini,
+            _ => tidev_engine::config::ApiType::OpenAiChatCompletions,
         },
         temperature: model_config.temperature,
         context_window: model_config.context_window,
@@ -471,7 +473,7 @@ pub async fn send_message(
         log::info!("Starting agent loop for session {}", session_id);
 
         if let Err(e) = agent
-            .run_agent_loop(crate::agent::runtime::AgentLoopConfig {
+            .run_agent_loop(tidev_engine::agent::runtime::AgentLoopConfig {
                 session_id,
                 model,
                 context_manager: &mut context_manager,
@@ -714,7 +716,7 @@ pub async fn revert_to_message(
     }
 
     // Collect patches from messages after the target
-    let patches = crate::shared::undo::collect_patches_after_message(&messages, body.message_id)?;
+    let patches = tidev_engine::shared::undo::collect_patches_after_message(&messages, body.message_id)?;
     log::info!("Collected {} patches to revert", patches.len());
 
     // Capture redo snapshot (current state) if not already saved
@@ -919,7 +921,7 @@ pub async fn compact_session(
         )
     };
 
-    let active_model = crate::config::ActiveModel {
+    let active_model = tidev_engine::config::ActiveModel {
         provider_id: provider_id.clone(),
         provider_display_name: provider.display_name.clone(),
         model_id: model_id.clone(),
@@ -931,10 +933,10 @@ pub async fn compact_session(
         base_url: provider.base_url.clone(),
         api_key: None,
         api_type: match provider.api_type.as_deref() {
-            Some("anthropic") => crate::config::ApiType::Anthropic,
-            Some("openai_responses") => crate::config::ApiType::OpenAiResponses,
-            Some("google_gemini") => crate::config::ApiType::GoogleGemini,
-            _ => crate::config::ApiType::OpenAiChatCompletions,
+            Some("anthropic") => tidev_engine::config::ApiType::Anthropic,
+            Some("openai_responses") => tidev_engine::config::ApiType::OpenAiResponses,
+            Some("google_gemini") => tidev_engine::config::ApiType::GoogleGemini,
+            _ => tidev_engine::config::ApiType::OpenAiChatCompletions,
         },
         temperature: model_config.temperature,
         context_window: model_config.context_window,
@@ -966,7 +968,7 @@ pub async fn compact_session(
         let prior_retained_from = context_manager.retained_from;
 
         // Create a channel so compact() streams Delta events back to us.
-        let (event_tx, mut event_rx) = unbounded_channel::<crate::session::BackendEvent>();
+        let (event_tx, mut event_rx) = unbounded_channel::<tidev_engine::session::BackendEvent>();
         let stream_request_id = rand::random::<u64>();
 
         // Spawn the actual compaction in a sub-task.  compact() will run the
@@ -974,7 +976,7 @@ pub async fn compact_session(
         // event_tx, then send Finished/Failed when done.
         let compact_handle = tokio::spawn(async move {
             let result = context_manager
-                .compact(crate::context::CompactionConfig {
+                .compact(tidev_engine::context::CompactionConfig {
                     llm: &llm,
                     model: &active_model,
                     conversation: &conversation,

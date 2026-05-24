@@ -2,9 +2,9 @@ use anyhow::Result;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
-use crate::snapshot::FileDiff;
+use tidev_engine::snapshot::FileDiff;
 use crate::tui::render::chat_render::strip_system_reminder_tags;
-use crate::{context::ContextManager, shared::undo::StepPatch, snapshot::Patch};
+use tidev_engine::{context::ContextManager, shared::undo::StepPatch, snapshot::Patch};
 
 use super::{App, BackendEvent, Screen};
 
@@ -475,7 +475,7 @@ impl App {
             .messages
             .iter()
             .rev()
-            .find(|m| matches!(m.role, crate::session::MessageRole::User))
+            .find(|m| matches!(m.role, tidev_engine::session::MessageRole::User))
             .map(|m| m.id);
 
         if let Some(msg_id) = last_user_id {
@@ -589,7 +589,7 @@ impl App {
 
     fn collect_patches_after_message(&self, message_id: Uuid) -> Result<Vec<Patch>> {
         log::info!("collect_patches: looking for message_id={}", message_id);
-        let patches = crate::shared::undo::collect_patches_after_message(
+        let patches = tidev_engine::shared::undo::collect_patches_after_message(
             &self.conversation.messages,
             message_id,
         )?;
@@ -625,7 +625,7 @@ impl App {
     /// Returns `true` if state was restored from a compaction message.
     fn restore_context_from_undo_compaction(&mut self, revert_to_id: Uuid) -> bool {
         if let Some((prior_summary, prior_retained_from)) =
-            crate::session::find_compaction_prior_state(&self.conversation.messages, revert_to_id)
+            tidev_engine::session::find_compaction_prior_state(&self.conversation.messages, revert_to_id)
         {
             log::info!(
                 "restore_context_from_undo_compaction: found compaction msg, \
@@ -647,7 +647,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
+    use tidev_engine::{
         config::ConfigPaths,
         session::{Message, MessageRole},
     };

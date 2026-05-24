@@ -8,17 +8,19 @@ pub(crate) use content::strip_system_reminder_tags;
 
 use tidev_types::prompts::SessionMode;
 
-use crate::{
+use tidev_engine::{
     config::{AppConfig, AuthStore},
     session::{Conversation, Message, MessageRole, ToolCall},
     theme::ThemePalette,
     tooling::canonical_tool_name,
+    utils::{TokenUsage, format_token_count},
+};
+use crate::{
     tui::App,
     tui::core::state::{
         MessageRenderCacheEntry, MessageRenderCacheKey, MessageRenderCacheKind,
         MessageRenderCacheValue, SelectableRegionRange,
     },
-    utils::{TokenUsage, format_token_count},
 };
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
@@ -757,7 +759,7 @@ impl App {
         for msg in self.conversation.visible_messages() {
             if let Some(diffs_json) = &msg.file_diffs
                 && let Ok(diffs) =
-                    serde_json::from_str::<Vec<crate::snapshot::FileDiff>>(diffs_json)
+                    serde_json::from_str::<Vec<tidev_engine::snapshot::FileDiff>>(diffs_json)
             {
                 for d in &diffs {
                     if seen_files.insert(d.file.clone()) {
