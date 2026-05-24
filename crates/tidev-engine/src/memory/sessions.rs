@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::config::ActiveModel;
 use crate::context::ContextManager;
-use crate::llm::LlmClient;
+use tidev_llm::LlmClient;
 use crate::memory::types::SessionSummary;
 use crate::memory::xml::{clean_llm_xml_response, get_xml_children_ci, get_xml_tag_ci};
 use tidev_types::prompts::SessionMode;
@@ -143,7 +143,11 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 model.clone()
             };
             response = match llm
-                .complete_with_messages(llm_model, attempt_messages, tools.to_vec())
+                .complete_with_messages(
+                    tidev_llm::LlmProviderConfig::from(llm_model),
+                    attempt_messages,
+                    tools.iter().map(tidev_llm::ToolDefinition::from).collect(),
+                )
                 .await
             {
                 Ok(r) => r,

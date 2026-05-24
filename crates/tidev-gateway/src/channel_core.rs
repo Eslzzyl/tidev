@@ -20,10 +20,10 @@ use tidev_engine::{
 
     agent::runtime::AgentRuntime,
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
-    llm::LlmClient,
     storage::SessionStore,
     tooling::ToolRegistry,
 };
+use tidev_llm::LlmClient;
 use tidev_session::session::{Conversation, Message, MessageRole};
 
 use super::commands::{format_status_summary, gateway_help_text};

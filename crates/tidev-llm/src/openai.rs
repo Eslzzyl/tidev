@@ -6,26 +6,27 @@ use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 use crate::{
-    config::{ActiveModel, reasoning::ThinkingLevelType},
-    tooling::ToolDefinition,
+    types::LlmProviderConfig,
+    types::ToolDefinition,
 };
 use tidev_session::session::{BackendEvent, Message, MessageAttachment, MessageRole, ToolCall};
+use tidev_types::reasoning::ThinkingLevelType;
 
 use log::{debug as log_debug, error as log_error};
 
-use super::attachments::{image_attachments, message_text_with_file_references};
-use super::debug::save_request_for_debugging;
-use super::error::classify_response_status;
-use super::think_parser::ThinkParser;
-use super::tool_call_format::ToolCallBuilder;
-use super::turn::finalize_turn;
+use crate::attachments::{image_attachments, message_text_with_file_references};
+use crate::debug::save_request_for_debugging;
+use crate::error::classify_response_status;
+use crate::think_parser::ThinkParser;
+use crate::tool_call_format::ToolCallBuilder;
+use crate::turn::finalize_turn;
 
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn stream_openai(
+pub(crate) async fn stream_openai(
     http: &Client,
     session_id: Uuid,
     request_id: u64,
-    model: ActiveModel,
+    model: LlmProviderConfig,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
     tx: UnboundedSender<BackendEvent>,
@@ -243,9 +244,9 @@ pub(super) async fn stream_openai(
     Ok(())
 }
 
-pub(super) async fn complete_openai(
+pub(crate) async fn complete_openai(
     http: &Client,
-    model: ActiveModel,
+    model: LlmProviderConfig,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
     save_request_body: bool,
@@ -319,7 +320,7 @@ pub(super) async fn complete_openai(
 }
 
 fn build_openai_request(
-    model: &ActiveModel,
+    model: &LlmProviderConfig,
     messages: Vec<Message>,
     stream: bool,
     tools: &[ToolDefinition],
@@ -330,8 +331,8 @@ fn build_openai_request(
     // System prompt comes from the model config directly.
     // No context summary merging needed — compaction summaries are now
     // User messages inserted at the compression boundary, not System messages.
-    if !model.system_prompt.trim().is_empty() {
-        request_messages.push(ChatMessagePayload::system(model.system_prompt.clone()));
+    if !model.system_prompt_str().trim().is_empty() {
+        request_messages.push(ChatMessagePayload::system(model.system_prompt.clone().unwrap_or_default()));
     }
 
     // Process only User/Assistant/Tool messages (System messages already handled above)
@@ -379,7 +380,7 @@ fn build_openai_request(
     };
 
     Ok(ChatCompletionRequest {
-        model: model.request_model_id.clone(),
+        model: model.request_model_id.clone().unwrap_or_default(),
         messages: request_messages,
         temperature: model.temperature,
         max_tokens: Some(model.max_output_tokens as u32),
@@ -451,7 +452,7 @@ impl ChatMessagePayload {
         }
     }
 
-    fn user(model: &ActiveModel, message: &Message) -> Result<Self> {
+    fn user(model: &LlmProviderConfig, message: &Message) -> Result<Self> {
         let content = user_message_content(model, message)?;
         Ok(Self {
             role: "user".to_string(),
@@ -500,7 +501,7 @@ impl ChatMessagePayload {
     }
 }
 
-fn user_message_content(model: &ActiveModel, message: &Message) -> Result<serde_json::Value> {
+fn user_message_content(model: &LlmProviderConfig, message: &Message) -> Result<serde_json::Value> {
     let text = message_text_with_file_references(message);
     let images: Vec<&MessageAttachment> = image_attachments(message).collect();
 
@@ -542,30 +543,24 @@ fn user_message_content(model: &ActiveModel, message: &Message) -> Result<serde_
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        config::ActiveModel,
-        config::ApiType,
-    };
+    use crate::types::{LlmProviderConfig, ApiType};
     use tidev_session::session::{Message, MessageRole};
 
     #[test]
     fn openai_system_messages_are_combined() {
-        let model = ActiveModel {
+        let model = LlmProviderConfig {
             provider_id: "openai".to_string(),
-            provider_display_name: "OpenAI".to_string(),
             base_url: "https://api.openai.com".to_string(),
             api_type: ApiType::OpenAiChatCompletions,
             model_id: "gpt-4".to_string(),
-            request_model_id: "gpt-4".to_string(),
-            display_name: "gpt-4".to_string(),
-            context_window: 8192,
+            request_model_id: Some("gpt-4".to_string()),
             max_output_tokens: 1024,
             temperature: Some(0.7),
             supports_images: false,
-            system_prompt: "base system prompt".to_string(),
+            system_prompt: Some("base system prompt".to_string()),
             api_key: None,
             extra_body: None,
-            thinking_level: crate::config::reasoning::ThinkingLevelType::None,
+            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
         };
 
         // System messages in the message list are now skipped (role match arm is empty).
@@ -601,22 +596,19 @@ mod tests {
 
     #[test]
     fn openai_system_prompt_only() {
-        let model = ActiveModel {
+        let model = LlmProviderConfig {
             provider_id: "openai".to_string(),
-            provider_display_name: "OpenAI".to_string(),
             base_url: "https://api.openai.com".to_string(),
             api_type: ApiType::OpenAiChatCompletions,
             model_id: "gpt-4".to_string(),
-            request_model_id: "gpt-4".to_string(),
-            display_name: "gpt-4".to_string(),
-            context_window: 8192,
+            request_model_id: Some("gpt-4".to_string()),
             max_output_tokens: 1024,
             temperature: Some(0.7),
             supports_images: false,
-            system_prompt: "base system prompt".to_string(),
+            system_prompt: Some("base system prompt".to_string()),
             api_key: None,
             extra_body: None,
-            thinking_level: crate::config::reasoning::ThinkingLevelType::None,
+            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
         };
 
         // No System message in messages, only model.system_prompt

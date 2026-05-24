@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use uuid::Uuid;
 
 use crate::config::ActiveModel;
-use crate::llm::LlmClient;
+use tidev_llm::LlmClient;
 use crate::tooling::ToolDefinition;
 
 /// Resolves a model label (e.g. "openai/gpt-4o") to a fully-configured

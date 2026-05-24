@@ -2,15 +2,15 @@ use std::collections::BTreeMap;
 
 use tidev_session::session::AssistantTurn;
 
-use super::think_parser::ThinkParser;
-use super::tool_call_format::{ToolCallBuilder, parse_invoke_xml};
+use crate::think_parser::ThinkParser;
+use crate::tool_call_format::{ToolCallBuilder, parse_invoke_xml};
 
 /// Build the final [`AssistantTurn`] from the accumulated streaming data.
 ///
 /// When the provider returned no native `tool_calls` (e.g. MiniMax XML format
 /// embedded in the content text), this function falls back to XML invoke-block
 /// parsing via [`parse_invoke_xml`].
-pub(super) fn finalize_turn(
+pub(crate) fn finalize_turn(
     assistant_text: String,
     reasoning_text: String,
     finish_reason: Option<String>,

@@ -3,7 +3,7 @@ pub mod config;
 pub mod context;
 pub mod hooks;
 pub mod instructions;
-pub mod llm;
+pub mod llm_bridge;
 pub mod logging;
 pub mod markdown_render;
 pub mod mcp;

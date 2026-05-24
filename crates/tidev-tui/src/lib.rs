@@ -72,7 +72,6 @@ use tidev_engine::{
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
     context::ContextManager,
     instructions,
-    llm::LlmClient,
     mcp::McpManager,
     memory::MemoryStore,
     notifications,
@@ -83,6 +82,7 @@ use tidev_engine::{
     theme::{ThemeManager, ThemeName},
     tooling::{FileReadTracker, TodoItem, ToolRegistry},
 };
+use tidev_llm::LlmClient;
 use tidev_session::session::{
     AssistantTurn, BackendEvent, COMPACTION_MESSAGE_LABEL, Conversation, Message,
     MessageAttachment, MessageRole, ToolCall, ToolExecutionResult,

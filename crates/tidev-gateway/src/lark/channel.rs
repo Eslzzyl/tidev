@@ -51,7 +51,7 @@ impl LarkChannel {
         config: AppConfig,
         auth: AuthStore,
         store: SessionStore,
-        llm: tidev_engine::llm::LlmClient,
+        llm: tidev_llm::LlmClient,
         tools: tidev_engine::tooling::ToolRegistry,
         instruction_prompt: String,
         allowlist: HashSet<String>,

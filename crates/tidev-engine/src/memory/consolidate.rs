@@ -5,7 +5,7 @@ use std::path::Path;
 use uuid::Uuid;
 
 use crate::config::ActiveModel;
-use crate::llm::LlmClient;
+use tidev_llm::LlmClient;
 use crate::memory::graph;
 use crate::memory::patterns::PatternMiningService;
 use crate::memory::remember::RememberService;
@@ -177,7 +177,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 Message::new(MessageRole::User, prompt.clone()),
             ];
             let response = match llm
-                .complete_with_messages(model.clone(), messages, vec![])
+                .complete_with_messages(tidev_llm::LlmProviderConfig::from(model.clone()), messages, vec![])
                 .await
             {
                 Ok(r) => r,
@@ -343,7 +343,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 Message::new(MessageRole::User, prompt.clone()),
             ];
             let response = match llm
-                .complete_with_messages(model.clone(), messages, vec![])
+                .complete_with_messages(tidev_llm::LlmProviderConfig::from(model.clone()), messages, vec![])
                 .await
             {
                 Ok(r) => r,

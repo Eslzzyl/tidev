@@ -17,11 +17,11 @@ use tidev_engine::{
 
     agent::runtime::AgentRuntime,
     config::{AppConfig, AuthStore, ConfigPaths},
-    llm::LlmClient,
     mcp::McpManager,
     storage::database::Database,
     tooling::{FileReadTracker, ToolRegistry},
 };
+use tidev_llm::LlmClient;
 
 use self::{
     event_bus::EventBus,
@@ -86,7 +86,7 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     let store = db.create_session_store()?;
 
     // Create LLM client
-    let llm_client = LlmClient::new(&config.logging)?;
+    let llm_client = LlmClient::new(config.logging.save_request_body, config.logging.max_request_files)?;
 
     // Create event bus
     let event_bus = EventBus::new(1024);

@@ -4018,6 +4018,7 @@ dependencies = [
  "syntect",
  "tempfile",
  "textwrap",
+ "tidev-llm",
  "tidev-session",
  "tidev-types",
  "tokio",
@@ -4049,12 +4050,32 @@ dependencies = [
  "serde",
  "serde_json",
  "tidev-engine",
+ "tidev-llm",
  "tidev-session",
  "tidev-types",
  "tokio",
  "tokio-tungstenite",
  "tokio-util",
  "urlencoding",
+ "uuid",
+]
+
+[[package]]
+name = "tidev-llm"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "chrono",
+ "futures-util",
+ "image",
+ "log",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tidev-session",
+ "tidev-types",
+ "tokio",
  "uuid",
 ]
 
@@ -4097,6 +4118,7 @@ dependencies = [
  "tempfile",
  "textwrap",
  "tidev-engine",
+ "tidev-llm",
  "tidev-session",
  "tidev-types",
  "tokio",
@@ -4135,6 +4157,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tidev-engine",
+ "tidev-llm",
  "tidev-session",
  "tidev-types",
  "tokio",

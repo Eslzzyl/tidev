@@ -97,6 +97,7 @@ prost = { version = "0.14", default-features = false, features = ["derive"] }
 log = "0.4.29"
 tidev-types = { path = "../tidev-types" }
 tidev-session = { path = "../tidev-session" }
+tidev-llm = { path = "../tidev-llm" }
 
 [dev-dependencies]
 tempfile = "3.27"

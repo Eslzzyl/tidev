@@ -13,6 +13,7 @@ include = ["/src", "/build.rs", "/../../web/dist", "/../../web/src", "/../../web
 
 [dependencies]
 tidev-engine = { path = "../tidev-engine" }
+tidev-llm = { path = "../tidev-llm" }
 tidev-types = { path = "../tidev-types" }
 tidev-session = { path = "../tidev-session" }
 anyhow = "1.0.102"

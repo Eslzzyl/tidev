@@ -39,6 +39,7 @@ use crate::{
     storage::SessionStore,
     tooling::{ToolDefinition, ToolRegistry, canonical_tool_name},
 };
+use tidev_llm::LlmClient;
 use tidev_session::session::{
     AssistantTurn, BackendEvent, Message, MessageAttachment, MessageRole, ToolCall,
     ToolExecutionResult,
@@ -124,7 +125,7 @@ pub struct AgentRuntime {
     pub config: AppConfig,
     pub auth: AuthStore,
     pub store: Arc<Mutex<SessionStore>>,
-    pub llm_client: crate::llm::LlmClient,
+    pub llm_client: LlmClient,
     pub tools: ToolRegistry,
     /// Instruction file paths/URLs from config (e.g. `config.instructions`).
     pub instructions: Vec<String>,
@@ -534,7 +535,10 @@ impl AgentRuntime {
         let tl = thinking_level.clone();
         let _t_spawn = std::time::Instant::now();
         tokio::spawn(async move {
-            llm.stream_chat(session_id, request_id, model_for_task, msgs, tools, tx, tl)
+            let llm_config = tidev_llm::LlmProviderConfig::from(model_for_task);
+            let llm_tools: Vec<tidev_llm::ToolDefinition> =
+                tools.iter().map(tidev_llm::ToolDefinition::from).collect();
+            llm.stream_chat(session_id, request_id, llm_config, msgs, llm_tools, tx, tl)
                 .await;
         });
 
@@ -1394,12 +1398,15 @@ impl AgentRuntime {
             // also use it in the cancel listener below.
             let stream_tx_for_llm = stream_tx.clone();
             tokio::spawn(async move {
+                let llm_config = tidev_llm::LlmProviderConfig::from(model_for_task);
+                let llm_tools: Vec<tidev_llm::ToolDefinition> =
+                    tools_for_spawn.iter().map(tidev_llm::ToolDefinition::from).collect();
                 llm.stream_chat(
                     child_session_id,
                     stream_req_id,
-                    model_for_task,
+                    llm_config,
                     msgs,
-                    tools_for_spawn,
+                    llm_tools,
                     stream_tx_for_llm,
                     tl,
                 )
@@ -2299,6 +2306,8 @@ mod tests {
 
     use tidev_types::prompts::SessionMode;
 
+    use tidev_llm::LlmClient;
+
     use crate::{
         config::ConfigPaths,
         context::ContextManager,
@@ -2352,7 +2361,7 @@ mod tests {
             config: crate::config::AppConfig::default(),
             auth: crate::config::AuthStore::default(),
             store: Arc::new(Mutex::new(store)),
-            llm_client: crate::llm::LlmClient::new(&crate::config::LogConfig::default()).unwrap(),
+            llm_client: LlmClient::new(false, 100).unwrap(),
             tools: crate::tooling::ToolRegistry::new(
                 tmp.path().join("workspace"),
                 tmp.path().join("config"),

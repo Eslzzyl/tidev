@@ -20,10 +20,11 @@ use tidev_types::types::PermissionConfig;
 use self::reasoning::{ThinkingLevelType, ThinkingMatcher};
 
 pub use auth::{ActiveModel, AuthStore, ModelSummary, ProviderAuth, WebAuth};
+pub use tidev_llm::ApiType;
 pub use logging::LogConfig;
 pub use mcp::{McpConfig, McpServerConfig};
 pub use paths::ConfigPaths;
-pub use provider::{ApiType, ModelConfig, ProviderConfig, ProviderSource};
+pub use provider::{ModelConfig, ProviderConfig, ProviderSource};
 pub use tmp::TmpConfig;
 pub use ui::UiConfig;
 

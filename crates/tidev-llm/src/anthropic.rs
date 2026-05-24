@@ -6,26 +6,26 @@ use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 use crate::{
-    config::ActiveModel,
-    tooling::ToolDefinition,
+    types::LlmProviderConfig,
+    types::ToolDefinition,
 };
 use tidev_session::session::{BackendEvent, Message, MessageAttachment, MessageRole};
 
 use log::{debug as log_debug, error as log_error};
 
-use super::attachments::{image_attachments, message_text_with_file_references};
-use super::debug::save_request_for_debugging;
-use super::error::classify_response_status;
-use super::think_parser::ThinkParser;
-use super::tool_call_format::ToolCallBuilder;
-use super::turn::finalize_turn;
+use crate::attachments::{image_attachments, message_text_with_file_references};
+use crate::debug::save_request_for_debugging;
+use crate::error::classify_response_status;
+use crate::think_parser::ThinkParser;
+use crate::tool_call_format::ToolCallBuilder;
+use crate::turn::finalize_turn;
 
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn stream_anthropic(
+pub(crate) async fn stream_anthropic(
     http: &Client,
     session_id: Uuid,
     request_id: u64,
-    model: ActiveModel,
+    model: LlmProviderConfig,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
     tx: UnboundedSender<BackendEvent>,
@@ -241,9 +241,9 @@ pub(super) async fn stream_anthropic(
     Ok(())
 }
 
-pub(super) async fn complete_anthropic(
+pub(crate) async fn complete_anthropic(
     http: &Client,
-    model: ActiveModel,
+    model: LlmProviderConfig,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
     save_request_body: bool,
@@ -320,17 +320,17 @@ pub(super) async fn complete_anthropic(
 }
 
 fn build_anthropic_request(
-    model: &ActiveModel,
+    model: &LlmProviderConfig,
     messages: Vec<Message>,
     tools: &[ToolDefinition],
 ) -> Result<AnthropicRequest> {
     // System prompt comes from the model config directly.
     // No context summary merging needed — compaction summaries are now
     // User messages inserted at the compression boundary, not System messages.
-    let system_prompt = if model.system_prompt.trim().is_empty() {
+    let system_prompt = if model.system_prompt_str().trim().is_empty() {
         None
     } else {
-        Some(model.system_prompt.clone())
+        Some(model.system_prompt.clone().unwrap_or_default())
     };
 
     let mut anthropic_messages = Vec::new();
@@ -405,7 +405,7 @@ fn build_anthropic_request(
     };
 
     Ok(AnthropicRequest {
-        model: model.request_model_id.clone(),
+        model: model.request_model_id.clone().unwrap_or_default(),
         max_tokens: model.max_output_tokens as u32,
         system: system_prompt,
         messages: anthropic_messages,
@@ -478,7 +478,7 @@ struct AnthropicImageSource {
 }
 
 fn user_message_content(
-    model: &ActiveModel,
+    model: &LlmProviderConfig,
     message: &Message,
 ) -> Result<Vec<AnthropicContentBlock>> {
     let text = message_text_with_file_references(message);

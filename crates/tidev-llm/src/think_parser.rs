@@ -1,14 +1,14 @@
 /// Stream-aware `<think>…</think>` tag parser used to separate chain-of-thought
 /// reasoning from visible assistant text in streaming LLM responses.
 #[derive(Clone, Debug, Default)]
-pub(super) struct ThinkParser {
+pub(crate) struct ThinkParser {
     in_think: bool,
     buffer: String,
 }
 
 impl ThinkParser {
     /// Push a chunk of streaming text and return `(visible, reasoning)`.
-    pub(super) fn push(&mut self, text: &str) -> (String, String) {
+    pub(crate) fn push(&mut self, text: &str) -> (String, String) {
         self.buffer.push_str(text);
 
         let mut visible = String::new();
@@ -48,7 +48,7 @@ impl ThinkParser {
     }
 
     /// Drain any remaining buffered text. Call this after the stream ends.
-    pub(super) fn finish(&mut self) -> (String, String) {
+    pub(crate) fn finish(&mut self) -> (String, String) {
         let mut visible = String::new();
         let mut reasoning = String::new();
 

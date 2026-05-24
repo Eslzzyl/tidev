@@ -8,11 +8,11 @@ use tidev_engine::{
 
     agent::runtime::AgentRuntime,
     config::{AppConfig, AuthStore},
-    llm::LlmClient,
     shared::file_search::FileSearchIndex,
     snapshot::SnapshotService,
     storage::SessionStore,
 };
+use tidev_llm::LlmClient;
 
 use crate::terminal::{TerminalManager, TerminalOutput};
 

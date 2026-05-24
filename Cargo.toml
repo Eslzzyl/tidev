@@ -3,6 +3,7 @@ members = [
     ".",
     "crates/tidev-types",
     "crates/tidev-session",
+    "crates/tidev-llm",
     "crates/tidev-engine",
     "crates/tidev-tui",
     "crates/tidev-web",

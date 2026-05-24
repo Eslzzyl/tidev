@@ -6,26 +6,26 @@ use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 use crate::{
-    config::ActiveModel,
-    tooling::ToolDefinition,
+    types::LlmProviderConfig,
+    types::ToolDefinition,
 };
 use tidev_session::session::{BackendEvent, Message, MessageRole, ToolCall};
 
 use log::{debug as log_debug, error as log_error};
 
-use super::attachments::message_text_with_file_references;
-use super::debug::save_request_for_debugging;
-use super::error::classify_response_status;
+use crate::attachments::message_text_with_file_references;
+use crate::debug::save_request_for_debugging;
+use crate::error::classify_response_status;
 
 /// Responses API endpoint
 const RESPONSES_ENDPOINT: &str = "/responses";
 
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn stream_responses(
+pub(crate) async fn stream_responses(
     http: &Client,
     session_id: Uuid,
     request_id: u64,
-    model: ActiveModel,
+    model: LlmProviderConfig,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
     tx: UnboundedSender<BackendEvent>,
@@ -493,9 +493,9 @@ pub(super) async fn stream_responses(
     Ok(())
 }
 
-pub(super) async fn complete_responses(
+pub(crate) async fn complete_responses(
     http: &Client,
-    model: ActiveModel,
+    model: LlmProviderConfig,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
     save_request_body: bool,
@@ -600,7 +600,7 @@ pub(super) async fn complete_responses(
 }
 
 fn build_responses_request(
-    model: &ActiveModel,
+    model: &LlmProviderConfig,
     messages: Vec<Message>,
     stream: bool,
     tools: &[ToolDefinition],
@@ -608,10 +608,10 @@ fn build_responses_request(
     // System prompt comes from the model config directly.
     // No context summary merging needed — compaction summaries are now
     // User messages inserted at the compression boundary, not System messages.
-    let instructions = if model.system_prompt.trim().is_empty() {
+    let instructions = if model.system_prompt_str().trim().is_empty() {
         None
     } else {
-        Some(model.system_prompt.clone())
+        Some(model.system_prompt.clone().unwrap_or_default())
     };
 
     // Build conversation history as a string (this backend only supports string input)
@@ -668,7 +668,7 @@ fn build_responses_request(
     };
 
     Ok(ResponsesRequest {
-        model: model.request_model_id.clone(),
+        model: model.request_model_id.clone().unwrap_or_default(),
         instructions,
         input,
         tools: chat_tools,
@@ -1570,26 +1570,24 @@ struct ResponseOutputContent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::ApiType;
+    use crate::types::ApiType;
+    use tidev_session::session::{Message, MessageRole};
 
     #[test]
     fn test_responses_request_basic() {
-        let model = ActiveModel {
+        let model = LlmProviderConfig {
             provider_id: "openai-responses".to_string(),
-            provider_display_name: "OpenAI Responses".to_string(),
             base_url: "https://api.openai.com".to_string(),
             api_type: ApiType::OpenAiResponses,
             model_id: "gpt-4.5".to_string(),
-            request_model_id: "gpt-4.5".to_string(),
-            display_name: "GPT-4.5".to_string(),
-            context_window: 128000,
+            request_model_id: Some("gpt-4.5".to_string()),
             max_output_tokens: 4096,
             temperature: Some(0.7),
             supports_images: true,
-            system_prompt: "You are helpful.".to_string(),
+            system_prompt: Some("You are helpful.".to_string()),
             api_key: None,
             extra_body: None,
-            thinking_level: crate::config::reasoning::ThinkingLevelType::None,
+            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
         };
 
         let messages = vec![Message::new(MessageRole::User, "Hello")];
@@ -1604,22 +1602,19 @@ mod tests {
 
     #[test]
     fn test_responses_request_with_system_prompt() {
-        let model = ActiveModel {
+        let model = LlmProviderConfig {
             provider_id: "test".to_string(),
-            provider_display_name: "Test".to_string(),
             base_url: "https://api.openai.com".to_string(),
             api_type: ApiType::OpenAiResponses,
             model_id: "gpt-4.5".to_string(),
-            request_model_id: "gpt-4.5".to_string(),
-            display_name: "GPT-4.5".to_string(),
-            context_window: 128000,
+            request_model_id: Some("gpt-4.5".to_string()),
             max_output_tokens: 4096,
             temperature: Some(0.7),
             supports_images: false,
-            system_prompt: "Base system prompt".to_string(),
+            system_prompt: Some("Base system prompt".to_string()),
             api_key: None,
             extra_body: None,
-            thinking_level: crate::config::reasoning::ThinkingLevelType::None,
+            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
         };
 
         // System messages in the list are now skipped; only model.system_prompt is used
@@ -1641,22 +1636,19 @@ mod tests {
 
     #[test]
     fn test_responses_request_assistant_and_tool_messages() {
-        let model = ActiveModel {
+        let model = LlmProviderConfig {
             provider_id: "test".to_string(),
-            provider_display_name: "Test".to_string(),
             base_url: "https://api.openai.com".to_string(),
             api_type: ApiType::OpenAiResponses,
             model_id: "gpt-4.5".to_string(),
-            request_model_id: "gpt-4.5".to_string(),
-            display_name: "GPT-4.5".to_string(),
-            context_window: 128000,
+            request_model_id: Some("gpt-4.5".to_string()),
             max_output_tokens: 4096,
             temperature: Some(0.7),
             supports_images: false,
-            system_prompt: "You are helpful.".to_string(),
+            system_prompt: Some("You are helpful.".to_string()),
             api_key: None,
             extra_body: None,
-            thinking_level: crate::config::reasoning::ThinkingLevelType::None,
+            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
         };
 
         let messages = vec![
@@ -1689,8 +1681,6 @@ mod tests {
                     "command": {"type": "string"}
                 }
             }),
-            permission: crate::tooling::ToolPermission::Execute,
-            origin: crate::tooling::ToolOrigin::Local,
         };
 
         let response_tool = ResponseTool::from(&tool);

@@ -7,36 +7,6 @@ pub enum ProviderSource {
     Bundled,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ApiType {
-    #[default]
-    OpenAiChatCompletions,
-    Anthropic,
-    OpenAiResponses,
-    GoogleGemini,
-}
-
-impl ApiType {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::OpenAiChatCompletions => "openai_chat_completions",
-            Self::Anthropic => "anthropic",
-            Self::OpenAiResponses => "openai_responses",
-            Self::GoogleGemini => "google_gemini",
-        }
-    }
-
-    pub fn parse(s: &str) -> Self {
-        match s {
-            "anthropic" => Self::Anthropic,
-            "openai_responses" => Self::OpenAiResponses,
-            "google_gemini" => Self::GoogleGemini,
-            _ => Self::OpenAiChatCompletions,
-        }
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProviderConfig {
     pub display_name: String,

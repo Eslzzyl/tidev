@@ -27,19 +27,19 @@ use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 use crate::{
-    config::ActiveModel,
-    tooling::ToolDefinition,
+    types::LlmProviderConfig,
+    types::ToolDefinition,
 };
 use tidev_session::session::{BackendEvent, Message, MessageAttachment, MessageRole, ToolCall};
 
 use log::{debug as log_debug, error as log_error};
 
-use super::attachments::{image_attachments, message_text_with_file_references};
-use super::debug::save_request_for_debugging;
-use super::error::classify_response_status;
-use super::think_parser::ThinkParser;
-use super::tool_call_format::ToolCallBuilder;
-use super::turn::finalize_turn;
+use crate::attachments::{image_attachments, message_text_with_file_references};
+use crate::debug::save_request_for_debugging;
+use crate::error::classify_response_status;
+use crate::think_parser::ThinkParser;
+use crate::tool_call_format::ToolCallBuilder;
+use crate::turn::finalize_turn;
 
 // ============================================================================
 // Public API
@@ -47,11 +47,11 @@ use super::turn::finalize_turn;
 
 /// Stream a chat completion via Gemini's `streamGenerateContent` (SSE).
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn stream_gemini(
+pub(crate) async fn stream_gemini(
     http: &Client,
     session_id: Uuid,
     request_id: u64,
-    model: ActiveModel,
+    model: LlmProviderConfig,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
     tx: UnboundedSender<BackendEvent>,
@@ -339,9 +339,9 @@ pub(super) async fn stream_gemini(
 
 /// Non-streaming completion via Gemini's `generateContent`.
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn complete_gemini(
+pub(crate) async fn complete_gemini(
     http: &Client,
-    model: ActiveModel,
+    model: LlmProviderConfig,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
     save_request_body: bool,
@@ -425,18 +425,18 @@ pub(super) async fn complete_gemini(
 // ============================================================================
 
 fn build_gemini_request(
-    model: &ActiveModel,
+    model: &LlmProviderConfig,
     messages: Vec<Message>,
     tools: &[ToolDefinition],
 ) -> Result<GeminiRequest> {
     // ── System instruction ────────────────────────────────────────────────
-    let system_instruction = if model.system_prompt.trim().is_empty() {
+    let system_instruction = if model.system_prompt_str().trim().is_empty() {
         None
     } else {
         Some(GeminiContent {
             role: None,
             parts: vec![GeminiPart {
-                text: Some(model.system_prompt.clone()),
+                text: Some(model.system_prompt.clone().unwrap_or_default()),
                 inline_data: None,
                 file_data: None,
                 function_call: None,
@@ -617,7 +617,7 @@ fn build_gemini_request(
 }
 
 /// Build the parts array for a user message (text + optional images).
-fn user_message_parts(model: &ActiveModel, message: &Message) -> Result<Vec<GeminiPart>> {
+fn user_message_parts(model: &LlmProviderConfig, message: &Message) -> Result<Vec<GeminiPart>> {
     let text = message_text_with_file_references(message);
     let images: Vec<&tidev_session::session::MessageAttachment> = image_attachments(message).collect();
 

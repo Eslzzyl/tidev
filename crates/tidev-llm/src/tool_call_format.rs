@@ -1,13 +1,13 @@
 /// Accumulates a tool call from streaming `tool_calls` delta chunks.
 #[derive(Clone, Debug, Default)]
-pub(super) struct ToolCallBuilder {
-    pub(super) id: String,
-    pub(super) name: String,
-    pub(super) arguments: String,
+pub(crate) struct ToolCallBuilder {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) arguments: String,
 }
 
 impl ToolCallBuilder {
-    pub(super) fn into_tool_call(self, index: usize) -> tidev_session::session::ToolCall {
+    pub(crate) fn into_tool_call(self, index: usize) -> tidev_session::session::ToolCall {
         tidev_session::session::ToolCall {
             id: if self.id.is_empty() {
                 format!("tool-call-{index}")
@@ -96,7 +96,7 @@ fn parse_parameters(body: &str) -> serde_json::Map<String, serde_json::Value> {
 /// that immediately follows `</invoke>`.
 ///
 /// Returns `(cleaned_text, extracted_tool_calls)`.
-pub(super) fn parse_invoke_xml(text: &str) -> (String, Vec<tidev_session::session::ToolCall>) {
+pub(crate) fn parse_invoke_xml(text: &str) -> (String, Vec<tidev_session::session::ToolCall>) {
     let mut text_parts: Vec<String> = Vec::new();
     let mut calls: Vec<tidev_session::session::ToolCall> = Vec::new();
     let mut cursor = 0usize;

@@ -22,11 +22,11 @@ use anyhow::{Context, Result, bail};
 use tidev_engine::{
 
     config::{AppConfig, AuthStore, ConfigPaths},
-    llm::LlmClient,
     mcp::McpManager,
     storage::database::Database,
     tooling::{FileReadTracker, ToolRegistry},
 };
+use tidev_llm::LlmClient;
 
 use orchestrator::ChannelOrchestrator;
 use shared::compose_instruction_prompt;
@@ -50,7 +50,7 @@ impl ChannelResources {
     ) -> Result<Self> {
         let store = db.create_session_store()?;
         let memory_store = Arc::new(db.create_memory_store()?);
-        let llm = LlmClient::new(&config.logging)?;
+        let llm = LlmClient::new(config.logging.save_request_body, config.logging.max_request_files)?;
         memory_store.set_models(llm.clone(), default_model.clone(), None);
         tidev_engine::memory::start_background_tasks(
             memory_store.clone(),

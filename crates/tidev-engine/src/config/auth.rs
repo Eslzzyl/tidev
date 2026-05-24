@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use super::paths::ConfigPaths;
-use super::provider::ApiType;
+use tidev_llm::ApiType;
 use super::reasoning::ThinkingLevelType;
 
 /// Web authentication configuration stored in auth.json

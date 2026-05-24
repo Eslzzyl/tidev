@@ -5,7 +5,7 @@ use std::path::Path;
 use uuid::Uuid;
 
 use crate::config::ActiveModel;
-use crate::llm::LlmClient;
+use tidev_llm::LlmClient;
 use crate::memory::remember::RememberService;
 use crate::memory::remember::map_memory_entry_from_row;
 use crate::memory::types::{MemoryEntry, MemoryType};
@@ -171,7 +171,11 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                 ];
 
                 let response = match llm
-                    .complete_with_messages(model.clone(), messages, vec![])
+                    .complete_with_messages(
+                        tidev_llm::LlmProviderConfig::from(model.clone()),
+                        messages,
+                        vec![],
+                    )
                     .await
                 {
                     Ok(r) => r,

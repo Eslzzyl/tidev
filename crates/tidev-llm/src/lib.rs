@@ -1,3 +1,10 @@
+//! LLM provider implementations — the core LLM abstraction used by the
+//! TiDev agent loop and background tasks.
+//!
+//! This crate exposes [`LlmClient`] which routes requests to provider-specific
+//! implementations (Anthropic, OpenAI Chat Completions, OpenAI Responses API,
+//! Google Gemini) based on the [`ApiType`] carried by [`LlmProviderConfig`].
+
 mod anthropic;
 mod attachments;
 mod debug;
@@ -8,6 +15,9 @@ mod responses;
 mod think_parser;
 mod tool_call_format;
 mod turn;
+mod types;
+
+pub use types::{ApiType, LlmProviderConfig, ToolDefinition};
 
 use anyhow::{Context, Result};
 use reqwest::Client;
@@ -15,15 +25,14 @@ use std::time::Duration;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
-use crate::{
-    config::LogConfig,
-    config::{ActiveModel, ApiType},
-    tooling::ToolDefinition,
-};
 use tidev_session::session::{BackendEvent, Message};
 
 use error::{MAX_RETRIES, backoff_delay, backoff_sleep, classify_anyhow_error};
 
+/// Streaming LLM client.
+///
+/// Create via [`LlmClient::new`], then call [`stream_chat`](LlmClient::stream_chat)
+/// or [`complete_with_messages`](LlmClient::complete_with_messages).
 #[derive(Clone, Debug)]
 pub struct LlmClient {
     http: Client,
@@ -32,18 +41,20 @@ pub struct LlmClient {
 }
 
 impl LlmClient {
-    pub fn new(logging: &LogConfig) -> Result<Self> {
+    /// Build a new client.  Only the two debug knobs are needed — all other
+    /// configuration comes per-request via [`LlmProviderConfig`].
+    pub fn new(save_request_body: bool, max_request_files: usize) -> Result<Self> {
         let http = Client::builder()
             .user_agent("tidev/0.1")
-            .timeout(Duration::from_mins(30))
+            .timeout(Duration::from_secs(1800))
             .connect_timeout(Duration::from_secs(15))
             .build()
             .context("failed to construct HTTP client")?;
 
         Ok(Self {
             http,
-            save_request_body: logging.save_request_body,
-            max_request_files: logging.max_request_files,
+            save_request_body,
+            max_request_files,
         })
     }
 
@@ -52,16 +63,17 @@ impl LlmClient {
         &self.http
     }
 
+    /// Stream a chat completion, forwarding [`BackendEvent`]s through `tx`.
     #[allow(clippy::too_many_arguments)]
     pub async fn stream_chat(
         &self,
         session_id: Uuid,
         request_id: u64,
-        model: ActiveModel,
+        model: LlmProviderConfig,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
         tx: UnboundedSender<BackendEvent>,
-        thinking_level: crate::config::reasoning::ThinkingLevelType,
+        thinking_level: tidev_types::reasoning::ThinkingLevelType,
     ) {
         let result = self
             .stream_chat_with_retry(
@@ -81,17 +93,17 @@ impl LlmClient {
                 request_id,
                 error: error.to_string(),
             });
+            }
         }
-    }
 
+    /// Non-streaming completion — returns the full assistant text.
     pub async fn complete_with_messages(
         &self,
-        model: ActiveModel,
+        model: LlmProviderConfig,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
     ) -> Result<String> {
         let result = self.complete_with_retry(model, messages, tools).await;
-
         result.context("LLM completion failed after retries")
     }
 
@@ -100,13 +112,16 @@ impl LlmClient {
         &self,
         session_id: Uuid,
         request_id: u64,
-        model: ActiveModel,
+        model: LlmProviderConfig,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
         tx: UnboundedSender<BackendEvent>,
-        thinking_level: crate::config::reasoning::ThinkingLevelType,
+        thinking_level: tidev_types::reasoning::ThinkingLevelType,
     ) -> Result<()> {
-        for attempt in 1..=MAX_RETRIES {
+        // Determine how many retries we can afford.
+        let max = MAX_RETRIES;
+
+        for attempt in 0..=max {
             let result = self
                 .stream_chat_inner(
                     session_id,
@@ -122,37 +137,33 @@ impl LlmClient {
             match result {
                 Ok(()) => return Ok(()),
                 Err(e) => {
-                    let network_error = classify_anyhow_error(e);
-                    let is_last_attempt = attempt == MAX_RETRIES;
+                    let network_err = classify_anyhow_error(e);
+                    let is_last = attempt == max;
 
-                    if !network_error.is_retryable() || is_last_attempt {
-                        // Return the final error (non-retryable or exhausted retries)
-                        return Err(anyhow::anyhow!("{}", network_error.message()));
+                    if !network_err.is_retryable() || is_last {
+                        return Err(anyhow::anyhow!("{}", network_err.message()));
                     }
 
-                    let delay_secs = backoff_delay(attempt).as_secs() as u32;
-
+                    let delay = backoff_delay(attempt + 1);
                     let _ = tx.send(BackendEvent::Retrying {
                         session_id,
                         request_id,
-                        attempt,
-                        max_attempts: MAX_RETRIES,
-                        reason: network_error.message().to_string(),
-                        retry_after_secs: Some(delay_secs),
+                        attempt: (attempt + 1) as u32,
+                        max_attempts: (max + 1) as u32,
+                        reason: network_err.message().to_string(),
+                        retry_after_secs: Some(delay.as_secs() as u32),
                     });
-
-                    backoff_sleep(attempt).await;
+                    backoff_sleep(attempt + 1).await;
                 }
             }
         }
 
-        unreachable!("loop should return before this point")
+        unreachable!()
     }
 
-    /// Internal: complete with retry logic.
     async fn complete_with_retry(
         &self,
-        model: ActiveModel,
+        model: LlmProviderConfig,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
     ) -> Result<String> {
@@ -223,13 +234,13 @@ impl LlmClient {
                         network_error.message(),
                         delay_secs
                     );
-
                     backoff_sleep(attempt).await;
                 }
             }
         }
 
-        unreachable!("loop should return before this point")
+        // If we exhaust all retries without returning, something is wrong.
+        unreachable!()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -237,11 +248,11 @@ impl LlmClient {
         &self,
         session_id: Uuid,
         request_id: u64,
-        model: ActiveModel,
+        model: LlmProviderConfig,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
         tx: UnboundedSender<BackendEvent>,
-        thinking_level: crate::config::reasoning::ThinkingLevelType,
+        thinking_level: tidev_types::reasoning::ThinkingLevelType,
     ) -> Result<()> {
         match model.api_type {
             ApiType::Anthropic => {
@@ -303,4 +314,6 @@ impl LlmClient {
             }
         }
     }
+
+
 }
