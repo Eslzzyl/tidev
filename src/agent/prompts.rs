@@ -24,6 +24,9 @@ fn general_prompt() -> String {
     format!(
         "You are TiDev, an intelligent coding assistant.\n\
          {}\n\n\
+         You have two operating modes: Plan and Build. Users can switch freely between these two modes;
+         they might switch from Build to Plan at any time to ask you for an explanation.
+         Remember, any mode switch is triggered manually by the user.\n\n\
          ## Multi-Agent Delegation\n\
          You can delegate specialised subtasks to sub-agents using the `task` tool.\n\
          Decide when to delegate vs. handle work yourself.\n\n\
