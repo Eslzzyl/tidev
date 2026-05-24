@@ -7,9 +7,9 @@ use uuid::Uuid;
 
 use crate::{
     config::{ActiveModel, reasoning::ThinkingLevelType},
-    session::{BackendEvent, Message, MessageAttachment, MessageRole, ToolCall},
     tooling::ToolDefinition,
 };
+use tidev_session::session::{BackendEvent, Message, MessageAttachment, MessageRole, ToolCall};
 
 use log::{debug as log_debug, error as log_error};
 
@@ -545,8 +545,8 @@ mod tests {
     use crate::{
         config::ActiveModel,
         config::ApiType,
-        session::{Message, MessageRole},
     };
+    use tidev_session::session::{Message, MessageRole};
 
     #[test]
     fn openai_system_messages_are_combined() {

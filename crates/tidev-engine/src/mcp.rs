@@ -14,7 +14,7 @@ use tokio::process::Command;
 use tidev_types::types::PermissionConfig;
 use crate::config::mcp::McpServerConfig;
 use tidev_types::prompts::SessionMode;
-use crate::session::{MessageAttachment, ToolCall, ToolExecutionResult, ToolMetadata};
+use tidev_session::session::{MessageAttachment, ToolCall, ToolExecutionResult, ToolMetadata};
 use crate::tooling::{ToolDefinition, ToolPermission};
 
 type McpClient = RunningService<RoleClient, ClientInfo>;

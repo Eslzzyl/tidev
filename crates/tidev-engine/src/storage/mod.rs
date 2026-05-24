@@ -20,9 +20,7 @@ use uuid::Uuid;
 use tidev_session::stats::{Granularity, ModelUsageEntry, StatsEntry, TimeRangeStats, UsageSummary};
 use tidev_types::TodoItem;
 
-use crate::{
-    session::{Conversation, Message, MessageRole, ToolCall},
-};
+use tidev_session::session::{Conversation, Message, MessageRole, ToolCall};
 
 use rayon::prelude::*;
 
@@ -190,14 +188,14 @@ impl RawMessageRow {
     fn into_message(self) -> Result<Message> {
         use crate::config::reasoning::ThinkingLevelType;
         use tidev_types::prompts::SessionMode;
-        use crate::session::ToolMetadata;
+        use tidev_session::session::ToolMetadata;
 
         let content = decompress_text(&self.content);
         let reasoning = match self.reasoning {
             Some(b) => decompress_text(&b),
             None => String::new(),
         };
-        let attachments: Vec<crate::session::MessageAttachment> =
+        let attachments: Vec<tidev_session::session::MessageAttachment> =
             serde_json::from_str(&self.attachments).unwrap_or_default();
         let tool_calls: Vec<ToolCall> =
             serde_json::from_str(&decompress_text(&self.tool_calls)).unwrap_or_default();

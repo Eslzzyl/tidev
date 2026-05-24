@@ -6,7 +6,7 @@ use std::{fs, io::BufRead, path::Path};
 
 use super::utils::{display_workspace_relative, read_existing_text, resolve_workspace_path};
 use crate::instructions::resolve_nearby_instructions;
-use crate::session::{MessageAttachment, ToolExecutionResult, ToolMetadata};
+use tidev_session::session::{MessageAttachment, ToolExecutionResult, ToolMetadata};
 use crate::tooling::tools::{ApplyPatchArgs, EditArgs, ReadArgs, WriteArgs, decode_tool_args};
 use crate::tooling::{ToolDefinition, ToolPermission};
 
@@ -46,7 +46,7 @@ pub fn execute_tool_call(
     _max_output_bytes: usize,
     allow_outside: bool,
     sensitive_file_approved: bool,
-) -> Result<crate::session::ToolExecutionResult> {
+) -> Result<tidev_session::session::ToolExecutionResult> {
     match crate::tooling::canonical_tool_name(tool_name) {
         Some("read") => {
             let args = decode_tool_args::<ReadArgs>(tool_name, arguments)?;

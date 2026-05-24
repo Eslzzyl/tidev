@@ -32,7 +32,7 @@
 use anyhow::Result;
 use uuid::Uuid;
 
-use crate::session::Message;
+use tidev_session::session::Message;
 use crate::snapshot::Patch;
 
 /// A single step-level patch stored within a round.
@@ -133,7 +133,7 @@ pub fn collect_patches_after_message(messages: &[Message], message_id: Uuid) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::{Message, MessageRole};
+    use tidev_session::session::{Message, MessageRole};
 
     fn make_message(id: Uuid, snapshot_hash: Option<&str>, patch_files: Option<&str>) -> Message {
         let mut msg = Message::new(MessageRole::User, "test");

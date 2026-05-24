@@ -407,7 +407,7 @@ pub struct Message {
     #[serde(default)]
     pub rtk_rewritten: bool,
     #[serde(default)]
-    pub thinking_level: Option<crate::config::reasoning::ThinkingLevelType>,
+    pub thinking_level: Option<tidev_types::reasoning::ThinkingLevelType>,
 }
 
 impl Message {
@@ -561,8 +561,8 @@ impl Message {
     }
 
     /// Get token usage from this message's token fields.
-    pub fn token_usage(&self) -> tidev_session::utils::TokenUsage {
-        tidev_session::utils::TokenUsage::new(
+    pub fn token_usage(&self) -> crate::utils::TokenUsage {
+        crate::utils::TokenUsage::new(
             self.input_tokens.unwrap_or(0),
             self.output_tokens.unwrap_or(0),
             self.cache_read_tokens.unwrap_or(0),

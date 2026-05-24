@@ -7,9 +7,9 @@ use uuid::Uuid;
 
 use crate::{
     config::ActiveModel,
-    session::{BackendEvent, Message, MessageAttachment, MessageRole},
     tooling::ToolDefinition,
 };
+use tidev_session::session::{BackendEvent, Message, MessageAttachment, MessageRole};
 
 use log::{debug as log_debug, error as log_error};
 

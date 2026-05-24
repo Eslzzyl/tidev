@@ -18,9 +18,9 @@ use uuid::Uuid;
 use crate::{
     config::LogConfig,
     config::{ActiveModel, ApiType},
-    session::{BackendEvent, Message},
     tooling::ToolDefinition,
 };
+use tidev_session::session::{BackendEvent, Message};
 
 use error::{MAX_RETRIES, backoff_delay, backoff_sleep, classify_anyhow_error};
 

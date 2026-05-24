@@ -36,12 +36,12 @@ use crate::{
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths, reasoning::ThinkingLevelType},
     context::ContextManager,
     instructions,
-    session::{
-        AssistantTurn, BackendEvent, Message, MessageAttachment, MessageRole, ToolCall,
-        ToolExecutionResult,
-    },
     storage::SessionStore,
     tooling::{ToolDefinition, ToolRegistry, canonical_tool_name},
+};
+use tidev_session::session::{
+    AssistantTurn, BackendEvent, Message, MessageAttachment, MessageRole, ToolCall,
+    ToolExecutionResult,
 };
 
 /// A user message received while the agent loop was already processing a turn.
@@ -1346,7 +1346,7 @@ impl AgentRuntime {
 
             let _t_sub_build = std::time::Instant::now();
             let mut conv =
-                crate::session::Conversation::new(child_session_id, "", "", "", "", "", "");
+                tidev_session::session::Conversation::new(child_session_id, "", "", "", "", "", "");
             conv.messages = db_messages;
             let request_messages = child_context.build_request_messages(&conv, SessionMode::Build);
             log::debug!(
@@ -1814,7 +1814,7 @@ impl AgentRuntime {
 
             // 3. Build request messages (already contains DC in the persisted content)
             let _t_build = std::time::Instant::now();
-            let mut conv = crate::session::Conversation::new(session_id, "", "", "", "", "", "");
+            let mut conv = tidev_session::session::Conversation::new(session_id, "", "", "", "", "", "");
             conv.messages = db_messages;
             let request_messages = context_manager.build_request_messages(&conv, mode);
             log::info!(
@@ -2273,7 +2273,7 @@ impl AgentRuntime {
     async fn load_conversation(
         &self,
         session_id: uuid::Uuid,
-    ) -> Result<Option<crate::session::Conversation>> {
+    ) -> Result<Option<tidev_session::session::Conversation>> {
         let store = self.store.lock().await;
         store.load_conversation(session_id)
     }
@@ -2302,9 +2302,9 @@ mod tests {
     use crate::{
         config::ConfigPaths,
         context::ContextManager,
-        session::{Conversation, Message, MessageRole, ToolCall, ToolExecutionResult},
         storage::SessionStore,
     };
+    use tidev_session::session::{Conversation, Message, MessageRole, ToolCall, ToolExecutionResult};
 
     use super::AgentRuntime;
 

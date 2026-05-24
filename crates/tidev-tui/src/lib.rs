@@ -77,15 +77,15 @@ use tidev_engine::{
     memory::MemoryStore,
     notifications,
     provider_setup::ConnectDialog,
-    session::{
-        AssistantTurn, BackendEvent, COMPACTION_MESSAGE_LABEL, Conversation, Message,
-        MessageAttachment, MessageRole, ToolCall, ToolExecutionResult,
-    },
     shared::file_search::current_at_fragment,
     snapshot::{FileDiff, SnapshotService},
     storage::SessionStore,
     theme::{ThemeManager, ThemeName},
     tooling::{FileReadTracker, TodoItem, ToolRegistry},
+};
+use tidev_session::session::{
+    AssistantTurn, BackendEvent, COMPACTION_MESSAGE_LABEL, Conversation, Message,
+    MessageAttachment, MessageRole, ToolCall, ToolExecutionResult,
 };
 use tidev_session::utils::TokenUsage;
 

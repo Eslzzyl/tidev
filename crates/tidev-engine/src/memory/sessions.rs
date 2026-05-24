@@ -9,7 +9,7 @@ use crate::llm::LlmClient;
 use crate::memory::types::SessionSummary;
 use crate::memory::xml::{clean_llm_xml_response, get_xml_children_ci, get_xml_tag_ci};
 use tidev_types::prompts::SessionMode;
-use crate::session::{Conversation, Message, MessageRole};
+use tidev_session::session::{Conversation, Message, MessageRole};
 use crate::storage::load_session_messages;
 use crate::tooling::ToolDefinition;
 

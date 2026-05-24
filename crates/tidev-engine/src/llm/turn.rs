@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::session::AssistantTurn;
+use tidev_session::session::AssistantTurn;
 
 use super::think_parser::ThinkParser;
 use super::tool_call_format::{ToolCallBuilder, parse_invoke_xml};

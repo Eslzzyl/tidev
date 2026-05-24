@@ -13,10 +13,8 @@ use uuid::Uuid;
 use tidev_types::TodoItem;
 
 use crate::tooling::{FileReadTracker, SkillCatalog};
-use crate::{
-    session::{ToolCall, ToolExecutionResult},
-    storage::SessionStore,
-};
+use crate::storage::SessionStore;
+use tidev_session::session::{ToolCall, ToolExecutionResult};
 
 use super::ToolDefinition;
 use super::builtin;
@@ -390,8 +388,8 @@ pub fn execute_shell_tool_call(
     sandbox_policy: Option<crate::sandbox::SandboxPolicy>,
     cancelled: Arc<AtomicBool>,
     session_id: Uuid,
-    event_tx: Option<UnboundedSender<crate::session::BackendEvent>>,
-) -> Result<crate::session::ToolExecutionResult> {
+    event_tx: Option<UnboundedSender<tidev_session::session::BackendEvent>>,
+) -> Result<tidev_session::session::ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
     let result = builtin::exec::execute_tool_call_with_cancel(
@@ -405,7 +403,7 @@ pub fn execute_shell_tool_call(
         session_id,
         event_tx,
     )?;
-    Ok(crate::session::ToolExecutionResult::new(result.output)
+    Ok(tidev_session::session::ToolExecutionResult::new(result.output)
         .with_rtk_rewritten(result.rtk_rewritten)
         .with_sandbox(result.sandboxed, result.sandbox_type)
         .with_sandbox_denied(result.sandbox_denied))

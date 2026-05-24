@@ -1,8 +1,5 @@
-use tidev_engine::{
-
-    markdown_render::render_markdown_text_with_width_and_cwd,
-    session::{COMPACTION_MESSAGE_LABEL, Message, MessageRole},
-};
+use tidev_engine::markdown_render::render_markdown_text_with_width_and_cwd;
+use tidev_session::session::{COMPACTION_MESSAGE_LABEL, Message, MessageRole};
 use chrono::Local;
 use ratatui::{
     prelude::{Modifier, Style},

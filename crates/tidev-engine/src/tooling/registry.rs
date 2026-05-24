@@ -12,9 +12,10 @@ use tidev_types::types::PermissionConfig;
 use crate::mcp::McpManager;
 use crate::memory::MemoryStore;
 use crate::sandbox::SandboxPolicy;
-use crate::session::BackendEvent;
+use tidev_session::session::BackendEvent;
 use crate::tooling::SkillCatalog;
-use crate::{session::{ToolCall, ToolExecutionResult}, storage::SessionStore};
+use crate::storage::SessionStore;
+use tidev_session::session::{ToolCall, ToolExecutionResult};
 use super::tools::tool_definitions;
 use super::{FileReadTracker, ToolDefinition, canonical_tool_name};
 
@@ -337,11 +338,11 @@ impl ToolRegistry {
             let had_images = result
                 .attachments
                 .iter()
-                .any(|a| matches!(a, crate::session::MessageAttachment::Image { .. }));
+                .any(|a| matches!(a, tidev_session::session::MessageAttachment::Image { .. }));
             if had_images {
                 result
                     .attachments
-                    .retain(|a| !matches!(a, crate::session::MessageAttachment::Image { .. }));
+                    .retain(|a| !matches!(a, tidev_session::session::MessageAttachment::Image { .. }));
                 result.output.push_str("\n\n(Note: Image reading was attempted, but the current model does not support image input. Images have been removed from the request.)");
             }
         }
@@ -509,11 +510,11 @@ impl ToolRegistry {
             let had_images = result
                 .attachments
                 .iter()
-                .any(|a| matches!(a, crate::session::MessageAttachment::Image { .. }));
+                .any(|a| matches!(a, tidev_session::session::MessageAttachment::Image { .. }));
             if had_images {
                 result
                     .attachments
-                    .retain(|a| !matches!(a, crate::session::MessageAttachment::Image { .. }));
+                    .retain(|a| !matches!(a, tidev_session::session::MessageAttachment::Image { .. }));
                 result.output.push_str("\n\n(Note: Image reading was attempted, but the current model does not support image input. Images have been removed from the request.)");
             }
         }

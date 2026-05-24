@@ -475,7 +475,7 @@ impl App {
             .messages
             .iter()
             .rev()
-            .find(|m| matches!(m.role, tidev_engine::session::MessageRole::User))
+            .find(|m| matches!(m.role, tidev_session::session::MessageRole::User))
             .map(|m| m.id);
 
         if let Some(msg_id) = last_user_id {
@@ -625,7 +625,7 @@ impl App {
     /// Returns `true` if state was restored from a compaction message.
     fn restore_context_from_undo_compaction(&mut self, revert_to_id: Uuid) -> bool {
         if let Some((prior_summary, prior_retained_from)) =
-            tidev_engine::session::find_compaction_prior_state(&self.conversation.messages, revert_to_id)
+            tidev_session::session::find_compaction_prior_state(&self.conversation.messages, revert_to_id)
         {
             log::info!(
                 "restore_context_from_undo_compaction: found compaction msg, \
@@ -647,10 +647,8 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tidev_engine::{
-        config::ConfigPaths,
-        session::{Message, MessageRole},
-    };
+    use tidev_engine::config::ConfigPaths;
+    use tidev_session::session::{Message, MessageRole};
     use std::{fs, path::Path, path::PathBuf, process::Command};
 
     struct CwdGuard(PathBuf);

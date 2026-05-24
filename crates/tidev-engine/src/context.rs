@@ -7,9 +7,9 @@ use tidev_types::prompts::SessionMode;
 use crate::{
     config::ActiveModel,
     llm::LlmClient,
-    session::{Conversation, Message, MessageAttachment, MessageRole, ToolExecutionResult},
     tooling::ToolDefinition,
 };
+use tidev_session::session::{Conversation, Message, MessageAttachment, MessageRole, ToolExecutionResult};
 
 /// Configuration for compaction operations.
 #[derive(Clone)]
@@ -20,7 +20,7 @@ pub struct CompactionConfig<'a> {
     pub manual: bool,
     pub stream_ctx: Option<(
         u64,
-        tokio::sync::mpsc::UnboundedSender<crate::session::BackendEvent>,
+        tokio::sync::mpsc::UnboundedSender<tidev_session::session::BackendEvent>,
     )>,
     pub tools: &'a [ToolDefinition],
     pub mode: SessionMode,
@@ -310,15 +310,15 @@ impl ContextManager {
             let mut text = String::new();
             while let Some(event) = rx.recv().await {
                 match &event {
-                    crate::session::BackendEvent::Delta { content, .. } => {
+                    tidev_session::session::BackendEvent::Delta { content, .. } => {
                         text.push_str(content);
                         let _ = ui_tx.send(event.clone());
                     }
-                    crate::session::BackendEvent::Finished { .. } => {
+                    tidev_session::session::BackendEvent::Finished { .. } => {
                         let _ = ui_tx.send(event.clone());
                         break;
                     }
-                    crate::session::BackendEvent::Failed { error, .. } => {
+                    tidev_session::session::BackendEvent::Failed { error, .. } => {
                         let _ = ui_tx.send(event.clone());
                         return Err(anyhow::anyhow!("compaction failed: {}", error));
                     }
@@ -390,7 +390,7 @@ mod tests {
 
     use super::*;
     use crate::config::{ActiveModel, ApiType};
-    use crate::session::{Message, ToolCall, ToolExecutionResult};
+    use tidev_session::session::{Message, ToolCall, ToolExecutionResult};
 
     fn test_conversation(messages: Vec<Message>) -> Conversation {
         Conversation {

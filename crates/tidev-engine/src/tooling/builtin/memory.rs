@@ -16,7 +16,7 @@ use crate::memory::{MemorySlot, MemoryStore, MemoryType, SlotScope};
 pub fn execute_tool_call(
     workspace_root: &Path,
     memory_store: &Arc<MemoryStore>,
-    _call: &crate::session::ToolCall,
+    _call: &tidev_session::session::ToolCall,
     arguments: Value,
 ) -> Result<String> {
     let ws = workspace_root.display().to_string();

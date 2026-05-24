@@ -7,9 +7,9 @@ use uuid::Uuid;
 
 use crate::{
     config::ActiveModel,
-    session::{BackendEvent, Message, MessageRole, ToolCall},
     tooling::ToolDefinition,
 };
+use tidev_session::session::{BackendEvent, Message, MessageRole, ToolCall};
 
 use log::{debug as log_debug, error as log_error};
 
@@ -282,7 +282,7 @@ pub(super) async fn stream_responses(
                             if let Some(builder) = tool_calls.get(&key_id)
                                 && let Some(arguments) = builder.arguments()
                             {
-                                let call = crate::session::ToolCall {
+                                let call = tidev_session::session::ToolCall {
                                     id: key_id.clone(),
                                     name: builder.name().to_string(),
                                     arguments: arguments.to_string(),
@@ -691,7 +691,7 @@ fn finalize_turn(
     reasoning_text: &str,
     finish_reason: &Option<String>,
     tool_calls: &BTreeMap<String, ToolCallBuilder>,
-) -> crate::session::AssistantTurn {
+) -> tidev_session::session::AssistantTurn {
     let tool_calls = tool_calls
         .values()
         .map(|builder| ToolCall {
@@ -710,7 +710,7 @@ fn finalize_turn(
         }
     });
 
-    crate::session::AssistantTurn {
+    tidev_session::session::AssistantTurn {
         content: assistant_text.to_string(),
         reasoning: reasoning_text.to_string(),
         tool_calls,

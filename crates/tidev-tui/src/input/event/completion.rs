@@ -235,9 +235,9 @@ impl App {
             CommandAction::Compact => {
                 self.active_request_id = self.active_request_id.wrapping_add(1);
                 let request_id = self.active_request_id;
-                let msg = tidev_engine::session::Message::streaming(
-                    tidev_engine::session::MessageRole::System,
-                    format!("{}\n\n", tidev_engine::session::COMPACTION_MESSAGE_LABEL),
+                let msg = tidev_session::session::Message::streaming(
+                    tidev_session::session::MessageRole::System,
+                    format!("{}\n\n", tidev_session::session::COMPACTION_MESSAGE_LABEL),
                 );
                 self.conversation.push(msg);
 

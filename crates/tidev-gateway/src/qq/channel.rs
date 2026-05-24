@@ -11,7 +11,7 @@ use tokio::time::{Duration, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 
 use tidev_engine::config::{ActiveModel, AppConfig, AuthStore, ConfigPaths};
-use tidev_engine::session::{Message, MessageRole};
+use tidev_session::session::{Message, MessageRole};
 use tidev_engine::storage::SessionStore;
 
 use super::client::QQClient;

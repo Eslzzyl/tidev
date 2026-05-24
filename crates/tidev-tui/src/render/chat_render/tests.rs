@@ -1,6 +1,6 @@
 use tidev_engine::config::{AppConfig, AuthStore};
 use tidev_types::prompts::SessionMode;
-use tidev_engine::session::{Conversation, Message, MessageRole};
+use tidev_session::session::{Conversation, Message, MessageRole};
 use tidev_engine::theme::ThemePalette;
 use crate::App;
 use crate::chat_render::RenderContext;
@@ -105,7 +105,7 @@ fn reasoning_lines_preserve_empty_state() {
 
 #[test]
 fn render_tool_result_detail_lines_todowrite_formats_checkbox_list() {
-    use tidev_engine::session::{Message, ToolExecutionResult};
+    use tidev_session::session::{Message, ToolExecutionResult};
     use tidev_engine::tooling::TodoItem;
 
     let todos = vec![
@@ -159,7 +159,7 @@ fn render_tool_result_detail_lines_todowrite_formats_checkbox_list() {
 
 #[test]
 fn streaming_tool_call_switches_to_summary_after_arguments_parse() {
-    use tidev_engine::session::ToolCall;
+    use tidev_session::session::ToolCall;
 
     let tool_call = ToolCall {
         id: "tool-call-id".to_string(),

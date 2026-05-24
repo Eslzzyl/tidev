@@ -14,8 +14,8 @@ use tidev_types::prompts::SessionMode;
 use tidev_engine::{
     config::reasoning::ThinkingLevelType,
     context::ContextManager,
-    session::{BackendEvent, Conversation, Message, MessageRole, ToolCall},
 };
+use tidev_session::session::{BackendEvent, Conversation, Message, MessageRole, ToolCall};
 use crate::{
     error::{AppError, WebResult},
     event_bus::AppEvent,
@@ -967,7 +967,7 @@ pub async fn compact_session(
         let prior_retained_from = context_manager.retained_from;
 
         // Create a channel so compact() streams Delta events back to us.
-        let (event_tx, mut event_rx) = unbounded_channel::<tidev_engine::session::BackendEvent>();
+        let (event_tx, mut event_rx) = unbounded_channel::<tidev_session::session::BackendEvent>();
         let stream_request_id = rand::random::<u64>();
 
         // Spawn the actual compaction in a sub-task.  compact() will run the

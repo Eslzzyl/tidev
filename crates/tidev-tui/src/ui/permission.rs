@@ -6,7 +6,7 @@ use tokio::runtime::Runtime;
 
 use tidev_engine::agent::runtime::ApprovedTool;
 use tidev_types::prompts::SessionMode;
-use tidev_engine::session::{ToolCall, ToolExecutionResult};
+use tidev_session::session::{ToolCall, ToolExecutionResult};
 use tidev_engine::tooling::QuestionArgs;
 
 use super::App;
@@ -642,7 +642,7 @@ impl App {
         } else {
             result.preview_for_storage(Some(tool_call.name.as_str()))
         };
-        let message = tidev_engine::session::Message::tool_result(
+        let message = tidev_session::session::Message::tool_result(
             tool_call.id,
             tool_call.name.clone(),
             display_result,

@@ -22,7 +22,7 @@ use crate::channel::Channel;
 use crate::channel_core::{ChannelCore, MessageSender};
 use crate::commands::parse_command;
 use crate::model_selection::{self, ModelSelectionIO, ModelSelectionState};
-use tidev_engine::session::{Message, MessageRole};
+use tidev_session::session::{Message, MessageRole};
 
 use super::client::{DISCORD_MAX_MESSAGE_LENGTH, DiscordClient};
 use super::types::{

@@ -12,7 +12,7 @@ use crate::memory::remember::RememberService;
 
 use crate::memory::types::*;
 use crate::memory::xml::clean_llm_xml_response;
-use crate::session::{Message, MessageRole};
+use tidev_session::session::{Message, MessageRole};
 
 // ─── LLM Prompts ──────────────────────────────────────────────────────
 

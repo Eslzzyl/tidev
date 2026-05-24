@@ -3,7 +3,7 @@ use std::path::Path;
 
 use tidev_engine::config::ConfigPaths;
 use tidev_types::prompts::SessionMode;
-use tidev_engine::session::Message;
+use tidev_session::session::Message;
 
 /// Compose the instruction prompt from config and instruction files.
 /// Shared by all gateway channels.
@@ -133,7 +133,7 @@ impl ModeManager {
         if let Some(last_user_with_mode) = messages
             .iter()
             .rev()
-            .find(|m| m.role == tidev_engine::session::MessageRole::User && m.mode.is_some())
+            .find(|m| m.role == tidev_session::session::MessageRole::User && m.mode.is_some())
             && let Some(mode) = last_user_with_mode.mode
         {
             self.set(chat_key, mode);

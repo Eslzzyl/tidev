@@ -11,7 +11,6 @@ pub mod memory;
 pub mod notifications;
 pub mod provider_setup;
 pub mod sandbox;
-pub mod session;
 pub mod shared;
 pub mod snapshot;
 pub mod storage;

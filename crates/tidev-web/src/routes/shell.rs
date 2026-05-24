@@ -10,9 +10,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use tidev_engine::{
-    session::{Message, MessageRole},
-};
+use tidev_session::session::{Message, MessageRole};
 use crate::{
     error::{AppError, WebResult},
     event_bus::AppEvent,

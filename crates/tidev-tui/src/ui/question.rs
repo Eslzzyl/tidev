@@ -3,11 +3,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use textwrap::wrap;
 use tokio::runtime::Runtime;
 
-use tidev_engine::{
-
-    session::{ToolCall, ToolExecutionResult},
-    tooling::{QuestionArgs, QuestionInfo},
-};
+use tidev_engine::tooling::{QuestionArgs, QuestionInfo};
+use tidev_session::session::{ToolCall, ToolExecutionResult};
 
 use super::App;
 

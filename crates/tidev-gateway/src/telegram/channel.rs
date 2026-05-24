@@ -12,9 +12,9 @@ use tokio_util::sync::CancellationToken;
 
 use tidev_engine::{
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
-    session::{BackendEvent, Conversation, Message, MessageRole},
     storage::SessionStore,
 };
+use tidev_session::session::{BackendEvent, Conversation, Message, MessageRole};
 
 use crate::channel::Channel;
 use crate::channel::SendMessage;

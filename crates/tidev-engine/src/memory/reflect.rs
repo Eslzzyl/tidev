@@ -10,7 +10,7 @@ use crate::memory::remember::RememberService;
 use crate::memory::remember::map_memory_entry_from_row;
 use crate::memory::types::{MemoryEntry, MemoryType};
 use crate::memory::xml::clean_llm_xml_response;
-use crate::session::{Message, MessageRole};
+use tidev_session::session::{Message, MessageRole};
 
 // ─── Prompts ──────────────────────────────────────────────────────────
 

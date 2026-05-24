@@ -23,7 +23,7 @@ use crate::sandbox::{
     CommandSpec, SandboxManager, SandboxPolicy, pre_exec_hardening,
     remove_dangerous_env_vars_parent,
 };
-use crate::session::{BackendEvent, tool_output_preview};
+use tidev_session::session::{BackendEvent, tool_output_preview};
 use crate::tooling::tools::{BashArgs, decode_tool_args};
 use crate::tooling::{ToolDefinition, ToolPermission};
 use uuid::Uuid;

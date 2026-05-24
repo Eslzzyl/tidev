@@ -5,7 +5,7 @@ use crate::hooks::config::{HooksConfig, PostToolUseHookConfig};
 use crate::hooks::matcher::matches_tool;
 use crate::hooks::runner::run_hook_command;
 use crate::memory::MemoryStore;
-use crate::session::{ToolCall, ToolExecutionResult};
+use tidev_session::session::{ToolCall, ToolExecutionResult};
 
 /// Max chars for pre-tool enrich context, matching agentmemory's MAX_CONTEXT_LENGTH.
 const ENRICH_MAX_CHARS: usize = 4000;

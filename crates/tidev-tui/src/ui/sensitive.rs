@@ -8,7 +8,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use std::path::PathBuf;
 use tokio::runtime::Runtime;
 
-use tidev_engine::session::{ToolCall, ToolExecutionResult};
+use tidev_session::session::{ToolCall, ToolExecutionResult};
 
 use super::App;
 

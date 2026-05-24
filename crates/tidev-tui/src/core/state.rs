@@ -26,13 +26,13 @@ use tidev_types::prompts::SessionMode;
 use crate::ui::skills_panel::SkillsPanelState;
 use crate::ui::workspace_boundary::WorkspaceBoundaryDialogState;
 use tidev_engine::{
-config::ActiveModel,
+    config::ActiveModel,
     config::reasoning::ThinkingLevelType,
     context::ContextManager,
     provider_setup::ConnectDialog,
-    session::{Conversation, MessageAttachment},
     tooling::TodoItem,
 };
+use tidev_session::session::{Conversation, MessageAttachment};
 
 use crate::{
 

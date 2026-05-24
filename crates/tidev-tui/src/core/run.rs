@@ -988,7 +988,7 @@ impl App {
 
         // Restore mode from last user message
         if let Some(last_mode) = runtime.conversation.messages.iter().rev().find_map(|m| {
-            if matches!(m.role, tidev_engine::session::MessageRole::User) {
+            if matches!(m.role, tidev_session::session::MessageRole::User) {
                 m.mode
             } else {
                 None
@@ -1142,7 +1142,7 @@ impl App {
                     if manual
                         && let Some(last_msg) = self.conversation.messages.last_mut()
                         && last_msg.streaming
-                        && last_msg.role == tidev_engine::session::MessageRole::System
+                        && last_msg.role == tidev_session::session::MessageRole::System
                     {
                         // Don't replace message content — Delta events during
                         // streaming have already accumulated the full summary
@@ -1164,7 +1164,7 @@ impl App {
                     }
                     if !updated_existing {
                         let mut compaction_message =
-                            tidev_engine::session::Message::compaction(summary.clone());
+                            tidev_session::session::Message::compaction(summary.clone());
                         compaction_message.metadata.prior_summary = prior_summary;
                         compaction_message.metadata.prior_retained_from = Some(prior_retained_from);
                         self.conversation.push(compaction_message.clone());

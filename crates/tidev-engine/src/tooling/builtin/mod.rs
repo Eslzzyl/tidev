@@ -10,8 +10,9 @@ use tidev_types::prompts::SessionMode;
 
 use crate::config::AuthStore;
 use crate::config::WebSearchConfig;
-use crate::session::BackendEvent;
-use crate::{session::ToolCall, storage::SessionStore};
+use tidev_session::session::BackendEvent;
+use crate::storage::SessionStore;
+use tidev_session::session::ToolCall;
 
 /// Context for executing a tool call — groups all shared configuration
 /// that is independent of the specific tool being invoked.
@@ -72,7 +73,7 @@ pub fn definitions(skill_description: String) -> Vec<ToolDefinition> {
 pub fn execute_tool_call(
     ctx: &ToolContext<'_>,
     call: &ToolCall,
-) -> Result<crate::session::ToolExecutionResult> {
+) -> Result<tidev_session::session::ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
 
@@ -96,7 +97,7 @@ pub fn execute_tool_call(
                 ctx.max_output_bytes,
                 ctx.allow_outside,
             )?;
-            crate::session::ToolExecutionResult::new(output)
+            tidev_session::session::ToolExecutionResult::new(output)
         }
         Some("bash") => {
             let result = exec::execute_tool_call(
@@ -109,7 +110,7 @@ pub fn execute_tool_call(
                 ctx.session_id,
                 None, // event_tx — caller who needs streaming uses the dedicated streaming path
             )?;
-            crate::session::ToolExecutionResult::new(result.output)
+            tidev_session::session::ToolExecutionResult::new(result.output)
                 .with_rtk_rewritten(result.rtk_rewritten)
                 .with_sandbox(result.sandboxed, result.sandbox_type)
                 .with_sandbox_denied(result.sandbox_denied)
@@ -123,7 +124,7 @@ pub fn execute_tool_call(
                 arguments,
                 ctx.mode,
             )?;
-            crate::session::ToolExecutionResult::new(output)
+            tidev_session::session::ToolExecutionResult::new(output)
         }
         Some("todowrite") => {
             let output = todo::execute_tool_call(
@@ -133,12 +134,12 @@ pub fn execute_tool_call(
                 &call.name,
                 arguments,
             )?;
-            crate::session::ToolExecutionResult::new(output)
+            tidev_session::session::ToolExecutionResult::new(output)
         }
         Some("skill") => {
             let args = super::tools::parse_arguments::<SkillArgs>(&call.name, arguments)?;
             let output = ctx.skills.render_skill(&args.name)?;
-            crate::session::ToolExecutionResult::new(output)
+            tidev_session::session::ToolExecutionResult::new(output)
         }
         Some("memory") => {
             let result = crate::tooling::builtin::memory::execute_tool_call(
@@ -147,7 +148,7 @@ pub fn execute_tool_call(
                 call,
                 arguments,
             )?;
-            crate::session::ToolExecutionResult::new(result)
+            tidev_session::session::ToolExecutionResult::new(result)
         }
         Some("websearch") | Some("webfetch") => {
             let output = web::execute_tool_call(
@@ -158,7 +159,7 @@ pub fn execute_tool_call(
                 ctx.web_search_config,
                 ctx.auth_store,
             )?;
-            crate::session::ToolExecutionResult::new(output)
+            tidev_session::session::ToolExecutionResult::new(output)
         }
         None => bail!("unknown tool '{}'", call.name),
         Some(other) => bail!("unsupported tool '{}'", other),
@@ -175,7 +176,7 @@ pub fn execute_tool_call_streaming(
     ctx: &ToolContext<'_>,
     call: &ToolCall,
     cancelled: Option<Arc<AtomicBool>>,
-) -> Result<crate::session::ToolExecutionResult> {
+) -> Result<tidev_session::session::ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
 
@@ -199,7 +200,7 @@ pub fn execute_tool_call_streaming(
                 ctx.max_output_bytes,
                 ctx.allow_outside,
             )?;
-            crate::session::ToolExecutionResult::new(output)
+            tidev_session::session::ToolExecutionResult::new(output)
         }
         Some("bash") => {
             let result = exec::execute_tool_call_with_cancel(
@@ -213,7 +214,7 @@ pub fn execute_tool_call_streaming(
                 ctx.session_id,
                 ctx.event_tx.clone(), // pass the sender through for streaming
             )?;
-            crate::session::ToolExecutionResult::new(result.output)
+            tidev_session::session::ToolExecutionResult::new(result.output)
                 .with_rtk_rewritten(result.rtk_rewritten)
                 .with_sandbox(result.sandboxed, result.sandbox_type)
                 .with_sandbox_denied(result.sandbox_denied)
@@ -227,7 +228,7 @@ pub fn execute_tool_call_streaming(
                 arguments,
                 ctx.mode,
             )?;
-            crate::session::ToolExecutionResult::new(output)
+            tidev_session::session::ToolExecutionResult::new(output)
         }
         Some("todowrite") => {
             let output = todo::execute_tool_call(
@@ -237,12 +238,12 @@ pub fn execute_tool_call_streaming(
                 &call.name,
                 arguments,
             )?;
-            crate::session::ToolExecutionResult::new(output)
+            tidev_session::session::ToolExecutionResult::new(output)
         }
         Some("skill") => {
             let args = super::tools::parse_arguments::<SkillArgs>(&call.name, arguments)?;
             let output = ctx.skills.render_skill(&args.name)?;
-            crate::session::ToolExecutionResult::new(output)
+            tidev_session::session::ToolExecutionResult::new(output)
         }
         Some("memory") => {
             let result = crate::tooling::builtin::memory::execute_tool_call(
@@ -251,7 +252,7 @@ pub fn execute_tool_call_streaming(
                 call,
                 arguments,
             )?;
-            crate::session::ToolExecutionResult::new(result)
+            tidev_session::session::ToolExecutionResult::new(result)
         }
         Some("websearch") | Some("webfetch") => {
             let output = web::execute_tool_call(
@@ -262,7 +263,7 @@ pub fn execute_tool_call_streaming(
                 ctx.web_search_config,
                 ctx.auth_store,
             )?;
-            crate::session::ToolExecutionResult::new(output)
+            tidev_session::session::ToolExecutionResult::new(output)
         }
         None => bail!("unknown tool '{}'", call.name),
         Some(other) => bail!("unsupported tool '{}'", other),
