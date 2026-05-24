@@ -83,36 +83,6 @@ impl MemoryStore {
 
         Ok(store)
     }
-
-    /// Open connections reusing a shared write connection (provided by
-    /// [`Database`](crate::storage::database::Database)).
-    /// Only opens a new read connection; the write connection is shared.
-    pub(crate) fn open_with_shared_write(
-        db_path: impl AsRef<std::path::Path>,
-        connection: Arc<Mutex<Connection>>,
-    ) -> Result<Self> {
-        let path = db_path.as_ref().to_path_buf();
-
-        let read_connection = Connection::open(&path)?;
-        read_connection.pragma_update(None, "journal_mode", "WAL")?;
-        read_connection.pragma_update(None, "mmap_size", "268435456")?;
-        read_connection.pragma_update(None, "cache_size", "-64000")?;
-        read_connection.pragma_update(None, "temp_store", "MEMORY")?;
-        read_connection.busy_timeout(std::time::Duration::from_secs(5))?;
-
-        let store = Self {
-            db_path: path,
-            connection,
-            read_connection: Mutex::new(read_connection),
-            llm: RwLock::new(None),
-            active_model: RwLock::new(None),
-            consolidation_model: RwLock::new(None),
-            model_resolver: RwLock::new(None),
-            tool_filter: RwLock::new(None),
-        };
-
-        Ok(store)
-    }
 }
 
 impl std::fmt::Debug for MemoryStore {

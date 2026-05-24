@@ -10,7 +10,7 @@ use anyhow::Result;
 use uuid::Uuid;
 
 use tidev_session::session::{Message, MessageRole};
-use tidev_engine::storage::SessionStore;
+use tidev_storage::SessionStore;
 
 /// Execute a shell command and return (raw_output, exit_code).
 ///

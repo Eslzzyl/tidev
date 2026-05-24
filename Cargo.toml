@@ -5,6 +5,7 @@ members = [
     "crates/tidev-session",
     "crates/tidev-llm",
     "crates/tidev-engine",
+    "crates/tidev-storage",
     "crates/tidev-tui",
     "crates/tidev-web",
     "crates/tidev-gateway",
@@ -53,6 +54,7 @@ tokio = { version = "=1.52.3", features = [
 uuid = { version = "1.23.1", features = ["v4", "serde"] }
 tidev-types = { path = "crates/tidev-types" }
 tidev-engine = { path = "crates/tidev-engine" }
+tidev-storage = { path = "crates/tidev-storage" }
 tidev-tui = { path = "crates/tidev-tui", optional = true }
 tidev-web = { path = "crates/tidev-web", optional = true }
 tidev-gateway = { path = "crates/tidev-gateway", optional = true }

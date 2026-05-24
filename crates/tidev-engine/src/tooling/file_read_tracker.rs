@@ -4,7 +4,7 @@ use std::sync::RwLock;
 
 use chrono::{DateTime, Local, Utc};
 
-use crate::storage::SessionStore;
+use tidev_storage::SessionStore;
 
 /// Tracks which files have been read by the model in each session.
 /// This enforces the rule that a file must be read before editing.

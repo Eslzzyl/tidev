@@ -24,8 +24,8 @@ use tidev_session::session::{Conversation, Message, MessageRole, ToolCall};
 
 use rayon::prelude::*;
 
-use self::compression::{compress_text, decompress_text};
-use schema::{EXPORT_SCHEMA_SQL, SCHEMA_SQL, SESSION_SELECT_COLUMNS};
+use crate::compression::{compress_text, decompress_text};
+use crate::schema::{EXPORT_SCHEMA_SQL, SCHEMA_SQL, SESSION_SELECT_COLUMNS};
 
 /// Build a struct literal from a SQLite row.
 ///
@@ -186,7 +186,7 @@ impl RawMessageRow {
 
     /// Decompress `content`/`reasoning`, parse JSON fields, build `Message`.
     fn into_message(self) -> Result<Message> {
-        use crate::config::reasoning::ThinkingLevelType;
+        use tidev_types::reasoning::ThinkingLevelType;
         use tidev_types::prompts::SessionMode;
         use tidev_session::session::ToolMetadata;
 

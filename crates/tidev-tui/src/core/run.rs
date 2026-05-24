@@ -1,5 +1,5 @@
 use super::*;
-use tidev_engine::storage::database::Database;
+use tidev_storage::database::Database;
 use crate::panel_launcher::PanelLauncherState;
 use chrono::Utc;
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -41,7 +41,9 @@ impl App {
         );
         let _t3 = std::time::Instant::now();
         let store = db.create_session_store()?;
-        let memory_store = Arc::new(db.create_memory_store()?);
+        let memory_store = Arc::new(tidev_engine::memory::MemoryStore::open(
+            paths.default_database_path(),
+        )?);
         log::info!("startup: stores created in {:?}", _t3.elapsed());
         let _t4 = std::time::Instant::now();
         let llm = LlmClient::new(config.logging.save_request_body, config.logging.max_request_files)?;

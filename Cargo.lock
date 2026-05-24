@@ -3966,6 +3966,7 @@ dependencies = [
  "rusqlite",
  "tidev-engine",
  "tidev-gateway",
+ "tidev-storage",
  "tidev-tui",
  "tidev-types",
  "tidev-web",
@@ -4020,6 +4021,7 @@ dependencies = [
  "textwrap",
  "tidev-llm",
  "tidev-session",
+ "tidev-storage",
  "tidev-types",
  "tokio",
  "tokio-stream",
@@ -4032,7 +4034,6 @@ dependencies = [
  "url",
  "urlencoding",
  "uuid",
- "zstd",
 ]
 
 [[package]]
@@ -4052,6 +4053,7 @@ dependencies = [
  "tidev-engine",
  "tidev-llm",
  "tidev-session",
+ "tidev-storage",
  "tidev-types",
  "tokio",
  "tokio-tungstenite",
@@ -4096,6 +4098,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "tidev-storage"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "log",
+ "rayon",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tidev-session",
+ "tidev-types",
+ "uuid",
+ "zstd",
+]
+
+[[package]]
 name = "tidev-tui"
 version = "0.4.0"
 dependencies = [
@@ -4120,6 +4140,7 @@ dependencies = [
  "tidev-engine",
  "tidev-llm",
  "tidev-session",
+ "tidev-storage",
  "tidev-types",
  "tokio",
  "tokio-util",
@@ -4159,6 +4180,7 @@ dependencies = [
  "tidev-engine",
  "tidev-llm",
  "tidev-session",
+ "tidev-storage",
  "tidev-types",
  "tokio",
  "tokio-stream",

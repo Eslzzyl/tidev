@@ -13,7 +13,6 @@ pub mod provider_setup;
 pub mod sandbox;
 pub mod shared;
 pub mod snapshot;
-pub mod storage;
 pub mod sync;
 pub mod theme;
 pub mod tmp;

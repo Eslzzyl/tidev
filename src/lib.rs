@@ -203,7 +203,7 @@ pub fn run() -> anyhow::Result<()> {
                 );
             }
             let paths = tidev_engine::config::ConfigPaths::discover()?;
-            let store = tidev_engine::storage::SessionStore::open(paths.database_file)?;
+            let store = tidev_storage::SessionStore::open(paths.database_file)?;
 
             let session_ids: Vec<uuid::Uuid> = if all {
                 store
@@ -242,7 +242,7 @@ pub fn run() -> anyhow::Result<()> {
                 anyhow::bail!("Import file not found: {}", input.display());
             }
             let paths = tidev_engine::config::ConfigPaths::discover()?;
-            let store = tidev_engine::storage::SessionStore::open(paths.database_file)?;
+            let store = tidev_storage::SessionStore::open(paths.database_file)?;
             let count = store.import_from_sqlite(&input, &session, replace)?;
             eprintln!("Imported {} session(s) from {}", count, input.display());
             Ok(())
@@ -306,7 +306,7 @@ pub fn run() -> anyhow::Result<()> {
         Some(Command::Db { action }) => match action {
             DbCommand::Migrate => {
                 let paths = tidev_engine::config::ConfigPaths::discover()?;
-                let db = tidev_engine::storage::database::Database::open(&paths.database_file)?;
+                let db = tidev_storage::database::Database::open(&paths.database_file)?;
                 eprintln!("Database migrated successfully.");
                 drop(db);
                 Ok(())
@@ -318,12 +318,12 @@ pub fn run() -> anyhow::Result<()> {
                     println!("Database does not exist yet at: {}", db_path.display());
                     println!(
                         "Latest schema version: {}",
-                        tidev_engine::storage::schema::SCHEMA_VERSION
+                        tidev_storage::schema::SCHEMA_VERSION
                     );
                     return Ok(());
                 }
                 let conn = rusqlite::Connection::open(db_path)?;
-                let status = tidev_engine::storage::migration::status(&conn)?;
+                let status = tidev_storage::migration::status(&conn)?;
                 println!("Current version: {}", status.current_version);
                 println!("Latest version:  {}", status.latest_version);
                 println!("Pending:         {}", status.pending_count);
@@ -386,7 +386,7 @@ pub fn run() -> anyhow::Result<()> {
             } => {
                 let paths = tidev_engine::config::ConfigPaths::discover()?;
                 let config = tidev_engine::config::AppConfig::load_or_create(&paths)?;
-                let store = tidev_engine::storage::SessionStore::open(&paths.database_file)?;
+                let store = tidev_storage::SessionStore::open(&paths.database_file)?;
                 let manager = tidev_engine::sync::SyncManager::new(config.sync.clone(), store);
 
                 let session_ids: Vec<uuid::Uuid> = if all {
@@ -422,7 +422,7 @@ pub fn run() -> anyhow::Result<()> {
             } => {
                 let paths = tidev_engine::config::ConfigPaths::discover()?;
                 let config = tidev_engine::config::AppConfig::load_or_create(&paths)?;
-                let store = tidev_engine::storage::SessionStore::open(&paths.database_file)?;
+                let store = tidev_storage::SessionStore::open(&paths.database_file)?;
                 let manager = tidev_engine::sync::SyncManager::new(config.sync.clone(), store);
 
                 let summary = manager.pull(&session, &remote, replace)?;
@@ -450,7 +450,7 @@ fn auto_cleanup_on_startup() {
     tidev_engine::tmp::auto_cleanup(&config.tmp);
 
     // Clean tool outputs older than 7 days
-    if let Ok(store) = tidev_engine::storage::SessionStore::open(&paths.database_file)
+    if let Ok(store) = tidev_storage::SessionStore::open(&paths.database_file)
         && let Ok(count) = store.delete_expired_tool_outputs(7)
         && count > 0
     {

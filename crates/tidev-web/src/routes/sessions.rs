@@ -29,8 +29,8 @@ pub struct SessionInfo {
     pub updated_at: String,
 }
 
-impl From<tidev_engine::storage::SessionRecord> for SessionInfo {
-    fn from(record: tidev_engine::storage::SessionRecord) -> Self {
+impl From<tidev_storage::SessionRecord> for SessionInfo {
+    fn from(record: tidev_storage::SessionRecord) -> Self {
         Self {
             session_id: record.session_id,
             parent_session_id: record.parent_session_id,

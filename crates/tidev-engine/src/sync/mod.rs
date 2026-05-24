@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::storage::SessionStore;
+use tidev_storage::SessionStore;
 use transport::Transport;
 
 /// Sync-specific errors.

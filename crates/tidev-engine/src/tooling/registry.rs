@@ -14,7 +14,7 @@ use crate::memory::MemoryStore;
 use crate::sandbox::SandboxPolicy;
 use tidev_session::session::BackendEvent;
 use crate::tooling::SkillCatalog;
-use crate::storage::SessionStore;
+use tidev_storage::SessionStore;
 use tidev_session::session::{ToolCall, ToolExecutionResult};
 use super::tools::tool_definitions;
 use super::{FileReadTracker, ToolDefinition, canonical_tool_name};

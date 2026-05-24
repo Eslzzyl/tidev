@@ -10,7 +10,7 @@ use crate::memory::types::SessionSummary;
 use crate::memory::xml::{clean_llm_xml_response, get_xml_children_ci, get_xml_tag_ci};
 use tidev_types::prompts::SessionMode;
 use tidev_session::session::{Conversation, Message, MessageRole};
-use crate::storage::load_session_messages;
+use tidev_storage::load_session_messages;
 use crate::tooling::ToolDefinition;
 
 pub const SUMMARY_INSTRUCTION: &str =

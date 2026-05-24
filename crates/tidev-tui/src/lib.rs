@@ -67,6 +67,7 @@ use crate::ui::permission::{
     RunningToolExecution, SandboxElevationDialog,
 };
 
+use tidev_storage::SessionStore;
 use tidev_engine::{
     agent::runtime::{AgentRuntime, PendingToolApproval},
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
@@ -78,7 +79,6 @@ use tidev_engine::{
     provider_setup::ConnectDialog,
     shared::file_search::current_at_fragment,
     snapshot::{FileDiff, SnapshotService},
-    storage::SessionStore,
     theme::{ThemeManager, ThemeName},
     tooling::{FileReadTracker, TodoItem, ToolRegistry},
 };

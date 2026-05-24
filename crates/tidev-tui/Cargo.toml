@@ -11,6 +11,7 @@ name = "tidev_tui"
 
 [dependencies]
 tidev-engine = { path = "../tidev-engine" }
+tidev-storage = { path = "../tidev-storage" }
 tidev-llm = { path = "../tidev-llm" }
 tidev-types = { path = "../tidev-types" }
 tidev-session = { path = "../tidev-session" }

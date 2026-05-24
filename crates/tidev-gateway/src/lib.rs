@@ -19,11 +19,10 @@ use tokio::runtime::Runtime;
 
 use anyhow::{Context, Result, bail};
 
+use tidev_storage::database::Database;
 use tidev_engine::{
-
     config::{AppConfig, AuthStore, ConfigPaths},
     mcp::McpManager,
-    storage::database::Database,
     tooling::{FileReadTracker, ToolRegistry},
 };
 use tidev_llm::LlmClient;
@@ -34,7 +33,7 @@ use shared::compose_instruction_prompt;
 /// Per-channel resources that need to be created independently
 /// for each channel (each channel gets its own store, tools, etc.).
 struct ChannelResources {
-    store: tidev_engine::storage::SessionStore,
+    store: tidev_storage::SessionStore,
     llm: LlmClient,
     tools: ToolRegistry,
 }
@@ -49,7 +48,9 @@ impl ChannelResources {
         auth: &AuthStore,
     ) -> Result<Self> {
         let store = db.create_session_store()?;
-        let memory_store = Arc::new(db.create_memory_store()?);
+        let memory_store = Arc::new(tidev_engine::memory::MemoryStore::open(
+            db.path(),
+        )?);
         let llm = LlmClient::new(config.logging.save_request_body, config.logging.max_request_files)?;
         memory_store.set_models(llm.clone(), default_model.clone(), None);
         tidev_engine::memory::start_background_tasks(

@@ -16,7 +16,7 @@ use tokio::time::{Duration, Instant, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 
 use tidev_engine::config::{ActiveModel, AppConfig, AuthStore, ConfigPaths};
-use tidev_engine::storage::SessionStore;
+use tidev_storage::SessionStore;
 
 use crate::channel::Channel;
 use crate::channel_core::{ChannelCore, MessageSender};

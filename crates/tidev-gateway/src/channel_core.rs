@@ -16,11 +16,11 @@ use uuid::Uuid;
 
 use tidev_types::prompts::{SessionMode, gateway_system_prompt};
 
-use tidev_engine::{
+use tidev_storage::SessionStore;
 
+use tidev_engine::{
     agent::runtime::AgentRuntime,
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
-    storage::SessionStore,
     tooling::ToolRegistry,
 };
 use tidev_llm::LlmClient;
@@ -726,7 +726,7 @@ impl ChannelCore {
         let token_stats = self
             .store
             .get_session_token_stats(conversation.session_id)
-            .unwrap_or(tidev_engine::storage::SessionTokenStats {
+            .unwrap_or(tidev_storage::SessionTokenStats {
                 input_tokens: 0,
                 output_tokens: 0,
             });

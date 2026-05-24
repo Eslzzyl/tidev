@@ -8,26 +8,23 @@ use std::{
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 
-use crate::memory::MemoryStore;
-
-use super::migration;
-use super::{SessionStore, schema::SCHEMA_SQL};
+use crate::migration;
+use crate::{SessionStore, schema::SCHEMA_SQL};
 
 /// Unified database manager.
 ///
-/// Opens the SQLite file, runs the full schema (including memory system tables),
-/// creates a **shared write connection**, and provides factory methods for
-/// [`SessionStore`] and [`MemoryStore`].
+/// Opens the SQLite file, runs the full schema, creates a **shared write
+/// connection**, and provides a factory method for [`SessionStore`].
 ///
 /// # Shared write connection
 ///
-/// Both stores receive the same `Arc<Mutex<Connection>>` for writes.  This
-/// guarantees that only one thread writes at a time — which is all SQLite
-/// allows anyway.  Each store still gets its own read connection so that
-/// reads never block writes and vice versa.
+/// The shared `Arc<Mutex<Connection>>` is provided to all stores created from
+/// this manager, guaranteeing that only one thread writes at a time — which is
+/// all SQLite allows anyway.  Each store still gets its own read connection so
+/// that reads never block writes.
 pub struct Database {
     path: PathBuf,
-    /// Shared write connection used by both SessionStore and MemoryStore.
+    /// Shared write connection used by created stores.
     write_conn: Arc<Mutex<Connection>>,
 }
 
@@ -77,7 +74,7 @@ impl Database {
                 rusqlite::functions::FunctionFlags::SQLITE_UTF8,
                 |ctx| {
                     let blob = ctx.get::<Vec<u8>>(0)?;
-                    let text = crate::storage::compression::decompress_text(&blob);
+                    let text = crate::compression::decompress_text(&blob);
                     Ok(text)
                 },
             )
@@ -102,11 +99,6 @@ impl Database {
     /// Create a [`SessionStore`] that shares the write connection.
     pub fn create_session_store(&self) -> Result<SessionStore> {
         SessionStore::open_with_shared_write(&self.path, Arc::clone(&self.write_conn))
-    }
-
-    /// Create a [`MemoryStore`] that shares the write connection.
-    pub fn create_memory_store(&self) -> Result<MemoryStore> {
-        MemoryStore::open_with_shared_write(&self.path, Arc::clone(&self.write_conn))
     }
 
     /// Return the path to the database file.

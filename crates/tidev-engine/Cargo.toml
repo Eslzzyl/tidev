@@ -67,7 +67,6 @@ rmcp = { version = "1.7.0", features = [
 ] }
 diffy = "0.5.0"
 blake3 = "1.8.5"
-zstd = { version = "0.13", default-features = false }
 lru = "0.18.0"
 rayon = "1.12.0"
 mime_guess = "2.0.5"
@@ -98,6 +97,7 @@ log = "0.4.29"
 tidev-types = { path = "../tidev-types" }
 tidev-session = { path = "../tidev-session" }
 tidev-llm = { path = "../tidev-llm" }
+tidev-storage = { path = "../tidev-storage" }
 
 [dev-dependencies]
 tempfile = "3.27"

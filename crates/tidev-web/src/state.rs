@@ -5,13 +5,12 @@ use tokio::sync::{Mutex, RwLock, broadcast};
 use tokio_util::sync::CancellationToken;
 
 use tidev_engine::{
-
     agent::runtime::AgentRuntime,
     config::{AppConfig, AuthStore},
     shared::file_search::FileSearchIndex,
     snapshot::SnapshotService,
-    storage::SessionStore,
 };
+use tidev_storage::SessionStore;
 use tidev_llm::LlmClient;
 
 use crate::terminal::{TerminalManager, TerminalOutput};

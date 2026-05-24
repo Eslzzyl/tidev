@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use uuid::Uuid;
 
 use tidev_engine::config::ConfigPaths;
-use tidev_engine::storage::SessionRecord;
+use tidev_storage::SessionRecord;
 use tidev_engine::sync::{RemoteMachine, SyncManager};
 
 use super::App;

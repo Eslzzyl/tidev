@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::agent::AgentType;
 use tidev_types::prompts::SessionMode;
-use crate::storage::SessionStore;
+use tidev_storage::SessionStore;
 use crate::tooling::tools::{TaskArgs, decode_tool_args};
 use crate::tooling::{ToolDefinition, ToolPermission};
 

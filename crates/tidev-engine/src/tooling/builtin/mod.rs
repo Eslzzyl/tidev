@@ -11,7 +11,7 @@ use tidev_types::prompts::SessionMode;
 use crate::config::AuthStore;
 use crate::config::WebSearchConfig;
 use tidev_session::session::BackendEvent;
-use crate::storage::SessionStore;
+use tidev_storage::SessionStore;
 use tidev_session::session::ToolCall;
 
 /// Context for executing a tool call — groups all shared configuration

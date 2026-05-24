@@ -13,12 +13,11 @@ use std::sync::Arc;
 use anyhow::Context;
 use tokio::sync::Mutex;
 
+use tidev_storage::database::Database;
 use tidev_engine::{
-
     agent::runtime::AgentRuntime,
     config::{AppConfig, AuthStore, ConfigPaths},
     mcp::McpManager,
-    storage::database::Database,
     tooling::{FileReadTracker, ToolRegistry},
 };
 use tidev_llm::LlmClient;
@@ -98,7 +97,7 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     log::info!("Auth store loaded");
 
     // Create shared agent runtime (ToolRegistry, MemoryStore, etc.)
-    let memory_store = Arc::new(db.create_memory_store()?);
+    let memory_store = Arc::new(tidev_engine::memory::MemoryStore::open(&paths.database_file)?);
     // Configure memory store with LLM
     if let Ok(default_model) = config.resolve_active_model(&auth) {
         memory_store.set_models(llm_client.clone(), default_model, None);

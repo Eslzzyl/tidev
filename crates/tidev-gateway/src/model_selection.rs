@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use std::hash::Hash;
 
 use tidev_engine::config::{ActiveModel, AppConfig, AuthStore, ConfigPaths};
-use tidev_engine::storage::SessionStore;
+use tidev_storage::SessionStore;
 
 use super::shared::{
     ModelSelectionTarget, all_target_entries, parse_target, target_display_name,

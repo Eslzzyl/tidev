@@ -13,7 +13,7 @@ use uuid::Uuid;
 use tidev_types::TodoItem;
 
 use crate::tooling::{FileReadTracker, SkillCatalog};
-use crate::storage::SessionStore;
+use tidev_storage::SessionStore;
 use tidev_session::session::{ToolCall, ToolExecutionResult};
 
 use super::ToolDefinition;

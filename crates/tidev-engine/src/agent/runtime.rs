@@ -36,9 +36,9 @@ use crate::{
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths, reasoning::ThinkingLevelType},
     context::ContextManager,
     instructions,
-    storage::SessionStore,
     tooling::{ToolDefinition, ToolRegistry, canonical_tool_name},
 };
+use tidev_storage::SessionStore;
 use tidev_llm::LlmClient;
 use tidev_session::session::{
     AssistantTurn, BackendEvent, Message, MessageAttachment, MessageRole, ToolCall,
@@ -2307,11 +2307,11 @@ mod tests {
     use tidev_types::prompts::SessionMode;
 
     use tidev_llm::LlmClient;
+    use tidev_storage::SessionStore;
 
     use crate::{
         config::ConfigPaths,
         context::ContextManager,
-        storage::SessionStore,
     };
     use tidev_session::session::{Conversation, Message, MessageRole, ToolCall, ToolExecutionResult};
 

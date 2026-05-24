@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use crate::memory::remember::RememberService;
 use crate::memory::types::MemoryType;
-use crate::storage::compression::decompress_text;
+use tidev_storage::compression::decompress_text;
 
 // ─── Pattern Types ────────────────────────────────────────────────────
 
