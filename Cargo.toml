@@ -7,7 +7,7 @@ members = [
     "tidev-web",
     "tidev-gateway",
 ]
-default-members = ["."]
+default-members = [".", "tidev-types", "tidev-engine", "tidev-tui", "tidev-web", "tidev-gateway"]
 resolver = "2"
 
 [workspace.package]
@@ -51,9 +51,15 @@ tokio = { version = "=1.52.3", features = [
 uuid = { version = "1.23.1", features = ["v4", "serde"] }
 tidev-types = { path = "tidev-types" }
 tidev-engine = { path = "tidev-engine" }
-tidev-tui = { path = "tidev-tui" }
-tidev-web = { path = "tidev-web" }
-tidev-gateway = { path = "tidev-gateway" }
+tidev-tui = { path = "tidev-tui", optional = true }
+tidev-web = { path = "tidev-web", optional = true }
+tidev-gateway = { path = "tidev-gateway", optional = true }
+
+[features]
+default = ["tui", "web", "gateway"]
+tui = ["tidev-tui"]
+web = ["tidev-web"]
+gateway = ["tidev-gateway"]
 
 [profile.dev]
 incremental = true

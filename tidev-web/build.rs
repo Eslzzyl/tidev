@@ -4,11 +4,11 @@ use std::time::SystemTime;
 
 fn main() {
     // Instruct Cargo to re-run the build script only when these paths change
-    println!("cargo:rerun-if-changed=web/src");
-    println!("cargo:rerun-if-changed=web/package.json");
-    println!("cargo:rerun-if-changed=web/pnpm-lock.yaml");
-    println!("cargo:rerun-if-changed=web/vite.config.ts");
-    println!("cargo:rerun-if-changed=web/index.html");
+    println!("cargo:rerun-if-changed=../web/src");
+    println!("cargo:rerun-if-changed=../web/package.json");
+    println!("cargo:rerun-if-changed=../web/pnpm-lock.yaml");
+    println!("cargo:rerun-if-changed=../web/vite.config.ts");
+    println!("cargo:rerun-if-changed=../web/index.html");
 
     if needs_build() {
         // Attempt to build web frontend (pnpm must be available)

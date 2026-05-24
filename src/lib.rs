@@ -12,10 +12,13 @@ struct Cli {
 #[derive(clap::Subcommand, Debug)]
 enum Command {
     /// Start gateway server (all enabled platforms: Telegram, QQ, etc.)
+    #[cfg(feature = "gateway")]
     Gateway,
     /// Start TUI (default when no subcommand is given)
+    #[cfg(feature = "tui")]
     Tui,
     /// Start web server
+    #[cfg(feature = "web")]
     Web {
         /// Host to bind to
         #[arg(short = 'H', long)]
@@ -148,18 +151,31 @@ enum SyncCommand {
 pub fn run() -> anyhow::Result<()> {
     match Cli::parse().command {
         None => {
-            // Auto-cleanup on startup (before TUI starts)
+            // Auto-cleanup on startup
             auto_cleanup_on_startup();
-            tidev_tui::run()
+            #[cfg(feature = "tui")]
+            return tidev_tui::run();
+            #[cfg(not(feature = "tui"))]
+            {
+                // No default frontend enabled, show help
+                use clap::CommandFactory;
+                let mut cmd = Cli::command();
+                cmd.print_help()?;
+                println!();
+                Ok(())
+            }
         }
+        #[cfg(feature = "gateway")]
         Some(Command::Gateway) => {
             auto_cleanup_on_startup();
             tidev_gateway::run()
         }
+        #[cfg(feature = "tui")]
         Some(Command::Tui) => {
             auto_cleanup_on_startup();
             tidev_tui::run()
         }
+        #[cfg(feature = "web")]
         Some(Command::Web {
             host,
             port,
@@ -452,6 +468,7 @@ mod tests {
         assert!(cli.command.is_none());
     }
 
+    #[cfg(feature = "gateway")]
     #[test]
     fn parses_gateway_command() {
         let cli = Cli::parse_from(["tidev", "gateway"]);
