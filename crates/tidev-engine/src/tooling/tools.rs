@@ -10,6 +10,8 @@ use std::{
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
+use tidev_types::TodoItem;
+
 use crate::tooling::{FileReadTracker, SkillCatalog};
 use crate::{
     session::{ToolCall, ToolExecutionResult},
@@ -276,15 +278,35 @@ tool_args! {
 }
 
 tool_args! {
-    pub struct TodoItem {
-        content: string("Brief description of the task"),
-        status: string("Current status of the task: pending, in_progress, completed"),
+    pub struct TodoWriteArgs {
+        todos: array(TodoItem, "The updated todo list"),
     }
 }
 
-tool_args! {
-    pub struct TodoWriteArgs {
-        todos: array(TodoItem, "The updated todo list"),
+// TodoItem is defined in tidev-types; we implement ToolArgs here
+// since the trait is crate-local to tidev-engine.
+impl ToolArgs for tidev_types::TodoItem {
+    fn schema() -> Value {
+        let mut properties = serde_json::Map::new();
+        properties.insert(
+            "content".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "Brief description of the task",
+            }),
+        );
+        properties.insert(
+            "status".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "description": "Current status of the task: pending, in_progress, completed",
+            }),
+        );
+        let mut schema = serde_json::Map::new();
+        schema.insert("type".to_string(), Value::String("object".to_string()));
+        schema.insert("properties".to_string(), Value::Object(properties));
+        schema.insert("additionalProperties".to_string(), Value::Bool(false));
+        Value::Object(schema)
     }
 }
 

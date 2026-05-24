@@ -18,10 +18,10 @@ use std::{
 };
 use uuid::Uuid;
 use tidev_session::stats::{Granularity, ModelUsageEntry, StatsEntry, TimeRangeStats, UsageSummary};
+use tidev_types::TodoItem;
 
 use crate::{
     session::{Conversation, Message, MessageRole, ToolCall},
-    tooling::TodoItem,
 };
 
 use rayon::prelude::*;

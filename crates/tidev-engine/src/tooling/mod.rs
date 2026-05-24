@@ -11,7 +11,7 @@ pub use file_read_tracker::FileReadStamp;
 pub use file_read_tracker::FileReadTracker;
 pub use registry::ToolRegistry;
 pub use skills::SkillCatalog;
-pub use tools::TodoItem;
+pub use tidev_types::TodoItem;
 pub use tools::ToolArgs;
 pub use tools::{QuestionArgs, QuestionInfo, SkillArgs, TaskArgs};
 

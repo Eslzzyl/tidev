@@ -3,8 +3,9 @@ use serde_json::Value;
 use std::path::Path;
 
 use crate::storage::SessionStore;
-use crate::tooling::tools::{TodoItem, TodoWriteArgs, decode_tool_args};
+use crate::tooling::tools::{TodoWriteArgs, decode_tool_args};
 use crate::tooling::{ToolDefinition, ToolPermission};
+use tidev_types::TodoItem;
 
 pub fn definitions() -> Vec<ToolDefinition> {
     vec![ToolDefinition::new::<TodoWriteArgs>(

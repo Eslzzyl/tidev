@@ -100,3 +100,12 @@ impl Default for PermissionConfig {
         }
     }
 }
+
+// ── TodoItem (moved from tooling to break tooling↔storage cycle) ─────
+
+/// A task/todo item within a session.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct TodoItem {
+    pub content: String,
+    pub status: String,
+}
