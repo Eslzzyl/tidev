@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use crate::prompts::{SessionMode, default_system_prompt, gateway_system_prompt};
+use crate::prompts::{SessionMode, gateway_system_prompt, general_system_prompt};
 use crate::sync::SyncConfig;
 use crate::theme::ThemeName;
 use crate::tooling::ToolPermission;
@@ -1156,7 +1156,7 @@ default_provider = "exa"
                 .system_prompt
                 .clone()
                 .filter(|prompt| !prompt.trim().is_empty())
-                .unwrap_or_else(default_system_prompt),
+                .unwrap_or_else(general_system_prompt),
             api_key,
             extra_body: model.extra_body.clone(),
             thinking_level,
