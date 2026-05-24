@@ -1,13 +1,13 @@
 [workspace]
 members = [
     ".",
-    "tidev-types",
-    "tidev-engine",
-    "tidev-tui",
-    "tidev-web",
-    "tidev-gateway",
+    "crates/tidev-types",
+    "crates/tidev-engine",
+    "crates/tidev-tui",
+    "crates/tidev-web",
+    "crates/tidev-gateway",
 ]
-default-members = [".", "tidev-types", "tidev-engine", "tidev-tui", "tidev-web", "tidev-gateway"]
+default-members = [".", "crates/tidev-types", "crates/tidev-engine", "crates/tidev-tui", "crates/tidev-web", "crates/tidev-gateway"]
 resolver = "2"
 
 [workspace.package]
@@ -49,11 +49,11 @@ tokio = { version = "=1.52.3", features = [
     "signal",
 ] }
 uuid = { version = "1.23.1", features = ["v4", "serde"] }
-tidev-types = { path = "tidev-types" }
-tidev-engine = { path = "tidev-engine" }
-tidev-tui = { path = "tidev-tui", optional = true }
-tidev-web = { path = "tidev-web", optional = true }
-tidev-gateway = { path = "tidev-gateway", optional = true }
+tidev-types = { path = "crates/tidev-types" }
+tidev-engine = { path = "crates/tidev-engine" }
+tidev-tui = { path = "crates/tidev-tui", optional = true }
+tidev-web = { path = "crates/tidev-web", optional = true }
+tidev-gateway = { path = "crates/tidev-gateway", optional = true }
 
 [features]
 default = ["tui", "web", "gateway"]
