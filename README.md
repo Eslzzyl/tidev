@@ -111,6 +111,18 @@ I'd like to pronounce it as "tide-v", but "ti-dev" should also be fine.
 
 ---
 
+## Version Management
+
+```bash
+# Bump to a new version (updates Cargo.toml, Cargo.lock, and npm/package.json)
+./scripts/bump-version.sh 0.6.0
+
+# Push the tag to trigger CI release
+git push origin master --tags
+```
+
+---
+
 ## Configuration
 
 - Config file: `~/.config/tidev/config.toml`
