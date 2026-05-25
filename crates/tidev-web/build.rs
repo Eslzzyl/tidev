@@ -80,7 +80,7 @@ fn build_web() -> Result<(), String> {
 
     if !Path::new("../../web/node_modules").exists() {
         let status = Command::new("pnpm")
-            .args(["--dir", "web", "install", "--frozen-lockfile"])
+            .args(["--dir", "../../web", "install", "--frozen-lockfile"])
             .status()
             .map_err(|e| format!("Failed to run pnpm install: {}", e))?;
 
@@ -93,7 +93,7 @@ fn build_web() -> Result<(), String> {
     }
 
     let output = Command::new("pnpm")
-        .args(["--dir", "web", "build"])
+        .args(["--dir", "../../web", "build"])
         .output()
         .map_err(|e| format!("Failed to run pnpm build: {}", e))?;
 
