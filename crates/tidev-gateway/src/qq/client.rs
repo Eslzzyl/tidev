@@ -28,7 +28,11 @@ pub struct QQClient {
 impl QQClient {
     pub fn new(app_id: String, app_secret: String, sandbox: bool) -> Self {
         Self {
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(Duration::from_secs(30))
+                .connect_timeout(Duration::from_secs(10))
+                .build()
+                .expect("QQClient: failed to build reqwest Client"),
             app_id,
             app_secret,
             sandbox,

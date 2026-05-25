@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::time::Instant;
+use tokio::sync::mpsc;
 use tokio::time::{Duration, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 
@@ -31,7 +31,6 @@ const OP_IDENTIFY: u8 = 2;
 const OP_RESUME: u8 = 6;
 const OP_RECONNECT: u8 = 7;
 const OP_INVALID_SESSION: u8 = 9;
-#[allow(dead_code)]
 const OP_HELLO: u8 = 10;
 const OP_HEARTBEAT_ACK: u8 = 11;
 
@@ -137,15 +136,13 @@ impl QQChannel {
 
         log::info!("QQ Gateway connected to {}", gateway_url);
 
-        let mut heartbeat_interval = 45000;
-        let mut _last_heartbeat_ack = Instant::now();
-
-        // Handle Hello
+        // ── Handle Hello ──────────────────────────────────────────────
+        let mut heartbeat_interval = 45000u64;
         if let Some(msg) = read.next().await {
             let msg = msg?;
             if let WsMessage::Text(text) = msg {
                 let payload: WsPayload = serde_json::from_str(&text)?;
-                if payload.op == 10 {
+                if payload.op == OP_HELLO {
                     let hello: HelloData = serde_json::from_value(payload.d.unwrap())?;
                     heartbeat_interval = hello.heartbeat_interval;
                     log::info!("QQ Hello received, heartbeat: {}ms", heartbeat_interval);
@@ -153,7 +150,7 @@ impl QQChannel {
             }
         }
 
-        // Identify or Resume
+        // ── Identify or Resume ────────────────────────────────────────
         let token = self.client.get_access_token().await?;
         let identify = if let (Some(sid), Some(seq)) = (&self.session_id, self.last_seq) {
             serde_json::json!({
@@ -173,14 +170,56 @@ impl QQChannel {
             .send(WsMessage::Text(identify.to_string().into()))
             .await?;
 
-        let mut heartbeat_timer = tokio::time::interval(Duration::from_millis(heartbeat_interval));
+        // ── Heartbeat: independent timer task ─────────────────────────
+        // Add a small grace period (10 % of interval, capped at 5 s) so
+        // that slightly-delayed ACKs do not immediately count as missed.
+        let grace_ms = (heartbeat_interval / 10).min(5000);
+        let effective_interval = heartbeat_interval + grace_ms;
+        let (hb_tx, mut hb_rx) = mpsc::channel::<()>(1);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_millis(effective_interval));
+            // The first tick is immediate; skip it so we don't send a
+            // heartbeat right after Identify.
+            interval.tick().await;
+            loop {
+                interval.tick().await;
+                if hb_tx.send(()).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        const MAX_MISSED_ACKS: u32 = 3;
+        let mut missed_ack_count: u32 = 0;
 
         loop {
             tokio::select! {
-                _ = heartbeat_timer.tick() => {
+                // Heartbeat timer tick from the independent task
+                _ = hb_rx.recv() => {
+                    if missed_ack_count > 0 {
+                        if missed_ack_count >= MAX_MISSED_ACKS {
+                            log::error!(
+                                "QQ heartbeat timeout after {} consecutive missed ACKs; \
+                                 reconnecting with resume",
+                                missed_ack_count,
+                            );
+                            break;
+                        }
+                        log::warn!(
+                            "QQ heartbeat ACK missed ({}/{}); tolerating transient delay",
+                            missed_ack_count,
+                            MAX_MISSED_ACKS,
+                        );
+                    }
                     let hb = serde_json::json!({ "op": 1, "d": self.last_seq });
-                    write.send(WsMessage::Text(hb.to_string().into())).await?;
+                    if write.send(WsMessage::Text(hb.to_string().into())).await.is_err() {
+                        log::error!("QQ heartbeat write failed; reconnecting");
+                        break;
+                    }
+                    missed_ack_count += 1;
                 }
+
+                // WebSocket incoming message
                 msg = read.next() => {
                     match msg {
                         Some(Ok(WsMessage::Text(text))) => {
@@ -192,6 +231,7 @@ impl QQChannel {
                                         match t {
                                             "READY" => {
                                                 let ready: ReadyData = serde_json::from_value(payload.d.unwrap())?;
+                                                log::info!("QQ Ready: session_id={}", ready.session_id);
                                                 self.session_id = Some(ready.session_id);
                                             }
                                             "AT_MESSAGE_CREATE" | "MESSAGE_CREATE" | "C2C_MESSAGE_CREATE" => {
@@ -221,16 +261,35 @@ impl QQChannel {
                                     self.last_seq = None;
                                     break;
                                 }
-                                OP_HEARTBEAT_ACK => { _last_heartbeat_ack = Instant::now(); }
+                                OP_HEARTBEAT_ACK => {
+                                    // Reset missed-ACK counter — the connection is alive
+                                    missed_ack_count = 0;
+                                }
                                 op => { log::warn!("QQ unknown opcode: {op}"); }
                             }
                         }
-                        Some(Ok(WsMessage::Close(_))) => {
-                            log::info!("QQ WebSocket closed, reconnecting...");
+                        Some(Ok(WsMessage::Close(frame))) => {
+                            let (code, reason) = frame
+                                .as_ref()
+                                .map(|f| (f.code.to_string(), f.reason.to_string()))
+                                .unwrap_or_else(|| ("unknown".into(), "none".into()));
+                            log::info!(
+                                "QQ WebSocket closed (code={code}, reason=\"{reason}\"); \
+                                 reconnecting with resume"
+                            );
                             break;
                         }
+                        Some(Ok(WsMessage::Ping(payload))) => {
+                            // QQ gateway may send Pings; respond promptly
+                            if write.send(WsMessage::Pong(payload)).await.is_err() {
+                                break;
+                            }
+                        }
                         Some(Err(e)) => anyhow::bail!("QQ WS error: {e}"),
-                        None => break,
+                        None => {
+                            log::warn!("QQ WebSocket stream ended; reconnecting");
+                            break;
+                        }
                         _ => {}
                     }
                 }
