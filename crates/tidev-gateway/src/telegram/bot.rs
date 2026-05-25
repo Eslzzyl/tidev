@@ -1,6 +1,7 @@
 //! Telegram bot API client.
 
 use std::fmt::Write;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use reqwest::Client;
@@ -16,11 +17,21 @@ pub struct TelegramBot {
 
 impl TelegramBot {
     /// Create a new bot client with the given token.
-    pub fn new(token: String) -> Self {
-        Self {
-            token,
-            http: Client::new(),
-        }
+    ///
+    /// `request_timeout_secs` is the maximum time allowed for a single HTTP
+    /// request (including the long-poll wait).  A reasonable value is the
+    /// `getUpdates` poll timeout plus a small buffer (e.g. `poll_timeout + 10`).
+    pub fn new(token: String, request_timeout_secs: u64) -> Self {
+        let http = Client::builder()
+            .timeout(Duration::from_secs(request_timeout_secs))
+            .connect_timeout(Duration::from_secs(10))
+            .tcp_keepalive(Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|e| {
+                log::warn!("Failed to build Telegram HTTP client with custom timeouts: {e}. Falling back to default client.");
+                Client::new()
+            });
+        Self { token, http }
     }
 
     /// Build API URL for an endpoint.
@@ -163,6 +174,40 @@ impl TelegramBot {
             .replace('>', "&gt;")
             .replace('"', "&quot;")
             .replace('\'', "&#39;")
+    }
+
+    /// Probe getUpdates with `timeout=0` to claim the polling slot at startup.
+    ///
+    /// Returns the highest `update_id + 1` to use as the initial offset, or
+    /// `offset` unchanged if no updates are pending.
+    pub async fn probe_updates(&self, offset: i64) -> Result<i64> {
+        let body = serde_json::json!({
+            "offset": offset,
+            "timeout": 0,
+            "allowed_updates": ["message"],
+        });
+
+        let response = self
+            .http
+            .post(self.api_url("getUpdates"))
+            .json(&body)
+            .send()
+            .await
+            .context("failed to call Telegram getUpdates probe")?;
+
+        let payload: TelegramApiResponse<Vec<TelegramUpdate>> = response
+            .json()
+            .await
+            .context("failed to parse Telegram getUpdates probe response")?;
+
+        let updates = payload.into_result("getUpdates probe")?;
+        let new_offset = updates
+            .iter()
+            .map(|u| u.update_id)
+            .max()
+            .map(|id| id.saturating_add(1))
+            .unwrap_or(offset);
+        Ok(new_offset)
     }
 
     /// Fetch updates from Telegram.

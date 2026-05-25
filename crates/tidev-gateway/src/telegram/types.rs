@@ -22,7 +22,7 @@ impl<T> TelegramApiResponse<T> {
             let msg = self
                 .description
                 .unwrap_or_else(|| "unknown error".to_string());
-            anyhow::bail!("telegram API {} failed: {}", operation, msg)
+            anyhow::bail!("telegram API {} failed: code={:?}, description={}", operation, self.error_code, msg)
         }
     }
 }

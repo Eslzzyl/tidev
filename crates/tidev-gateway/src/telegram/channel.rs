@@ -74,7 +74,7 @@ impl TelegramChannel {
         );
         Self {
             core,
-            bot: TelegramBot::new(bot_token),
+            bot: TelegramBot::new(bot_token, poll_timeout_secs + 10),
             poll_timeout_secs,
             offset: 0,
             request_seq: 0,
@@ -95,6 +95,36 @@ impl TelegramChannel {
         Ok(())
     }
 
+    /// Claim the getUpdates polling slot before entering the long-poll loop.
+    ///
+    /// Uses `timeout=0` so the request returns immediately, and retries on
+    /// failure (including 409 Conflict from a previous daemon's still-active
+    /// poll).  This prevents the main loop from entering a self-sustaining 409
+    /// cycle where each rejected request is immediately retried.
+    async fn claim_polling_slot(&mut self) -> Result<()> {
+        log::info!("Telegram claiming polling slot...");
+        loop {
+            match self.bot.probe_updates(self.offset).await {
+                Ok(new_offset) => {
+                    self.offset = new_offset;
+                    log::info!("Telegram polling slot claimed, offset={}", self.offset);
+                    return Ok(());
+                }
+                Err(error) => {
+                    let err_str = error.to_string();
+                    if err_str.contains("code=409") {
+                        log::warn!(
+                            "Telegram polling slot busy (409), retrying in 5s..."
+                        );
+                    } else {
+                        log::error!("Telegram polling slot probe failed: {error}. Retrying in 5s...");
+                    }
+                    sleep(Duration::from_secs(5)).await;
+                }
+            }
+        }
+    }
+
     async fn register_commands(&self) -> Result<()> {
         let commands: Vec<(String, String)> = GATEWAY_COMMANDS
             .iter()
@@ -113,8 +143,17 @@ impl TelegramChannel {
             {
                 Ok(updates) => updates,
                 Err(error) => {
-                    log::error!("Telegram getUpdates failed: {error}");
-                    sleep(Duration::from_secs(2)).await;
+                    let err_str = error.to_string();
+                    if err_str.contains("code=409") {
+                        log::warn!(
+                            "Telegram polling conflict (409): {error}. \
+                             Backing off for 35s to let stale connections expire."
+                        );
+                        sleep(Duration::from_secs(35)).await;
+                    } else {
+                        log::error!("Telegram getUpdates failed: {error}");
+                        sleep(Duration::from_secs(5)).await;
+                    }
                     continue;
                 }
             };
@@ -933,6 +972,7 @@ impl Channel for TelegramChannel {
         Box::pin(async move {
             log::info!("Telegram channel ready");
             self.bootstrap_offset().await?;
+            self.claim_polling_slot().await?;
             self.run_loop().await
         })
     }
