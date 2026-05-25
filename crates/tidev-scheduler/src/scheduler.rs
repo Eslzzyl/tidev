@@ -15,8 +15,10 @@ use crate::types::{
     CronDeliveryMessage, CronJob, JobResult, JobType, Schedule,
 };
 
-use tidev_engine::agent::runtime::AgentRuntime;
+use tidev_engine::agent::runtime::{AgentLoopConfig, AgentRuntime};
 use tidev_engine::config::ActiveModel;
+use tidev_session::session::{Message, MessageRole};
+use tidev_types::prompts::SessionMode;
 
 const SHELL_JOB_TIMEOUT_SECS: u64 = 120;
 const MIN_POLL_SECONDS: u64 = 5;
@@ -170,7 +172,7 @@ async fn execute_and_deliver(
         JobType::Shell => execute_shell_job(&job).await,
         JobType::Agent => {
             match &agent_runtime {
-                Some(rt) => execute_agent_job(&job, rt, &active_model, &workspace_root, &store).await,
+                Some(rt) => execute_agent_job(&job, rt, &active_model, &workspace_root).await,
                 None => {
                     log::error!("Cannot execute agent job '{job_name}': no AgentRuntime configured");
                     JobResult {
@@ -304,50 +306,122 @@ async fn execute_shell_job(job: &CronJob) -> JobResult {
     }
 }
 
-/// Execute an agent job by running a single LLM turn with the job's prompt.
-///
-/// Creates a fresh isolated session for each execution.
+/// Execute an agent job — creates an isolated session, runs the prompt through
+/// the LLM + tool loop, and returns the final assistant output.
 async fn execute_agent_job(
     job: &CronJob,
-    _runtime: &AgentRuntime,
-    _active_model: &ActiveModel,
-    _workspace_root: &std::path::Path,
-    _session_store: &Arc<CronStore>,
+    runtime: &AgentRuntime,
+    active_model: &ActiveModel,
+    workspace_root: &std::path::Path,
 ) -> JobResult {
     let started_at = Utc::now();
     let start_instant = Instant::now();
 
     let prompt = job.prompt.as_deref().unwrap_or("");
     let session_id = Uuid::new_v4();
-
-    // Create a new session in the database.
-    // We use the underlying tidev SessionStore via the CronStore's connection.
-    // Since we store session data in the main DB, we can use the shared write conn.
     let title = format!("Cron: {}", job.name.as_deref().unwrap_or(&job.id));
 
-    // For now, we log the attempt.  The actual session creation and agent loop
-    // requires access to tidev's SessionStore which the CronStore doesn't have.
-    // We'll complete this integration step when wiring up in the gateway.
-    log::info!(
-        "Agent job '{session_id}': would run prompt '{prompt}' in session {title}"
-    );
+    // 1. Lock the shared session store and create a new session.
+    {
+        let store = runtime.store.lock().await;
+        if let Err(e) = store.create_session(
+            session_id,
+            workspace_root,
+            &active_model.provider_id,
+            &active_model.provider_display_name,
+            &active_model.model_id,
+            &active_model.display_name,
+            &title,
+        ) {
+            let finished_at = Utc::now();
+            let duration_ms = start_instant.elapsed().as_millis() as i64;
+            return JobResult {
+                success: false,
+                output: format!("Failed to create agent session: {e}"),
+                started_at,
+                finished_at,
+                duration_ms,
+            };
+        }
+    }
 
-    // Placeholder: In the real implementation, we would:
-    // 1. Create a SessionStore instance sharing the database connection
-    // 2. Call session_store.create_session(...)
-    // 3. Create a ContextManager
-    // 4. Run runtime.run_single_turn() or run_agent_loop()
-    // 5. Read the output from the session store
+    // 2. Compose and persist the system prompt.
+    {
+        let store = runtime.store.lock().await;
+        let static_prompt = runtime.compose_static_system_prompt(&active_model.system_prompt);
+        if let Err(e) = store.update_session_system_prompt(session_id, &static_prompt) {
+            log::warn!("Failed to persist static system prompt for cron job: {e}");
+        }
+    }
+
+    // 3. Add the user message (the job prompt) to the session.
+    {
+        let store = runtime.store.lock().await;
+        let user_msg = Message::new(MessageRole::User, prompt.to_string());
+        if let Err(e) = store.append_message(session_id, &user_msg) {
+            log::warn!("Failed to append user message for cron job: {e}");
+        }
+    }
+
+    // 4. Clone the runtime and set the active model on the tools.
+    let mut agent = runtime.clone();
+    agent.tools.set_active_model(active_model.clone());
+
+    // 5. Create a fresh context manager.
+    let mut context_manager = tidev_engine::context::ContextManager::new();
+
+    // 6. Run the agent loop (discard streaming events, we read the final
+    //    result from the session store afterwards).
+    let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+
+    let loop_result = agent
+        .run_agent_loop(AgentLoopConfig {
+            session_id,
+            model: active_model.clone(),
+            context_manager: &mut context_manager,
+            mode: SessionMode::Build,
+            thinking_level: active_model.thinking_level.clone(),
+            event_tx,
+            cancel_token: None,
+        })
+        .await;
 
     let finished_at = Utc::now();
     let duration_ms = start_instant.elapsed().as_millis() as i64;
 
-    JobResult {
-        success: true,
-        output: format!("Agent job executed: session_id={session_id}"),
-        started_at,
-        finished_at,
-        duration_ms,
+    match loop_result {
+        Ok(()) => {
+            // Read the last assistant message from the session store.
+            let store = runtime.store.lock().await;
+            let output = match store.load_messages(session_id) {
+                Ok(messages) => messages
+                    .into_iter()
+                    .rev()
+                    .find(|m| m.role == MessageRole::Assistant)
+                    .map(|m| m.content)
+                    .unwrap_or_default(),
+                Err(e) => {
+                    log::warn!("Failed to load messages for cron agent job: {e}");
+                    String::new()
+                }
+            };
+            drop(store);
+
+            JobResult {
+                success: true,
+                output,
+                started_at,
+                finished_at,
+                duration_ms,
+            }
+        }
+        Err(e) => JobResult {
+            success: false,
+            output: format!("Agent execution failed: {e}"),
+            started_at,
+            finished_at,
+            duration_ms,
+        },
     }
 }
 
