@@ -305,12 +305,27 @@ impl App {
             Span::styled(format!(" {} ", count), Style::default().fg(palette.muted)),
         ]);
 
+        // Align with composer: left_inset=2 (bg) + inner_margin=2 (text)
+        let left_inset: u16 = 2;
+        let block_area = Rect {
+            x: area.x + left_inset,
+            y: area.y,
+            width: area.width.saturating_sub(left_inset),
+            height: area.height,
+        };
+
         let block = Block::default()
             .style(Style::default().bg(palette.panel))
             .title(title)
             .title_alignment(Alignment::Left);
 
-        let inner = block.inner(area);
+        // Inner content matches composer's text area (x+4, width-5)
+        let inner = Rect {
+            x: block_area.x + left_inset,
+            y: block_area.y,
+            width: block_area.width.saturating_sub(left_inset + 1),
+            height: block_area.height,
+        };
         let inner_height = inner.height as usize;
         let width = inner.width.max(1) as usize;
 
@@ -367,7 +382,7 @@ impl App {
         }
 
         // Render block last so it draws borders on top
-        frame.render_widget(block, area);
+        frame.render_widget(block, block_area);
     }
 
     fn render_subsession_navigation(&self, frame: &mut Frame<'_>, area: Rect) {
