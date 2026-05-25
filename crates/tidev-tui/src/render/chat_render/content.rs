@@ -26,8 +26,15 @@ pub(super) fn render_reasoning_lines(
     ctx: &RenderContext<'_>,
     reasoning: &str,
     body_width: usize,
+    is_streaming: bool,
 ) -> Vec<Line<'static>> {
-    render_reasoning_markdown_lines(reasoning, body_width, Some(ctx.workspace_root), ctx.palette)
+    render_reasoning_markdown_lines(
+        reasoning,
+        body_width,
+        Some(ctx.workspace_root),
+        ctx.palette,
+        is_streaming,
+    )
 }
 
 /// Strip all `<system-reminder>…</system-reminder>` blocks from the
@@ -86,7 +93,7 @@ pub(super) fn render_error_body_lines(
     let mut lines = Vec::new();
 
     if !message.reasoning.trim().is_empty() {
-        lines.extend(render_reasoning_lines(ctx, &message.reasoning, body_width));
+        lines.extend(render_reasoning_lines(ctx, &message.reasoning, body_width, message.streaming));
         lines.push(Line::from(""));
     }
 
@@ -121,7 +128,7 @@ pub(super) fn render_assistant_body_lines(
     let mut lines = Vec::new();
 
     if !message.reasoning.trim().is_empty() {
-        lines.extend(render_reasoning_lines(ctx, &message.reasoning, body_width));
+        lines.extend(render_reasoning_lines(ctx, &message.reasoning, body_width, message.streaming));
         if !message.content.trim().is_empty() {
             lines.push(Line::from(""));
         }

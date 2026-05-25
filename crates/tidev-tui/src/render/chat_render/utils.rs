@@ -15,6 +15,7 @@ pub(super) fn render_reasoning_markdown_lines(
     body_width: usize,
     cwd: Option<&std::path::Path>,
     palette: ThemePalette,
+    is_streaming: bool,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     // Use 0.5 ratio for a balanced dimmed appearance that works consistently across terminals
@@ -27,9 +28,10 @@ pub(super) fn render_reasoning_markdown_lines(
         .add_modifier(Modifier::ITALIC);
     let body_style = Style::default().fg(dimmed_color);
 
+    let label = if is_streaming { "Thinking:" } else { "Thought:" };
     lines.push(Line::from(vec![
         Span::styled("┃ ", label_style),
-        Span::styled("Thinking:", label_italic_style),
+        Span::styled(label, label_italic_style),
     ]));
 
     if reasoning.trim().is_empty() {

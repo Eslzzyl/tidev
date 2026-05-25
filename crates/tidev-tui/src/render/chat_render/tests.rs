@@ -81,9 +81,10 @@ fn reasoning_lines_render_markdown_code_blocks() {
         80,
         None,
         ThemePalette::dark(),
+        false,
     );
 
-    assert_eq!(line_text(&lines[0]), "┃ Thinking:");
+    assert_eq!(line_text(&lines[0]), "┃ Thought:");
     assert_eq!(line_text(&lines[1]), "┃ fn main() { println!(\"hi\"); }");
     assert!(
         lines[1]
@@ -97,10 +98,25 @@ fn reasoning_lines_render_markdown_code_blocks() {
 
 #[test]
 fn reasoning_lines_preserve_empty_state() {
-    let lines = render_reasoning_markdown_lines("", 80, None, ThemePalette::dark());
+    let lines = render_reasoning_markdown_lines("", 80, None, ThemePalette::dark(), false);
 
     assert_eq!(lines.len(), 1);
+    assert_eq!(line_text(&lines[0]), "┃ Thought:");
+}
+
+#[test]
+fn reasoning_lines_shows_thinking_during_streaming() {
+    let lines = render_reasoning_markdown_lines(
+        "working through the problem...",
+        80,
+        None,
+        ThemePalette::dark(),
+        true,
+    );
+
     assert_eq!(line_text(&lines[0]), "┃ Thinking:");
+    assert_eq!(lines.len(), 2);
+    assert!(line_text(&lines[1]).contains("working through the problem"));
 }
 
 #[test]
