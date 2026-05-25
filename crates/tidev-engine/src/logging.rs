@@ -5,7 +5,7 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local};
 use crossterm::style::{Color, Stylize};
 use log::{Level, LevelFilter, Log, Metadata, Record, SetLoggerError};
 
@@ -41,7 +41,7 @@ impl Log for TidevLogger {
         let level = record.level().as_str();
         let target = record.target();
         let message = record.args().to_string();
-        let timestamp: DateTime<Utc> = Utc::now();
+        let timestamp: DateTime<Local> = Local::now();
         let formatted_timestamp = timestamp.format("%Y-%m-%d %H:%M:%S%.3f").to_string();
 
         // Write to file (always uncolored)
