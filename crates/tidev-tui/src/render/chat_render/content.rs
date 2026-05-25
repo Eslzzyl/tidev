@@ -1,5 +1,6 @@
 use crate::markdown::render_markdown_text_with_width_and_cwd;
 use tidev_session::session::{COMPACTION_MESSAGE_LABEL, Message, MessageRole};
+use tidev_types::prompts::SessionMode;
 use chrono::Local;
 use ratatui::{
     prelude::{Modifier, Style},
@@ -235,8 +236,12 @@ pub(super) fn render_message_cards_inner(
                 content_lines.push(line_with_style(&attachment.summary(), palette.accent_soft));
             }
             let mut lines = Vec::new();
+            let mode_color = message.mode.map_or(palette.accent, |m| match m {
+                SessionMode::Build => palette.mode_build,
+                SessionMode::Plan => palette.mode_plan,
+            });
             let prefix_style = Style::default()
-                .fg(palette.accent)
+                .fg(mode_color)
                 .add_modifier(Modifier::BOLD);
             lines.push(Line::from(vec![Span::styled("┃ ", prefix_style)]));
             for line in content_lines {
