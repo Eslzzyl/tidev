@@ -90,7 +90,7 @@ jobs:
           target: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: release-cache
+          shared-key: release-cache-${{ matrix.target }}
       - uses: actions/download-artifact@v8
         with:
           name: web-dist
