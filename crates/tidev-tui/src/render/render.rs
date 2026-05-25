@@ -1,5 +1,4 @@
 use crate::theme::ThemePalette;
-use tidev_session::utils::TokenUsage;
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Position, Rect},
     prelude::{Frame, Modifier, Style, Text},
@@ -7,6 +6,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
+use tidev_session::utils::TokenUsage;
 
 /// Render a vertical scrollbar (1 column wide) into the given area.
 /// Draws a track (░) with a thumb (█) proportional to the visible fraction.

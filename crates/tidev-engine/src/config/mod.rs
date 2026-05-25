@@ -12,19 +12,19 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use tidev_types::prompts::{SessionMode, gateway_system_prompt, general_system_prompt};
 use crate::sync::SyncConfig;
+use tidev_types::prompts::{SessionMode, gateway_system_prompt, general_system_prompt};
 use tidev_types::theme::ThemeName;
 use tidev_types::types::PermissionConfig;
 
 use self::reasoning::{ThinkingLevelType, ThinkingMatcher};
 
 pub use auth::{ActiveModel, AuthStore, ModelSummary, ProviderAuth, WebAuth};
-pub use tidev_llm::ApiType;
 pub use logging::LogConfig;
 pub use mcp::{McpConfig, McpServerConfig};
 pub use paths::ConfigPaths;
 pub use provider::{ModelConfig, ProviderConfig, ProviderSource};
+pub use tidev_llm::ApiType;
 pub use tmp::TmpConfig;
 pub use ui::UiConfig;
 
@@ -282,11 +282,21 @@ pub struct SchedulerConfig {
     pub jobs: std::collections::HashMap<String, CronJobDecl>,
 }
 
-fn default_scheduler_enabled() -> bool { false }
-fn default_scheduler_poll_secs() -> u64 { 15 }
-fn default_scheduler_max_tasks() -> usize { 10 }
-fn default_scheduler_max_concurrent() -> usize { 3 }
-fn default_scheduler_max_run_history() -> usize { 100 }
+fn default_scheduler_enabled() -> bool {
+    false
+}
+fn default_scheduler_poll_secs() -> u64 {
+    15
+}
+fn default_scheduler_max_tasks() -> usize {
+    10
+}
+fn default_scheduler_max_concurrent() -> usize {
+    3
+}
+fn default_scheduler_max_run_history() -> usize {
+    100
+}
 
 impl Default for SchedulerConfig {
     fn default() -> Self {
@@ -339,7 +349,9 @@ pub struct CronJobDecl {
     pub delivery: Option<DeliveryConfigDecl>,
 }
 
-fn default_cron_job_type() -> String { "shell".to_string() }
+fn default_cron_job_type() -> String {
+    "shell".to_string()
+}
 
 impl Default for CronJobDecl {
     fn default() -> Self {
@@ -1540,7 +1552,7 @@ mod tests {
     #[test]
     fn gateway_mode_uses_separate_system_prompt() {
         use crate::agent::prompts::default_system_prompt;
-        use tidev_types::prompts::{gateway_system_prompt};
+        use tidev_types::prompts::gateway_system_prompt;
 
         let auth = AuthStore::default();
         let mut config = AppConfig::default();

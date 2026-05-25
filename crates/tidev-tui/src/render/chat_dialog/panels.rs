@@ -1,10 +1,7 @@
 use crate::App;
 use crate::render::render::{centered_rect, render_scrollbar, shorten};
-use chrono::Local;
-use tidev_types::prompts::SessionMode;
 use crate::{
-
-mcp_panel::McpPanelState,
+    mcp_panel::McpPanelState,
     memory_panel::{EditField, MemoryPanelMode, MemoryPanelState, PanelFocus},
     message_panel::MessagePanelState,
     model_panel::{ModelPanelItem, ModelPanelState, thinking_options_for_model},
@@ -14,8 +11,8 @@ mcp_panel::McpPanelState,
     ui::agents_panel::AgentsPanelState,
     ui::search_panel::{BUILTIN_PROVIDERS, SearchPanelState},
     ui::skills_panel::SkillsPanelState,
-
 };
+use chrono::Local;
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     prelude::{Frame, Modifier, Position, Style},
@@ -24,6 +21,7 @@ use ratatui::{
         Block, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState, Wrap,
     },
 };
+use tidev_types::prompts::SessionMode;
 
 impl App {
     pub(crate) fn render_theme_panel(
@@ -485,7 +483,11 @@ impl App {
                         shorten(&session.provider_display_name, 12),
                         shorten(&session.model_display_name, 14)
                     );
-                    let time = session.updated_at.with_timezone(&Local).format("%Y-%m-%d %H:%M").to_string();
+                    let time = session
+                        .updated_at
+                        .with_timezone(&Local)
+                        .format("%Y-%m-%d %H:%M")
+                        .to_string();
                     let mut w = pm.chars().count() + 2 + time.chars().count();
                     if session.session_id == self.conversation.session_id {
                         w += 9; // "  current"
@@ -524,7 +526,11 @@ impl App {
                 }
 
                 let is_current = session.session_id == self.conversation.session_id;
-                let updated_at = session.updated_at.with_timezone(&Local).format("%Y-%m-%d %H:%M").to_string();
+                let updated_at = session
+                    .updated_at
+                    .with_timezone(&Local)
+                    .format("%Y-%m-%d %H:%M")
+                    .to_string();
                 let is_selected = panel.is_selected(*index);
 
                 let checkbox = if is_multi_select {
@@ -605,8 +611,7 @@ impl App {
             frame.render_stateful_widget(table, sections[3], &mut state);
         }
 
-        let help_text = if panel.operation_mode
-            == crate::session_panel::OperationMode::MultiSelect
+        let help_text = if panel.operation_mode == crate::session_panel::OperationMode::MultiSelect
         {
             "Enter/D: switch/delete · Space: select · Ctrl+A: exit multi-select · Tab: switch view · C: cleanup · E: export"
         } else {
@@ -695,7 +700,10 @@ impl App {
 
                 let ts_str = format!(
                     "{:<16}",
-                    message.created_at.with_timezone(&Local).format("%Y-%m-%d %H:%M")
+                    message
+                        .created_at
+                        .with_timezone(&Local)
+                        .format("%Y-%m-%d %H:%M")
                 );
                 let ts_cell = Cell::from(Line::from(vec![Span::styled(
                     ts_str,
@@ -713,9 +721,7 @@ impl App {
                 });
                 let mode_cell = Cell::from(Line::from(vec![Span::styled(
                     mode_str,
-                    Style::default()
-                        .fg(mode_color)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(mode_color).add_modifier(Modifier::BOLD),
                 )]));
 
                 let content_cell = Cell::from(Line::from(vec![Span::styled(
@@ -1967,8 +1973,14 @@ impl App {
                                 header_lines.push(Line::from(Span::styled(
                                     format!(
                                         " Created: {}  Updated: {}",
-                                        entry.created_at.with_timezone(&Local).format("%Y-%m-%d %H:%M"),
-                                        entry.updated_at.with_timezone(&Local).format("%Y-%m-%d %H:%M")
+                                        entry
+                                            .created_at
+                                            .with_timezone(&Local)
+                                            .format("%Y-%m-%d %H:%M"),
+                                        entry
+                                            .updated_at
+                                            .with_timezone(&Local)
+                                            .format("%Y-%m-%d %H:%M")
                                     ),
                                     Style::default().fg(palette.muted),
                                 )));

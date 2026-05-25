@@ -641,8 +641,7 @@ impl ChannelCore {
                         if let Some(summary) = &context_manager.summary {
                             let mut compact_msg = Message::compaction(summary);
                             compact_msg.metadata.prior_summary = prior_summary;
-                            compact_msg.metadata.prior_retained_from =
-                                Some(prior_retained_from);
+                            compact_msg.metadata.prior_retained_from = Some(prior_retained_from);
 
                             let _ = self.store.append_message(session_id, &compact_msg);
                             let _ = self.store.update_session_context_state(
@@ -666,9 +665,7 @@ impl ChannelCore {
                     }
                     Err(e) => {
                         let text = format!("❌ Compaction failed: {}", e);
-                        sender
-                            .send_message(recipient, &text, reply_to)
-                            .await?;
+                        sender.send_message(recipient, &text, reply_to).await?;
                     }
                 }
 

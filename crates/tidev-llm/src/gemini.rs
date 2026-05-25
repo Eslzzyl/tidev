@@ -26,10 +26,7 @@ use std::collections::BTreeMap;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
-use crate::{
-    types::LlmProviderConfig,
-    types::ToolDefinition,
-};
+use crate::{types::LlmProviderConfig, types::ToolDefinition};
 use tidev_session::session::{BackendEvent, Message, MessageAttachment, MessageRole, ToolCall};
 
 use log::{debug as log_debug, error as log_error};
@@ -619,7 +616,8 @@ fn build_gemini_request(
 /// Build the parts array for a user message (text + optional images).
 fn user_message_parts(model: &LlmProviderConfig, message: &Message) -> Result<Vec<GeminiPart>> {
     let text = message_text_with_file_references(message);
-    let images: Vec<&tidev_session::session::MessageAttachment> = image_attachments(message).collect();
+    let images: Vec<&tidev_session::session::MessageAttachment> =
+        image_attachments(message).collect();
 
     let mut parts = Vec::new();
 

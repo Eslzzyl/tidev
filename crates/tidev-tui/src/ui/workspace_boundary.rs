@@ -88,7 +88,8 @@ pub(crate) fn extract_boundary_violation_path(
         _ => return None,
     };
 
-    if !tidev_engine::tooling::builtin::utils::is_path_outside_workspace(workspace_root, &path_buf) {
+    if !tidev_engine::tooling::builtin::utils::is_path_outside_workspace(workspace_root, &path_buf)
+    {
         return None;
     }
 

@@ -5,10 +5,7 @@ use std::collections::BTreeMap;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
-use crate::{
-    types::LlmProviderConfig,
-    types::ToolDefinition,
-};
+use crate::{types::LlmProviderConfig, types::ToolDefinition};
 use tidev_session::session::{BackendEvent, Message, MessageAttachment, MessageRole};
 
 use log::{debug as log_debug, error as log_error};

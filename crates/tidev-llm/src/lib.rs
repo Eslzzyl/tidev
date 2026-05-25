@@ -93,8 +93,8 @@ impl LlmClient {
                 request_id,
                 error: error.to_string(),
             });
-            }
         }
+    }
 
     /// Non-streaming completion — returns the full assistant text.
     pub async fn complete_with_messages(
@@ -314,6 +314,4 @@ impl LlmClient {
             }
         }
     }
-
-
 }

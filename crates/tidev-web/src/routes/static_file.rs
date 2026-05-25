@@ -7,10 +7,8 @@ use std::path::PathBuf;
 use tower_http::services::ServeDir;
 
 use crate::{
-
     assets::{handle_embedded_request, has_embedded_assets},
     state::AppState,
-
 };
 
 /// Static file serving strategy

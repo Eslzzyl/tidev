@@ -1,8 +1,8 @@
 //! Bridge types for converting engine config types into `tidev-llm` config types.
 
-use tidev_llm::{LlmProviderConfig, ToolDefinition as LlmToolDef};
 use crate::config::ActiveModel;
 use crate::tooling::ToolDefinition as EngineToolDef;
+use tidev_llm::{LlmProviderConfig, ToolDefinition as LlmToolDef};
 
 impl From<ActiveModel> for LlmProviderConfig {
     fn from(m: ActiveModel) -> Self {

@@ -334,9 +334,7 @@ impl AgentRuntime {
     }
 
     /// Format session summaries into a Markdown block.
-    fn format_session_summaries(
-        summaries: &[crate::memory::SessionSummary],
-    ) -> String {
+    fn format_session_summaries(summaries: &[crate::memory::SessionSummary]) -> String {
         let mut parts = vec!["## Related Session Summaries".to_string()];
         for s in summaries {
             let title = s.title.as_deref().unwrap_or("(untitled)");

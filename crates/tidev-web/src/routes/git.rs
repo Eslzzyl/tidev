@@ -635,8 +635,7 @@ async fn git_commit(
 
     run_git(&["add", "-A"], &cwd).map_err(crate::error::AppError::Internal)?;
 
-    run_git(&["commit", "-m", &req.message], &cwd)
-        .map_err(crate::error::AppError::Internal)?;
+    run_git(&["commit", "-m", &req.message], &cwd).map_err(crate::error::AppError::Internal)?;
 
     Ok(Json(MessageResponse {
         success: true,
@@ -727,8 +726,7 @@ async fn git_stash(
     let cwd = workspace(&state).clone();
 
     if let Some(msg) = &req.message {
-        run_git(&["stash", "push", "-m", msg], &cwd)
-            .map_err(crate::error::AppError::Internal)?;
+        run_git(&["stash", "push", "-m", msg], &cwd).map_err(crate::error::AppError::Internal)?;
     } else {
         run_git(&["stash", "push"], &cwd).map_err(crate::error::AppError::Internal)?;
     }

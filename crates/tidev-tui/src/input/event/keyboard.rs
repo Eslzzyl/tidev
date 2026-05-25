@@ -1,7 +1,7 @@
 use super::*;
 
-use tidev_session::session::{BackendEvent, Message, MessageRole};
 use crate::App;
+use tidev_session::session::{BackendEvent, Message, MessageRole};
 
 impl App {
     pub(crate) fn handle_key_event(&mut self, key: KeyEvent, runtime: &Runtime) -> Result<()> {
@@ -699,8 +699,7 @@ impl App {
             return Ok(());
         }
 
-        let Some((cmd, mut args)) = crate::input::editor::resolve_editor(&self.config.ui)
-        else {
+        let Some((cmd, mut args)) = crate::input::editor::resolve_editor(&self.config.ui) else {
             self.last_notice = Some(
                 "No editor found. Set external_editor in config, $VISUAL, or $EDITOR.".to_string(),
             );

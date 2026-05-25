@@ -13,8 +13,8 @@ use uuid::Uuid;
 use tidev_types::TodoItem;
 
 use crate::tooling::{FileReadTracker, SkillCatalog};
-use tidev_storage::SessionStore;
 use tidev_session::session::{ToolCall, ToolExecutionResult};
+use tidev_storage::SessionStore;
 
 use super::ToolDefinition;
 use super::builtin;
@@ -403,10 +403,12 @@ pub fn execute_shell_tool_call(
         session_id,
         event_tx,
     )?;
-    Ok(tidev_session::session::ToolExecutionResult::new(result.output)
-        .with_rtk_rewritten(result.rtk_rewritten)
-        .with_sandbox(result.sandboxed, result.sandbox_type)
-        .with_sandbox_denied(result.sandbox_denied))
+    Ok(
+        tidev_session::session::ToolExecutionResult::new(result.output)
+            .with_rtk_rewritten(result.rtk_rewritten)
+            .with_sandbox(result.sandboxed, result.sandbox_type)
+            .with_sandbox_denied(result.sandbox_denied),
+    )
 }
 
 #[allow(dead_code)]

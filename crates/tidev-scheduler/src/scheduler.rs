@@ -11,9 +11,7 @@ use uuid::Uuid;
 use crate::delivery::DeliveryBus;
 use crate::schedule::next_run_for_schedule;
 use crate::store::CronStore;
-use crate::types::{
-    CronDeliveryMessage, CronJob, JobResult, JobType, Schedule,
-};
+use crate::types::{CronDeliveryMessage, CronJob, JobResult, JobType, Schedule};
 
 use tidev_engine::agent::runtime::{AgentLoopConfig, AgentRuntime};
 use tidev_engine::config::ActiveModel;
@@ -138,7 +136,13 @@ impl Scheduler {
 
             let handle = tokio::task::spawn_local(async move {
                 execute_and_deliver(
-                    job, store, delivery_bus, agent_runtime, active_model, workspace_root, permit,
+                    job,
+                    store,
+                    delivery_bus,
+                    agent_runtime,
+                    active_model,
+                    workspace_root,
+                    permit,
                 )
                 .await;
             });
@@ -162,29 +166,24 @@ async fn execute_and_deliver(
     workspace_root: std::path::PathBuf,
     _permit: OwnedSemaphorePermit,
 ) {
-    let job_name = job
-        .name
-        .as_deref()
-        .unwrap_or(&job.id);
+    let job_name = job.name.as_deref().unwrap_or(&job.id);
     log::info!("Executing cron job '{job_name}' (type={:?})", job.job_type);
 
     let result = match job.job_type {
         JobType::Shell => execute_shell_job(&job).await,
-        JobType::Agent => {
-            match &agent_runtime {
-                Some(rt) => execute_agent_job(&job, rt, &active_model, &workspace_root).await,
-                None => {
-                    log::error!("Cannot execute agent job '{job_name}': no AgentRuntime configured");
-                    JobResult {
-                        success: false,
-                        output: "AgentRuntime not available".to_string(),
-                        started_at: Utc::now(),
-                        finished_at: Utc::now(),
-                        duration_ms: 0,
-                    }
+        JobType::Agent => match &agent_runtime {
+            Some(rt) => execute_agent_job(&job, rt, &active_model, &workspace_root).await,
+            None => {
+                log::error!("Cannot execute agent job '{job_name}': no AgentRuntime configured");
+                JobResult {
+                    success: false,
+                    output: "AgentRuntime not available".to_string(),
+                    started_at: Utc::now(),
+                    finished_at: Utc::now(),
+                    duration_ms: 0,
                 }
             }
-        }
+        },
     };
 
     // Persist the run.
@@ -203,19 +202,17 @@ async fn execute_and_deliver(
             let _ = store.reschedule_after_run(&job, None);
             None
         }
-        _ => {
-            match next_run_for_schedule(&job.schedule, Utc::now()) {
-                Ok(next) => {
-                    let _ = store.reschedule_after_run(&job, Some(next));
-                    Some(next)
-                }
-                Err(e) => {
-                    log::warn!("Failed to compute next run for job '{job_name}': {e}");
-                    let _ = store.reschedule_after_run(&job, None);
-                    None
-                }
+        _ => match next_run_for_schedule(&job.schedule, Utc::now()) {
+            Ok(next) => {
+                let _ = store.reschedule_after_run(&job, Some(next));
+                Some(next)
             }
-        }
+            Err(e) => {
+                log::warn!("Failed to compute next run for job '{job_name}': {e}");
+                let _ = store.reschedule_after_run(&job, None);
+                None
+            }
+        },
     };
 
     log::info!(
@@ -226,20 +223,21 @@ async fn execute_and_deliver(
 
     // Deliver if configured.
     if let Some(ref bus) = delivery_bus
-        && job.delivery.mode == "announce" {
-            let msg = CronDeliveryMessage {
-                job_id: job.id.clone(),
-                job_name: job_name.to_string(),
-                output: result.output.clone(),
-                delivery: job.delivery.clone(),
-                success: result.success,
-                executed_at: Utc::now(),
-            };
-            bus.send(msg);
+        && job.delivery.mode == "announce"
+    {
+        let msg = CronDeliveryMessage {
+            job_id: job.id.clone(),
+            job_name: job_name.to_string(),
+            output: result.output.clone(),
+            delivery: job.delivery.clone(),
+            success: result.success,
+            executed_at: Utc::now(),
+        };
+        bus.send(msg);
 
-            // Mark the run as delivered in the database.
-            let _ = store.mark_delivered(&run.id);
-        }
+        // Mark the run as delivered in the database.
+        let _ = store.mark_delivered(&run.id);
+    }
 }
 
 /// Execute a shell command with a timeout.
@@ -427,7 +425,11 @@ async fn execute_agent_job(
 fn truncate_output(output: &str) -> String {
     const MAX_BYTES: usize = 16 * 1024;
     if output.len() > MAX_BYTES {
-        format!("{}...[truncated {} bytes]", &output[..MAX_BYTES], output.len() - MAX_BYTES)
+        format!(
+            "{}...[truncated {} bytes]",
+            &output[..MAX_BYTES],
+            output.len() - MAX_BYTES
+        )
     } else {
         output.to_string()
     }

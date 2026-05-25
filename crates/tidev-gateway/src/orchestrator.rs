@@ -57,20 +57,12 @@ impl ChannelOrchestrator {
                 match channel.restore_sessions(store.clone()) {
                     Ok(count) => {
                         if count > 0 {
-                            log::info!(
-                                "Restored {} session(s) for {}",
-                                count,
-                                channel.name()
-                            );
+                            log::info!("Restored {} session(s) for {}", count, channel.name());
                         }
                         total_restored += count;
                     }
                     Err(e) => {
-                        log::error!(
-                            "Failed to restore sessions for {}: {}",
-                            channel.name(),
-                            e
-                        );
+                        log::error!("Failed to restore sessions for {}: {}", channel.name(), e);
                     }
                 }
             }

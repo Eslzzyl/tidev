@@ -1,9 +1,9 @@
 use axum::{Json, extract::State};
 use serde::Serialize;
 
-use tidev_engine::tooling::SkillCatalog;
 use crate::error::WebResult;
 use crate::state::AppState;
+use tidev_engine::tooling::SkillCatalog;
 
 /// Skill info for the API response
 #[derive(Serialize)]

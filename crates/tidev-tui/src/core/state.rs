@@ -26,21 +26,12 @@ use tidev_types::prompts::SessionMode;
 use crate::ui::skills_panel::SkillsPanelState;
 use crate::ui::workspace_boundary::WorkspaceBoundaryDialogState;
 use tidev_engine::{
-    config::ActiveModel,
-    config::reasoning::ThinkingLevelType,
-    context::ContextManager,
-    provider_setup::ConnectDialog,
-    tooling::TodoItem,
+    config::ActiveModel, config::reasoning::ThinkingLevelType, context::ContextManager,
+    provider_setup::ConnectDialog, tooling::TodoItem,
 };
 use tidev_session::session::{Conversation, MessageAttachment};
 
-use crate::{
-
-    commands::CommandPaletteState,
-    input::Composer,
-    panel_launcher::PanelLauncherState,
-
-};
+use crate::{commands::CommandPaletteState, input::Composer, panel_launcher::PanelLauncherState};
 
 pub(crate) const MESSAGE_RENDER_CACHE_MAX_ENTRIES: usize = 1200;
 

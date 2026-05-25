@@ -266,10 +266,7 @@ mod tests {
         };
 
         let next = next_run_for_schedule(&schedule, from).unwrap();
-        assert_eq!(
-            next,
-            Utc.with_ymd_and_hms(2026, 2, 16, 17, 0, 0).unwrap()
-        );
+        assert_eq!(next, Utc.with_ymd_and_hms(2026, 2, 16, 17, 0, 0).unwrap());
     }
 
     #[test]

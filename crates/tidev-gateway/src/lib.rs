@@ -19,13 +19,13 @@ use tokio::runtime::Runtime;
 
 use anyhow::{Context, Result, bail};
 
-use tidev_storage::database::Database;
 use tidev_engine::{
     config::{AppConfig, AuthStore, ConfigPaths},
     mcp::McpManager,
     tooling::{FileReadTracker, ToolRegistry},
 };
 use tidev_llm::LlmClient;
+use tidev_storage::database::Database;
 
 use orchestrator::ChannelOrchestrator;
 use shared::compose_instruction_prompt;
@@ -48,10 +48,11 @@ impl ChannelResources {
         auth: &AuthStore,
     ) -> Result<Self> {
         let store = db.create_session_store()?;
-        let memory_store = Arc::new(tidev_engine::memory::MemoryStore::open(
-            db.path(),
-        )?);
-        let llm = LlmClient::new(config.logging.save_request_body, config.logging.max_request_files)?;
+        let memory_store = Arc::new(tidev_engine::memory::MemoryStore::open(db.path())?);
+        let llm = LlmClient::new(
+            config.logging.save_request_body,
+            config.logging.max_request_files,
+        )?;
         memory_store.set_models(llm.clone(), default_model.clone(), None);
         tidev_engine::memory::start_background_tasks(
             memory_store.clone(),
@@ -138,7 +139,7 @@ async fn run_async() -> Result<()> {
             cron_store,
             scheduler_config,
             Some(bus.clone()),
-            None,           // AgentRuntime will be wired up later
+            None, // AgentRuntime will be wired up later
             default_model.clone(),
             workspace_root.clone(),
         );

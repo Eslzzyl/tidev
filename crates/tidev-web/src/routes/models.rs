@@ -1,8 +1,8 @@
 use axum::{Json, extract::State};
 use serde::Serialize;
 
-use tidev_engine::config::reasoning::ThinkingMatcher;
 use crate::{error::WebResult, state::AppState};
+use tidev_engine::config::reasoning::ThinkingMatcher;
 
 /// Model info
 #[derive(Serialize)]

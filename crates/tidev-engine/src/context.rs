@@ -4,12 +4,11 @@ use anyhow::Result;
 
 use tidev_types::prompts::SessionMode;
 
-use crate::{
-    config::ActiveModel,
-    tooling::ToolDefinition,
-};
+use crate::{config::ActiveModel, tooling::ToolDefinition};
 use tidev_llm::LlmClient;
-use tidev_session::session::{Conversation, Message, MessageAttachment, MessageRole, ToolExecutionResult};
+use tidev_session::session::{
+    Conversation, Message, MessageAttachment, MessageRole, ToolExecutionResult,
+};
 
 /// Configuration for compaction operations.
 #[derive(Clone)]
@@ -295,8 +294,10 @@ impl ContextManager {
             tokio::spawn(async move {
                 let thinking_level = model_clone.thinking_level.clone();
                 let llm_config = tidev_llm::LlmProviderConfig::from(model_clone);
-                let llm_tools: Vec<tidev_llm::ToolDefinition> =
-                    tools_vec.iter().map(tidev_llm::ToolDefinition::from).collect();
+                let llm_tools: Vec<tidev_llm::ToolDefinition> = tools_vec
+                    .iter()
+                    .map(tidev_llm::ToolDefinition::from)
+                    .collect();
                 llm_clone
                     .stream_chat(
                         session_id,
@@ -333,8 +334,11 @@ impl ContextManager {
             text
         } else {
             let llm_config = tidev_llm::LlmProviderConfig::from(config.model.clone());
-            let llm_tools: Vec<tidev_llm::ToolDefinition> =
-                config.tools.iter().map(tidev_llm::ToolDefinition::from).collect();
+            let llm_tools: Vec<tidev_llm::ToolDefinition> = config
+                .tools
+                .iter()
+                .map(tidev_llm::ToolDefinition::from)
+                .collect();
             config
                 .llm
                 .complete_with_messages(llm_config, compact_msgs, llm_tools)

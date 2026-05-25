@@ -2,8 +2,8 @@ use anyhow::Result;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
-use tidev_engine::snapshot::FileDiff;
 use crate::render::chat_render::strip_system_reminder_tags;
+use tidev_engine::snapshot::FileDiff;
 use tidev_engine::{context::ContextManager, shared::undo::StepPatch, snapshot::Patch};
 
 use super::{App, BackendEvent, Screen};
@@ -417,10 +417,7 @@ impl App {
                             self.merge_step_diffs(diffs);
                         }
                         Err(e) => {
-                            log::warn!(
-                                "capture_step_snapshot: diff_lightweight failed: {}",
-                                e
-                            );
+                            log::warn!("capture_step_snapshot: diff_lightweight failed: {}", e);
                             self.step_cached_file_lists.push(Vec::new());
                         }
                     }
@@ -625,7 +622,10 @@ impl App {
     /// Returns `true` if state was restored from a compaction message.
     fn restore_context_from_undo_compaction(&mut self, revert_to_id: Uuid) -> bool {
         if let Some((prior_summary, prior_retained_from)) =
-            tidev_session::session::find_compaction_prior_state(&self.conversation.messages, revert_to_id)
+            tidev_session::session::find_compaction_prior_state(
+                &self.conversation.messages,
+                revert_to_id,
+            )
         {
             log::info!(
                 "restore_context_from_undo_compaction: found compaction msg, \
@@ -647,9 +647,9 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{fs, path::Path, path::PathBuf, process::Command};
     use tidev_engine::config::ConfigPaths;
     use tidev_session::session::{Message, MessageRole};
-    use std::{fs, path::Path, path::PathBuf, process::Command};
 
     struct CwdGuard(PathBuf);
 

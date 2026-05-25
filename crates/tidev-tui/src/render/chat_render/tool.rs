@@ -6,11 +6,7 @@ use tidev_engine::{
 };
 use tidev_session::session::{Message, ToolCall};
 
-use crate::{
-
-    core::state::SelectableRegionRange,
-
-};
+use crate::core::state::SelectableRegionRange;
 use ratatui::{
     prelude::{Color, Modifier, Style},
     text::{Line, Span},

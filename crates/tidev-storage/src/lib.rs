@@ -16,9 +16,11 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-use uuid::Uuid;
-use tidev_session::stats::{Granularity, ModelUsageEntry, StatsEntry, TimeRangeStats, UsageSummary};
+use tidev_session::stats::{
+    Granularity, ModelUsageEntry, StatsEntry, TimeRangeStats, UsageSummary,
+};
 use tidev_types::TodoItem;
+use uuid::Uuid;
 
 use tidev_session::session::{Conversation, Message, MessageRole, ToolCall};
 
@@ -186,9 +188,9 @@ impl RawMessageRow {
 
     /// Decompress `content`/`reasoning`, parse JSON fields, build `Message`.
     fn into_message(self) -> Result<Message> {
-        use tidev_types::reasoning::ThinkingLevelType;
-        use tidev_types::prompts::SessionMode;
         use tidev_session::session::ToolMetadata;
+        use tidev_types::prompts::SessionMode;
+        use tidev_types::reasoning::ThinkingLevelType;
 
         let content = decompress_text(&self.content);
         let reasoning = match self.reasoning {

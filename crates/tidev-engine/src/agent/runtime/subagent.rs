@@ -250,8 +250,10 @@ impl AgentRuntime {
 
             tokio::spawn(async move {
                 let llm_config = tidev_llm::LlmProviderConfig::from(model_for_task);
-                let llm_tools: Vec<tidev_llm::ToolDefinition> =
-                    tools_for_spawn.iter().map(tidev_llm::ToolDefinition::from).collect();
+                let llm_tools: Vec<tidev_llm::ToolDefinition> = tools_for_spawn
+                    .iter()
+                    .map(tidev_llm::ToolDefinition::from)
+                    .collect();
                 llm.stream_chat(
                     child_session_id,
                     stream_req_id,
@@ -293,13 +295,7 @@ impl AgentRuntime {
                             turn.created_at = Some(Utc::now());
                         }
                         turn.reasoning.push_str(&content);
-                        send_status(
-                            event_tx,
-                            "Thinking".to_string(),
-                            None,
-                            None,
-                            Some(content),
-                        );
+                        send_status(event_tx, "Thinking".to_string(), None, None, Some(content));
                     }
                     BackendEvent::ToolCallUpdated { tool_call, .. } => {
                         turn.upsert_tool_call(tool_call);
@@ -403,7 +399,8 @@ impl AgentRuntime {
             // Execute tools
             'tool_loop: for tool_call in &turn.tool_calls {
                 // Reject phantom "task" tool calls
-                if tool_call.name == "task" || canonical_tool_name(&tool_call.name) == Some("task") {
+                if tool_call.name == "task" || canonical_tool_name(&tool_call.name) == Some("task")
+                {
                     log::info!(
                         "run_subagent: rejecting phantom '{}' call from subagent LLM",
                         tool_call.name
@@ -465,8 +462,6 @@ impl AgentRuntime {
             .rev()
             .find(|m| m.role == MessageRole::Assistant && !m.streaming);
 
-        Ok(last_assistant
-            .map(|m| m.content)
-            .unwrap_or_default())
+        Ok(last_assistant.map(|m| m.content).unwrap_or_default())
     }
 }

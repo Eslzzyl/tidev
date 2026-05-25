@@ -11,11 +11,9 @@ use tokio::sync::broadcast;
 use tokio::time::{Duration, sleep};
 use tokio_util::sync::CancellationToken;
 
-use tidev_storage::SessionStore;
-use tidev_engine::{
-    config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
-};
+use tidev_engine::config::{ActiveModel, AppConfig, AuthStore, ConfigPaths};
 use tidev_session::session::{BackendEvent, Conversation, Message, MessageRole};
+use tidev_storage::SessionStore;
 
 use crate::channel::Channel;
 use crate::channel::SendMessage;
@@ -118,11 +116,11 @@ impl TelegramChannel {
                 Err(error) => {
                     let err_str = error.to_string();
                     if err_str.contains("code=409") {
-                        log::warn!(
-                            "Telegram polling slot busy (409), retrying in 5s..."
-                        );
+                        log::warn!("Telegram polling slot busy (409), retrying in 5s...");
                     } else {
-                        log::error!("Telegram polling slot probe failed: {error}. Retrying in 5s...");
+                        log::error!(
+                            "Telegram polling slot probe failed: {error}. Retrying in 5s..."
+                        );
                     }
                     sleep(Duration::from_secs(5)).await;
                 }
@@ -194,14 +192,18 @@ impl TelegramChannel {
     async fn drain_cron_messages(&mut self) {
         use tokio::sync::broadcast::error::TryRecvError;
 
-        let Some(ref mut rx) = self.cron_rx else { return };
+        let Some(ref mut rx) = self.cron_rx else {
+            return;
+        };
         loop {
             match rx.try_recv() {
                 Ok(msg) => {
                     if msg.delivery.channel.as_deref() != Some("telegram") {
                         continue;
                     }
-                    let Some(to) = msg.delivery.to.as_ref() else { continue };
+                    let Some(to) = msg.delivery.to.as_ref() else {
+                        continue;
+                    };
                     let Ok(chat_id) = to.parse::<i64>() else {
                         log::warn!("Cron delivery: invalid telegram chat_id: {to}");
                         continue;
@@ -396,12 +398,7 @@ impl TelegramChannel {
         let formatted_db = crate::shell::format_shell_output(&content, exit_code);
         let formatted_html = crate::shell::format_shell_output_html(&content, exit_code);
 
-        crate::shell::persist_shell_messages(
-            &self.core.store,
-            session_id,
-            command,
-            &formatted_db,
-        )?;
+        crate::shell::persist_shell_messages(&self.core.store, session_id, command, &formatted_db)?;
 
         self.send_reply_chunks(message, &formatted_html).await
     }
@@ -595,7 +592,10 @@ impl TelegramChannel {
         };
 
         // Send initial draft
-        let draft_id = match self.send_draft_message(&recipient, "Compacting session context...").await? {
+        let draft_id = match self
+            .send_draft_message(&recipient, "Compacting session context...")
+            .await?
+        {
             Some(id) => id,
             None => {
                 self.send_reply_chunks(message, "Compacting session context...")
@@ -717,9 +717,7 @@ impl TelegramChannel {
                     .await;
             }
             Err(e) => {
-                let _ = self
-                    .cancel_draft_message(&recipient, &draft_id)
-                    .await;
+                let _ = self.cancel_draft_message(&recipient, &draft_id).await;
                 self.send_reply_chunks(message, &format!("❌ Compaction failed: {e}"))
                     .await?;
             }
@@ -795,7 +793,8 @@ impl TelegramChannel {
             .context("API key not found")?;
 
         match provider_id {
-            "deepseek" => match tidev_session::balance::query_deepseek_balance(http, api_key).await {
+            "deepseek" => match tidev_session::balance::query_deepseek_balance(http, api_key).await
+            {
                 Ok(balance) => {
                     let text = self.core.format_deepseek_balance(&balance);
                     self.send_reply_chunks(message, &text).await?;

@@ -1,9 +1,9 @@
 use super::*;
-use tidev_engine::mcp::McpConnectionStatus;
 use crate::memory_panel::PanelFocus;
 use crate::model_panel::{ModelPanelItem, selectable_indices, thinking_options_for_model};
 use crate::theme_panel::DisplayItem;
 use ratatui::layout::Margin;
+use tidev_engine::mcp::McpConnectionStatus;
 
 /// Helper: check if a position is within an overlay rect (including border).
 fn in_overlay(position: Position, overlay: Option<Rect>) -> bool {

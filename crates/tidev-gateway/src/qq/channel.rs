@@ -6,11 +6,11 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::sync::Mutex;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use tokio::time::{Duration, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 
@@ -306,18 +306,19 @@ impl QQChannel {
     async fn drain_cron_messages(&mut self) {
         use tokio::sync::broadcast::error::TryRecvError;
 
-        let Some(ref mut rx) = self.cron_rx else { return };
+        let Some(ref mut rx) = self.cron_rx else {
+            return;
+        };
         loop {
             match rx.try_recv() {
                 Ok(msg) => {
                     if msg.delivery.channel.as_deref() != Some("qq") {
                         continue;
                     }
-                    let Some(to) = msg.delivery.to.as_ref() else { continue };
-                    log::info!(
-                        "Delivering cron job '{}' result to QQ {to}",
-                        msg.job_name
-                    );
+                    let Some(to) = msg.delivery.to.as_ref() else {
+                        continue;
+                    };
+                    log::info!("Delivering cron job '{}' result to QQ {to}", msg.job_name);
                     let shared = self.shared.clone();
                     // Send via QQ client under lock
                     let output = msg.output.clone();
@@ -327,7 +328,12 @@ impl QQChannel {
                         if to.starts_with("user:") {
                             let _ = guard
                                 .client
-                                .send_c2c_message_markdown(to.trim_start_matches("user:"), &output, None, 0)
+                                .send_c2c_message_markdown(
+                                    to.trim_start_matches("user:"),
+                                    &output,
+                                    None,
+                                    0,
+                                )
                                 .await;
                         } else {
                             let _ = guard
@@ -361,16 +367,25 @@ async fn handle_message(
     // ── Extract message metadata (no lock needed) ─────────────────────
     let (channel_id, author_id) = if event_type == "C2C_MESSAGE_CREATE" {
         let openid = data["author"]["user_openid"]
-            .as_str().context("missing user_openid")?.to_string();
+            .as_str()
+            .context("missing user_openid")?
+            .to_string();
         (format!("user:{openid}"), openid)
     } else {
         let cid = data["channel_id"]
-            .as_str().context("missing channel_id")?.to_string();
+            .as_str()
+            .context("missing channel_id")?
+            .to_string();
         let aid = data["author"]["id"]
-            .as_str().context("missing author id")?.to_string();
+            .as_str()
+            .context("missing author id")?
+            .to_string();
         (cid, aid)
     };
-    let msg_id = data["id"].as_str().context("missing message id")?.to_string();
+    let msg_id = data["id"]
+        .as_str()
+        .context("missing message id")?
+        .to_string();
     let content = data["content"].as_str().unwrap_or_default().trim();
     let clean_content = content.split(' ').next_back().unwrap_or(content);
 
@@ -391,7 +406,8 @@ async fn handle_message(
         if !cmd.is_empty() {
             let chat_key = format!("qq:{channel_id}");
             let mut sender = QQSender::new(&guard);
-            return guard.core
+            return guard
+                .core
                 .handle_shell_command(&mut sender, &channel_id, Some(&msg_id), cmd, &chat_key)
                 .await;
         }
@@ -419,15 +435,28 @@ async fn handle_message(
 
         let chat_key = format!("qq:{channel_id}");
         let mut active_model = guard.core.resolve_chat_model(&chat_key)?;
-        let mut conversation = guard.core.load_or_create_conversation(&chat_key, &active_model)?;
-        guard.core.load_system_prompt(&conversation, &mut active_model);
-        guard.core.mode_manager.restore_from_messages(&chat_key, &conversation.messages);
+        let mut conversation = guard
+            .core
+            .load_or_create_conversation(&chat_key, &active_model)?;
+        guard
+            .core
+            .load_system_prompt(&conversation, &mut active_model);
+        guard
+            .core
+            .mode_manager
+            .restore_from_messages(&chat_key, &conversation.messages);
 
         let mut sender = QQSender::new(&guard);
-        let handled = guard.core
+        let handled = guard
+            .core
             .handle_command(
-                &mut sender, &channel_id, Some(&msg_id), &chat_key,
-                &mut conversation, &mut active_model, command,
+                &mut sender,
+                &channel_id,
+                Some(&msg_id),
+                &chat_key,
+                &mut conversation,
+                &mut active_model,
+                command,
             )
             .await?;
         if handled {
@@ -438,23 +467,40 @@ async fn handle_message(
     // ── Regular message → run agent ───────────────────────────────────
     let chat_key = format!("qq:{channel_id}");
     let mut active_model = guard.core.resolve_chat_model(&chat_key)?;
-    let mut conversation = guard.core.load_or_create_conversation(&chat_key, &active_model)?;
-    guard.core.load_system_prompt(&conversation, &mut active_model);
-    guard.core.mode_manager.restore_from_messages(&chat_key, &conversation.messages);
-    guard.core.persist_user_message(&mut conversation, &chat_key, clean_content)?;
+    let mut conversation = guard
+        .core
+        .load_or_create_conversation(&chat_key, &active_model)?;
+    guard
+        .core
+        .load_system_prompt(&conversation, &mut active_model);
+    guard
+        .core
+        .mode_manager
+        .restore_from_messages(&chat_key, &conversation.messages);
+    guard
+        .core
+        .persist_user_message(&mut conversation, &chat_key, clean_content)?;
 
     let mut sender = QQSender::new(&guard);
 
-    if let Err(error) = guard.core
+    if let Err(error) = guard
+        .core
         .run_agent_loop_simple(
-            &mut sender, &channel_id, Some(&msg_id),
-            &chat_key, &mut conversation, &active_model,
+            &mut sender,
+            &channel_id,
+            Some(&msg_id),
+            &chat_key,
+            &mut conversation,
+            &active_model,
         )
         .await
     {
         let error_text = format!("Gateway error: {error}");
         let error_message = Message::new(MessageRole::Error, error_text.clone());
-        let _ = guard.core.store.append_message(conversation.session_id, &error_message);
+        let _ = guard
+            .core
+            .store
+            .append_message(conversation.session_id, &error_message);
         let _ = QQChannel::send_md(&mut guard, &channel_id, &error_text, Some(&msg_id)).await;
     }
 
@@ -641,7 +687,11 @@ fn truncate_for_markdown(value: &str) -> String {
     const MAX_CHARS: usize = 500;
     let mut out = String::new();
     for ch in value.chars().take(MAX_CHARS) {
-        if ch == '`' { out.push_str("\\`"); } else { out.push(ch); }
+        if ch == '`' {
+            out.push_str("\\`");
+        } else {
+            out.push(ch);
+        }
     }
     if value.chars().count() > MAX_CHARS {
         out.push_str("\n... (truncated)");

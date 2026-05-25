@@ -32,8 +32,8 @@
 use anyhow::Result;
 use uuid::Uuid;
 
-use tidev_session::session::Message;
 use crate::snapshot::Patch;
+use tidev_session::session::Message;
 
 /// A single step-level patch stored within a round.
 ///

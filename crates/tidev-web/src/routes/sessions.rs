@@ -8,10 +8,8 @@ use std::path::Path;
 use uuid::Uuid;
 
 use crate::{
-
     error::{AppError, WebResult},
     state::AppState,
-
 };
 
 /// Session info for API
@@ -252,7 +250,10 @@ pub async fn fork_session(
         .ok_or_else(|| AppError::NotFound(format!("Message {} not found", body.message_id)))?;
 
     // Verify target is a user message
-    if !matches!(messages[target_idx].role, tidev_session::session::MessageRole::User) {
+    if !matches!(
+        messages[target_idx].role,
+        tidev_session::session::MessageRole::User
+    ) {
         return Err(AppError::BadRequest(
             "Can only fork from user messages".to_string(),
         ));

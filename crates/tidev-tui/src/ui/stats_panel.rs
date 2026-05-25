@@ -1,5 +1,5 @@
-use tidev_session::stats::{Granularity, TimeRangeStats};
 use chrono::{DateTime, Utc};
+use tidev_session::stats::{Granularity, TimeRangeStats};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StatsChart {

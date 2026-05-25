@@ -8,9 +8,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::{ActiveModel, reasoning::ThinkingLevelType};
 use crate::context::ContextManager;
-use tidev_session::session::{
-    BackendEvent, MessageAttachment, ToolCall, ToolExecutionResult,
-};
+use tidev_session::session::{BackendEvent, MessageAttachment, ToolCall, ToolExecutionResult};
 use tidev_types::prompts::SessionMode;
 
 /// A user message received while the agent loop was already processing a turn.

@@ -18,9 +18,9 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use tokio::time::{Duration, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 
@@ -309,18 +309,19 @@ impl LarkChannel {
     async fn drain_cron_messages(&mut self) {
         use tokio::sync::broadcast::error::TryRecvError;
 
-        let Some(ref mut rx) = self.cron_rx else { return };
+        let Some(ref mut rx) = self.cron_rx else {
+            return;
+        };
         loop {
             match rx.try_recv() {
                 Ok(msg) => {
                     if msg.delivery.channel.as_deref() != Some("lark") {
                         continue;
                     }
-                    let Some(to) = msg.delivery.to.as_ref() else { continue };
-                    log::info!(
-                        "Delivering cron job '{}' result to lark {to}",
-                        msg.job_name
-                    );
+                    let Some(to) = msg.delivery.to.as_ref() else {
+                        continue;
+                    };
+                    log::info!("Delivering cron job '{}' result to lark {to}", msg.job_name);
                     let shared = self.shared.clone();
                     let output = msg.output.clone();
                     let to = to.clone();
@@ -429,8 +430,11 @@ async fn handle_event(
         let cmd = cmd.trim();
         if !cmd.is_empty() {
             let chat_key = format!("lark:{chat_id}");
-            let mut sender = LarkSender { client: guard.client.clone() };
-            return guard.core
+            let mut sender = LarkSender {
+                client: guard.client.clone(),
+            };
+            return guard
+                .core
                 .handle_shell_command(&mut sender, chat_id, Some(message_id), cmd, &chat_key)
                 .await;
         }
@@ -458,15 +462,30 @@ async fn handle_event(
 
         let chat_key = format!("lark:{chat_id}");
         let mut active_model = guard.core.resolve_chat_model(&chat_key)?;
-        let mut conversation = guard.core.load_or_create_conversation(&chat_key, &active_model)?;
-        guard.core.load_system_prompt(&conversation, &mut active_model);
-        guard.core.mode_manager.restore_from_messages(&chat_key, &conversation.messages);
+        let mut conversation = guard
+            .core
+            .load_or_create_conversation(&chat_key, &active_model)?;
+        guard
+            .core
+            .load_system_prompt(&conversation, &mut active_model);
+        guard
+            .core
+            .mode_manager
+            .restore_from_messages(&chat_key, &conversation.messages);
 
-        let mut sender = LarkSender { client: guard.client.clone() };
-        let handled = guard.core
+        let mut sender = LarkSender {
+            client: guard.client.clone(),
+        };
+        let handled = guard
+            .core
             .handle_command(
-                &mut sender, chat_id, Some(message_id), &chat_key,
-                &mut conversation, &mut active_model, command,
+                &mut sender,
+                chat_id,
+                Some(message_id),
+                &chat_key,
+                &mut conversation,
+                &mut active_model,
+                command,
             )
             .await?;
         if handled {
@@ -477,23 +496,42 @@ async fn handle_event(
     // Regular message → run agent
     let chat_key = format!("lark:{chat_id}");
     let mut active_model = guard.core.resolve_chat_model(&chat_key)?;
-    let mut conversation = guard.core.load_or_create_conversation(&chat_key, &active_model)?;
-    guard.core.load_system_prompt(&conversation, &mut active_model);
-    guard.core.mode_manager.restore_from_messages(&chat_key, &conversation.messages);
-    guard.core.persist_user_message(&mut conversation, &chat_key, &clean_content)?;
+    let mut conversation = guard
+        .core
+        .load_or_create_conversation(&chat_key, &active_model)?;
+    guard
+        .core
+        .load_system_prompt(&conversation, &mut active_model);
+    guard
+        .core
+        .mode_manager
+        .restore_from_messages(&chat_key, &conversation.messages);
+    guard
+        .core
+        .persist_user_message(&mut conversation, &chat_key, &clean_content)?;
 
-    let mut sender = LarkSender { client: guard.client.clone() };
+    let mut sender = LarkSender {
+        client: guard.client.clone(),
+    };
 
-    if let Err(error) = guard.core
+    if let Err(error) = guard
+        .core
         .run_agent_loop_simple(
-            &mut sender, chat_id, Some(message_id),
-            &chat_key, &mut conversation, &active_model,
+            &mut sender,
+            chat_id,
+            Some(message_id),
+            &chat_key,
+            &mut conversation,
+            &active_model,
         )
         .await
     {
         let error_text = format!("Gateway error: {error}");
         let error_message = Message::new(MessageRole::Error, error_text.clone());
-        let _ = guard.core.store.append_message(conversation.session_id, &error_message);
+        let _ = guard
+            .core
+            .store
+            .append_message(conversation.session_id, &error_message);
         let _ = LarkChannel::send_message_adaptive(&guard.client, chat_id, &error_text).await;
     }
 
@@ -527,7 +565,10 @@ impl MessageSender for LarkSender {
     }
 
     async fn send_draft(&mut self, recipient: &str, text: &str) -> Result<Option<String>> {
-        self.client.send_text_message(recipient, text).await.map(Some)
+        self.client
+            .send_text_message(recipient, text)
+            .await
+            .map(Some)
     }
 
     async fn update_draft(&mut self, _recipient: &str, _msg_id: &str, _text: &str) -> Result<()> {

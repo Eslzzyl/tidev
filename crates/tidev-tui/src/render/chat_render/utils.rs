@@ -1,14 +1,14 @@
-use crate::render::render::shorten_single_line;
 use crate::markdown::render_markdown_text_with_width_and_cwd;
+use crate::render::render::shorten_single_line;
 use crate::theme::ThemePalette;
-use tidev_engine::{
-    tooling::builtin::utils::display_workspace_relative, tooling::canonical_tool_name,
-};
 use ratatui::{
     prelude::{Modifier, Style},
     text::{Line, Span},
 };
 use std::path::Path;
+use tidev_engine::{
+    tooling::builtin::utils::display_workspace_relative, tooling::canonical_tool_name,
+};
 
 pub(super) fn render_reasoning_markdown_lines(
     reasoning: &str,
@@ -28,7 +28,11 @@ pub(super) fn render_reasoning_markdown_lines(
         .add_modifier(Modifier::ITALIC);
     let body_style = Style::default().fg(dimmed_color);
 
-    let label = if is_streaming { "Thinking:" } else { "Thought:" };
+    let label = if is_streaming {
+        "Thinking:"
+    } else {
+        "Thought:"
+    };
     lines.push(Line::from(vec![
         Span::styled("┃ ", label_style),
         Span::styled(label, label_italic_style),

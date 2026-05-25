@@ -23,9 +23,9 @@ use crate::sandbox::{
     CommandSpec, SandboxManager, SandboxPolicy, pre_exec_hardening,
     remove_dangerous_env_vars_parent,
 };
-use tidev_session::session::{BackendEvent, tool_output_preview};
 use crate::tooling::tools::{BashArgs, decode_tool_args};
 use crate::tooling::{ToolDefinition, ToolPermission};
+use tidev_session::session::{BackendEvent, tool_output_preview};
 use uuid::Uuid;
 
 /// Registry of active child process PIDs spawned by the bash tool.
@@ -180,9 +180,7 @@ fn run_shell_inner(
     let _sudo_active = if !use_sandbox && super::sudo::has_privilege_escalation(&actual_command) {
         let guard = super::sudo::create_askpass_script()?;
         let wrapped = super::sudo::wrap_command(&actual_command, guard.path());
-        log::info!(
-            "sudo: privilege escalation detected, wrapping command with SUDO_ASKPASS"
-        );
+        log::info!("sudo: privilege escalation detected, wrapping command with SUDO_ASKPASS");
         sudo_guard = Some(guard);
         actual_command = wrapped;
         true

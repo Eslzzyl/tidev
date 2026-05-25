@@ -1,6 +1,6 @@
 use super::*;
-use tidev_engine::agent::AgentType;
 use crate::theme::ThemeName;
+use tidev_engine::agent::AgentType;
 
 impl App {
     pub(crate) fn apply_theme_command(&mut self, args: &[String]) -> Result<()> {
@@ -711,7 +711,9 @@ impl App {
             runtime.spawn(async move {
                 match selected_provider {
                     crate::ui::balance_panel::ProviderTab::DeepSeek => {
-                        match tidev_session::balance::query_deepseek_balance(&http, &api_key_clone).await {
+                        match tidev_session::balance::query_deepseek_balance(&http, &api_key_clone)
+                            .await
+                        {
                             Ok(balance) => {
                                 if let Ok(mut guard) = panel_ptr_clone.lock()
                                     && let Some(panel) = &mut *guard
@@ -729,7 +731,11 @@ impl App {
                         }
                     }
                     crate::ui::balance_panel::ProviderTab::SiliconFlow => {
-                        match tidev_session::balance::query_siliconflow_balance(&http, &api_key_clone).await
+                        match tidev_session::balance::query_siliconflow_balance(
+                            &http,
+                            &api_key_clone,
+                        )
+                        .await
                         {
                             Ok(balance) => {
                                 if let Ok(mut guard) = panel_ptr_clone.lock()
@@ -801,7 +807,9 @@ impl App {
             runtime.spawn(async move {
                 match selected_provider {
                     crate::ui::balance_panel::ProviderTab::DeepSeek => {
-                        match tidev_session::balance::query_deepseek_balance(&http, &api_key_clone).await {
+                        match tidev_session::balance::query_deepseek_balance(&http, &api_key_clone)
+                            .await
+                        {
                             Ok(balance) => {
                                 if let Ok(mut guard) = panel_ptr_clone.lock()
                                     && let Some(panel) = &mut *guard
@@ -819,7 +827,11 @@ impl App {
                         }
                     }
                     crate::ui::balance_panel::ProviderTab::SiliconFlow => {
-                        match tidev_session::balance::query_siliconflow_balance(&http, &api_key_clone).await
+                        match tidev_session::balance::query_siliconflow_balance(
+                            &http,
+                            &api_key_clone,
+                        )
+                        .await
                         {
                             Ok(balance) => {
                                 if let Ok(mut guard) = panel_ptr_clone.lock()

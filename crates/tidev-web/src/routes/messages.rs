@@ -11,17 +11,13 @@ use uuid::Uuid;
 use tidev_engine::agent::prompts::default_system_prompt;
 use tidev_types::prompts::SessionMode;
 
-use tidev_engine::{
-    config::reasoning::ThinkingLevelType,
-    context::ContextManager,
-};
-use tidev_session::session::{BackendEvent, Conversation, Message, MessageRole, ToolCall};
 use crate::{
     error::{AppError, WebResult},
     event_bus::AppEvent,
     state::AppState,
 };
-
+use tidev_engine::{config::reasoning::ThinkingLevelType, context::ContextManager};
+use tidev_session::session::{BackendEvent, Conversation, Message, MessageRole, ToolCall};
 
 /// Tool call in the API
 #[derive(Serialize)]
@@ -432,7 +428,9 @@ pub async fn send_message(
         context_window: model_config.context_window,
         max_output_tokens: model_config.max_output_tokens,
         supports_images: model_config.supports_images,
-        system_prompt: model_config.system_prompt.clone()
+        system_prompt: model_config
+            .system_prompt
+            .clone()
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(default_system_prompt),
         extra_body: model_config.extra_body.clone(),
@@ -715,7 +713,8 @@ pub async fn revert_to_message(
     }
 
     // Collect patches from messages after the target
-    let patches = tidev_engine::shared::undo::collect_patches_after_message(&messages, body.message_id)?;
+    let patches =
+        tidev_engine::shared::undo::collect_patches_after_message(&messages, body.message_id)?;
     log::info!("Collected {} patches to revert", patches.len());
 
     // Capture redo snapshot (current state) if not already saved
@@ -941,7 +940,9 @@ pub async fn compact_session(
         context_window: model_config.context_window,
         max_output_tokens: model_config.max_output_tokens,
         supports_images: model_config.supports_images,
-        system_prompt: model_config.system_prompt.clone()
+        system_prompt: model_config
+            .system_prompt
+            .clone()
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(default_system_prompt),
         extra_body: model_config.extra_body.clone(),

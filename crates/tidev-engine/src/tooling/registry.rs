@@ -7,17 +7,17 @@ use tokio::task::JoinHandle;
 use crate::config::AuthStore;
 use tidev_types::prompts::SessionMode;
 
+use super::tools::tool_definitions;
+use super::{FileReadTracker, ToolDefinition, canonical_tool_name};
 use crate::config::WebSearchConfig;
-use tidev_types::types::PermissionConfig;
 use crate::mcp::McpManager;
 use crate::memory::MemoryStore;
 use crate::sandbox::SandboxPolicy;
-use tidev_session::session::BackendEvent;
 use crate::tooling::SkillCatalog;
-use tidev_storage::SessionStore;
+use tidev_session::session::BackendEvent;
 use tidev_session::session::{ToolCall, ToolExecutionResult};
-use super::tools::tool_definitions;
-use super::{FileReadTracker, ToolDefinition, canonical_tool_name};
+use tidev_storage::SessionStore;
+use tidev_types::types::PermissionConfig;
 
 #[derive(Clone, Debug)]
 pub struct ToolRegistry {
@@ -340,9 +340,9 @@ impl ToolRegistry {
                 .iter()
                 .any(|a| matches!(a, tidev_session::session::MessageAttachment::Image { .. }));
             if had_images {
-                result
-                    .attachments
-                    .retain(|a| !matches!(a, tidev_session::session::MessageAttachment::Image { .. }));
+                result.attachments.retain(|a| {
+                    !matches!(a, tidev_session::session::MessageAttachment::Image { .. })
+                });
                 result.output.push_str("\n\n(Note: Image reading was attempted, but the current model does not support image input. Images have been removed from the request.)");
             }
         }
@@ -512,9 +512,9 @@ impl ToolRegistry {
                 .iter()
                 .any(|a| matches!(a, tidev_session::session::MessageAttachment::Image { .. }));
             if had_images {
-                result
-                    .attachments
-                    .retain(|a| !matches!(a, tidev_session::session::MessageAttachment::Image { .. }));
+                result.attachments.retain(|a| {
+                    !matches!(a, tidev_session::session::MessageAttachment::Image { .. })
+                });
                 result.output.push_str("\n\n(Note: Image reading was attempted, but the current model does not support image input. Images have been removed from the request.)");
             }
         }

@@ -80,9 +80,7 @@ pub fn wrap_command(command: &str, askpass_path: &std::path::Path) -> String {
         })
         .collect();
 
-    format!(
-        "sudo() {{ command sudo -A \"$@\"; }}; export SUDO_ASKPASS='{escaped_path}'; {command}"
-    )
+    format!("sudo() {{ command sudo -A \"$@\"; }}; export SUDO_ASKPASS='{escaped_path}'; {command}")
 }
 
 /// A guard that cleans up the askpass script directory on drop.

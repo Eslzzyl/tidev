@@ -70,7 +70,11 @@ pub struct PermissionConfig {
 }
 
 impl PermissionConfig {
-    pub fn is_allowed(&self, mode: crate::prompts::SessionMode, permission: ToolPermission) -> bool {
+    pub fn is_allowed(
+        &self,
+        mode: crate::prompts::SessionMode,
+        permission: ToolPermission,
+    ) -> bool {
         match mode {
             crate::prompts::SessionMode::Plan => self.plan.is_allowed(permission),
             crate::prompts::SessionMode::Build => self.build.is_allowed(permission),

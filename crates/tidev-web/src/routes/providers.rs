@@ -5,13 +5,11 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use tidev_engine::config::{ModelConfig, ProviderConfig};
 use crate::{
-
     error::{AppError, WebResult},
     state::AppState,
-
 };
+use tidev_engine::config::{ModelConfig, ProviderConfig};
 
 /// Model summary in provider response
 #[derive(Serialize)]

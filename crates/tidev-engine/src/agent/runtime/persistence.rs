@@ -18,11 +18,7 @@ impl AgentRuntime {
     ///
     /// Useful when the caller has already constructed the message with
     /// the correct timestamps and IDs (e.g. tool results).
-    pub async fn persist_message(
-        &self,
-        session_id: uuid::Uuid,
-        msg: &Message,
-    ) -> Result<()> {
+    pub async fn persist_message(&self, session_id: uuid::Uuid, msg: &Message) -> Result<()> {
         let store = self.store.lock().await;
         store.append_message(session_id, msg)?;
         Ok(())

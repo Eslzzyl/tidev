@@ -5,10 +5,7 @@ use std::collections::BTreeMap;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
-use crate::{
-    types::LlmProviderConfig,
-    types::ToolDefinition,
-};
+use crate::{types::LlmProviderConfig, types::ToolDefinition};
 use tidev_session::session::{BackendEvent, Message, MessageAttachment, MessageRole, ToolCall};
 use tidev_types::reasoning::ThinkingLevelType;
 
@@ -332,7 +329,9 @@ fn build_openai_request(
     // No context summary merging needed — compaction summaries are now
     // User messages inserted at the compression boundary, not System messages.
     if !model.system_prompt_str().trim().is_empty() {
-        request_messages.push(ChatMessagePayload::system(model.system_prompt.clone().unwrap_or_default()));
+        request_messages.push(ChatMessagePayload::system(
+            model.system_prompt.clone().unwrap_or_default(),
+        ));
     }
 
     // Process only User/Assistant/Tool messages (System messages already handled above)
@@ -543,7 +542,7 @@ fn user_message_content(model: &LlmProviderConfig, message: &Message) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{LlmProviderConfig, ApiType};
+    use crate::types::{ApiType, LlmProviderConfig};
     use tidev_session::session::{Message, MessageRole};
 
     #[test]

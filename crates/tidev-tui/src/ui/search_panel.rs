@@ -1,5 +1,5 @@
-use tidev_engine::config::AuthStore;
 use crate::Composer;
+use tidev_engine::config::AuthStore;
 
 /// Static metadata for a built-in search provider.
 #[derive(Clone, Debug)]

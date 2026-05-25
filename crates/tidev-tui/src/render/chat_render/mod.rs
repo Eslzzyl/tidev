@@ -8,21 +8,13 @@ pub(crate) use content::strip_system_reminder_tags;
 
 use tidev_types::prompts::SessionMode;
 
-use tidev_engine::{
-    config::{AppConfig, AuthStore},
-    tooling::canonical_tool_name,
-};
 use crate::theme::ThemePalette;
-use tidev_session::session::{Conversation, Message, MessageRole, ToolCall};
-use tidev_session::utils::{TokenUsage, format_token_count};
 use crate::{
-
     App,
     core::state::{
         MessageRenderCacheEntry, MessageRenderCacheKey, MessageRenderCacheKind,
         MessageRenderCacheValue, SelectableRegionRange,
     },
-
 };
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
@@ -35,6 +27,12 @@ use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::{Duration, Instant};
+use tidev_engine::{
+    config::{AppConfig, AuthStore},
+    tooling::canonical_tool_name,
+};
+use tidev_session::session::{Conversation, Message, MessageRole, ToolCall};
+use tidev_session::utils::{TokenUsage, format_token_count};
 use unicode_width::UnicodeWidthStr;
 use uuid::Uuid;
 

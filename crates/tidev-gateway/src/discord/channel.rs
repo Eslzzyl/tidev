@@ -164,7 +164,10 @@ impl DiscordChannel {
 
         let hello_payload: GatewayPayload = serde_json::from_str(&hello_msg.to_string())?;
         if hello_payload.op != OP_HELLO {
-            anyhow::bail!("Discord: expected Hello (op 10), got op {}", hello_payload.op);
+            anyhow::bail!(
+                "Discord: expected Hello (op 10), got op {}",
+                hello_payload.op
+            );
         }
         let hello_data: HelloData =
             serde_json::from_value(hello_payload.d.context("Discord: Hello missing data")?)?;
@@ -308,14 +311,18 @@ impl DiscordChannel {
     async fn drain_cron_messages(&mut self) {
         use tokio::sync::broadcast::error::TryRecvError;
 
-        let Some(ref mut rx) = self.cron_rx else { return };
+        let Some(ref mut rx) = self.cron_rx else {
+            return;
+        };
         loop {
             match rx.try_recv() {
                 Ok(msg) => {
                     if msg.delivery.channel.as_deref() != Some("discord") {
                         continue;
                     }
-                    let Some(to) = msg.delivery.to.as_ref() else { continue };
+                    let Some(to) = msg.delivery.to.as_ref() else {
+                        continue;
+                    };
                     log::info!(
                         "Delivering cron job '{}' result to discord {to}",
                         msg.job_name
@@ -413,15 +420,21 @@ async fn handle_message(
     // Add a reaction acknowledgment
     let reaction = DiscordChannel::random_ack_reaction();
     let msg_id = &msg.id;
-    let _ = guard.client.add_reaction(channel_id, msg_id, reaction).await;
+    let _ = guard
+        .client
+        .add_reaction(channel_id, msg_id, reaction)
+        .await;
 
     // Shell command
     if let Some(cmd) = clean_content.strip_prefix('!') {
         let cmd = cmd.trim();
         if !cmd.is_empty() {
             let chat_key = format!("discord:{channel_id}");
-            let mut sender = DiscordSender { client: guard.client.clone() };
-            return guard.core
+            let mut sender = DiscordSender {
+                client: guard.client.clone(),
+            };
+            return guard
+                .core
                 .handle_shell_command(&mut sender, channel_id, Some(msg_id), cmd, &chat_key)
                 .await;
         }
@@ -449,15 +462,30 @@ async fn handle_message(
 
         let chat_key = format!("discord:{channel_id}");
         let mut active_model = guard.core.resolve_chat_model(&chat_key)?;
-        let mut conversation = guard.core.load_or_create_conversation(&chat_key, &active_model)?;
-        guard.core.load_system_prompt(&conversation, &mut active_model);
-        guard.core.mode_manager.restore_from_messages(&chat_key, &conversation.messages);
+        let mut conversation = guard
+            .core
+            .load_or_create_conversation(&chat_key, &active_model)?;
+        guard
+            .core
+            .load_system_prompt(&conversation, &mut active_model);
+        guard
+            .core
+            .mode_manager
+            .restore_from_messages(&chat_key, &conversation.messages);
 
-        let mut sender = DiscordSender { client: guard.client.clone() };
-        let handled = guard.core
+        let mut sender = DiscordSender {
+            client: guard.client.clone(),
+        };
+        let handled = guard
+            .core
             .handle_command(
-                &mut sender, channel_id, Some(msg_id), &chat_key,
-                &mut conversation, &mut active_model, command,
+                &mut sender,
+                channel_id,
+                Some(msg_id),
+                &chat_key,
+                &mut conversation,
+                &mut active_model,
+                command,
             )
             .await?;
         if handled {
@@ -468,10 +496,19 @@ async fn handle_message(
     // Regular message → run agent
     let chat_key = format!("discord:{channel_id}");
     let mut active_model = guard.core.resolve_chat_model(&chat_key)?;
-    let mut conversation = guard.core.load_or_create_conversation(&chat_key, &active_model)?;
-    guard.core.load_system_prompt(&conversation, &mut active_model);
-    guard.core.mode_manager.restore_from_messages(&chat_key, &conversation.messages);
-    guard.core.persist_user_message(&mut conversation, &chat_key, &clean_content)?;
+    let mut conversation = guard
+        .core
+        .load_or_create_conversation(&chat_key, &active_model)?;
+    guard
+        .core
+        .load_system_prompt(&conversation, &mut active_model);
+    guard
+        .core
+        .mode_manager
+        .restore_from_messages(&chat_key, &conversation.messages);
+    guard
+        .core
+        .persist_user_message(&mut conversation, &chat_key, &clean_content)?;
 
     // Send typing indicator while processing
     let client = guard.client.clone();
@@ -485,19 +522,29 @@ async fn handle_message(
         }
     });
 
-    let mut sender = DiscordSender { client: guard.client.clone() };
+    let mut sender = DiscordSender {
+        client: guard.client.clone(),
+    };
 
-    if let Err(error) = guard.core
+    if let Err(error) = guard
+        .core
         .run_agent_loop_simple(
-            &mut sender, channel_id, Some(msg_id),
-            &chat_key, &mut conversation, &active_model,
+            &mut sender,
+            channel_id,
+            Some(msg_id),
+            &chat_key,
+            &mut conversation,
+            &active_model,
         )
         .await
     {
         typing_handle.abort();
         let error_text = format!("Gateway error: {error}");
         let error_message = Message::new(MessageRole::Error, error_text.clone());
-        guard.core.store.append_message(conversation.session_id, &error_message)?;
+        guard
+            .core
+            .store
+            .append_message(conversation.session_id, &error_message)?;
         let _ = guard.client.send_message(channel_id, &error_text).await;
     } else {
         typing_handle.abort();

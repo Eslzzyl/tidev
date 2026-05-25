@@ -1,6 +1,4 @@
 use crate::markdown::render_markdown_text_with_width_and_cwd;
-use tidev_session::session::{COMPACTION_MESSAGE_LABEL, Message, MessageRole};
-use tidev_types::prompts::SessionMode;
 use chrono::Local;
 use ratatui::{
     prelude::{Modifier, Style},
@@ -9,6 +7,8 @@ use ratatui::{
 };
 use std::collections::HashMap;
 use std::path::Path;
+use tidev_session::session::{COMPACTION_MESSAGE_LABEL, Message, MessageRole};
+use tidev_types::prompts::SessionMode;
 use uuid::Uuid;
 
 use super::RenderContext;
@@ -93,7 +93,12 @@ pub(super) fn render_error_body_lines(
     let mut lines = Vec::new();
 
     if !message.reasoning.trim().is_empty() {
-        lines.extend(render_reasoning_lines(ctx, &message.reasoning, body_width, message.streaming));
+        lines.extend(render_reasoning_lines(
+            ctx,
+            &message.reasoning,
+            body_width,
+            message.streaming,
+        ));
         lines.push(Line::from(""));
     }
 
@@ -128,7 +133,12 @@ pub(super) fn render_assistant_body_lines(
     let mut lines = Vec::new();
 
     if !message.reasoning.trim().is_empty() {
-        lines.extend(render_reasoning_lines(ctx, &message.reasoning, body_width, message.streaming));
+        lines.extend(render_reasoning_lines(
+            ctx,
+            &message.reasoning,
+            body_width,
+            message.streaming,
+        ));
         if !message.content.trim().is_empty() {
             lines.push(Line::from(""));
         }
@@ -247,9 +257,7 @@ pub(super) fn render_message_cards_inner(
                 SessionMode::Build => palette.mode_build,
                 SessionMode::Plan => palette.mode_plan,
             });
-            let prefix_style = Style::default()
-                .fg(mode_color)
-                .add_modifier(Modifier::BOLD);
+            let prefix_style = Style::default().fg(mode_color).add_modifier(Modifier::BOLD);
             lines.push(Line::from(vec![Span::styled("┃ ", prefix_style)]));
             for line in content_lines {
                 let mut spans = vec![Span::styled("┃ ", prefix_style)];

@@ -2,19 +2,11 @@ use crate::App;
 use crate::render::render::centered_rect;
 use crate::ui::connect::ProviderPickerItem;
 use crate::ui::sensitive::SensitiveFileDialogState;
-use tidev_engine::{
-    config::ProviderSource,
-    provider_setup::{ConnectDialog, EditProviderStep, NewProviderStep},
-};
 use crate::{
-
-    {
-        permission::PermissionDialogState,
-        question::QuestionDialogState,
-        session_panel::{SessionPanelDialog, SessionPanelState},
-        ui::{rename::RenameSessionDialogState, workspace_boundary::WorkspaceBoundaryDialogState},
-    },
-
+    permission::PermissionDialogState,
+    question::QuestionDialogState,
+    session_panel::{SessionPanelDialog, SessionPanelState},
+    ui::{rename::RenameSessionDialogState, workspace_boundary::WorkspaceBoundaryDialogState},
 };
 use chrono;
 use ratatui::{
@@ -22,6 +14,10 @@ use ratatui::{
     prelude::{Frame, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Clear, List, ListItem, ListState, Paragraph, Wrap},
+};
+use tidev_engine::{
+    config::ProviderSource,
+    provider_setup::{ConnectDialog, EditProviderStep, NewProviderStep},
 };
 
 impl App {

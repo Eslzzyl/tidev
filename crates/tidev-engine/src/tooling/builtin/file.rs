@@ -6,9 +6,9 @@ use std::{fs, io::BufRead, path::Path};
 
 use super::utils::{display_workspace_relative, read_existing_text, resolve_workspace_path};
 use crate::instructions::resolve_nearby_instructions;
-use tidev_session::session::{MessageAttachment, ToolExecutionResult, ToolMetadata};
 use crate::tooling::tools::{ApplyPatchArgs, EditArgs, ReadArgs, WriteArgs, decode_tool_args};
 use crate::tooling::{ToolDefinition, ToolPermission};
+use tidev_session::session::{MessageAttachment, ToolExecutionResult, ToolMetadata};
 
 const MAX_LINE_LENGTH: usize = 2000;
 const MAX_LINE_SUFFIX: &str = "... (line truncated to 2000 chars)";

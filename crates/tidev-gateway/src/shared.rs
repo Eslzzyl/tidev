@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use tidev_engine::config::ConfigPaths;
-use tidev_types::prompts::SessionMode;
 use tidev_session::session::Message;
+use tidev_types::prompts::SessionMode;
 
 /// Compose the instruction prompt from config and instruction files.
 /// Shared by all gateway channels.

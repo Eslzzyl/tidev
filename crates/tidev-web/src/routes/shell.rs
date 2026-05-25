@@ -10,12 +10,12 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use tidev_session::session::{Message, MessageRole};
 use crate::{
     error::{AppError, WebResult},
     event_bus::AppEvent,
     state::AppState,
-};// ── Request / Response types ──────────────────────────────────────────────
+};
+use tidev_session::session::{Message, MessageRole}; // ── Request / Response types ──────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct ShellCommandRequest {

@@ -3,10 +3,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::{error::AppError, state::AppState};
 use tidev_session::stats::{
     Granularity, ProviderUsageEntry, SessionUsageEntry, UsageStatsService, UsageSummary,
 };
-use crate::{error::AppError, state::AppState};
 
 /// ─── Request query types ────────────────────────────────────────────────
 
@@ -338,13 +338,13 @@ pub async fn get_provider_usage(
     // Aggregate by provider_id
     let mut map: HashMap<String, tidev_session::stats::ProviderUsageEntry> = HashMap::new();
     for m in models {
-        let entry =
-            map.entry(m.provider_id.clone())
-                .or_insert_with(|| tidev_session::stats::ProviderUsageEntry {
-                    provider_id: m.provider_id.clone(),
-                    provider_display_name: m.provider_display_name.clone(),
-                    ..Default::default()
-                });
+        let entry = map.entry(m.provider_id.clone()).or_insert_with(|| {
+            tidev_session::stats::ProviderUsageEntry {
+                provider_id: m.provider_id.clone(),
+                provider_display_name: m.provider_display_name.clone(),
+                ..Default::default()
+            }
+        });
         entry.input_tokens += m.input_tokens;
         entry.output_tokens += m.output_tokens;
         entry.cache_read_tokens += m.cache_read_tokens;

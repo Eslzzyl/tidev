@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use super::paths::ConfigPaths;
-use tidev_llm::ApiType;
 use super::reasoning::ThinkingLevelType;
+use tidev_llm::ApiType;
 
 /// Web authentication configuration stored in auth.json
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

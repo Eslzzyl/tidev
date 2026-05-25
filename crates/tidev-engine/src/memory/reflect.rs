@@ -5,11 +5,11 @@ use std::path::Path;
 use uuid::Uuid;
 
 use crate::config::ActiveModel;
-use tidev_llm::LlmClient;
 use crate::memory::remember::RememberService;
 use crate::memory::remember::map_memory_entry_from_row;
 use crate::memory::types::{MemoryEntry, MemoryType};
 use crate::memory::xml::clean_llm_xml_response;
+use tidev_llm::LlmClient;
 use tidev_session::session::{Message, MessageRole};
 
 // ─── Prompts ──────────────────────────────────────────────────────────
@@ -191,9 +191,7 @@ IMPORTANT: Your response MUST contain valid XML tags. Do NOT output any text out
                     break;
                 }
                 if attempt == 0 {
-                    log::warn!(
-                        "reflect: unparseable response, retrying with stricter prompt"
-                    );
+                    log::warn!("reflect: unparseable response, retrying with stricter prompt");
                 }
             }
 

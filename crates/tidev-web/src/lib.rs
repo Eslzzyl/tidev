@@ -13,7 +13,6 @@ use std::sync::Arc;
 use anyhow::Context;
 use tokio::sync::Mutex;
 
-use tidev_storage::database::Database;
 use tidev_engine::{
     agent::runtime::AgentRuntime,
     config::{AppConfig, AuthStore, ConfigPaths},
@@ -21,6 +20,7 @@ use tidev_engine::{
     tooling::{FileReadTracker, ToolRegistry},
 };
 use tidev_llm::LlmClient;
+use tidev_storage::database::Database;
 
 use self::{
     event_bus::EventBus,
@@ -85,7 +85,10 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     let store = db.create_session_store()?;
 
     // Create LLM client
-    let llm_client = LlmClient::new(config.logging.save_request_body, config.logging.max_request_files)?;
+    let llm_client = LlmClient::new(
+        config.logging.save_request_body,
+        config.logging.max_request_files,
+    )?;
 
     // Create event bus
     let event_bus = EventBus::new(1024);
@@ -97,7 +100,9 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     log::info!("Auth store loaded");
 
     // Create shared agent runtime (ToolRegistry, MemoryStore, etc.)
-    let memory_store = Arc::new(tidev_engine::memory::MemoryStore::open(&paths.database_file)?);
+    let memory_store = Arc::new(tidev_engine::memory::MemoryStore::open(
+        &paths.database_file,
+    )?);
     // Configure memory store with LLM
     if let Ok(default_model) = config.resolve_active_model(&auth) {
         memory_store.set_models(llm_client.clone(), default_model, None);
@@ -185,9 +190,7 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
             log::info!("Frontend mode: DevFs (serving from web/dist)");
         } else {
             log::info!("Frontend mode: Dev (showing development page)");
-            log::info!(
-                "Tip: Run `cd web && pnpm dev` and visit http://localhost:5173 for HMR"
-            );
+            log::info!("Tip: Run `cd web && pnpm dev` and visit http://localhost:5173 for HMR");
             log::info!("     Or use --dev-fs to serve from web/dist");
         }
     } else {

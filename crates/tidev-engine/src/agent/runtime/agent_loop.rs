@@ -11,9 +11,7 @@ use chrono::Utc;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use tokio_util::sync::CancellationToken;
 
-use tidev_session::session::{
-    AssistantTurn, BackendEvent, Message, ToolCall, ToolExecutionResult,
-};
+use tidev_session::session::{AssistantTurn, BackendEvent, Message, ToolCall, ToolExecutionResult};
 use tidev_types::prompts::SessionMode;
 
 use crate::config::{ActiveModel, reasoning::ThinkingLevelType};
@@ -304,7 +302,9 @@ impl AgentRuntime {
                 if result.sandbox_denied
                     || result.output.starts_with("Error:")
                     || result.output.starts_with("Tool task panicked")
-                    || result.output.starts_with("Tool execution returned no result")
+                    || result
+                        .output
+                        .starts_with("Tool execution returned no result")
                 {
                     self.hooks
                         .on_post_tool_failure(&tool_call, &result.output, Some(session_id));
@@ -335,20 +335,21 @@ impl AgentRuntime {
             // via ShellOutput events while the command runs.
             let is_bash =
                 tool_call.name == "bash" || canonical_tool_name(&tool_call.name) == Some("bash");
-            let cancelled_flag: Option<std::sync::Arc<AtomicBool>> = if is_bash && cancel_token.is_some() {
-                let flag = std::sync::Arc::new(AtomicBool::new(false));
-                if let Some(ref ct) = cancel_token {
-                    let flag_clone = flag.clone();
-                    let ct = ct.clone();
-                    tokio::spawn(async move {
-                        ct.cancelled().await;
-                        flag_clone.store(true, std::sync::atomic::Ordering::SeqCst);
-                    });
-                }
-                Some(flag)
-            } else {
-                None
-            };
+            let cancelled_flag: Option<std::sync::Arc<AtomicBool>> =
+                if is_bash && cancel_token.is_some() {
+                    let flag = std::sync::Arc::new(AtomicBool::new(false));
+                    if let Some(ref ct) = cancel_token {
+                        let flag_clone = flag.clone();
+                        let ct = ct.clone();
+                        tokio::spawn(async move {
+                            ct.cancelled().await;
+                            flag_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+                        });
+                    }
+                    Some(flag)
+                } else {
+                    None
+                };
             let handle = if is_bash {
                 self.tools.execute_call_spawned_streaming(
                     runtime.clone(),
@@ -579,10 +580,7 @@ impl AgentRuntime {
             };
 
             if let Some(msg) = next_user_msg {
-                let new_msg = Message::new(
-                    tidev_session::session::MessageRole::User,
-                    &msg.content,
-                );
+                let new_msg = Message::new(tidev_session::session::MessageRole::User, &msg.content);
                 let store = self.store.lock().await;
                 store.append_message(session_id, &new_msg)?;
                 drop(store);
@@ -622,7 +620,10 @@ impl AgentRuntime {
             let request_messages = if let Some(ref conv) = conversation {
                 context_manager.build_request_messages(conv, mode)
             } else {
-                log::warn!("agent_loop: conversation not found for session {}", session_id);
+                log::warn!(
+                    "agent_loop: conversation not found for session {}",
+                    session_id
+                );
                 break Ok(());
             };
 
@@ -655,14 +656,12 @@ impl AgentRuntime {
             // No tool calls — we're done
             if turn.tool_calls.is_empty() {
                 log::info!("agent_loop: no tool calls, persisting final assistant message");
-                self.persist_assistant_message(session_id, &turn)
-                    .await?;
+                self.persist_assistant_message(session_id, &turn).await?;
                 break Ok(());
             }
 
             // 5b. Persist assistant message (with tool calls)
-            self.persist_assistant_message(session_id, &turn)
-                .await?;
+            self.persist_assistant_message(session_id, &turn).await?;
 
             // 6. Permission approval (frontend interception)
             let mut task_calls: Vec<(ToolCall, Option<uuid::Uuid>)> = Vec::new();
@@ -743,11 +742,14 @@ impl AgentRuntime {
                     .is_some_and(|t| t.is_read_only());
 
                 if !is_read_only {
-                    let subagent_type = serde_json::from_str::<crate::tooling::TaskArgs>(&tc.arguments)
-                        .ok()
-                        .and_then(|args| crate::agent::AgentType::parse(args.subagent_type.trim()))
-                        .map(|t| format!("{t:?}"))
-                        .unwrap_or_else(|| "unknown".to_string());
+                    let subagent_type =
+                        serde_json::from_str::<crate::tooling::TaskArgs>(&tc.arguments)
+                            .ok()
+                            .and_then(|args| {
+                                crate::agent::AgentType::parse(args.subagent_type.trim())
+                            })
+                            .map(|t| format!("{t:?}"))
+                            .unwrap_or_else(|| "unknown".to_string());
 
                     let agent = self.clone();
                     let owned_tc = tc.clone();
@@ -800,11 +802,14 @@ impl AgentRuntime {
                     .is_some_and(|t| t.is_read_only());
 
                 if is_read_only {
-                    let subagent_type = serde_json::from_str::<crate::tooling::TaskArgs>(&tc.arguments)
-                        .ok()
-                        .and_then(|args| crate::agent::AgentType::parse(args.subagent_type.trim()))
-                        .map(|t| format!("{t:?}"))
-                        .unwrap_or_else(|| "unknown".to_string());
+                    let subagent_type =
+                        serde_json::from_str::<crate::tooling::TaskArgs>(&tc.arguments)
+                            .ok()
+                            .and_then(|args| {
+                                crate::agent::AgentType::parse(args.subagent_type.trim())
+                            })
+                            .map(|t| format!("{t:?}"))
+                            .unwrap_or_else(|| "unknown".to_string());
 
                     log::info!(
                         "agent_loop: parallel subagent [{subagent_type}] spawning (task: {})",
@@ -846,9 +851,7 @@ impl AgentRuntime {
                     .map(|t| format!("{t:?}"))
                     .unwrap_or_else(|| "unknown".to_string());
 
-                log::info!(
-                    "agent_loop: collecting parallel subagent [{subagent_type}] result",
-                );
+                log::info!("agent_loop: collecting parallel subagent [{subagent_type}] result",);
                 let _t_collect = std::time::Instant::now();
                 let result = handle.await.unwrap_or_else(|e| {
                     ToolExecutionResult::new(format!("Subagent task panicked/aborted: {e}"))

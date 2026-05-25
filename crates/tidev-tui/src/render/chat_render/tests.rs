@@ -1,18 +1,16 @@
-use tidev_engine::config::{AppConfig, AuthStore};
-use tidev_types::prompts::SessionMode;
-use tidev_session::session::{Conversation, Message, MessageRole};
-use crate::theme::ThemePalette;
 use crate::App;
 use crate::chat_render::RenderContext;
-use crate::chat_render::tool::{
-    render_tool_call_with_result, render_tool_result_detail_lines,
-};
+use crate::chat_render::tool::{render_tool_call_with_result, render_tool_result_detail_lines};
 use crate::chat_render::utils::render_reasoning_markdown_lines;
+use crate::theme::ThemePalette;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 use tempfile::TempDir;
+use tidev_engine::config::{AppConfig, AuthStore};
+use tidev_session::session::{Conversation, Message, MessageRole};
+use tidev_types::prompts::SessionMode;
 
 fn line_text(line: &Line<'static>) -> String {
     line.spans
@@ -121,8 +119,8 @@ fn reasoning_lines_shows_thinking_during_streaming() {
 
 #[test]
 fn render_tool_result_detail_lines_todowrite_formats_checkbox_list() {
-    use tidev_session::session::{Message, ToolExecutionResult};
     use tidev_engine::tooling::TodoItem;
+    use tidev_session::session::{Message, ToolExecutionResult};
 
     let todos = vec![
         TodoItem {

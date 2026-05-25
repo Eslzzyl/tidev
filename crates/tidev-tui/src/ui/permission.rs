@@ -5,9 +5,9 @@ use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 
 use tidev_engine::agent::runtime::ApprovedTool;
-use tidev_types::prompts::SessionMode;
-use tidev_session::session::{ToolCall, ToolExecutionResult};
 use tidev_engine::tooling::QuestionArgs;
+use tidev_session::session::{ToolCall, ToolExecutionResult};
+use tidev_types::prompts::SessionMode;
 
 use super::App;
 
@@ -325,12 +325,11 @@ impl App {
                     // No stored permission - show dialog
                     self.workspace_boundary_dialog = Some(
                         crate::ui::workspace_boundary::WorkspaceBoundaryDialogState {
-                            pending:
-                                crate::ui::workspace_boundary::PendingWorkspaceBoundaryCheck {
-                                    tool_call: tool_call.clone(),
-                                    requested_path: violation_path,
-                                    workspace_root: self.workspace_root.clone(),
-                                },
+                            pending: crate::ui::workspace_boundary::PendingWorkspaceBoundaryCheck {
+                                tool_call: tool_call.clone(),
+                                requested_path: violation_path,
+                                workspace_root: self.workspace_root.clone(),
+                            },
                             current_index,
                             total,
                         },
@@ -355,9 +354,10 @@ impl App {
                             false,
                         )
                 {
-                    let patterns = tidev_engine::tooling::builtin::sensitive::load_sensitive_patterns(
-                        &self.workspace_root,
-                    );
+                    let patterns =
+                        tidev_engine::tooling::builtin::sensitive::load_sensitive_patterns(
+                            &self.workspace_root,
+                        );
                     if tidev_engine::tooling::builtin::sensitive::is_path_sensitive(
                         &self.workspace_root,
                         &resolved_path,

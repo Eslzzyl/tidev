@@ -65,11 +65,11 @@ use core::state::*;
 use tidev_types::prompts::{SessionMode, init_command};
 
 use crate::ui::permission::{
-    PendingToolExecution, PermissionDialogState, RunningSubagentExecution,
-    RunningToolExecution, SandboxElevationDialog,
+    PendingToolExecution, PermissionDialogState, RunningSubagentExecution, RunningToolExecution,
+    SandboxElevationDialog,
 };
 
-use tidev_storage::SessionStore;
+use crate::theme::ThemeManager;
 use tidev_engine::{
     agent::runtime::{AgentRuntime, PendingToolApproval},
     config::{ActiveModel, AppConfig, AuthStore, ConfigPaths},
@@ -84,15 +84,14 @@ use tidev_engine::{
     tooling::{FileReadTracker, TodoItem, ToolRegistry},
 };
 use tidev_llm::LlmClient;
-use crate::theme::ThemeManager;
 use tidev_session::session::{
     AssistantTurn, BackendEvent, COMPACTION_MESSAGE_LABEL, Conversation, Message,
     MessageAttachment, MessageRole, ToolCall, ToolExecutionResult,
 };
 use tidev_session::utils::TokenUsage;
+use tidev_storage::SessionStore;
 
 use crate::{
-
     at_mention::{AtMentionKind, AtMentionState},
     input::SnippetState,
     input::shell_completion::ShellCompletionState,
@@ -107,7 +106,6 @@ use crate::{
     theme_panel::ThemePanelState,
     ui::rename::RenameSessionDialogState,
     ui::workspace_boundary::WorkspaceBoundaryDialogState,
-
 };
 
 struct App {
@@ -269,8 +267,9 @@ struct App {
     running_subagent_card_bounds: Vec<(usize, Rect)>,
     /// Permission channel receiver — receives [`PendingToolApproval`] from
     /// the spawned `run_agent_loop` task when tool calls need approval.
-    pending_permission_rx:
-        Option<tokio::sync::mpsc::UnboundedReceiver<tidev_engine::agent::runtime::PendingToolApproval>>,
+    pending_permission_rx: Option<
+        tokio::sync::mpsc::UnboundedReceiver<tidev_engine::agent::runtime::PendingToolApproval>,
+    >,
     /// The oneshot sender for the current pending permission approval.
     /// Set when we receive a `PendingToolApproval` and consumed when we
     /// send the response back to `run_agent_loop`.
@@ -1432,10 +1431,7 @@ impl App {
                         message_id,
                         &file_diffs_json,
                     ) {
-                        log::warn!(
-                            "SidebarSnapshotReady: failed to persist file_diffs: {}",
-                            e
-                        );
+                        log::warn!("SidebarSnapshotReady: failed to persist file_diffs: {}", e);
                     }
                     // Invalidate render cache so sidebar re-renders
                     self.invalidate_active_message_render_cache_for(message_id);
@@ -1528,10 +1524,7 @@ impl App {
                                 .store
                                 .append_message(self.conversation.session_id, &persisted)
                             {
-                                log::warn!(
-                                    "ShellOutput: failed to persist shell message: {}",
-                                    e
-                                );
+                                log::warn!("ShellOutput: failed to persist shell message: {}", e);
                             }
                         }
                         // Force layout rebuild since content size may have changed

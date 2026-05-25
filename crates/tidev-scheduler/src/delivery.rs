@@ -56,7 +56,7 @@ impl DeliveryBus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{DeliveryConfig, CronDeliveryMessage};
+    use crate::types::{CronDeliveryMessage, DeliveryConfig};
     use chrono::Utc;
 
     #[test]

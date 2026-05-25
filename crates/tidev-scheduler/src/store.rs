@@ -108,10 +108,7 @@ impl CronStore {
         let id = Uuid::new_v4().to_string();
         let expression = schedule_cron_expression(&schedule).unwrap_or_default();
         let schedule_json = serde_json::to_string(&schedule)?;
-        let delivery_json = delivery
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()?;
+        let delivery_json = delivery.as_ref().map(serde_json::to_string).transpose()?;
 
         let conn = self.write_conn.lock().unwrap();
         conn.execute(
@@ -174,10 +171,7 @@ impl CronStore {
         let id = Uuid::new_v4().to_string();
         let expression = schedule_cron_expression(&schedule).unwrap_or_default();
         let schedule_json = serde_json::to_string(&schedule)?;
-        let delivery_json = delivery
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()?;
+        let delivery_json = delivery.as_ref().map(serde_json::to_string).transpose()?;
 
         let conn = self.write_conn.lock().unwrap();
         conn.execute(
@@ -313,10 +307,7 @@ impl CronStore {
     /// Delete a job.
     pub fn remove_job(&self, job_id: &str) -> Result<()> {
         let conn = self.write_conn.lock().unwrap();
-        let changed = conn.execute(
-            "DELETE FROM scheduler_jobs WHERE id = ?1",
-            params![job_id],
-        )?;
+        let changed = conn.execute("DELETE FROM scheduler_jobs WHERE id = ?1", params![job_id])?;
         if changed == 0 {
             anyhow::bail!("Cron job '{job_id}' not found");
         }
@@ -327,8 +318,7 @@ impl CronStore {
 
     /// Get all enabled jobs whose `next_run` is <= `now`.
     pub fn due_jobs(&self, now: DateTime<Utc>) -> Result<Vec<CronJob>> {
-        let lim = i64::try_from(self.max_tasks.max(1))
-            .context("max_tasks overflows i64")?;
+        let lim = i64::try_from(self.max_tasks.max(1)).context("max_tasks overflows i64")?;
 
         let conn = self.write_conn.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -439,10 +429,8 @@ impl CronStore {
             Ok(CronRun {
                 id: row.get(0)?,
                 job_id: row.get(1)?,
-                started_at: parse_rfc3339(&row.get::<_, String>(2)?)
-                    .map_err(to_sql_err)?,
-                finished_at: parse_rfc3339(&row.get::<_, String>(3)?)
-                    .map_err(to_sql_err)?,
+                started_at: parse_rfc3339(&row.get::<_, String>(2)?).map_err(to_sql_err)?,
+                finished_at: parse_rfc3339(&row.get::<_, String>(3)?).map_err(to_sql_err)?,
                 status: row.get(4)?,
                 output: row.get(5)?,
                 duration_ms: row.get(6)?,
@@ -470,8 +458,8 @@ impl CronStore {
     // ── Internal helpers ──────────────────────────────────────────────────
 
     fn prune_run_history(&self, job_id: &str) -> Result<()> {
-        let limit = i64::try_from(self.max_run_history.max(1))
-            .context("max_run_history overflows i64")?;
+        let limit =
+            i64::try_from(self.max_run_history.max(1)).context("max_run_history overflows i64")?;
         let conn = self.write_conn.lock().unwrap();
         conn.execute(
             "DELETE FROM scheduler_runs
@@ -492,12 +480,10 @@ impl CronStore {
 fn map_cron_job_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
     let expression: String = row.get(1)?;
     let schedule_raw: Option<String> = row.get(3)?;
-    let schedule = decode_schedule(schedule_raw.as_deref(), &expression)
-        .map_err(to_sql_err)?;
+    let schedule = decode_schedule(schedule_raw.as_deref(), &expression).map_err(to_sql_err)?;
 
     let delivery_raw: Option<String> = row.get(10)?;
-    let delivery = decode_delivery(delivery_raw.as_deref())
-        .map_err(to_sql_err)?;
+    let delivery = decode_delivery(delivery_raw.as_deref()).map_err(to_sql_err)?;
 
     let next_run_raw: String = row.get(13)?;
     let last_run_raw: Option<String> = row.get(14)?;
@@ -512,7 +498,11 @@ fn map_cron_job_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
         expression,
         schedule,
         command: row.get(2)?,
-        job_type: row.get::<_, String>(4)?.as_str().try_into().unwrap_or(JobType::Shell),
+        job_type: row
+            .get::<_, String>(4)?
+            .as_str()
+            .try_into()
+            .unwrap_or(JobType::Shell),
         prompt: row.get(5)?,
         name: row.get(6)?,
         session_target: SessionTarget::parse(&row.get::<_, String>(7)?),
@@ -523,21 +513,15 @@ fn map_cron_job_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
         delete_after_run: row.get::<_, i64>(11)? != 0,
         source: source.unwrap_or_else(|| "imperative".to_string()),
         uses_memory: uses_memory != Some(0),
-        created_at: parse_rfc3339(&created_at_raw)
-            .map_err(to_sql_err)?,
-        next_run: parse_rfc3339(&next_run_raw)
-            .map_err(to_sql_err)?,
+        created_at: parse_rfc3339(&created_at_raw).map_err(to_sql_err)?,
+        next_run: parse_rfc3339(&next_run_raw).map_err(to_sql_err)?,
         last_run: match last_run_raw {
-            Some(raw) => Some(
-                parse_rfc3339(&raw)
-                    .map_err(to_sql_err)?,
-            ),
+            Some(raw) => Some(parse_rfc3339(&raw).map_err(to_sql_err)?),
             None => None,
         },
         last_status: row.get(15)?,
         last_output: row.get(16)?,
-        allowed_tools: decode_allowed_tools(allowed_tools_raw.as_deref())
-            .map_err(to_sql_err)?,
+        allowed_tools: decode_allowed_tools(allowed_tools_raw.as_deref()).map_err(to_sql_err)?,
     })
 }
 
@@ -571,19 +555,15 @@ fn decode_delivery(delivery_raw: Option<&str>) -> Result<DeliveryConfig> {
 
 fn decode_allowed_tools(raw: Option<&str>) -> Result<Option<Vec<String>>> {
     match raw {
-        Some(s) if !s.trim().is_empty() && s.trim() != "null" => {
-            serde_json::from_str(s)
-                .with_context(|| format!("Failed to parse allowed_tools JSON: {s}"))
-                .map(Some)
-        }
+        Some(s) if !s.trim().is_empty() && s.trim() != "null" => serde_json::from_str(s)
+            .with_context(|| format!("Failed to parse allowed_tools JSON: {s}"))
+            .map(Some),
         _ => Ok(None),
     }
 }
 
 fn to_sql_err(e: anyhow::Error) -> rusqlite::Error {
-    rusqlite::Error::ToSqlConversionFailure(
-        Box::new(std::io::Error::other(e.to_string()))
-    )
+    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
 }
 
 fn parse_rfc3339(s: &str) -> anyhow::Result<DateTime<Utc>> {

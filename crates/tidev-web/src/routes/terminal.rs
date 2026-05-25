@@ -143,10 +143,8 @@ async fn terminal_resize(
 async fn terminal_events(
     State(state): State<AppState>,
     Query(query): Query<EventsQuery>,
-) -> Result<
-    Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>,
-    crate::error::AppError,
-> {
+) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, crate::error::AppError>
+{
     let session_id = Uuid::parse_str(&query.session_id)
         .map_err(|e| crate::error::AppError::BadRequest(format!("Invalid session_id: {e}")))?;
 

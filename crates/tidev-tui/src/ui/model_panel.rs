@@ -1,5 +1,5 @@
-use tidev_engine::config::ModelSummary;
 use crate::Composer;
+use tidev_engine::config::ModelSummary;
 
 /// Memory tab sub-entry identifiers.
 pub const MEMORY_ROLE_CONSOLIDATION: &str = "consolidation";

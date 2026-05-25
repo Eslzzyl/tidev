@@ -5,13 +5,13 @@ use uuid::Uuid;
 
 use crate::config::ActiveModel;
 use crate::context::ContextManager;
-use tidev_llm::LlmClient;
 use crate::memory::types::SessionSummary;
 use crate::memory::xml::{clean_llm_xml_response, get_xml_children_ci, get_xml_tag_ci};
-use tidev_types::prompts::SessionMode;
+use crate::tooling::ToolDefinition;
+use tidev_llm::LlmClient;
 use tidev_session::session::{Conversation, Message, MessageRole};
 use tidev_storage::load_session_messages;
-use crate::tooling::ToolDefinition;
+use tidev_types::prompts::SessionMode;
 
 pub const SUMMARY_INSTRUCTION: &str =
     "Please summarize this session. Output EXACTLY this XML format with no additional text:

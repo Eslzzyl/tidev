@@ -1,9 +1,9 @@
 use super::*;
-use tidev_storage::database::Database;
 use crate::panel_launcher::PanelLauncherState;
 use chrono::Utc;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{io, path::Path, sync::RwLock, time::Duration};
+use tidev_storage::database::Database;
 use tokio::runtime::Runtime;
 
 /// Find the git worktree root by looking for a .git directory,
@@ -46,7 +46,10 @@ impl App {
         )?);
         log::info!("startup: stores created in {:?}", _t3.elapsed());
         let _t4 = std::time::Instant::now();
-        let llm = LlmClient::new(config.logging.save_request_body, config.logging.max_request_files)?;
+        let llm = LlmClient::new(
+            config.logging.save_request_body,
+            config.logging.max_request_files,
+        )?;
         log::info!("startup: LlmClient::new in {:?}", _t4.elapsed());
         let http_client = Arc::new(llm.http().clone());
         let _t5 = std::time::Instant::now();
@@ -108,7 +111,8 @@ impl App {
         if let Some(ref mut model) = consolidation_override
             && let Some(tl_str) = config.memory.thinking_levels.get("consolidation")
         {
-            model.thinking_level = tidev_engine::config::reasoning::ThinkingLevelType::from_string(tl_str);
+            model.thinking_level =
+                tidev_engine::config::reasoning::ThinkingLevelType::from_string(tl_str);
         }
 
         // Provide a model resolver so summarization can reuse the last
@@ -152,8 +156,11 @@ impl App {
                 std::collections::VecDeque::new(),
             )),
             auto_approve_permissions: true, // TUI handles permissions via channel
-            hooks: tidev_engine::hooks::HookEngine::new(config.hooks.clone(), workspace_root.clone())
-                .with_memory_store(memory_store.clone()),
+            hooks: tidev_engine::hooks::HookEngine::new(
+                config.hooks.clone(),
+                workspace_root.clone(),
+            )
+            .with_memory_store(memory_store.clone()),
         };
         // Share current session ID for the background inactivity check.
         let current_session_id: Arc<RwLock<Uuid>> = Arc::new(RwLock::new(session_id));

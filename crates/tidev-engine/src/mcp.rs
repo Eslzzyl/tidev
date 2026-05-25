@@ -11,11 +11,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tokio::process::Command;
 
-use tidev_types::types::PermissionConfig;
 use crate::config::mcp::McpServerConfig;
-use tidev_types::prompts::SessionMode;
-use tidev_session::session::{MessageAttachment, ToolCall, ToolExecutionResult, ToolMetadata};
 use crate::tooling::{ToolDefinition, ToolPermission};
+use tidev_session::session::{MessageAttachment, ToolCall, ToolExecutionResult, ToolMetadata};
+use tidev_types::prompts::SessionMode;
+use tidev_types::types::PermissionConfig;
 
 type McpClient = RunningService<RoleClient, ClientInfo>;
 
