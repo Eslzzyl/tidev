@@ -21,6 +21,20 @@ use crate::commands::parse_command;
 use crate::model_selection::{self, ModelSelectionIO, ModelSelectionState};
 pub const GATEWAY_PLATFORM_QQ: &str = "qq";
 
+// ── Gateway opcodes (same numbering as QQ/Discord spec) ────────────────────
+
+const OP_DISPATCH: u8 = 0;
+const OP_HEARTBEAT: u8 = 1;
+#[allow(dead_code)]
+const OP_IDENTIFY: u8 = 2;
+#[allow(dead_code)]
+const OP_RESUME: u8 = 6;
+const OP_RECONNECT: u8 = 7;
+const OP_INVALID_SESSION: u8 = 9;
+#[allow(dead_code)]
+const OP_HELLO: u8 = 10;
+const OP_HEARTBEAT_ACK: u8 = 11;
+
 #[derive(Debug, Serialize, Deserialize)]
 struct WsPayload {
     op: u8,
@@ -173,7 +187,7 @@ impl QQChannel {
                             let payload: WsPayload = serde_json::from_str(&text)?;
                             if let Some(s) = payload.s { self.last_seq = Some(s); }
                             match payload.op {
-                                0 => {
+                                OP_DISPATCH => {
                                     if let Some(t) = payload.t.as_deref() {
                                         match t {
                                             "READY" => {
@@ -187,7 +201,27 @@ impl QQChannel {
                                         }
                                     }
                                 }
-                                11 => { _last_heartbeat_ack = Instant::now(); }
+                                // Server requests an immediate heartbeat
+                                OP_HEARTBEAT => {
+                                    let hb = serde_json::json!({ "op": 1, "d": self.last_seq });
+                                    if write.send(WsMessage::Text(hb.to_string().into())).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                // Server requests graceful reconnect — break to let run_loop
+                                // reconnect with Resume (op 6), preserving session state.
+                                OP_RECONNECT => {
+                                    log::info!("QQ Reconnect (op 7) received; reconnecting with resume");
+                                    break;
+                                }
+                                // Invalid session — clear state so next connection uses fresh Identify.
+                                OP_INVALID_SESSION => {
+                                    log::warn!("QQ Invalid Session (op 9) received; clearing session for fresh auth");
+                                    self.session_id = None;
+                                    self.last_seq = None;
+                                    break;
+                                }
+                                OP_HEARTBEAT_ACK => { _last_heartbeat_ack = Instant::now(); }
                                 op => { log::warn!("QQ unknown opcode: {op}"); }
                             }
                         }
