@@ -288,6 +288,7 @@ impl App {
                 message_id: message.id,
                 content: message.content.clone(),
                 created_at: message.created_at,
+                mode: message.mode,
             })
             .collect();
 

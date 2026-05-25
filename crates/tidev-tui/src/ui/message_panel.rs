@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use tidev_types::prompts::SessionMode;
 use uuid::Uuid;
 
 #[derive(Clone, Debug)]
@@ -6,6 +7,7 @@ pub struct MessagePanelMessage {
     pub message_id: Uuid,
     pub content: String,
     pub created_at: DateTime<Utc>,
+    pub mode: Option<SessionMode>,
 }
 
 #[derive(Clone, Debug)]

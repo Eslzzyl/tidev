@@ -1,5 +1,7 @@
 use crate::App;
 use crate::render::render::{centered_rect, render_scrollbar, shorten};
+use chrono::Local;
+use tidev_types::prompts::SessionMode;
 use crate::{
 
 mcp_panel::McpPanelState,
@@ -687,46 +689,67 @@ impl App {
                 sections[3],
             );
         } else {
-            let mut items: Vec<ListItem> = Vec::new();
+            let mut rows: Vec<Row> = Vec::new();
             for index in matches.iter() {
                 let message = &panel.messages[*index];
-                let timestamp = message.created_at.format("%Y-%m-%d %H:%M").to_string();
-                let spans = vec![
-                    Span::styled(
-                        timestamp.to_string(),
-                        Style::default().fg(palette.accent_soft),
-                    ),
-                    Span::raw("  "),
-                    Span::styled(
-                        shorten(&message.content, 64),
-                        Style::default()
-                            .fg(palette.text)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw("  "),
-                    Span::styled(
-                        format!("({})", message.message_id.as_simple()),
-                        Style::default().fg(palette.muted),
-                    ),
-                ];
-                items.push(ListItem::new(Line::from(spans)));
+
+                let ts_str = format!(
+                    "{:<16}",
+                    message.created_at.with_timezone(&Local).format("%Y-%m-%d %H:%M")
+                );
+                let ts_cell = Cell::from(Line::from(vec![Span::styled(
+                    ts_str,
+                    Style::default().fg(palette.accent_soft),
+                )]));
+
+                let mode_str = match message.mode {
+                    Some(SessionMode::Build) => " Build",
+                    Some(SessionMode::Plan) => "  Plan",
+                    None => "      ",
+                };
+                let mode_color = message.mode.map_or(palette.muted, |m| match m {
+                    SessionMode::Build => palette.mode_build,
+                    SessionMode::Plan => palette.mode_plan,
+                });
+                let mode_cell = Cell::from(Line::from(vec![Span::styled(
+                    mode_str,
+                    Style::default()
+                        .fg(mode_color)
+                        .add_modifier(Modifier::BOLD),
+                )]));
+
+                let content_cell = Cell::from(Line::from(vec![Span::styled(
+                    shorten(&message.content, 80),
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                )]));
+
+                rows.push(Row::new(vec![ts_cell, mode_cell, content_cell]));
             }
 
-            let mut state = ListState::default();
+            let mut state = TableState::default();
             state.select(Some(
                 panel.selected_index.min(matches.len().saturating_sub(1)),
             ));
 
-            let list = List::new(items)
-                .style(Style::default().bg(palette.panel_alt).fg(palette.text))
-                .highlight_style(
-                    Style::default()
-                        .bg(palette.selection_bg)
-                        .fg(palette.selection_fg)
-                        .add_modifier(Modifier::BOLD),
-                );
+            let table = Table::new(
+                rows,
+                [
+                    Constraint::Length(17),
+                    Constraint::Length(6),
+                    Constraint::Fill(1),
+                ],
+            )
+            .style(Style::default().bg(palette.panel_alt).fg(palette.text))
+            .row_highlight_style(
+                Style::default()
+                    .bg(palette.selection_bg)
+                    .fg(palette.selection_fg)
+                    .add_modifier(Modifier::BOLD),
+            );
 
-            frame.render_stateful_widget(list, sections[3], &mut state);
+            frame.render_stateful_widget(table, sections[3], &mut state);
         }
 
         frame.render_widget(
