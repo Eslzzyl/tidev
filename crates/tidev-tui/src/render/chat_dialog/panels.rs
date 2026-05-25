@@ -485,7 +485,7 @@ impl App {
                         shorten(&session.provider_display_name, 12),
                         shorten(&session.model_display_name, 14)
                     );
-                    let time = session.updated_at.format("%Y-%m-%d %H:%M").to_string();
+                    let time = session.updated_at.with_timezone(&Local).format("%Y-%m-%d %H:%M").to_string();
                     let mut w = pm.chars().count() + 2 + time.chars().count();
                     if session.session_id == self.conversation.session_id {
                         w += 9; // "  current"
@@ -524,7 +524,7 @@ impl App {
                 }
 
                 let is_current = session.session_id == self.conversation.session_id;
-                let updated_at = session.updated_at.format("%Y-%m-%d %H:%M").to_string();
+                let updated_at = session.updated_at.with_timezone(&Local).format("%Y-%m-%d %H:%M").to_string();
                 let is_selected = panel.is_selected(*index);
 
                 let checkbox = if is_multi_select {
@@ -1967,8 +1967,8 @@ impl App {
                                 header_lines.push(Line::from(Span::styled(
                                     format!(
                                         " Created: {}  Updated: {}",
-                                        entry.created_at.format("%Y-%m-%d %H:%M"),
-                                        entry.updated_at.format("%Y-%m-%d %H:%M")
+                                        entry.created_at.with_timezone(&Local).format("%Y-%m-%d %H:%M"),
+                                        entry.updated_at.with_timezone(&Local).format("%Y-%m-%d %H:%M")
                                     ),
                                     Style::default().fg(palette.muted),
                                 )));
