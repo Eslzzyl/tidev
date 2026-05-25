@@ -499,6 +499,7 @@ impl AgentRuntime {
     }
 
     /// Run the agent loop with an explicit tool list.
+    #[allow(clippy::too_many_arguments)]
     async fn run_agent_loop_with_tools(
         &mut self,
         session_id: uuid::Uuid,

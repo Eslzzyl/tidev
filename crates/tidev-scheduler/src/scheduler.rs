@@ -225,8 +225,8 @@ async fn execute_and_deliver(
     );
 
     // Deliver if configured.
-    if let Some(ref bus) = delivery_bus {
-        if job.delivery.mode == "announce" {
+    if let Some(ref bus) = delivery_bus
+        && job.delivery.mode == "announce" {
             let msg = CronDeliveryMessage {
                 job_id: job.id.clone(),
                 job_name: job_name.to_string(),
@@ -240,7 +240,6 @@ async fn execute_and_deliver(
             // Mark the run as delivered in the database.
             let _ = store.mark_delivered(&run.id);
         }
-    }
 }
 
 /// Execute a shell command with a timeout.

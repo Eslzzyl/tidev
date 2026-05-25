@@ -148,8 +148,8 @@ impl LlmClient {
                     let _ = tx.send(BackendEvent::Retrying {
                         session_id,
                         request_id,
-                        attempt: (attempt + 1) as u32,
-                        max_attempts: (max + 1) as u32,
+                        attempt: attempt + 1,
+                        max_attempts: max + 1,
                         reason: network_err.message().to_string(),
                         retry_after_secs: Some(delay.as_secs() as u32),
                     });

@@ -144,6 +144,7 @@ impl DiscordChannel {
         }
     }
 
+    #[allow(clippy::collapsible_match)]
     async fn connect_and_listen(&mut self) -> Result<()> {
         let gw_url = {
             let guard = self.shared.lock().await;
@@ -248,13 +249,12 @@ impl DiscordChannel {
                                     if let Some(event_type) = payload.t.as_deref() {
                                         match event_type {
                                             "MESSAGE_CREATE" => {
-                                                if let Some(d) = payload.d {
-                                                    if let Ok(discord_msg) = serde_json::from_value::<DiscordMessage>(d) {
+                                                if let Some(d) = payload.d
+                                                    && let Ok(discord_msg) = serde_json::from_value::<DiscordMessage>(d) {
                                                         let shared = shared.clone();
                                                         let guild_ids = guild_ids.clone();
                                                         let channel_ids = channel_ids.clone();
                                                         let bot_user_id = bot_user_id.clone();
-                                                        let mention_only = mention_only;
                                                         tokio::task::spawn_local(async move {
                                                             if let Err(e) = handle_message(
                                                                 shared, discord_msg,
@@ -264,7 +264,6 @@ impl DiscordChannel {
                                                                 log::error!("Discord handle_message error: {e}");
                                                             }
                                                         });
-                                                    }
                                                 }
                                             }
                                             "READY" => {

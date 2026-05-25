@@ -110,7 +110,7 @@ impl CronStore {
         let schedule_json = serde_json::to_string(&schedule)?;
         let delivery_json = delivery
             .as_ref()
-            .map(|d| serde_json::to_string(d))
+            .map(serde_json::to_string)
             .transpose()?;
 
         let conn = self.write_conn.lock().unwrap();
@@ -176,7 +176,7 @@ impl CronStore {
         let schedule_json = serde_json::to_string(&schedule)?;
         let delivery_json = delivery
             .as_ref()
-            .map(|d| serde_json::to_string(d))
+            .map(serde_json::to_string)
             .transpose()?;
 
         let conn = self.write_conn.lock().unwrap();
@@ -582,7 +582,7 @@ fn decode_allowed_tools(raw: Option<&str>) -> Result<Option<Vec<String>>> {
 
 fn to_sql_err(e: anyhow::Error) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(
-        Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+        Box::new(std::io::Error::other(e.to_string()))
     )
 }
 
@@ -597,7 +597,6 @@ fn parse_rfc3339(s: &str) -> anyhow::Result<DateTime<Utc>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use tempfile::TempDir;
 
     fn setup_store() -> (CronStore, TempDir) {

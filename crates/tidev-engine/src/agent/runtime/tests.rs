@@ -19,6 +19,7 @@ use tidev_session::session::{
 use super::AgentRuntime;
 
     /// Create a minimal ActiveModel for passing to execute_tool_calls.
+    #[allow(dead_code)]
     fn test_active_model() -> crate::config::ActiveModel {
         crate::config::ActiveModel {
             provider_id: "test".into(),

@@ -147,6 +147,7 @@ impl QQChannel {
         }
     }
 
+    #[allow(clippy::collapsible_match)]
     async fn connect_and_handle(&mut self) -> Result<()> {
         let shared = self.shared.clone();
         let client_for_gw = shared.lock().await.client.clone();
@@ -237,15 +238,15 @@ impl QQChannel {
                                     if let Some(t) = payload.t.as_deref() {
                                         match t {
                                             "READY" => {
-                                                if let Some(d) = payload.d {
-                                                    if let Ok(ready) = serde_json::from_value::<ReadyData>(d) {
+                                                if let Some(d) = payload.d
+                                                    && let Ok(ready) = serde_json::from_value::<ReadyData>(d) {
                                                         log::info!("QQ Ready: session_id={}", ready.session_id);
                                                         self.session_id = Some(ready.session_id);
-                }
-            }
-            // Drain any pending cron delivery messages.
-            self.drain_cron_messages().await;
-        }                                            "AT_MESSAGE_CREATE" | "MESSAGE_CREATE" | "C2C_MESSAGE_CREATE" => {
+                                                }
+                                                // Drain any pending cron delivery messages.
+                                                self.drain_cron_messages().await;
+                                            }
+                                            "AT_MESSAGE_CREATE" | "MESSAGE_CREATE" | "C2C_MESSAGE_CREATE" => {
                                                 if let Some(data) = payload.d {
                                                     let shared = self.shared.clone();
                                                     let event_type = t.to_string();
@@ -326,7 +327,7 @@ impl QQChannel {
                         if to.starts_with("user:") {
                             let _ = guard
                                 .client
-                                .send_c2c_message_markdown(&to.trim_start_matches("user:"), &output, None, 0)
+                                .send_c2c_message_markdown(to.trim_start_matches("user:"), &output, None, 0)
                                 .await;
                         } else {
                             let _ = guard
