@@ -306,6 +306,92 @@ sandbox = false
 | `allowlist` | `[]` | Allowed QQ user or channel identifiers |
 | `sandbox` | `false` | Use the QQ sandbox environment |
 
+### [gateway.scheduler]
+
+The task scheduler enables cron-based periodic job execution. Jobs can run shell
+commands or AI agent prompts. Results can be delivered to gateway channels
+(Telegram, QQ, Discord, Lark) when `delivery` is configured.
+
+The scheduler is **disabled by default** and must be explicitly enabled.
+
+```
+[gateway.scheduler]
+enabled = true
+poll_secs = 15
+max_concurrent = 3
+max_tasks = 10
+max_run_history = 100
+
+[gateway.scheduler.jobs.daily_report]
+name = "Daily Report"
+job_type = "shell"
+schedule = { kind = "cron", expr = "0 9 * * *", tz = "Asia/Shanghai" }
+command = "echo hello"
+enabled = true
+delivery = { mode = "announce", channel = "telegram", to = "123456789" }
+```
+
+**Scheduler settings:**
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `false` | Enable the task scheduler |
+| `poll_secs` | `15` | Polling interval in seconds (minimum 5) |
+| `max_concurrent` | `3` | Maximum number of jobs to execute concurrently |
+| `max_tasks` | `10` | Maximum number of due jobs to fetch per poll cycle |
+| `max_run_history` | `100` | Number of run history entries retained per job |
+
+**Job definition keys** (`[gateway.scheduler.jobs.<alias>]`):
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `name` | `None` | Human-readable job name |
+| `job_type` | `"shell"` | Job type: `"shell"` or `"agent"` |
+| `schedule` | (required) | Schedule specification (see below) |
+| `command` | `None` | Shell command (required for `job_type = "shell"`) |
+| `prompt` | `None` | Agent prompt (required for `job_type = "agent"`) |
+| `enabled` | `true` | Whether the job is active |
+| `model` | `None` | Model override for agent jobs |
+| `allowed_tools` | `None` | Tool allowlist for agent jobs (e.g. `["read", "grep"]`) |
+| `uses_memory` | `true` | Whether to inject memory context for agent jobs |
+| `session_target` | `None` | Session target: `"isolated"` (default) or `"main"` |
+| `delivery` | `None` | Delivery configuration (see below) |
+
+**Schedule specification:**
+
+The `schedule` field uses a tagged union with three variants:
+
+```
+# Every 5 minutes (cron expression)
+schedule = { kind = "cron", expr = "*/5 * * * *" }
+
+# With timezone
+schedule = { kind = "cron", expr = "0 9 * * 1-5", tz = "America/New_York" }
+
+# One-shot at a specific time
+schedule = { kind = "at", at = "2026-06-01T09:00:00Z" }
+
+# Fixed interval in milliseconds
+schedule = { kind = "every", every_ms = 3600000 }
+```
+
+**Delivery configuration:**
+
+When a job completes with `delivery.mode = "announce"`, the result is sent to
+the specified gateway channel.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `mode` | `"none"` | Delivery mode: `"announce"` or `"none"` |
+| `channel` | `None` | Target channel: `"telegram"`, `"qq"`, `"discord"`, `"lark"` |
+| `to` | `None` | Recipient identifier (chat ID, user ID, channel ID) |
+| `thread_id` | `None` | Optional thread/conversation identifier |
+| `best_effort` | `true` | Don't fail the job if delivery fails |
+
+**Shell jobs** execute the command via `sh -c <command>` with a 120-second
+timeout. **Agent jobs** create an isolated session, run the prompt through the
+full LLM + tool loop, and return the final assistant output.
+
 ## [agent]
 
 The multi-agent subsystem allows tidev to delegate specialised subtasks to
