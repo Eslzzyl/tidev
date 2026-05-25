@@ -742,6 +742,12 @@ impl AgentRuntime {
                     .is_some_and(|t| t.is_read_only());
 
                 if !is_read_only {
+                    let subagent_type = serde_json::from_str::<crate::tooling::TaskArgs>(&tc.arguments)
+                        .ok()
+                        .and_then(|args| crate::agent::AgentType::parse(args.subagent_type.trim()))
+                        .map(|t| format!("{t:?}"))
+                        .unwrap_or_else(|| "unknown".to_string());
+
                     let agent = self.clone();
                     let owned_tc = tc.clone();
                     let owned_child_sid = *child_sid;
@@ -750,6 +756,11 @@ impl AgentRuntime {
                     let rid = request_id;
                     let pm = model.clone();
 
+                    log::info!(
+                        "agent_loop: serial subagent [{subagent_type}] starting (task: {})",
+                        tc.name,
+                    );
+                    let _t_sub = std::time::Instant::now();
                     let result: ToolExecutionResult = {
                         let fut: std::pin::Pin<
                             Box<dyn std::future::Future<Output = ToolExecutionResult> + Send>,
@@ -764,6 +775,10 @@ impl AgentRuntime {
                         }));
                         fut.await
                     };
+                    log::info!(
+                        "agent_loop: serial subagent [{subagent_type}] completed in {:?}",
+                        _t_sub.elapsed(),
+                    );
                     self.persist_tool_result(session_id, request_id, tc, &result, &event_tx)
                         .await?;
                     let _ = event_tx.send(BackendEvent::SubagentCompleted {
@@ -784,6 +799,17 @@ impl AgentRuntime {
                     .is_some_and(|t| t.is_read_only());
 
                 if is_read_only {
+                    let subagent_type = serde_json::from_str::<crate::tooling::TaskArgs>(&tc.arguments)
+                        .ok()
+                        .and_then(|args| crate::agent::AgentType::parse(args.subagent_type.trim()))
+                        .map(|t| format!("{t:?}"))
+                        .unwrap_or_else(|| "unknown".to_string());
+
+                    log::info!(
+                        "agent_loop: parallel subagent [{subagent_type}] spawning (task: {})",
+                        tc.name,
+                    );
+
                     let agent = self.clone();
                     let owned_tc = tc.clone();
                     let owned_child_sid = *child_sid;
@@ -813,9 +839,23 @@ impl AgentRuntime {
 
             // Collect parallel task results in order
             for (tc, child_sid, handle) in task_handles {
+                let subagent_type = serde_json::from_str::<crate::tooling::TaskArgs>(&tc.arguments)
+                    .ok()
+                    .and_then(|args| crate::agent::AgentType::parse(args.subagent_type.trim()))
+                    .map(|t| format!("{t:?}"))
+                    .unwrap_or_else(|| "unknown".to_string());
+
+                log::info!(
+                    "agent_loop: collecting parallel subagent [{subagent_type}] result",
+                );
+                let _t_collect = std::time::Instant::now();
                 let result = handle.await.unwrap_or_else(|e| {
                     ToolExecutionResult::new(format!("Subagent task panicked/aborted: {e}"))
                 });
+                log::info!(
+                    "agent_loop: parallel subagent [{subagent_type}] collected in {:?}",
+                    _t_collect.elapsed(),
+                );
                 self.persist_tool_result(session_id, request_id, &tc, &result, &event_tx)
                     .await?;
                 let _ = event_tx.send(BackendEvent::SubagentCompleted {

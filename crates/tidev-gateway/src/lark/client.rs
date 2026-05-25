@@ -10,6 +10,7 @@ use tokio::time::{Duration, Instant};
 use super::types::{BotInfoResp, SendMessageResp, TenantAccessTokenResp, WsEndpointResp};
 
 /// Lark/Feishu REST API client.
+#[derive(Clone)]
 pub struct LarkClient {
     client: Client,
     app_id: String,
@@ -21,7 +22,11 @@ pub struct LarkClient {
 impl LarkClient {
     pub fn new(app_id: String, app_secret: String, use_feishu: bool) -> Self {
         Self {
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(Duration::from_secs(30))
+                .connect_timeout(Duration::from_secs(10))
+                .build()
+                .expect("LarkClient: failed to build reqwest Client"),
             app_id,
             app_secret,
             use_feishu,

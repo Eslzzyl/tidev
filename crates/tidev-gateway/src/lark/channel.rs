@@ -2,6 +2,10 @@
 //!
 //! Connects via WebSocket with Protobuf-framed protocol for receiving events
 //! and uses the REST API for sending replies.
+//!
+//! Architecture: WebSocket IO and event processing are decoupled.
+//! Events are dispatched via `spawn_local` to background tasks so
+//! heartbeats and new events are never blocked by long agent runs.
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -12,7 +16,10 @@ use std::collections::HashSet;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::mpsc;
+use tokio::sync::Mutex;
 use tokio::time::{Duration, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 
@@ -33,15 +40,20 @@ const WS_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
 const WS_RECONNECT_DELAY: Duration = Duration::from_secs(5);
 const LARK_TEXT_MAX_LENGTH: usize = 2000;
 
+// ── Shared state (behind Arc<Mutex>, used via spawn_local) ────────────
+
+struct SharedState {
+    core: ChannelCore,
+    client: LarkClient,
+    bot_open_id: Option<String>,
+}
+
 /// Lark/Feishu gateway channel implementation.
 pub struct LarkChannel {
-    pub core: ChannelCore,
-    pub client: LarkClient,
+    shared: Arc<Mutex<SharedState>>,
     pub app_id: String,
     pub mention_only: bool,
     pub use_feishu: bool,
-    /// Bot's own open_id (resolved at startup for mention detection).
-    bot_open_id: Option<String>,
 }
 
 impl LarkChannel {
@@ -74,12 +86,14 @@ impl LarkChannel {
             allowlist,
         );
         Self {
-            core,
-            client: LarkClient::new(app_id.clone(), app_secret, use_feishu),
+            shared: Arc::new(Mutex::new(SharedState {
+                core,
+                client: LarkClient::new(app_id.clone(), app_secret, use_feishu),
+                bot_open_id: None,
+            })),
             app_id,
             mention_only,
             use_feishu,
-            bot_open_id: None,
         }
     }
 
@@ -87,7 +101,6 @@ impl LarkChannel {
     fn parse_content(msg: &EventMessage) -> String {
         match msg.msg_type.as_str() {
             "text" => {
-                // content is JSON: {"text": "hello"}
                 if let Ok(val) = serde_json::from_str::<Value>(&msg.content) {
                     val.get("text")
                         .and_then(|v| v.as_str())
@@ -98,65 +111,60 @@ impl LarkChannel {
                 }
             }
             "post" => {
-                // content is JSON with rich text elements
-                Self::extract_post_text(&msg.content)
+                if let Ok(val) = serde_json::from_str::<Value>(&msg.content) {
+                    Self::extract_post_text(&val)
+                } else {
+                    String::new()
+                }
             }
             _ => String::new(),
         }
     }
 
-    /// Extract plain text from a Lark post (rich text) message.
-    fn extract_post_text(content: &str) -> String {
-        let Ok(val) = serde_json::from_str::<Value>(content) else {
-            return String::new();
-        };
+    fn extract_post_text(val: &Value) -> String {
         let mut text = String::new();
-
-        // Post format: { "zh_cn": { "content": [[...]] }, "default": ... }
-        for lang in &["default", "zh_cn", "en_us", "ja_jp"] {
-            if let Some(content_block) = val.get(*lang).and_then(|c| c.get("content")) {
-                if let Some(lines) = content_block.as_array() {
-                    for line in lines {
-                        if let Some(elements) = line.as_array() {
-                            for elem in elements {
-                                if let Some(tag) = elem.get("tag").and_then(|t| t.as_str()) {
-                                    match tag {
-                                        "text" | "md" => {
-                                            if let Some(txt) =
-                                                elem.get("text").and_then(|t| t.as_str())
-                                            {
-                                                text.push_str(txt);
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            }
-                            text.push('\n');
+        if let Some(paragraphs) = val.get("content").and_then(|c| c.as_array()) {
+            for paragraph in paragraphs {
+                if let Some(elements) = paragraph.as_array() {
+                    for element in elements {
+                        if let Some(t) = element.get("insert").and_then(|i| i.as_str()) {
+                            text.push_str(t);
                         }
                     }
                 }
-                if !text.is_empty() {
-                    break;
-                }
             }
         }
-
         text.trim().to_string()
     }
 
-    /// Check if the bot was @mentioned in the message content.
     fn is_mentioned(content: &str, bot_open_id: &str) -> bool {
         let mention_pattern = format!("@_user_{}", bot_open_id);
         content.contains(&mention_pattern)
+    }
+
+    /// Send a message choosing between text and interactive card based on length.
+    async fn send_message_adaptive(
+        client: &LarkClient,
+        recipient: &str,
+        content: &str,
+    ) -> Result<()> {
+        if content.len() <= LARK_TEXT_MAX_LENGTH {
+            client.send_text_message(recipient, content).await?;
+        } else {
+            client.send_card_message(recipient, content).await?;
+        }
+        Ok(())
     }
 
     // ── WebSocket event loop ─────────────────────────────────────────────────
 
     async fn run_loop(&mut self) -> Result<()> {
         // Resolve bot open_id at startup
-        self.bot_open_id = self.client.get_bot_info().await.ok();
-        log::info!("Lark bot open_id: {:?}", self.bot_open_id);
+        {
+            let mut guard = self.shared.lock().await;
+            guard.bot_open_id = guard.client.get_bot_info().await.ok();
+            log::info!("Lark bot open_id: {:?}", guard.bot_open_id);
+        }
 
         loop {
             if let Err(e) = self.connect_and_listen().await {
@@ -170,8 +178,13 @@ impl LarkChannel {
     }
 
     async fn connect_and_listen(&mut self) -> Result<()> {
-        // Get WS endpoint
-        let (ws_url, client_config) = self.client.get_ws_endpoint().await?;
+        let shared = self.shared.clone();
+
+        // Get WS endpoint using a temporary lock
+        let (ws_url, client_config) = {
+            let guard = shared.lock().await;
+            guard.client.get_ws_endpoint().await?
+        };
         let ping_interval = Duration::from_secs(client_config.ping_interval.unwrap_or(120).max(10));
 
         log::info!("Lark connecting to WS endpoint...");
@@ -180,8 +193,6 @@ impl LarkChannel {
 
         let mut seq: u64 = 0;
         let mut last_recv = Instant::now();
-        let mut hb_interval = tokio::time::interval(ping_interval);
-        hb_interval.tick().await; // consume immediate tick
 
         // Send initial ping
         seq = seq.wrapping_add(1);
@@ -200,9 +211,28 @@ impl LarkChannel {
             .send(WsMessage::Binary(initial_ping.encode_to_vec().into()))
             .await?;
 
+        // ── Heartbeat: independent timer task ─────────────────────────
+        let ping_ms = ping_interval.as_millis() as u64;
+        let grace_ms = (ping_ms / 10).min(5000);
+        let effective_interval = ping_ms + grace_ms;
+        let (hb_tx, mut hb_rx) = mpsc::channel::<()>(1);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_millis(effective_interval));
+            interval.tick().await;
+            loop {
+                interval.tick().await;
+                if hb_tx.send(()).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        // ── Shared state for spawned tasks ────────────────────────────
+        let mention_only = self.mention_only;
+
         loop {
             tokio::select! {
-                _ = hb_interval.tick() => {
+                _ = hb_rx.recv() => {
                     seq = seq.wrapping_add(1);
                     let ping = PbFrame {
                         seq_id: seq, log_id: 0, service: 0, method: 0,
@@ -224,13 +254,18 @@ impl LarkChannel {
                                     last_recv = Instant::now();
                                     if frame.method == 0 {
                                         // CONTROL frame (ping/pong)
-                                        if frame.header_value("type") == "pong" {
-                                            // Pong received, server is alive
-                                        }
                                     } else if frame.method == 1 {
                                         // DATA frame → event
                                         if let Some(payload_bytes) = &frame.payload {
-                                            self.handle_event(payload_bytes).await?;
+                                            let shared = shared.clone();
+                                            let payload_bytes = payload_bytes.clone();
+                                            tokio::task::spawn_local(async move {
+                                                if let Err(e) = handle_event(
+                                                    shared, &payload_bytes, mention_only,
+                                                ).await {
+                                                    log::error!("Lark handle_event error: {e}");
+                                                }
+                                            });
                                         }
                                     }
                                 }
@@ -247,7 +282,7 @@ impl LarkChannel {
                             let _ = write.send(WsMessage::Pong(data)).await;
                         }
                         Some(Err(e)) => anyhow::bail!("Lark WS error: {e}"),
-                        None => break,
+                        None => { log::warn!("Lark WS stream ended; reconnecting"); break; }
                         _ => {}
                     }
 
@@ -262,243 +297,179 @@ impl LarkChannel {
 
         Ok(())
     }
-
-    /// Handle a received event payload from the WS DATA frame.
-    async fn handle_event(&mut self, payload_bytes: &[u8]) -> Result<()> {
-        // The payload is a JSON object with event data
-        let event_val: Value = serde_json::from_slice(payload_bytes)?;
-
-        // Extract event type from the payload
-        let event_type = event_val
-            .get("header")
-            .and_then(|h| h.get("event_type"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
-        // Extract event body
-        let Some(event) = event_val.get("event") else {
-            return Ok(());
-        };
-
-        match event_type {
-            "im.message.receive_v1" => {
-                let payload: EventPayload = serde_json::from_value(event.clone())?;
-                self.handle_message_event(payload).await?;
-            }
-            _ => {
-                // Ignore other event types
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Handle an im.message.receive_v1 event.
-    async fn handle_message_event(&mut self, event: EventPayload) -> Result<()> {
-        // Skip messages from bots (including ourselves)
-        if event.sender.sender_type.open_id().is_none() {
-            return Ok(());
-        }
-
-        let sender_open_id = match event.sender.sender_type.open_id() {
-            Some(id) => id.to_string(),
-            None => return Ok(()),
-        };
-
-        // Skip our own messages
-        if Some(&sender_open_id) == self.bot_open_id.as_ref() {
-            return Ok(());
-        }
-
-        let msg = &event.message;
-        let chat_id = &msg.chat_id;
-        let message_id = &msg.message_id;
-
-        // Allowlist check
-        if !self.core.is_allowed(&sender_open_id) {
-            log::info!("Lark unauthorized user: {sender_open_id}");
-            return Ok(());
-        }
-
-        // Parse content
-        let content = Self::parse_content(msg);
-        if content.trim().is_empty() {
-            return Ok(());
-        }
-
-        // Mention-only check for group chats
-        if msg.chat_type == "group"
-            && self.mention_only
-            && let Some(ref bot_id) = self.bot_open_id
-            && !Self::is_mentioned(&content, bot_id)
-        {
-            return Ok(());
-        }
-
-        // Clean @mention from content
-        let clean_content = if let Some(ref bot_id) = self.bot_open_id {
-            let mention = format!("@_user_{}", bot_id);
-            content.replace(&mention, "").trim().to_string()
-        } else {
-            content.trim().to_string()
-        };
-
-        if clean_content.is_empty() {
-            return Ok(());
-        }
-
-        log::info!("Lark Message from {sender_open_id} in {chat_id}: {clean_content}");
-
-        // Add ack reaction (best-effort)
-        let _ = self.client.add_reaction(message_id, "OK").await;
-
-        // Shell command
-        if let Some(cmd) = clean_content.strip_prefix('!') {
-            let cmd = cmd.trim();
-            if !cmd.is_empty() {
-                return self.handle_shell_command(chat_id, message_id, cmd).await;
-            }
-        }
-
-        // Model selection state
-        if let Some(state) = self.core.model_selection_states.get(chat_id).cloned() {
-            return self
-                .handle_model_selection(chat_id, message_id, &state, &clean_content)
-                .await;
-        }
-
-        // Parse command
-        if let Some(command) = parse_command(&clean_content) {
-            if command.name == "model" {
-                model_selection::start_model_selection(self, chat_id).await?;
-                return Ok(());
-            }
-
-            let mut active_model = self.core.resolve_chat_model(&format!("lark:{chat_id}"))?;
-            let chat_key = format!("lark:{chat_id}");
-            let mut conversation = self
-                .core
-                .load_or_create_conversation(&chat_key, &active_model)?;
-            self.core
-                .load_system_prompt(&conversation, &mut active_model);
-            self.core
-                .mode_manager
-                .restore_from_messages(&chat_key, &conversation.messages);
-
-            let mut sender = LarkSender {
-                client: &self.client,
-            };
-            let handled = self
-                .core
-                .handle_command(
-                    &mut sender,
-                    chat_id,
-                    Some(message_id),
-                    &chat_key,
-                    &mut conversation,
-                    &mut active_model,
-                    command,
-                )
-                .await?;
-
-            if handled {
-                return Ok(());
-            }
-        }
-
-        // Regular message → run agent
-        let mut active_model = self.core.resolve_chat_model(&format!("lark:{chat_id}"))?;
-        let chat_key = format!("lark:{chat_id}");
-        let mut conversation = self
-            .core
-            .load_or_create_conversation(&chat_key, &active_model)?;
-        self.core
-            .load_system_prompt(&conversation, &mut active_model);
-        self.core
-            .mode_manager
-            .restore_from_messages(&chat_key, &conversation.messages);
-        self.core
-            .persist_user_message(&mut conversation, &chat_key, &clean_content)?;
-
-        let mut sender = LarkSender {
-            client: &self.client,
-        };
-
-        if let Err(error) = self
-            .core
-            .run_agent_loop_simple(
-                &mut sender,
-                chat_id,
-                Some(message_id),
-                &chat_key,
-                &mut conversation,
-                &active_model,
-            )
-            .await
-        {
-            let error_text = format!("Gateway error: {error}");
-            let error_message = Message::new(MessageRole::Error, error_text.clone());
-            self.core
-                .store
-                .append_message(conversation.session_id, &error_message)?;
-            let _ = self.client.send_text_message(chat_id, &error_text).await;
-        }
-
-        Ok(())
-    }
-
-    async fn handle_shell_command(
-        &mut self,
-        chat_id: &str,
-        msg_id: &str,
-        command: &str,
-    ) -> Result<()> {
-        let chat_key = format!("lark:{chat_id}");
-        let mut sender = LarkSender {
-            client: &self.client,
-        };
-        self.core
-            .handle_shell_command(&mut sender, chat_id, Some(msg_id), command, &chat_key)
-            .await
-    }
-
-    async fn handle_model_selection(
-        &mut self,
-        chat_id: &str,
-        _msg_id: &str,
-        state: &ModelSelectionState,
-        content: &str,
-    ) -> Result<()> {
-        let id = chat_id.to_string();
-        model_selection::handle_step(self, &id, state, content).await
-    }
-
-    /// Send a message choosing between text and interactive card based on length.
-    async fn send_message_adaptive(&mut self, recipient: &str, content: &str) -> Result<()> {
-        if content.len() <= LARK_TEXT_MAX_LENGTH {
-            self.client.send_text_message(recipient, content).await?;
-        } else {
-            self.client.send_card_message(recipient, content).await?;
-        }
-        Ok(())
-    }
 }
 
-// ── Lark MessageSender ───────────────────────────────────────────────────────
+// ── Background event handler ───────────────────────────────────────────
 
-struct LarkSender<'a> {
-    client: &'a LarkClient,
+async fn handle_event(
+    shared: Arc<Mutex<SharedState>>,
+    payload_bytes: &[u8],
+    mention_only: bool,
+) -> Result<()> {
+    let event_val: Value = serde_json::from_slice(payload_bytes)?;
+    let event_type = event_val
+        .get("header")
+        .and_then(|h| h.get("event_type"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let Some(event) = event_val.get("event") else {
+        return Ok(());
+    };
+
+    if event_type != "im.message.receive_v1" {
+        return Ok(());
+    }
+
+    let payload: EventPayload = serde_json::from_value(event.clone())?;
+
+    // Skip messages from bots
+    if payload.sender.sender_type.open_id().is_none() {
+        return Ok(());
+    }
+    let sender_open_id = match payload.sender.sender_type.open_id() {
+        Some(id) => id.to_string(),
+        None => return Ok(()),
+    };
+
+    // ── Lock shared state ─────────────────────────────────────────────
+    let mut guard = shared.lock().await;
+
+    // Skip our own messages
+    if Some(&sender_open_id) == guard.bot_open_id.as_ref() {
+        return Ok(());
+    }
+
+    let msg = &payload.message;
+    let chat_id = &msg.chat_id;
+    let message_id = &msg.message_id;
+
+    // Allowlist check
+    if !guard.core.is_allowed(&sender_open_id) {
+        log::info!("Lark unauthorized user: {sender_open_id}");
+        return Ok(());
+    }
+
+    let content = LarkChannel::parse_content(msg);
+    if content.trim().is_empty() {
+        return Ok(());
+    }
+
+    // Mention-only check for group chats
+    if msg.chat_type == "group"
+        && mention_only
+        && let Some(ref bot_id) = guard.bot_open_id
+        && !LarkChannel::is_mentioned(&content, bot_id)
+    {
+        return Ok(());
+    }
+
+    // Clean @mention
+    let clean_content = if let Some(ref bot_id) = guard.bot_open_id {
+        let mention = format!("@_user_{}", bot_id);
+        content.replace(&mention, "").trim().to_string()
+    } else {
+        content.trim().to_string()
+    };
+    if clean_content.is_empty() {
+        return Ok(());
+    }
+
+    log::info!("Lark Message from {sender_open_id} in {chat_id}: {clean_content}");
+
+    // Add ack reaction
+    let _ = guard.client.add_reaction(message_id, "OK").await;
+
+    // Shell command
+    if let Some(cmd) = clean_content.strip_prefix('!') {
+        let cmd = cmd.trim();
+        if !cmd.is_empty() {
+            let chat_key = format!("lark:{chat_id}");
+            let mut sender = LarkSender { client: guard.client.clone() };
+            return guard.core
+                .handle_shell_command(&mut sender, chat_id, Some(message_id), cmd, &chat_key)
+                .await;
+        }
+    }
+
+    // Model selection state (drop lock, run via snapshot IO)
+    let model_state = guard.core.model_selection_states.get(chat_id).cloned();
+    if let Some(state) = model_state {
+        drop(guard);
+        let mut io = LarkModelSelectionIO::new(&shared).await;
+        model_selection::handle_step(&mut io, chat_id, &state, &clean_content).await?;
+        io.finalize().await;
+        return Ok(());
+    }
+
+    // Parse command
+    if let Some(command) = parse_command(&clean_content) {
+        if command.name == "model" {
+            drop(guard);
+            let mut io = LarkModelSelectionIO::new(&shared).await;
+            model_selection::start_model_selection(&mut io, chat_id).await?;
+            io.finalize().await;
+            return Ok(());
+        }
+
+        let chat_key = format!("lark:{chat_id}");
+        let mut active_model = guard.core.resolve_chat_model(&chat_key)?;
+        let mut conversation = guard.core.load_or_create_conversation(&chat_key, &active_model)?;
+        guard.core.load_system_prompt(&conversation, &mut active_model);
+        guard.core.mode_manager.restore_from_messages(&chat_key, &conversation.messages);
+
+        let mut sender = LarkSender { client: guard.client.clone() };
+        let handled = guard.core
+            .handle_command(
+                &mut sender, chat_id, Some(message_id), &chat_key,
+                &mut conversation, &mut active_model, command,
+            )
+            .await?;
+        if handled {
+            return Ok(());
+        }
+    }
+
+    // Regular message → run agent
+    let chat_key = format!("lark:{chat_id}");
+    let mut active_model = guard.core.resolve_chat_model(&chat_key)?;
+    let mut conversation = guard.core.load_or_create_conversation(&chat_key, &active_model)?;
+    guard.core.load_system_prompt(&conversation, &mut active_model);
+    guard.core.mode_manager.restore_from_messages(&chat_key, &conversation.messages);
+    guard.core.persist_user_message(&mut conversation, &chat_key, &clean_content)?;
+
+    let mut sender = LarkSender { client: guard.client.clone() };
+
+    if let Err(error) = guard.core
+        .run_agent_loop_simple(
+            &mut sender, chat_id, Some(message_id),
+            &chat_key, &mut conversation, &active_model,
+        )
+        .await
+    {
+        let error_text = format!("Gateway error: {error}");
+        let error_message = Message::new(MessageRole::Error, error_text.clone());
+        let _ = guard.core.store.append_message(conversation.session_id, &error_message);
+        let _ = LarkChannel::send_message_adaptive(&guard.client, chat_id, &error_text).await;
+    }
+
+    Ok(())
+}
+
+// ── LarkSender (owned) ─────────────────────────────────────────────────
+
+struct LarkSender {
+    client: LarkClient,
 }
 
 #[async_trait]
-impl MessageSender for LarkSender<'_> {
+impl MessageSender for LarkSender {
     async fn send_message(
         &mut self,
         recipient: &str,
         text: &str,
         _reply_to: Option<&str>,
     ) -> Result<()> {
-        // Short messages use text, long messages use interactive card
         if text.len() <= LARK_TEXT_MAX_LENGTH {
             self.client.send_text_message(recipient, text).await?;
         } else {
@@ -512,87 +483,127 @@ impl MessageSender for LarkSender<'_> {
     }
 
     async fn send_draft(&mut self, recipient: &str, text: &str) -> Result<Option<String>> {
-        let msg_id = self.client.send_text_message(recipient, text).await?;
-        Ok(Some(msg_id))
+        self.client.send_text_message(recipient, text).await.map(Some)
     }
 
     async fn update_draft(&mut self, _recipient: &str, _msg_id: &str, _text: &str) -> Result<()> {
-        // Lark does not support editing messages via the API.
-        // We re-send instead (the draft is replaced with a new message).
         Ok(())
     }
 
     async fn finalize_draft(&mut self, recipient: &str, _msg_id: &str, text: &str) -> Result<()> {
-        // Send the final response (draft editing is not supported, send fresh)
         self.send_message(recipient, text, None).await
     }
 
     async fn cancel_draft(&mut self, _recipient: &str, _msg_id: &str) -> Result<()> {
-        // Cannot delete messages via Lark API; just ignore
         Ok(())
     }
 }
 
-// ── ModelSelectionIO for LarkChannel ─────────────────────────────────────────
+// ── LarkModelSelectionIO (snapshot-based) ──────────────────────────────
 
-#[async_trait]
-impl ModelSelectionIO for LarkChannel {
-    type Id = String;
+struct LarkModelSelectionIO {
+    shared: Arc<Mutex<SharedState>>,
+    states: std::collections::HashMap<String, ModelSelectionState>,
+    config: AppConfig,
+    config_modified: bool,
+}
 
-    async fn send_message(&mut self, id: &String, text: &str) -> Result<()> {
-        self.send_message_adaptive(id, text).await
-    }
-
-    fn get_state(&self, id: &String) -> Option<ModelSelectionState> {
-        self.core.model_selection_states.get(id).cloned()
-    }
-
-    fn set_state(&mut self, id: String, state: ModelSelectionState) {
-        self.core.model_selection_states.insert(id, state);
-    }
-
-    fn remove_state(&mut self, id: &String) {
-        self.core.model_selection_states.remove(id);
+impl LarkModelSelectionIO {
+    async fn new(shared: &Arc<Mutex<SharedState>>) -> Self {
+        let guard = shared.lock().await;
+        Self {
+            shared: shared.clone(),
+            states: guard.core.model_selection_states.clone(),
+            config: guard.core.config.clone(),
+            config_modified: false,
+        }
     }
 
-    fn chat_key(&self, id: &String) -> String {
-        format!("{}:{}", self.core.platform_name, id)
-    }
-
-    fn platform(&self) -> &'static str {
-        self.core.platform_name
-    }
-
-    fn config(&self) -> &AppConfig {
-        &self.core.config
-    }
-    fn config_mut(&mut self) -> &mut AppConfig {
-        &mut self.core.config
-    }
-    fn config_paths(&self) -> &ConfigPaths {
-        &self.core.config_paths
-    }
-    fn auth(&self) -> &AuthStore {
-        &self.core.auth
-    }
-    fn store(&self) -> &SessionStore {
-        &self.core.store
-    }
-
-    fn get_available_providers(&self) -> Vec<(String, String)> {
-        self.core.get_available_providers()
-    }
-
-    fn get_models_for_provider(&self, provider_id: &str) -> Vec<(String, String)> {
-        self.core.get_models_for_provider(provider_id)
-    }
-
-    fn resolve_chat_model(&self, chat_key: &str) -> Result<ActiveModel> {
-        self.core.resolve_chat_model(chat_key)
+    async fn finalize(mut self) {
+        let mut guard = self.shared.lock().await;
+        std::mem::swap(&mut guard.core.model_selection_states, &mut self.states);
+        if self.config_modified {
+            guard.core.config = self.config;
+        }
     }
 }
 
-// ── Channel trait implementation ────────────────────────────────────────────
+#[async_trait]
+impl ModelSelectionIO for LarkModelSelectionIO {
+    type Id = String;
+
+    async fn send_message(&mut self, id: &String, text: &str) -> Result<()> {
+        let guard = self.shared.lock().await;
+        LarkChannel::send_message_adaptive(&guard.client, id, text).await
+    }
+
+    fn get_state(&self, id: &String) -> Option<ModelSelectionState> {
+        self.states.get(id).cloned()
+    }
+
+    fn set_state(&mut self, id: String, state: ModelSelectionState) {
+        self.states.insert(id, state);
+    }
+
+    fn remove_state(&mut self, id: &String) {
+        self.states.remove(id);
+    }
+
+    fn chat_key(&self, id: &String) -> String {
+        format!("{}:{}", GATEWAY_PLATFORM_LARK, id)
+    }
+
+    fn platform(&self) -> &'static str {
+        GATEWAY_PLATFORM_LARK
+    }
+
+    fn config(&self) -> &AppConfig {
+        &self.config
+    }
+
+    fn config_mut(&mut self) -> &mut AppConfig {
+        self.config_modified = true;
+        &mut self.config
+    }
+
+    fn config_paths(&self) -> &ConfigPaths {
+        panic!("LarkModelSelectionIO::config_paths not available in snapshot mode")
+    }
+
+    fn auth(&self) -> &AuthStore {
+        panic!("LarkModelSelectionIO::auth not available in snapshot mode")
+    }
+
+    fn store(&self) -> &SessionStore {
+        panic!("LarkModelSelectionIO::store not available in snapshot mode")
+    }
+
+    fn get_available_providers(&self) -> Vec<(String, String)> {
+        self.shared
+            .try_lock()
+            .ok()
+            .map(|g| g.core.get_available_providers())
+            .unwrap_or_default()
+    }
+
+    fn get_models_for_provider(&self, provider_id: &str) -> Vec<(String, String)> {
+        self.shared
+            .try_lock()
+            .ok()
+            .map(|g| g.core.get_models_for_provider(provider_id))
+            .unwrap_or_default()
+    }
+
+    fn resolve_chat_model(&self, chat_key: &str) -> Result<ActiveModel> {
+        self.shared
+            .try_lock()
+            .map_err(|_| anyhow::anyhow!("failed to lock for resolve_chat_model"))?
+            .core
+            .resolve_chat_model(chat_key)
+    }
+}
+
+// ── Channel trait implementation ────────────────────────────────────────
 
 #[async_trait]
 impl Channel for LarkChannel {
@@ -601,7 +612,7 @@ impl Channel for LarkChannel {
     }
 
     fn store(&self) -> Option<&SessionStore> {
-        Some(&self.core.store)
+        None
     }
 
     fn run(&mut self) -> Pin<Box<dyn Future<Output = Result<()>> + '_>> {
@@ -612,44 +623,9 @@ impl Channel for LarkChannel {
     }
 
     fn restore_sessions(&mut self, store: SessionStore) -> Result<usize> {
-        self.core.restore_sessions(store)
-    }
-
-    fn supports_draft_updates(&self) -> bool {
-        false
-    }
-
-    async fn send_draft(
-        &mut self,
-        message: &crate::channel::SendMessage,
-    ) -> Result<Option<String>> {
-        // Lark doesn't support editing, so send as regular message
-        let msg_id = self
-            .client
-            .send_text_message(&message.recipient, &message.content)
-            .await?;
-        Ok(Some(msg_id))
-    }
-
-    async fn update_draft(
-        &mut self,
-        _recipient: &str,
-        _message_id: &str,
-        _text: &str,
-    ) -> Result<()> {
-        Ok(())
-    }
-
-    async fn finalize_draft(
-        &mut self,
-        recipient: &str,
-        _message_id: &str,
-        text: &str,
-    ) -> Result<()> {
-        self.send_message_adaptive(recipient, text).await
-    }
-
-    async fn cancel_draft(&mut self, _recipient: &str, _message_id: &str) -> Result<()> {
-        Ok(())
+        let guard = self.shared.try_lock().map_err(|_| {
+            anyhow::anyhow!("LarkChannel::restore_sessions: failed to lock shared state")
+        })?;
+        guard.core.restore_sessions(store)
     }
 }

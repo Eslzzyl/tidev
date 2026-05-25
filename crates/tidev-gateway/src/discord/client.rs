@@ -3,11 +3,13 @@
 use anyhow::{Context, Result, bail};
 use reqwest::Client;
 use serde_json::json;
+use tokio::time::Duration;
 
 /// Maximum allowed Discord message length.
 pub const DISCORD_MAX_MESSAGE_LENGTH: usize = 2000;
 
 /// Discord REST API client.
+#[derive(Clone)]
 pub struct DiscordClient {
     client: Client,
     bot_token: String,
@@ -17,7 +19,11 @@ impl DiscordClient {
     /// Create a new Discord client with the given bot token.
     pub fn new(bot_token: String) -> Self {
         Self {
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(Duration::from_secs(30))
+                .connect_timeout(Duration::from_secs(10))
+                .build()
+                .expect("DiscordClient: failed to build reqwest Client"),
             bot_token,
         }
     }
