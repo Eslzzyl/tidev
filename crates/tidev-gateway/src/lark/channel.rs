@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
+use tokio::sync::broadcast;
 use tokio::time::{Duration, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 
@@ -54,6 +55,7 @@ pub struct LarkChannel {
     pub app_id: String,
     pub mention_only: bool,
     pub use_feishu: bool,
+    cron_rx: Option<broadcast::Receiver<tidev_scheduler::CronDeliveryMessage>>,
 }
 
 impl LarkChannel {
@@ -72,6 +74,7 @@ impl LarkChannel {
         mention_only: bool,
         use_feishu: bool,
         paths: &ConfigPaths,
+        cron_rx: Option<broadcast::Receiver<tidev_scheduler::CronDeliveryMessage>>,
     ) -> Self {
         let core = ChannelCore::new(
             GATEWAY_PLATFORM_LARK,
@@ -94,6 +97,7 @@ impl LarkChannel {
             app_id,
             mention_only,
             use_feishu,
+            cron_rx,
         }
     }
 
@@ -293,9 +297,49 @@ impl LarkChannel {
                     }
                 }
             }
+
+            // Drain any pending cron delivery messages.
+            self.drain_cron_messages().await;
         }
 
         Ok(())
+    }
+
+    /// Drain any pending cron job delivery messages and send them.
+    async fn drain_cron_messages(&mut self) {
+        use tokio::sync::broadcast::error::TryRecvError;
+
+        let Some(ref mut rx) = self.cron_rx else { return };
+        loop {
+            match rx.try_recv() {
+                Ok(msg) => {
+                    if msg.delivery.channel.as_deref() != Some("lark") {
+                        continue;
+                    }
+                    let Some(to) = msg.delivery.to.as_ref() else { continue };
+                    log::info!(
+                        "Delivering cron job '{}' result to lark {to}",
+                        msg.job_name
+                    );
+                    let shared = self.shared.clone();
+                    let output = msg.output.clone();
+                    let to = to.clone();
+                    tokio::task::spawn_local(async move {
+                        let guard = shared.lock().await;
+                        let _ = guard.client.send_text_message(&to, &output).await;
+                    });
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Closed) => {
+                    self.cron_rx = None;
+                    break;
+                }
+                Err(TryRecvError::Lagged(n)) => {
+                    log::warn!("Cron delivery receiver lagged by {n} messages");
+                    continue;
+                }
+            }
+        }
     }
 }
 

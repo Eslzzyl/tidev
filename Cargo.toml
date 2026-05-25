@@ -9,8 +9,9 @@ members = [
     "crates/tidev-tui",
     "crates/tidev-web",
     "crates/tidev-gateway",
+    "crates/tidev-scheduler",
 ]
-default-members = [".", "crates/tidev-types", "crates/tidev-session", "crates/tidev-engine", "crates/tidev-tui", "crates/tidev-web", "crates/tidev-gateway"]
+default-members = [".", "crates/tidev-types", "crates/tidev-session", "crates/tidev-engine", "crates/tidev-tui", "crates/tidev-web", "crates/tidev-gateway", "crates/tidev-scheduler"]
 resolver = "2"
 
 [workspace.package]

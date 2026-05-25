@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use tokio::sync::broadcast;
 use tokio::time::{Duration, sleep};
 use tokio_util::sync::CancellationToken;
 
@@ -43,6 +44,8 @@ pub struct TelegramChannel {
     pub request_seq: u64,
     /// Telegram-specific balance selection state.
     balance_selection_states: HashMap<i64, BalanceSelectionState>,
+    /// Receiver for cron job delivery messages.
+    cron_rx: Option<broadcast::Receiver<tidev_scheduler::CronDeliveryMessage>>,
 }
 
 impl TelegramChannel {
@@ -59,6 +62,7 @@ impl TelegramChannel {
         poll_timeout_secs: u64,
         bot_token: String,
         paths: &ConfigPaths,
+        cron_rx: Option<broadcast::Receiver<tidev_scheduler::CronDeliveryMessage>>,
     ) -> Self {
         let core = ChannelCore::new(
             GATEWAY_PLATFORM_TELEGRAM,
@@ -79,6 +83,7 @@ impl TelegramChannel {
             offset: 0,
             request_seq: 0,
             balance_selection_states: HashMap::new(),
+            cron_rx,
         }
     }
 
@@ -136,6 +141,9 @@ impl TelegramChannel {
 
     async fn run_loop(&mut self) -> Result<()> {
         loop {
+            // Drain any pending cron delivery messages before polling.
+            self.drain_cron_messages().await;
+
             let updates = match self
                 .bot
                 .get_updates(self.offset, self.poll_timeout_secs)
@@ -177,6 +185,47 @@ impl TelegramChannel {
 
                 if let Err(error) = self.handle_message(message).await {
                     log::error!("Message handling failed: {error}");
+                }
+            }
+        }
+    }
+
+    /// Drain any pending cron job delivery messages and send them.
+    async fn drain_cron_messages(&mut self) {
+        use tokio::sync::broadcast::error::TryRecvError;
+
+        let Some(ref mut rx) = self.cron_rx else { return };
+        loop {
+            match rx.try_recv() {
+                Ok(msg) => {
+                    if msg.delivery.channel.as_deref() != Some("telegram") {
+                        continue;
+                    }
+                    let Some(to) = msg.delivery.to.as_ref() else { continue };
+                    let Ok(chat_id) = to.parse::<i64>() else {
+                        log::warn!("Cron delivery: invalid telegram chat_id: {to}");
+                        continue;
+                    };
+                    log::info!(
+                        "Delivering cron job '{}' result to telegram chat {chat_id}",
+                        msg.job_name
+                    );
+                    if let Err(e) = self
+                        .bot
+                        .send_message_html(chat_id, None, &msg.output, None)
+                        .await
+                    {
+                        log::error!("Failed to deliver cron message to telegram: {e}");
+                    }
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Closed) => {
+                    self.cron_rx = None;
+                    break;
+                }
+                Err(TryRecvError::Lagged(n)) => {
+                    log::warn!("Cron delivery receiver lagged by {n} messages");
+                    continue;
                 }
             }
         }

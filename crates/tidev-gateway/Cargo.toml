@@ -15,6 +15,7 @@ tidev-storage = { path = "../tidev-storage" }
 tidev-llm = { path = "../tidev-llm" }
 tidev-types = { path = "../tidev-types" }
 tidev-session = { path = "../tidev-session" }
+tidev-scheduler = { path = "../tidev-scheduler" }
 anyhow = "1.0.102"
 async-trait = "0.1"
 base64 = "0.22.1"

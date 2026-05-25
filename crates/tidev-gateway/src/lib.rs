@@ -116,6 +116,45 @@ async fn run_async() -> Result<()> {
     let instruction_prompt = compose_instruction_prompt(&workspace_root, &paths, &config);
     let db = Database::open(paths.default_database_path())?;
 
+    // ── Task scheduler setup ──────────────────────────────────────────────
+    let (delivery_bus, _cron_rx) = if config.gateway.scheduler.enabled {
+        let (bus, rx) = tidev_scheduler::delivery::DeliveryBus::new(256);
+
+        let cron_store = tidev_scheduler::store::CronStore::new(
+            db.write_conn(),
+            db.path(),
+            config.gateway.scheduler.max_tasks,
+            config.gateway.scheduler.max_run_history,
+        )?;
+
+        let scheduler_config = tidev_scheduler::scheduler::SchedulerConfig {
+            poll_secs: config.gateway.scheduler.poll_secs,
+            max_tasks: config.gateway.scheduler.max_tasks,
+            max_concurrent: config.gateway.scheduler.max_concurrent,
+            max_run_history: config.gateway.scheduler.max_run_history,
+        };
+
+        let scheduler = tidev_scheduler::scheduler::Scheduler::new(
+            cron_store,
+            scheduler_config,
+            Some(bus.clone()),
+            None,           // AgentRuntime will be wired up later
+            default_model.clone(),
+            workspace_root.clone(),
+        );
+
+        tokio::task::spawn_local(async move {
+            if let Err(e) = scheduler.run().await {
+                log::error!("Task scheduler failed: {e}");
+            }
+        });
+
+        log::info!("Task scheduler enabled");
+        (Some(bus), Some(rx))
+    } else {
+        (None, None)
+    };
+
     // Build orchestrator with enabled channels
     let mut orchestrator = ChannelOrchestrator::new();
 
@@ -160,6 +199,7 @@ async fn run_async() -> Result<()> {
             config.gateway.telegram.poll_timeout_secs.max(1),
             bot_token,
             &paths,
+            delivery_bus.as_ref().map(|b| b.subscribe()),
         );
 
         orchestrator.add(Box::new(channel));
@@ -206,6 +246,7 @@ async fn run_async() -> Result<()> {
             app_secret,
             config.gateway.qq.sandbox,
             &paths,
+            delivery_bus.as_ref().map(|b| b.subscribe()),
         );
 
         orchestrator.add(Box::new(channel));
@@ -252,6 +293,7 @@ async fn run_async() -> Result<()> {
             config.gateway.discord.channel_ids.clone(),
             config.gateway.discord.mention_only,
             &paths,
+            delivery_bus.as_ref().map(|b| b.subscribe()),
         );
 
         orchestrator.add(Box::new(channel));
@@ -302,6 +344,7 @@ async fn run_async() -> Result<()> {
             config.gateway.lark.mention_only,
             config.gateway.lark.use_feishu,
             &paths,
+            delivery_bus.as_ref().map(|b| b.subscribe()),
         );
 
         orchestrator.add(Box::new(channel));

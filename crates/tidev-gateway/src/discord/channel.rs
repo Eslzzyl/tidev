@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio::sync::broadcast;
 use tokio::time::{Duration, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 
@@ -57,6 +58,7 @@ pub struct DiscordChannel {
     pub channel_ids: Vec<String>,
     pub mention_only: bool,
     pub last_seq: Option<u32>,
+    cron_rx: Option<broadcast::Receiver<tidev_scheduler::CronDeliveryMessage>>,
 }
 
 impl DiscordChannel {
@@ -75,6 +77,7 @@ impl DiscordChannel {
         channel_ids: Vec<String>,
         mention_only: bool,
         paths: &ConfigPaths,
+        cron_rx: Option<broadcast::Receiver<tidev_scheduler::CronDeliveryMessage>>,
     ) -> Self {
         let bot_user_id = Self::extract_bot_user_id(&bot_token);
         let core = ChannelCore::new(
@@ -100,6 +103,7 @@ impl DiscordChannel {
             channel_ids,
             mention_only,
             last_seq: None,
+            cron_rx,
         }
     }
 
@@ -310,9 +314,49 @@ impl DiscordChannel {
                     }
                 }
             }
+
+            // Drain any pending cron delivery messages.
+            self.drain_cron_messages().await;
         }
 
         Ok(())
+    }
+
+    /// Drain any pending cron job delivery messages and send them.
+    async fn drain_cron_messages(&mut self) {
+        use tokio::sync::broadcast::error::TryRecvError;
+
+        let Some(ref mut rx) = self.cron_rx else { return };
+        loop {
+            match rx.try_recv() {
+                Ok(msg) => {
+                    if msg.delivery.channel.as_deref() != Some("discord") {
+                        continue;
+                    }
+                    let Some(to) = msg.delivery.to.as_ref() else { continue };
+                    log::info!(
+                        "Delivering cron job '{}' result to discord {to}",
+                        msg.job_name
+                    );
+                    let shared = self.shared.clone();
+                    let output = msg.output.clone();
+                    let to = to.clone();
+                    tokio::task::spawn_local(async move {
+                        let guard = shared.lock().await;
+                        let _ = guard.client.send_message(&to, &output).await;
+                    });
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Closed) => {
+                    self.cron_rx = None;
+                    break;
+                }
+                Err(TryRecvError::Lagged(n)) => {
+                    log::warn!("Cron delivery receiver lagged by {n} messages");
+                    continue;
+                }
+            }
+        }
     }
 }
 

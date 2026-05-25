@@ -106,6 +106,11 @@ impl Database {
         &self.path
     }
 
+    /// Return a clone of the shared write connection.
+    pub fn write_conn(&self) -> Arc<Mutex<Connection>> {
+        Arc::clone(&self.write_conn)
+    }
+
     /// Open a new read-only connection to the database.
     ///
     /// This is safe to call concurrently with the shared write connection

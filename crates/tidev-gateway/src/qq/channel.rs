@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
+use tokio::sync::broadcast;
 use tokio::time::{Duration, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 
@@ -71,6 +72,7 @@ pub struct QQChannel {
     shared: Arc<Mutex<SharedState>>,
     pub session_id: Option<String>,
     pub last_seq: Option<u32>,
+    cron_rx: Option<broadcast::Receiver<tidev_scheduler::CronDeliveryMessage>>,
 }
 
 impl QQChannel {
@@ -88,6 +90,7 @@ impl QQChannel {
         app_secret: String,
         sandbox: bool,
         paths: &ConfigPaths,
+        cron_rx: Option<broadcast::Receiver<tidev_scheduler::CronDeliveryMessage>>,
     ) -> Self {
         let core = ChannelCore::new(
             GATEWAY_PLATFORM_QQ,
@@ -109,6 +112,7 @@ impl QQChannel {
             })),
             session_id: None,
             last_seq: None,
+            cron_rx,
         }
     }
 
@@ -237,10 +241,11 @@ impl QQChannel {
                                                     if let Ok(ready) = serde_json::from_value::<ReadyData>(d) {
                                                         log::info!("QQ Ready: session_id={}", ready.session_id);
                                                         self.session_id = Some(ready.session_id);
-                                                    }
-                                                }
-                                            }
-                                            "AT_MESSAGE_CREATE" | "MESSAGE_CREATE" | "C2C_MESSAGE_CREATE" => {
+                }
+            }
+            // Drain any pending cron delivery messages.
+            self.drain_cron_messages().await;
+        }                                            "AT_MESSAGE_CREATE" | "MESSAGE_CREATE" | "C2C_MESSAGE_CREATE" => {
                                                 if let Some(data) = payload.d {
                                                     let shared = self.shared.clone();
                                                     let event_type = t.to_string();
@@ -294,6 +299,54 @@ impl QQChannel {
             }
         }
         Ok(())
+    }
+
+    /// Drain any pending cron job delivery messages and send them via QQ.
+    async fn drain_cron_messages(&mut self) {
+        use tokio::sync::broadcast::error::TryRecvError;
+
+        let Some(ref mut rx) = self.cron_rx else { return };
+        loop {
+            match rx.try_recv() {
+                Ok(msg) => {
+                    if msg.delivery.channel.as_deref() != Some("qq") {
+                        continue;
+                    }
+                    let Some(to) = msg.delivery.to.as_ref() else { continue };
+                    log::info!(
+                        "Delivering cron job '{}' result to QQ {to}",
+                        msg.job_name
+                    );
+                    let shared = self.shared.clone();
+                    // Send via QQ client under lock
+                    let output = msg.output.clone();
+                    let to = to.clone();
+                    tokio::task::spawn_local(async move {
+                        let guard = shared.lock().await;
+                        if to.starts_with("user:") {
+                            let _ = guard
+                                .client
+                                .send_c2c_message_markdown(&to.trim_start_matches("user:"), &output, None, 0)
+                                .await;
+                        } else {
+                            let _ = guard
+                                .client
+                                .send_message_markdown(&to, &output, None, 0)
+                                .await;
+                        }
+                    });
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Closed) => {
+                    self.cron_rx = None;
+                    break;
+                }
+                Err(TryRecvError::Lagged(n)) => {
+                    log::warn!("Cron delivery receiver lagged by {n} messages");
+                    continue;
+                }
+            }
+        }
     }
 }
 

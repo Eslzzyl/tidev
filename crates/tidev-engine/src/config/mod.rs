@@ -234,6 +234,9 @@ pub struct GatewayConfig {
     /// Defaults to "build".
     #[serde(default = "default_gateway_default_mode")]
     pub default_mode: String,
+    /// Task scheduler configuration (cron jobs, periodic tasks).
+    #[serde(default)]
+    pub scheduler: SchedulerConfig,
 }
 
 fn default_gateway_session_persistence() -> bool {
@@ -250,6 +253,166 @@ impl GatewayConfig {
         match self.default_mode.to_ascii_lowercase().as_str() {
             "plan" => SessionMode::Plan,
             _ => SessionMode::Build,
+        }
+    }
+}
+
+// ── SchedulerConfig ────────────────────────────────────────────────────────
+
+/// Task scheduler configuration (`[gateway.scheduler]`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SchedulerConfig {
+    /// Enable the task scheduler.
+    #[serde(default = "default_scheduler_enabled")]
+    pub enabled: bool,
+    /// Polling interval in seconds (minimum 5).
+    #[serde(default = "default_scheduler_poll_secs")]
+    pub poll_secs: u64,
+    /// Maximum number of jobs to fetch per poll cycle.
+    #[serde(default = "default_scheduler_max_tasks")]
+    pub max_tasks: usize,
+    /// Maximum number of jobs to execute concurrently.
+    #[serde(default = "default_scheduler_max_concurrent")]
+    pub max_concurrent: usize,
+    /// Maximum number of run history entries to retain per job.
+    #[serde(default = "default_scheduler_max_run_history")]
+    pub max_run_history: usize,
+    /// Declarative cron job definitions (keyed by alias).
+    #[serde(default)]
+    pub jobs: std::collections::HashMap<String, CronJobDecl>,
+}
+
+fn default_scheduler_enabled() -> bool { false }
+fn default_scheduler_poll_secs() -> u64 { 15 }
+fn default_scheduler_max_tasks() -> usize { 10 }
+fn default_scheduler_max_concurrent() -> usize { 3 }
+fn default_scheduler_max_run_history() -> usize { 100 }
+
+impl Default for SchedulerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_scheduler_enabled(),
+            poll_secs: default_scheduler_poll_secs(),
+            max_tasks: default_scheduler_max_tasks(),
+            max_concurrent: default_scheduler_max_concurrent(),
+            max_run_history: default_scheduler_max_run_history(),
+            jobs: std::collections::HashMap::new(),
+        }
+    }
+}
+
+/// A declarative cron job definition (`[gateway.scheduler.jobs.<alias>]`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CronJobDecl {
+    /// Human-readable name.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Job type: "shell" (default) or "agent".
+    #[serde(default = "default_cron_job_type")]
+    pub job_type: String,
+    /// Schedule for the job.
+    #[serde(default)]
+    pub schedule: CronScheduleDecl,
+    /// Shell command to run (required when `job_type = "shell"`).
+    #[serde(default)]
+    pub command: Option<String>,
+    /// Agent prompt (required when `job_type = "agent"`).
+    #[serde(default)]
+    pub prompt: Option<String>,
+    /// Whether the job is enabled.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Model override for agent jobs.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Allowlist of tool names for agent jobs.
+    #[serde(default)]
+    pub allowed_tools: Option<Vec<String>>,
+    /// Whether to inject memory context for agent jobs.
+    #[serde(default = "default_true")]
+    pub uses_memory: bool,
+    /// Session target: "isolated" (default) or "main".
+    #[serde(default)]
+    pub session_target: Option<String>,
+    /// Delivery configuration (channel to send results to).
+    #[serde(default)]
+    pub delivery: Option<DeliveryConfigDecl>,
+}
+
+fn default_cron_job_type() -> String { "shell".to_string() }
+
+impl Default for CronJobDecl {
+    fn default() -> Self {
+        Self {
+            name: None,
+            job_type: default_cron_job_type(),
+            schedule: CronScheduleDecl::default(),
+            command: None,
+            prompt: None,
+            enabled: true,
+            model: None,
+            allowed_tools: None,
+            uses_memory: true,
+            session_target: None,
+            delivery: None,
+        }
+    }
+}
+
+/// Schedule variants for declarative cron jobs.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum CronScheduleDecl {
+    Cron {
+        expr: String,
+        #[serde(default)]
+        tz: Option<String>,
+    },
+    At {
+        at: String,
+    },
+    Every {
+        every_ms: u64,
+    },
+}
+
+impl Default for CronScheduleDecl {
+    fn default() -> Self {
+        Self::Cron {
+            expr: "0 * * * *".into(),
+            tz: None,
+        }
+    }
+}
+
+/// Delivery configuration for declarative cron jobs.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DeliveryConfigDecl {
+    /// Delivery mode: "announce" or "none".
+    #[serde(default)]
+    pub mode: String,
+    /// Target channel type: "telegram", "qq", "discord", "lark".
+    #[serde(default)]
+    pub channel: Option<String>,
+    /// Target recipient ID.
+    #[serde(default)]
+    pub to: Option<String>,
+    /// Optional thread/conversation identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
+    /// Best-effort delivery.
+    #[serde(default = "default_true")]
+    pub best_effort: bool,
+}
+
+impl Default for DeliveryConfigDecl {
+    fn default() -> Self {
+        Self {
+            mode: "none".to_string(),
+            channel: None,
+            to: None,
+            thread_id: None,
+            best_effort: true,
         }
     }
 }
