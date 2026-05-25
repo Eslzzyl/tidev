@@ -37,7 +37,6 @@ use super::types::{
 };
 
 pub const GATEWAY_PLATFORM_DISCORD: &str = "discord";
-const DISCORD_DRAFT_EDIT_INTERVAL_MS: u64 = 1200;
 
 /// Random acknowledgement emoji reactions.
 const ACK_REACTIONS: &[&str] = &["👀", "✅", "👍", "👋", "🤔", "💭", "✨"];
@@ -132,22 +131,6 @@ impl DiscordChannel {
 
     fn random_ack_reaction() -> &'static str {
         ACK_REACTIONS[0]
-    }
-
-    fn channel_passes_filter(&self, guild_id: Option<&str>, channel_id: &str) -> bool {
-        if self.guild_ids.is_empty() && self.channel_ids.is_empty() {
-            return true;
-        }
-        if !self.guild_ids.is_empty() {
-            if let Some(gid) = guild_id {
-                if self.guild_ids.iter().any(|g| g == gid) {
-                    return true;
-                }
-            }
-            // If guild_ids is set but message has no guild, it's a DM — allow.
-            return guild_id.is_none();
-        }
-        self.channel_ids.iter().any(|c| c == channel_id)
     }
 
     // ── WebSocket event loop ─────────────────────────────────────────────────

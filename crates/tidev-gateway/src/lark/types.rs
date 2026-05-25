@@ -31,16 +31,6 @@ pub struct PbFrame {
     pub payload: Option<Vec<u8>>,
 }
 
-impl PbFrame {
-    pub fn header_value(&self, key: &str) -> &str {
-        self.headers
-            .iter()
-            .find(|h| h.key == key)
-            .map(|h| h.value.as_str())
-            .unwrap_or("")
-    }
-}
-
 // ── WS endpoint response ────────────────────────────────────────────────────
 
 /// Server-sent client config (parsed from pong payload).

@@ -5,9 +5,6 @@ use reqwest::Client;
 use serde_json::json;
 use tokio::time::Duration;
 
-/// Maximum allowed Discord message length.
-pub const DISCORD_MAX_MESSAGE_LENGTH: usize = 2000;
-
 /// Discord REST API client.
 #[derive(Clone)]
 pub struct DiscordClient {
