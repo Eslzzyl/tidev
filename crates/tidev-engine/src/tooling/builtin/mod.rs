@@ -39,6 +39,7 @@ pub mod file;
 pub mod memory;
 pub mod search;
 pub mod sensitive;
+pub mod sudo;
 pub mod task;
 pub mod todo;
 pub mod utils;

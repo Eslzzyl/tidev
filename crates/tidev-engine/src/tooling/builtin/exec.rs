@@ -158,7 +158,7 @@ fn run_shell_inner(
     session_id: Uuid,
 ) -> Result<BashExecutionResult> {
     // Try to get RTK rewritten command if RTK is enabled
-    let (actual_command, rtk_rewritten) = if rtk_enabled {
+    let (mut actual_command, rtk_rewritten) = if rtk_enabled {
         let result = rewrite_command(command);
         (result.command, result.rewritten)
     } else {
@@ -169,6 +169,26 @@ fn run_shell_inner(
     let sandbox_policy = sandbox_policy.unwrap_or(SandboxPolicy::DangerFullAccess);
     let use_sandbox = !matches!(sandbox_policy, SandboxPolicy::DangerFullAccess)
         && !matches!(sandbox_policy, SandboxPolicy::ExternalSandbox);
+
+    // ── Layer 1: Privilege escalation handling (sudo/doas/pkexec) ──────
+    // When sudo is detected in a non-sandboxed command, we:
+    // 1. Wrap the command so `sudo` becomes `sudo -A`, which uses
+    //    SUDO_ASKPASS instead of writing to /dev/tty directly.
+    // 2. Create a temporary askpass script that fails with a friendly
+    //    error message (no password prompt reaches the terminal).
+    let mut sudo_guard: Option<super::sudo::AskpassGuard> = None;
+    let _sudo_active = if !use_sandbox && super::sudo::has_privilege_escalation(&actual_command) {
+        let guard = super::sudo::create_askpass_script()?;
+        let wrapped = super::sudo::wrap_command(&actual_command, guard.path());
+        log::info!(
+            "sudo: privilege escalation detected, wrapping command with SUDO_ASKPASS"
+        );
+        sudo_guard = Some(guard);
+        actual_command = wrapped;
+        true
+    } else {
+        false
+    };
 
     let mut process = if use_sandbox {
         let spec = CommandSpec::shell(
@@ -238,21 +258,54 @@ fn run_shell_inner(
     } else {
         // No sandbox: direct execution (original behavior)
         if cfg!(target_os = "windows") {
-            std::process::Command::new("powershell")
-                .args(["-NoProfile", "-Command", &actual_command])
+            let mut cmd = std::process::Command::new("powershell");
+            cmd.args(["-NoProfile", "-Command", &actual_command])
                 .current_dir(workspace_root)
                 .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
+                .stderr(Stdio::piped());
+
+            // Inject SUDO_ASKPASS for privilege escalation handling
+            if let Some(ref guard) = sudo_guard {
+                cmd.env("SUDO_ASKPASS", guard.path());
+            }
+
+            cmd.spawn()
                 .with_context(|| format!("failed to run command '{actual_command}'"))?
         } else {
-            std::process::Command::new("sh")
-                .arg("-lc")
+            let mut cmd = std::process::Command::new("sh");
+            cmd.arg("-lc")
                 .arg(&actual_command)
                 .current_dir(workspace_root)
                 .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
+                .stderr(Stdio::piped());
+
+            // ── Layer 1: Inject SUDO_ASKPASS environment variable ──
+            // This tells sudo -A where to find the askpass helper.
+            if let Some(ref guard) = sudo_guard {
+                cmd.env("SUDO_ASKPASS", guard.path());
+            }
+
+            // ── Layer 2: Disconnect from controlling terminal ──
+            // When sudo is active, create a new session (setsid) so the
+            // child process has no controlling terminal. This means
+            // open("/dev/tty") will fail with ENXIO, providing defense
+            // in depth against terminal corruption even if sudo somehow
+            // bypasses the ASKPASS mechanism.
+            //
+            // This is done in pre_exec (after fork, before exec) so it
+            // only affects the child process.
+            #[cfg(target_os = "macos")]
+            if _sudo_active {
+                unsafe {
+                    cmd.pre_exec(move || {
+                        // Create a new session, detaching from controlling terminal
+                        libc::setsid();
+                        Ok(())
+                    });
+                }
+            }
+
+            cmd.spawn()
                 .with_context(|| format!("failed to run command '{actual_command}'"))?
         }
     };

@@ -85,10 +85,8 @@ bytes = "1.11.1"
 hex = "0.4.3"
 prost = { version = "0.14", default-features = false, features = ["derive"] }
 log = "0.4.29"
+tempfile = "3.27"
 tidev-types = { path = "../tidev-types" }
 tidev-session = { path = "../tidev-session" }
 tidev-llm = { path = "../tidev-llm" }
 tidev-storage = { path = "../tidev-storage" }
-
-[dev-dependencies]
-tempfile = "3.27"
