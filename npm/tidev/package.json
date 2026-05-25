@@ -1,7 +1,7 @@
 {
   "name": "tidev",
-  "version": "0.3.0",
-  "tidevBinaryVersion": "0.3.0",
+  "version": "0.5.0",
+  "tidevBinaryVersion": "0.5.0",
   "description": "Install and run tidev binary from GitHub release artifacts.",
   "author": "Eslzzyl",
   "license": "Apache-2.0",
