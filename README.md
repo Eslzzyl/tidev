@@ -93,21 +93,30 @@ I'd like to pronounce it as "tide-v", but "ti-dev" should also be fine.
 
 ---
 
-## Install from crates.io
+## Install
 
-1. Ensure [pnpm](https://pnpm.io) and Node.js are installed (required to build the web frontend).
-1. `cargo install tidev`
-1. Run `tidev` in your working directory.
+### Via npm (recommended)
 
-> **Note**: If pnpm is not available during installation, the web frontend is skipped and the WebUI (`tidev web`) will show a placeholder page. The terminal TUI and all other features work without pnpm.
+```bash
+npm install -g tidev
+```
 
-## Install from Source
+### GitHub Releases
 
-1. Prerequisites: Latest Rust stable toolchain, pnpm, and Node.js.
-1. Clone the repository and `cd tidev`.
-1. `cd web` and run `pnpm install` and then `pnpm build`.
-1. Run `cargo install --path .` in project root. The single binary will be generated at `~/.cargo/bin/tidev`.
-1. Run `tidev` in your working directory.
+Download the pre-built binary for your platform from the [latest release](https://github.com/Eslzzyl/tidev/releases/latest).
+
+### From source
+
+Requires Rust stable toolchain, [pnpm](https://pnpm.io), and Node.js.
+
+```bash
+git clone https://github.com/Eslzzyl/tidev.git
+cd tidev
+cd web && pnpm install && pnpm build && cd ..
+cargo install --path .
+```
+
+> **Note**: The `tidev` crate is no longer published on [crates.io](https://crates.io/crates/tidev). Use the methods above instead.
 
 ---
 
