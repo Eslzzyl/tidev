@@ -25,28 +25,43 @@ jobs:
       ref: ${{ steps.resolve.outputs.ref }}
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
       - name: Resolve tag & version
         id: resolve
-        shell: bash
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="v${{ inputs.version }}"
-            VERSION="${{ inputs.version }}"
-            git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
-            REF="${TAG}"
+            REF="v${{ inputs.version }}"
+            git fetch --force origin "refs/tags/${REF}:refs/tags/${REF}"
           else
-            TAG="${GITHUB_REF_NAME}"
-            VERSION="${GITHUB_REF_NAME#v}"
             REF="${GITHUB_REF_NAME}"
           fi
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${REF}" >> "$GITHUB_OUTPUT"
+          echo "version=${REF#v}" >> "$GITHUB_OUTPUT"
           echo "ref=${REF}" >> "$GITHUB_OUTPUT"
 
-  build:
+  web:
     needs: [resolve]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve.outputs.ref }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: latest
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm --dir web install --frozen-lockfile && pnpm --dir web build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: web-dist
+          path: web/dist/
+          retention-days: 1
+
+  build:
+    needs: [resolve, web]
     strategy:
       matrix:
         include:
@@ -74,23 +89,17 @@ jobs:
         with:
           target: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-cache
+      - uses: actions/download-artifact@v8
+        with:
+          name: web-dist
+          path: web/dist/
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libdbus-1-dev pkg-config
-      - name: Install pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: latest
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
-      - name: Build web frontend
-        run: pnpm --dir web install --frozen-lockfile && pnpm --dir web build
       - name: Build tidev binary
         run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Rename binary
