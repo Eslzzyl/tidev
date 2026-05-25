@@ -84,7 +84,14 @@ fn execute_remember(
     let title = arguments
         .get("title")
         .and_then(|v| v.as_str())
-        .unwrap_or(&content[..content.len().min(80)]);
+        .unwrap_or_else(|| {
+            let end = content
+                .char_indices()
+                .nth(80)
+                .map(|(i, _)| i)
+                .unwrap_or(content.len());
+            &content[..end]
+        });
 
     let tags: Vec<String> = arguments.get("tags").map(parse_tags).unwrap_or_default();
 

@@ -445,7 +445,14 @@ impl PatternMiningService {
             let title = content
                 .lines()
                 .next()
-                .unwrap_or(&content[..content.len().min(80)])
+                .unwrap_or_else(|| {
+                    let end = content
+                        .char_indices()
+                        .nth(80)
+                        .map(|(i, _)| i)
+                        .unwrap_or(content.len());
+                    &content[..end]
+                })
                 .to_string();
             if !entry.titles.contains(&title) {
                 entry.titles.push(title);
