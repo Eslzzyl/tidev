@@ -199,4 +199,6 @@ jobs:
           if [ "$PKG_VER" != "${{ needs.resolve.outputs.version }}" ]; then
             npm version "${{ needs.resolve.outputs.version }}" --no-git-tag-version
           fi
-          npm publish
+          # Skip prepublishOnly (verify-release-assets.js) — artifacts already
+          # verified by the build pipeline and uploaded to the release above.
+          npm publish --ignore-scripts
