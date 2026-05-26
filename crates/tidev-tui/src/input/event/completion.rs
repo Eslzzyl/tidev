@@ -329,8 +329,10 @@ impl App {
                                 }
                             }
                         } else {
+                            // If on welcome screen, create the session first
+                            self.ensure_goal_session()?;
                             let objective = args.join(" ");
-                            store.set_goal(session_id, &objective)?;
+                            self.store.set_goal(self.conversation.session_id, &objective)?;
                             self.last_notice = Some("Goal set.".to_string());
                         }
                     }

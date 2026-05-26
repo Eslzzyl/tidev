@@ -1733,6 +1733,50 @@ impl App {
             ));
     }
 
+    /// If we are on the welcome screen, create the session and switch to chat.
+    /// This is used by `/goal <objective>` so the user can set a goal before
+    /// sending any message.  Returns `true` if a session was just created.
+    fn ensure_goal_session(&mut self) -> Result<bool> {
+        if self.screen != Screen::Welcome {
+            return Ok(false);
+        }
+        let session_id = Uuid::new_v4();
+        self.conversation.session_id = session_id;
+        self.conversation.clear_context_state();
+        self.store.create_session(
+            session_id,
+            self.workspace_root.as_path(),
+            &self.active_model.provider_id,
+            &self.active_model.provider_display_name,
+            &self.active_model.model_id,
+            &self.active_model.display_name,
+            "Untitled session",
+        )?;
+        let static_prompt = self
+            .agent
+            .compose_static_system_prompt(&self.active_model.system_prompt);
+        self.active_model.system_prompt = static_prompt.clone();
+        if let Err(e) = self
+            .store
+            .update_session_system_prompt(session_id, &static_prompt)
+        {
+            log::warn!("failed to persist static system prompt: {}", e);
+        }
+        self.context_manager = ContextManager::new();
+        self.pending_tool_execution = None;
+        self.permission_dialog = None;
+        self.question_dialog = None;
+        self.fork_confirm_dialog = None;
+        self.running_tool_executions.clear();
+        self.workspace_boundary_approved.clear();
+        self.abort_confirmation_deadline = None;
+        self.active_request_id = self.active_request_id.wrapping_add(1);
+        self.screen = Screen::Chat;
+        self.command_palette.clear();
+        self.connect_dialog = None;
+        Ok(true)
+    }
+
     fn submit_prompt_now(
         &mut self,
         prompt: String,
