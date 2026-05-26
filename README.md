@@ -53,8 +53,6 @@ Significantly lower memory usage and binary size compared to OpenCode:
 
 ![welcome](https://github-imagebed.eslzzyl.eu.org/tidev/welcome.webp)
 ![chat](https://github-imagebed.eslzzyl.eu.org/tidev/chat.webp)
-![stat](https://github-imagebed.eslzzyl.eu.org/tidev/stat.webp)
-![models](https://github-imagebed.eslzzyl.eu.org/tidev/models.webp)
 
 ---
 
