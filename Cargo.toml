@@ -40,8 +40,8 @@ include = ["/src", "/README.md", "/LICENSE"]
 [dependencies]
 anyhow = "1.0.102"
 clap = { version = "4.6.1", features = ["derive"] }
-log = "0.4.29"
-rusqlite = { version = "0.39.0", features = ["bundled", "functions", "vtab"] }
+log = "0.4.30"
+rusqlite = { version = "0.40.0", features = ["bundled", "functions", "vtab"] }
 tokio = { version = "=1.52.3", features = [
     "rt-multi-thread",
     "macros",
