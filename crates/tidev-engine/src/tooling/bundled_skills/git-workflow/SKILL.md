@@ -9,10 +9,15 @@ Standard git operations for any project.
 
 ## Branching
 
-- **Feature branches**: `feat/<short-description>` or `<username>/<feature-name>`
-- **Bug fixes**: `fix/<issue-number>-<description>`
-- **Chores/refactoring**: `chore/<description>`
-- Base feature/fix branches off the default branch (`main`, `master`, `dev`)
+- **Never create a new branch for simple commits or pushes.** Always commit
+  directly to the current branch unless the user explicitly requests otherwise.
+- **PRs are the exception.** When the user asks to open a pull request, creating
+  a feature/fix branch is expected as part of the PR workflow.
+- Conventions when branching IS explicitly requested:
+  - **Feature branches**: `feat/<short-description>` or `<username>/<feature-name>`
+  - **Bug fixes**: `fix/<issue-number>-<description>`
+  - **Chores/refactoring**: `chore/<description>`
+  - Base feature/fix branches off the default branch (`main`, `master`, `dev`)
 
 ## Committing
 
