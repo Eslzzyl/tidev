@@ -38,19 +38,6 @@ impl<'a> RtOptions<'a> {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn line_ending(self, line_ending: textwrap::LineEnding) -> Self {
-        Self {
-            line_ending,
-            ..self
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn width(self, width: usize) -> Self {
-        Self { width, ..self }
-    }
-
     pub fn initial_indent(self, initial_indent: Line<'a>) -> Self {
         Self {
             initial_indent,
@@ -71,37 +58,10 @@ impl<'a> RtOptions<'a> {
             ..self
         }
     }
-
-    pub fn word_separator(self, word_separator: textwrap::WordSeparator) -> Self {
-        Self {
-            word_separator,
-            ..self
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn wrap_algorithm(self, wrap_algorithm: textwrap::WrapAlgorithm) -> Self {
-        Self {
-            wrap_algorithm,
-            ..self
-        }
-    }
-
-    pub fn word_splitter(self, word_splitter: textwrap::WordSplitter) -> Self {
-        Self {
-            word_splitter,
-            ..self
-        }
-    }
 }
 
 pub fn adaptive_wrap_line<'a>(line: &'a Line<'a>, base: RtOptions<'a>) -> Vec<Line<'a>> {
-    let selected = if line_contains_url_like(line) {
-        url_preserving_wrap_options(base)
-    } else {
-        base
-    };
-    word_wrap_line(line, selected)
+    word_wrap_line(line, base)
 }
 
 #[allow(private_bounds)]
@@ -261,201 +221,6 @@ fn line_display_width(line: &Line<'_>) -> usize {
         .iter()
         .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
         .sum()
-}
-
-fn line_contains_url_like(line: &Line<'_>) -> bool {
-    let text: String = line
-        .spans
-        .iter()
-        .map(|span| span.content.as_ref())
-        .collect();
-    text_contains_url_like(&text)
-}
-
-fn text_contains_url_like(text: &str) -> bool {
-    text.split_ascii_whitespace().any(is_url_like_token)
-}
-
-fn is_url_like_token(raw_token: &str) -> bool {
-    let token = trim_url_token(raw_token);
-    !token.is_empty() && (is_absolute_url_like(token) || is_bare_url_like(token))
-}
-
-fn trim_url_token(raw_token: &str) -> &str {
-    raw_token.trim_matches(|ch: char| {
-        matches!(
-            ch,
-            '(' | ')'
-                | '['
-                | ']'
-                | '{'
-                | '}'
-                | '<'
-                | '>'
-                | ','
-                | '.'
-                | ';'
-                | ':'
-                | '!'
-                | '?'
-                | '\''
-                | '"'
-        )
-    })
-}
-
-fn is_absolute_url_like(token: &str) -> bool {
-    if !token.contains("://") {
-        return false;
-    }
-
-    if let Ok(url) = url::Url::parse(token) {
-        let scheme = url.scheme().to_ascii_lowercase();
-        if matches!(
-            scheme.as_str(),
-            "http" | "https" | "ftp" | "ftps" | "ws" | "wss"
-        ) {
-            return url.host_str().is_some();
-        }
-        return true;
-    }
-
-    has_valid_scheme_prefix(token)
-}
-
-fn has_valid_scheme_prefix(token: &str) -> bool {
-    let Some((scheme, rest)) = token.split_once("://") else {
-        return false;
-    };
-    if scheme.is_empty() || rest.is_empty() {
-        return false;
-    }
-
-    let mut chars = scheme.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    first.is_ascii_alphabetic()
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.')
-}
-
-fn is_bare_url_like(token: &str) -> bool {
-    let (host_port, has_trailer) = split_host_port_and_trailer(token);
-    if host_port.is_empty() {
-        return false;
-    }
-
-    if !has_trailer && !host_port.to_ascii_lowercase().starts_with("www.") {
-        return false;
-    }
-
-    let (host, port) = split_host_and_port(host_port);
-    if host.is_empty() {
-        return false;
-    }
-    if let Some(port) = port
-        && !is_valid_port(port)
-    {
-        return false;
-    }
-
-    host.eq_ignore_ascii_case("localhost") || is_ipv4(host) || is_domain_name(host)
-}
-
-fn split_host_port_and_trailer(token: &str) -> (&str, bool) {
-    if let Some(idx) = token.find(['/', '?', '#']) {
-        (&token[..idx], true)
-    } else {
-        (token, false)
-    }
-}
-
-fn split_host_and_port(host_port: &str) -> (&str, Option<&str>) {
-    if host_port.starts_with('[') {
-        return (host_port, None);
-    }
-
-    if let Some((host, port)) = host_port.rsplit_once(':')
-        && !host.is_empty()
-        && !port.is_empty()
-        && port.chars().all(|c| c.is_ascii_digit())
-    {
-        return (host, Some(port));
-    }
-
-    (host_port, None)
-}
-
-fn is_valid_port(port: &str) -> bool {
-    if port.is_empty() || port.len() > 5 || !port.chars().all(|c| c.is_ascii_digit()) {
-        return false;
-    }
-
-    port.parse::<u16>().is_ok()
-}
-
-fn is_ipv4(host: &str) -> bool {
-    let parts: Vec<&str> = host.split('.').collect();
-    if parts.len() != 4 {
-        return false;
-    }
-
-    parts
-        .iter()
-        .all(|part| !part.is_empty() && part.parse::<u8>().is_ok())
-}
-
-fn is_domain_name(host: &str) -> bool {
-    let host = host.to_ascii_lowercase();
-    if !host.contains('.') {
-        return false;
-    }
-
-    let mut labels = host.split('.');
-    let Some(tld) = labels.next_back() else {
-        return false;
-    };
-    if !is_tld(tld) {
-        return false;
-    }
-
-    labels.all(is_domain_label)
-}
-
-fn is_tld(label: &str) -> bool {
-    (2..=63).contains(&label.len()) && label.chars().all(|c| c.is_ascii_alphabetic())
-}
-
-fn is_domain_label(label: &str) -> bool {
-    if label.is_empty() || label.len() > 63 {
-        return false;
-    }
-
-    let mut chars = label.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    let Some(last) = label.chars().next_back() else {
-        return false;
-    };
-
-    first.is_ascii_alphanumeric()
-        && last.is_ascii_alphanumeric()
-        && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-}
-
-pub(crate) fn url_preserving_wrap_options<'a>(opts: RtOptions<'a>) -> RtOptions<'a> {
-    opts.word_separator(textwrap::WordSeparator::AsciiSpace)
-        .word_splitter(textwrap::WordSplitter::Custom(split_non_url_word))
-        .break_words(false)
-}
-
-fn split_non_url_word(word: &str) -> Vec<usize> {
-    if is_url_like_token(word) {
-        return Vec::new();
-    }
-
-    word.char_indices().skip(1).map(|(idx, _)| idx).collect()
 }
 
 fn wrap_ranges_trim<'a, O>(text: &str, width_or_options: O) -> Vec<Range<usize>>
@@ -693,19 +458,53 @@ mod tests {
     }
 
     #[test]
-    fn line_contains_url_like_matches_expected_tokens() {
-        let line = Line::from("see https://example.com/path for details");
-        assert!(line_contains_url_like(&line));
+    fn url_short_enough_stays_intact() {
+        let line = Line::from("https://example.com");
+        let out = adaptive_wrap_line(&line, RtOptions::new(40));
+        assert_eq!(out.len(), 1);
+        assert_eq!(concat_line(&out[0]), "https://example.com");
     }
 
     #[test]
-    fn url_preserving_wrap_keeps_url_intact() {
-        let line = Line::from("https://example.com/long-url-with-dashes-wider-than-terminal");
-        let out = adaptive_wrap_line(&line, RtOptions::new(20));
-        assert_eq!(out.len(), 1);
-        assert_eq!(
-            concat_line(&out[0]),
-            "https://example.com/long-url-with-dashes-wider-than-terminal"
-        );
+    fn url_longer_than_width_breaks_at_natural_boundary() {
+        let line = Line::from("https://example.com/long-path-wider-than-terminal");
+        let out = adaptive_wrap_line(&line, RtOptions::new(30));
+        // UnicodeBreakProperties breaks after hyphen ("long-path-") at width 30
+        assert_eq!(out.len(), 2);
+        assert_eq!(concat_line(&out[0]), "https://example.com/long-path-");
+        assert_eq!(concat_line(&out[1]), "wider-than-terminal");
+    }
+
+    #[test]
+    fn url_with_query_breaks_at_query_separator() {
+        let line =
+            Line::from("https://example.com/search?q=very+long+query+string&page=1&limit=50");
+        let out = adaptive_wrap_line(&line, RtOptions::new(45));
+        // UnicodeBreakProperties breaks after `?`
+        assert_eq!(out.len(), 2);
+        assert_eq!(concat_line(&out[0]), "https://example.com/search?");
+        assert_eq!(concat_line(&out[1]), "q=very+long+query+string&page=1&limit=50");
+    }
+
+    #[test]
+    fn url_in_mixed_text_wraps_naturally() {
+        let line = Line::from("Check this: https://example.com/very/long/path more text");
+        let out = adaptive_wrap_line(&line, RtOptions::new(35));
+        // UnicodeBreakProperties breaks at `/` after the URL's initial segment
+        assert_eq!(out.len(), 2);
+        assert_eq!(concat_line(&out[0]), "Check this: https://example.com/");
+        assert_eq!(concat_line(&out[1]), "very/long/path more text");
+    }
+
+    #[test]
+    fn long_url_never_truncated_even_at_narrow_width() {
+        let line = Line::from("https://github.com/very-long-project-name/issues/12345");
+        // With a very narrow width that would have caused truncation before,
+        // the URL should still be fully visible via wrapping.
+        let out = adaptive_wrap_line(&line, RtOptions::new(25));
+        let full: String = out.iter().map(concat_line).collect();
+        assert_eq!(full, "https://github.com/very-long-project-name/issues/12345",
+            "URL must never be truncated — all content must be present");
+        assert!(out.len() >= 2, "should wrap across multiple lines");
     }
 }
