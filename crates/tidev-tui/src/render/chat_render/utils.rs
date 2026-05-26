@@ -119,6 +119,7 @@ pub(super) fn tool_output_is_error(output: &str) -> bool {
     first_line.starts_with("Tool failed:")
         || first_line.starts_with("Tool '")
         || first_line.starts_with("Request failed:")
+        || first_line.starts_with("Error:")
         || first_line.starts_with("failed to read")
         || first_line.contains("Cannot read binary file")
         || (first_line.starts_with("[exit ") && !first_line.starts_with("[exit 0]"))

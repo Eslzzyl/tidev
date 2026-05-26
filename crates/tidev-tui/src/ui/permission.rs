@@ -297,6 +297,23 @@ impl App {
             {
                 let path_str = violation_path.display().to_string();
 
+                // If the path doesn't exist, don't ask for permission — the
+                // operation will fail anyway. Skip this for tools that can
+                // create files (write, apply_patch).
+                let needs_existing = matches!(
+                    tidev_engine::tooling::canonical_tool_name(&tool_call.name),
+                    Some("read" | "edit" | "glob" | "grep")
+                );
+                if needs_existing && !violation_path.exists() {
+                    let output = format!(
+                        "[Path not found] The path '{}' does not exist.",
+                        path_str
+                    );
+                    rejected.push((tool_call, ToolExecutionResult::new(output)));
+                    self.advance_pending_tool_execution();
+                    continue;
+                }
+
                 // Check stored permissions in memory
                 if let Some(allowed) = self.is_workspace_boundary_allowed(&path_str) {
                     if !allowed {
