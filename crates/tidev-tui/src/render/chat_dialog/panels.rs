@@ -1089,7 +1089,16 @@ impl App {
                 })
             })
         } else {
-            None
+            // Agent tab: find the model currently configured for this agent type
+            panel.current_tab().and_then(|tab| {
+                let current = self.config.agent.models.get(&tab.agent_type_str);
+                current.and_then(|label| {
+                    items.iter().position(|item| match item {
+                        ModelPanelItem::Model { summary } => summary.label() == *label,
+                        _ => false,
+                    })
+                })
+            })
         };
 
         let mut rows: Vec<ListItem> = Vec::new();
@@ -1161,8 +1170,11 @@ impl App {
                         }
                     } else if !panel.is_general_tab() {
                         if let Some(tab) = panel.current_tab() {
+                            let model_label = summary.label();
                             if let Some(tl_str) =
                                 self.config.agent.thinking_levels.get(&tab.agent_type_str)
+                                && self.config.agent.models.get(&tab.agent_type_str)
+                                    .map_or(false, |m| *m == model_label)
                             {
                                 let tl_level =
                                     tl_str.rsplit_once(':').map(|(_, v)| v).unwrap_or(tl_str);
