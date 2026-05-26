@@ -167,7 +167,8 @@ fn run_shell_inner(
 
     // Prepare sandbox if a policy is provided
     let sandbox_policy = sandbox_policy.unwrap_or(SandboxPolicy::DangerFullAccess);
-    let use_sandbox = !matches!(sandbox_policy, SandboxPolicy::DangerFullAccess)
+    let use_sandbox = !cfg!(target_os = "windows")
+        && !matches!(sandbox_policy, SandboxPolicy::DangerFullAccess)
         && !matches!(sandbox_policy, SandboxPolicy::ExternalSandbox);
 
     // ── Layer 1: Privilege escalation handling (sudo/doas/pkexec) ──────
