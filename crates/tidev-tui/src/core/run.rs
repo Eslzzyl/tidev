@@ -197,6 +197,7 @@ impl App {
             tools,
             agent,
             file_read_tracker,
+            current_goal: None,
             commands,
             command_palette,
             panel_launcher: PanelLauncherState::default(),

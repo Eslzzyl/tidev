@@ -118,6 +118,26 @@ CREATE INDEX IF NOT EXISTS idx_tool_outputs_session_created
     ON tool_outputs(session_id, created_at);
 "#,
     },
+    // ── v35: Add session_goals table ─────────────────────────────────────
+    //
+    // Stores a single persistent goal per session for the `/goal` command.
+    // The table is created IF NOT EXISTS so fresh installations already
+    // have it via SCHEMA_SQL.
+    Migration {
+        version: 35,
+        description: "Add session_goals table for /goal command",
+        sql: r#"
+CREATE TABLE IF NOT EXISTS session_goals (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    objective TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    tokens_used INTEGER NOT NULL DEFAULT 0,
+    time_used_seconds INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"#,
+    },
 ];
 
 // ---------------------------------------------------------------------------

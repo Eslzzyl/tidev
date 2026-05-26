@@ -368,6 +368,28 @@ tool_args! {
     }
 }
 
+tool_args! {
+    /// Mark the current goal as complete.
+    pub struct UpdateGoalArgs {
+        status: string("Only 'complete' is supported."),
+        reasoning: string("Brief explanation of verification evidence for each requirement."),
+    }
+}
+
+/// Empty args for the get_goal tool (no parameters needed).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct GetGoalArgs {}
+
+impl ToolArgs for GetGoalArgs {
+    fn schema() -> Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false,
+        })
+    }
+}
+
 pub(super) fn parse_arguments<Args>(tool_name: &str, arguments: Value) -> Result<Args>
 where
     Args: ToolArgs,

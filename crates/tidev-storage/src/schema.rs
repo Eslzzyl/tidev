@@ -1,4 +1,4 @@
-pub const SCHEMA_VERSION: i64 = 34;
+pub const SCHEMA_VERSION: i64 = 35;
 
 pub const SESSION_SELECT_COLUMNS: &str = "s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, s.status, s.ended_at, s.context_summary, s.context_retained_from, s.system_prompt, COALESCE(sw.workspace_root, '')";
 
@@ -287,8 +287,16 @@ CREATE TABLE IF NOT EXISTS tool_outputs (
 CREATE INDEX IF NOT EXISTS idx_tool_outputs_session_created
     ON tool_outputs(session_id, created_at);
 
+CREATE TABLE IF NOT EXISTS session_goals (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    objective TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    tokens_used INTEGER NOT NULL DEFAULT 0,
+    time_used_seconds INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 "#;
-
 /// Schema for the export database (no zstd compression).
 ///
 /// Mirrors `SCHEMA_SQL` but uses TEXT instead of BLOB for the columns
@@ -582,4 +590,14 @@ CREATE TABLE IF NOT EXISTS tool_outputs (
 
 CREATE INDEX IF NOT EXISTS idx_tool_outputs_session_created
     ON tool_outputs(session_id, created_at);
+
+CREATE TABLE IF NOT EXISTS session_goals (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    objective TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    tokens_used INTEGER NOT NULL DEFAULT 0,
+    time_used_seconds INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 "#;

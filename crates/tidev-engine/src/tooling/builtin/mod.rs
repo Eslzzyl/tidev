@@ -36,6 +36,7 @@ pub struct ToolContext<'a> {
 
 pub mod exec;
 pub mod file;
+pub mod goal;
 pub mod memory;
 pub mod search;
 pub mod sensitive;
@@ -52,6 +53,7 @@ pub fn definitions(skill_description: String) -> Vec<ToolDefinition> {
     definitions.extend(exec::definitions());
     definitions.extend(task::definitions());
     definitions.extend(todo::definitions());
+    definitions.extend(goal::definitions());
     definitions.extend(web::definitions());
     definitions.push(ToolDefinition::new::<QuestionArgs>(
         "question",
@@ -129,6 +131,16 @@ pub fn execute_tool_call(
         }
         Some("todowrite") => {
             let output = todo::execute_tool_call(
+                ctx.workspace_root,
+                ctx.store,
+                ctx.session_id,
+                &call.name,
+                arguments,
+            )?;
+            tidev_session::session::ToolExecutionResult::new(output)
+        }
+        Some("get_goal") | Some("update_goal") => {
+            let output = goal::execute_tool_call(
                 ctx.workspace_root,
                 ctx.store,
                 ctx.session_id,
@@ -233,6 +245,16 @@ pub fn execute_tool_call_streaming(
         }
         Some("todowrite") => {
             let output = todo::execute_tool_call(
+                ctx.workspace_root,
+                ctx.store,
+                ctx.session_id,
+                &call.name,
+                arguments,
+            )?;
+            tidev_session::session::ToolExecutionResult::new(output)
+        }
+        Some("get_goal") | Some("update_goal") => {
+            let output = goal::execute_tool_call(
                 ctx.workspace_root,
                 ctx.store,
                 ctx.session_id,

@@ -63,6 +63,7 @@ pub use ui::theme_panel;
 use core::state::*;
 
 use tidev_types::prompts::{SessionMode, init_command};
+use tidev_types::Goal;
 
 use crate::ui::permission::{
     PendingToolExecution, PermissionDialogState, RunningSubagentExecution, RunningToolExecution,
@@ -129,6 +130,8 @@ struct App {
     /// Shared AgentRuntime for compose_static_system_prompt / build_request_messages.
     agent: AgentRuntime,
     file_read_tracker: Arc<FileReadTracker>,
+    /// Current goal for the active session, if any.
+    current_goal: Option<Goal>,
     commands: CommandRegistry,
     command_palette: CommandPaletteState,
     panel_launcher: panel_launcher::PanelLauncherState,
@@ -898,6 +901,7 @@ impl App {
             BackendEvent::ShellOutput { .. } => "ShellOutput",
             BackendEvent::TurnStarting { .. } => "TurnStarting",
             BackendEvent::SandboxElevationRequest { .. } => "SandboxElevationRequest",
+            BackendEvent::GoalStatusChanged { .. } => "GoalStatusChanged",
         };
         if event_type != "Delta"
             && event_type != "ReasoningDelta"
@@ -1609,6 +1613,10 @@ impl App {
             }
             BackendEvent::SandboxElevationRequest { .. } => {
                 // Handled in handle_backend_event before dispatch
+            }
+            BackendEvent::GoalStatusChanged { goal, .. } => {
+                self.current_goal = goal;
+                self.dirty = true;
             }
         }
 

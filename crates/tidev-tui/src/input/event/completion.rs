@@ -1,6 +1,7 @@
 use super::*;
 
 use crate::App;
+use tidev_types::GoalStatus;
 
 impl App {
     pub(crate) fn refresh_at_mention_state(&mut self) {
@@ -147,7 +148,7 @@ impl App {
 
     pub(crate) fn run_command(
         &mut self,
-        _command_name: &str,
+        command_name: &str,
         action: CommandAction,
         args: &[String],
         runtime: &Runtime,
@@ -173,7 +174,8 @@ impl App {
                 | CommandAction::Agents
                 | CommandAction::Search
                 | CommandAction::Skills
-                | CommandAction::Sync => {}
+                | CommandAction::Sync
+                | CommandAction::Goal => {}
                 _ => {
                     self.last_notice = Some(
                         "A response is still streaming. Wait for it to finish before changing sessions.".to_string(),
@@ -289,6 +291,50 @@ impl App {
             }
             CommandAction::Sync => {
                 self.open_sync_panel();
+            }
+            CommandAction::Goal => {
+                let store = &self.store;
+                let session_id = self.conversation.session_id;
+                match command_name {
+                    "goal-clear" => {
+                        store.clear_goal(session_id)?;
+                        self.last_notice = Some("Goal cleared.".to_string());
+                    }
+                    "goal-pause" => {
+                        store.update_goal_status(session_id, GoalStatus::Paused)?;
+                        self.last_notice = Some("Goal paused.".to_string());
+                    }
+                    "goal-resume" => {
+                        store.update_goal_status(session_id, GoalStatus::Active)?;
+                        self.last_notice = Some("Goal resumed.".to_string());
+                    }
+                    _ => {
+                        // "goal" — show status or set
+                        if args.is_empty() {
+                            match store.get_goal(session_id)? {
+                                Some(g) => {
+                                    self.last_notice = Some(format!(
+                                        "Goal: {}  [{}]  (tokens: {}, time: {}s)",
+                                        g.objective,
+                                        g.status.as_str(),
+                                        g.tokens_used,
+                                        g.time_used_seconds
+                                    ));
+                                }
+                                None => {
+                                    self.last_notice = Some(
+                                        "No goal set. Use /goal <objective> to set one."
+                                            .to_string(),
+                                    );
+                                }
+                            }
+                        } else {
+                            let objective = args.join(" ");
+                            store.set_goal(session_id, &objective)?;
+                            self.last_notice = Some("Goal set.".to_string());
+                        }
+                    }
+                }
             }
             CommandAction::Sandbox => {
                 self.open_sandbox_panel();

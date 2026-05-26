@@ -24,6 +24,7 @@ pub enum CommandAction {
     Agents,
     Skills,
     Sync,
+    Goal,
 }
 
 #[derive(Clone, Debug)]
@@ -392,5 +393,33 @@ pub static COMMANDS: &[CommandSpec] = &[
         description: "Sync sessions with remote machines (see CLI: tidev sync)",
         usage: "/sync",
         action: CommandAction::Sync,
+    },
+    CommandSpec {
+        name: "goal",
+        aliases: &[],
+        description: "Show or set the session goal for long-running tasks",
+        usage: "/goal — show current goal\n/goal <objective> — set a new goal",
+        action: CommandAction::Goal,
+    },
+    CommandSpec {
+        name: "goal-clear",
+        aliases: &[],
+        description: "Clear the current session goal",
+        usage: "/goal-clear",
+        action: CommandAction::Goal,
+    },
+    CommandSpec {
+        name: "goal-pause",
+        aliases: &[],
+        description: "Pause the active goal",
+        usage: "/goal-pause",
+        action: CommandAction::Goal,
+    },
+    CommandSpec {
+        name: "goal-resume",
+        aliases: &[],
+        description: "Resume a paused goal",
+        usage: "/goal-resume",
+        action: CommandAction::Goal,
     },
 ];

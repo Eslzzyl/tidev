@@ -4,6 +4,8 @@ use uuid::Uuid;
 
 use std::sync::Arc;
 
+use tidev_types::Goal;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MessageAttachment {
@@ -835,6 +837,11 @@ pub enum BackendEvent {
         finished: bool,
         exit_code: Option<i32>,
     },
+    /// Fired when the session goal is set, updated, paused, resumed, or cleared.
+    GoalStatusChanged {
+        session_id: Uuid,
+        goal: Option<Goal>,
+    },
     /// Emitted by the agent loop when a new turn starts (after executing
     /// tool calls from the previous turn).  Frontends should use this to
     /// update their active request ID and create a new streaming message.
@@ -870,6 +877,7 @@ impl BackendEvent {
             | Self::ContextCompacted { session_id, .. }
             | Self::SidebarSnapshotReady { session_id, .. }
             | Self::ShellOutput { session_id, .. }
+            | Self::GoalStatusChanged { session_id, .. }
             | Self::TurnStarting { session_id, .. }
             | Self::SandboxElevationRequest { session_id, .. } => *session_id,
         }
@@ -893,7 +901,8 @@ impl BackendEvent {
             | Self::SandboxElevationRequest { request_id, .. } => Some(*request_id),
             Self::InstructionsLoaded { .. }
             | Self::ContextCompacted { .. }
-            | Self::ShellOutput { .. } => None,
+            | Self::ShellOutput { .. }
+            | Self::GoalStatusChanged { .. } => None,
         }
     }
 }
