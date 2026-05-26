@@ -284,7 +284,7 @@ impl AgentRuntime {
                         }
                         send_status(
                             event_tx,
-                            "Generating".to_string(),
+                            "Writing output".to_string(),
                             None,
                             Some(content),
                             None,
@@ -298,7 +298,15 @@ impl AgentRuntime {
                         send_status(event_tx, "Thinking".to_string(), None, None, Some(content));
                     }
                     BackendEvent::ToolCallUpdated { tool_call, .. } => {
+                        let tc = tool_call.clone();
                         turn.upsert_tool_call(tool_call);
+                        send_status(
+                            event_tx,
+                            "Tool".to_string(),
+                            Some(tc),
+                            None,
+                            None,
+                        );
                     }
                     BackendEvent::UsageStats {
                         input_tokens,
@@ -446,6 +454,8 @@ impl AgentRuntime {
                         result,
                     });
                 }
+
+                send_status(event_tx, "Working".to_string(), None, None, None);
             }
 
             // Next turn
