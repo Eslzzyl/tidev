@@ -24,6 +24,7 @@ use crate::ui::search_panel::SearchPanelState;
 use tidev_types::prompts::SessionMode;
 
 use crate::ui::skills_panel::SkillsPanelState;
+use crate::ui::workspace_boundary::WorkspaceBoundaryConfirmDialogState;
 use crate::ui::workspace_boundary::WorkspaceBoundaryDialogState;
 use tidev_engine::{
     config::ActiveModel, config::reasoning::ThinkingLevelType, context::ContextManager,
@@ -186,6 +187,7 @@ pub(crate) struct CachedSessionRuntime {
     pub(crate) pending_tool_execution: Option<PendingToolExecution>,
     pub(crate) permission_dialog: Option<PermissionDialogState>,
     pub(crate) workspace_boundary_dialog: Option<WorkspaceBoundaryDialogState>,
+    pub(crate) workspace_boundary_confirm_dialog: Option<WorkspaceBoundaryConfirmDialogState>,
     pub(crate) sensitive_file_dialog: Option<crate::ui::sensitive::SensitiveFileDialogState>,
     pub(crate) workspace_boundary_permissions: std::collections::HashMap<String, bool>,
     pub(crate) sensitive_file_permissions: std::collections::HashMap<String, bool>,

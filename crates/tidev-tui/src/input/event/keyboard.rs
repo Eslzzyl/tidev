@@ -71,6 +71,10 @@ impl App {
             return self.handle_sandbox_elevation_key(key);
         }
 
+        if self.workspace_boundary_confirm_dialog.is_some() {
+            return self.handle_workspace_boundary_confirm_dialog_key(key, runtime);
+        }
+
         if self.workspace_boundary_dialog.is_some() {
             return self.handle_workspace_boundary_dialog_key(key, runtime);
         }

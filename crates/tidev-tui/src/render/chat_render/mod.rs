@@ -159,6 +159,27 @@ impl App {
         // In subsession, the navigation area needs only 3 rows (1 content + 1 padding above/below)
         let subsession_nav_height: u16 = 3;
 
+        // Handle workspace boundary confirm dialog (shown before the boundary dialog)
+        if let Some(dialog) = self.workspace_boundary_confirm_dialog.clone() {
+            let dialog_height = dialog
+                .dialog_height(main_area.width)
+                .min(main_area.height.saturating_sub(3).max(6));
+
+            let layout = Layout::vertical([
+                Constraint::Min(6),
+                Constraint::Length(dialog_height),
+                Constraint::Length(1),
+                Constraint::Length(1),
+            ])
+            .split(main_area);
+
+            self.render_messages(frame, layout[0]);
+            self.render_workspace_boundary_confirm_dialog(frame, layout[1], &dialog);
+            self.render_prompt_footer(frame, layout[2]);
+            self.render_retrying_hint(frame, layout[3]);
+            return;
+        }
+
         // Handle workspace boundary dialog (similar to question dialog)
         if let Some(dialog) = self.workspace_boundary_dialog.clone() {
             let dialog_height = dialog

@@ -58,6 +58,36 @@ pub(crate) enum BoundaryDecision {
     DenyUntilExit,
 }
 
+/// Confirmation dialog shown when the user chooses "allow until exit" or
+/// "deny until exit", asking them to confirm the remembered permission.
+/// Maintains the same size and position as the workspace boundary dialog.
+#[derive(Clone, Debug)]
+pub(crate) struct WorkspaceBoundaryConfirmDialogState {
+    /// The original pending boundary check.
+    pub pending: PendingWorkspaceBoundaryCheck,
+    /// The action being confirmed (AllowUntilExit or DenyUntilExit).
+    pub action: BoundaryDecision,
+    /// Which option is highlighted: 0 = confirm, 1 = cancel.
+    pub selected_index: usize,
+    pub current_index: usize,
+    pub total: usize,
+}
+
+impl WorkspaceBoundaryConfirmDialogState {
+    pub(crate) fn title(&self) -> String {
+        format!("Confirm {} of {}", self.current_index, self.total)
+    }
+
+    pub(crate) fn path_display(&self) -> String {
+        self.pending.requested_path.display().to_string()
+    }
+
+    /// Calculate the height needed for the dialog (same as boundary dialog).
+    pub(crate) fn dialog_height(&self, _width: u16) -> u16 {
+        8
+    }
+}
+
 /// Extract paths from tool call arguments that might be outside the workspace.
 /// Returns the first resolved (normalized) path that would violate workspace
 /// boundaries, or None if all paths are valid. The returned path is the
@@ -88,8 +118,7 @@ pub(crate) fn extract_boundary_violation_path(
         _ => return None,
     };
 
-    if !tidev_engine::tooling::builtin::utils::is_path_outside_workspace(workspace_root, &path_buf)
-    {
+    if !tidev_engine::tooling::builtin::utils::is_path_outside_workspace(workspace_root, &path_buf) {
         return None;
     }
 
@@ -196,22 +225,90 @@ impl App {
     }
 
     /// Handle keyboard input for the workspace boundary dialog.
+    /// 'a' and 'd' now show a confirmation dialog first instead of resolving immediately.
     pub(crate) fn handle_workspace_boundary_dialog_key(
         &mut self,
         key: KeyEvent,
         runtime: &Runtime,
     ) -> Result<()> {
+        // Intercept AllowUntilExit / DenyUntilExit to show confirmation dialog
+        if matches!(key.code, KeyCode::Char('a') | KeyCode::Char('A')) {
+            if let Some(ref dialog) = self.workspace_boundary_dialog {
+                self.workspace_boundary_confirm_dialog = Some(
+                    WorkspaceBoundaryConfirmDialogState {
+                        pending: dialog.pending.clone(),
+                        action: BoundaryDecision::AllowUntilExit,
+                        selected_index: 0,
+                        current_index: dialog.current_index,
+                        total: dialog.total,
+                    },
+                );
+            }
+            return Ok(());
+        }
+        if matches!(key.code, KeyCode::Char('d') | KeyCode::Char('D')) {
+            if let Some(ref dialog) = self.workspace_boundary_dialog {
+                self.workspace_boundary_confirm_dialog = Some(
+                    WorkspaceBoundaryConfirmDialogState {
+                        pending: dialog.pending.clone(),
+                        action: BoundaryDecision::DenyUntilExit,
+                        selected_index: 0,
+                        current_index: dialog.current_index,
+                        total: dialog.total,
+                    },
+                );
+            }
+            return Ok(());
+        }
+
         let decision = match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => Some(BoundaryDecision::AllowOnce),
-            KeyCode::Char('a') | KeyCode::Char('A') => Some(BoundaryDecision::AllowUntilExit),
             KeyCode::Char('n') | KeyCode::Char('N') => Some(BoundaryDecision::DenyOnce),
-            KeyCode::Char('d') | KeyCode::Char('D') => Some(BoundaryDecision::DenyUntilExit),
             KeyCode::Esc => Some(BoundaryDecision::DenyOnce),
             _ => None,
         };
 
         if let Some(decision) = decision {
             self.resolve_workspace_boundary_dialog(decision, runtime)?;
+        }
+
+        Ok(())
+    }
+
+    /// Handle keyboard input for the workspace boundary confirmation dialog.
+    /// Left/Right to select, Enter to confirm, Esc to go back.
+    pub(crate) fn handle_workspace_boundary_confirm_dialog_key(
+        &mut self,
+        key: KeyEvent,
+        runtime: &Runtime,
+    ) -> Result<()> {
+        let Some(ref mut confirm) = self.workspace_boundary_confirm_dialog else {
+            return Ok(());
+        };
+
+        match key.code {
+            KeyCode::Left => {
+                confirm.selected_index = confirm.selected_index.saturating_sub(1);
+            }
+            KeyCode::Right => {
+                confirm.selected_index = confirm.selected_index.saturating_add(1).min(1);
+            }
+            KeyCode::Enter => {
+                if confirm.selected_index == 0 {
+                    // Confirm — execute the remembered action
+                    let action = confirm.action;
+                    self.workspace_boundary_confirm_dialog = None;
+                    self.resolve_workspace_boundary_dialog(action, runtime)?;
+                } else {
+                    // Cancel — go back to the original dialog
+                    self.workspace_boundary_confirm_dialog = None;
+                }
+            }
+            KeyCode::Esc => {
+                // Cancel — go back to the original dialog
+                self.workspace_boundary_confirm_dialog = None;
+            }
+            _ => {}
         }
 
         Ok(())

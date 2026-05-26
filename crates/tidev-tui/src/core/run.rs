@@ -220,6 +220,7 @@ impl App {
             permission_dialog: None,
             sandbox_elevation: None,
             workspace_boundary_dialog: None,
+            workspace_boundary_confirm_dialog: None,
             sensitive_file_dialog: None,
             sensitive_file_permissions: std::collections::HashMap::new(),
             sensitive_file_approved: std::collections::HashMap::new(),
@@ -532,6 +533,7 @@ impl App {
             pending_tool_execution: self.pending_tool_execution.clone(),
             permission_dialog: self.permission_dialog.clone(),
             workspace_boundary_dialog: self.workspace_boundary_dialog.clone(),
+            workspace_boundary_confirm_dialog: self.workspace_boundary_confirm_dialog.clone(),
             sensitive_file_dialog: self.sensitive_file_dialog.clone(),
             workspace_boundary_permissions: self.workspace_boundary_permissions.clone(),
             sensitive_file_permissions: self.sensitive_file_permissions.clone(),
@@ -669,6 +671,7 @@ impl App {
         self.pending_tool_execution = cached.pending_tool_execution;
         self.permission_dialog = cached.permission_dialog;
         self.workspace_boundary_dialog = cached.workspace_boundary_dialog;
+        self.workspace_boundary_confirm_dialog = cached.workspace_boundary_confirm_dialog;
         self.sensitive_file_dialog = cached.sensitive_file_dialog;
         self.workspace_boundary_permissions = cached.workspace_boundary_permissions;
         self.sensitive_file_permissions = cached.sensitive_file_permissions;
@@ -919,6 +922,7 @@ impl App {
             pending_tool_execution: None,
             permission_dialog: None,
             workspace_boundary_dialog: None,
+            workspace_boundary_confirm_dialog: None,
             sensitive_file_dialog: None,
             workspace_boundary_permissions: std::collections::HashMap::new(),
             sensitive_file_permissions: std::collections::HashMap::new(),

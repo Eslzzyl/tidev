@@ -6,7 +6,7 @@ use crate::{
     permission::PermissionDialogState,
     question::QuestionDialogState,
     session_panel::{SessionPanelDialog, SessionPanelState},
-    ui::{rename::RenameSessionDialogState, workspace_boundary::WorkspaceBoundaryDialogState},
+    ui::{rename::RenameSessionDialogState, workspace_boundary::WorkspaceBoundaryConfirmDialogState, workspace_boundary::WorkspaceBoundaryDialogState},
 };
 use chrono;
 use ratatui::{
@@ -721,6 +721,106 @@ impl App {
 
         frame.render_widget(
             Paragraph::new("Y allow once · A allow until exit · N deny once · D deny until exit · Esc deny once")
+                .style(
+                    Style::default()
+                        .bg(palette.panel_alt)
+                        .fg(palette.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            sections[3],
+        );
+    }
+
+    pub(crate) fn render_workspace_boundary_confirm_dialog(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        dialog: &WorkspaceBoundaryConfirmDialogState,
+    ) {
+        let palette = self.palette();
+        let inner = area.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+
+        frame.render_widget(Clear, area);
+
+        let block = Block::default().style(Style::default().bg(palette.panel_alt));
+        frame.render_widget(block, area);
+
+        let sections = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(2),
+            Constraint::Length(2),
+            Constraint::Length(2),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+        // Title
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                dialog.title(),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            sections[0],
+        );
+
+        // Confirmation message
+        let action_text = if dialog.action == crate::ui::workspace_boundary::BoundaryDecision::AllowUntilExit {
+            "allow"
+        } else {
+            "deny"
+        };
+        let message = format!(
+            "This will {} access to:\n{}",
+            action_text,
+            dialog.path_display()
+        );
+        frame.render_widget(
+            Paragraph::new(message)
+                .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+            sections[1],
+        );
+
+        // Options row: [ Confirm ] [ Cancel ]
+        let options = [" Confirm ", " Cancel "];
+        let option_spans: Vec<Span> = options
+            .iter()
+            .enumerate()
+            .flat_map(|(i, label)| {
+                let selected = i == dialog.selected_index;
+                let span = if selected {
+                    Span::styled(
+                        format!("[{}]", label),
+                        Style::default()
+                            .fg(palette.accent)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    Span::styled(
+                        format!(" {} ", label),
+                        Style::default().fg(palette.text),
+                    )
+                };
+                // Add spacing between options
+                vec![span, Span::raw("  ")]
+            })
+            .collect();
+
+        frame.render_widget(
+            Paragraph::new(Line::from(option_spans))
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(palette.panel_alt)),
+            sections[2],
+        );
+
+        // Help text
+        frame.render_widget(
+            Paragraph::new("← → switch · Enter confirm · Esc cancel")
                 .style(
                     Style::default()
                         .bg(palette.panel_alt)
