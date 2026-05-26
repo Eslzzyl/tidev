@@ -297,16 +297,28 @@ impl App {
                 let session_id = self.conversation.session_id;
                 match command_name {
                     "goal-clear" => {
-                        store.clear_goal(session_id)?;
-                        self.last_notice = Some("Goal cleared.".to_string());
+                        if self.screen == Screen::Welcome {
+                            self.last_notice = Some("No goal to clear.".to_string());
+                        } else {
+                            store.clear_goal(session_id)?;
+                            self.last_notice = Some("Goal cleared.".to_string());
+                        }
                     }
                     "goal-pause" => {
-                        store.update_goal_status(session_id, GoalStatus::Paused)?;
-                        self.last_notice = Some("Goal paused.".to_string());
+                        if self.screen == Screen::Welcome {
+                            self.last_notice = Some("No active goal.".to_string());
+                        } else {
+                            store.update_goal_status(session_id, GoalStatus::Paused)?;
+                            self.last_notice = Some("Goal paused.".to_string());
+                        }
                     }
                     "goal-resume" => {
-                        store.update_goal_status(session_id, GoalStatus::Active)?;
-                        self.last_notice = Some("Goal resumed.".to_string());
+                        if self.screen == Screen::Welcome {
+                            self.last_notice = Some("No paused goal.".to_string());
+                        } else {
+                            store.update_goal_status(session_id, GoalStatus::Active)?;
+                            self.last_notice = Some("Goal resumed.".to_string());
+                        }
                     }
                     _ => {
                         // "goal" — show status or set
