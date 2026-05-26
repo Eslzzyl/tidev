@@ -6,7 +6,10 @@ use crate::{
     permission::PermissionDialogState,
     question::QuestionDialogState,
     session_panel::{SessionPanelDialog, SessionPanelState},
-    ui::{rename::RenameSessionDialogState, workspace_boundary::WorkspaceBoundaryConfirmDialogState, workspace_boundary::WorkspaceBoundaryDialogState},
+    ui::{
+        rename::RenameSessionDialogState, workspace_boundary::WorkspaceBoundaryConfirmDialogState,
+        workspace_boundary::WorkspaceBoundaryDialogState,
+    },
 };
 use chrono;
 use ratatui::{
@@ -770,19 +773,19 @@ impl App {
         );
 
         // Confirmation message
-        let action_text = if dialog.action == crate::ui::workspace_boundary::BoundaryDecision::AllowUntilExit {
-            "allow"
-        } else {
-            "deny"
-        };
+        let action_text =
+            if dialog.action == crate::ui::workspace_boundary::BoundaryDecision::AllowUntilExit {
+                "allow"
+            } else {
+                "deny"
+            };
         let message = format!(
             "This will {} access to:\n{}",
             action_text,
             dialog.path_display()
         );
         frame.render_widget(
-            Paragraph::new(message)
-                .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+            Paragraph::new(message).style(Style::default().bg(palette.panel_alt).fg(palette.text)),
             sections[1],
         );
 
@@ -801,10 +804,7 @@ impl App {
                             .add_modifier(Modifier::BOLD),
                     )
                 } else {
-                    Span::styled(
-                        format!(" {} ", label),
-                        Style::default().fg(palette.text),
-                    )
+                    Span::styled(format!(" {} ", label), Style::default().fg(palette.text))
                 };
                 // Add spacing between options
                 vec![span, Span::raw("  ")]
@@ -820,13 +820,12 @@ impl App {
 
         // Help text
         frame.render_widget(
-            Paragraph::new("← → switch · Enter confirm · Esc cancel")
-                .style(
-                    Style::default()
-                        .bg(palette.panel_alt)
-                        .fg(palette.accent)
-                        .add_modifier(Modifier::BOLD),
-                ),
+            Paragraph::new("← → switch · Enter confirm · Esc cancel").style(
+                Style::default()
+                    .bg(palette.panel_alt)
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
             sections[3],
         );
     }

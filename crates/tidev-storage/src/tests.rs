@@ -811,9 +811,11 @@ fn goal_status_transitions() {
 
         // Updating non-existent goal should error
         let missing = uuid::Uuid::new_v4();
-        assert!(store
-            .update_goal_status(missing, GoalStatus::Active)
-            .is_err());
+        assert!(
+            store
+                .update_goal_status(missing, GoalStatus::Active)
+                .is_err()
+        );
     }
 
     let _ = std::fs::remove_file(path);
@@ -821,10 +823,8 @@ fn goal_status_transitions() {
 
 #[test]
 fn goal_clear_removes_goal() {
-    let path = std::env::temp_dir().join(format!(
-        "tidev-goal-clear-{}.sqlite3",
-        uuid::Uuid::new_v4()
-    ));
+    let path =
+        std::env::temp_dir().join(format!("tidev-goal-clear-{}.sqlite3", uuid::Uuid::new_v4()));
 
     {
         let store = SessionStore::open(&path).expect("store should open");
@@ -863,10 +863,8 @@ fn goal_clear_removes_goal() {
 
 #[test]
 fn goal_account_usage_accumulates() {
-    let path = std::env::temp_dir().join(format!(
-        "tidev-goal-usage-{}.sqlite3",
-        uuid::Uuid::new_v4()
-    ));
+    let path =
+        std::env::temp_dir().join(format!("tidev-goal-usage-{}.sqlite3", uuid::Uuid::new_v4()));
 
     {
         let store = SessionStore::open(&path).expect("store should open");
@@ -974,10 +972,7 @@ fn goal_account_usage_noops_when_paused_or_complete() {
 
         let g = store.get_goal(session_id).unwrap().unwrap();
         assert_eq!(g.tokens_used, 0, "should not accumulate when paused");
-        assert_eq!(
-            g.time_used_seconds, 0,
-            "should not accumulate when paused"
-        );
+        assert_eq!(g.time_used_seconds, 0, "should not accumulate when paused");
 
         // Mark complete — usage should no-op
         store

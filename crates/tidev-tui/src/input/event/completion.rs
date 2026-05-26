@@ -344,7 +344,8 @@ impl App {
                             // If on welcome screen, create the session first
                             self.ensure_goal_session()?;
                             let objective = args.join(" ");
-                            self.store.set_goal(self.conversation.session_id, &objective)?;
+                            self.store
+                                .set_goal(self.conversation.session_id, &objective)?;
                             self.last_notice = Some("Goal set.".to_string());
                         }
                     }

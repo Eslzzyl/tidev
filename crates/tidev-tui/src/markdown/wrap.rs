@@ -483,7 +483,10 @@ mod tests {
         // UnicodeBreakProperties breaks after `?`
         assert_eq!(out.len(), 2);
         assert_eq!(concat_line(&out[0]), "https://example.com/search?");
-        assert_eq!(concat_line(&out[1]), "q=very+long+query+string&page=1&limit=50");
+        assert_eq!(
+            concat_line(&out[1]),
+            "q=very+long+query+string&page=1&limit=50"
+        );
     }
 
     #[test]
@@ -503,8 +506,10 @@ mod tests {
         // the URL should still be fully visible via wrapping.
         let out = adaptive_wrap_line(&line, RtOptions::new(25));
         let full: String = out.iter().map(concat_line).collect();
-        assert_eq!(full, "https://github.com/very-long-project-name/issues/12345",
-            "URL must never be truncated — all content must be present");
+        assert_eq!(
+            full, "https://github.com/very-long-project-name/issues/12345",
+            "URL must never be truncated — all content must be present"
+        );
         assert!(out.len() >= 2, "should wrap across multiple lines");
     }
 }

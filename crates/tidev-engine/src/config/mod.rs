@@ -694,7 +694,9 @@ pub struct ShellConfig {
 
 impl Default for ShellConfig {
     fn default() -> Self {
-        Self { windows_shell: None }
+        Self {
+            windows_shell: None,
+        }
     }
 }
 

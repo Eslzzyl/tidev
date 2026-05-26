@@ -68,7 +68,9 @@ pub fn init(_config_shell: Option<String>, _paths: Option<&crate::config::Config
 ///
 /// Panics if [`init`] has not been called yet.
 pub fn get() -> &'static ResolvedShell {
-    RESOLVED.get().expect("shell::init() must be called before shell::get()")
+    RESOLVED
+        .get()
+        .expect("shell::init() must be called before shell::get()")
 }
 
 // ---------------------------------------------------------------------------
@@ -76,7 +78,10 @@ pub fn get() -> &'static ResolvedShell {
 // ---------------------------------------------------------------------------
 
 #[cfg(windows)]
-fn resolve(config_shell: Option<String>, paths: Option<&crate::config::ConfigPaths>) -> ResolvedShell {
+fn resolve(
+    config_shell: Option<String>,
+    paths: Option<&crate::config::ConfigPaths>,
+) -> ResolvedShell {
     // 1. User-configured value (from config.toml) takes priority.
     if let Some(shell) = config_shell {
         let arg = infer_shell_arg(&shell);

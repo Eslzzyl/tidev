@@ -6,8 +6,8 @@ mod utils;
 
 pub(crate) use content::strip_system_reminder_tags;
 
-use tidev_types::prompts::SessionMode;
 use tidev_types::GoalStatus;
+use tidev_types::prompts::SessionMode;
 
 use crate::theme::ThemePalette;
 use crate::{

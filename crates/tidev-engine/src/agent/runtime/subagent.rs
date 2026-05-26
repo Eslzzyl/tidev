@@ -300,13 +300,7 @@ impl AgentRuntime {
                     BackendEvent::ToolCallUpdated { tool_call, .. } => {
                         let tc = tool_call.clone();
                         turn.upsert_tool_call(tool_call);
-                        send_status(
-                            event_tx,
-                            "Tool".to_string(),
-                            Some(tc),
-                            None,
-                            None,
-                        );
+                        send_status(event_tx, "Tool".to_string(), Some(tc), None, None);
                     }
                     BackendEvent::UsageStats {
                         input_tokens,

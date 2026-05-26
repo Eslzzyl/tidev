@@ -118,7 +118,8 @@ pub(crate) fn extract_boundary_violation_path(
         _ => return None,
     };
 
-    if !tidev_engine::tooling::builtin::utils::is_path_outside_workspace(workspace_root, &path_buf) {
+    if !tidev_engine::tooling::builtin::utils::is_path_outside_workspace(workspace_root, &path_buf)
+    {
         return None;
     }
 
@@ -127,10 +128,9 @@ pub(crate) fn extract_boundary_violation_path(
     // represented by the same key regardless of the path used to reach it.
     // If canonicalization fails (e.g. the path does not yet exist), fall
     // back to the logically-resolved (but not symlink-resolved) path.
-    let resolved = tidev_engine::tooling::builtin::utils::resolve_path_unchecked(
-        workspace_root, &path_buf,
-    )
-    .unwrap_or_else(|_| path_buf.clone());
+    let resolved =
+        tidev_engine::tooling::builtin::utils::resolve_path_unchecked(workspace_root, &path_buf)
+            .unwrap_or_else(|_| path_buf.clone());
 
     Some(std::fs::canonicalize(&resolved).unwrap_or(resolved))
 }
@@ -256,29 +256,27 @@ impl App {
         // Intercept AllowUntilExit / DenyUntilExit to show confirmation dialog
         if matches!(key.code, KeyCode::Char('a') | KeyCode::Char('A')) {
             if let Some(ref dialog) = self.workspace_boundary_dialog {
-                self.workspace_boundary_confirm_dialog = Some(
-                    WorkspaceBoundaryConfirmDialogState {
+                self.workspace_boundary_confirm_dialog =
+                    Some(WorkspaceBoundaryConfirmDialogState {
                         pending: dialog.pending.clone(),
                         action: BoundaryDecision::AllowUntilExit,
                         selected_index: 0,
                         current_index: dialog.current_index,
                         total: dialog.total,
-                    },
-                );
+                    });
             }
             return Ok(());
         }
         if matches!(key.code, KeyCode::Char('d') | KeyCode::Char('D')) {
             if let Some(ref dialog) = self.workspace_boundary_dialog {
-                self.workspace_boundary_confirm_dialog = Some(
-                    WorkspaceBoundaryConfirmDialogState {
+                self.workspace_boundary_confirm_dialog =
+                    Some(WorkspaceBoundaryConfirmDialogState {
                         pending: dialog.pending.clone(),
                         action: BoundaryDecision::DenyUntilExit,
                         selected_index: 0,
                         current_index: dialog.current_index,
                         total: dialog.total,
-                    },
-                );
+                    });
             }
             return Ok(());
         }

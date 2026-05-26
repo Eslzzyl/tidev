@@ -1173,7 +1173,11 @@ impl App {
                             let model_label = summary.label();
                             if let Some(tl_str) =
                                 self.config.agent.thinking_levels.get(&tab.agent_type_str)
-                                && self.config.agent.models.get(&tab.agent_type_str)
+                                && self
+                                    .config
+                                    .agent
+                                    .models
+                                    .get(&tab.agent_type_str)
                                     .map_or(false, |m| *m == model_label)
                             {
                                 let tl_level =

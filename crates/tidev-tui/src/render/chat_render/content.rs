@@ -267,18 +267,15 @@ pub(super) fn render_message_cards_inner(
                         Some(ctx.workspace_root),
                     );
                     for attachment in &message.attachments {
-                        content_lines.push(line_with_style(
-                            &attachment.summary(),
-                            palette.accent_soft,
-                        ));
+                        content_lines
+                            .push(line_with_style(&attachment.summary(), palette.accent_soft));
                     }
                     let mut lines = Vec::new();
                     let mode_color = message.mode.map_or(palette.accent, |m| match m {
                         SessionMode::Build => palette.mode_build,
                         SessionMode::Plan => palette.mode_plan,
                     });
-                    let prefix_style =
-                        Style::default().fg(mode_color).add_modifier(Modifier::BOLD);
+                    let prefix_style = Style::default().fg(mode_color).add_modifier(Modifier::BOLD);
                     lines.push(Line::from(vec![Span::styled("┃ ", prefix_style)]));
                     for line in content_lines {
                         let mut spans = vec![Span::styled("┃ ", prefix_style)];

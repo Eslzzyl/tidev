@@ -62,8 +62,8 @@ pub use ui::theme_panel;
 
 use core::state::*;
 
-use tidev_types::prompts::{SessionMode, init_command};
 use tidev_types::Goal;
+use tidev_types::prompts::{SessionMode, init_command};
 
 use crate::ui::permission::{
     PendingToolExecution, PermissionDialogState, RunningSubagentExecution, RunningToolExecution,
@@ -157,7 +157,8 @@ struct App {
     workspace_boundary_dialog: Option<WorkspaceBoundaryDialogState>,
     /// Confirmation dialog for "allow/deny until exit" choices.
     /// Shown after user presses 'a' or 'd' to confirm they want to remember the permission.
-    workspace_boundary_confirm_dialog: Option<ui::workspace_boundary::WorkspaceBoundaryConfirmDialogState>,
+    workspace_boundary_confirm_dialog:
+        Option<ui::workspace_boundary::WorkspaceBoundaryConfirmDialogState>,
     sensitive_file_dialog: Option<ui::sensitive::SensitiveFileDialogState>,
     /// In-memory sensitive file permissions (path -> allowed).
     /// Cleared when tidev exits or session switches.

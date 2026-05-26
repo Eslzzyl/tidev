@@ -926,7 +926,12 @@ impl SessionStore {
     ///
     /// Only takes effect when the session has an **Active** goal.
     /// Silently no-ops if there is no goal or the goal is Paused/Complete.
-    pub fn account_goal_usage(&self, session_id: Uuid, tokens: i64, elapsed_secs: i64) -> Result<()> {
+    pub fn account_goal_usage(
+        &self,
+        session_id: Uuid,
+        tokens: i64,
+        elapsed_secs: i64,
+    ) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         self.write_execute(
             "UPDATE session_goals \
@@ -2942,7 +2947,8 @@ impl SessionStore {
                     .optional()?
                 {
                     let (sid, obj, status, tokens, secs, created, updated) = goal;
-                    insert_goal.execute(params![sid, obj, status, tokens, secs, created, updated])?;
+                    insert_goal
+                        .execute(params![sid, obj, status, tokens, secs, created, updated])?;
                 }
 
                 imported_count += 1;
