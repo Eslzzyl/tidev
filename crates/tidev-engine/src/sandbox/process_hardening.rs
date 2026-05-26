@@ -108,10 +108,10 @@ pub fn remove_dangerous_env_vars_parent() {
             {
                 return Some(key);
             }
+            let _ = key;
             None
         })
         .collect();
-
     for key in &keys_to_remove {
         unsafe {
             std::env::remove_var(key);

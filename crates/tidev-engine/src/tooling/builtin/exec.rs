@@ -20,9 +20,10 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use super::utils::truncate_in_place;
 use crate::sandbox::{
-    CommandSpec, SandboxManager, SandboxPolicy, pre_exec_hardening,
-    remove_dangerous_env_vars_parent,
+    CommandSpec, SandboxManager, SandboxPolicy, remove_dangerous_env_vars_parent,
 };
+#[cfg(unix)]
+use crate::sandbox::pre_exec_hardening;
 use crate::tooling::tools::{BashArgs, decode_tool_args};
 use crate::tooling::{ToolDefinition, ToolPermission};
 use tidev_session::session::{BackendEvent, tool_output_preview};
