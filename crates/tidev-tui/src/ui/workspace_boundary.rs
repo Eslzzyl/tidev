@@ -123,17 +123,39 @@ pub(crate) fn extract_boundary_violation_path(
     }
 
     // Return the resolved path for consistent permission key.
-    // Fall back to the raw path if resolution fails.
-    Some(
-        tidev_engine::tooling::builtin::utils::resolve_path_unchecked(workspace_root, &path_buf)
-            .unwrap_or(path_buf),
+    // Try to canonicalize (resolve symlinks) so the same file is always
+    // represented by the same key regardless of the path used to reach it.
+    // If canonicalization fails (e.g. the path does not yet exist), fall
+    // back to the logically-resolved (but not symlink-resolved) path.
+    let resolved = tidev_engine::tooling::builtin::utils::resolve_path_unchecked(
+        workspace_root, &path_buf,
     )
+    .unwrap_or_else(|_| path_buf.clone());
+
+    Some(std::fs::canonicalize(&resolved).unwrap_or(resolved))
 }
 
 impl App {
-    /// Check if a path has been allowed in memory.
+    /// Check if a path has been allowed or denied in memory.
+    /// Uses prefix matching (longest matching prefix wins) so that:
+    /// - Allowing a directory also allows all files under it.
+    /// - Denying a directory also denies all files under it.
+    /// - If a specific path has a more specific rule, it takes precedence.
     pub(crate) fn is_workspace_boundary_allowed(&self, path: &str) -> Option<bool> {
-        self.workspace_boundary_permissions.get(path).copied()
+        let target = std::path::Path::new(path);
+        let mut result: Option<bool> = None;
+        let mut longest_prefix: usize = 0;
+        for (stored_path, allowed) in &self.workspace_boundary_permissions {
+            let stored = std::path::Path::new(stored_path);
+            if target.starts_with(stored) {
+                let components = stored.components().count();
+                if components > longest_prefix {
+                    longest_prefix = components;
+                    result = Some(*allowed);
+                }
+            }
+        }
+        result
     }
 
     /// Store a workspace boundary permission in memory.
