@@ -24,7 +24,10 @@ pub fn load() -> Vec<SkillInfo> {
 }
 
 fn skill_from_str(content: &'static str, dir_name: &str) -> SkillInfo {
-    let (name, description, _body) = super::skills::parse_frontmatter(content)
+    // Normalize CRLF to LF to handle Windows line endings (git may convert
+    // to CRLF on checkout).  This mirrors what parse_skill_content does.
+    let content = content.replace("\r\n", "\n");
+    let (name, description, _body) = super::skills::parse_frontmatter(&content)
         .expect("bundled SKILL.md must have valid YAML frontmatter");
 
     SkillInfo {
@@ -32,7 +35,7 @@ fn skill_from_str(content: &'static str, dir_name: &str) -> SkillInfo {
         description,
         directory: PathBuf::from(format!("__builtin__/{}", dir_name)),
         location: PathBuf::from(format!("__builtin__/{}/SKILL.md", dir_name)),
-        content: content.to_string(),
+        content,
         companion_files: Vec::new(),
     }
 }
