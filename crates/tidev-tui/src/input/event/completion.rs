@@ -293,6 +293,12 @@ impl App {
                 self.open_sync_panel();
             }
             CommandAction::Goal => {
+                if self.screen == crate::core::state::Screen::Welcome {
+                    self.last_notice = Some(
+                        "Start a session first before using /goal.".to_string(),
+                    );
+                    return Ok(());
+                }
                 let store = &self.store;
                 let session_id = self.conversation.session_id;
                 match command_name {
