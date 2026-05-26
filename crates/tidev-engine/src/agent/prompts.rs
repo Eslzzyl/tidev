@@ -46,7 +46,7 @@ fn explorer_prompt() -> String {
          </results>\n\n\
          ## Memory\n\
          - Store important findings (file locations, code patterns, architecture insights)\n\
-           using the `memory` tool with `operation: store`.\n\
+           using the `memory` tool with `operation: remember`.\n\
          - This helps future sessions recall what you discovered.\n\n\
          ## Constraints\n\
          - READ-ONLY: You MUST NOT write, edit, create, or delete any files. \
@@ -96,7 +96,7 @@ fn librarian_prompt() -> String {
          - Distinguish between facts and educated guesses.\n\n\
          ## Memory\n\
          - Store useful references (documentation links, API patterns, library findings)\n\
-           using the `memory` tool with `operation: store`.\n\
+           using the `memory` tool with `operation: remember`.\n\
          - This builds a reusable knowledge base for future sessions.\n\n\
          ## Constraints\n\
          - READ-ONLY: You MUST NOT write, edit, create, or delete any files. \
@@ -129,7 +129,7 @@ fn oracle_prompt() -> String {
          - Prefer simpler designs unless complexity clearly earns its keep.\n\n\
          ## Memory\n\
          - Record your analysis, architectural decisions, and recommendations\n\
-           using the `memory` tool with `operation: store`.\n\
+           using the `memory` tool with `operation: remember`.\n\
          - This preserves engineering knowledge for future sessions.\n\n\
          ## Constraints\n\
          - READ-ONLY: You MUST NOT write, edit, create, or delete any files. \

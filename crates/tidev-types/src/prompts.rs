@@ -102,7 +102,7 @@ pub fn general_system_prompt() -> String {
          - **Memory types**: `user` (preferences), `project` (architecture, patterns,\n\
             conventions), `feedback` (corrections), `reference` (important references).\n\
          - **Tags**: Add relevant tags when storing so related memories can be found easily.\n\
-         - Use the `memory` tool with `operation: store` to persist important information.\n\
+         - Use the `memory` tool with `operation: remember` to persist important information.\n\
          - Use the `memory` tool with `operation: update` to revise an existing memory instead of duplicating.\n\
          - Use the `memory` tool with `operation: search` to find relevant past context.\n\n\
          ## Question Tool Usage\n\n\
@@ -162,7 +162,7 @@ pub fn gateway_system_prompt() -> String {
      - **Memory types**: `user` (preferences), `project` (architecture, patterns,\n\
         conventions), `feedback` (corrections), `reference` (important references).\n\
      - **Tags**: Add relevant tags when storing so related memories can be found easily.\n\
-     - Use the `memory` tool with `operation: store` to persist important information.\n\
+     - Use the `memory` tool with `operation: remember` to persist important information.\n\
      - Use the `memory` tool with `operation: update` to revise an existing memory instead of duplicating.\n\
      - Use the `memory` tool with `operation: search` to find relevant past context.\n\n\
      ## Question Tool Usage\n\n\
