@@ -572,6 +572,50 @@ impl ChannelCore {
                 sender.send_message(recipient, &text, reply_to).await?;
                 Ok(true)
             }
+            "goal" => {
+                use tidev_types::GoalStatus;
+                let session_id = conversation.session_id;
+                match command.args.first().map(|s| s.as_str()) {
+                    Some("clear") => {
+                        self.store.clear_goal(session_id)?;
+                        sender.send_message(recipient, "Goal cleared.", reply_to).await?;
+                    }
+                    Some("pause") => {
+                        self.store.update_goal_status(session_id, GoalStatus::Paused)?;
+                        sender.send_message(recipient, "Goal paused.", reply_to).await?;
+                    }
+                    Some("resume") => {
+                        self.store.update_goal_status(session_id, GoalStatus::Active)?;
+                        sender.send_message(recipient, "Goal resumed.", reply_to).await?;
+                    }
+                    _ => {
+                        if command.args.is_empty() {
+                            match self.store.get_goal(session_id)? {
+                                Some(g) => {
+                                    sender.send_message(
+                                        recipient,
+                                        &format!("Goal: {} [{}] (tokens: {}, time: {}s)",
+                                            g.objective, g.status.as_str(), g.tokens_used, g.time_used_seconds),
+                                        reply_to,
+                                    ).await?;
+                                }
+                                None => {
+                                    sender.send_message(
+                                        recipient,
+                                        "No goal set. Use /goal <objective> to set one.",
+                                        reply_to,
+                                    ).await?;
+                                }
+                            }
+                        } else {
+                            let objective = command.args.join(" ");
+                            self.store.set_goal(session_id, &objective)?;
+                            sender.send_message(recipient, "Goal set.", reply_to).await?;
+                        }
+                    }
+                }
+                Ok(true)
+            }
             "stop" => {
                 let chat_id = recipient.to_string();
                 if let Some(token) = self.cancellation_tokens.get(&chat_id) {
@@ -837,6 +881,21 @@ impl ChannelCore {
             sender
                 .send_message(recipient, &final_text, reply_to)
                 .await?;
+
+            // Append goal status if there's an active goal
+            if let Ok(Some(goal)) = self.store.get_goal(session_id) {
+                let status_line = match goal.status {
+                    tidev_types::GoalStatus::Active =>
+                        format!("[Goal: {} — Active]", goal.objective),
+                    tidev_types::GoalStatus::Paused =>
+                        format!("[Goal: {} — Paused]", goal.objective),
+                    tidev_types::GoalStatus::Complete =>
+                        format!("[Goal: {} — Complete]", goal.objective),
+                };
+                sender
+                    .send_message(recipient, &status_line, reply_to)
+                    .await?;
+            }
         }
 
         Ok(())

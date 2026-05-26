@@ -69,6 +69,14 @@ pub const GATEWAY_COMMANDS: &[CommandSpec] = &[
         name: "mode",
         description: "Show current session mode (Plan / Build)",
     },
+    CommandSpec {
+        name: "goal",
+        description: "Show or set the session goal\n\
+                      /goal <objective> — set a goal\n\
+                      /goal clear — clear the goal\n\
+                      /goal pause — pause the goal\n\
+                      /goal resume — resume a paused goal",
+    },
 ];
 
 /// Parse a slash command from message content.
