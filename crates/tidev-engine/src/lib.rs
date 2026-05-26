@@ -11,6 +11,7 @@ pub mod notifications;
 pub mod provider_setup;
 pub mod sandbox;
 pub mod shared;
+pub mod shell;
 pub mod snapshot;
 pub mod sync;
 pub mod tmp;

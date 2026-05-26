@@ -165,6 +165,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub sandbox: SandboxConfig,
     #[serde(default)]
+    pub shell: ShellConfig,
+    #[serde(default)]
     pub tmp: TmpConfig,
     #[serde(default)]
     pub hooks: crate::hooks::HooksConfig,
@@ -200,6 +202,7 @@ impl Default for AppConfig {
             rtk: RtkConfig::default(),
             agent: AgentConfig::default(),
             sandbox: SandboxConfig::default(),
+            shell: ShellConfig::default(),
             tmp: TmpConfig::default(),
             hooks: crate::hooks::HooksConfig::default(),
             websearch: WebSearchConfig::default(),
@@ -670,6 +673,31 @@ impl Default for NotificationConfig {
     }
 }
 
+/// Configuration for shell command execution.
+///
+/// Controls which shell is used by the `bash` tool on Windows.
+/// When `windows_shell` is `None`, the engine auto-detects the best
+/// available shell (Git Bash / MSYS2 bash > PowerShell) on first use
+/// and persists the result to the config file.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ShellConfig {
+    /// Path or name of the shell executable on Windows.
+    ///
+    /// Examples:
+    ///   "C:\\Program Files\\Git\\bin\\bash.exe"
+    ///   "powershell"
+    ///   "C:\\msys64\\usr\\bin\\bash.exe"
+    ///   "cmd"
+    #[serde(default)]
+    pub windows_shell: Option<String>,
+}
+
+impl Default for ShellConfig {
+    fn default() -> Self {
+        Self { windows_shell: None }
+    }
+}
+
 impl AppConfig {
     pub fn load_or_create(paths: &ConfigPaths) -> Result<Self> {
         paths.ensure_directories()?;
@@ -803,6 +831,9 @@ impl AppConfig {
         }
         if has("sandbox") {
             self.sandbox = overlay.sandbox;
+        }
+        if has("shell") {
+            self.shell = overlay.shell;
         }
         if has("memory") {
             self.memory = overlay.memory;

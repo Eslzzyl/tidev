@@ -27,6 +27,8 @@ impl App {
         let _t0 = std::time::Instant::now();
         let workspace_root = env::current_dir().context("failed to determine workspace root")?;
         let config = AppConfig::load_with_project_overlay(&paths, &workspace_root)?;
+        // Initialize shell detection (Windows: auto-detect bash, Unix: sh).
+        tidev_engine::shell::init(config.shell.windows_shell.clone(), Some(&paths));
         let _ = tidev_engine::logging::init(&paths.data_dir, config.logging.clone());
         log::info!("App initializing, workspace={}", workspace_root.display());
         log::info!("startup: config loaded in {:?}", _t0.elapsed());

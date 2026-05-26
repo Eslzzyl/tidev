@@ -256,8 +256,12 @@ fn run_shell_inner(
     } else {
         // No sandbox: direct execution (original behavior)
         if cfg!(target_os = "windows") {
-            let mut cmd = std::process::Command::new("powershell");
-            cmd.args(["-NoProfile", "-Command", &actual_command])
+            let shell = crate::shell::get();
+            let mut cmd = std::process::Command::new(&shell.program);
+            // arg may contain spaces (e.g. "-NoProfile -Command")
+            let mut all_args: Vec<&str> = shell.arg.split_whitespace().collect();
+            all_args.push(&actual_command);
+            cmd.args(&all_args)
                 .current_dir(workspace_root)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());

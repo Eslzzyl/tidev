@@ -73,6 +73,9 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
         config.merge_overlay(project_config, &keys);
     }
 
+    // Initialize shell detection (Windows: auto-detect bash, Unix: sh).
+    tidev_engine::shell::init(config.shell.windows_shell.clone(), Some(&paths));
+
     // Initialize logging (console enabled for web mode)
     let mut logging_config = config.logging.clone();
     logging_config.console = true;

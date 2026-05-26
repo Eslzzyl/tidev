@@ -103,6 +103,8 @@ async fn run_async() -> Result<()> {
     let workspace_root = env::current_dir().context("failed to determine workspace root")?;
     let paths = ConfigPaths::discover()?;
     let config = AppConfig::load_with_project_overlay(&paths, &workspace_root)?;
+    // Initialize shell detection (Windows: auto-detect bash, Unix: sh).
+    tidev_engine::shell::init(config.shell.windows_shell.clone(), Some(&paths));
     log::info!("Gateway starting, config loaded");
 
     let mut logging_config = config.logging.clone();

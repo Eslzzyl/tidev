@@ -126,6 +126,12 @@ impl AgentRuntime {
             if is_git { "yes" } else { "no" }
         ));
         prompt.push_str(&system_info.format_env());
+        // Inform the model which shell the bash tool uses (Windows only).
+        #[cfg(windows)]
+        {
+            let shell = crate::shell::get();
+            prompt.push_str(&format!("Shell: {}\n  ", shell.display_name));
+        }
         prompt.push_str("\n</env>");
         prompt
     }
