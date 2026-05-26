@@ -510,6 +510,15 @@ impl App {
         // (e.g. from resolve_permission_prompt or question dialog resolution)
         rejected.append(&mut self.pending_rejected_tools);
 
+        // Immediately record rejected tool results in the in-memory conversation
+        // so the TUI can render the rejection without waiting for the async
+        // ToolCompleted event from the agent loop. Rejected tools are never
+        // added to running_tool_executions, so ToolCompleted is silently
+        // dropped — without this early record the rejection would never appear.
+        for (tc, result) in &rejected {
+            self.record_tool_result(tc.clone(), result.clone())?;
+        }
+
         // Build approved list: None = execute, Some(error) = reject
         let mut approvals: Vec<ApprovedTool> = rejected
             .into_iter()

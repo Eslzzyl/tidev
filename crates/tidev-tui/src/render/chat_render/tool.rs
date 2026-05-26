@@ -59,7 +59,10 @@ pub(super) fn render_tool_call_with_result(
 
     // For write/edit, also show progress when arguments are complete but
     // the tool hasn't executed yet (covers rapid chunks that skip is_pending).
+    // Requires is_streaming so the spinner stops when streaming ends—otherwise
+    // a rejected/abandoned tool call would keep the spinner spinning forever.
     let is_waiting_result = tool_result.is_none()
+        && is_streaming
         && matches!(canonical_name, "write" | "edit")
         && match canonical_name {
             "write" => write_lines > 0,
