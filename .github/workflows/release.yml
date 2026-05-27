@@ -202,3 +202,55 @@ jobs:
           # Skip prepublishOnly (verify-release-assets.js) — artifacts already
           # verified by the build pipeline and uploaded to the release above.
           npm publish --ignore-scripts
+
+  homebrew-tap:
+    needs: [release, resolve]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout homebrew-tap repository
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.repository_owner }}/homebrew-tap
+          path: homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Download binaries and calculate SHA256
+        id: sha
+        run: |
+          TAG="${{ needs.resolve.outputs.tag }}"
+          BASE="https://github.com/${{ github.repository }}/releases/download/${TAG}"
+
+          for pair in \
+            "mac_arm64 tidev-macos-arm64" \
+            "mac_x64   tidev-macos-x64" \
+            "linux_arm64 tidev-linux-arm64" \
+            "linux_x64   tidev-linux-x64"; do
+            key=$(echo "$pair"  | awk '{print $1}')
+            file=$(echo "$pair" | awk '{print $2}')
+            curl -sL "${BASE}/${file}" -o "/tmp/${file}"
+            hash=$(sha256sum "/tmp/${file}" | awk '{print $1}')
+            echo "${key}=${hash}" >> $GITHUB_OUTPUT
+          done
+
+      - name: Update Formula file
+        run: |
+          VERSION="${{ needs.resolve.outputs.version }}"
+          FORMULA="homebrew-tap/Formula/tidev.rb"
+
+          sed -i "s/version \"[^\"]*\"/version \"${VERSION}\"/" "$FORMULA"
+          sed -i '/# sha256: macos-arm64/{n;s/sha256 "[^"]*"/sha256 "'"${{ steps.sha.outputs.mac_arm64 }}"'"/}' "$FORMULA"
+          sed -i '/# sha256: macos-x64/{n;s/sha256 "[^"]*"/sha256 "'"${{ steps.sha.outputs.mac_x64 }}"'"/}' "$FORMULA"
+          sed -i '/# sha256: linux-arm64/{n;s/sha256 "[^"]*"/sha256 "'"${{ steps.sha.outputs.linux_arm64 }}"'"/}' "$FORMULA"
+          sed -i '/# sha256: linux-x64/{n;s/sha256 "[^"]*"/sha256 "'"${{ steps.sha.outputs.linux_x64 }}"'"/}' "$FORMULA"
+
+          echo "=== Updated Formula ==="
+          cat "$FORMULA"
+
+      - name: Commit and push
+        run: |
+          cd homebrew-tap
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add Formula/tidev.rb
+          git diff --staged --quiet || git commit -m "chore: update tidev to ${{ needs.resolve.outputs.tag }}"
+          git push
