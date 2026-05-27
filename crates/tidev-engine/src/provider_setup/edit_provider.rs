@@ -75,6 +75,7 @@ pub enum EditModelStep {
     ContextWindow,
     MaxOutputTokens,
     Temperature,
+    ModelApiType,
 }
 
 impl EditModelStep {
@@ -85,6 +86,7 @@ impl EditModelStep {
             Self::ContextWindow => "Context window",
             Self::MaxOutputTokens => "Max output tokens",
             Self::Temperature => "Temperature",
+            Self::ModelApiType => "API type",
         }
     }
 
@@ -95,6 +97,7 @@ impl EditModelStep {
             Self::ContextWindow => "Context window",
             Self::MaxOutputTokens => "Max output tokens",
             Self::Temperature => "Temperature",
+            Self::ModelApiType => "API type",
         }
     }
 
@@ -105,6 +108,7 @@ impl EditModelStep {
             Self::ContextWindow => "128000",
             Self::MaxOutputTokens => "32768",
             Self::Temperature => "0.7",
+            Self::ModelApiType => "openai_chat_completions | anthropic | openai_responses | google_gemini",
         }
     }
 
@@ -115,16 +119,20 @@ impl EditModelStep {
             Self::ContextWindow => "Total token budget for the model context.",
             Self::MaxOutputTokens => "Maximum tokens the model may generate per turn.",
             Self::Temperature => "Usually 0.0 to 1.0 for deterministic coding help.",
+            Self::ModelApiType => "Leave blank to inherit from provider. Override per-model if needed.",
         }
     }
 
-    pub fn next(self, _editing_existing: bool) -> Option<Self> {
+    /// Next step in the model editing wizard.
+    /// `editing` is true when modifying an existing model (skips `ModelId`).
+    pub fn next(self, _editing: bool) -> Option<Self> {
         match self {
             Self::ModelId => Some(Self::ModelDisplayName),
             Self::ModelDisplayName => Some(Self::ContextWindow),
             Self::ContextWindow => Some(Self::MaxOutputTokens),
             Self::MaxOutputTokens => Some(Self::Temperature),
-            Self::Temperature => None,
+            Self::Temperature => Some(Self::ModelApiType),
+            Self::ModelApiType => None,
         }
     }
 

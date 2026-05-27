@@ -21,7 +21,7 @@ api_type = "openai_chat_completions"
 |-----|----------|-------------|
 | `display_name` | Yes | Human-readable name shown in the UI |
 | `base_url` | Yes | Base URL of the API endpoint |
-| `api_type` | No | API protocol. `"openai_chat_completions"` (default), `"anthropic"`, or `"openai_responses"` |
+| `api_type` | No | Default API protocol for all models under this provider (see below). Can be overridden per-model |
 
 ### api_type values
 
@@ -30,6 +30,38 @@ api_type = "openai_chat_completions"
 | `"openai_chat_completions"` | OpenAI Chat Completions API (`/chat/completions`). This is the default and is compatible with many OpenAI-compatible providers |
 | `"anthropic"` | Anthropic Messages API (`/v1/messages`) |
 | `"openai_responses"` | OpenAI Responses API (`/responses`) |
+| `"google_gemini"` | Google Gemini API (`/models/{model}:generateContent`) |
+
+### Per-model api_type override
+
+When a provider serves models with different API protocols (e.g., an
+aggregator that exposes both OpenAI and Anthropic models), set `api_type`
+on individual models instead of (or in addition to) the provider level.
+The resolution order is:
+
+1. **Model-level** `api_type` — highest priority
+2. **Provider-level** `api_type` — fallback
+3. **Default** — `openai_chat_completions`
+
+```toml
+# A provider that serves mixed API protocols
+[providers.my-aggregator]
+display_name = "My Aggregator"
+base_url = "https://api.example.com"
+# No provider-level api_type — each model specifies its own
+
+[providers.my-aggregator.models.gpt-4o]
+api_type = "openai_chat_completions"
+display_name = "GPT-4o"
+context_window = 128000
+max_output_tokens = 16384
+
+[providers.my-aggregator.models.claude-sonnet]
+api_type = "anthropic"
+display_name = "Claude Sonnet"
+context_window = 200000
+max_output_tokens = 64000
+```
 
 ## Model configuration
 
@@ -54,6 +86,7 @@ extra_body = { some_provider_param = "value" }
 | `display_name` | Yes | | Human-readable name for the model shown in the UI |
 | `context_window` | Yes | | Maximum number of input tokens the model can accept |
 | `max_output_tokens` | Yes | | Maximum number of tokens the model can generate in a single response |
+| `api_type` | No | Inherited from provider | Per-model API protocol override. See [api_type values](#api_type-values) above. When omitted, uses the provider-level `api_type` |
 | `temperature` | Yes | | Sampling temperature for the model. Higher values produce more random outputs |
 | `supports_streaming` | No | `true` | Whether the model supports streaming responses |
 | `supports_images` | No | `false` | Whether the model can process image inputs |

@@ -526,7 +526,7 @@ impl App {
                         return Ok(());
                     }
 
-                    if step == NewProviderStep::Temperature {
+                    if step == NewProviderStep::ModelApiType {
                         if let Err(error) = draft.finish_current_model() {
                             self.last_notice = Some(error.to_string());
                             self.show_new_provider_step(NewProviderStep::ModelId, draft);

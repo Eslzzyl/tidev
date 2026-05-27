@@ -11,6 +11,7 @@ pub enum NewProviderStep {
     ContextWindow,
     MaxOutputTokens,
     Temperature,
+    ModelApiType,
     AddAnotherModel,
 }
 
@@ -26,6 +27,7 @@ impl NewProviderStep {
             Self::ContextWindow => "Context window",
             Self::MaxOutputTokens => "Max output tokens",
             Self::Temperature => "Temperature",
+            Self::ModelApiType => "API type",
             Self::AddAnotherModel => "Add another model",
         }
     }
@@ -40,7 +42,8 @@ impl NewProviderStep {
             Self::ModelDisplayName => Some(Self::ContextWindow),
             Self::ContextWindow => Some(Self::MaxOutputTokens),
             Self::MaxOutputTokens => Some(Self::Temperature),
-            Self::Temperature => Some(Self::AddAnotherModel),
+            Self::Temperature => Some(Self::ModelApiType),
+            Self::ModelApiType => Some(Self::AddAnotherModel),
             Self::AddAnotherModel => None,
         }
     }
@@ -56,6 +59,7 @@ impl NewProviderStep {
             Self::ContextWindow => "Context window",
             Self::MaxOutputTokens => "Max output tokens",
             Self::Temperature => "Temperature",
+            Self::ModelApiType => "API type",
             Self::AddAnotherModel => "Add another model",
         }
     }
@@ -71,6 +75,7 @@ impl NewProviderStep {
             Self::ContextWindow => "128000",
             Self::MaxOutputTokens => "32768",
             Self::Temperature => "0.7",
+            Self::ModelApiType => "openai_chat_completions | anthropic | openai_responses | google_gemini",
             Self::AddAnotherModel => "y or n",
         }
     }
@@ -86,6 +91,7 @@ impl NewProviderStep {
             Self::ContextWindow => "Total token budget for the model context.",
             Self::MaxOutputTokens => "Maximum tokens the model may generate per turn.",
             Self::Temperature => "Usually 0.0 to 1.0 for deterministic coding help.",
+            Self::ModelApiType => "Leave blank to inherit from provider. Override per-model if needed.",
             Self::AddAnotherModel => "Press y to add another model, or Enter/n to finish.",
         }
     }
@@ -103,6 +109,7 @@ pub struct NewModelDraft {
     pub context_window: usize,
     pub max_output_tokens: usize,
     pub temperature: f32,
+    pub api_type: String,
 }
 
 impl Default for NewModelDraft {
@@ -114,6 +121,7 @@ impl Default for NewModelDraft {
             context_window: 128_000,
             max_output_tokens: 32_768,
             temperature: 0.7,
+            api_type: String::new(),
         }
     }
 }
@@ -128,6 +136,7 @@ impl NewModelDraft {
             context_window: model.context_window,
             max_output_tokens: model.max_output_tokens,
             temperature: model.temperature.unwrap_or(0.7),
+            api_type: model.api_type.clone().unwrap_or_default(),
         }
     }
 
@@ -144,6 +153,7 @@ impl NewModelDraft {
             NewProviderStep::ContextWindow => self.context_window.to_string(),
             NewProviderStep::MaxOutputTokens => self.max_output_tokens.to_string(),
             NewProviderStep::Temperature => self.temperature.to_string(),
+            NewProviderStep::ModelApiType => self.api_type.clone(),
             _ => String::new(),
         }
     }
@@ -162,6 +172,7 @@ impl NewModelDraft {
             EditModelStep::ContextWindow => self.context_window.to_string(),
             EditModelStep::MaxOutputTokens => self.max_output_tokens.to_string(),
             EditModelStep::Temperature => self.temperature.to_string(),
+            EditModelStep::ModelApiType => self.api_type.clone(),
         }
     }
 
@@ -186,6 +197,9 @@ impl NewModelDraft {
             }
             NewProviderStep::Temperature => {
                 self.temperature = parse_temperature(value)?;
+            }
+            NewProviderStep::ModelApiType => {
+                self.api_type = value.to_string();
             }
             _ => {}
         }
@@ -220,6 +234,9 @@ impl NewModelDraft {
             EditModelStep::Temperature => {
                 self.temperature = parse_temperature(value)?;
             }
+            EditModelStep::ModelApiType => {
+                self.api_type = value.to_string();
+            }
         }
 
         Ok(())
@@ -234,6 +251,11 @@ impl NewModelDraft {
                 display_name: self.model_display_name,
                 context_window: self.context_window,
                 max_output_tokens: self.max_output_tokens,
+                api_type: if self.api_type.trim().is_empty() {
+                    None
+                } else {
+                    Some(self.api_type)
+                },
                 temperature: Some(self.temperature),
                 system_prompt: None,
                 supports_streaming: true,
@@ -287,7 +309,8 @@ impl NewProviderDraft {
             | NewProviderStep::ModelDisplayName
             | NewProviderStep::ContextWindow
             | NewProviderStep::MaxOutputTokens
-            | NewProviderStep::Temperature => self.model.current_value(step),
+            | NewProviderStep::Temperature
+            | NewProviderStep::ModelApiType => self.model.current_value(step),
             NewProviderStep::AddAnotherModel => String::new(),
         }
     }
@@ -314,7 +337,8 @@ impl NewProviderDraft {
             | NewProviderStep::ModelDisplayName
             | NewProviderStep::ContextWindow
             | NewProviderStep::MaxOutputTokens
-            | NewProviderStep::Temperature => self.model.apply_step(step, value)?,
+            | NewProviderStep::Temperature
+            | NewProviderStep::ModelApiType => self.model.apply_step(step, value)?,
             NewProviderStep::AddAnotherModel => {}
         }
 

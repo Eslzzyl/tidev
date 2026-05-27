@@ -1254,11 +1254,7 @@ default_provider = "exa"
             .with_context(|| format!("unknown model '{model_id}' for provider '{provider_id}'"))?;
 
         let api_key = self.resolve_api_key(auth, provider_id);
-        let api_type = provider
-            .api_type
-            .as_deref()
-            .map(ApiType::parse)
-            .unwrap_or_default();
+        let api_type = provider.resolve_api_type(model);
 
         let request_model_id = model
             .request_model_id
@@ -1489,6 +1485,7 @@ mod tests {
                         context_window: 1024,
                         max_output_tokens: 1024,
                         temperature: Some(0.7),
+                        api_type: None,
                         system_prompt: None,
                         supports_streaming: true,
                         supports_images: false,
@@ -1512,6 +1509,7 @@ mod tests {
                         context_window: 1024,
                         max_output_tokens: 1024,
                         temperature: Some(0.7),
+                        api_type: None,
                         system_prompt: None,
                         supports_streaming: true,
                         supports_images: false,

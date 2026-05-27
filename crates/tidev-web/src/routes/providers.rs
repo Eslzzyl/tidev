@@ -262,6 +262,7 @@ pub async fn create_provider(
                 context_window: model_req.context_window,
                 max_output_tokens: model_req.max_output_tokens,
                 temperature,
+                api_type: None,
                 system_prompt: None,
                 supports_streaming: true,
                 supports_images: model_req.supports_images,
