@@ -267,6 +267,11 @@ struct App {
     /// User message card screen bounds: (message_id, screen_rect)
     /// Recalculated every frame in render_chat()
     user_card_bounds: Vec<(Uuid, Rect)>,
+    /// Queued prompt card screen bounds: (queue_index, screen_rect)
+    /// Recalculated every frame in render_queued_prompts()
+    queued_card_bounds: Vec<(usize, Rect)>,
+    /// Hovered queued prompt index for mouse hover highlight
+    hovered_queued_index: Option<usize>,
     /// Maps tool_call_id → child_session_id for subagent task navigation
     subagent_task_map: std::collections::HashMap<String, Uuid>,
     /// Running subagent card screen bounds: (execution_index, screen_rect)

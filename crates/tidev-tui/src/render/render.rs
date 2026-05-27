@@ -62,7 +62,7 @@ pub(crate) fn render_scrollbar(
     frame.render_widget(paragraph, area);
 }
 use std::time::Instant;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::{App, Composer, Screen};
 
@@ -1040,4 +1040,124 @@ pub(crate) fn shorten_single_line(value: &str, max_chars: usize) -> String {
         .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
         .collect();
     shorten(&single_line, max_chars)
+}
+
+/// Wrap `text` into at most `max_lines` lines of `max_width` columns each.
+///
+/// * Newlines in the input are treated as spaces.
+/// * Word boundaries are preferred for line breaks; hard-breaks are used when
+///   a single word exceeds `max_width`.
+/// * If the text would exceed `max_lines`, the last line is truncated with `…`.
+///
+/// Returns at least one (possibly empty) line.
+pub(crate) fn wrap_text_lines(text: &str, max_width: usize, max_lines: usize) -> Vec<String> {
+    if max_width == 0 || max_lines == 0 {
+        return vec![];
+    }
+
+    // Normalize: collapse newlines into spaces
+    let normalized: String = text
+        .chars()
+        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+        .collect();
+    let trimmed = normalized.trim();
+
+    if trimmed.is_empty() {
+        return vec!["".to_string()];
+    }
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut remaining = trimmed;
+
+    while !remaining.is_empty() && lines.len() < max_lines {
+        let remaining_width = char_width(remaining);
+
+        // Last allowed line — truncate if needed
+        if lines.len() == max_lines - 1 {
+            if remaining_width > max_width {
+                lines.push(shorten_by_width(remaining, max_width));
+            } else {
+                lines.push(remaining.to_string());
+            }
+            break;
+        }
+
+        // Fits entirely on this line
+        if remaining_width <= max_width {
+            lines.push(remaining.to_string());
+            break;
+        }
+
+        // Need to wrap. Walk characters to find the break point.
+        let mut width_so_far: usize = 0;
+        let mut break_pos: Option<usize> = None; // byte offset of last whitespace
+        let mut hard_break: usize = 0; // byte offset where width overflows
+
+        for (i, ch) in remaining.char_indices() {
+            let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+            if width_so_far + cw > max_width {
+                hard_break = i;
+                break;
+            }
+            width_so_far += cw;
+            if ch.is_whitespace() {
+                break_pos = Some(i);
+            }
+            hard_break = i + ch.len_utf8();
+        }
+
+        if let Some(sp) = break_pos {
+            if sp > 0 {
+                lines.push(remaining[..sp].to_string());
+                remaining = remaining[sp..].trim_start();
+            } else {
+                // Leading whitespace — skip it
+                remaining = remaining[sp + 1..].trim_start();
+            }
+        } else if hard_break > 0 && hard_break < remaining.len() {
+            // No whitespace in range — hard-break
+            lines.push(remaining[..hard_break].to_string());
+            remaining = &remaining[hard_break..];
+        } else {
+            lines.push(remaining.to_string());
+            break;
+        }
+    }
+
+    if lines.is_empty() {
+        lines.push("".to_string());
+    }
+
+    lines
+}
+
+/// Return the display width (in terminal columns) of `s`.
+fn char_width(s: &str) -> usize {
+    UnicodeWidthStr::width(s)
+}
+
+/// Truncate `s` to fit within `max_width` columns and append `…` if truncated.
+fn shorten_by_width(s: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    let total = char_width(s);
+    if total <= max_width {
+        return s.to_string();
+    }
+    let ellipsis = '…';
+    let ellipsis_width = UnicodeWidthChar::width(ellipsis).unwrap_or(1);
+    let target = max_width.saturating_sub(ellipsis_width);
+    let mut out = String::new();
+    let mut w = 0;
+    for ch in s.chars() {
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if w + cw > target {
+            break;
+        }
+        w += cw;
+        out.push(ch);
+    }
+    out.push(ellipsis);
+    out
 }

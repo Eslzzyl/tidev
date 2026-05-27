@@ -142,6 +142,16 @@ impl App {
                     self.hovered_card = hit_id;
                 }
 
+                // Check queued prompt hover
+                let hit_queued = self
+                    .queued_card_bounds
+                    .iter()
+                    .find(|(_, rect)| rect.contains(position))
+                    .map(|(idx, _)| *idx);
+                if self.hovered_queued_index != hit_queued {
+                    self.hovered_queued_index = hit_queued;
+                }
+
                 // Check scrollbar hover
                 let scrollbar_hovered = self
                     .message_scrollbar_area

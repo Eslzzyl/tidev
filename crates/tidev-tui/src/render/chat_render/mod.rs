@@ -40,12 +40,14 @@ use uuid::Uuid;
 use super::super::permission::{RunningSubagentExecution, SubagentStatus};
 use crate::render::render::{
     decorate_card_lines, line_with_prefix, line_with_style, shorten, shorten_single_line,
+    wrap_text_lines,
 };
 
 use crate::chat_render::content::BlockComputation;
 
 const TOOL_OUTPUT_PREVIEW_LINES: usize = 5;
 const MAX_VISIBLE_QUEUED_PROMPTS: usize = 4;
+const MAX_QUEUED_PROMPT_LINES: usize = 3;
 
 #[derive(Clone, Debug)]
 struct ToolResultCardRange {
@@ -132,8 +134,22 @@ impl App {
         };
         let queued_height = if queued_count > 0 {
             let visible = queued_count.min(MAX_VISIBLE_QUEUED_PROMPTS);
-            // inner: visible text lines + (visible-1) separator lines
-            let inner = visible + (visible.saturating_sub(1));
+            // Compute actual wrapped line count per visible queued prompt
+            let text_width = main_area.width.saturating_sub(5).max(1) as usize;
+            let mut inner: usize = 0;
+            for (i, queued) in self
+                .pending_prompt_queue
+                .iter()
+                .take(visible)
+                .enumerate()
+            {
+                let wrapped = wrap_text_lines(&queued.prompt, text_width, MAX_QUEUED_PROMPT_LINES);
+                inner += wrapped.len();
+                // Separator between items (not after last)
+                if i + 1 < visible {
+                    inner += 1;
+                }
+            }
             // +1 for "+N more" overflow, +2 for block top/bottom borders
             let overflow = if queued_count > MAX_VISIBLE_QUEUED_PROMPTS {
                 1
@@ -142,7 +158,7 @@ impl App {
             };
             (inner + overflow + 2)
                 .min(main_area.height.saturating_sub(6) as usize / 2)
-                .min(12)
+                .min(15)
         } else {
             0
         };
@@ -258,6 +274,7 @@ impl App {
 
         self.render_messages(frame, layout[0]);
 
+        self.queued_card_bounds.clear();
         if queued_height > 0 {
             self.render_queued_prompts(frame, layout[1]);
         }
@@ -306,8 +323,8 @@ impl App {
     }
 
     /// Render a frozen area above the input box showing queued (pending) prompts.
-    /// Each queued message is displayed as a single truncated line with a separator
-    /// between items, wrapped in a top/bottom bordered block with a "QUEUE" badge.
+    /// Each queued message is word-wrapped into up to [`MAX_QUEUED_PROMPT_LINES`] lines.
+    /// Rows are separated by a thin rule. Each row is independently hover-highlighted.
     fn render_queued_prompts(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let palette = self.palette();
         let count = self.pending_prompt_queue.len();
@@ -349,35 +366,77 @@ impl App {
         let inner_height = inner.height as usize;
         let width = inner.width.max(1) as usize;
 
-        let mut y_offset = 0u16;
+        let mut y_offset: u16 = 0;
 
         for (i, queued) in self.pending_prompt_queue.iter().take(visible).enumerate() {
             if y_offset as usize >= inner_height {
                 break;
             }
 
-            // Truncate prompt to a single line
-            let text = shorten_single_line(&queued.prompt, width);
-            frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    text,
-                    Style::default()
-                        .fg(palette.muted)
-                        .add_modifier(Modifier::ITALIC),
-                )))
-                .wrap(Wrap { trim: false }),
-                Rect::new(inner.x, inner.y + y_offset, inner.width, 1),
-            );
-            y_offset += 1;
+            // Word-wrap the prompt into up to MAX_QUEUED_PROMPT_LINES lines
+            let wrapped_lines = wrap_text_lines(&queued.prompt, width, MAX_QUEUED_PROMPT_LINES);
+            let row_text_height = wrapped_lines.len();
+            let has_separator = i + 1 < visible;
+            let row_height = row_text_height + if has_separator { 1 } else { 0 };
 
-            // Separator line (not after last visible item)
-            if i + 1 < visible && (y_offset as usize) < inner_height {
-                let sep = "─".repeat(width.saturating_sub(2));
+            // Clamp to available space
+            let available = inner_height.saturating_sub(y_offset as usize);
+            if available == 0 {
+                break;
+            }
+            let render_height = row_height.min(available);
+
+            // Record bounds for hover hit-testing
+            let row_rect = Rect::new(inner.x, inner.y + y_offset, inner.width, render_height as u16);
+            self.queued_card_bounds.push((i, row_rect));
+
+            // Apply hover highlight
+            let is_hovered = self.hovered_queued_index == Some(i);
+            if is_hovered {
+                let hover_bg = palette.hover_bg(palette.panel);
+                frame.render_widget(
+                    Block::default().style(Style::default().bg(hover_bg)),
+                    row_rect,
+                );
+            }
+
+            // Render each wrapped line of the prompt
+            let text_style = if is_hovered {
+                Style::default()
+                    .fg(palette.text)
+                    .add_modifier(Modifier::ITALIC)
+            } else {
+                Style::default()
+                    .fg(palette.muted)
+                    .add_modifier(Modifier::ITALIC)
+            };
+
+            for line_text in wrapped_lines.iter() {
+                if y_offset as usize >= inner_height {
+                    break;
+                }
                 frame.render_widget(
                     Paragraph::new(Line::from(Span::styled(
-                        sep,
-                        Style::default().fg(palette.border),
-                    ))),
+                        line_text.clone(),
+                        text_style,
+                    )))
+                    .wrap(Wrap { trim: false }),
+                    Rect::new(inner.x, inner.y + y_offset, inner.width, 1),
+                );
+                y_offset += 1;
+            }
+
+            // Separator line (not after last visible item)
+            if has_separator && (y_offset as usize) < inner_height {
+                let sep_width = width.saturating_sub(2);
+                let sep = "─".repeat(sep_width);
+                let sep_style = if is_hovered {
+                    Style::default().fg(palette.text)
+                } else {
+                    Style::default().fg(palette.border)
+                };
+                frame.render_widget(
+                    Paragraph::new(Line::from(Span::styled(sep, sep_style))),
                     Rect::new(
                         inner.x + 1,
                         inner.y + y_offset,
