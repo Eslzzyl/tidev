@@ -176,12 +176,13 @@ impl ContextManager {
                             tool_call_id,
                             tool_name
                         );
+                        let msg = format!(
+                            "Tool call {tool_call_id} was orphaned — cancelled or interrupted before completion"
+                        );
                         messages.push(Message::tool_result(
                             tool_call_id,
                             tool_name,
-                            ToolExecutionResult::new(
-                                "Tool was cancelled by user or interrupted before completion",
-                            ),
+                            ToolExecutionResult::new(msg),
                         ));
                     }
                     messages.push(message.clone());
@@ -206,12 +207,13 @@ impl ContextManager {
                                 tool_call_id,
                                 tool_name,
                             );
+                            let msg = format!(
+                                "Tool call {tool_call_id} was orphaned — cancelled or interrupted before completion"
+                            );
                             messages.push(Message::tool_result(
                                 tool_call_id,
                                 tool_name,
-                                ToolExecutionResult::new(
-                                    "Tool was cancelled by user or interrupted before completion",
-                                ),
+                                ToolExecutionResult::new(msg),
                             ));
                         }
                     }
@@ -249,9 +251,9 @@ impl ContextManager {
             messages.push(Message::tool_result(
                 tool_call_id.clone(),
                 tool_name.clone(),
-                ToolExecutionResult::new(
-                    "Tool was cancelled by user or interrupted before completion",
-                ),
+                ToolExecutionResult::new(format!(
+                    "Tool call {tool_call_id} was orphaned — cancelled or interrupted before completion"
+                )),
             ));
         }
 
