@@ -46,7 +46,9 @@ impl SensitiveFileDialogState {
 
     /// Calculate the height needed for the dialog.
     pub(crate) fn dialog_height(&self, _width: u16) -> u16 {
-        8
+        // Inner: title(1) + message(2) + paths(2) + help(2) + bottom(1) = 8
+        // Outer margin: top(1) + bottom(1) = 2
+        10
     }
 }
 
@@ -61,6 +63,42 @@ pub(crate) enum SensitiveFileDecision {
     DenyOnce,
     /// Deny and remember until tidev exits
     DenyUntilExit,
+}
+
+/// Confirmation dialog shown when the user chooses "allow until exit" or
+/// "deny until exit", asking them to confirm the remembered permission.
+/// Maintains the same size and position as the sensitive file dialog.
+#[derive(Clone, Debug)]
+pub(crate) struct SensitiveFileConfirmDialogState {
+    /// The original pending sensitive file check.
+    pub pending: PendingSensitiveFileCheck,
+    /// The action being confirmed (AllowUntilExit or DenyUntilExit).
+    pub action: SensitiveFileDecision,
+    /// Which option is highlighted: 0 = confirm, 1 = cancel.
+    pub selected_index: usize,
+    pub current_index: usize,
+    pub total: usize,
+}
+
+impl SensitiveFileConfirmDialogState {
+    pub(crate) fn title(&self) -> String {
+        format!("Confirm {} of {}", self.current_index, self.total)
+    }
+
+    pub(crate) fn path_display(&self) -> String {
+        self.pending.sensitive_path.display().to_string()
+    }
+
+    pub(crate) fn workspace_display(&self) -> String {
+        self.pending.workspace_root.display().to_string()
+    }
+
+    /// Calculate the height needed for the dialog (same as sensitive file dialog).
+    pub(crate) fn dialog_height(&self, _width: u16) -> u16 {
+        // Inner: title(1) + message(1) + paths(2) + options(2) + help(1) + bottom(1) = 8
+        // Outer margin: top(1) + bottom(1) = 2
+        10
+    }
 }
 
 impl App {
@@ -131,22 +169,88 @@ impl App {
     }
 
     /// Handle keyboard input for the sensitive file dialog.
+    /// 'a' and 'd' now show a confirmation dialog first instead of resolving immediately.
     pub(crate) fn handle_sensitive_file_dialog_key(
         &mut self,
         key: KeyEvent,
         runtime: &Runtime,
     ) -> Result<()> {
+        // Intercept AllowUntilExit / DenyUntilExit to show confirmation dialog
+        if matches!(key.code, KeyCode::Char('a') | KeyCode::Char('A')) {
+            if let Some(ref dialog) = self.sensitive_file_dialog {
+                self.sensitive_file_confirm_dialog =
+                    Some(SensitiveFileConfirmDialogState {
+                        pending: dialog.pending.clone(),
+                        action: SensitiveFileDecision::AllowUntilExit,
+                        selected_index: 0,
+                        current_index: dialog.current_index,
+                        total: dialog.total,
+                    });
+            }
+            return Ok(());
+        }
+        if matches!(key.code, KeyCode::Char('d') | KeyCode::Char('D')) {
+            if let Some(ref dialog) = self.sensitive_file_dialog {
+                self.sensitive_file_confirm_dialog =
+                    Some(SensitiveFileConfirmDialogState {
+                        pending: dialog.pending.clone(),
+                        action: SensitiveFileDecision::DenyUntilExit,
+                        selected_index: 0,
+                        current_index: dialog.current_index,
+                        total: dialog.total,
+                    });
+            }
+            return Ok(());
+        }
+
         let decision = match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => Some(SensitiveFileDecision::AllowOnce),
-            KeyCode::Char('a') | KeyCode::Char('A') => Some(SensitiveFileDecision::AllowUntilExit),
             KeyCode::Char('n') | KeyCode::Char('N') => Some(SensitiveFileDecision::DenyOnce),
-            KeyCode::Char('d') | KeyCode::Char('D') => Some(SensitiveFileDecision::DenyUntilExit),
             KeyCode::Esc => Some(SensitiveFileDecision::DenyOnce),
             _ => None,
         };
 
         if let Some(decision) = decision {
             self.resolve_sensitive_file_dialog(decision, runtime)?;
+        }
+
+        Ok(())
+    }
+
+    /// Handle keyboard input for the sensitive file confirmation dialog.
+    /// Left/Right to select, Enter to confirm, Esc to go back.
+    pub(crate) fn handle_sensitive_file_confirm_dialog_key(
+        &mut self,
+        key: KeyEvent,
+        runtime: &Runtime,
+    ) -> Result<()> {
+        let Some(ref mut confirm) = self.sensitive_file_confirm_dialog else {
+            return Ok(());
+        };
+
+        match key.code {
+            KeyCode::Left => {
+                confirm.selected_index = confirm.selected_index.saturating_sub(1);
+            }
+            KeyCode::Right => {
+                confirm.selected_index = confirm.selected_index.saturating_add(1).min(1);
+            }
+            KeyCode::Enter => {
+                if confirm.selected_index == 0 {
+                    // Confirm — execute the remembered action
+                    let action = confirm.action;
+                    self.sensitive_file_confirm_dialog = None;
+                    self.resolve_sensitive_file_dialog(action, runtime)?;
+                } else {
+                    // Cancel — go back to the original dialog
+                    self.sensitive_file_confirm_dialog = None;
+                }
+            }
+            KeyCode::Esc => {
+                // Cancel — go back to the original dialog
+                self.sensitive_file_confirm_dialog = None;
+            }
+            _ => {}
         }
 
         Ok(())

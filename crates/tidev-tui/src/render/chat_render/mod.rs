@@ -218,6 +218,27 @@ impl App {
             return;
         }
 
+        // Handle sensitive file confirm dialog (shown before the sensitive file dialog)
+        if let Some(dialog) = self.sensitive_file_confirm_dialog.clone() {
+            let dialog_height = dialog
+                .dialog_height(main_area.width)
+                .min(main_area.height.saturating_sub(3).max(6));
+
+            let layout = Layout::vertical([
+                Constraint::Min(6),
+                Constraint::Length(dialog_height),
+                Constraint::Length(1),
+                Constraint::Length(1),
+            ])
+            .split(main_area);
+
+            self.render_messages(frame, layout[0]);
+            self.render_sensitive_file_confirm_dialog(frame, layout[1], &dialog);
+            self.render_prompt_footer(frame, layout[2]);
+            self.render_retrying_hint(frame, layout[3]);
+            return;
+        }
+
         // Handle sensitive file dialog
         if let Some(dialog) = self.sensitive_file_dialog.clone() {
             let dialog_height = dialog

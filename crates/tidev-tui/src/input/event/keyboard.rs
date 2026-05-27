@@ -63,6 +63,13 @@ impl App {
             return Ok(());
         }
 
+        // Allow message scrolling even when security dialogs are shown.
+        // This must come before the dialog dispatch so PageUp/PageDown
+        // reach the scroll handler instead of being consumed by dialogs.
+        if !self.command_palette.visible && self.handle_message_scroll_key(key) {
+            return Ok(());
+        }
+
         if self.permission_dialog.is_some() {
             return self.handle_permission_dialog_key(key, runtime);
         }
@@ -77,6 +84,10 @@ impl App {
 
         if self.workspace_boundary_dialog.is_some() {
             return self.handle_workspace_boundary_dialog_key(key, runtime);
+        }
+
+        if self.sensitive_file_confirm_dialog.is_some() {
+            return self.handle_sensitive_file_confirm_dialog_key(key, runtime);
         }
 
         if self.sensitive_file_dialog.is_some() {
@@ -355,10 +366,6 @@ impl App {
                 }
                 _ => {}
             }
-        }
-
-        if !self.command_palette.visible && self.handle_message_scroll_key(key) {
-            return Ok(());
         }
 
         if matches!(key.code, KeyCode::Up | KeyCode::Down) {

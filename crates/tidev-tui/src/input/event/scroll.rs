@@ -4,7 +4,6 @@ impl App {
     pub(crate) fn can_scroll_conversation(&self) -> bool {
         self.screen == Screen::Chat
             && self.permission_dialog.is_none()
-            && self.workspace_boundary_dialog.is_none()
             && self.fork_confirm_dialog.is_none()
             && self.connect_dialog.is_none()
             && self.theme_panel.is_none()

@@ -40,8 +40,9 @@ impl WorkspaceBoundaryDialogState {
 
     /// Calculate the height needed for the dialog.
     pub(crate) fn dialog_height(&self, _width: u16) -> u16 {
-        // Title + warning + path info + help text + borders
-        8
+        // Inner: title(1) + message(2) + paths(2) + help(2) + bottom(1) = 8
+        // Outer margin: top(1) + bottom(1) = 2
+        10
     }
 }
 
@@ -82,9 +83,15 @@ impl WorkspaceBoundaryConfirmDialogState {
         self.pending.requested_path.display().to_string()
     }
 
+    pub(crate) fn workspace_display(&self) -> String {
+        self.pending.workspace_root.display().to_string()
+    }
+
     /// Calculate the height needed for the dialog (same as boundary dialog).
     pub(crate) fn dialog_height(&self, _width: u16) -> u16 {
-        8
+        // Inner: title(1) + message(1) + paths(2) + options(2) + help(1) + bottom(1) = 8
+        // Outer margin: top(1) + bottom(1) = 2
+        10
     }
 }
 

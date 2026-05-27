@@ -189,6 +189,7 @@ pub(crate) struct CachedSessionRuntime {
     pub(crate) workspace_boundary_dialog: Option<WorkspaceBoundaryDialogState>,
     pub(crate) workspace_boundary_confirm_dialog: Option<WorkspaceBoundaryConfirmDialogState>,
     pub(crate) sensitive_file_dialog: Option<crate::ui::sensitive::SensitiveFileDialogState>,
+    pub(crate) sensitive_file_confirm_dialog: Option<crate::ui::sensitive::SensitiveFileConfirmDialogState>,
     pub(crate) workspace_boundary_permissions: std::collections::HashMap<String, bool>,
     pub(crate) sensitive_file_permissions: std::collections::HashMap<String, bool>,
     pub(crate) question_dialog: Option<QuestionDialogState>,

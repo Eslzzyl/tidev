@@ -1,7 +1,7 @@
 use crate::App;
 use crate::render::render::centered_rect;
 use crate::ui::connect::ProviderPickerItem;
-use crate::ui::sensitive::SensitiveFileDialogState;
+use crate::ui::sensitive::{SensitiveFileConfirmDialogState, SensitiveFileDialogState};
 use crate::{
     permission::PermissionDialogState,
     question::QuestionDialogState,
@@ -753,9 +753,10 @@ impl App {
 
         let sections = Layout::vertical([
             Constraint::Length(1),
+            Constraint::Length(1),
             Constraint::Length(2),
             Constraint::Length(2),
-            Constraint::Length(2),
+            Constraint::Length(1),
             Constraint::Length(1),
         ])
         .split(inner);
@@ -779,14 +780,28 @@ impl App {
             } else {
                 "deny"
             };
-        let message = format!(
-            "This will {} access to:\n{}",
-            action_text,
-            dialog.path_display()
+        frame.render_widget(
+            Paragraph::new(format!(
+                "This will {} access to:",
+                action_text
+            ))
+            .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+            sections[1],
+        );
+
+        // Path info (same format as the boundary dialog)
+        let path_text = format!(
+            "Requested: {}\nWorkspace: {}",
+            dialog.path_display(),
+            dialog.workspace_display()
         );
         frame.render_widget(
-            Paragraph::new(message).style(Style::default().bg(palette.panel_alt).fg(palette.text)),
-            sections[1],
+            Paragraph::new(path_text).style(
+                Style::default()
+                    .bg(palette.panel_alt)
+                    .fg(palette.accent_soft),
+            ),
+            sections[2],
         );
 
         // Options row: [ Confirm ] [ Cancel ]
@@ -815,7 +830,7 @@ impl App {
             Paragraph::new(Line::from(option_spans))
                 .alignment(Alignment::Center)
                 .style(Style::default().bg(palette.panel_alt)),
-            sections[2],
+            sections[3],
         );
 
         // Help text
@@ -826,7 +841,7 @@ impl App {
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD),
             ),
-            sections[3],
+            sections[4],
         );
     }
 
@@ -896,6 +911,117 @@ impl App {
                         .add_modifier(Modifier::BOLD),
                 ),
             sections[3],
+        );
+    }
+
+    pub(crate) fn render_sensitive_file_confirm_dialog(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        dialog: &SensitiveFileConfirmDialogState,
+    ) {
+        let palette = self.palette();
+        let inner = area.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+
+        frame.render_widget(Clear, area);
+
+        let block = Block::default().style(Style::default().bg(palette.panel_alt));
+        frame.render_widget(block, area);
+
+        let sections = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(2),
+            Constraint::Length(2),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+        // Title
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                dialog.title(),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            sections[0],
+        );
+
+        // Confirmation message
+        let action_text =
+            if dialog.action == crate::ui::sensitive::SensitiveFileDecision::AllowUntilExit {
+                "allow"
+            } else {
+                "deny"
+            };
+        frame.render_widget(
+            Paragraph::new(format!(
+                "This will {} access to:",
+                action_text
+            ))
+            .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+            sections[1],
+        );
+
+        // Path info (same format as the sensitive file dialog)
+        let path_text = format!(
+            "Requested: {}\nWorkspace: {}",
+            dialog.path_display(),
+            dialog.workspace_display()
+        );
+        frame.render_widget(
+            Paragraph::new(path_text).style(
+                Style::default()
+                    .bg(palette.panel_alt)
+                    .fg(palette.accent_soft),
+            ),
+            sections[2],
+        );
+
+        // Options row: [ Confirm ] [ Cancel ]
+        let options = [" Confirm ", " Cancel "];
+        let option_spans: Vec<Span> = options
+            .iter()
+            .enumerate()
+            .flat_map(|(i, label)| {
+                let selected = i == dialog.selected_index;
+                let span = if selected {
+                    Span::styled(
+                        format!("[{}]", label),
+                        Style::default()
+                            .fg(palette.accent)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    Span::styled(format!(" {} ", label), Style::default().fg(palette.text))
+                };
+                // Add spacing between options
+                vec![span, Span::raw("  ")]
+            })
+            .collect();
+
+        frame.render_widget(
+            Paragraph::new(Line::from(option_spans))
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(palette.panel_alt)),
+            sections[3],
+        );
+
+        // Help text
+        frame.render_widget(
+            Paragraph::new("← → switch · Enter confirm · Esc cancel").style(
+                Style::default()
+                    .bg(palette.panel_alt)
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            sections[4],
         );
     }
 
