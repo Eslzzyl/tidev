@@ -1,0 +1,91 @@
+name: Update Homebrew Tap
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  update-homebrew-tap:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout homebrew-tap repository
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.repository_owner }}/homebrew-tap
+          path: homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Get release tag
+        id: release
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download macOS arm64 binary and calculate SHA256
+        id: mac_arm64
+        run: |
+          TAG="${{ steps.release.outputs.tag }}"
+          URL="https://github.com/Eslzzyl/tidev/releases/download/${TAG}/tidev-macos-arm64"
+          curl -sL "$URL" -o /tmp/tidev-macos-arm64
+          SHA=$(shasum -a 256 /tmp/tidev-macos-arm64 | awk '{print $1}')
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+
+      - name: Download macOS x64 binary and calculate SHA256
+        id: mac_x64
+        run: |
+          TAG="${{ steps.release.outputs.tag }}"
+          URL="https://github.com/Eslzzyl/tidev/releases/download/${TAG}/tidev-macos-x64"
+          curl -sL "$URL" -o /tmp/tidev-macos-x64
+          SHA=$(shasum -a 256 /tmp/tidev-macos-x64 | awk '{print $1}')
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+
+      - name: Download Linux arm64 binary and calculate SHA256
+        id: linux_arm64
+        run: |
+          TAG="${{ steps.release.outputs.tag }}"
+          URL="https://github.com/Eslzzyl/tidev/releases/download/${TAG}/tidev-linux-arm64"
+          curl -sL "$URL" -o /tmp/tidev-linux-arm64
+          SHA=$(shasum -a 256 /tmp/tidev-linux-arm64 | awk '{print $1}')
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+
+      - name: Download Linux x64 binary and calculate SHA256
+        id: linux_x64
+        run: |
+          TAG="${{ steps.release.outputs.tag }}"
+          URL="https://github.com/Eslzzyl/tidev/releases/download/${TAG}/tidev-linux-x64"
+          curl -sL "$URL" -o /tmp/tidev-linux-x64
+          SHA=$(shasum -a 256 /tmp/tidev-linux-x64 | awk '{print $1}')
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+
+      - name: Update Formula file
+        run: |
+          VERSION="${{ steps.release.outputs.version }}"
+          MAC_ARM64_SHA="${{ steps.mac_arm64.outputs.sha }}"
+          MAC_X64_SHA="${{ steps.mac_x64.outputs.sha }}"
+          LINUX_ARM64_SHA="${{ steps.linux_arm64.outputs.sha }}"
+          LINUX_X64_SHA="${{ steps.linux_x64.outputs.sha }}"
+
+          FORMULA="homebrew-tap/Formula/tidev.rb"
+
+          # Update version
+          sed -i '' "s/version \"[^\"]*\"/version \"${VERSION}\"/" "$FORMULA"
+
+          # Update sha256 for each platform (comment-guided replacement)
+          sed -i '' '/# sha256: macos-arm64/{n;s/sha256 "[^"]*"/sha256 "'"${MAC_ARM64_SHA}"'"/}' "$FORMULA"
+          sed -i '' '/# sha256: macos-x64/{n;s/sha256 "[^"]*"/sha256 "'"${MAC_X64_SHA}"'"/}' "$FORMULA"
+          sed -i '' '/# sha256: linux-arm64/{n;s/sha256 "[^"]*"/sha256 "'"${LINUX_ARM64_SHA}"'"/}' "$FORMULA"
+          sed -i '' '/# sha256: linux-x64/{n;s/sha256 "[^"]*"/sha256 "'"${LINUX_X64_SHA}"'"/}' "$FORMULA"
+
+          echo "=== Updated Formula ==="
+          cat "$FORMULA"
+
+      - name: Commit and push
+        run: |
+          cd homebrew-tap
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add Formula/tidev.rb
+          git diff --staged --quiet || git commit -m "chore: update tidev to ${{ steps.release.outputs.tag }}"
+          git push
