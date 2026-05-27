@@ -332,7 +332,7 @@ display_name = "Qwen3.7-Max"
 context_window = 1048576
 max_output_tokens = 32768
 supports_streaming = true
-supports_images = true
+supports_images = false
 
 [providers.google-gemini]
 display_name = "Google Gemini"
