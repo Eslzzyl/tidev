@@ -598,9 +598,9 @@ impl App {
         } else {
             self.workspace_root.join(source)
         };
-        path.canonicalize()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|_| source.to_string())
+        tidev_engine::tooling::builtin::utils::canonicalize_display(&path)
+            .display()
+            .to_string()
     }
 
     fn update_loaded_instruction_sources(&mut self, sources: &[String]) -> Result<()> {

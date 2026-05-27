@@ -138,15 +138,29 @@ impl CommandSpec {
 
     /// Get the original command as a single string (for display).
     pub fn display_command(&self) -> String {
+        // Unix: sh -c <command>
         if self.program == "sh" && self.args.len() == 2 && self.args[0] == "-c" {
-            // For shell commands, show the actual command
-            self.args[1].clone()
-        } else {
-            // For other commands, join program and args
-            let mut parts = vec![self.program.clone()];
-            parts.extend(self.args.clone());
-            parts.join(" ")
+            return self.args[1].clone();
         }
+        // Windows: cmd /C <command>
+        if self.program.eq_ignore_ascii_case("cmd")
+            && self.args.len() >= 2
+            && self.args[0].eq_ignore_ascii_case("/c")
+        {
+            return self.args[1..].join(" ");
+        }
+        // Windows: powershell/pwsh -NoProfile -Command <command>
+        if (self.program.eq_ignore_ascii_case("powershell")
+            || self.program.eq_ignore_ascii_case("pwsh"))
+            && self.args.len() >= 2
+            && self.args[self.args.len() - 2].eq_ignore_ascii_case("-command")
+        {
+            return self.args[self.args.len() - 1].clone();
+        }
+        // Fallback: join program and args
+        let mut parts = vec![self.program.clone()];
+        parts.extend(self.args.clone());
+        parts.join(" ")
     }
 }
 

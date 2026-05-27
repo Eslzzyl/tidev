@@ -9,6 +9,7 @@ use std::{
 use tokio::sync::Mutex;
 
 use crate::config::ConfigPaths;
+use crate::tooling::builtin::utils::canonicalize_display;
 
 const BATCH_SIZE: usize = 100;
 
@@ -37,12 +38,7 @@ pub struct SnapshotService {
 
 impl SnapshotService {
     pub fn new(workspace_root: &Path, paths: &ConfigPaths) -> Result<Self> {
-        let worktree = workspace_root.canonicalize().with_context(|| {
-            format!(
-                "failed to canonicalize workspace root {}",
-                workspace_root.display()
-            )
-        })?;
+        let worktree = canonicalize_display(workspace_root);
 
         let worktree_hash = blake3::hash(worktree.to_string_lossy().as_bytes())
             .to_hex()

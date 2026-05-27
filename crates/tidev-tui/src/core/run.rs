@@ -713,7 +713,7 @@ impl App {
             } else {
                 self.workspace_root.join(source)
             };
-            let canonical_path = path.canonicalize().unwrap_or_else(|_| path.clone());
+            let canonical_path = tidev_engine::tooling::builtin::utils::canonicalize_display(&path);
 
             if let Ok(content) = std::fs::read_to_string(&canonical_path) {
                 self.instruction_content_cache
@@ -892,9 +892,8 @@ impl App {
             } else {
                 self.workspace_root.join(source.as_str())
             };
-            if let Ok(canonical) = path.canonicalize() {
-                *source = canonical.display().to_string();
-            }
+            let canonical = tidev_engine::tooling::builtin::utils::canonicalize_display(&path);
+            *source = canonical.display().to_string();
         }
 
         // Pre-populate cache from loaded instruction sources so the next

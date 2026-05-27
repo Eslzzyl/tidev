@@ -1,10 +1,27 @@
 use anyhow::{Context, Result, bail};
 use std::path::{Component, Path, PathBuf};
 
+/// Canonicalize a path, stripping the Windows `\\?\` extended-length prefix
+/// so the result is comparable with paths from [`std::env::current_dir`]
+/// and displays cleanly to users.
+///
+/// On Windows, [`std::fs::canonicalize`] returns paths prefixed with `\\?\`
+/// (e.g. `\\?\C:\Users\foo\project`), while [`std::env::current_dir`] returns
+/// normal paths (e.g. `C:\Users\foo\project`).  Mixing the two causes
+/// [`Path::strip_prefix`] to fail and produces ugly `\\?\` paths in UI
+/// messages.  This function uses the [`dunce`] crate to remove the prefix
+/// when it is safe to do so.
+///
+/// Falls back to the original path if canonicalization fails (e.g. the path
+/// does not yet exist).
+pub fn canonicalize_display(path: &Path) -> PathBuf {
+    dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 /// Expand a leading tilde (`~` or `~/...`) to the user's home directory.
 /// Uses `Path::components` instead of string matching, so it correctly handles
 /// both `/` (Unix) and `\` (Windows) path separators.
-fn expand_tilde(candidate: &Path) -> Result<PathBuf> {
+pub(crate) fn expand_tilde(candidate: &Path) -> Result<PathBuf> {
     let mut components = candidate.components();
     match components.next() {
         Some(Component::Normal(part)) if part == "~" => {

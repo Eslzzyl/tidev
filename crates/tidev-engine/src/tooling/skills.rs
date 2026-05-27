@@ -10,6 +10,8 @@ use std::{
 
 use reqwest::blocking::Client;
 
+use super::builtin::utils::canonicalize_display;
+
 const SKILL_FILE_NAME: &str = "SKILL.md";
 const SKILL_ROOTS: &[&str] = &[".opencode/skills", ".claude/skills", ".agents/skills"];
 const MAX_COMPANION_FILES: usize = 10;
@@ -62,9 +64,7 @@ fn discover_inner(
                 "discover_inner: found skill_file = {}",
                 skill_file.display()
             );
-            let canonical_location = skill_file
-                .canonicalize()
-                .unwrap_or_else(|_| skill_file.clone());
+            let canonical_location = canonicalize_display(&skill_file);
             if !seen_locations.insert(canonical_location) {
                 log::debug!("discover_inner: duplicate location, skip");
                 continue;
@@ -105,10 +105,7 @@ fn discover_inner(
             continue;
         };
 
-        let canonical_location = skill
-            .location
-            .canonicalize()
-            .unwrap_or_else(|_| skill.location.clone());
+        let canonical_location = canonicalize_display(&skill.location);
         if !seen_locations.insert(canonical_location) {
             log::debug!("discover_inner: duplicate extra location, skip");
             continue;
@@ -280,9 +277,7 @@ fn candidate_roots(
                 continue;
             }
 
-            let canonical = candidate
-                .canonicalize()
-                .unwrap_or_else(|_| candidate.clone());
+            let canonical = canonicalize_display(&candidate);
             if seen.insert(canonical.clone()) {
                 log::info!(
                     "candidate_roots: found skill directory: {}",
@@ -309,9 +304,7 @@ fn candidate_roots(
         global_root.display()
     );
     if global_root.is_dir() {
-        let canonical = global_root
-            .canonicalize()
-            .unwrap_or_else(|_| global_root.clone());
+        let canonical = canonicalize_display(&global_root);
         if seen.insert(canonical.clone()) {
             log::info!(
                 "candidate_roots: found global skill directory: {}",

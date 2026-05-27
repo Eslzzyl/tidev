@@ -8,6 +8,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::tooling::builtin::utils::canonicalize_display;
+
 const INSTRUCTION_FILES: &[&str] = &[
     "AGENTS.md",
     "CLAUDE.md",
@@ -26,18 +28,14 @@ pub fn resolve_nearby_instructions(
     let mut results = Vec::new();
     let mut seen = HashSet::new();
 
-    let target = file_path
-        .canonicalize()
-        .unwrap_or_else(|_| file_path.to_path_buf());
-    let root = workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let target = canonicalize_display(file_path);
+    let root = canonicalize_display(workspace_root);
 
     // Collect system-wide instruction paths
     let system_paths = system_paths(workspace_root, config_dir, &[])?;
     let system_set: HashSet<_> = system_paths
         .iter()
-        .map(|p| p.canonicalize().unwrap_or_else(|_| p.clone()))
+        .map(|p| canonicalize_display(p))
         .collect();
 
     // Walk upward from the file being read
@@ -45,9 +43,7 @@ pub fn resolve_nearby_instructions(
     while current.starts_with(&root) {
         for file_name in INSTRUCTION_FILES {
             let candidate = current.join(file_name);
-            let canonical = candidate
-                .canonicalize()
-                .unwrap_or_else(|_| candidate.clone());
+            let canonical = canonicalize_display(&candidate);
 
             // Skip if already loaded, system-wide, or the file itself
             if canonical == target {
@@ -90,7 +86,7 @@ pub fn system_paths(
     let mut seen = HashSet::new();
 
     let mut push_unique = |path: PathBuf| {
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+        let canonical = canonicalize_display(&path);
         if seen.insert(canonical.clone()) {
             paths.push(canonical);
         }

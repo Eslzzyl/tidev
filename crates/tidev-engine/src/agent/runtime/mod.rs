@@ -38,6 +38,7 @@ use tidev_storage::SessionStore;
 
 use crate::config::{AppConfig, AuthStore, ConfigPaths};
 use crate::tooling::ToolRegistry;
+use crate::tooling::builtin::utils::canonicalize_display;
 
 // ── AgentRuntime ───────────────────────────────────────────────────────────
 
@@ -183,9 +184,7 @@ impl AgentRuntime {
                 } else {
                     self.workspace_root.join(s)
                 };
-                path.canonicalize()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_else(|_| s.clone())
+                canonicalize_display(&path).display().to_string()
             })
             .collect();
 

@@ -553,7 +553,6 @@ fn extract_file_path_for_check(call: &ToolCall, tool_name: &str) -> Option<Strin
 }
 
 /// Resolve workspace path without failing (returns Err on failure instead of panicking)
-#[allow(dead_code)]
 fn resolve_workspace_path_safe(
     workspace_root: &Path,
     candidate: &str,
@@ -561,13 +560,14 @@ fn resolve_workspace_path_safe(
     use std::path::Component;
 
     let candidate_path = std::path::Path::new(candidate);
-    let mut resolved = if candidate_path.is_absolute() {
+    let expanded = super::builtin::utils::expand_tilde(candidate_path).map_err(|_| ())?;
+    let mut resolved = if expanded.is_absolute() {
         std::path::PathBuf::new()
     } else {
         workspace_root.to_path_buf()
     };
 
-    for component in candidate_path.components() {
+    for component in expanded.components() {
         match component {
             Component::CurDir => {}
             Component::ParentDir => {

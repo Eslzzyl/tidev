@@ -12,6 +12,7 @@
 //! 3. Check that user namespaces are available (WSL1 does not support them).
 //! 4. If bwrap is unavailable, the system falls back to Landlock.
 
+use crate::tooling::builtin::utils::canonicalize_display;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
@@ -77,13 +78,13 @@ pub fn is_wsl1() -> bool {
 /// in the project directory.
 pub fn find_system_bwrap() -> Option<PathBuf> {
     let cwd = std::env::current_dir().ok()?;
-    let cwd_canonical = cwd.canonicalize().ok().unwrap_or(cwd);
+    let cwd_canonical = canonicalize_display(&cwd);
 
     // Search PATH entries manually, excluding cwd
     let path_var = std::env::var_os("PATH")?;
     for path_entry in std::env::split_paths(&path_var) {
         // Skip if this PATH entry is inside the current working directory
-        let canonical_entry = path_entry.canonicalize().ok().unwrap_or(path_entry.clone());
+        let canonical_entry = canonicalize_display(&path_entry);
         if canonical_entry.starts_with(&cwd_canonical) {
             continue;
         }
