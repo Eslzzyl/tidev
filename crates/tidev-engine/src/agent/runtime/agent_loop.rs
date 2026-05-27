@@ -697,6 +697,7 @@ impl AgentRuntime {
             log::info!("agent_loop: turn completed in {:?}", _t_turn.elapsed());
 
             // No tool calls — check if we should continue for an active goal
+            // or pick up queued messages
             if turn.tool_calls.is_empty() {
                 log::info!("agent_loop: no tool calls, persisting assistant message");
                 self.persist_assistant_message(session_id, &turn).await?;
@@ -717,7 +718,65 @@ impl AgentRuntime {
                 if self.continue_goal_if_active(session_id).await? {
                     log::info!("agent_loop: goal active, injecting continuation and continuing");
                     request_id = rand::random::<u64>();
+
+                    // Check cancellation before notifying the frontend,
+                    // to avoid stale TurnStarting events after abort.
+                    if let Some(ref ct) = cancel_token
+                        && ct.is_cancelled()
+                    {
+                        log::info!("run_agent_loop: cancelled before TurnStarting (goal)");
+                        return Ok(());
+                    }
+
+                    // Notify frontend about the new turn so it can create a
+                    // streaming message and update its active_request_id.
+                    let _ = event_tx.send(BackendEvent::TurnStarting {
+                        session_id,
+                        request_id,
+                    });
                     continue;
+                }
+
+                // Before exiting, check for queued user messages.  This implements
+                // the "type-ahead" mechanism — frontends push messages through
+                // `queue_user_message()` while the previous turn is running.
+                {
+                    let next_msg = self.queued_messages.lock().unwrap().pop_front();
+                    if let Some(qmsg) = next_msg {
+                        log::info!(
+                            "agent_loop: processing queued message ({} chars)",
+                            qmsg.content.len()
+                        );
+                        let mut user_msg = Message::new(tidev_session::session::MessageRole::User, &qmsg.content);
+                        user_msg.attachments = qmsg.attachments;
+                        user_msg.mode = qmsg.mode;
+                        user_msg.thinking_level = qmsg.thinking_level;
+                        user_msg.completed_at = Some(Utc::now());
+                        {
+                            let store = self.store.lock().await;
+                            store.append_message(session_id, &user_msg)?;
+                        }
+                        // Continue the loop — the next iteration picks up the
+                        // newly persisted user message.
+                        request_id = rand::random::<u64>();
+
+                        // Check cancellation before notifying the frontend,
+                        // to avoid stale TurnStarting events after abort.
+                        if let Some(ref ct) = cancel_token
+                            && ct.is_cancelled()
+                        {
+                            log::info!("run_agent_loop: cancelled before TurnStarting (queued)");
+                            return Ok(());
+                        }
+
+                        // Notify frontend about the new turn so it can create a
+                        // streaming message and update its active_request_id.
+                        let _ = event_tx.send(BackendEvent::TurnStarting {
+                            session_id,
+                            request_id,
+                        });
+                        continue;
+                    }
                 }
 
                 break Ok(());
