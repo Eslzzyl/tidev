@@ -3998,7 +3998,7 @@ dependencies = [
 
 [[package]]
 name = "tidev"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -4016,7 +4016,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-engine"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4072,7 +4072,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-gateway"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4099,7 +4099,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-llm"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -4118,7 +4118,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-scheduler"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4140,7 +4140,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-session"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4156,7 +4156,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-storage"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4174,7 +4174,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-tui"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -4214,7 +4214,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-types"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "log",
@@ -4225,7 +4225,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-web"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-stream",
