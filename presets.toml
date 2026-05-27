@@ -311,7 +311,15 @@ display_name = "Qwen3.6-Plus"
 context_window = 200000
 max_output_tokens = 32768
 supports_streaming = true
-supports_images = false
+supports_images = true
+
+[providers.opencode-go.qwen-3-7-max]
+request_model_id = "qwen3.7-max"
+display_name = "Qwen3.7-Max"
+context_window = 1048576
+max_output_tokens = 32768
+supports_streaming = true
+supports_images = true
 
 [providers.google-gemini]
 display_name = "Google Gemini"
