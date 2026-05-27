@@ -99,6 +99,13 @@ I'd like to pronounce it as "tide-v", but "ti-dev" should also be fine.
 npm install -g tidev
 ```
 
+### Via Homebrew
+
+```bash
+brew tap eslzzyl/tap
+brew install tidev
+```
+
 ### GitHub Releases
 
 Download the pre-built binary for your platform from the [latest release](https://github.com/Eslzzyl/tidev/releases/latest).
