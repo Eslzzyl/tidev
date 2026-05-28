@@ -7,7 +7,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "TiDev web server"
+description = "tidev web server"
 build = "build.rs"
 include = ["/src", "/build.rs", "/../../web/dist", "/../../web/src", "/../../web/package.json", "/../../web/pnpm-lock.yaml", "/../../web/vite.config.ts", "/../../web/index.html"]
 

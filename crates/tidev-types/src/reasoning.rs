@@ -1,4 +1,4 @@
-//! Thinking / reasoning level types shared across the TiDev workspace.
+//! Thinking / reasoning level types shared across the tidev workspace.
 //!
 //! These types were originally defined in `tidev-engine/src/config/reasoning.rs`
 //! but are needed by `tidev-session` (the `Message` struct stores an optional

@@ -862,7 +862,7 @@ impl AppConfig {
     }
 
     pub fn example_toml() -> &'static str {
-        r#"# TiDev configuration
+        r#"# tidev configuration
 # Bundled provider presets ship with the binary and do not need to be copied here.
 # Add your own providers below if you want custom endpoints.
 # `theme` can be one of: dark, light, nord, one-dark, catppuccin, solarized, orng, github, material.

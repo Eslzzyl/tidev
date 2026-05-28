@@ -1,4 +1,4 @@
-# TiDev - Hermes Agent 自进化能力分析
+# tidev - Hermes Agent 自进化能力分析
 
 ## 概述
 

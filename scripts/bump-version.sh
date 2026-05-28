@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bump-version.sh — Bump TiDev workspace version, update lockfile and npm package.
+# bump-version.sh — Bump tidev workspace version, update lockfile and npm package.
 #
 # Usage:  ./scripts/bump-version.sh <new-version>
 #   e.g.  ./scripts/bump-version.sh 0.6.0

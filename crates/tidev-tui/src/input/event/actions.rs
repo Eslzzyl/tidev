@@ -301,7 +301,7 @@ impl App {
         if self.message_panel.take().is_some() {
             self.composer.clear();
             self.composer
-                .set_placeholder("Ask TiDev about your code, task, or question...");
+                .set_placeholder("Ask tidev about your code, task, or question...");
         }
     }
 
@@ -391,7 +391,7 @@ impl App {
         self.draft_attachments.clear();
         self.composer.clear();
         self.composer
-            .set_placeholder("Ask TiDev about your code, task, or question...");
+            .set_placeholder("Ask tidev about your code, task, or question...");
         self.scroll_messages_to_bottom();
 
         self.last_notice = Some(format!(
@@ -484,7 +484,7 @@ impl App {
         self.rename_dialog = None;
         self.composer.clear();
         self.composer
-            .set_placeholder("Ask TiDev about your code, task, or question...");
+            .set_placeholder("Ask tidev about your code, task, or question...");
     }
 
     pub(crate) fn confirm_rename_session(&mut self) -> Result<()> {
@@ -598,7 +598,7 @@ impl App {
         self.draft_attachments.clear();
         self.composer.clear();
         self.composer
-            .set_placeholder("Ask TiDev about your code, task, or question...");
+            .set_placeholder("Ask tidev about your code, task, or question...");
         // ── Compose the static system prompt and persist it ──────────────
         // This prompt is frozen for the entire session lifetime. Never change it.
         let static_prompt = self

@@ -41,7 +41,7 @@ export function AboutSection() {
         About
       </h2>
       <p className="mb-4 text-sm text-neutral-500 dark:text-neutral-400">
-        TiDev Web Frontend
+        tidev Web Frontend
       </p>
 
       <div className="space-y-3">

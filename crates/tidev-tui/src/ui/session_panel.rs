@@ -223,7 +223,7 @@ impl App {
         if self.session_panel.take().is_some() {
             self.composer.clear();
             self.composer
-                .set_placeholder("Ask TiDev about your code, task, or question...");
+                .set_placeholder("Ask tidev about your code, task, or question...");
         }
     }
 
@@ -618,7 +618,7 @@ impl App {
             self.composer.set_placeholder(dialog.answer_placeholder());
         } else {
             self.composer
-                .set_placeholder("Ask TiDev about your code, task, or question...");
+                .set_placeholder("Ask tidev about your code, task, or question...");
         }
 
         if self.pending_assistant_turns.remove(&session_id) {

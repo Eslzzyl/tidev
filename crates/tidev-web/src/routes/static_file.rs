@@ -102,7 +102,7 @@ async fn dev_fallback() -> impl IntoResponse {
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>TiDev Web - Development</title>
+    <title>tidev Web - Development</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -144,7 +144,7 @@ async fn dev_fallback() -> impl IntoResponse {
     </style>
 </head>
 <body>
-    <h1>TiDev Web</h1>
+    <h1>tidev Web</h1>
     <p>Development mode. Choose how to run:</p>
 
     <div class="option">
@@ -180,7 +180,7 @@ async fn index_fallback() -> impl IntoResponse {
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>TiDev Web</title>
+    <title>tidev Web</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -207,7 +207,7 @@ async fn index_fallback() -> impl IntoResponse {
     </style>
 </head>
 <body>
-    <h1>TiDev Web</h1>
+    <h1>tidev Web</h1>
     <p>The web frontend is not built yet.</p>
     <div class="info">
         <p><strong>To build the frontend:</strong></p>

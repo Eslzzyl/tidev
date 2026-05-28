@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::ActiveModel;
 
-/// The built-in agent types supported by TiDev.
+/// The built-in agent types supported by tidev.
 ///
 /// Each agent type has a specialized system prompt, default tool permissions,
 /// and optional model overrides. The General agent serves as the default and

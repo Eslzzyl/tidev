@@ -1,7 +1,7 @@
 //! Sandbox module for secure command execution.
 //!
 //! This module provides sandboxing capabilities for shell commands executed by
-//! TiDev. Sandboxing restricts what system resources a command can access,
+//! tidev. Sandboxing restricts what system resources a command can access,
 //! preventing accidental or malicious damage to the system.
 //!
 //! # Platform Support

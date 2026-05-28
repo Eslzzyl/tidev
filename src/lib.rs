@@ -3,7 +3,7 @@ use clap::Parser;
 use std::time::Duration;
 
 #[derive(Parser, Debug)]
-#[command(name = "tidev", version, about = "TiDev")]
+#[command(name = "tidev", version, about = "tidev")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,

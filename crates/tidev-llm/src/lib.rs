@@ -1,5 +1,5 @@
 //! LLM provider implementations — the core LLM abstraction used by the
-//! TiDev agent loop and background tasks.
+//! tidev agent loop and background tasks.
 //!
 //! This crate exposes [`LlmClient`] which routes requests to provider-specific
 //! implementations (Anthropic, OpenAI Chat Completions, OpenAI Responses API,

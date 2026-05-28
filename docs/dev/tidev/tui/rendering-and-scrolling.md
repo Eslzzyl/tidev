@@ -1,11 +1,8 @@
 # 消息渲染机制与滚动约束 (Message Rendering & Scrolling Constraints)
 
-本文档描述了 TiDev 中会话消息的渲染实现原理，以及在维护 UI 相关代码时必须遵守的核心约束，以防止出现滚动条计算偏差导致消息显示不全的问题。
+本文档描述了 tidev 中会话消息的渲染实现原理，以及在维护 UI 相关代码时必须遵守的核心约束，以防止出现滚动条计算偏差导致消息显示不全的问题。
 
-## 核心原理
-
-TiDev 的聊天界面渲染由 `src/app/render/render_chat.rs` 负责。为了支持长会话和流畅的滚动体验，渲染流程遵循以下逻辑：
-
+tidev 的聊天界面渲染由 `src/app/render/render_chat.rs` 负责。为了支持长会话和流畅的滚动体验，渲染流程遵循以下逻辑：
 1. **手动换行 (Manual Word Wrap)**：
    - 系统**不依赖** Terminal UI 库（如 `ratatui`）的自动换行功能。
    - 所有文本内容在渲染阶段之前，都会根据当前视口（Viewport）的实际像素宽度，通过 `render_markdown_text_with_width_and_cwd` 或 `word_wrap_line` 进行精准的手动预折行。

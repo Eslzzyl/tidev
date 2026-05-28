@@ -364,7 +364,7 @@ impl App {
         self.draft_attachments.clear();
         self.composer.clear();
         self.composer
-            .set_placeholder("Ask TiDev about your code, task, or question...");
+            .set_placeholder("Ask tidev about your code, task, or question...");
     }
 
     pub(crate) fn handle_connect_dialog_key(

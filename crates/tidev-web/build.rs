@@ -160,7 +160,7 @@ fn create_placeholder(out_dist: &Path) {
     std::fs::create_dir_all(out_dist.join("assets")).ok();
     let html = r#"<!DOCTYPE html>
 <html>
-<head><title>TiDev</title></head>
+<head><title>tidev</title></head>
 <body>
   <h1>Frontend not available</h1>
   <p>The web frontend was not built. Run <code>cd web && pnpm install && pnpm build</code> to build it.</p>

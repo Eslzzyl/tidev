@@ -355,7 +355,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "exit",
         aliases: &["quit", "q"],
-        description: "Exit TiDev",
+        description: "Exit tidev",
         usage: "/exit",
         action: CommandAction::Quit,
     },

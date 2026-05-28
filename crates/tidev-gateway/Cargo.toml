@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "TiDev gateway bots (Telegram, QQ, Discord, Lark)"
+description = "tidev gateway bots (Telegram, QQ, Discord, Lark)"
 
 [lib]
 name = "tidev_gateway"

@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "TiDev core data model and types"
+description = "tidev core data model and types"
 
 [lib]
 name = "tidev_session"

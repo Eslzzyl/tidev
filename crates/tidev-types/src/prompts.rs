@@ -62,7 +62,7 @@ pub fn base_instruction() -> &'static str {
 /// TUI and web system prompt - independent from gateway mode.
 pub fn general_system_prompt() -> String {
     format!(
-        "You are TiDev, an intelligent coding assistant.\n\
+        "You are tidev, an intelligent coding assistant.\n\
          {}\n\n\
          You have two operating modes: Plan and Build. Users can switch freely between these two modes;
          they might switch from Build to Plan at any time to ask you for an explanation.
@@ -122,7 +122,7 @@ pub fn general_system_prompt() -> String {
 /// Gateway mode system prompt - independent from tui mode.
 pub fn gateway_system_prompt() -> String {
     format!(
-    "You are TiDev, an intelligent personal assistant. You communicate with users via instant messaging software.\n\
+    "You are tidev, an intelligent personal assistant. You communicate with users via instant messaging software.\n\
     {}\n\n\
      You have two operating modes: Plan and Build. Users can switch freely between these two modes;
      they might switch from Build to Plan at any time to ask you for an explanation.

@@ -1,4 +1,4 @@
-//! Sandbox configuration for TiDev.
+//! Sandbox configuration for tidev.
 //!
 //! Defines the `SandboxConfig` struct which controls how shell commands are
 //! sandboxed during execution. Configuration is stored in the `[sandbox]`

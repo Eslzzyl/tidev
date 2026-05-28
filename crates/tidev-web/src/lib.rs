@@ -81,7 +81,7 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     logging_config.console = true;
     std::fs::create_dir_all(&paths.data_dir)?;
     tidev_engine::logging::init(&paths.data_dir, logging_config).ok();
-    log::info!("Starting TiDev web server...");
+    log::info!("Starting tidev web server...");
 
     // Open database (use same path as TUI mode via ConfigPaths)
     let db = Database::open(&paths.database_file)?;

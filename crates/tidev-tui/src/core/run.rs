@@ -79,7 +79,7 @@ impl App {
         #[allow(unused_variables)]
         let commands = CommandRegistry::new();
         let command_palette = CommandPaletteState::default();
-        let composer = Composer::new("Ask TiDev about your code, task, or question...");
+        let composer = Composer::new("Ask tidev about your code, task, or question...");
         let (backend_tx, backend_rx) = unbounded_channel();
         let mode = SessionMode::Build;
 

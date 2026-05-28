@@ -1,12 +1,12 @@
-# TiDev 浏览器增强方案
+# tidev 浏览器增强方案
 
-本文档探讨使用 [rust-headless-chrome](https://github.com/rust-headless-chrome/rust-headless-chrome) 增强 TiDev 网页抓取和 Web 调试能力的可行性方案。
+本文档探讨使用 [rust-headless-chrome](https://github.com/rust-headless-chrome/rust-headless-chrome) 增强 tidev 网页抓取和 Web 调试能力的可行性方案。
 
 ## 背景
 
 ### 现有 webfetch 工具的局限
 
-TiDev 当前的 `webfetch` 工具（`src/tooling/builtin/web.rs`）基于 `reqwest` HTTP 客户端实现，存在以下局限：
+tidev 当前的 `webfetch` 工具（`src/tooling/builtin/web.rs`）基于 `reqwest` HTTP 客户端实现，存在以下局限：
 
 1. **无法处理 JavaScript 渲染页面**：SPA（单页应用）如 React/Vue/Angular 应用，内容通过 JS 动态加载，webfetch 只能获取初始 HTML
 2. **无法处理需要交互的场景**：登录后的内容、点击"加载更多"、滚动加载等
@@ -326,7 +326,7 @@ let browser = Browser::connect("127.0.0.1:9222".parse().unwrap())?;
 
 ### 异步适配
 
-`headless_chrome` 是同步 API，但 TiDev 使用异步模型（tokio）：
+`headless_chrome` 是同步 API，但 tidev 使用异步模型（tokio）：
 
 ```rust
 // 方案 1: 使用 spawn_blocking

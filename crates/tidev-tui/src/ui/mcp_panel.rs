@@ -98,7 +98,7 @@ impl App {
         if self.mcp_panel.take().is_some() {
             self.composer.clear();
             self.composer
-                .set_placeholder("Ask TiDev about your code, task, or question...");
+                .set_placeholder("Ask tidev about your code, task, or question...");
         }
     }
 

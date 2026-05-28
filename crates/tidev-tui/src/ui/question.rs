@@ -519,7 +519,7 @@ impl App {
             }
             self.composer.clear();
             self.composer
-                .set_placeholder("Ask TiDev about your code, task, or question...");
+                .set_placeholder("Ask tidev about your code, task, or question...");
             self.last_notice = Some("Question dialog dismissed, request stopped".to_string());
             self.abort_current_request();
             return Ok(());
@@ -679,7 +679,7 @@ impl App {
 
         self.composer.clear();
         self.composer
-            .set_placeholder("Ask TiDev about your code, task, or question...");
+            .set_placeholder("Ask tidev about your code, task, or question...");
         self.advance_pending_tool_execution();
         self.process_pending_tool_execution(runtime)
     }

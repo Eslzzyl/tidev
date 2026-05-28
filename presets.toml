@@ -1,4 +1,4 @@
-# Bundled provider presets for TiDev.
+# Bundled provider presets for tidev.
 # These are merged with user config at runtime.
 
 [providers.deepseek]

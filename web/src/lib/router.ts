@@ -1,5 +1,5 @@
 /**
- * Simple hash-based router for TiDev web.
+ * Simple hash-based router for tidev web.
  *
  * URL Schema:
  * - `#chat` or empty — Chat view (default)
