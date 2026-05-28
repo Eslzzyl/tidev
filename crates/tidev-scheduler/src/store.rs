@@ -363,8 +363,8 @@ impl CronStore {
             ],
         )?;
 
-        // Prune old run history
-        self.prune_run_history(&job.id)?;
+        // Prune old run history (conn already locked above)
+        self.prune_run_history(&conn, &job.id)?;
 
         Ok(CronRun {
             id,
@@ -457,10 +457,9 @@ impl CronStore {
 
     // ── Internal helpers ──────────────────────────────────────────────────
 
-    fn prune_run_history(&self, job_id: &str) -> Result<()> {
+    fn prune_run_history(&self, conn: &Connection, job_id: &str) -> Result<()> {
         let limit =
             i64::try_from(self.max_run_history.max(1)).context("max_run_history overflows i64")?;
-        let conn = self.write_conn.lock().unwrap();
         conn.execute(
             "DELETE FROM scheduler_runs
              WHERE id IN (
