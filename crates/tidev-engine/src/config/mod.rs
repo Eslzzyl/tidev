@@ -1108,8 +1108,13 @@ default_provider = "exa"
 
         let mut model = self.resolve_model_by_ids(auth, &provider_id, &model_id)?;
 
-        // Apply agent-specific thinking_level override if configured
-        if let Some(tl_str) = self.agent.thinking_levels.get(agent_type) {
+        // Apply agent-specific thinking_level override if configured.
+        // Only override when the model actually supports thinking (auto-detected
+        // level is not None); otherwise a stale override from a previous model
+        // would force invalid thinking parameters onto the API request.
+        if let Some(tl_str) = self.agent.thinking_levels.get(agent_type)
+            && model.thinking_level.is_supported()
+        {
             model.thinking_level = ThinkingLevelType::from_string(tl_str);
         }
 

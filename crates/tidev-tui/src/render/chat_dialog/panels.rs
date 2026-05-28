@@ -1161,6 +1161,10 @@ impl App {
                             self.config.memory.thinking_levels.get("consolidation")
                             && self.config.memory.consolidation_model.as_deref()
                                 == Some(&model_label)
+                            && tidev_engine::config::reasoning::ThinkingMatcher::match_for_model(
+                                &summary.model_id,
+                            )
+                            .is_supported()
                         {
                             let tl_level =
                                 tl_str.rsplit_once(':').map(|(_, v)| v).unwrap_or(tl_str);
@@ -1179,6 +1183,10 @@ impl App {
                                     .models
                                     .get(&tab.agent_type_str)
                                     .map_or(false, |m| *m == model_label)
+                                && tidev_engine::config::reasoning::ThinkingMatcher::match_for_model(
+                                    &summary.model_id,
+                                )
+                                .is_supported()
                             {
                                 let tl_level =
                                     tl_str.rsplit_once(':').map(|(_, v)| v).unwrap_or(tl_str);

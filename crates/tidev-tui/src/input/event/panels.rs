@@ -362,8 +362,14 @@ impl App {
                             } else if panel.is_memory_tab() {
                                 let role = panel.active_memory_role();
                                 let model_str = summary.label();
-                                self.config
-                                    .set_memory_model(&self.paths, role, &model_str)?;
+                                // Clear stale thinking level when switching to a
+                                // model that does not support thinking.
+                                self.config.set_memory_model_and_thinking(
+                                    &self.paths,
+                                    role,
+                                    &model_str,
+                                    "",
+                                )?;
                                 let mut next_panel = panel;
                                 if let Some(t) = next_panel.current_tab_mut() {
                                     t.current_label = model_str.clone();
@@ -377,10 +383,13 @@ impl App {
                                     .map(|t| t.agent_type_str.clone())
                                     .unwrap_or_default();
                                 let model_str = summary.label();
-                                self.config.set_agent_model(
+                                // Clear stale thinking level when switching to a
+                                // model that does not support thinking.
+                                self.config.set_agent_model_and_thinking(
                                     &self.paths,
                                     &agent_type_str,
                                     &model_str,
+                                    "",
                                 )?;
                                 let mut next_panel = panel;
                                 if let Some(t) = next_panel.current_tab_mut() {

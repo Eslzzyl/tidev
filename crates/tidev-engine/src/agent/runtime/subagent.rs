@@ -116,14 +116,6 @@ impl AgentRuntime {
             });
         };
 
-        // Look up parent session record
-        let parent_record = {
-            let store = self.store.lock().await;
-            store
-                .load_session_record(parent_session_id)?
-                .ok_or_else(|| anyhow::anyhow!("parent session not found"))?
-        };
-
         // Use agent's model override if set, else inherit parent model.
         let child_model = {
             let agent_type_name = agent_type.display_name();
@@ -154,8 +146,8 @@ impl AgentRuntime {
                 child_session_id,
                 parent_session_id,
                 &self.workspace_root,
-                &parent_record.provider_id,
-                &parent_record.provider_display_name,
+                &child_model.provider_id,
+                &child_model.provider_display_name,
                 &child_model.model_id,
                 &child_model.display_name,
                 &child_title,
