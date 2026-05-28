@@ -1,8 +1,15 @@
 # tidev
 
-AI coding agent built in Rust. tidev reimplements the interaction model of [OpenCode](https://github.com/anomalyco/opencode) with a focus on performance and memory efficiency.
+AI coding agent built in Rust. tidev reimplements the interaction model of [OpenCode](https://github.com/anomalyco/opencode) with a focus on performance and memory efficiency. It also introduced richer extended features.
 
-> Disclaimer: This project is early in development. The database structure and UI may iterate quickly and produce incompatible changes. Run at your own risk.
+> Disclaimer: This project is early in development. The database structure and UI may iterate quickly and produce incompatible changes. Some features may be unavailable yet or contain bugs. Run at your own risk.
+
+---
+
+## Screenshots
+
+![welcome](https://github-imagebed.eslzzyl.eu.org/tidev/welcome.webp)
+![chat](https://github-imagebed.eslzzyl.eu.org/tidev/chat.webp)
 
 ---
 
@@ -29,13 +36,11 @@ AI coding agent built in Rust. tidev reimplements the interaction model of [Open
 
 - **API Balance Checking** -- Query account balances for DeepSeek and SiliconFlow providers directly from the UI.
 
-- **Session Persistence** -- All conversations are stored in SQLite. Sessions, workspaces, messages, tool events, and reverts survive restarts. Larger database columns are compressed using zstd at the application layer to ensure a stable increase in database file size.
+- **Session Persistence** -- All conversations are stored in SQLite. Sessions, workspaces, messages, tool events, and reverts survive restarts. Large database columns are compressed using zstd at the application layer to ensure a stable increase in database file size.
 
 ---
 
 ## Performance
-
-Significantly lower memory usage and binary size compared to OpenCode:
 
 | Page | OpenCode Memory | tidev Memory |
 |------|----------------|--------------|
@@ -49,21 +54,9 @@ Significantly lower memory usage and binary size compared to OpenCode:
 
 ---
 
-## Screenshots
+## Gateway Mode
 
-![welcome](https://github-imagebed.eslzzyl.eu.org/tidev/welcome.webp)
-![chat](https://github-imagebed.eslzzyl.eu.org/tidev/chat.webp)
-
----
-
-## Experimental: Gateway Mode
-
-A gateway mode is under active development that runs tidev as a persistent server with bot integrations (like OpenClaw):
-
-- **Telegram** -- Polling-based bot with file attachment support and user allowlist.
-- **QQ** -- Bot integration using the QQ channel API with sandbox mode.
-
-Both platforms can run simultaneously via a shared channel orchestrator. Gateway mode uses a dedicated system prompt and manages separate chat-to-session mappings.
+A gateway mode is under active development that runs tidev as a persistent server with bot integrations (like OpenClaw). Currently supported platforms include Telegram, QQ, Lark, and Discord. Both platforms can run simultaneously via a shared channel orchestrator.
 
 Run with:
 ```
@@ -74,7 +67,7 @@ tidev gateway
 
 ---
 
-## Experimental: WebUI
+## WebUI
 
 tidev also supports WebUI. Currently, WebUI is an experimental feature and may not be stable.
 
