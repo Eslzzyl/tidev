@@ -1260,6 +1260,7 @@ default_provider = "exa"
 
         let api_key = self.resolve_api_key(auth, provider_id);
         let api_type = provider.resolve_api_type(model);
+        let base_url = provider.resolve_base_url(model);
 
         let request_model_id = model
             .request_model_id
@@ -1284,7 +1285,7 @@ default_provider = "exa"
         Ok(ActiveModel {
             provider_id: provider_id.to_string(),
             provider_display_name: provider.display_name.clone(),
-            base_url: provider.base_url.clone(),
+            base_url,
             api_type,
             model_id: model_id.to_string(),
             request_model_id,
@@ -1491,6 +1492,7 @@ mod tests {
                         max_output_tokens: 1024,
                         temperature: Some(0.7),
                         api_type: None,
+                        base_url: None,
                         system_prompt: None,
                         supports_streaming: true,
                         supports_images: false,
@@ -1515,6 +1517,7 @@ mod tests {
                         max_output_tokens: 1024,
                         temperature: Some(0.7),
                         api_type: None,
+                        base_url: None,
                         system_prompt: None,
                         supports_streaming: true,
                         supports_images: false,

@@ -416,7 +416,7 @@ pub async fn send_message(
             .clone()
             .unwrap_or_else(|| model_id.clone()),
         display_name: model_config.display_name.clone(),
-        base_url: provider.base_url.clone(),
+        base_url: provider.resolve_base_url(&model_config),
         api_key,
         api_type: provider.resolve_api_type(&model_config),
         temperature: model_config.temperature,
@@ -923,7 +923,7 @@ pub async fn compact_session(
             .clone()
             .unwrap_or_else(|| model_id.clone()),
         display_name: model_config.display_name.clone(),
-        base_url: provider.base_url.clone(),
+        base_url: provider.resolve_base_url(&model_config),
         api_key: None,
         api_type: provider.resolve_api_type(&model_config),
         temperature: model_config.temperature,

@@ -63,6 +63,42 @@ context_window = 200000
 max_output_tokens = 64000
 ```
 
+### Per-model base_url override
+
+Different API protocols often use different endpoints. When a provider
+serves models that need different base URLs, set `base_url` on individual
+models. The resolution order is:
+
+1. **Model-level** `base_url` — highest priority
+2. **Provider-level** `base_url` — fallback
+
+```toml
+[providers.my-aggregator]
+display_name = "My Aggregator"
+base_url = "https://api.openai.com/v1"
+
+[providers.my-aggregator.models.gpt-4o]
+# Inherits base_url from provider — no override needed
+api_type = "openai_chat_completions"
+display_name = "GPT-4o"
+context_window = 128000
+max_output_tokens = 16384
+
+[providers.my-aggregator.models.claude-sonnet]
+base_url = "https://api.anthropic.com"
+api_type = "anthropic"
+display_name = "Claude Sonnet"
+context_window = 200000
+max_output_tokens = 64000
+
+[providers.my-aggregator.models.gemini-pro]
+base_url = "https://generativelanguage.googleapis.com"
+api_type = "google_gemini"
+display_name = "Gemini Pro"
+context_window = 1048576
+max_output_tokens = 8192
+```
+
 ## Model configuration
 
 Each provider can have multiple models defined under `[providers.<id>.models]`.

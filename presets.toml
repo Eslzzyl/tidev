@@ -291,6 +291,7 @@ supports_images = false
 
 [providers.opencode-go.minimax-m-2-7]
 api_type = "anthropic"
+base_url = "https://opencode.ai/zen/go/v1/messages"
 request_model_id = "minimax-m2.7"
 display_name = "MiniMax-M2.7"
 context_window = 200000
@@ -300,6 +301,7 @@ supports_images = false
 
 [providers.opencode-go.minimax-m-2-5]
 api_type = "anthropic"
+base_url = "https://opencode.ai/zen/go/v1/messages"
 request_model_id = "minimax-m2.5"
 display_name = "MiniMax-M2.5"
 context_window = 200000
@@ -309,6 +311,7 @@ supports_images = false
 
 [providers.opencode-go.qwen-3-5-plus]
 api_type = "anthropic"
+base_url = "https://opencode.ai/zen/go/v1/messages"
 request_model_id = "qwen3.5-plus"
 display_name = "Qwen3.5-Plus"
 context_window = 200000
@@ -318,6 +321,7 @@ supports_images = true
 
 [providers.opencode-go.qwen-3-6-plus]
 api_type = "anthropic"
+base_url = "https://opencode.ai/zen/go/v1/messages"
 request_model_id = "qwen3.6-plus"
 display_name = "Qwen3.6-Plus"
 context_window = 200000
@@ -327,6 +331,7 @@ supports_images = true
 
 [providers.opencode-go.qwen-3-7-max]
 api_type = "anthropic"
+base_url = "https://opencode.ai/zen/go/v1/messages"
 request_model_id = "qwen3.7-max"
 display_name = "Qwen3.7-Max"
 context_window = 1048576

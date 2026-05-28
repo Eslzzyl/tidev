@@ -21,6 +21,10 @@ pub struct ProviderModelInfo {
     pub temperature: Option<f32>,
     pub supports_images: bool,
     pub supports_streaming: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
 }
 
 /// Provider info response
@@ -57,6 +61,10 @@ pub struct CreateModelRequest {
     pub temperature: Option<f32>,
     #[serde(default)]
     pub supports_images: bool,
+    #[serde(default)]
+    pub api_type: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 /// Create provider request
@@ -97,6 +105,8 @@ pub async fn list_providers(
                     temperature: model.temperature,
                     supports_images: model.supports_images,
                     supports_streaming: model.supports_streaming,
+                    api_type: model.api_type.clone(),
+                    base_url: model.base_url.clone(),
                 })
                 .collect();
 
@@ -262,7 +272,8 @@ pub async fn create_provider(
                 context_window: model_req.context_window,
                 max_output_tokens: model_req.max_output_tokens,
                 temperature,
-                api_type: None,
+                api_type: model_req.api_type.clone(),
+                base_url: model_req.base_url.clone(),
                 system_prompt: None,
                 supports_streaming: true,
                 supports_images: model_req.supports_images,

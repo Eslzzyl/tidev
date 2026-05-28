@@ -76,6 +76,7 @@ pub enum EditModelStep {
     MaxOutputTokens,
     Temperature,
     ModelApiType,
+    ModelBaseUrl,
 }
 
 impl EditModelStep {
@@ -87,6 +88,7 @@ impl EditModelStep {
             Self::MaxOutputTokens => "Max output tokens",
             Self::Temperature => "Temperature",
             Self::ModelApiType => "API type",
+            Self::ModelBaseUrl => "Base URL",
         }
     }
 
@@ -98,6 +100,7 @@ impl EditModelStep {
             Self::MaxOutputTokens => "Max output tokens",
             Self::Temperature => "Temperature",
             Self::ModelApiType => "API type",
+            Self::ModelBaseUrl => "Base URL",
         }
     }
 
@@ -109,6 +112,7 @@ impl EditModelStep {
             Self::MaxOutputTokens => "32768",
             Self::Temperature => "0.7",
             Self::ModelApiType => "openai_chat_completions | anthropic | openai_responses | google_gemini",
+            Self::ModelBaseUrl => "https://api.openai.com/v1",
         }
     }
 
@@ -120,6 +124,7 @@ impl EditModelStep {
             Self::MaxOutputTokens => "Maximum tokens the model may generate per turn.",
             Self::Temperature => "Usually 0.0 to 1.0 for deterministic coding help.",
             Self::ModelApiType => "Leave blank to inherit from provider. Override per-model if needed.",
+            Self::ModelBaseUrl => "Leave blank to inherit from provider. Override per-model if needed.",
         }
     }
 
@@ -132,7 +137,8 @@ impl EditModelStep {
             Self::ContextWindow => Some(Self::MaxOutputTokens),
             Self::MaxOutputTokens => Some(Self::Temperature),
             Self::Temperature => Some(Self::ModelApiType),
-            Self::ModelApiType => None,
+            Self::ModelApiType => Some(Self::ModelBaseUrl),
+            Self::ModelBaseUrl => None,
         }
     }
 

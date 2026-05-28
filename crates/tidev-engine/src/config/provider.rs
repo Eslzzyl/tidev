@@ -29,6 +29,16 @@ impl ProviderConfig {
             .map(ApiType::parse)
             .unwrap_or_default()
     }
+
+    /// Resolve the effective base URL for a given model using cascade
+    /// precedence: model-level → provider-level.
+    pub fn resolve_base_url(&self, model: &ModelConfig) -> String {
+        model
+            .base_url
+            .clone()
+            .or_else(|| Some(self.base_url.clone()))
+            .unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -40,6 +50,10 @@ pub struct ModelConfig {
     /// provider-level `api_type`, then to the default (`openai_chat_completions`).
     #[serde(default)]
     pub api_type: Option<String>,
+    /// Per-model base URL override.  When `None`, falls back to the
+    /// provider-level `base_url`.
+    #[serde(default)]
+    pub base_url: Option<String>,
     #[serde(default)]
     pub temperature: Option<f32>,
     #[serde(default)]

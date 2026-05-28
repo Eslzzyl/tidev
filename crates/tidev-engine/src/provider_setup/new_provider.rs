@@ -12,6 +12,7 @@ pub enum NewProviderStep {
     MaxOutputTokens,
     Temperature,
     ModelApiType,
+    ModelBaseUrl,
     AddAnotherModel,
 }
 
@@ -28,6 +29,7 @@ impl NewProviderStep {
             Self::MaxOutputTokens => "Max output tokens",
             Self::Temperature => "Temperature",
             Self::ModelApiType => "API type",
+            Self::ModelBaseUrl => "Base URL",
             Self::AddAnotherModel => "Add another model",
         }
     }
@@ -43,7 +45,8 @@ impl NewProviderStep {
             Self::ContextWindow => Some(Self::MaxOutputTokens),
             Self::MaxOutputTokens => Some(Self::Temperature),
             Self::Temperature => Some(Self::ModelApiType),
-            Self::ModelApiType => Some(Self::AddAnotherModel),
+            Self::ModelApiType => Some(Self::ModelBaseUrl),
+            Self::ModelBaseUrl => Some(Self::AddAnotherModel),
             Self::AddAnotherModel => None,
         }
     }
@@ -60,6 +63,7 @@ impl NewProviderStep {
             Self::MaxOutputTokens => "Max output tokens",
             Self::Temperature => "Temperature",
             Self::ModelApiType => "API type",
+            Self::ModelBaseUrl => "Base URL",
             Self::AddAnotherModel => "Add another model",
         }
     }
@@ -76,6 +80,7 @@ impl NewProviderStep {
             Self::MaxOutputTokens => "32768",
             Self::Temperature => "0.7",
             Self::ModelApiType => "openai_chat_completions | anthropic | openai_responses | google_gemini",
+            Self::ModelBaseUrl => "https://api.openai.com/v1",
             Self::AddAnotherModel => "y or n",
         }
     }
@@ -92,6 +97,7 @@ impl NewProviderStep {
             Self::MaxOutputTokens => "Maximum tokens the model may generate per turn.",
             Self::Temperature => "Usually 0.0 to 1.0 for deterministic coding help.",
             Self::ModelApiType => "Leave blank to inherit from provider. Override per-model if needed.",
+            Self::ModelBaseUrl => "Leave blank to inherit from provider. Override per-model if needed.",
             Self::AddAnotherModel => "Press y to add another model, or Enter/n to finish.",
         }
     }
@@ -110,6 +116,7 @@ pub struct NewModelDraft {
     pub max_output_tokens: usize,
     pub temperature: f32,
     pub api_type: String,
+    pub base_url: String,
 }
 
 impl Default for NewModelDraft {
@@ -122,6 +129,7 @@ impl Default for NewModelDraft {
             max_output_tokens: 32_768,
             temperature: 0.7,
             api_type: String::new(),
+            base_url: String::new(),
         }
     }
 }
@@ -137,6 +145,7 @@ impl NewModelDraft {
             max_output_tokens: model.max_output_tokens,
             temperature: model.temperature.unwrap_or(0.7),
             api_type: model.api_type.clone().unwrap_or_default(),
+            base_url: model.base_url.clone().unwrap_or_default(),
         }
     }
 
@@ -154,6 +163,7 @@ impl NewModelDraft {
             NewProviderStep::MaxOutputTokens => self.max_output_tokens.to_string(),
             NewProviderStep::Temperature => self.temperature.to_string(),
             NewProviderStep::ModelApiType => self.api_type.clone(),
+            NewProviderStep::ModelBaseUrl => self.base_url.clone(),
             _ => String::new(),
         }
     }
@@ -173,11 +183,12 @@ impl NewModelDraft {
             EditModelStep::MaxOutputTokens => self.max_output_tokens.to_string(),
             EditModelStep::Temperature => self.temperature.to_string(),
             EditModelStep::ModelApiType => self.api_type.clone(),
+            EditModelStep::ModelBaseUrl => self.base_url.clone(),
         }
     }
 
     pub fn apply_step(&mut self, step: NewProviderStep, input: &str) -> anyhow::Result<()> {
-        use super::{non_empty, normalize_identifier, parse_temperature, parse_usize};
+        use super::{non_empty, normalize_base_url, normalize_identifier, parse_temperature, parse_usize};
         let value = input.trim();
 
         match step {
@@ -201,6 +212,9 @@ impl NewModelDraft {
             NewProviderStep::ModelApiType => {
                 self.api_type = value.to_string();
             }
+            NewProviderStep::ModelBaseUrl => {
+                self.base_url = normalize_base_url(value)?;
+            }
             _ => {}
         }
 
@@ -213,7 +227,7 @@ impl NewModelDraft {
         input: &str,
     ) -> anyhow::Result<()> {
         use super::EditModelStep;
-        use super::{non_empty, normalize_identifier, parse_temperature, parse_usize};
+        use super::{non_empty, normalize_base_url, normalize_identifier, parse_temperature, parse_usize};
         let value = input.trim();
 
         match step {
@@ -237,6 +251,9 @@ impl NewModelDraft {
             EditModelStep::ModelApiType => {
                 self.api_type = value.to_string();
             }
+            EditModelStep::ModelBaseUrl => {
+                self.base_url = normalize_base_url(value)?;
+            }
         }
 
         Ok(())
@@ -255,6 +272,11 @@ impl NewModelDraft {
                     None
                 } else {
                     Some(self.api_type)
+                },
+                base_url: if self.base_url.trim().is_empty() {
+                    None
+                } else {
+                    Some(self.base_url)
                 },
                 temperature: Some(self.temperature),
                 system_prompt: None,
@@ -310,7 +332,8 @@ impl NewProviderDraft {
             | NewProviderStep::ContextWindow
             | NewProviderStep::MaxOutputTokens
             | NewProviderStep::Temperature
-            | NewProviderStep::ModelApiType => self.model.current_value(step),
+            | NewProviderStep::ModelApiType
+            | NewProviderStep::ModelBaseUrl => self.model.current_value(step),
             NewProviderStep::AddAnotherModel => String::new(),
         }
     }
@@ -338,7 +361,8 @@ impl NewProviderDraft {
             | NewProviderStep::ContextWindow
             | NewProviderStep::MaxOutputTokens
             | NewProviderStep::Temperature
-            | NewProviderStep::ModelApiType => self.model.apply_step(step, value)?,
+            | NewProviderStep::ModelApiType
+            | NewProviderStep::ModelBaseUrl => self.model.apply_step(step, value)?,
             NewProviderStep::AddAnotherModel => {}
         }
 
