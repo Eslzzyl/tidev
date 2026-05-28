@@ -1,5 +1,10 @@
 use anyhow::{Context, Result, bail};
+use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
+
+/// Maximum number of ancestor directories to walk up when canonicalizing a
+/// non-existent path. This prevents infinite loops on deeply nested paths.
+const CANONICALIZE_MAX_DEPTH: usize = 256;
 
 /// Canonicalize a path, stripping the Windows `\\?\` extended-length prefix
 /// so the result is comparable with paths from [`std::env::current_dir`]
@@ -16,6 +21,51 @@ use std::path::{Component, Path, PathBuf};
 /// does not yet exist).
 pub fn canonicalize_display(path: &Path) -> PathBuf {
     dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Canonicalize a path for **boundary comparison**, resolving all symlinks.
+///
+/// Unlike [`canonicalize_display`] which falls back to the raw path on failure,
+/// this function walks up parent directories until it finds an existing ancestor,
+/// canonicalizes that, and appends the non-existent tail components. This makes
+/// it suitable for paths that do not yet exist (e.g., files to be created by
+/// `write`).
+///
+/// Uses [`dunce`] on Windows so the result is comparable with paths from
+/// [`std::env::current_dir`].
+///
+/// Returns the canonical path on success, or the original path as a last resort.
+pub fn canonicalize_for_comparison(path: &Path) -> PathBuf {
+    match dunce::canonicalize(path) {
+        Ok(canonical) => return canonical,
+        Err(_) => {}
+    }
+
+    // Walk up ancestors until we find one that exists, then append the
+    // non-existent components we peeled off.
+    let mut components: Vec<&OsStr> = Vec::new();
+    let mut current = path;
+    for _ in 0..CANONICALIZE_MAX_DEPTH {
+        match dunce::canonicalize(current) {
+            Ok(canonical) => {
+                let mut result = canonical;
+                for c in components.iter().rev() {
+                    result.push(c);
+                }
+                return result;
+            }
+            Err(_) => match (current.file_name(), current.parent()) {
+                (Some(name), Some(parent)) => {
+                    components.push(name);
+                    current = parent;
+                }
+                _ => return path.to_path_buf(), // give up, return as-is
+            },
+        }
+    }
+
+    // Depth limit reached — return the original path as-is
+    path.to_path_buf()
 }
 
 /// Expand a leading tilde (`~` or `~/...`) to the user's home directory.
@@ -43,8 +93,15 @@ pub fn resolve_workspace_path(
 ) -> Result<PathBuf> {
     let resolved = resolve_path_unchecked(workspace_root, candidate)?;
 
-    if !resolved.starts_with(workspace_root) && !allow_outside {
-        bail!("path {} escapes the workspace root", candidate.display());
+    if !allow_outside {
+        // Canonicalise both sides to handle symlinks:
+        //   - workspace_root may itself be a symlink
+        //   - the resolved path may traverse symlinks that escape the workspace
+        let canonical_resolved = canonicalize_for_comparison(&resolved);
+        let canonical_root = canonicalize_for_comparison(workspace_root);
+        if !canonical_resolved.starts_with(&canonical_root) {
+            bail!("path {} escapes the workspace root", candidate.display());
+        }
     }
 
     Ok(resolved)
@@ -57,7 +114,11 @@ pub fn resolve_workspace_path(
 /// treating the path as outside the workspace (safe default triggering a dialog).
 pub fn is_path_outside_workspace(workspace_root: &Path, candidate: &Path) -> bool {
     match resolve_path_unchecked(workspace_root, candidate) {
-        Ok(resolved) => !resolved.starts_with(workspace_root),
+        Ok(resolved) => {
+            let canonical_resolved = canonicalize_for_comparison(&resolved);
+            let canonical_root = canonicalize_for_comparison(workspace_root);
+            !canonical_resolved.starts_with(&canonical_root)
+        }
         Err(_) => true,
     }
 }
@@ -130,4 +191,246 @@ pub(super) fn truncate_in_place(value: &mut String, max_bytes: usize) {
 
     value.truncate(end);
     value.push_str("\n[truncated]");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    // ─── canonicalize_for_comparison ───────────────────────────────
+
+    #[test]
+    fn test_canonicalize_for_comparison_existing_file() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("hello.txt");
+        fs::write(&file, "world").unwrap();
+
+        let result = canonicalize_for_comparison(&file);
+        assert!(result.ends_with("hello.txt"), "should end with file name");
+        assert!(result.is_absolute(), "canonical path should be absolute");
+    }
+
+    #[test]
+    fn test_canonicalize_for_comparison_non_existent() {
+        let dir = tempdir().unwrap();
+        let nested = dir.path().join("a").join("b").join("new.rs");
+
+        let result = canonicalize_for_comparison(&nested);
+        // The tail should be preserved even though the file doesn't exist
+        assert!(result.ends_with("a/b/new.rs"), "non-existent tail should be preserved");
+    }
+
+    #[test]
+    fn test_canonicalize_for_comparison_existing_dir() {
+        let dir = tempdir().unwrap();
+        let result = canonicalize_for_comparison(dir.path());
+        assert!(result.is_absolute());
+        // Should be the real path (no symlink remains)
+        assert_eq!(fs::canonicalize(dir.path()).unwrap(), result);
+    }
+
+    #[test]
+    fn test_canonicalize_for_comparison_symlink() {
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("target");
+        fs::create_dir(&target).unwrap();
+        let link = dir.path().join("link_to_target");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        let result = canonicalize_for_comparison(&link);
+        // Should resolve the symlink to the target's real path
+        assert_eq!(fs::canonicalize(&target).unwrap(), result);
+    }
+
+    // ─── resolve_workspace_path ────────────────────────────────────
+
+    #[test]
+    fn test_resolve_workspace_path_normal_relative() {
+        let dir = tempdir().unwrap();
+        let ws = dir.path().join("workspace");
+        fs::create_dir_all(ws.join("sub")).unwrap();
+
+        let result = resolve_workspace_path(&ws, Path::new("sub/file.txt"), false);
+        assert!(result.is_ok(), "relative path inside workspace should be allowed");
+        assert_eq!(result.unwrap(), ws.join("sub/file.txt"));
+    }
+
+    #[test]
+    fn test_resolve_workspace_path_absolute_inside() {
+        let dir = tempdir().unwrap();
+        let ws = dir.path().join("workspace");
+        fs::create_dir_all(ws.join("sub")).unwrap();
+        let abs_path = ws.join("sub/file.txt");
+
+        let result = resolve_workspace_path(&ws, &abs_path, false);
+        assert!(
+            result.is_ok(),
+            "absolute path inside workspace should be allowed"
+        );
+    }
+
+    #[test]
+    fn test_resolve_workspace_path_outside_blocked() {
+        let dir = tempdir().unwrap();
+        let ws = dir.path().join("workspace");
+        fs::create_dir(&ws).unwrap();
+
+        let result = resolve_workspace_path(&ws, Path::new("../outside.txt"), false);
+        assert!(result.is_err(), "path escaping via .. should be blocked");
+    }
+
+    #[test]
+    fn test_resolve_workspace_path_symlink_escape_blocked() {
+        let dir = tempdir().unwrap();
+        let ws = dir.path().join("workspace");
+        fs::create_dir(&ws).unwrap();
+        let outside = dir.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        // Symlink inside the workspace that points outside
+        std::os::unix::fs::symlink(&outside, ws.join("link")).unwrap();
+
+        let result = resolve_workspace_path(&ws, Path::new("link/secret.txt"), false);
+        assert!(
+            result.is_err(),
+            "symlink escape via direct symlink should be blocked"
+        );
+    }
+
+    #[test]
+    fn test_resolve_workspace_path_symlink_to_outside_non_existent() {
+        let dir = tempdir().unwrap();
+        let ws = dir.path().join("workspace");
+        fs::create_dir(&ws).unwrap();
+        let outside = dir.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, ws.join("link")).unwrap();
+
+        // Write to a non-existent path through a symlink that escapes
+        let result = resolve_workspace_path(&ws, Path::new("link/new_file.txt"), false);
+        assert!(
+            result.is_err(),
+            "writing through symlink escape should be blocked"
+        );
+    }
+
+    #[test]
+    fn test_resolve_workspace_path_workspace_root_is_symlink() {
+        let dir = tempdir().unwrap();
+        let real = dir.path().join("real_workspace");
+        fs::create_dir_all(real.join("sub")).unwrap();
+        // Workspace root is a symlink to the real directory
+        let ws_symlink = dir.path().join("project_link");
+        std::os::unix::fs::symlink(&real, &ws_symlink).unwrap();
+
+        // Absolute path using the real path should be allowed
+        let result = resolve_workspace_path(&ws_symlink, &real.join("sub/file.txt"), false);
+        assert!(
+            result.is_ok(),
+            "absolute path via real path should be allowed when workspace_root is a symlink"
+        );
+    }
+
+    #[test]
+    fn test_resolve_workspace_path_allow_outside() {
+        let dir = tempdir().unwrap();
+        let ws = dir.path().join("workspace");
+        fs::create_dir(&ws).unwrap();
+
+        let result = resolve_workspace_path(&ws, Path::new("/tmp/outside.txt"), true);
+        assert!(
+            result.is_ok(),
+            "allow_outside=true should permit external paths"
+        );
+    }
+
+    // ─── is_path_outside_workspace ─────────────────────────────────
+
+    #[test]
+    fn test_is_path_outside_normal_inside() {
+        let dir = tempdir().unwrap();
+        let ws = dir.path().join("workspace");
+        fs::create_dir(&ws).unwrap();
+
+        assert!(!is_path_outside_workspace(&ws, Path::new("test.txt")));
+    }
+
+    #[test]
+    fn test_is_path_outside_normal_outside() {
+        let dir = tempdir().unwrap();
+        let ws = dir.path().join("workspace");
+        fs::create_dir(&ws).unwrap();
+
+        assert!(is_path_outside_workspace(&ws, Path::new("../outside.txt")));
+    }
+
+    #[test]
+    fn test_is_path_outside_symlink_escape() {
+        let dir = tempdir().unwrap();
+        let ws = dir.path().join("workspace");
+        fs::create_dir(&ws).unwrap();
+        let outside = dir.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, ws.join("link")).unwrap();
+
+        assert!(
+            is_path_outside_workspace(&ws, Path::new("link")),
+            "symlink pointing outside should be detected as outside"
+        );
+        assert!(
+            is_path_outside_workspace(&ws, Path::new("link/secret.txt")),
+            "file through symlink escape should be detected as outside"
+        );
+    }
+
+    #[test]
+    fn test_is_path_outside_symlink_inside_not_detected() {
+        let dir = tempdir().unwrap();
+        let ws = dir.path().join("workspace");
+        fs::create_dir_all(ws.join("real_dir")).unwrap();
+        // Symlink inside the workspace that points to another place inside
+        std::os::unix::fs::symlink(ws.join("real_dir"), ws.join("link")).unwrap();
+
+        assert!(
+            !is_path_outside_workspace(&ws, Path::new("link")),
+            "symlink pointing inside should not be flagged as outside"
+        );
+    }
+
+    #[test]
+    fn test_is_path_outside_absolute_path_inside() {
+        let dir = tempdir().unwrap();
+        let ws = dir.path().join("workspace");
+        fs::create_dir_all(ws.join("sub")).unwrap();
+
+        assert!(
+            !is_path_outside_workspace(&ws, &ws.join("sub/file.txt")),
+            "absolute path inside workspace should not be flagged"
+        );
+    }
+
+    // ─── resolve_path_unchecked (unchanged behaviour) ───────────────
+
+    #[test]
+    fn test_resolve_path_unchecked_relative() {
+        let ws = Path::new("/home/user/project");
+        let result = resolve_path_unchecked(ws, Path::new("src/main.rs")).unwrap();
+        assert_eq!(result, Path::new("/home/user/project/src/main.rs"));
+    }
+
+    #[test]
+    fn test_resolve_path_unchecked_absolute() {
+        let ws = Path::new("/home/user/project");
+        let result =
+            resolve_path_unchecked(ws, Path::new("/home/user/project/src/main.rs")).unwrap();
+        assert_eq!(result, Path::new("/home/user/project/src/main.rs"));
+    }
+
+    #[test]
+    fn test_resolve_path_unchecked_with_parent_dir() {
+        let ws = Path::new("/home/user/project");
+        let result = resolve_path_unchecked(ws, Path::new("src/../lib/utils.rs")).unwrap();
+        assert_eq!(result, Path::new("/home/user/project/lib/utils.rs"));
+    }
 }

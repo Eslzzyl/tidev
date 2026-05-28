@@ -131,15 +131,13 @@ pub(crate) fn extract_boundary_violation_path(
     }
 
     // Return the resolved path for consistent permission key.
-    // Try to canonicalize (resolve symlinks) so the same file is always
-    // represented by the same key regardless of the path used to reach it.
-    // If canonicalization fails (e.g. the path does not yet exist), fall
-    // back to the logically-resolved (but not symlink-resolved) path.
+    // Use canonicalize_for_comparison which handles both existing paths
+    // (resolving symlinks) and non-existent paths (via parent-walk fallback).
     let resolved =
         tidev_engine::tooling::builtin::utils::resolve_path_unchecked(workspace_root, &path_buf)
             .unwrap_or_else(|_| path_buf.clone());
 
-    Some(std::fs::canonicalize(&resolved).unwrap_or(resolved))
+    Some(tidev_engine::tooling::builtin::utils::canonicalize_for_comparison(&resolved))
 }
 
 impl App {

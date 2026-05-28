@@ -557,33 +557,12 @@ fn resolve_workspace_path_safe(
     workspace_root: &Path,
     candidate: &str,
 ) -> Result<std::path::PathBuf, ()> {
-    use std::path::Component;
-
-    let candidate_path = std::path::Path::new(candidate);
-    let expanded = super::builtin::utils::expand_tilde(candidate_path).map_err(|_| ())?;
-    let mut resolved = if expanded.is_absolute() {
-        std::path::PathBuf::new()
-    } else {
-        workspace_root.to_path_buf()
-    };
-
-    for component in expanded.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                resolved.pop();
-            }
-            Component::Normal(part) => resolved.push(part),
-            Component::RootDir => resolved.push(component.as_os_str()),
-            Component::Prefix(prefix) => resolved.push(prefix.as_os_str()),
-        }
-    }
-
-    if !resolved.starts_with(workspace_root) {
-        return Err(());
-    }
-
-    Ok(resolved)
+    super::builtin::utils::resolve_workspace_path(
+        workspace_root,
+        std::path::Path::new(candidate),
+        false,
+    )
+    .map_err(|_| ())
 }
 
 /// Extract the file path from a unified diff patch string.

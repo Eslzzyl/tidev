@@ -25,7 +25,10 @@ impl App {
 
     pub(crate) fn new_with_paths(paths: ConfigPaths) -> Result<Self> {
         let _t0 = std::time::Instant::now();
-        let workspace_root = env::current_dir().context("failed to determine workspace root")?;
+        let workspace_root = env::current_dir()
+            .context("failed to determine workspace root")?
+            .canonicalize()
+            .context("failed to canonicalize workspace root")?;
         let config = AppConfig::load_with_project_overlay(&paths, &workspace_root)?;
         // Initialize shell detection (Windows: auto-detect bash, Unix: sh).
         tidev_engine::shell::init(config.shell.windows_shell.clone(), Some(&paths));
