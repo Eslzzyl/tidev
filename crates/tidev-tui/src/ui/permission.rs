@@ -246,7 +246,8 @@ impl App {
 
             if !self.tools.can_execute(&tool_call.name, effective_mode) {
                 let output = format!(
-                    "Tool '{}' is disabled in {} mode",
+                    "Tool '{}' is disabled in {} mode. \
+                     If you need to modify files, you must explain your intent to the user and ask them to switch to Build mode.",
                     tool_call.name,
                     effective_mode.as_str()
                 );

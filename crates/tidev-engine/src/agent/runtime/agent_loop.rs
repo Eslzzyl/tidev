@@ -230,7 +230,8 @@ impl AgentRuntime {
                     mode
                 );
                 let result = ToolExecutionResult::new(format!(
-                    "Tool '{}' is disabled in {:?} mode",
+                    "Tool '{}' is disabled in {:?} mode. \
+                     If you need to modify files, you must explain your intent to the user and ask them to switch to Build mode.",
                     call.name, mode
                 ));
                 self.persist_tool_result(session_id, request_id, call, &result, event_tx)
