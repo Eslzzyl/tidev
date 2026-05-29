@@ -617,27 +617,11 @@ impl AgentRuntime {
                 _t_load.elapsed()
             );
 
-            // 2. Pick up queued user message, if any
-            let next_user_msg = {
-                let mut queue = self.queued_messages.lock().unwrap();
-                queue.pop_front()
-            };
-
-            if let Some(msg) = next_user_msg {
-                let mut new_msg = Message::new(tidev_session::session::MessageRole::User, &msg.content);
-                new_msg.attachments = msg.attachments;
-                new_msg.mode = msg.mode;
-                new_msg.thinking_level = msg.thinking_level;
-                new_msg.completed_at = Some(Utc::now());
-                let store = self.store.lock().await;
-                store.append_message(session_id, &new_msg)?;
-                drop(store);
-                // Re-load messages to include the new user message
-                db_messages = {
-                    let store = self.store.lock().await;
-                    store.load_messages(session_id)?
-                };
-            }
+            // 2. Queued (type-ahead) messages are not consumed here. Instead,
+            //    they are popped one-at-a-time after a no-tool-calls turn
+            //    (see step 5a below), where each pop sends a TurnStarting
+            //    event.  This keeps the TUI's display queue in 1:1 sync with
+            //    the runtime queue.
 
             // 3. Inject instructions into the last user message if needed
             let has_assistant = db_messages

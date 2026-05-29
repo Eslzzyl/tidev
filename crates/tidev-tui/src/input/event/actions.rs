@@ -631,7 +631,7 @@ impl App {
             return Ok(());
         }
 
-        if self.pending_request || !self.pending_prompt_queue.is_empty() {
+        if self.pending_request {
             self.queue_prompt(prompt, attachments, instruction_sources);
             self.draft_attachments.clear();
             return Ok(());
