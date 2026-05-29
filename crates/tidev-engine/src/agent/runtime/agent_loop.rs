@@ -624,7 +624,11 @@ impl AgentRuntime {
             };
 
             if let Some(msg) = next_user_msg {
-                let new_msg = Message::new(tidev_session::session::MessageRole::User, &msg.content);
+                let mut new_msg = Message::new(tidev_session::session::MessageRole::User, &msg.content);
+                new_msg.attachments = msg.attachments;
+                new_msg.mode = msg.mode;
+                new_msg.thinking_level = msg.thinking_level;
+                new_msg.completed_at = Some(Utc::now());
                 let store = self.store.lock().await;
                 store.append_message(session_id, &new_msg)?;
                 drop(store);
@@ -651,6 +655,8 @@ impl AgentRuntime {
                 self.inject_new_instructions(session_id, last_user_msg)
                     .await?;
                 self.inject_first_turn_memory(session_id, last_user_msg, has_assistant)
+                    .await?;
+                self.inject_mode_reminder(session_id, last_user_msg, mode)
                     .await?;
             }
 
