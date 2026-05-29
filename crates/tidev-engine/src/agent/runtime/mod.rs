@@ -338,6 +338,76 @@ impl AgentRuntime {
         Ok(true)
     }
 
+    /// Inject mode reminder into the last user message.
+    ///
+    /// Injects `mode.reminder()` on the very first user message of a session,
+    /// and injects `plan_switch_reminder()` / `build_switch_reminder()` whenever
+    /// the session mode changes (detected by comparing the mode stored on the
+    /// previous user message with the current mode).
+    ///
+    /// Follows the same pattern as `inject_new_instructions` and
+    /// `inject_first_turn_memory`: the reminder is prepended to the user
+    /// message content and the updated content is persisted to the database.
+    async fn inject_mode_reminder(
+        &self,
+        session_id: uuid::Uuid,
+        last_user_msg: &mut tidev_session::session::Message,
+        current_mode: tidev_types::prompts::SessionMode,
+    ) -> Result<bool> {
+        // Load all messages to inspect conversation history.
+        let all_messages = {
+            let store = self.store.lock().await;
+            store.load_messages(session_id)?
+        };
+
+        // Find the mode of the most recent *previous* user message
+        // (skip the current last_user_msg itself).
+        let prev_mode = all_messages
+            .iter()
+            .rev()
+            .skip(1)
+            .find(|m| m.role == tidev_session::session::MessageRole::User)
+            .and_then(|m| m.mode);
+
+        // Determine whether this is the very first user message in the session.
+        let is_first_user = !all_messages.iter().any(|m| {
+            m.role == tidev_session::session::MessageRole::User && m.id != last_user_msg.id
+        });
+
+        let reminder: Option<String> = match (is_first_user, prev_mode) {
+            // ① Very first user message → inject mode reminder
+            (true, _) => Some(current_mode.reminder().to_string()),
+            // ② Mode changed → inject switch reminder
+            (false, Some(prev)) if prev != current_mode => {
+                Some(match current_mode {
+                    tidev_types::prompts::SessionMode::Plan => {
+                        tidev_types::prompts::plan_switch_reminder()
+                    }
+                    tidev_types::prompts::SessionMode::Build => {
+                        tidev_types::prompts::build_switch_reminder()
+                    }
+                })
+            }
+            // ③ Same mode as before → no injection needed
+            _ => None,
+        };
+
+        if let Some(text) = reminder {
+            last_user_msg.content = format!("{}\n\n{}", text, last_user_msg.content);
+            let store = self.store.lock().await;
+            store.update_message_content(last_user_msg.id, &last_user_msg.content)?;
+            log::info!(
+                "injected mode reminder into user message {} (mode={:?}, is_first={})",
+                last_user_msg.id,
+                current_mode,
+                is_first_user,
+            );
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     /// Format session summaries into a Markdown block.
     fn format_session_summaries(summaries: &[crate::memory::SessionSummary]) -> String {
         let mut parts = vec!["## Related Session Summaries".to_string()];

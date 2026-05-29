@@ -296,32 +296,7 @@ pub async fn send_message(
         })
         .unwrap_or(SessionMode::Build);
 
-    // Get existing messages for context (before appending user message)
-    let existing_messages = {
-        let store = state.store.lock().await;
-        store.load_messages(session_id)?
-    };
-
-    // Detect mode transition and inject switch reminder
-    let prev_mode = existing_messages
-        .iter()
-        .rev()
-        .find(|m| m.mode.is_some())
-        .and_then(|m| m.mode);
-
-    let content = if let Some(prev) = prev_mode {
-        if prev != mode {
-            let reminder = match mode {
-                SessionMode::Plan => tidev_types::prompts::plan_switch_reminder(),
-                SessionMode::Build => tidev_types::prompts::build_switch_reminder(),
-            };
-            format!("{}\n\n{}", reminder, body.content)
-        } else {
-            body.content.clone()
-        }
-    } else {
-        body.content.clone()
-    };
+    let content = body.content.clone();
 
     // Add user message to database (agent loop will inject
     // instructions and memory context before the LLM turn).
