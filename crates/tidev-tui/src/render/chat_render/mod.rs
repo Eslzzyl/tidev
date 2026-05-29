@@ -377,12 +377,13 @@ impl App {
             .title(title)
             .title_alignment(Alignment::Left);
 
-        // Inner content matches composer's text area (x+4, width-5)
+        // Inner content matches composer's text area (x+4, width-5).
+        // Offset y by 1 to leave room for the block's title on the first row.
         let inner = Rect {
             x: block_area.x + left_inset,
-            y: block_area.y,
+            y: block_area.y + 1,
             width: block_area.width.saturating_sub(left_inset + 1),
-            height: block_area.height,
+            height: block_area.height.saturating_sub(1),
         };
         let inner_height = inner.height as usize;
         let width = inner.width.max(1) as usize;
