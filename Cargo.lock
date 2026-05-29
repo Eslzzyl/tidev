@@ -372,9 +372,9 @@ dependencies = [
 
 [[package]]
 name = "brotli"
-version = "8.0.2"
+version = "8.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4bd8b9603c7aa97359dbd97ecf258968c95f3adddd6db2f7e7a5bef101c84560"
+checksum = "8119e4516436f5708bbc474a9d395bf12f1b5395e93a92a56e647ac3388c8610"
 dependencies = [
  "alloc-no-stdlib",
  "alloc-stdlib",
@@ -383,9 +383,9 @@ dependencies = [
 
 [[package]]
 name = "brotli-decompressor"
-version = "5.0.0"
+version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "874bb8112abecc98cbd6d81ea4fa7e94fb9449648c93cc89aa40c81c24d7de03"
+checksum = "5962523e1b92ce1b5e793d9169b9943eece10d39f62550bc04bb605d75b94924"
 dependencies = [
  "alloc-no-stdlib",
  "alloc-stdlib",
@@ -587,9 +587,9 @@ dependencies = [
 
 [[package]]
 name = "compact_str"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fdb1325a1cece981e8a296ab8f0f9b63ae357bd0784a9faaf548cc7b480707a"
+checksum = "9dfdd1c2274d9aa354115b09dc9a901d6c5576818cdf70d14cae2bdb47df00ab"
 dependencies = [
  "castaway",
  "cfg-if",
@@ -919,9 +919,9 @@ dependencies = [
 
 [[package]]
 name = "displaydoc"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97369cbbc041bc366949bc74d34658d6cda5621039731c6310521892a3a20ae0"
+checksum = "1ac70aa55017e108007fbaf5aa0f54b021c98f92ff8af59d42eda9da96e3dd4f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1559,9 +1559,9 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "hyper"
-version = "1.9.0"
+version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6299f016b246a94207e63da54dbe807655bf9e00044f73ded42c3ac5305fbcca"
+checksum = "eb92f162bf56536459fc83c79b974bb12837acfed43d6bc370a7916d0ae15ecc"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -1995,9 +1995,9 @@ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
 name = "libredox"
-version = "0.1.16"
+version = "0.1.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e02f3bb43d335493c96bf3fd3a321600bf6bd07ed34bc64118e9293bdffea46c"
+checksum = "f02ab6bace2054fb888a3c16f990117b579d14a3088e472d63c6011fa185c9d3"
 dependencies = [
  "libc",
 ]
@@ -2122,9 +2122,9 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "memchr"
-version = "2.8.0"
+version = "2.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
+checksum = "6b947ae49db0d222b1dbc6b113ce7248a3fc3a6ca21b696717bfc000ba4484d8"
 
 [[package]]
 name = "memmap2"
@@ -2184,9 +2184,9 @@ dependencies = [
 
 [[package]]
 name = "mio"
-version = "1.2.0"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50b7e5b27aa02a74bac8c3f23f448f8d87ff11f92d3aac1a6ed369ee08cc56c1"
+checksum = "02bd0af71c67b473010cbbc60715ee815645a4dc942899111f494b4b737d6fda"
 dependencies = [
  "libc",
  "log",
@@ -3719,9 +3719,9 @@ checksum = "b7c388c1b5e93756d0c740965c41e8822f866621d41acbdf6336a6a168f8840c"
 
 [[package]]
 name = "socket2"
-version = "0.6.3"
+version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
+checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
@@ -3998,7 +3998,7 @@ dependencies = [
 
 [[package]]
 name = "tidev"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -4016,7 +4016,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-engine"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4072,7 +4072,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-gateway"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4099,7 +4099,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-llm"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "base64",
@@ -4118,7 +4118,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-scheduler"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4140,7 +4140,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-session"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4156,7 +4156,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-storage"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4174,7 +4174,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-tui"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "arboard",
@@ -4214,7 +4214,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-types"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "chrono",
  "log",
@@ -4225,7 +4225,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-web"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5420,18 +5420,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.48"
+version = "0.8.49"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eed437bf9d6692032087e337407a86f04cd8d6a16a37199ed57949d415bd68e9"
+checksum = "bce33a6288fa3f072a8c2c7d0f2fdbb90e28298f0135c1f99b96c3db2efcc60b"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.48"
+version = "0.8.49"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70e3cd084b1788766f53af483dd21f93881ff30d7320490ec3ef7526d203bad4"
+checksum = "8fd425244944f4ab65ccff928e7323354c5a018c75838362fdce749dfad2ee1e"
 dependencies = [
  "proc-macro2",
  "quote",
