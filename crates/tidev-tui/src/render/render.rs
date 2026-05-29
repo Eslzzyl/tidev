@@ -182,7 +182,9 @@ impl App {
 
         let rect = Rect::new(x, y, width, height);
         let block = Block::default().style(Style::default().bg(palette.panel).fg(palette.text));
-        let paragraph = Paragraph::new(message.as_str())
+        // Prepend a newline to vertically center the single-line message in the 3-row box
+        let centered = format!("\n{}", message);
+        let paragraph = Paragraph::new(centered.as_str())
             .style(Style::default().bg(palette.panel).fg(palette.text))
             .alignment(Alignment::Center)
             .block(block);
