@@ -321,7 +321,10 @@ impl ContextManager {
                         let _ = ui_tx.send(event.clone());
                     }
                     tidev_session::session::BackendEvent::Finished { .. } => {
-                        let _ = ui_tx.send(event.clone());
+                        // Do NOT forward Finished to the UI — it would trigger
+                        // finish_assistant_turn() which is designed for real
+                        // Assistant turns, not compaction.  The completion
+                        // signal is delivered via ContextCompacted instead.
                         break;
                     }
                     tidev_session::session::BackendEvent::Failed { error, .. } => {
