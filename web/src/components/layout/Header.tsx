@@ -74,14 +74,16 @@ export function Header({ className }: HeaderProps) {
     >
       {/* Left: mobile menu + nav tabs */}
       <div className="flex items-center gap-1">
-        {/* Mobile menu toggle */}
-        <button
-          onClick={toggleMobileMenu}
-          className="mr-1 rounded p-1.5 text-neutral-500 hover:bg-neutral-100 md:hidden dark:text-neutral-400 dark:hover:bg-neutral-800"
-          aria-label="Toggle menu"
-        >
-          <Menu className="h-4 w-4" />
-        </button>
+        {/* Mobile menu toggle — only in chat session view (not welcome page) */}
+        {activeTab === "chat" && (currentSession || isDraftSession) && (
+          <button
+            onClick={toggleMobileMenu}
+            className="mr-1 rounded p-1.5 text-neutral-500 hover:bg-neutral-100 md:hidden dark:text-neutral-400 dark:hover:bg-neutral-800"
+            aria-label="Toggle menu"
+          >
+            <Menu className="h-4 w-4" />
+          </button>
+        )}
 
         {/* Nav tabs with animated sliding indicator */}
         <nav
