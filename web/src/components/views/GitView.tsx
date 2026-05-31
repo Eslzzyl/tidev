@@ -27,6 +27,7 @@ import type {
   GitGraphResponse,
 } from "../../types/api";
 import { DiffRenderer } from "../renderers/DiffRenderer";
+import { formatGitDate } from "../../utils/format";
 import { computeGraphLayout } from "../../lib/gitGraph";
 import type { GraphRow } from "../../lib/gitGraph";
 import { GitGraphSVG, getGraphWidth, GRAPH_ROW_HEIGHT } from "./GitGraph";
@@ -1014,7 +1015,7 @@ function GraphHistoryPanel({
                 <span>·</span>
                 <span>{row.commit.author}</span>
                 <span>·</span>
-                <span>{new Date(row.commit.date).toLocaleString()}</span>
+                <span>{formatGitDate(row.commit.date)}</span>
               </div>
             </button>
           );
