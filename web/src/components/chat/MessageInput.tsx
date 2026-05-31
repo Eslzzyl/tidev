@@ -209,6 +209,18 @@ export function MessageInput({
   // Auto-resize textarea as content grows (up to 200px, then scrolls)
   useAutoResizeTextarea(textareaRef, inputValue, 200);
 
+  // Re-focus the textarea when streaming ends, so the user can immediately
+  // type their next message without clicking back into the composer.
+  const hasStreamedRef = useRef(false);
+  useEffect(() => {
+    if (isStreaming) {
+      hasStreamedRef.current = true;
+    } else if (hasStreamedRef.current && textareaRef.current) {
+      hasStreamedRef.current = false;
+      textareaRef.current.focus();
+    }
+  }, [isStreaming]);
+
   // Handle skill insert
   useEffect(() => {
     if (skillInsert?.text && textareaRef.current) {
