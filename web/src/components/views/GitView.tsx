@@ -17,14 +17,11 @@ import {
   ChevronDown,
   ChevronRight,
   X,
-  List,
-  GitGraph,
 } from "lucide-react";
 import { api } from "../../api/client";
 import type {
   GitStatusResponse,
   GitBranchResponse,
-  GitCommitItem,
   GitShowResponse,
   GitFileDiffResponse,
   GitGraphResponse,
@@ -36,7 +33,6 @@ import { GitGraphSVG, getGraphWidth, GRAPH_ROW_HEIGHT } from "./GitGraph";
 
 type GitTab = "changes" | "history" | "branches";
 
-const PAGE_SIZE = 20;
 const MIN_PANEL_PCT = 20; // minimum panel width in %
 
 export function GitView() {
@@ -53,13 +49,7 @@ export function GitView() {
   const [newBranchName, setNewBranchName] = useState("");
   const [creatingBranch, setCreatingBranch] = useState(false);
 
-  // History pagination
-  const [allCommits, setAllCommits] = useState<GitCommitItem[]>([]);
-  const [hasMore, setHasMore] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-
   // Graph view
-  const [graphMode, setGraphMode] = useState(true);
   const [graphData, setGraphData] = useState<GitGraphResponse | null>(null);
   const [graphLoading, setGraphLoading] = useState(false);
   const [graphCount, setGraphCount] = useState(50);
@@ -150,28 +140,6 @@ export function GitView() {
 
   // ── Data fetching ───────────────────────────────────────────────────
 
-  const loadCommits = useCallback(async (skip: number, replace: boolean) => {
-    try {
-      if (replace) {
-        setLoading(true);
-      } else {
-        setLoadingMore(true);
-      }
-      const result = await api.gitLog(PAGE_SIZE, skip);
-      if (replace) {
-        setAllCommits(result.commits);
-      } else {
-        setAllCommits((prev) => [...prev, ...result.commits]);
-      }
-      setHasMore(result.has_more);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load history");
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
-    }
-  }, []);
-
   const loadGraphData = useCallback(async (count?: number) => {
     const fetchCount = count ?? 50;
     setGraphLoading(true);
@@ -203,8 +171,6 @@ export function GitView() {
       ]);
       setStatus(s);
       setBranches(b);
-      // Also reset history on refresh
-      await loadCommits(0, true);
       // Refresh graph data
       await loadGraphData(50);
     } catch (err) {
@@ -212,12 +178,7 @@ export function GitView() {
     } finally {
       setLoading(false);
     }
-  }, [showSubmodules, loadCommits, loadGraphData]);
-
-  const loadMoreCommits = useCallback(() => {
-    if (loadingMore || !hasMore) return;
-    loadCommits(allCommits.length, false);
-  }, [allCommits.length, hasMore, loadingMore, loadCommits]);
+  }, [showSubmodules, loadGraphData]);
 
   // ── History commit detail ───────────────────────────────────────────
 
@@ -611,53 +572,20 @@ export function GitView() {
           />
         ) : activeTab === "history" ? (
           <div ref={splitContainerRef} className="flex flex-1 overflow-hidden">
-            {/* Left: History / Graph list */}
+            {/* Left: Graph history list */}
             <div
               className="overflow-y-auto"
               style={{ flex: `${splitRatio * 100}%` }}
             >
-              {/* View mode toggle */}
-              <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-2 dark:border-neutral-800">
-                <span className="text-xs font-medium text-neutral-500">
-                  {graphMode ? "Graph" : "History"}
-                </span>
-                <button
-                  onClick={() => setGraphMode((g) => !g)}
-                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                  title={graphMode ? "Switch to list view" : "Switch to graph view"}
-                >
-                  {graphMode ? (
-                    <List className="h-3.5 w-3.5" />
-                  ) : (
-                    <GitBranch className="h-3.5 w-3.5" />
-                  )}
-                  {graphMode ? "List" : "Graph"}
-                </button>
-              </div>
-
-              {graphMode ? (
-                /* ── Graph View ────────────────────────────────── */
-                <GraphHistoryPanel
-                  rows={graphRows}
-                  graphLoading={graphLoading}
-                  graphError={graphErrorMessage}
-                  selectedSha={selectedCommit?.sha ?? null}
-                  onSelectCommit={selectCommit}
-                  onRetry={() => loadGraphData(50)}
-                  onLoadMore={loadMoreGraph}
-                />
-              ) : (
-                /* ── List View ─────────────────────────────────── */
-                <HistoryPanel
-                  commits={allCommits}
-                  hasMore={hasMore}
-                  loadingMore={loadingMore}
-                  loading={loading}
-                  selectedSha={selectedCommit?.sha ?? null}
-                  onSelectCommit={selectCommit}
-                  onLoadMore={loadMoreCommits}
-                />
-              )}
+              <GraphHistoryPanel
+                rows={graphRows}
+                graphLoading={graphLoading}
+                graphError={graphErrorMessage}
+                selectedSha={selectedCommit?.sha ?? null}
+                onSelectCommit={selectCommit}
+                onRetry={() => loadGraphData(50)}
+                onLoadMore={loadMoreGraph}
+              />
             </div>
 
             {/* Resize handle */}
@@ -1106,100 +1034,6 @@ function GraphHistoryPanel({
 }
 
 // ── History Panel ─────────────────────────────────────────────────────────
-
-function HistoryPanel({
-  commits,
-  hasMore,
-  loadingMore,
-  loading,
-  selectedSha,
-  onSelectCommit,
-  onLoadMore,
-}: {
-  commits: GitCommitItem[];
-  hasMore: boolean;
-  loadingMore: boolean;
-  loading: boolean;
-  selectedSha: string | null;
-  onSelectCommit: (sha: string) => void;
-  onLoadMore: () => void;
-}) {
-  const sentinelRef = useRef<HTMLDivElement>(null);
-
-  // IntersectionObserver for infinite scroll
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting && hasMore && !loadingMore) {
-          onLoadMore();
-        }
-      },
-      { rootMargin: "200px" },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [hasMore, loadingMore, onLoadMore]);
-
-  if (!loading && commits.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center p-6">
-        <p className="text-sm text-neutral-500">No commits yet</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-4">
-      <div className="space-y-2">
-        {commits.map((commit) => (
-          <button
-            key={commit.sha}
-            onClick={() => onSelectCommit(commit.sha)}
-            className={`motion-safe:animate-slide-up-fade w-full rounded-lg border p-3 text-left transition-colors ${
-              selectedSha === commit.sha
-                ? "border-neutral-500 bg-neutral-100 dark:border-neutral-500 dark:bg-neutral-800"
-                : "border-neutral-200 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900"
-            }`}
-          >
-            <div className="mb-1 flex items-center gap-2">
-              <GitCommitHorizontal className="h-3.5 w-3.5 text-neutral-400" />
-              <span className="font-mono text-xs text-neutral-500">
-                {commit.sha.substring(0, 7)}
-              </span>
-            </div>
-            <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
-              {commit.message}
-            </p>
-            <div className="mt-1 flex items-center gap-2 text-xs text-neutral-500">
-              <span>{commit.author}</span>
-              <span>·</span>
-              <span>{new Date(commit.date).toLocaleString()}</span>
-            </div>
-          </button>
-        ))}
-      </div>
-
-      {/* Sentinel element for infinite scroll */}
-      <div ref={sentinelRef} className="h-4" />
-
-      {/* Loading indicator */}
-      {loadingMore && (
-        <div className="flex items-center justify-center py-4">
-          <Loader2 className="h-4 w-4 animate-spin text-neutral-400" />
-          <span className="ml-2 text-xs text-neutral-500">Loading more...</span>
-        </div>
-      )}
-
-      {!hasMore && commits.length > 0 && (
-        <p className="py-4 text-center text-xs text-neutral-400">
-          All commits loaded
-        </p>
-      )}
-    </div>
-  );
-}
 
 // ── Commit Detail Panel ───────────────────────────────────────────────────
 
