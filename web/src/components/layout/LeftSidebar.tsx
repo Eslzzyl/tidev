@@ -4,6 +4,8 @@ import { useSessionStore } from "../../stores/useSessionStore";
 import { useUIStore } from "../../stores/useUIStore";
 import { api } from "../../api/client";
 import { formatSessionDate } from "../../utils/format";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
+import type { Session } from "../../types/api";
 
 export function LeftSidebar() {
   const sessions = useSessionStore((s) => s.sessions);
@@ -26,6 +28,8 @@ export function LeftSidebar() {
   const [searchQuery, setSearchQuery] = useState("");
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
   // Focus rename input when renaming starts
@@ -70,7 +74,7 @@ export function LeftSidebar() {
 
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
-      if (!confirm("Delete this session?")) return;
+      setIsDeleting(true);
       try {
         await api.deleteSession(sessionId);
         removeSession(sessionId);
@@ -78,6 +82,9 @@ export function LeftSidebar() {
         setError(
           err instanceof Error ? err.message : "Failed to delete session",
         );
+      } finally {
+        setIsDeleting(false);
+        setSessionToDelete(null);
       }
     },
     [removeSession, setError],
@@ -229,7 +236,7 @@ export function LeftSidebar() {
 
                   {/* Action buttons */}
                   {!isRenaming && (
-                    <div className="absolute right-3 top-1/2 flex -translate-y-1/2 gap-0.5 opacity-0 transition-all duration-150 group-hover:opacity-100">
+                    <div className="absolute right-3 top-1/2 flex -translate-y-1/2 gap-0.5 opacity-100 transition-all duration-150 hover-only:opacity-0 hover-only:group-hover:opacity-100">
                       <button
                         onClick={() =>
                           handleStartRename(session.session_id, session.title)
@@ -241,7 +248,7 @@ export function LeftSidebar() {
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
                       <button
-                        onClick={() => handleDeleteSession(session.session_id)}
+                        onClick={() => setSessionToDelete(session)}
                         className="rounded p-1 text-neutral-400 transition-all duration-150 hover:text-red-600 hover:bg-neutral-100 active:scale-95 dark:text-neutral-500 dark:hover:text-red-400 dark:hover:bg-neutral-800"
                         aria-label="Delete session"
                         title="Delete"
@@ -256,6 +263,24 @@ export function LeftSidebar() {
           </ul>
         )}
       </div>
+
+      {/* Delete Session Confirmation */}
+      <ConfirmDialog
+        isOpen={sessionToDelete !== null}
+        title="Delete session"
+        message={
+          sessionToDelete
+            ? `Are you sure you want to delete "${sessionToDelete.title || "Untitled"}"?`
+            : ""
+        }
+        confirmText="Delete"
+        danger
+        isLoading={isDeleting}
+        onConfirm={() => {
+          if (sessionToDelete) handleDeleteSession(sessionToDelete.session_id);
+        }}
+        onCancel={() => setSessionToDelete(null)}
+      />
     </div>
   );
 }
