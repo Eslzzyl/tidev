@@ -342,7 +342,7 @@ export function WelcomePage() {
                                 e.stopPropagation();
                                 setSessionToDelete(session);
                               }}
-                              className="shrink-0 rounded p-1 text-neutral-400 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                              className="shrink-0 rounded p-1 text-neutral-400 opacity-100 transition-opacity hover-only:opacity-0 hover-only:group-hover:opacity-100 hover-only:hover:bg-red-100 hover-only:hover:text-red-600 hover-only:dark:hover:bg-red-900/30 hover-only:dark:hover:text-red-400"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
@@ -377,7 +377,7 @@ export function WelcomePage() {
                     e.stopPropagation();
                     setSessionToDelete(session);
                   }}
-                  className="shrink-0 rounded p-1 text-neutral-400 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                  className="shrink-0 rounded p-1 text-neutral-400 opacity-100 transition-opacity hover-only:opacity-0 hover-only:group-hover:opacity-100 hover-only:hover:bg-red-100 hover-only:hover:text-red-600 hover-only:dark:hover:bg-red-900/30 hover-only:dark:hover:text-red-400"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
