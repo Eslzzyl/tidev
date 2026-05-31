@@ -10,6 +10,7 @@ export interface SettingsState {
   fontSize: number;
   diffLayout: "inline" | "side-by-side";
   enterToSend: boolean;
+  terminalShell: string;
 }
 
 export interface UIState {
@@ -111,6 +112,7 @@ function loadLocalStorage() {
         "side-by-side",
       ),
       enterToSend: loadSetting("settings.enterToSend", true),
+      terminalShell: loadSetting("settings.terminalShell", ""),
     },
   };
 }

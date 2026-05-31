@@ -81,6 +81,10 @@ pub fn api_routes() -> Router<AppState> {
             "/config/model-thinking-level",
             get(config::get_model_thinking_level).post(config::set_model_thinking_level),
         )
+        .route(
+            "/config/terminal-shell",
+            get(config::get_terminal_shell).post(config::set_terminal_shell),
+        )
         // Providers
         .route(
             "/providers",

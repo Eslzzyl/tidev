@@ -694,12 +694,20 @@ pub struct ShellConfig {
     ///   "cmd"
     #[serde(default)]
     pub windows_shell: Option<String>,
+
+    /// Default shell for the web terminal.
+    ///
+    /// Overrides `$SHELL` on the server.  The user can still override
+    /// per-session from the frontend settings.
+    #[serde(default)]
+    pub terminal_shell: Option<String>,
 }
 
 impl Default for ShellConfig {
     fn default() -> Self {
         Self {
             windows_shell: None,
+            terminal_shell: None,
         }
     }
 }

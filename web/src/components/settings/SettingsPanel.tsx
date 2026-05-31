@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { X, Palette, Type, Keyboard, Lock, Info } from "lucide-react";
+import { X, Palette, Type, Keyboard, Terminal as TerminalIcon, Lock, Info } from "lucide-react";
 import { useUIStore } from "../../stores/useUIStore";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { AppearanceSection } from "./AppearanceSection";
 import { EditorSection } from "./EditorSection";
 import { InteractionSection } from "./InteractionSection";
+import { TerminalSection } from "./TerminalSection";
 import { SecuritySection } from "./SecuritySection";
 import { AboutSection } from "./AboutSection";
 
@@ -12,6 +13,7 @@ type CategoryId =
   | "appearance"
   | "editor"
   | "interaction"
+  | "terminal"
   | "security"
   | "about";
 
@@ -32,6 +34,11 @@ const categories: Category[] = [
     id: "interaction",
     label: "Interaction",
     icon: <Keyboard className="h-4 w-4" />,
+  },
+  {
+    id: "terminal",
+    label: "Terminal",
+    icon: <TerminalIcon className="h-4 w-4" />,
   },
   { id: "security", label: "Security", icon: <Lock className="h-4 w-4" /> },
   { id: "about", label: "About", icon: <Info className="h-4 w-4" /> },
@@ -150,6 +157,7 @@ export function SettingsPanel() {
             {activeCategory === "appearance" && <AppearanceSection />}
             {activeCategory === "editor" && <EditorSection />}
             {activeCategory === "interaction" && <InteractionSection />}
+            {activeCategory === "terminal" && <TerminalSection />}
             {activeCategory === "security" && <SecuritySection />}
             {activeCategory === "about" && <AboutSection />}
           </div>

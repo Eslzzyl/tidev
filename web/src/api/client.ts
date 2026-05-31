@@ -264,12 +264,11 @@ export const api = {
       `${API_BASE}/config/model-thinking-level?${params}`,
     );
   },
-
   setModelThinkingLevel: (data: SetModelThinkingLevelRequest) =>
-    fetchJson<{ success: boolean }>(`${API_BASE}/config/model-thinking-level`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
+    fetchJson<{ success: boolean }>(
+      `${API_BASE}/config/model-thinking-level`,
+      { method: "POST", body: JSON.stringify(data) },
+    ),
 
   // Providers
   listProviders: () =>
@@ -346,11 +345,16 @@ export const api = {
     ),
 
   // Terminal
-  startTerminal: (cols?: number, rows?: number) =>
+  startTerminal: (cols?: number, rows?: number, shell?: string) =>
     fetchJson<{ session_id: string }>(`${API_BASE}/terminal/start`, {
       method: "POST",
-      body: JSON.stringify({ cols, rows }),
+      body: JSON.stringify({ cols, rows, shell: shell || undefined }),
     }),
+
+  listTerminalShells: () =>
+    fetchJson<{ shells: Array<{ path: string; name: string }>; default_shell: string }>(
+      `${API_BASE}/terminal/shells`,
+    ),
 
   terminalInput: (sessionId: string, data: string) =>
     fetchWithAuth(`${API_BASE}/terminal/input`, {
@@ -368,6 +372,16 @@ export const api = {
 
   closeTerminal: (sessionId: string) =>
     fetchWithAuth(`${API_BASE}/terminal/${sessionId}`, { method: "DELETE" }),
+
+  // Terminal shell config (server-side persisted)
+  getTerminalShellConfig: () =>
+    fetchJson<{ shell: string }>(`${API_BASE}/config/terminal-shell`),
+
+  setTerminalShellConfig: (shell: string) =>
+    fetchJson<{ success: boolean; shell: string }>(
+      `${API_BASE}/config/terminal-shell`,
+      { method: "POST", body: JSON.stringify({ shell }) },
+    ),
 
   // Git
   gitStatus: () => fetchJson<GitStatusResponse>(`${API_BASE}/git/status`),

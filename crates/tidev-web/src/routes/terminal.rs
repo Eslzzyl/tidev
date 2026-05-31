@@ -1,13 +1,15 @@
 //! Terminal API routes for web terminal.
 //!
-//! - `POST /api/terminal/start`     — Start a new terminal session (with optional cols/rows)
+//! - `POST /api/terminal/start`     — Start a new terminal session (with optional cols/rows/shell)
 //! - `POST /api/terminal/input`     — Send raw input to a terminal session
 //! - `POST /api/terminal/resize`    — Resize the PTY (cols × rows)
 //! - `GET  /api/terminal/events`    — SSE stream for terminal output
+//! - `GET  /api/terminal/shells`    — List available shells on the server
 //! - `GET  /api/terminal/ws`        — WebSocket endpoint for terminal I/O
 //! - `DELETE /api/terminal/{id}`    — Close a terminal session
 
 use std::convert::Infallible;
+use std::collections::HashSet;
 
 use axum::{
     Json, Router,
@@ -33,6 +35,7 @@ pub fn terminal_routes() -> Router<AppState> {
         .route("/terminal/input", post(terminal_input))
         .route("/terminal/resize", post(terminal_resize))
         .route("/terminal/events", get(terminal_events))
+        .route("/terminal/shells", get(list_shells))
         .route("/terminal/ws", get(terminal_ws_handler))
         .route("/terminal/{session_id}", delete(close_terminal))
 }
@@ -44,12 +47,25 @@ struct StartResponse {
     session_id: String,
 }
 
+#[derive(Serialize)]
+struct ShellEntry {
+    path: String,
+    name: String,
+}
+
+#[derive(Serialize)]
+struct ShellsResponse {
+    shells: Vec<ShellEntry>,
+    default_shell: String,
+}
+
 #[derive(Deserialize)]
 #[serde(default)]
 #[derive(Default)]
 struct StartRequest {
     cols: Option<u16>,
     rows: Option<u16>,
+    shell: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -95,15 +111,156 @@ async fn start_terminal(
         pixel_height: 0,
     };
 
+    // Shell priority:
+    //   1. Explicit request parameter (from frontend)
+    //   2. Config override (server-side persisted)
+    //   3. $SHELL environment variable
+    //   4. /bin/bash (hardcoded fallback in start_session)
+    let shell = req.shell.or_else(|| {
+        let config = state.config.try_read().ok()?;
+        config.shell.terminal_shell.clone()
+    });
+
     let session_id = state
         .terminal_manager
-        .start_session(state.terminal_tx.clone(), size)
+        .start_session(state.terminal_tx.clone(), size, shell)
         .await
         .map_err(crate::error::AppError::Internal)?;
 
     Ok(Json(StartResponse {
         session_id: session_id.to_string(),
     }))
+}
+
+/// Detect available shells on the server.
+///
+/// On Unix, reads `/etc/shells` and filters to existing executables.
+/// Always includes `$SHELL` first. Also scans common paths for shells
+/// that may not appear in `/etc/shells` (e.g. Homebrew-installed fish).
+async fn list_shells(
+    State(_state): State<AppState>,
+) -> Json<ShellsResponse> {
+    let shells = detect_shells();
+    let default_shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+    Json(ShellsResponse { shells, default_shell })
+}
+
+#[cfg(unix)]
+fn detect_shells() -> Vec<ShellEntry> {
+    let mut shells = Vec::new();
+    let mut seen = HashSet::new();
+
+    // 1. Always include $SHELL first
+    if let Ok(s) = std::env::var("SHELL") {
+        if !s.is_empty() && std::path::Path::new(&s).exists() {
+            let name = std::path::Path::new(&s)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| s.clone());
+            shells.push(ShellEntry { path: s.clone(), name });
+            seen.insert(s);
+        }
+    }
+
+    // 2. Read /etc/shells
+    if let Ok(content) = std::fs::read_to_string("/etc/shells") {
+        for line in content.lines() {
+            let line = line.trim();
+            if line.starts_with('#') || line.is_empty() {
+                continue;
+            }
+            if std::path::Path::new(line).exists() && !seen.contains(line) {
+                let name = std::path::Path::new(line)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| line.to_string());
+                shells.push(ShellEntry { path: line.to_string(), name });
+                seen.insert(line.to_string());
+            }
+        }
+    }
+
+    // 3. Cross-product search: search_dirs × shell_names.
+    //    This catches shells from package managers (Homebrew, cargo, pipx, etc.)
+    //    that may not be registered in /etc/shells.
+    let home = std::env::var("HOME").unwrap_or_default();
+    let search_dirs: Vec<String> = [
+        "/bin",
+        "/usr/bin",
+        "/usr/local/bin",
+        "/opt/homebrew/bin",
+        "/opt/local/bin",
+        "/run/current-system/sw/bin",
+    ]
+    .into_iter()
+    .map(|s| s.to_string())
+    .chain(
+        [
+            format!("{}/.cargo/bin", home),
+            format!("{}/.local/bin", home),
+            format!("{}/.nix-profile/bin", home),
+        ]
+        .into_iter(),
+    )
+    .collect();
+
+    let shell_names = [
+        "bash", "zsh", "fish", "nu", "sh", "dash", "tcsh", "ksh", "mksh", "oksh", "elvish", "pwsh",
+    ];
+
+    for dir in &search_dirs {
+        for name in &shell_names {
+            let path = format!("{}/{}", dir, name);
+            if std::path::Path::new(&path).exists() && !seen.contains(&path) {
+                shells.push(ShellEntry {
+                    path: path.clone(),
+                    name: name.to_string(),
+                });
+                seen.insert(path);
+            }
+        }
+    }
+
+    shells
+}
+
+#[cfg(windows)]
+fn detect_shells() -> Vec<ShellEntry> {
+    let mut shells = Vec::new();
+    let mut seen = HashSet::new();
+
+    // Always include $SHELL or default PowerShell first
+    let default = std::env::var("SHELL").unwrap_or_else(|_| "powershell.exe".to_string());
+    if !default.is_empty() {
+        let name = std::path::Path::new(&default)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| default.clone());
+        shells.push(ShellEntry { path: default, name });
+    }
+
+    // Common Windows shells
+    let common = [
+        "powershell.exe",
+        "pwsh.exe",
+        "cmd.exe",
+        "wsl.exe",
+        "C:\\Program Files\\Git\\bin\\bash.exe",
+        "C:\\Program Files\\Git\\usr\\bin\\bash.exe",
+    ];
+    for path in &common {
+        if !seen.contains(*path) {
+            let name = std::path::Path::new(path)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            shells.push(ShellEntry { path: path.to_string(), name });
+            seen.insert(path.to_string());
+        }
+    }
+
+    shells
 }
 
 async fn terminal_input(

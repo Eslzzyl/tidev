@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { v4 as uuidv4 } from "uuid";
 import { api } from "../api/client";
+import { useUIStore } from "./useUIStore";
 
 export interface TerminalTab {
   id: string;
@@ -52,7 +53,9 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
   initSession: async (tabId, cols, rows) => {
     try {
-      const result = await api.startTerminal(cols, rows);
+      const { settings } = useUIStore.getState();
+      const shell = settings.terminalShell || undefined;
+      const result = await api.startTerminal(cols, rows, shell);
       set((state) => ({
         tabs: state.tabs.map((t) =>
           t.id === tabId

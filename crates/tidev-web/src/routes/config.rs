@@ -380,3 +380,51 @@ pub async fn set_model_thinking_level(
 
     Ok(Json(SetModelThinkingLevelResponse { success: true }))
 }
+
+// ── Terminal Shell Preference ─────────────────────────────────────
+
+/// Response for GET /api/config/terminal-shell
+#[derive(Serialize)]
+pub struct GetTerminalShellResponse {
+    pub shell: String,
+}
+
+/// Request for POST /api/config/terminal-shell
+#[derive(Deserialize)]
+pub struct SetTerminalShellRequest {
+    pub shell: String,
+}
+
+/// Get the server-side terminal shell preference.
+pub async fn get_terminal_shell(
+    State(state): State<AppState>,
+) -> Json<GetTerminalShellResponse> {
+    let config = state.config.read().await;
+    let shell = config
+        .shell
+        .terminal_shell
+        .clone()
+        .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string()));
+    Json(GetTerminalShellResponse { shell })
+}
+
+/// Set and persist the server-side terminal shell preference.
+///
+/// Pass an empty string to clear the preference (fall back to $SHELL).
+pub async fn set_terminal_shell(
+    State(state): State<AppState>,
+    Json(body): Json<SetTerminalShellRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let mut config = state.config.write().await;
+    config.shell.terminal_shell = if body.shell.is_empty() {
+        None
+    } else {
+        Some(body.shell.clone())
+    };
+    if let Err(e) = config.save(&state.config_paths) {
+        log::error!("Failed to save terminal shell config: {e}");
+        return Err(AppError::Internal(format!("Failed to save config: {e}")));
+    }
+    drop(config);
+    Ok(Json(serde_json::json!({ "success": true, "shell": body.shell })))
+}
