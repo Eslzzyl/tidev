@@ -159,7 +159,7 @@ export function Header({ className }: HeaderProps) {
           <Settings className="h-4 w-4" />
         </button>
 
-        {activeTab === "chat" && (
+        {activeTab === "chat" && (currentSession || isDraftSession) && (
           <>
             <button
               onClick={toggleRightSidebar}
