@@ -309,16 +309,6 @@ max_output_tokens = 32768
 supports_streaming = true
 supports_images = false
 
-[providers.opencode-go.qwen-3-5-plus]
-api_type = "anthropic"
-base_url = "https://opencode.ai/zen/go/v1/messages"
-request_model_id = "qwen3.5-plus"
-display_name = "Qwen3.5-Plus"
-context_window = 200000
-max_output_tokens = 32768
-supports_streaming = true
-supports_images = true
-
 [providers.opencode-go.qwen-3-6-plus]
 api_type = "anthropic"
 base_url = "https://opencode.ai/zen/go/v1/messages"
