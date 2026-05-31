@@ -5,12 +5,14 @@ import {
   Clock,
   MoreHorizontal,
   X,
+  Trash2,
 } from "lucide-react";
 import { useSessionStore } from "../stores/useSessionStore";
 import { useUIStore } from "../stores/useUIStore";
 import { SmartInput } from "./SmartInput";
 import { SkillsDialog } from "./chat/SkillsDialog";
 import { ConnectDialog } from "./chat/ConnectDialog";
+import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { api } from "../api/client";
 import { formatSessionDate } from "../utils/format";
 import type { Session } from "../types/api";
@@ -21,6 +23,8 @@ export function WelcomePage() {
   const [showAllSessions, setShowAllSessions] = useState(false);
   const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
   const [connectDialogOpen, setConnectDialogOpen] = useState(false);
+  const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const sessions = useSessionStore((s) => s.sessions);
@@ -212,6 +216,26 @@ export function WelcomePage() {
     [setLoading, setCurrentSession, setMessages, setError],
   );
 
+  const handleDeleteSession = useCallback(
+    async (session: Session) => {
+      setIsDeleting(true);
+      try {
+        await api.deleteSession(session.session_id);
+        // Refresh sessions list
+        const { sessions: updatedSessions } = await api.listSessions();
+        setSessions(updatedSessions);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Failed to delete session",
+        );
+      } finally {
+        setIsDeleting(false);
+        setSessionToDelete(null);
+      }
+    },
+    [setSessions, setError],
+  );
+
   // Sort sessions by updated_at desc and take top 5
   const recentSessions = [...sessions]
     .sort(
@@ -301,7 +325,7 @@ export function WelcomePage() {
                               handleSelectSession(session);
                               setShowAllSessions(false);
                             }}
-                            className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-neutral-50 dark:hover:bg-neutral-800"
+                            className="group flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-neutral-50 dark:hover:bg-neutral-800"
                           >
                             <MessageSquare className="h-4 w-4 shrink-0 text-neutral-400" />
                             <div className="min-w-0 flex-1">
@@ -313,6 +337,15 @@ export function WelcomePage() {
                                 {formatSessionDate(session.updated_at)}
                               </p>
                             </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSessionToDelete(session);
+                              }}
+                              className="shrink-0 rounded p-1 text-neutral-400 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
                           </button>
                         ))}
                     </div>
@@ -327,7 +360,7 @@ export function WelcomePage() {
               <button
                 key={session.session_id}
                 onClick={() => handleSelectSession(session)}
-                className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-900"
+                className="group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-900"
               >
                 <MessageSquare className="h-4 w-4 shrink-0 text-neutral-400" />
                 <div className="min-w-0 flex-1">
@@ -339,6 +372,15 @@ export function WelcomePage() {
                     {formatSessionDate(session.updated_at)}
                   </p>
                 </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSessionToDelete(session);
+                  }}
+                  className="shrink-0 rounded p-1 text-neutral-400 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
               </button>
             ))}
           </div>
@@ -369,6 +411,24 @@ export function WelcomePage() {
       <ConnectDialog
         isOpen={connectDialogOpen}
         onClose={() => setConnectDialogOpen(false)}
+      />
+
+      {/* Delete Session Confirmation */}
+      <ConfirmDialog
+        isOpen={sessionToDelete !== null}
+        title="Delete session"
+        message={
+          sessionToDelete
+            ? `Are you sure you want to delete "${sessionToDelete.title || "Untitled"}"?`
+            : ""
+        }
+        confirmText="Delete"
+        danger
+        isLoading={isDeleting}
+        onConfirm={() => {
+          if (sessionToDelete) handleDeleteSession(sessionToDelete);
+        }}
+        onCancel={() => setSessionToDelete(null)}
       />
     </div>
   );
