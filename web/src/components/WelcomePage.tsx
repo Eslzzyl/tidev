@@ -123,6 +123,7 @@ export function WelcomePage() {
         } = { content: payload.inputValue };
 
         if (payload.mode) requestBody.mode = payload.mode;
+        if (payload.mode) useSessionStore.getState().setMode(payload.mode);
         if (payload.thinkingLevel)
           requestBody.thinking_level = payload.thinkingLevel;
         if (payload.modelId) requestBody.model_id = payload.modelId;
