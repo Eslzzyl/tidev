@@ -4233,6 +4233,7 @@ dependencies = [
  "base64",
  "bytes",
  "chrono",
+ "dirs",
  "futures-util",
  "log",
  "mime_guess",

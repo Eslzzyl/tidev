@@ -6,6 +6,7 @@ import { FileMentionPopover } from "./chat/FileMentionPopover";
 import { commandFragment, getSuggestions } from "../commands";
 import { ModelPanel } from "./chat/ModelPanel";
 import { api } from "../api/client";
+import { formatWorkspace } from "../utils/format";
 
 export interface SmartInputProps {
   /** Called when user submits the input */
@@ -576,7 +577,7 @@ export function SmartInput({
       {/* Workspace path display */}
       {workspacePath && (
         <span className="text-xs text-neutral-400 dark:text-neutral-500 truncate max-w-[200px]">
-          {workspacePath.replace(/^\/home\/[^/]+/, "~")}
+          {formatWorkspace(workspacePath)}
         </span>
       )}
     </div>

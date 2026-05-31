@@ -157,6 +157,7 @@ export interface SetDefaultModelRequest {
 
 export interface WorkspaceInfo {
   workspace_root: string;
+  workspace_display: string;
 }
 
 export interface CreateSessionResponse {

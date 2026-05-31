@@ -58,10 +58,14 @@ export function WelcomePage() {
   }, [setSessions]);
 
   const [workspaceRoot, setWorkspaceRoot] = useState<string>("");
+  const [workspaceDisplay, setWorkspaceDisplay] = useState<string>("");
   useEffect(() => {
     api
       .getWorkspace()
-      .then((info) => setWorkspaceRoot(info.workspace_root))
+      .then((info) => {
+        setWorkspaceRoot(info.workspace_root);
+        setWorkspaceDisplay(info.workspace_display);
+      })
       .catch(() => setWorkspaceRoot(""));
   }, []);
 
@@ -267,7 +271,7 @@ export function WelcomePage() {
           multiline={true}
           autoFocus
           className="w-full"
-          workspacePath={workspaceRoot}
+          workspacePath={workspaceDisplay}
           isStreaming={isStreaming}
           onStop={handleStop}
         />

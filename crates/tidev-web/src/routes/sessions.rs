@@ -362,12 +362,21 @@ pub async fn rename_session(
 #[derive(Serialize)]
 pub struct WorkspaceInfo {
     pub workspace_root: String,
+    pub workspace_display: String,
 }
 
 /// Get current workspace info
 pub async fn get_workspace(State(state): State<AppState>) -> WebResult<Json<WorkspaceInfo>> {
     log::debug!("Getting workspace info: {}", state.workspace_root.display());
+    let workspace_root = state.workspace_root.display().to_string();
+    // Match TUI logic: replace home directory with ~ for display,
+    // keep absolute path if outside home directory
+    let workspace_display = workspace_root.replace(
+        &dirs::home_dir().unwrap_or_default().display().to_string(),
+        "~",
+    );
     Ok(Json(WorkspaceInfo {
-        workspace_root: state.workspace_root.display().to_string(),
+        workspace_root,
+        workspace_display,
     }))
 }
