@@ -393,6 +393,20 @@ impl AgentRuntime {
         };
 
         if let Some(text) = reminder {
+            // Guard: if the message already starts with the exact same
+            // reminder text, skip injection to avoid duplicate accumulation.
+            // The agent loop may iterate multiple times for tool-call turns,
+            // and `is_first_user` remains `true` as long as no new user
+            // messages are added, causing the same reminder to be prepended
+            // on every iteration.
+            if last_user_msg.content.starts_with(&text) {
+                log::debug!(
+                    "inject_mode_reminder: reminder already present in message {}, skipping",
+                    last_user_msg.id,
+                );
+                return Ok(false);
+            }
+
             last_user_msg.content = format!("{}\n\n{}", text, last_user_msg.content);
             let store = self.store.lock().await;
             store.update_message_content(last_user_msg.id, &last_user_msg.content)?;
