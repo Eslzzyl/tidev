@@ -17,6 +17,9 @@ import {
   ChevronDown,
   ChevronRight,
   X,
+  Copy,
+  Tag,
+  User,
 } from "lucide-react";
 import { api } from "../../api/client";
 import type {
@@ -31,6 +34,7 @@ import { formatGitDate } from "../../utils/format";
 import { computeGraphLayout } from "../../lib/gitGraph";
 import type { GraphRow } from "../../lib/gitGraph";
 import { GitGraphSVG, getGraphWidth, GRAPH_ROW_HEIGHT } from "./GitGraph";
+import { ContextMenu, type ContextMenuItem } from "../ui/ContextMenu";
 
 type GitTab = "changes" | "history" | "branches";
 
@@ -891,6 +895,61 @@ function ChangeFileRow({
 
 // ── Graph History Panel ────────────────────────────────────────────────────
 
+function buildCommitContextMenuItems(row: GraphRow): ContextMenuItem[] {
+  const copy = (text: string) => {
+    navigator.clipboard.writeText(text).catch(() => {});
+  };
+
+  const items: ContextMenuItem[] = [
+    {
+      label: "Copy SHA (short)",
+      icon: <GitCommitHorizontal className="h-3.5 w-3.5" />,
+      onClick: () => copy(row.commit.sha.substring(0, 7)),
+    },
+    {
+      label: "Copy SHA (full)",
+      icon: <FileText className="h-3.5 w-3.5" />,
+      onClick: () => copy(row.commit.sha),
+    },
+  ];
+
+  // Extract tag names from refs
+  const tags = (row.commit.refs ?? [])
+    .filter((r) => r.startsWith("tag: "))
+    .map((r) => r.replace(/^tag: /, ""));
+  if (tags.length > 0) {
+    items.push({ type: "separator" });
+    for (const tag of tags) {
+      items.push({
+        label: `Copy Tag (${tag})`,
+        icon: <Tag className="h-3.5 w-3.5" />,
+        onClick: () => copy(tag),
+      });
+    }
+  }
+
+  items.push({ type: "separator" });
+  items.push(
+    {
+      label: "Copy Author",
+      icon: <User className="h-3.5 w-3.5" />,
+      onClick: () => copy(row.commit.author),
+    },
+    {
+      label: "Copy Title",
+      icon: <Copy className="h-3.5 w-3.5" />,
+      onClick: () => copy(row.commit.message.split("\n")[0]),
+    },
+    {
+      label: "Copy Full Message",
+      icon: <FileText className="h-3.5 w-3.5" />,
+      onClick: () => copy(row.commit.message),
+    },
+  );
+
+  return items;
+}
+
 function GraphHistoryPanel({
   rows,
   graphLoading,
@@ -910,6 +969,17 @@ function GraphHistoryPanel({
 }) {
   const sentinelRef = useRef<HTMLDivElement>(null);
 
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    row: GraphRow;
+  } | null>(null);
+
+  // Long-press detection for touch devices
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isLongPress = useRef(false);
+
   // IntersectionObserver for infinite scroll
   useEffect(() => {
     const el = sentinelRef.current;
@@ -925,6 +995,51 @@ function GraphHistoryPanel({
     observer.observe(el);
     return () => observer.disconnect();
   }, [graphLoading, onLoadMore]);
+
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent, row: GraphRow) => {
+      e.preventDefault();
+      setContextMenu({ x: e.clientX, y: e.clientY, row });
+    },
+    [],
+  );
+
+  const handleTouchStart = useCallback(
+    (e: React.TouchEvent, row: GraphRow) => {
+      isLongPress.current = false;
+      const touch = e.touches[0];
+      longPressTimer.current = setTimeout(() => {
+        isLongPress.current = true;
+        setContextMenu({ x: touch.clientX, y: touch.clientY, row });
+      }, 500);
+    },
+    [],
+  );
+
+  const handleTouchMove = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }, []);
+
+  const handleTouchEnd = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }, []);
+
+  const handleClick = useCallback(
+    (sha: string) => {
+      if (isLongPress.current) {
+        isLongPress.current = false;
+        return;
+      }
+      onSelectCommit(sha);
+    },
+    [onSelectCommit],
+  );
 
   if (graphLoading && rows.length === 0) {
     return (
@@ -983,7 +1098,11 @@ function GraphHistoryPanel({
           return (
             <button
               key={row.commit.sha}
-              onClick={() => onSelectCommit(row.commit.sha)}
+              onClick={() => handleClick(row.commit.sha)}
+              onContextMenu={(e) => handleContextMenu(e, row)}
+              onTouchStart={(e) => handleTouchStart(e, row)}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
               className={`w-full rounded-lg px-2 py-1.5 text-left transition-colors ${
                 isSelected
                   ? "bg-neutral-100 dark:bg-neutral-800"
@@ -1032,6 +1151,16 @@ function GraphHistoryPanel({
             Loading graph...
           </span>
         </div>
+      )}
+
+      {/* Context menu */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={buildCommitContextMenuItems(contextMenu.row)}
+          onClose={() => setContextMenu(null)}
+        />
       )}
     </div>
   );
