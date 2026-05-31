@@ -281,35 +281,35 @@ export function useSSE(sessionId: string | null) {
 
     const handleMessageComplete = () => {
       // Mark the streaming assistant as complete.
-      // Keep isStreaming = true only if there are tool_calls → more turns follow.
-      // If no tool_calls, this is the final turn → end streaming.
+      // Do NOT set streaming=false here — the stream.end event (sent by the
+      // agent loop when it fully exits) is the authoritative signal.  This
+      // prevents the footer from flashing during multi-turn agent loops
+      // where tool.calls arrive after message.complete.
       if (streamingAssistantIdRef.current) {
-        // Check if the completed assistant requested tools (more turns coming)
-        const state = useSessionStore.getState();
-        const completedMsg = state.messages.find(
-          (m) => m.id === streamingAssistantIdRef.current,
-        );
-        const hasToolCalls =
-          completedMsg?.tool_calls && completedMsg.tool_calls.length > 0;
-
-        if (!hasToolCalls) {
-          setStreaming(false);
-        }
-
+        const stats = useSessionStore.getState().currentUsageStats;
         updateStreamingAssistant((msg) => ({
           ...msg,
           completed_at: new Date().toISOString(),
           streaming: false,
+          // Persist usage stats onto the message so the sidebar can read them
+          // even after currentUsageStats is cleared by stream.end.
+          token_usage: stats
+            ? {
+                total_tokens: stats.total_tokens,
+                input_tokens: stats.input_tokens,
+                output_tokens: stats.output_tokens,
+                cache_read_tokens: stats.cache_read_tokens,
+                cache_write_tokens: stats.cache_write_tokens,
+              }
+            : msg.token_usage,
+          tokens_per_second:
+            stats?.tokens_per_second ?? msg.tokens_per_second,
         }));
         streamingAssistantIdRef.current = null;
       } else {
-        // No streaming assistant — clean up streaming state
         setStreaming(false);
       }
-
-      useSessionStore.getState().setCurrentUsageStats(null);
     };
-
     const handleErrorEvent = (event: AppEvent) => {
       if (!event || event.type !== "error") return;
       setStreaming(false);
@@ -344,6 +344,13 @@ export function useSSE(sessionId: string | null) {
         }));
         streamingAssistantIdRef.current = null;
       }
+    };
+
+    const handleStreamEnd = () => {
+      setStreaming(false);
+      useSessionStore.getState().setCurrentUsageStats(null);
+      streamingAssistantIdRef.current = null;
+      currentRequestIdRef.current = null;
     };
 
     const handleConnected = () => {
@@ -574,6 +581,7 @@ export function useSSE(sessionId: string | null) {
     sseClient.on("subagent.status", handleSubagentStatus);
     sseClient.on("subagent.tool_result", handleSubagentToolResult);
     sseClient.on("subagent.completed", handleSubagentCompleted);
+    sseClient.on("stream.end", handleStreamEnd);
 
     // Connect
     sseClient.connect(sessionId);
@@ -596,6 +604,7 @@ export function useSSE(sessionId: string | null) {
       sseClient.off("subagent.status", handleSubagentStatus);
       sseClient.off("subagent.tool_result", handleSubagentToolResult);
       sseClient.off("subagent.completed", handleSubagentCompleted);
+      sseClient.off("stream.end", handleStreamEnd);
       sseClient.disconnect();
       setStreaming(false);
       streamingAssistantIdRef.current = null;

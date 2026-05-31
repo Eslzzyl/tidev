@@ -60,7 +60,7 @@ export function VirtualMessageList({
             className="contents"
             style={{ contentVisibility: "auto" }}
           >
-            {renderEntry(entry, onUndoRequest, canUndo, getStaggerIndex(idx))}
+            {renderEntry(entry, onUndoRequest, canUndo, getStaggerIndex(idx), idx === entries.length - 1)}
           </div>
         ))}
       </div>
@@ -96,6 +96,7 @@ export function VirtualMessageList({
                 onUndoRequest,
                 canUndo,
                 getStaggerIndex(virtualItem.index),
+                virtualItem.index === entries.length - 1,
               )}
             </div>
           );
@@ -110,6 +111,7 @@ function renderEntry(
   onUndoRequest?: (messageId: string) => void,
   canUndo?: boolean,
   staggerIndex?: number,
+  isLastRound?: boolean,
 ) {
   if ("kind" in entry) {
     if (entry.kind === "shell") {
@@ -125,6 +127,7 @@ function renderEntry(
       onUndoRequest={onUndoRequest}
       canUndo={canUndo}
       staggerIndex={staggerIndex}
+      isLastRound={isLastRound}
     />
   );
 }

@@ -658,6 +658,10 @@ impl AgentRuntime {
                     "agent_loop: conversation not found for session {}",
                     session_id
                 );
+                let _ = event_tx.send(BackendEvent::StreamEnd {
+                    session_id,
+                    request_id,
+                });
                 break Ok(());
             };
 
@@ -669,6 +673,10 @@ impl AgentRuntime {
 
             if request_messages.is_empty() {
                 log::info!("agent_loop: no messages to send, breaking");
+                let _ = event_tx.send(BackendEvent::StreamEnd {
+                    session_id,
+                    request_id,
+                });
                 break Ok(());
             }
 
@@ -770,6 +778,11 @@ impl AgentRuntime {
                     }
                 }
 
+                // Signal frontend that the stream is fully done.
+                let _ = event_tx.send(BackendEvent::StreamEnd {
+                    session_id,
+                    request_id,
+                });
                 break Ok(());
             }
 

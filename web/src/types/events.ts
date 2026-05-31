@@ -94,4 +94,5 @@ export type AppEvent =
       tool_call_id: string;
       child_session_id: string;
       output: string;
-    };
+    }
+  | { type: "stream_end"; session_id: string; request_id: number };

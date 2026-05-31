@@ -41,6 +41,7 @@ fn event_type_str(event: &AppEvent) -> &'static str {
         AppEvent::SubagentStatus { .. } => "subagent.status",
         AppEvent::SubagentToolResult { .. } => "subagent.tool_result",
         AppEvent::SubagentCompleted { .. } => "subagent.completed",
+        AppEvent::StreamEnd { .. } => "stream.end",
     }
 }
 
@@ -125,6 +126,7 @@ pub async fn events_stream(
                         AppEvent::SubagentStatus { session_id: sid, .. } => *sid == session_id,
                         AppEvent::SubagentToolResult { session_id: sid, .. } => *sid == session_id,
                         AppEvent::SubagentCompleted { session_id: sid, .. } => *sid == session_id,
+                        AppEvent::StreamEnd { session_id: sid, .. } => *sid == session_id,
                     };
 
                     if !matches_session {

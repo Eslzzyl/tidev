@@ -5,6 +5,7 @@ import { ThinkingBlock } from "../renderers/ThinkingBlock";
 import { ToolCallRow } from "../renderers/ToolCallRow";
 import { CopyButton } from "../ui/CopyButton";
 import { UndoButton } from "./UndoButton";
+import { useUIStore } from "../../stores/useUIStore";
 import {
   formatTime,
   getDuration,
@@ -18,6 +19,9 @@ interface Props {
   /** Used to stagger entrance animations when the message list is remounted
    *  (e.g. switching tabs).  Passed from VirtualMessageList. */
   staggerIndex?: number;
+  /** When true and streaming is active, the footer is suppressed.
+   *  Only the last (streaming) round should set this to true. */
+  isLastRound?: boolean;
 }
 
 export const MessageRound = memo(function MessageRound({
@@ -25,6 +29,7 @@ export const MessageRound = memo(function MessageRound({
   onUndoRequest,
   canUndo = true,
   staggerIndex,
+  isLastRound,
 }: Props) {
   function getFooterParts(): string[] {
     const parts: string[] = [];
@@ -48,6 +53,7 @@ export const MessageRound = memo(function MessageRound({
 
   const footerParts = getFooterParts();
   const assistantContent = getAssistantContent();
+  const isStreaming = useUIStore((s) => s.isStreaming);
 
   const handleUndo = () => {
     if (onUndoRequest) {
@@ -125,11 +131,6 @@ export const MessageRound = memo(function MessageRound({
                   {formatTime(round.userMessage.created_at)}
                 </span>
               )}
-              {round.status === "streaming" && (
-                <span className="text-xs text-blue-500 dark:text-blue-400">
-                  streaming...
-                </span>
-              )}
               {round.status === "complete" && assistantContent && (
                 <CopyButton
                   content={stripSystemReminderTags(assistantContent)}
@@ -174,8 +175,10 @@ export const MessageRound = memo(function MessageRound({
               )}
             </div>
 
-            {/* Footer */}
-            {round.status === "complete" && footerParts.length > 0 && (
+            {/* Footer — only show when round is fully complete.
+             *  For the last round we additionally wait until streaming stops
+             *  (stream.end) to avoid flashing. */}
+            {round.status === "complete" && (!isLastRound || !isStreaming) && footerParts.length > 0 && (
               <div className="mt-0.5 text-xs text-neutral-400 dark:text-neutral-600">
                 {footerParts.join(" · ")}
               </div>

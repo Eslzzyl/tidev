@@ -138,6 +138,8 @@ pub enum AppEvent {
         child_session_id: Uuid,
         output: String,
     },
+    /// Agent loop has fully completed, stream is done.
+    StreamEnd { session_id: Uuid, request_id: u64 },
 }
 
 impl AppEvent {
@@ -162,6 +164,7 @@ impl AppEvent {
             AppEvent::SubagentStatus { session_id, .. } => Some(*session_id),
             AppEvent::SubagentToolResult { session_id, .. } => Some(*session_id),
             AppEvent::SubagentCompleted { session_id, .. } => Some(*session_id),
+            AppEvent::StreamEnd { session_id, .. } => Some(*session_id),
         }
     }
 }

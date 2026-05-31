@@ -914,6 +914,7 @@ impl App {
             BackendEvent::TurnStarting { .. } => "TurnStarting",
             BackendEvent::SandboxElevationRequest { .. } => "SandboxElevationRequest",
             BackendEvent::GoalStatusChanged { .. } => "GoalStatusChanged",
+            BackendEvent::StreamEnd { .. } => "StreamEnd",
         };
         if event_type != "Delta"
             && event_type != "ReasoningDelta"
@@ -1629,6 +1630,10 @@ impl App {
             BackendEvent::GoalStatusChanged { goal, .. } => {
                 self.current_goal = goal;
                 self.dirty = true;
+            }
+            BackendEvent::StreamEnd { .. } => {
+                // TUI can safely ignore StreamEnd — it already manages
+                // streaming state via TurnStarting and Finished events.
             }
         }
 

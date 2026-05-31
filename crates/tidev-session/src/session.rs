@@ -846,6 +846,10 @@ pub enum BackendEvent {
     /// tool calls from the previous turn).  Frontends should use this to
     /// update their active request ID and create a new streaming message.
     TurnStarting { session_id: Uuid, request_id: u64 },
+    /// Emitted when the agent loop has fully completed all turns and is
+    /// waiting for user input.  Frontends should use this to signal that
+    /// the stream is done (e.g. show per-round stats).
+    StreamEnd { session_id: Uuid, request_id: u64 },
     /// Emitted when a sandboxed command was denied by the OS sandbox.
     /// The frontend should show an elevation dialog and send a response
     /// through `response_tx`.
@@ -879,6 +883,7 @@ impl BackendEvent {
             | Self::ShellOutput { session_id, .. }
             | Self::GoalStatusChanged { session_id, .. }
             | Self::TurnStarting { session_id, .. }
+            | Self::StreamEnd { session_id, .. }
             | Self::SandboxElevationRequest { session_id, .. } => *session_id,
         }
     }
@@ -898,6 +903,7 @@ impl BackendEvent {
             | Self::UsageStats { request_id, .. }
             | Self::SidebarSnapshotReady { request_id, .. }
             | Self::TurnStarting { request_id, .. }
+            | Self::StreamEnd { request_id, .. }
             | Self::SandboxElevationRequest { request_id, .. } => Some(*request_id),
             Self::InstructionsLoaded { .. }
             | Self::ContextCompacted { .. }

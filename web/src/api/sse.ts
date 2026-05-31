@@ -145,6 +145,10 @@ export class SSEClient {
         this.emit("subagent.completed", JSON.parse(e.data));
       },
     );
+
+    this.eventSource.addEventListener("stream.end", (e: MessageEvent) => {
+      this.emit("stream.end", JSON.parse(e.data));
+    });
   }
 
   disconnect() {

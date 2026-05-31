@@ -642,6 +642,13 @@ pub async fn send_message(
                     child_session_id,
                     output: result.output,
                 }),
+                BackendEvent::StreamEnd {
+                    session_id,
+                    request_id,
+                } => Some(AppEvent::StreamEnd {
+                    session_id,
+                    request_id,
+                }),
                 _ => None,
             };
 
