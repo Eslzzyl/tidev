@@ -229,34 +229,90 @@ fn detect_shells() -> Vec<ShellEntry> {
     let mut shells = Vec::new();
     let mut seen = HashSet::new();
 
-    // Always include $SHELL or default PowerShell first
-    let default = std::env::var("SHELL").unwrap_or_else(|_| "powershell.exe".to_string());
-    if !default.is_empty() {
-        let name = std::path::Path::new(&default)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| default.clone());
-        shells.push(ShellEntry { path: default, name });
+    // 1. Always include ComSpec (the standard Windows default shell env var) first
+    if let Ok(s) = std::env::var("ComSpec") {
+        if !s.is_empty() && std::path::Path::new(&s).exists() && !seen.contains(&s) {
+            let name = std::path::Path::new(&s)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "cmd.exe".to_string());
+            shells.push(ShellEntry { path: s.clone(), name });
+            seen.insert(s);
+        }
     }
 
-    // Common Windows shells
-    let common = [
-        "powershell.exe",
-        "pwsh.exe",
-        "cmd.exe",
-        "wsl.exe",
-        "C:\\Program Files\\Git\\bin\\bash.exe",
-        "C:\\Program Files\\Git\\usr\\bin\\bash.exe",
-    ];
-    for path in &common {
-        if !seen.contains(*path) {
-            let name = std::path::Path::new(path)
+    // 2. Include $SHELL if set (may be used by MSYS2/Cygwin environments)
+    if let Ok(s) = std::env::var("SHELL") {
+        if !s.is_empty() && std::path::Path::new(&s).exists() && !seen.contains(&s) {
+            let name = std::path::Path::new(&s)
                 .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-            shells.push(ShellEntry { path: path.to_string(), name });
-            seen.insert(path.to_string());
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| s.clone());
+            shells.push(ShellEntry { path: s.clone(), name });
+            seen.insert(s);
+        }
+    }
+
+    // 3. System-known shells from PATH (where we can resolve them)
+    let path_dirs = std::env::var("PATH").unwrap_or_default();
+    let shell_exes = ["powershell.exe", "pwsh.exe", "cmd.exe", "wsl.exe", "bash.exe", "nu.exe", "fish.exe", "zsh.exe", "ksh.exe", "tcsh.exe", "elvish.exe", "dash.exe"];
+    for dir in path_dirs.split(';') {
+        let dir = dir.trim();
+        if dir.is_empty() {
+            continue;
+        }
+        for name in &shell_exes {
+            let path = format!("{}\\{}", dir, name);
+            if std::path::Path::new(&path).exists() && !seen.contains(&path) {
+                let display_name = name.trim_end_matches(".exe").to_string();
+                shells.push(ShellEntry { path, name: display_name });
+                seen.insert(path);
+            }
+        }
+    }
+
+    // 4. Cross-product search: common install directories × shell names
+    let userprofile = std::env::var("USERPROFILE").unwrap_or_default();
+    let localappdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
+    let programfiles = std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".to_string());
+    let programfiles_x86 = std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| "C:\\Program Files (x86)".to_string());
+    let systemroot = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+
+    let search_dirs: Vec<String> = [
+        format!("{}\\System32", systemroot),
+        format!("{}\\SysWOW64", systemroot),
+        format!("{}\\Git\\bin", programfiles),
+        format!("{}\\Git\\usr\\bin", programfiles),
+        format!("{}\\Git\\bin", programfiles_x86),
+        format!("{}\\Git\\usr\\bin", programfiles_x86),
+        "C:\\msys64\\usr\\bin".to_string(),
+        "C:\\tools\\msys64\\usr\\bin".to_string(),
+        "C:\\cygwin64\\bin".to_string(),
+        "C:\\cygwin\\bin".to_string(),
+        format!("{}\\Chocolatey\\bin", programfiles),
+        format!("{}\\chocolatey\\bin", programfiles),
+        format!("{}\\scoop\\shims", userprofile),
+        format!("{}\\scoop\\apps\\pwsh\\current", userprofile),
+        format!("{}\\Microsoft\\WindowsApps", localappdata),
+        format!("{}\\.cargo\\bin", userprofile),
+    ]
+    .into_iter()
+    .collect();
+
+    let shell_names = [
+        "powershell.exe", "pwsh.exe", "cmd.exe", "bash.exe",
+        "nu.exe", "fish.exe", "zsh.exe", "ksh.exe", "tcsh.exe",
+        "elvish.exe", "dash.exe", "sh.exe", "wsl.exe",
+    ];
+
+    for dir in &search_dirs {
+        for name in &shell_names {
+            let path = format!("{}\\{}", dir, name);
+            if std::path::Path::new(&path).exists() && !seen.contains(&path) {
+                let display_name = name.trim_end_matches(".exe").to_string();
+                shells.push(ShellEntry { path, name: display_name });
+                seen.insert(path);
+            }
         }
     }
 

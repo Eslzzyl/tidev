@@ -60,7 +60,14 @@ impl TerminalManager {
         let shell = shell
             .filter(|s| !s.is_empty())
             .or_else(|| std::env::var("SHELL").ok())
-            .unwrap_or_else(|| "/bin/bash".to_string());
+            .or_else(|| std::env::var("ComSpec").ok())
+            .unwrap_or_else(|| {
+                if cfg!(windows) {
+                    "powershell.exe".to_string()
+                } else {
+                    "/bin/bash".to_string()
+                }
+            });
         let mut command_builder = CommandBuilder::new(&shell);
         command_builder.cwd(std::env::current_dir().unwrap_or_default());
         command_builder.env("TERM", "xterm-256color");
