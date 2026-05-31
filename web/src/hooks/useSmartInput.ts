@@ -478,8 +478,8 @@ export function useSmartInput(
         return false;
       }
 
-      // Handle submit on Enter (without shift for textarea)
-      if (e.key === "Enter" && !e.shiftKey) {
+      // Handle submit on Enter (without shift for textarea, skip during IME)
+      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
         e.preventDefault();
         if (onSubmit && inputValue.trim() && !isSubmitting) {
           onSubmit();

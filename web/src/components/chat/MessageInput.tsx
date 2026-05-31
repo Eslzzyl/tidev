@@ -224,33 +224,52 @@ export function MessageInput({
 
   // IME composition guards.
   //
-  // On macOS with Chinese Pinyin IME, pressing Enter to commit fires
-  // `compositionend` BEFORE `keydown` in the same synchronous dispatch.
-  // By the time keydown fires, both `isComposing` and a simple useRef
-  // are already false, so the Enter key incorrectly submits the message.
+  // Cross-browser fix for IME composition + Enter-to-submit.
   //
-  // Fix: set a "just committed" flag on compositionend and clear it in a
-  // microtask (Promise.resolve). Since compositionend and keydown fire in
-  // the same synchronous dispatch, the flag is still true when keydown runs,
-  // preventing premature submission.
+  // The problem: when a user presses Enter to commit IME composition (e.g.
+  // Chinese Pinyin), the browser should treat it as "commit text", not
+  // "submit the form". However, browser event orderings differ:
+  //
+  //   Chrome/Firefox (W3C-compliant):
+  //     keydown (isComposing=true) → compositionend → input → keyup
+  //     → `e.isComposing` on keydown is `true`, so a simple check works.
+  //
+  //   Safari (WebKit bug 165004):
+  //     compositionend (isComposing=false) → keydown (isComposing=false)
+  //     → By the time keydown fires, `isComposing` is already `false`.
+  //
+  // Solution: maintain a custom `compositionJustCommittedRef` that is set
+  // on `compositionend` and cleared via `setTimeout(fn, 0)` (macrotask).
+  // This guarantees the flag is still `true` when keydown fires in the
+  // same event-loop tick (Safari) or the next tick. We also check the
+  // native `e.isComposing` as a belt-and-suspenders guard.
+  //
+  // Pattern used by VS Code, Slack, and Nuxt UI.
   const composingRef = useRef(false);
   const compositionJustCommittedRef = useRef(false);
+  const compositionEndTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // Clean up the timer on unmount.
+  useEffect(() => {
+    return () => clearTimeout(compositionEndTimerRef.current);
+  }, []);
 
   function handleCompositionStart() {
     composingRef.current = true;
     compositionJustCommittedRef.current = false;
+    clearTimeout(compositionEndTimerRef.current);
   }
 
-  function handleCompositionEnd(
-    _e: React.CompositionEvent<HTMLTextAreaElement>,
-  ) {
+  function handleCompositionEnd() {
     composingRef.current = false;
-    if (_e.data) {
-      compositionJustCommittedRef.current = true;
-      void Promise.resolve().then(() => {
-        compositionJustCommittedRef.current = false;
-      });
-    }
+    compositionJustCommittedRef.current = true;
+    clearTimeout(compositionEndTimerRef.current);
+    // Use setTimeout (macrotask) instead of Promise.resolve (microtask) to
+    // ensure the flag persists across separate task boundaries — critical
+    // for Safari where compositionend and keydown may be in different tasks.
+    compositionEndTimerRef.current = setTimeout(() => {
+      compositionJustCommittedRef.current = false;
+    }, 0);
   }
 
   function handleKeydown(event: React.KeyboardEvent) {
@@ -317,6 +336,7 @@ export function MessageInput({
     if (
       event.key === "Enter" &&
       !event.shiftKey &&
+      !event.nativeEvent.isComposing &&
       !composingRef.current &&
       !compositionJustCommittedRef.current
     ) {

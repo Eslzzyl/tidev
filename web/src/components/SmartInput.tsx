@@ -116,28 +116,34 @@ export function SmartInput({
 
   // IME composition guards.
   //
-  // On macOS with Chinese Pinyin IME, pressing Enter to commit fires
-  // `compositionend` BEFORE `keydown` in the same synchronous dispatch.
-  // A simple isComposing check on keydown is therefore insufficient;
-  // we track a "just committed" flag cleared in the next microtask.
+  // Cross-browser fix for IME composition + Enter-to-submit.
+  // See MessageInput.tsx for the detailed explanation of the Safari
+  // compositionend-before-keydown ordering issue (WebKit bug 165004).
+  //
+  // Pattern: maintain a custom ref set on compositionend, cleared via
+  // setTimeout (macrotask). Also check e.isComposing for Chrome/Firefox.
   const composingRef = useRef(false);
   const compositionJustCommittedRef = useRef(false);
+  const compositionEndTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // Clean up the timer on unmount.
+  useEffect(() => {
+    return () => clearTimeout(compositionEndTimerRef.current);
+  }, []);
 
   function handleCompositionStart() {
     composingRef.current = true;
     compositionJustCommittedRef.current = false;
+    clearTimeout(compositionEndTimerRef.current);
   }
 
-  function handleCompositionEnd(
-    _e: React.CompositionEvent<HTMLTextAreaElement | HTMLInputElement>,
-  ) {
+  function handleCompositionEnd() {
     composingRef.current = false;
-    if (_e.data) {
-      compositionJustCommittedRef.current = true;
-      void Promise.resolve().then(() => {
-        compositionJustCommittedRef.current = false;
-      });
-    }
+    compositionJustCommittedRef.current = true;
+    clearTimeout(compositionEndTimerRef.current);
+    compositionEndTimerRef.current = setTimeout(() => {
+      compositionJustCommittedRef.current = false;
+    }, 0);
   }
 
   // Auto-focus on mount
@@ -252,6 +258,8 @@ export function SmartInput({
       if (
         e.key === "Enter" &&
         !e.shiftKey &&
+        !e.nativeEvent.isComposing &&
+        !composingRef.current &&
         !compositionJustCommittedRef.current
       ) {
         e.preventDefault();
