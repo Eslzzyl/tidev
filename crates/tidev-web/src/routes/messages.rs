@@ -580,6 +580,68 @@ pub async fn send_message(
                     reason,
                     retry_after_secs,
                 }),
+                BackendEvent::SubagentStatus {
+                    session_id,
+                    request_id,
+                    child_session_id,
+                    status_text,
+                    content_delta,
+                    reasoning_delta,
+                    current_tool_call: tool,
+                    ..
+                } => {
+                    let (current_tool_name, current_tool_args) = match tool {
+                        Some(tc) => (Some(tc.name), Some(tc.arguments)),
+                        None => (None, None),
+                    };
+                    Some(AppEvent::SubagentStatus {
+                        session_id,
+                        request_id,
+                        child_session_id,
+                        status_text,
+                        content_delta,
+                        reasoning_delta,
+                        current_tool_name,
+                        current_tool_args,
+                    })
+                },
+                BackendEvent::SubagentToolResult {
+                    session_id,
+                    request_id,
+                    child_session_id,
+                    message,
+                } => {
+                    let content_delta = if message.content.is_empty() {
+                        None
+                    } else {
+                        Some(message.content)
+                    };
+                    let reasoning_delta = if message.reasoning.is_empty() {
+                        None
+                    } else {
+                        Some(message.reasoning)
+                    };
+                    Some(AppEvent::SubagentToolResult {
+                        session_id,
+                        request_id,
+                        child_session_id,
+                        content_delta,
+                        reasoning_delta,
+                    })
+                }
+                BackendEvent::SubagentCompleted {
+                    session_id,
+                    request_id,
+                    tool_call,
+                    child_session_id,
+                    result,
+                } => Some(AppEvent::SubagentCompleted {
+                    session_id,
+                    request_id,
+                    tool_call_id: tool_call.id,
+                    child_session_id,
+                    output: result.output,
+                }),
                 _ => None,
             };
 

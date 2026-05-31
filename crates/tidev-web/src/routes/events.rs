@@ -38,6 +38,9 @@ fn event_type_str(event: &AppEvent) -> &'static str {
         AppEvent::MessagesUpdated { .. } => "messages.updated",
         AppEvent::CompactionChunk { .. } => "compaction.chunk",
         AppEvent::ShellOutput { .. } => "shell.output",
+        AppEvent::SubagentStatus { .. } => "subagent.status",
+        AppEvent::SubagentToolResult { .. } => "subagent.tool_result",
+        AppEvent::SubagentCompleted { .. } => "subagent.completed",
     }
 }
 
@@ -119,6 +122,9 @@ pub async fn events_stream(
                         AppEvent::ShellOutput { session_id: sid, .. } => *sid == session_id,
                         AppEvent::MessagesUpdated { session_id: sid } => *sid == session_id,
                         AppEvent::CompactionChunk { session_id: sid, .. } => *sid == session_id,
+                        AppEvent::SubagentStatus { session_id: sid, .. } => *sid == session_id,
+                        AppEvent::SubagentToolResult { session_id: sid, .. } => *sid == session_id,
+                        AppEvent::SubagentCompleted { session_id: sid, .. } => *sid == session_id,
                     };
 
                     if !matches_session {

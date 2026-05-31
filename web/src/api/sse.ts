@@ -127,6 +127,24 @@ export class SSEClient {
     this.eventSource.addEventListener("messages.updated", (e: MessageEvent) => {
       this.emit("messages.updated", JSON.parse(e.data));
     });
+
+    this.eventSource.addEventListener("subagent.status", (e: MessageEvent) => {
+      this.emit("subagent.status", JSON.parse(e.data));
+    });
+
+    this.eventSource.addEventListener(
+      "subagent.tool_result",
+      (e: MessageEvent) => {
+        this.emit("subagent.tool_result", JSON.parse(e.data));
+      },
+    );
+
+    this.eventSource.addEventListener(
+      "subagent.completed",
+      (e: MessageEvent) => {
+        this.emit("subagent.completed", JSON.parse(e.data));
+      },
+    );
   }
 
   disconnect() {

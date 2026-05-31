@@ -20,9 +20,11 @@ import { DiffRenderer } from "./DiffRenderer";
 import { CodeLinesRenderer } from "./CodeLinesRenderer";
 import { TodoRenderer } from "./TodoRenderer";
 import { JsonTreeView } from "../ui/JsonTreeView";
+import { SubagentCard } from "./SubagentCard";
 
 interface Props {
   entry: ToolCallEntry;
+  defaultExpanded?: boolean;
 }
 
 function isReadOnlyTool(name: string): boolean {
@@ -285,8 +287,8 @@ function looksLikeJson(output: string): boolean {
   return trimmed.startsWith("{") || trimmed.startsWith("[");
 }
 
-export const ToolCallRow = memo(function ToolCallRow({ entry }: Props) {
-  const [expanded, setExpanded] = useState(false);
+export const ToolCallRow = memo(function ToolCallRow({ entry, defaultExpanded = false }: Props) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const [elapsedMs, setElapsedMs] = useState(0);
   const didAutoExpand = useRef(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -357,6 +359,11 @@ export const ToolCallRow = memo(function ToolCallRow({ entry }: Props) {
 
   const isRunning = !entry.resultComplete && entry.argumentsComplete;
   const showDuration = entry.resultComplete && elapsedMs > 0;
+
+  // For task tool calls, use the dedicated SubagentCard component
+  if (entry.name === "task") {
+    return <SubagentCard entry={entry} />;
+  }
 
   return (
     <div

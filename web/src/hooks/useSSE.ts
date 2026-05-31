@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { sseClient } from "../api/sse";
 import { usePermissionStore } from "../stores/usePermissionStore";
 import { useSessionStore } from "../stores/useSessionStore";
+import { useSubagentStore } from "../stores/useSubagentStore";
 import { useUIStore } from "../stores/useUIStore";
 import { api } from "../api/client";
 import type { AppEvent } from "../types/events";
@@ -371,6 +372,191 @@ export function useSSE(sessionId: string | null) {
       usePermissionStore.getState().handlePermissionRequestEvent(event);
     };
 
+    // -----------------------------------------------------------------------
+    // Subagent event handlers
+    // -----------------------------------------------------------------------
+
+    /**
+     * Find a task tool call that hasn't been mapped to a child session yet.
+     * Searches all assistant messages (including the streaming one) to handle
+     * subagent events that arrive after the parent's message has been finalized.
+     */
+    function findUnmappedTaskToolCall(): ToolCall | null {
+      const state = useSessionStore.getState();
+      const subagentStore = useSubagentStore.getState();
+
+      // Search all assistant messages for task tool calls
+      for (const msg of state.messages) {
+        if (msg.role !== "assistant") continue;
+        if (!msg.tool_calls || msg.tool_calls.length === 0) continue;
+        const match = msg.tool_calls.find(
+          (tc) =>
+            tc.name === "task" &&
+            !subagentStore.states[tc.id],
+        );
+        if (match) return match;
+      }
+      return null;
+    }
+
+    const handleSubagentStatus = (event: AppEvent) => {
+      if (event.type !== "subagent_status") return;
+      const {
+        child_session_id,
+        status_text,
+        content_delta,
+        reasoning_delta,
+        current_tool_name,
+        current_tool_args,
+      } = event;
+
+      // Try to find existing mapping by child_session_id
+      const subagentStore = useSubagentStore.getState();
+      let toolCallId: string | null = null;
+
+      for (const [tcId, state] of Object.entries(subagentStore.states)) {
+        if (state.childSessionId === child_session_id) {
+          toolCallId = tcId;
+          break;
+        }
+      }
+
+      // If no existing mapping, find a task tool call not yet mapped
+      if (!toolCallId) {
+        const work = findUnmappedTaskToolCall();
+        if (work) {
+          toolCallId = work.id;
+        }
+      }
+
+      if (!toolCallId) return;
+
+      const current = subagentStore.states[toolCallId] || {
+        completed: false,
+        blocks: [],
+      };
+      const blocks = [...current.blocks];
+
+      // --- Handle reasoning delta ---
+      if (reasoning_delta) {
+        const last = blocks[blocks.length - 1];
+        if (last?.type === "reasoning") {
+          // Append to existing reasoning block
+          last.content = (last.content ?? "") + reasoning_delta;
+        } else {
+          // Start a new reasoning block
+          blocks.push({ type: "reasoning", content: reasoning_delta });
+        }
+      }
+
+      // --- Handle content delta ---
+      if (content_delta) {
+        const last = blocks[blocks.length - 1];
+        if (last?.type === "content") {
+          // Append to existing content block
+          last.content = (last.content ?? "") + content_delta;
+        } else {
+          // Start a new content block
+          blocks.push({ type: "content", content: content_delta });
+        }
+      }
+
+      // --- Handle tool call ---
+      if (current_tool_name) {
+        // Check if the last block is the same tool (still running)
+        const last = blocks[blocks.length - 1];
+        if (
+          last?.type === "tool_call" &&
+          last.toolName === current_tool_name &&
+          !last.complete
+        ) {
+          // Update existing tool block with fresher args
+          last.toolArgs = current_tool_args;
+        } else {
+          // Mark previous tool call as complete if it was a tool block
+          if (last?.type === "tool_call" && !last.complete) {
+            last.complete = true;
+          }
+          // Push new tool call block
+          blocks.push({
+            type: "tool_call",
+            toolName: current_tool_name,
+            toolArgs: current_tool_args,
+            complete: false,
+          });
+        }
+      } else if (
+        // When status is Working/Completed (no tool running), mark last tool as done
+        !current_tool_name &&
+        (status_text === "Working" || status_text === "Completed")
+      ) {
+        const last = blocks[blocks.length - 1];
+        if (last?.type === "tool_call" && !last.complete) {
+          last.complete = true;
+        }
+      }
+
+      // Update the store
+      useSubagentStore.getState().updateState(toolCallId, {
+        childSessionId: child_session_id,
+        statusText: status_text,
+        blocks,
+      });
+    };
+
+    const handleSubagentToolResult = (event: AppEvent) => {
+      if (event.type !== "subagent_tool_result") return;
+      const { child_session_id, content_delta, reasoning_delta } = event;
+      if (!content_delta && !reasoning_delta) return;
+
+      // Find the tool call by child session id and append to blocks
+      const subagentStore = useSubagentStore.getState();
+      for (const [tcId, state] of Object.entries(subagentStore.states)) {
+        if (state.childSessionId === child_session_id) {
+          const blocks = [...(state.blocks || [])];
+
+          if (reasoning_delta) {
+            const last = blocks[blocks.length - 1];
+            if (last?.type === "reasoning") {
+              last.content = (last.content ?? "") + reasoning_delta;
+            } else {
+              blocks.push({ type: "reasoning", content: reasoning_delta });
+            }
+          }
+
+          if (content_delta) {
+            const last = blocks[blocks.length - 1];
+            if (last?.type === "content") {
+              last.content = (last.content ?? "") + content_delta;
+            } else {
+              blocks.push({ type: "content", content: content_delta });
+            }
+          }
+
+          useSubagentStore.getState().updateState(tcId, { blocks });
+          break;
+        }
+      }
+    };
+
+    const handleSubagentCompleted = (event: AppEvent) => {
+      if (event.type !== "subagent_completed") return;
+      const { tool_call_id, child_session_id } = event;
+
+      // Update subagent store — the result is already handled by
+      // the ToolCompleted event → handleToolResult, so we just mark
+      // the subagent as complete and store the child session ID.
+      useSubagentStore.getState().updateState(tool_call_id, {
+        childSessionId: child_session_id,
+        completed: true,
+      });
+
+      console.log(
+        "[SSE] subagent completed for %s",
+        tool_call_id.substring(0, 12),
+      );
+    };
+
     // Register SSE listeners
     sseClient.on("message.chunk", handleMessageChunk);
     sseClient.on("reasoning.chunk", handleReasoningChunk);
@@ -385,6 +571,9 @@ export function useSSE(sessionId: string | null) {
     sseClient.on("connected", handleConnected);
     sseClient.on("messages.updated", handleMessagesUpdated);
     sseClient.on("permission.request", handlePermissionRequest);
+    sseClient.on("subagent.status", handleSubagentStatus);
+    sseClient.on("subagent.tool_result", handleSubagentToolResult);
+    sseClient.on("subagent.completed", handleSubagentCompleted);
 
     // Connect
     sseClient.connect(sessionId);
@@ -404,6 +593,9 @@ export function useSSE(sessionId: string | null) {
       sseClient.off("connected", handleConnected);
       sseClient.off("messages.updated", handleMessagesUpdated);
       sseClient.off("permission.request", handlePermissionRequest);
+      sseClient.off("subagent.status", handleSubagentStatus);
+      sseClient.off("subagent.tool_result", handleSubagentToolResult);
+      sseClient.off("subagent.completed", handleSubagentCompleted);
       sseClient.disconnect();
       setStreaming(false);
       streamingAssistantIdRef.current = null;

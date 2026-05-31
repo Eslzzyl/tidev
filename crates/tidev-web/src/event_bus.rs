@@ -103,6 +103,41 @@ pub enum AppEvent {
     },
     /// Heartbeat to keep connection alive
     Heartbeat,
+    /// Subagent status update (real-time progress)
+    SubagentStatus {
+        session_id: Uuid,
+        request_id: u64,
+        child_session_id: Uuid,
+        status_text: String,
+        /// Streaming content delta from the subagent
+        #[serde(skip_serializing_if = "Option::is_none")]
+        content_delta: Option<String>,
+        /// Streaming reasoning delta from the subagent
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reasoning_delta: Option<String>,
+        /// Current tool the subagent is executing (name only, for display)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        current_tool_name: Option<String>,
+        /// Serialized arguments of the current tool
+        #[serde(skip_serializing_if = "Option::is_none")]
+        current_tool_args: Option<String>,
+    },
+    /// Subagent intermediate tool result
+    SubagentToolResult {
+        session_id: Uuid,
+        request_id: u64,
+        child_session_id: Uuid,
+        content_delta: Option<String>,
+        reasoning_delta: Option<String>,
+    },
+    /// Subagent completed
+    SubagentCompleted {
+        session_id: Uuid,
+        request_id: u64,
+        tool_call_id: String,
+        child_session_id: Uuid,
+        output: String,
+    },
 }
 
 impl AppEvent {
@@ -124,6 +159,9 @@ impl AppEvent {
             AppEvent::Retrying { session_id, .. } => Some(*session_id),
             AppEvent::MessagesUpdated { session_id } => Some(*session_id),
             AppEvent::CompactionChunk { session_id, .. } => Some(*session_id),
+            AppEvent::SubagentStatus { session_id, .. } => Some(*session_id),
+            AppEvent::SubagentToolResult { session_id, .. } => Some(*session_id),
+            AppEvent::SubagentCompleted { session_id, .. } => Some(*session_id),
         }
     }
 }

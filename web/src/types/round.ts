@@ -17,6 +17,14 @@ export interface ToolCallEntry {
     exitCode?: number | null;
   };
   resultComplete: boolean;
+  /** Subagent-specific: child session ID for task tool calls */
+  childSessionId?: string;
+  /** Subagent-specific: live status text (e.g. "Thinking...", "Searching files...") */
+  subagentStatus?: string;
+  /** Subagent-specific: accumulated content delta from subagent */
+  subagentContentDelta?: string;
+  /** Subagent-specific: accumulated reasoning delta from subagent */
+  subagentReasoningDelta?: string;
 }
 
 /**

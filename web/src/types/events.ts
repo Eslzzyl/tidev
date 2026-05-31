@@ -67,4 +67,31 @@ export type AppEvent =
       content: string;
       finished: boolean;
       exit_code: number | null;
+    }
+  | {
+      type: "subagent_status";
+      session_id: string;
+      request_id: number;
+      child_session_id: string;
+      status_text: string;
+      content_delta?: string;
+      reasoning_delta?: string;
+      current_tool_name?: string;
+      current_tool_args?: string;
+    }
+  | {
+      type: "subagent_tool_result";
+      session_id: string;
+      request_id: number;
+      child_session_id: string;
+      content_delta?: string;
+      reasoning_delta?: string;
+    }
+  | {
+      type: "subagent_completed";
+      session_id: string;
+      request_id: number;
+      tool_call_id: string;
+      child_session_id: string;
+      output: string;
     };
