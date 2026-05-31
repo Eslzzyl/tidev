@@ -1,4 +1,5 @@
 use super::*;
+use crate::render::chat_render::strip_system_reminder_tags;
 use crate::theme::ThemeName;
 use tidev_engine::agent::AgentType;
 
@@ -286,7 +287,7 @@ impl App {
             .filter(|message| matches!(message.role, MessageRole::User))
             .map(|message| crate::message_panel::MessagePanelMessage {
                 message_id: message.id,
-                content: message.content.clone(),
+                content: strip_system_reminder_tags(&message.content),
                 created_at: message.created_at,
                 mode: message.mode,
             })
