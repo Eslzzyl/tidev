@@ -798,9 +798,11 @@ export function MessageInput({
             onClick={() => setModelPanelOpen(true)}
             className="flex items-center gap-1 rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 transition-all duration-150 hover:scale-105 active:scale-95 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
           >
-            <span className="max-w-[120px] truncate">
-              {selectedModelDisplay?.display_name || "Select model"}
-            </span>
+            <span className="max-w-[180px] truncate">
+            {selectedModelDisplay?.display_name
+              ? `${selectedModelDisplay.provider_name}/${selectedModelDisplay.display_name}`
+              : "Select model"}
+          </span>
             <ChevronDown className="h-3 w-3" />
           </button>
 

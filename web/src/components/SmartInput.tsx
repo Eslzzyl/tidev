@@ -428,68 +428,8 @@ export function SmartInput({
         />
       )}
 
-      {/* Input Container */}
-      <div className="relative rounded-2xl border border-neutral-200 bg-white shadow-lg transition-all duration-200 ease-smooth focus-within:border-neutral-400 focus-within:shadow-[0_0_0_3px_rgba(0,0,0,0.04)] dark:border-neutral-800 dark:bg-neutral-900 dark:focus-within:border-neutral-600 dark:focus-within:shadow-[0_0_0_3px_rgba(255,255,255,0.04)]">
-        {/* Input Element */}
-        {multiline ? (
-          <textarea
-            ref={inputRef as React.RefObject<HTMLTextAreaElement>}
-            value={inputValue}
-            onChange={enhancedHandleInputChange}
-            onKeyDown={enhancedHandleKeyDown}
-            onCompositionStart={handleCompositionStart}
-            onCompositionEnd={handleCompositionEnd}
-            placeholder={finalPlaceholder}
-            rows={1}
-            disabled={!isInputEnabled}
-            className={`min-h-[44px] w-full resize-none rounded-2xl bg-transparent px-4 py-3 pr-12 text-sm text-neutral-900 placeholder-neutral-400 outline-none disabled:opacity-50 dark:text-neutral-100 dark:placeholder-neutral-500 ${inputClassName}`}
-          />
-        ) : (
-          <input
-            ref={inputRef as React.RefObject<HTMLInputElement>}
-            type="text"
-            value={inputValue}
-            onChange={enhancedHandleInputChange}
-            onKeyDown={enhancedHandleKeyDown}
-            onCompositionStart={handleCompositionStart}
-            onCompositionEnd={handleCompositionEnd}
-            placeholder={finalPlaceholder}
-            disabled={!isInputEnabled}
-            className={`w-full rounded-2xl bg-transparent px-4 py-3 pr-12 text-sm text-neutral-900 placeholder-neutral-400 outline-none disabled:opacity-50 dark:text-neutral-100 dark:placeholder-neutral-500 ${inputClassName}`}
-          />
-        )}
-
-        {/* Submit/Stop Button */}
-        {showSubmitButton && (
-          <div className="absolute right-2 top-1/2 -translate-y-1/2">
-            {isStreaming ? (
-              <button
-                onClick={onStop}
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-red-100 text-red-600 transition-colors hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50"
-                aria-label="Stop streaming"
-              >
-                <Square className="h-4 w-4" fill="currentColor" />
-              </button>
-            ) : isSubmitting ? (
-              <div className="flex h-8 w-8 items-center justify-center">
-                <Loader2 className="h-5 w-5 animate-spin text-neutral-400" />
-              </div>
-            ) : (
-              <button
-                onClick={handleSubmit}
-                disabled={!inputValue.trim() || !isInputEnabled}
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-900 text-white transition-colors hover:bg-neutral-800 disabled:opacity-50 disabled:hover:bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
-                aria-label="Send message"
-              >
-                <ArrowUp className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
       {/* Toolbar */}
-      <div className="mt-2 flex items-center gap-2 px-1">
+      <div className="mb-2 flex items-center gap-2 px-1">
         {/* Mode Toggle */}
         <button
           onClick={toggleMode}
@@ -507,8 +447,10 @@ export function SmartInput({
           onClick={() => setModelPanelOpen(true)}
           className="flex items-center gap-1 rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
         >
-          <span className="max-w-[120px] truncate">
-            {selectedModelDisplay?.display_name || "Select model"}
+          <span className="max-w-[180px] truncate">
+            {selectedModelDisplay?.display_name
+              ? `${selectedModelDisplay.provider_name}/${selectedModelDisplay.display_name}`
+              : "Select model"}
           </span>
           <ChevronDown className="h-3 w-3" />
         </button>
@@ -569,23 +511,74 @@ export function SmartInput({
           </div>
         )}
 
-        {/* Workspace path display */}
-        {workspacePath && (
-          <span className="text-xs text-neutral-400 dark:text-neutral-500 truncate max-w-[200px]">
-            {workspacePath.replace(/^\/home\/[^/]+/, "~")}
-          </span>
+      </div>
+
+      {/* Input Container */}
+      <div className="relative rounded-2xl border border-neutral-200 bg-white shadow-lg transition-all duration-200 ease-smooth focus-within:border-neutral-400 focus-within:shadow-[0_0_0_3px_rgba(0,0,0,0.04)] dark:border-neutral-800 dark:bg-neutral-900 dark:focus-within:border-neutral-600 dark:focus-within:shadow-[0_0_0_3px_rgba(255,255,255,0.04)]">
+        {/* Input Element */}
+        {multiline ? (
+          <textarea
+            ref={inputRef as React.RefObject<HTMLTextAreaElement>}
+            value={inputValue}
+            onChange={enhancedHandleInputChange}
+            onKeyDown={enhancedHandleKeyDown}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
+            placeholder={finalPlaceholder}
+            rows={1}
+            disabled={!isInputEnabled}
+            className={`min-h-[44px] w-full resize-none rounded-2xl bg-transparent px-4 py-3 pr-12 text-sm text-neutral-900 placeholder-neutral-400 outline-none disabled:opacity-50 dark:text-neutral-100 dark:placeholder-neutral-500 ${inputClassName}`}
+          />
+        ) : (
+          <input
+            ref={inputRef as React.RefObject<HTMLInputElement>}
+            type="text"
+            value={inputValue}
+            onChange={enhancedHandleInputChange}
+            onKeyDown={enhancedHandleKeyDown}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
+            placeholder={finalPlaceholder}
+            disabled={!isInputEnabled}
+            className={`w-full rounded-2xl bg-transparent px-4 py-3 pr-12 text-sm text-neutral-900 placeholder-neutral-400 outline-none disabled:opacity-50 dark:text-neutral-100 dark:placeholder-neutral-500 ${inputClassName}`}
+          />
         )}
 
-        {/* Hint text */}
-        <div className="flex-1" />
-        <span className="text-xs text-neutral-400 dark:text-neutral-500">
-          Press{" "}
-          <kbd className="rounded bg-neutral-100 px-1 py-0.5 font-mono dark:bg-neutral-800">
-            Enter
-          </kbd>{" "}
-          to send
-        </span>
+        {/* Submit/Stop Button */}
+        {showSubmitButton && (
+          <div className="absolute right-2 top-1/2 -translate-y-1/2">
+            {isStreaming ? (
+              <button
+                onClick={onStop}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-red-100 text-red-600 transition-colors hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50"
+                aria-label="Stop streaming"
+              >
+                <Square className="h-4 w-4" fill="currentColor" />
+              </button>
+            ) : isSubmitting ? (
+              <div className="flex h-8 w-8 items-center justify-center">
+                <Loader2 className="h-5 w-5 animate-spin text-neutral-400" />
+              </div>
+            ) : (
+              <button
+                onClick={handleSubmit}
+                disabled={!inputValue.trim() || !isInputEnabled}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-900 text-white transition-colors hover:bg-neutral-800 disabled:opacity-50 disabled:hover:bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+                aria-label="Send message"
+              >
+                <ArrowUp className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Workspace path display */}
+      {workspacePath && (
+        <span className="text-xs text-neutral-400 dark:text-neutral-500 truncate max-w-[200px]">
+          {workspacePath.replace(/^\/home\/[^/]+/, "~")}
+        </span>
+      )}
     </div>
   );
 }
