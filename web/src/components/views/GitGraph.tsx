@@ -22,10 +22,10 @@ import { LANE_COLORS } from "../../lib/gitGraph";
 // ── Constants ─────────────────────────────────────────────────────────────
 
 const LANE_W = 18;
-const ROW_H = 72;
-const DOT_R = 5;
-const MERGE_DOT_R = 6.5;
-const PAD_Y = 6;
+const ROW_H = 56;
+const DOT_R = 4;
+const MERGE_DOT_R = 5.5;
+const PAD_Y = 4;
 const PAD_LEFT = 8;
 const PAD_RIGHT = 4;
 const LINE_W = 2;

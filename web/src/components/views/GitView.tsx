@@ -983,32 +983,35 @@ function GraphHistoryPanel({
             <button
               key={row.commit.sha}
               onClick={() => onSelectCommit(row.commit.sha)}
-              className={`w-full rounded-lg p-3 text-left transition-colors ${
+              className={`w-full rounded-lg px-2 py-1.5 text-left transition-colors ${
                 isSelected
                   ? "bg-neutral-100 dark:bg-neutral-800"
                   : "hover:bg-neutral-50 dark:hover:bg-neutral-900"
               }`}
               style={{ height: GRAPH_ROW_HEIGHT }}
             >
-              <div className="mb-0.5 flex items-center gap-2">
-                <span className="font-mono text-[11px] text-neutral-500">
-                  {row.commit.sha.substring(0, 7)}
-                </span>
-                {row.refLabels.slice(0, 3).map((rl, ri) => (
-                  <span
-                    key={ri}
-                    className={`inline-block rounded px-1.5 py-[1px] text-[10px] font-medium leading-tight text-white ${
-                      rl.isHead ? "bg-green-500" : "bg-indigo-500"
-                    }`}
-                  >
-                    {rl.label}
-                  </span>
-                ))}
-              </div>
+              {row.refLabels.length > 0 && (
+                <div className="flex items-center gap-2">
+                  {row.refLabels.slice(0, 3).map((rl, ri) => (
+                    <span
+                      key={ri}
+                      className={`inline-block rounded px-1.5 py-[1px] text-[10px] font-medium leading-tight text-white ${
+                        rl.isHead ? "bg-green-500" : "bg-indigo-500"
+                      }`}
+                    >
+                      {rl.label}
+                    </span>
+                  ))}
+                </div>
+              )}
               <p className="truncate text-sm font-medium text-neutral-900 dark:text-neutral-100">
                 {row.commit.message}
               </p>
-              <div className="mt-0.5 flex items-center gap-2 text-[11px] text-neutral-500">
+              <div className="flex items-center gap-2 text-[11px] text-neutral-500">
+                <span className="font-mono text-[11px] text-neutral-500">
+                  {row.commit.sha.substring(0, 7)}
+                </span>
+                <span>·</span>
                 <span>{row.commit.author}</span>
                 <span>·</span>
                 <span>{new Date(row.commit.date).toLocaleString()}</span>
