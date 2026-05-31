@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   GitBranch,
   GitCommitHorizontal,
@@ -17,6 +17,8 @@ import {
   ChevronDown,
   ChevronRight,
   X,
+  List,
+  GitGraph,
 } from "lucide-react";
 import { api } from "../../api/client";
 import type {
@@ -25,8 +27,12 @@ import type {
   GitCommitItem,
   GitShowResponse,
   GitFileDiffResponse,
+  GitGraphResponse,
 } from "../../types/api";
 import { DiffRenderer } from "../renderers/DiffRenderer";
+import { computeGraphLayout } from "../../lib/gitGraph";
+import type { GraphRow } from "../../lib/gitGraph";
+import { GitGraphSVG, getGraphWidth, GRAPH_ROW_HEIGHT } from "./GitGraph";
 
 type GitTab = "changes" | "history" | "branches";
 
@@ -51,6 +57,13 @@ export function GitView() {
   const [allCommits, setAllCommits] = useState<GitCommitItem[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  // Graph view
+  const [graphMode, setGraphMode] = useState(true);
+  const [graphData, setGraphData] = useState<GitGraphResponse | null>(null);
+  const [graphLoading, setGraphLoading] = useState(false);
+  const [graphCount, setGraphCount] = useState(50);
+  const [graphErrorMessage, setGraphErrorMessage] = useState<string | null>(null);
 
   // Commit detail (History tab)
   const [selectedCommit, setSelectedCommit] = useState<GitShowResponse | null>(
@@ -159,6 +172,27 @@ export function GitView() {
     }
   }, []);
 
+  const loadGraphData = useCallback(async (count?: number) => {
+    const fetchCount = count ?? 50;
+    setGraphLoading(true);
+    setGraphErrorMessage(null);
+    try {
+      const result = await api.gitGraph(fetchCount);
+      setGraphData(result);
+      setGraphCount(fetchCount);
+    } catch (err) {
+      setGraphErrorMessage(err instanceof Error ? err.message : "Failed to load graph data");
+    } finally {
+      setGraphLoading(false);
+    }
+  }, []);
+
+  const loadMoreGraph = useCallback(() => {
+    if (graphLoading) return;
+    const newCount = graphCount + 50;
+    loadGraphData(newCount);
+  }, [graphLoading, graphCount, loadGraphData]);
+
   const refreshStatus = useCallback(async () => {
     try {
       setLoading(true);
@@ -171,12 +205,14 @@ export function GitView() {
       setBranches(b);
       // Also reset history on refresh
       await loadCommits(0, true);
+      // Refresh graph data
+      await loadGraphData(50);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load git data");
     } finally {
       setLoading(false);
     }
-  }, [showSubmodules, loadCommits]);
+  }, [showSubmodules, loadCommits, loadGraphData]);
 
   const loadMoreCommits = useCallback(() => {
     if (loadingMore || !hasMore) return;
@@ -411,6 +447,12 @@ export function GitView() {
     setShowSubmodules((prev) => !prev);
   };
 
+  // ── Graph computation ─────────────────────────────────────────────────
+  const graphRows = useMemo<GraphRow[]>(() => {
+    if (!graphData) return [];
+    return computeGraphLayout(graphData.commits, graphData.head_sha);
+  }, [graphData]);
+
   const tabs: { id: GitTab; label: string; icon: React.ReactNode }[] = [
     {
       id: "changes",
@@ -569,20 +611,53 @@ export function GitView() {
           />
         ) : activeTab === "history" ? (
           <div ref={splitContainerRef} className="flex flex-1 overflow-hidden">
-            {/* Left: History list */}
+            {/* Left: History / Graph list */}
             <div
               className="overflow-y-auto"
               style={{ flex: `${splitRatio * 100}%` }}
             >
-              <HistoryPanel
-                commits={allCommits}
-                hasMore={hasMore}
-                loadingMore={loadingMore}
-                loading={loading}
-                selectedSha={selectedCommit?.sha ?? null}
-                onSelectCommit={selectCommit}
-                onLoadMore={loadMoreCommits}
-              />
+              {/* View mode toggle */}
+              <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-2 dark:border-neutral-800">
+                <span className="text-xs font-medium text-neutral-500">
+                  {graphMode ? "Graph" : "History"}
+                </span>
+                <button
+                  onClick={() => setGraphMode((g) => !g)}
+                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  title={graphMode ? "Switch to list view" : "Switch to graph view"}
+                >
+                  {graphMode ? (
+                    <List className="h-3.5 w-3.5" />
+                  ) : (
+                    <GitBranch className="h-3.5 w-3.5" />
+                  )}
+                  {graphMode ? "List" : "Graph"}
+                </button>
+              </div>
+
+              {graphMode ? (
+                /* ── Graph View ────────────────────────────────── */
+                <GraphHistoryPanel
+                  rows={graphRows}
+                  graphLoading={graphLoading}
+                  graphError={graphErrorMessage}
+                  selectedSha={selectedCommit?.sha ?? null}
+                  onSelectCommit={selectCommit}
+                  onRetry={() => loadGraphData(50)}
+                  onLoadMore={loadMoreGraph}
+                />
+              ) : (
+                /* ── List View ─────────────────────────────────── */
+                <HistoryPanel
+                  commits={allCommits}
+                  hasMore={hasMore}
+                  loadingMore={loadingMore}
+                  loading={loading}
+                  selectedSha={selectedCommit?.sha ?? null}
+                  onSelectCommit={selectCommit}
+                  onLoadMore={loadMoreCommits}
+                />
+              )}
             </div>
 
             {/* Resize handle */}
@@ -881,6 +956,151 @@ function ChangeFileRow({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Graph History Panel ────────────────────────────────────────────────────
+
+function GraphHistoryPanel({
+  rows,
+  graphLoading,
+  graphError,
+  selectedSha,
+  onSelectCommit,
+  onRetry,
+  onLoadMore,
+}: {
+  rows: GraphRow[];
+  graphLoading: boolean;
+  graphError: string | null;
+  selectedSha: string | null;
+  onSelectCommit: (sha: string) => void;
+  onRetry: () => void;
+  onLoadMore: () => void;
+}) {
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  // IntersectionObserver for infinite scroll
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !graphLoading) {
+          onLoadMore();
+        }
+      },
+      { rootMargin: "300px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [graphLoading, onLoadMore]);
+
+  if (graphLoading && rows.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <Loader2 className="h-5 w-5 animate-spin text-neutral-400" />
+      </div>
+    );
+  }
+
+  if (graphError && rows.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <div className="text-center">
+          <p className="text-sm text-red-600 dark:text-red-400">
+            {graphError}
+          </p>
+          <button
+            onClick={onRetry}
+            className="mt-3 rounded bg-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-300 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (rows.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <p className="text-sm text-neutral-500">No commits yet</p>
+      </div>
+    );
+  }
+
+  const graphWidth = getGraphWidth(rows);
+
+  return (
+    <div className="relative py-2">
+      {/* SVG graph layer — positioned absolutely behind the cards */}
+      <div
+        className="absolute left-0 top-0 pointer-events-none"
+        style={{ width: graphWidth }}
+      >
+        <GitGraphSVG
+          rows={rows}
+          selectedSha={selectedSha}
+          onSelectCommit={onSelectCommit}
+        />
+      </div>
+
+      {/* Commit cards — overlaid on top with padding for the graph */}
+      <div className="space-y-0" style={{ paddingLeft: graphWidth + 8 }}>
+        {rows.map((row) => {
+          const isSelected = row.commit.sha === selectedSha;
+          return (
+            <button
+              key={row.commit.sha}
+              onClick={() => onSelectCommit(row.commit.sha)}
+              className={`w-full rounded-lg p-3 text-left transition-colors ${
+                isSelected
+                  ? "bg-neutral-100 dark:bg-neutral-800"
+                  : "hover:bg-neutral-50 dark:hover:bg-neutral-900"
+              }`}
+              style={{ height: GRAPH_ROW_HEIGHT }}
+            >
+              <div className="mb-0.5 flex items-center gap-2">
+                <span className="font-mono text-[11px] text-neutral-500">
+                  {row.commit.sha.substring(0, 7)}
+                </span>
+                {row.refLabels.slice(0, 3).map((rl, ri) => (
+                  <span
+                    key={ri}
+                    className={`inline-block rounded px-1.5 py-[1px] text-[10px] font-medium leading-tight text-white ${
+                      rl.isHead ? "bg-green-500" : "bg-indigo-500"
+                    }`}
+                  >
+                    {rl.label}
+                  </span>
+                ))}
+              </div>
+              <p className="truncate text-sm font-medium text-neutral-900 dark:text-neutral-100">
+                {row.commit.message}
+              </p>
+              <div className="mt-0.5 flex items-center gap-2 text-[11px] text-neutral-500">
+                <span>{row.commit.author}</span>
+                <span>·</span>
+                <span>{new Date(row.commit.date).toLocaleString()}</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Sentinel for infinite scroll */}
+      <div ref={sentinelRef} className="h-4" />
+
+      {graphLoading && (
+        <div className="flex items-center justify-center py-4">
+          <Loader2 className="h-4 w-4 animate-spin text-neutral-400" />
+          <span className="ml-2 text-xs text-neutral-500">
+            Loading graph...
+          </span>
+        </div>
+      )}
     </div>
   );
 }

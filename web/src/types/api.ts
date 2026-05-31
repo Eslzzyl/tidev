@@ -272,11 +272,19 @@ export interface GitLogResponse {
   has_more: boolean;
 }
 
+export interface GitGraphResponse {
+  commits: GitCommitItem[];
+  head_sha: string;
+  current_branch: string;
+}
+
 export interface GitCommitItem {
   sha: string;
   author: string;
   date: string;
   message: string;
+  parents?: string[];
+  refs?: string[];
 }
 
 export interface GitCommitFileInfo {

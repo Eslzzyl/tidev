@@ -41,6 +41,7 @@ import type {
   GitStatusResponse,
   GitBranchResponse,
   GitLogResponse,
+  GitGraphResponse,
   GitMessageResponse,
   GitShowResponse,
   GitFileDiffResponse,
@@ -394,6 +395,11 @@ export const api = {
   gitLog: (count = 20, skip = 0) =>
     fetchJson<GitLogResponse>(
       `${API_BASE}/git/history?count=${count}&skip=${skip}`,
+    ),
+
+  gitGraph: (count = 50) =>
+    fetchJson<GitGraphResponse>(
+      `${API_BASE}/git/graph?count=${count}`,
     ),
 
   gitShowCommit: (sha: string) =>

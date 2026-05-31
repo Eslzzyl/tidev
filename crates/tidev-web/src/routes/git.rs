@@ -3,6 +3,7 @@
 //! - `GET    /api/git/status`          — Working tree status
 //! - `GET    /api/git/branches`        — List branches (with optional submodule filtering)
 //! - `GET    /api/git/history`         — Commit log (with skip/count pagination)
+//! - `GET    /api/git/graph`           — Commit graph data (all branches, parent refs, decorations)
 //! - `GET    /api/git/show/{sha}`      — List files changed in a commit
 //! - `GET    /api/git/show/{sha}/diff` — Get all diffs for a commit (or per-file with ?path=)
 //! - `POST   /api/git/commit`          — Create a commit
@@ -28,6 +29,7 @@ pub fn git_routes() -> Router<AppState> {
         .route("/git/status", get(git_status))
         .route("/git/branches", get(git_branches))
         .route("/git/history", get(git_log))
+        .route("/git/graph", get(git_graph))
         .route("/git/show/{sha}", get(git_show_files))
         .route("/git/show/{sha}/diff", get(git_show_diff))
         .route("/git/diff/file", get(git_diff_file))
@@ -99,11 +101,22 @@ struct GitLogResponse {
 }
 
 #[derive(Serialize)]
+struct GitGraphResponse {
+    commits: Vec<CommitItem>,
+    head_sha: String,
+    current_branch: String,
+}
+
+#[derive(Serialize)]
 struct CommitItem {
     sha: String,
     author: String,
     date: String,
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parents: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    refs: Option<Vec<String>>,
 }
 
 /// File info for a commit (returned by git_show_files).
@@ -136,6 +149,11 @@ struct GitFileDiffResponse {
 struct GitLogParams {
     count: Option<usize>,
     skip: Option<usize>,
+}
+
+#[derive(Deserialize)]
+struct GitGraphParams {
+    count: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -383,6 +401,8 @@ async fn git_log(
                     author: parts[1].to_string(),
                     date: parts[2].to_string(),
                     message: parts[3].to_string(),
+                    parents: None,
+                    refs: None,
                 })
             } else {
                 None
@@ -397,6 +417,80 @@ async fn git_log(
 
     Ok(Json(GitLogResponse { commits, has_more }))
 }
+
+/// `GET /api/git/graph?count=50` — Get commits from all branches with parent refs for graph rendering.
+///
+/// Returns topological commit data including parents, branch refs, and HEAD info.
+async fn git_graph(
+    State(state): State<AppState>,
+    Query(params): Query<GitGraphParams>,
+) -> Result<Json<GitGraphResponse>, crate::error::AppError> {
+    let cwd = workspace(&state).clone();
+    let count = params.count.unwrap_or(50);
+
+    // Get current HEAD info
+    let head_sha = run_git(&["rev-parse", "--short", "HEAD"], &cwd)
+        .map_err(crate::error::AppError::Internal)?;
+    let head_sha = head_sha.trim().to_string();
+
+    let current_branch = run_git(&["rev-parse", "--abbrev-ref", "HEAD"], &cwd)
+        .map_err(crate::error::AppError::Internal)?;
+    let current_branch = current_branch.trim().to_string();
+
+    // Fetch commits from all branches with parent SHAs and ref decorations
+    // fmt: %H = hash, %P = parents (space-sep), %an = author, %ai = date, %s = subject, %D = refs
+    let output = run_git(
+        &[
+            "log",
+            "--all",
+            &format!("-{}", count),
+            "--format=%H|%P|%an|%ai|%s|%D",
+        ],
+        &cwd,
+    )
+    .map_err(crate::error::AppError::Internal)?;
+
+    let commits: Vec<CommitItem> = output
+        .lines()
+        .filter(|l| !l.is_empty())
+        .filter_map(|line| {
+            // Split into 6 parts: hash, parents, author, date, message, refs
+            let parts: Vec<&str> = line.splitn(6, '|').collect();
+            if parts.len() >= 5 {
+                let sha = parts[0].to_string();
+                let parents: Vec<String> = if parts[1].is_empty() {
+                    Vec::new()
+                } else {
+                    parts[1].split_whitespace().map(|s| s.to_string()).collect()
+                };
+                let author = parts[2].to_string();
+                let date = parts[3].to_string();
+                let message = parts[4].to_string();
+                let refs: Vec<String> = if parts.len() >= 6 && !parts[5].is_empty() {
+                    parts[5].split(", ").map(|s| s.to_string()).collect()
+                } else {
+                    Vec::new()
+                };
+
+                Some(CommitItem {
+                    sha,
+                    author,
+                    date,
+                    message,
+                    parents: Some(parents),
+                    refs: Some(refs),
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    Ok(Json(GitGraphResponse {
+        commits,
+        head_sha,
+        current_branch,
+    }))}
 
 /// `GET /api/git/show/{sha}` — List files changed in a commit (no diff content).
 async fn git_show_files(
