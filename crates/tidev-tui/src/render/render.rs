@@ -206,6 +206,8 @@ impl App {
 
         let card_width = self
             .config
+            .read()
+            .unwrap()
             .ui
             .welcome_width
             .min(area.width.saturating_sub(4).max(32));
@@ -227,7 +229,7 @@ impl App {
             Constraint::Length(1),
             Constraint::Length(
                 self.composer
-                    .preferred_height(card_inner_width, self.config.ui.max_input_lines)
+                    .preferred_height(card_inner_width, self.config.read().unwrap().ui.max_input_lines)
                     .saturating_add(2),
             ),
         ])
@@ -542,7 +544,7 @@ impl App {
                     .tools
                     .sandbox_policy()
                     .map(|p| p.label())
-                    .unwrap_or_else(|| self.config.sandbox.to_policy().label());
+                    .unwrap_or_else(|| self.config.read().unwrap().sandbox.to_policy().label());
                 meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
                 let sandbox_style =
                     if sandbox_label.contains("off") || sandbox_label.contains("read") {

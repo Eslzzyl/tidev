@@ -89,7 +89,7 @@ impl App {
         if let Ok(paths) = ConfigPaths::discover()
             && let Ok(config) = tidev_engine::config::AppConfig::load_or_create(&paths)
         {
-            self.config = config;
+            *self.config.write().unwrap() = config;
         }
 
         let sessions = self.store.load_all_sessions().unwrap_or_default();
@@ -107,11 +107,11 @@ impl App {
     }
 
     fn sync_remotes(&self) -> Vec<RemoteMachine> {
-        self.config.sync.remotes.clone()
+        self.config.read().unwrap().sync.remotes.clone()
     }
 
     fn sync_manager(&self) -> SyncManager {
-        SyncManager::new(self.config.sync.clone(), self.store.clone())
+        SyncManager::new(self.config.read().unwrap().sync.clone(), self.store.clone())
     }
 
     pub(crate) fn handle_sync_panel_key(
@@ -416,11 +416,11 @@ impl App {
                             last_sync_at: None,
                         };
 
-                        let paths = ConfigPaths::discover()?;
-                        let mut config = tidev_engine::config::AppConfig::load_or_create(&paths)?;
-                        config.sync.remotes.push(remote);
-                        config.save(&paths)?;
-                        self.config = config;
+                        {
+                            let mut cfg = self.config.write().unwrap();
+                            cfg.sync.remotes.push(remote);
+                            cfg.save(&self.paths)?;
+                        }
 
                         self.composer.clear();
                         panel.view = SyncView::RemoteList;
@@ -470,13 +470,14 @@ impl App {
                     }
                     SyncView::RemoteActions { remote_index } => {
                         // Delete remote
-                        let paths = ConfigPaths::discover()?;
-                        let mut config = tidev_engine::config::AppConfig::load_or_create(&paths)?;
-                        let remotes = self.sync_remotes();
-                        if let Some(remote) = remotes.get(remote_index) {
-                            config.sync.remotes.retain(|r| r.name != remote.name);
-                            config.save(&paths)?;
-                            self.config = config;
+                        let name = {
+                            let cfg = self.config.read().unwrap();
+                            cfg.sync.remotes.get(remote_index).map(|r| r.name.clone())
+                        };
+                        if let Some(name) = name {
+                            let mut cfg = self.config.write().unwrap();
+                            cfg.sync.remotes.retain(|r| r.name != name);
+                            cfg.save(&self.paths)?;
                         }
                         panel.view = SyncView::RemoteList;
                         self.sync_panel = Some(panel);
@@ -551,18 +552,18 @@ impl App {
 
         match result {
             Ok(summary) => {
-                let paths = ConfigPaths::discover()?;
-                let mut config = tidev_engine::config::AppConfig::load_or_create(&paths)?;
-                if let Some(r) = config
-                    .sync
-                    .remotes
-                    .iter_mut()
-                    .find(|r| r.name == remote_name)
                 {
-                    r.last_sync_at = Some(chrono::Utc::now().to_rfc3339());
+                    let mut cfg = self.config.write().unwrap();
+                    if let Some(r) = cfg
+                        .sync
+                        .remotes
+                        .iter_mut()
+                        .find(|r| r.name == remote_name)
+                    {
+                        r.last_sync_at = Some(chrono::Utc::now().to_rfc3339());
+                    }
+                    cfg.save(&self.paths)?;
                 }
-                config.save(&paths)?;
-                self.config = config;
 
                 panel.sessions = self.store.load_all_sessions().unwrap_or_default();
 

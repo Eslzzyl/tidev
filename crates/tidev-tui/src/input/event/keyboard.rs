@@ -710,7 +710,7 @@ impl App {
             return Ok(());
         }
 
-        let Some((cmd, mut args)) = crate::input::editor::resolve_editor(&self.config.ui) else {
+        let Some((cmd, mut args)) = crate::input::editor::resolve_editor(&self.config.read().unwrap().ui) else {
             self.last_notice = Some(
                 "No editor found. Set external_editor in config, $VISUAL, or $EDITOR.".to_string(),
             );

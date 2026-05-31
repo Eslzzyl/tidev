@@ -262,7 +262,7 @@ impl App {
         let mut items = Vec::new();
         let mut current_provider_id: Option<String> = None;
 
-        for summary in self.config.connected_models(&self.auth) {
+        for summary in self.config.read().unwrap().connected_models(&self.auth) {
             if !model_panel_matches_query(&query, &summary) {
                 continue;
             }

@@ -190,7 +190,7 @@ impl App {
                     panel.move_down();
                 }
                 KeyCode::Enter | KeyCode::Char(' ') => {
-                    panel.toggle_selected(self.config.rtk.installed);
+                    panel.toggle_selected(self.config.read().unwrap().rtk.installed);
                 }
                 KeyCode::Left => {
                     panel.decrease_selected();
@@ -301,7 +301,7 @@ impl App {
                             // Memory tab: save model + thinking level
                             let role = next_panel.active_memory_role();
                             let model_str = summary.label();
-                            self.config.set_memory_model_and_thinking(
+                            self.config.write().unwrap().set_memory_model_and_thinking(
                                 &self.paths,
                                 role,
                                 &model_str,
@@ -324,7 +324,7 @@ impl App {
                                 .map(|t| t.agent_type_str.clone())
                                 .unwrap_or_default();
                             let model_str = summary.label();
-                            self.config.set_agent_model_and_thinking(
+                            self.config.write().unwrap().set_agent_model_and_thinking(
                                 &self.paths,
                                 &agent_type_str,
                                 &model_str,
@@ -364,7 +364,7 @@ impl App {
                                 let model_str = summary.label();
                                 // Clear stale thinking level when switching to a
                                 // model that does not support thinking.
-                                self.config.set_memory_model_and_thinking(
+                                self.config.write().unwrap().set_memory_model_and_thinking(
                                     &self.paths,
                                     role,
                                     &model_str,
@@ -385,7 +385,7 @@ impl App {
                                 let model_str = summary.label();
                                 // Clear stale thinking level when switching to a
                                 // model that does not support thinking.
-                                self.config.set_agent_model_and_thinking(
+                                self.config.write().unwrap().set_agent_model_and_thinking(
                                     &self.paths,
                                     &agent_type_str,
                                     &model_str,

@@ -1,3 +1,5 @@
+use std::sync::{Arc, RwLock};
+
 use crate::App;
 use crate::chat_render::RenderContext;
 use crate::chat_render::tool::{render_tool_call_with_result, render_tool_result_detail_lines};
@@ -149,7 +151,7 @@ fn render_tool_result_detail_lines_todowrite_formats_checkbox_list() {
         workspace_root: std::path::Path::new("/tmp"),
         expanded_tool_results: &HashSet::new(),
         expanded_tool_outputs: &HashMap::new(),
-        config: &AppConfig::default(),
+        config: Arc::new(RwLock::new(AppConfig::default())),
         auth: &AuthStore::default(),
         conversation: &Conversation::new(
             uuid::Uuid::new_v4(),
@@ -188,7 +190,7 @@ fn streaming_tool_call_switches_to_summary_after_arguments_parse() {
         workspace_root: std::path::Path::new("/tmp"),
         expanded_tool_results: &HashSet::new(),
         expanded_tool_outputs: &HashMap::new(),
-        config: &AppConfig::default(),
+        config: Arc::new(RwLock::new(AppConfig::default())),
         auth: &AuthStore::default(),
         conversation: &Conversation::new(
             uuid::Uuid::new_v4(),

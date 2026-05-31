@@ -40,18 +40,16 @@ impl App {
     pub(crate) fn provider_picker_items(&self) -> Vec<ProviderPickerItem> {
         let query = self.composer.text().trim().to_ascii_lowercase();
 
-        let mut items = self
-            .config
+        let config = self.config.read().unwrap();
+        let mut items = config
             .provider_ids()
             .into_iter()
             .filter_map(|provider_id| {
-                let display_name = self
-                    .config
+                let display_name = config
                     .provider_display_name(&provider_id)
                     .unwrap_or(&provider_id)
                     .to_string();
-                let source = self
-                    .config
+                let source = config
                     .provider_source(&provider_id)
                     .unwrap_or(ProviderSource::User);
                 let connected = self.auth.api_key(&provider_id).is_some();
@@ -68,6 +66,7 @@ impl App {
                 }
             })
             .collect::<Vec<_>>();
+        drop(config);
 
         items.push(ProviderPickerItem::AddNew {
             query: self.composer.text().trim().to_string(),
@@ -79,6 +78,8 @@ impl App {
     fn begin_connect_key_entry(&mut self, provider_id: String) {
         let label = self
             .config
+            .read()
+            .unwrap()
             .provider_display_name(&provider_id)
             .map(str::to_string)
             .unwrap_or_else(|| provider_id.clone());
@@ -107,7 +108,7 @@ impl App {
         provider_id: String,
         selected_model_id: Option<String>,
     ) -> Result<()> {
-        let Some(provider) = self.config.providers.get(&provider_id).cloned() else {
+        let Some(provider) = self.config.read().unwrap().providers.get(&provider_id).cloned() else {
             self.last_notice = Some(format!("Provider '{provider_id}' is not editable"));
             return Ok(());
         };
@@ -200,10 +201,11 @@ impl App {
         draft: EditProviderDraft,
     ) -> Result<()> {
         let (provider_config, api_key) = draft.into_provider_config()?;
-        self.config
-            .providers
-            .insert(provider_id.clone(), provider_config);
-        self.config.save(&self.paths)?;
+        {
+            let mut cfg = self.config.write().unwrap();
+            cfg.providers.insert(provider_id.clone(), provider_config);
+            cfg.save(&self.paths)?;
+        }
 
         self.auth.set_api_key(provider_id.clone(), api_key);
         self.auth.save(&self.paths)?;
@@ -222,6 +224,8 @@ impl App {
 
         let updated = self
             .config
+            .read()
+            .unwrap()
             .resolve_model_by_ids(
                 &self.auth,
                 &self.active_model.provider_id,
@@ -229,6 +233,8 @@ impl App {
             )
             .or_else(|_| {
                 self.config
+                    .read()
+                    .unwrap()
                     .resolve_provider_default_model(&self.auth, provider_id)
             })?;
 
@@ -262,6 +268,8 @@ impl App {
 
         let model = self
             .config
+            .read()
+            .unwrap()
             .resolve_provider_default_model(&self.auth, &provider_id)?;
 
         self.active_model = model.clone();
@@ -294,7 +302,7 @@ impl App {
     fn finish_new_provider_setup(&mut self, draft: NewProviderDraft) -> Result<()> {
         let provider_id = draft.provider_id.clone();
 
-        if self.config.provider_exists(&provider_id) {
+        if self.config.read().unwrap().provider_exists(&provider_id) {
             self.last_notice = Some(format!("Provider '{provider_id}' already exists"));
             self.show_new_provider_step(NewProviderStep::ProviderId, draft);
             return Ok(());
@@ -302,16 +310,19 @@ impl App {
 
         let (provider_id, provider_config, api_key) = draft.into_provider_config()?;
 
-        self.config
-            .providers
-            .insert(provider_id.clone(), provider_config);
-        self.config.save(&self.paths)?;
+        {
+            let mut cfg = self.config.write().unwrap();
+            cfg.providers.insert(provider_id.clone(), provider_config);
+            cfg.save(&self.paths)?;
+        }
 
         self.auth.set_api_key(provider_id.clone(), api_key);
         self.auth.save(&self.paths)?;
 
         let model = self
             .config
+            .read()
+            .unwrap()
             .resolve_provider_default_model(&self.auth, &provider_id)?;
 
         self.active_model = model.clone();
@@ -509,7 +520,7 @@ impl App {
                     }
 
                     if step == NewProviderStep::ProviderId
-                        && self.config.providers.contains_key(&draft.provider_id)
+                        && self.config.read().unwrap().providers.contains_key(&draft.provider_id)
                     {
                         self.last_notice =
                             Some(format!("Provider '{}' already exists", draft.provider_id));

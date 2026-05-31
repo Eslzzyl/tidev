@@ -208,6 +208,8 @@ impl App {
             ConnectDialog::ApiKey { provider_id } => {
                 let label = self
                     .config
+                    .read()
+                    .unwrap()
                     .provider_display_name(provider_id)
                     .unwrap_or(provider_id)
                     .to_string();
@@ -344,6 +346,8 @@ impl App {
 
                     let provider_label = self
                         .config
+                        .read()
+                        .unwrap()
                         .provider_display_name(provider_id)
                         .unwrap_or(provider_id)
                         .to_string();
@@ -1164,7 +1168,7 @@ impl App {
                 .composer
                 .preferred_height(
                     inner.width.saturating_sub(3),
-                    self.config.ui.max_input_lines,
+                    self.config.read().unwrap().ui.max_input_lines,
                 )
                 .min(available_input_height.max(3));
 
@@ -1606,7 +1610,7 @@ impl App {
                     sections[0],
                 );
 
-                let remotes = &self.config.sync.remotes;
+                let remotes: Vec<_> = self.config.read().unwrap().sync.remotes.clone();
                 if remotes.is_empty() {
                     frame.render_widget(
                         Paragraph::new("No remotes configured. Press 'a' to add one.")
@@ -1658,7 +1662,8 @@ impl App {
                 ])
                 .split(inner);
 
-                if let Some(remote) = self.config.sync.remotes.get(*remote_index) {
+                let remote = self.config.read().unwrap().sync.remotes.get(*remote_index).cloned();
+                if let Some(remote) = remote {
                     frame.render_widget(
                         Paragraph::new(Line::from(vec![Span::styled(
                             format!(" {} - Actions ", remote.name),

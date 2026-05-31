@@ -18,6 +18,7 @@ use std::{
     sync::{Arc, Mutex, RwLock},
     time::{Duration, Instant},
 };
+use tidev_engine::config::SharedConfig;
 use tokio::{
     runtime::Runtime,
     sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
@@ -114,7 +115,7 @@ struct App {
     screen: Screen,
     workspace_root: PathBuf,
     paths: ConfigPaths,
-    config: AppConfig,
+    config: SharedConfig,
     auth: AuthStore,
     store: SessionStore,
     llm: LlmClient,
@@ -561,27 +562,28 @@ impl App {
     }
 
     fn refresh_tools(&mut self) {
+        let config = self.config.read().unwrap();
         let mcp = self.tools.mcp_manager();
         let file_read_tracker = self.tools.file_read_tracker();
         let worktree = Self::find_git_worktree(&self.workspace_root);
         self.tools = ToolRegistry::new(
             self.workspace_root.clone(),
             self.paths.config_dir.clone(),
-            self.config.skills.clone(),
+            config.skills.clone(),
             mcp,
-            self.config.permissions.clone(),
+            config.permissions.clone(),
             file_read_tracker,
             self.memory_store.clone(),
-            self.config.rtk.enabled,
+            config.rtk.enabled,
             worktree,
-            self.config.websearch.clone(),
+            config.websearch.clone(),
             Arc::new(self.auth.clone()),
         );
         // Set sandbox policy based on current mode
-        let sandbox_policy = self.config.sandbox.to_policy();
+        let sandbox_policy = config.sandbox.to_policy();
         self.tools.set_sandbox_policy(Some(sandbox_policy));
         // Also sync to the agent's ToolRegistry (separate copy at init)
-        let agent_policy = self.config.sandbox.to_policy();
+        let agent_policy = config.sandbox.to_policy();
         self.agent.tools.set_sandbox_policy(Some(agent_policy));
     }
 

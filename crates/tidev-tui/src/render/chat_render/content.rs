@@ -174,6 +174,8 @@ pub(super) fn render_assistant_body_lines(
             .as_ref()
             .and_then(|model_id| {
                 ctx.config
+                    .read()
+                    .unwrap()
                     .resolve_model_by_ids(ctx.auth, &ctx.conversation.provider_id, model_id)
                     .ok()
                     .map(|model| model.display_name)

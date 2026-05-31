@@ -11,6 +11,7 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::sync::{Arc, RwLock};
 
 use crate::sync::SyncConfig;
 use tidev_types::prompts::{SessionMode, gateway_system_prompt, general_system_prompt};
@@ -29,6 +30,9 @@ pub use tmp::TmpConfig;
 pub use ui::UiConfig;
 
 pub use self::sandbox::SandboxConfig;
+
+/// Shared (thread-safe) reference to the app configuration.
+pub type SharedConfig = Arc<RwLock<AppConfig>>;
 
 /// Per-model overrides for memory operations.
 /// `None` = inherit from the session's active model.

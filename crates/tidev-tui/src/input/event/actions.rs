@@ -177,7 +177,7 @@ impl App {
                 continue;
             }
             let ty = agent_type.display_name();
-            let label = self.config.agent_model_display(ty);
+            let label = self.config.read().unwrap().agent_model_display(ty);
             tabs.push(crate::model_panel::ModelPanelTab::new(
                 ty,
                 agent_type.display_name(),
@@ -186,7 +186,7 @@ impl App {
         }
         // Memory tab — consolidation model
         {
-            let display = self.config.memory_model_display("consolidation");
+            let display = self.config.read().unwrap().memory_model_display("consolidation");
             tabs.push(crate::model_panel::ModelPanelTab::new(
                 "memory", "Memory", &display,
             ));
@@ -218,9 +218,8 @@ impl App {
         self.session_panel = None;
         self.memory_panel = None;
 
-        self.search_panel = Some(ui::search_panel::SearchPanelState::new(
-            &self.config.websearch.default_provider,
-        ));
+        let provider = self.config.read().unwrap().websearch.default_provider.clone();
+        self.search_panel = Some(ui::search_panel::SearchPanelState::new(&provider));
     }
 
     pub(crate) fn close_search_panel(&mut self) {
@@ -233,8 +232,11 @@ impl App {
         self.tools.set_active_search_provider(provider);
 
         // Persist to config
-        self.config.websearch.default_provider = provider.to_string();
-        self.config.save(&self.paths)?;
+        {
+            let mut cfg = self.config.write().unwrap();
+            cfg.websearch.default_provider = provider.to_string();
+            cfg.save(&self.paths)?;
+        }
 
         Ok(())
     }
@@ -445,8 +447,9 @@ impl App {
 
     pub(crate) fn close_settings_panel(&mut self, _apply: bool) -> Result<()> {
         if let Some(panel) = self.settings_panel.take() {
-            panel.apply_to_config(&mut self.config);
-            self.config.save(&self.paths)?;
+            let mut cfg = self.config.write().unwrap();
+            panel.apply_to_config(&mut *cfg);
+            cfg.save(&self.paths)?;
         }
         Ok(())
     }
@@ -454,8 +457,11 @@ impl App {
     pub(crate) fn apply_theme(&mut self, theme: ThemeName) -> Result<()> {
         self.theme.set_mode(theme);
         self.clear_message_render_cache();
-        self.config.set_theme(theme);
-        self.config.save(&self.paths)?;
+        {
+            let mut cfg = self.config.write().unwrap();
+            cfg.set_theme(theme);
+            cfg.save(&self.paths)?;
+        }
         self.last_notice = Some(format!("Theme switched to {}", self.theme.name()));
         Ok(())
     }
@@ -506,7 +512,7 @@ impl App {
         // Preserve the session's static system prompt — it was composed at
         // session creation and must never be recomposed mid-session.
         let saved_system_prompt = self.active_model.system_prompt.clone();
-        let model = self.config.resolve_model(&self.auth, selector)?;
+        let model = self.config.read().unwrap().resolve_model(&self.auth, selector)?;
         self.active_model = model.clone();
         self.active_model.system_prompt = saved_system_prompt;
         self.thinking_level = model.thinking_level.clone();
@@ -532,9 +538,12 @@ impl App {
             &model.model_id,
             &model.display_name,
         )?;
-        self.config.default_provider = model.provider_id.clone();
-        self.config.default_model = model.model_id.clone();
-        self.config.save(&self.paths)?;
+        {
+            let mut cfg = self.config.write().unwrap();
+            cfg.default_provider = model.provider_id.clone();
+            cfg.default_model = model.model_id.clone();
+            cfg.save(&self.paths)?;
+        }
         self.last_notice = Some(format!("Switched to {}", model.label()));
         Ok(())
     }
@@ -569,7 +578,7 @@ impl App {
 
         // Reset thinking_level to the default auto-detected value for the current model,
         // then apply any saved user preference.
-        if let Ok(model) = self.config.resolve_model_by_ids(
+        if let Ok(model) = self.config.read().unwrap().resolve_model_by_ids(
             &self.auth,
             &self.active_model.provider_id,
             &self.active_model.model_id,

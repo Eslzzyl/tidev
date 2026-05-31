@@ -98,17 +98,20 @@ impl App {
             .set_sandbox_policy(Some(item.policy.clone()));
 
         // Persist to config file so the choice survives restarts
-        self.config.sandbox.mode = match &item.policy {
-            tidev_engine::sandbox::SandboxPolicy::DangerFullAccess => {
-                "danger-full-access".to_string()
-            }
-            tidev_engine::sandbox::SandboxPolicy::ReadOnly => "read-only".to_string(),
-            tidev_engine::sandbox::SandboxPolicy::ExternalSandbox => "external-sandbox".to_string(),
-            tidev_engine::sandbox::SandboxPolicy::WorkspaceWrite { .. } => {
-                "workspace-write".to_string()
-            }
-        };
-        let _ = self.config.save(&self.paths);
+        {
+            let mut cfg = self.config.write().unwrap();
+            cfg.sandbox.mode = match &item.policy {
+                tidev_engine::sandbox::SandboxPolicy::DangerFullAccess => {
+                    "danger-full-access".to_string()
+                }
+                tidev_engine::sandbox::SandboxPolicy::ReadOnly => "read-only".to_string(),
+                tidev_engine::sandbox::SandboxPolicy::ExternalSandbox => "external-sandbox".to_string(),
+                tidev_engine::sandbox::SandboxPolicy::WorkspaceWrite { .. } => {
+                    "workspace-write".to_string()
+                }
+            };
+            let _ = cfg.save(&self.paths);
+        }
 
         self.last_notice = Some(format!("Sandbox policy changed to: {}", item.label));
         self.sandbox_panel = None;

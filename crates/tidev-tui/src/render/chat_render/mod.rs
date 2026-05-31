@@ -29,7 +29,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::{Duration, Instant};
 use tidev_engine::{
-    config::{AppConfig, AuthStore},
+    config::{AuthStore, SharedConfig},
     tooling::canonical_tool_name,
 };
 use tidev_session::session::{Conversation, Message, MessageRole, ToolCall};
@@ -69,7 +69,7 @@ struct RenderContext<'a> {
     workspace_root: &'a Path,
     expanded_tool_results: &'a HashSet<Uuid>,
     expanded_tool_outputs: &'a HashMap<Uuid, String>,
-    config: &'a AppConfig,
+    config: SharedConfig,
     auth: &'a AuthStore,
     conversation: &'a Conversation,
     mode: SessionMode,
@@ -100,6 +100,8 @@ impl App {
         let sidebar_visible = area.width
             >= self
                 .config
+                .read()
+                .unwrap()
                 .ui
                 .sidebar_width
                 .saturating_add(70)
@@ -108,7 +110,7 @@ impl App {
             let split = Layout::horizontal([
                 Constraint::Min(20),
                 Constraint::Length(SIDEBAR_GAP),
-                Constraint::Length(self.config.ui.sidebar_width),
+                Constraint::Length(self.config.read().unwrap().ui.sidebar_width),
             ])
             .split(area);
             self.sidebar_area = Some(split[2]);
@@ -122,7 +124,7 @@ impl App {
             .composer
             .preferred_height(
                 main_area.width.saturating_sub(5),
-                self.config.ui.max_input_lines,
+                self.config.read().unwrap().ui.max_input_lines,
             )
             .min(main_area.height.saturating_sub(3).max(3));
 
@@ -1264,7 +1266,7 @@ impl App {
             workspace_root: self.workspace_root.as_path(),
             expanded_tool_results: &self.expanded_tool_results,
             expanded_tool_outputs: &expanded_tool_outputs,
-            config: &self.config,
+            config: self.config.clone(),
             auth: &self.auth,
             conversation: &self.conversation,
             mode: self.mode,
@@ -1611,7 +1613,7 @@ impl App {
                 workspace_root: self.workspace_root.as_path(),
                 expanded_tool_results: &self.expanded_tool_results,
                 expanded_tool_outputs: &expanded_tool_outputs,
-                config: &self.config,
+                config: self.config.clone(),
                 auth: &self.auth,
                 conversation: &self.conversation,
                 mode: self.mode,
@@ -1724,7 +1726,7 @@ impl App {
                 workspace_root: self.workspace_root.as_path(),
                 expanded_tool_results: &self.expanded_tool_results,
                 expanded_tool_outputs: &expanded_tool_outputs,
-                config: &self.config,
+                config: self.config.clone(),
                 auth: &self.auth,
                 conversation: &self.conversation,
                 mode: self.mode,
@@ -1812,7 +1814,7 @@ impl App {
             workspace_root: self.workspace_root.as_path(),
             expanded_tool_results: &self.expanded_tool_results,
             expanded_tool_outputs: &expanded_tool_outputs,
-            config: &self.config,
+            config: self.config.clone(),
             auth: &self.auth,
             conversation: &self.conversation,
             mode: self.mode,

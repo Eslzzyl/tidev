@@ -88,7 +88,8 @@ impl App {
             && area.contains(position)
         {
             if self.sidebar_scroll_offset > 0 {
-                self.scroll_sidebar_up(self.config.ui.scroll_speed as usize);
+                let speed = self.config.read().unwrap().ui.scroll_speed as usize;
+                self.scroll_sidebar_up(speed);
             }
             true // Always consume scroll event when in sidebar area
         } else {
@@ -102,7 +103,8 @@ impl App {
         {
             let max_scroll = self.sidebar_scroll_max();
             if self.sidebar_scroll_offset < max_scroll {
-                self.scroll_sidebar_down(self.config.ui.scroll_speed as usize);
+                let speed = self.config.read().unwrap().ui.scroll_speed as usize;
+                self.scroll_sidebar_down(speed);
             }
             true // Always consume scroll event when in sidebar area
         } else {

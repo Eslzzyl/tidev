@@ -989,7 +989,7 @@ impl App {
             .enumerate()
             .map(|(idx, role)| {
                 let is_selected = idx == panel.memory_sub_selection;
-                let label = self.config.memory_model_display(role);
+                let label = self.config.read().unwrap().memory_model_display(role);
 
                 let role_display = match *role {
                     "consolidation" => "Consolidation",
@@ -1081,7 +1081,7 @@ impl App {
         } else if panel.is_memory_tab() {
             // For memory tab, find the model currently saved for the active role
             let role = panel.active_memory_role();
-            let current = self.config.memory_model_label(role);
+            let current = self.config.read().unwrap().memory_model_label(role).map(|s| s.to_string());
             current.and_then(|label| {
                 items.iter().position(|item| match item {
                     ModelPanelItem::Model { summary } => summary.label() == label,
@@ -1091,7 +1091,7 @@ impl App {
         } else {
             // Agent tab: find the model currently configured for this agent type
             panel.current_tab().and_then(|tab| {
-                let current = self.config.agent.models.get(&tab.agent_type_str);
+                let current = self.config.read().unwrap().agent.models.get(&tab.agent_type_str).cloned();
                 current.and_then(|label| {
                     items.iter().position(|item| match item {
                         ModelPanelItem::Model { summary } => summary.label() == *label,
@@ -1157,9 +1157,21 @@ impl App {
                         Some(self.thinking_level.display_name().to_string())
                     } else if panel.is_memory_tab() {
                         let model_label = summary.label();
-                        if let Some(tl_str) =
-                            self.config.memory.thinking_levels.get("consolidation")
-                            && self.config.memory.consolidation_model.as_deref()
+                        if let Some(tl_str) = self
+                            .config
+                            .read()
+                            .unwrap()
+                            .memory
+                            .thinking_levels
+                            .get("consolidation")
+                            .cloned()
+                            && self
+                                .config
+                                .read()
+                                .unwrap()
+                                .memory
+                                .consolidation_model
+                                .as_deref()
                                 == Some(&model_label)
                             && tidev_engine::config::reasoning::ThinkingMatcher::match_for_model(
                                 &summary.model_id,
@@ -1167,7 +1179,7 @@ impl App {
                             .is_supported()
                         {
                             let tl_level =
-                                tl_str.rsplit_once(':').map(|(_, v)| v).unwrap_or(tl_str);
+                                tl_str.rsplit_once(':').map(|(_, v)| v).unwrap_or(&tl_str);
                             Some(tl_level.to_string())
                         } else {
                             None
@@ -1175,10 +1187,10 @@ impl App {
                     } else if !panel.is_general_tab() {
                         if let Some(tab) = panel.current_tab() {
                             let model_label = summary.label();
+                            let config = self.config.read().unwrap();
                             if let Some(tl_str) =
-                                self.config.agent.thinking_levels.get(&tab.agent_type_str)
-                                && self
-                                    .config
+                                config.agent.thinking_levels.get(&tab.agent_type_str)
+                                && config
                                     .agent
                                     .models
                                     .get(&tab.agent_type_str)
@@ -1189,8 +1201,7 @@ impl App {
                                 .is_supported()
                             {
                                 let tl_level =
-                                    tl_str.rsplit_once(':').map(|(_, v)| v).unwrap_or(tl_str);
-                                Some(tl_level.to_string())
+                                tl_str.rsplit_once(':').map(|(_, v)| v).unwrap_or(&tl_str);                                Some(tl_level.to_string())
                             } else {
                                 None
                             }

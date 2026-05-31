@@ -2,7 +2,8 @@ use super::*;
 use crate::panel_launcher::PanelLauncherState;
 use chrono::Utc;
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::{io, path::Path, sync::RwLock, time::Duration};
+use std::{io, path::Path, sync::{Arc, RwLock}, time::Duration};
+use tidev_engine::config::SharedConfig;
 use tidev_storage::database::Database;
 use tokio::runtime::Runtime;
 
@@ -122,11 +123,12 @@ impl App {
 
         // Provide a model resolver so summarization can reuse the last
         // assistant message's model (for prompt-cache reuse).
+        let shared_config: SharedConfig = Arc::new(RwLock::new(config.clone()));
         {
-            let config = config.clone();
+            let config = shared_config.clone();
             let auth = auth.clone();
             memory_store.set_model_resolver(std::sync::Arc::new(move |model_id: &str| {
-                config.resolve_model(&auth, Some(model_id))
+                config.read().unwrap().resolve_model(&auth, Some(model_id))
             }));
         }
 
@@ -186,7 +188,7 @@ impl App {
             screen: Screen::Welcome,
             workspace_root: workspace_root.clone(),
             paths: paths.clone(),
-            config: config.clone(),
+            config: shared_config,
             auth,
             store,
             llm,
@@ -372,7 +374,7 @@ impl App {
             self.memory_store.clone(),
             runtime.handle(),
             &self.workspace_root.to_string_lossy(),
-            &self.config.memory,
+            &self.config.read().unwrap().memory,
         );
         log::info!(
             "startup: memory background tasks spawned in {:?}",
@@ -385,7 +387,9 @@ impl App {
         let check_ws = self.workspace_root.to_string_lossy().to_string();
         let cancel_token = self.inactivity_check_cancel.clone();
         let sid_ref = self.current_session_id.clone();
-        let memory_auto_learn = self.config.memory.enabled && self.config.memory.auto_learn;
+        let cfg = self.config.read().unwrap();
+        let memory_auto_learn = cfg.memory.enabled && cfg.memory.auto_learn;
+        drop(cfg);
         runtime.spawn(async move {
             const INACTIVITY_TIMEOUT_SECS: i64 = 300;
             let mut interval = tokio::time::interval(Duration::from_secs(60));
@@ -641,7 +645,7 @@ impl App {
         let ui_snapshot = self.capture_ui_snapshot();
         self.cache_active_session_runtime();
 
-        let fallback_model = Self::resolve_fallback_model(&self.config, &self.auth)?;
+        let fallback_model = Self::resolve_fallback_model(&self.config.read().unwrap(), &self.auth)?;
         let target_runtime = if let Some(cached) = self.cached_sessions.remove(&session_id) {
             cached
         } else {
@@ -860,7 +864,7 @@ impl App {
         };
 
         let mut active_model =
-            Self::resolve_conversation_model(&self.config, &self.auth, &conversation)
+            Self::resolve_conversation_model(&self.config.read().unwrap(), &self.auth, &conversation)
                 .unwrap_or_else(|_| fallback_model.clone());
 
         // Restore the session's immutable static system prompt.

@@ -218,7 +218,8 @@ impl App {
                 }
                 if self.can_scroll_conversation() {
                     self.clear_mouse_selection();
-                    self.scroll_messages_up(self.config.ui.scroll_speed as usize);
+                    let speed = self.config.read().unwrap().ui.scroll_speed as usize;
+                    self.scroll_messages_up(speed);
                 }
             }
             MouseEventKind::ScrollDown => {
@@ -233,7 +234,8 @@ impl App {
                 }
                 if self.can_scroll_conversation() {
                     self.clear_mouse_selection();
-                    self.scroll_messages_down(self.config.ui.scroll_speed as usize);
+                    let speed = self.config.read().unwrap().ui.scroll_speed as usize;
+                    self.scroll_messages_down(speed);
                 }
             }
             _ => {}
@@ -516,7 +518,7 @@ impl App {
                 if local_y < panel.items.len() as u16 {
                     panel.selected_index = local_y as usize;
                     // Same as Enter/Space: toggle the selected setting
-                    panel.toggle_selected(self.config.rtk.installed);
+                    panel.toggle_selected(self.config.read().unwrap().rtk.installed);
                 }
                 self.settings_panel = Some(panel);
                 true
@@ -742,6 +744,8 @@ impl App {
                         .unwrap_or_default();
                     let model_str = summary.label();
                     self.config
+                        .write()
+                        .unwrap()
                         .set_agent_model(&self.paths, &agent_type_str, &model_str)
                         .ok();
                     if let Some(tab) = next_panel.tabs.get_mut(tab_index) {
@@ -831,6 +835,8 @@ impl App {
                 .unwrap_or_default();
             let model_str = summary.label();
             self.config
+                .write()
+                .unwrap()
                 .set_agent_model_and_thinking(&self.paths, &agent_type_str, &model_str, &tl)
                 .ok();
             if let Some(tab) = panel.tabs.get_mut(tab_index) {
@@ -1440,10 +1446,12 @@ impl App {
 
         if pointer.y <= top_threshold {
             self.dirty = true;
-            self.scroll_messages_up_internal(self.config.ui.scroll_speed as usize);
+            let speed = self.config.read().unwrap().ui.scroll_speed as usize;
+            self.scroll_messages_up_internal(speed);
         } else if pointer.y >= bottom_threshold {
             self.dirty = true;
-            self.scroll_messages_down_internal(self.config.ui.scroll_speed as usize);
+            let speed = self.config.read().unwrap().ui.scroll_speed as usize;
+            self.scroll_messages_down_internal(speed);
         }
     }
 

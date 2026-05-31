@@ -304,7 +304,7 @@ impl App {
         previous_query: String,
         server_name: String,
     ) -> Result<()> {
-        let Some(config) = self.config.mcp.servers.get(&server_name).cloned() else {
+        let Some(config) = self.config.read().unwrap().mcp.servers.get(&server_name).cloned() else {
             self.last_notice = Some(format!("MCP server '{server_name}' does not exist"));
             return Ok(());
         };
@@ -338,12 +338,15 @@ impl App {
         runtime: &tokio::runtime::Runtime,
         name: &str,
     ) -> Result<()> {
-        if self.config.mcp.servers.remove(name).is_none() {
-            self.last_notice = Some(format!("MCP server '{name}' does not exist"));
-            return Ok(());
+        {
+            let mut cfg = self.config.write().unwrap();
+            if cfg.mcp.servers.remove(name).is_none() {
+                drop(cfg); // release lock before borrowing self
+                self.last_notice = Some(format!("MCP server '{name}' does not exist"));
+                return Ok(());
+            }
+            cfg.save(&self.paths)?;
         }
-
-        self.config.save(&self.paths)?;
 
         if self.tools.mcp_manager().has_server(name) {
             runtime.block_on(self.tools.mcp_manager().remove_server(name))?;
@@ -366,7 +369,7 @@ impl App {
         } = result;
 
         if original_name.as_deref() != Some(name.as_str())
-            && self.config.mcp.servers.contains_key(&name)
+            && self.config.read().unwrap().mcp.servers.contains_key(&name)
         {
             bail!("MCP server '{name}' already exists");
         }
@@ -376,15 +379,25 @@ impl App {
             && original_name != name
         {
             previous_name = Some(original_name);
-            self.config
-                .mcp
-                .servers
-                .remove(previous_name.as_ref().expect("name set"));
         }
 
-        self.config.mcp.servers.insert(name.clone(), config.clone());
-        self.config.save(&self.paths)?;
+        {
+            let mut cfg = self.config.write().unwrap();
+            if original_name.as_deref() != Some(name.as_str())
+                && cfg.mcp.servers.contains_key(&name)
+            {
+                bail!("MCP server '{name}' already exists");
+            }
 
+            if let Some(original_name) = &previous_name
+                && original_name != &name
+            {
+                cfg.mcp.servers.remove(original_name);
+            }
+
+            cfg.mcp.servers.insert(name.clone(), config.clone());
+            cfg.save(&self.paths)?;
+        }
         if let Some(previous_name) = previous_name
             && self.tools.mcp_manager().has_server(&previous_name)
         {
