@@ -211,12 +211,8 @@ export function MessageInput({
 
   // Re-focus the textarea when streaming ends, so the user can immediately
   // type their next message without clicking back into the composer.
-  const hasStreamedRef = useRef(false);
   useEffect(() => {
-    if (isStreaming) {
-      hasStreamedRef.current = true;
-    } else if (hasStreamedRef.current && textareaRef.current) {
-      hasStreamedRef.current = false;
+    if (!isStreaming && textareaRef.current) {
       textareaRef.current.focus();
     }
   }, [isStreaming]);
@@ -1017,6 +1013,7 @@ export function MessageInput({
             onKeyDown={handleKeydown}
             onCompositionStart={handleCompositionStart}
             onCompositionEnd={handleCompositionEnd}
+            autoFocus
             placeholder={
               shellMode
                 ? "Enter a shell command..."
