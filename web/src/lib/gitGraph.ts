@@ -9,8 +9,18 @@ import type { GitCommitItem } from "../types/api";
 
 /** Color palette for branch lanes — rotates if more lanes than colors. */
 export const LANE_COLORS = [
-  "#4caf50", "#2196f3", "#ff9800", "#e91e63", "#9c27b0", "#00bcd4",
-  "#ff5722", "#3f51b5", "#8bc34a", "#f44336", "#009688", "#cddc39",
+  "#4caf50",
+  "#2196f3",
+  "#ff9800",
+  "#e91e63",
+  "#9c27b0",
+  "#00bcd4",
+  "#ff5722",
+  "#3f51b5",
+  "#8bc34a",
+  "#f44336",
+  "#009688",
+  "#cddc39",
 ];
 
 export interface GraphRow {
@@ -92,7 +102,6 @@ export function computeGraphLayout(
 
     // ── 5. Update lanes for parents & record merge curves ─────────────
     const merges: GraphRow["merges"] = [];
-    let forkLane: number | null = null;
 
     if (parents.length === 0) {
       // Root commit — free the lane.
@@ -103,33 +112,24 @@ export function computeGraphLayout(
       const fpCol = shaToCol.get(firstParent);
 
       if (fpCol !== undefined && fpCol !== col) {
-        // ── First parent is in a DIFFERENT lane ────────────────────
-        merges.push({ fromCol: fpCol, toCol: col });
         if (col < fpCol) {
-          // Merge: commit on LEFT → move parent here, free old lane.
+          // Merge: commit on LEFT absorbs parent's lane.
+          merges.push({ fromCol: fpCol, toCol: col });
           lanes[col] = firstParent;
           shaToCol.set(firstParent, col);
           lanes[fpCol] = null;
           shaToCol.delete(sha);
         } else {
-          // col > fpCol — could be a genuine new fork or a pre-assigned
-          // commit on an existing feature branch.
-          if (oldCol === undefined) {
-            // Truly new fork (not pre-assigned by children):
-            // dot belongs on the MAIN branch (fpCol).
-            forkLane = col;
-            lanes[col] = null;
-            shaToCol.set(sha, fpCol);
-            col = fpCol;
-          } else {
-            // Pre-assigned feature-branch commit: stays on its branch.
-            // Free this lane (parent continues on fpCol) and clean up.
-            lanes[col] = null;
-            shaToCol.delete(sha);
-          }
+          // Fork (col > fpCol): parent continues at fpCol, child stays at col.
+          // The fork curve is drawn at this commit's row (the child's row).
+          merges.push({ fromCol: fpCol, toCol: col });
+
+          // Free the feature lane below this commit.
+          lanes[col] = null;
+          shaToCol.delete(sha);
         }
       } else {
-        // ── Same lane (or parent not tracked yet) ────────────────
+        // Same lane (or parent not tracked yet).
         if (fpCol === undefined || fpCol === col) {
           lanes[col] = firstParent;
           shaToCol.set(firstParent, col);
@@ -164,7 +164,6 @@ export function computeGraphLayout(
     // ── 7. Compute `lines` — union of before & after ──────────────────
     const lines: Record<number, string | null> = {};
     const allCols = new Set([...beforeLines.keys(), ...afterLines.keys(), col]);
-    if (forkLane !== null) allCols.add(forkLane);
     for (const c of allCols) {
       const before = beforeLines.get(c);
       const after = afterLines.get(c);

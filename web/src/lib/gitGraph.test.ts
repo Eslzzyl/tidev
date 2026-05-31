@@ -46,7 +46,7 @@ describe("computeGraphLayout", () => {
   });
 
   it("should handle a fork (two children of same parent)", () => {
-    //   C (main, child of A)
+    //   C (main, child of A)  ← fork curve appears HERE
     //   D (feature, child of A)
     //   A (parent)
     // Commits from git log (newest first): C, D, A
@@ -54,16 +54,18 @@ describe("computeGraphLayout", () => {
     const result = computeGraphLayout(commits, "C");
 
     expect(result).toHaveLength(3);
-    // C is on the main line (col 0)
+    // C is on the main line (col 0) — carries the fork curve
     expect(result[0].commit.sha).toBe("C");
     expect(result[0].column).toBe(0);
-    // D is the fork point — dot belongs on the main branch (col 0)
+    expect(result[0].merges).toHaveLength(1);
+    expect(result[0].merges[0].fromCol).toBe(0);
+    expect(result[0].merges[0].toCol).toBe(1);
+    expect(result[0].lines[0]).toBe("A");
+    expect(result[0].lines[1]).toBeNull(); // fork lane terminating stub
+    // D is on the feature branch (col 1) — no merge at its row
     expect(result[1].commit.sha).toBe("D");
-    expect(result[1].column).toBe(0);
-    expect(result[1].merges).toHaveLength(1);
-    expect(result[1].merges[0].fromCol).toBe(0);
-    expect(result[1].merges[0].toCol).toBe(1);
-    // The fork lane (col 1) should have a terminating line passing through
+    expect(result[1].column).toBe(1);
+    expect(result[1].merges).toHaveLength(0);
     expect(result[1].lines[1]).toBeNull();
     // A is on the main line (col 0)
     expect(result[2].commit.sha).toBe("A");
