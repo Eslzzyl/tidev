@@ -73,6 +73,32 @@ pub fn get() -> &'static ResolvedShell {
         .expect("shell::init() must be called before shell::get()")
 }
 
+/// Return `true` if the resolved shell is a known bash-like shell.
+pub fn is_bash_like(shell: &ResolvedShell) -> bool {
+    let name = std::path::Path::new(&shell.program)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    matches!(
+        name.as_str(),
+        "bash" | "sh" | "zsh" | "fish" | "dash" | "ksh"
+    ) || shell.arg == "-lc"
+}
+
+#[cfg(windows)]
+fn classify_shell_display_name(program: &str) -> String {
+    let name = std::path::Path::new(program)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    match name.to_lowercase().as_str() {
+        "bash" | "sh" | "zsh" | "fish" | "dash" | "ksh" => format!("Bash ({program})"),
+        "powershell" | "pwsh" => format!("PowerShell ({program})"),
+        _ => format!("Custom shell ({program})"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Resolution logic (Windows only)
 // ---------------------------------------------------------------------------
@@ -85,10 +111,11 @@ fn resolve(
     // 1. User-configured value (from config.toml) takes priority.
     if let Some(shell) = config_shell {
         let arg = infer_shell_arg(&shell);
+        let display_name = classify_shell_display_name(&shell);
         return ResolvedShell {
             program: shell,
             arg,
-            display_name: "custom shell".to_string(),
+            display_name,
         };
     }
 
