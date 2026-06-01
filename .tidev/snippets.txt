@@ -1,4 +1,3 @@
 opencode
-DeepSeek-Reasonix
 submodule
 codex
