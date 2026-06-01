@@ -122,8 +122,11 @@ fn resolve(
     }
 }
 
-/// Walk `PATH` looking for a `bash.exe` that is **not** the WSL one
-/// (which lives in `%SystemRoot%\System32`).
+/// Walk `PATH` looking for a `bash.exe` that is **not** the WSL one.
+///
+/// WSL ships two `bash.exe` shims that we must exclude:
+/// - `%SystemRoot%\System32\bash.exe`
+/// - `%LOCALAPPDATA%\Microsoft\WindowsApps\bash.exe`  (Windows 10+ shim)
 #[cfg(windows)]
 fn find_bash_on_path() -> Option<PathBuf> {
     std::env::var_os("PATH").and_then(|paths| {
@@ -131,8 +134,11 @@ fn find_bash_on_path() -> Option<PathBuf> {
             let bash = dir.join("bash.exe");
             if bash.is_file() {
                 let s = bash.to_string_lossy().to_lowercase();
-                // WSL bash is always under System32; exclude it.
-                if !s.contains("system32") && !s.contains(r"windows\system") {
+                // WSL bash shims live under System32 or WindowsApps; exclude both.
+                if !s.contains("system32")
+                    && !s.contains(r"windows\system")
+                    && !s.contains("windowsapps")
+                {
                     Some(bash)
                 } else {
                     None
