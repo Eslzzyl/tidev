@@ -384,7 +384,7 @@ async fn git_log(
             "log",
             &format!("--skip={}", skip),
             &format!("-{}", fetch),
-            "--format=%H|%an|%ai|%s",
+            "--format=%H|%an|%aI|%s",
         ],
         &cwd,
     )
@@ -444,7 +444,7 @@ async fn git_graph(
             "log",
             "--all",
             &format!("-{}", count),
-            "--format=%H|%P|%an|%ai|%s|%D",
+            "--format=%H|%P|%an|%aI|%s|%D",
         ],
         &cwd,
     )
@@ -500,7 +500,7 @@ async fn git_show_files(
     let cwd = workspace(&state).clone();
 
     // Get commit metadata
-    let info = run_git(&["log", "-1", "--format=%H|%an|%ai|%s", &sha], &cwd)
+    let info = run_git(&["log", "-1", "--format=%H|%an|%aI|%s", &sha], &cwd)
         .map_err(crate::error::AppError::Internal)?;
 
     let (author, date, message) = info
