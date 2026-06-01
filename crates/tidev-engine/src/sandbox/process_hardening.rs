@@ -131,6 +131,11 @@ mod tests {
 
     #[test]
     fn test_remove_dangerous_env_vars() {
+        // Save original PATH so we can restore it later — otherwise this test
+        // pollutes the process environment and breaks any test that needs to
+        // spawn an external program (e.g. snapshot tests that run git).
+        let original_path = std::env::var("PATH").ok();
+
         unsafe {
             std::env::set_var("LD_PRELOAD", "/evil.so");
         }
@@ -161,6 +166,13 @@ mod tests {
             std::env::remove_var("LD_PRELOAD");
             std::env::remove_var("LD_LIBRARY_PATH");
             std::env::remove_var("DYLD_INSERT_LIBRARIES");
+        }
+
+        // Restore original PATH to avoid polluting the process environment
+        // for subsequent tests (e.g. snapshot tests that need git).
+        match original_path {
+            Some(path) => unsafe { std::env::set_var("PATH", path); },
+            None => unsafe { std::env::remove_var("PATH"); },
         }
     }
 

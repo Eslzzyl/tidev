@@ -437,7 +437,10 @@ mod tests {
         fs::write(ws_path.join("AGENTS.md"), "# Root")?;
 
         let paths = system_paths(&ws_path, &ws_path, &[])?;
-        assert_eq!(paths, vec![ws_path.join("AGENTS.md").canonicalize()?]);
+        assert_eq!(
+            paths,
+            vec![canonicalize_display(&ws_path.join("AGENTS.md"))]
+        );
         Ok(())
     }
 
@@ -455,8 +458,8 @@ mod tests {
         assert_eq!(
             paths,
             vec![
-                ws_path.join("AGENTS.md").canonicalize()?,
-                gl_path.join("AGENTS.md").canonicalize()?,
+                canonicalize_display(&ws_path.join("AGENTS.md")),
+                canonicalize_display(&gl_path.join("AGENTS.md")),
             ],
         );
         Ok(())
@@ -491,12 +494,9 @@ mod tests {
         let paths = system_paths(ws_path, ws_path, &[])?;
         assert_eq!(
             paths,
-            vec![
-                ws_path
-                    .join(".github")
-                    .join("copilot-instructions.md")
-                    .canonicalize()?
-            ]
+            vec![canonicalize_display(
+                &ws_path.join(".github").join("copilot-instructions.md")
+            )]
         );
         Ok(())
     }
@@ -520,10 +520,9 @@ mod tests {
 
         let results = resolve_nearby_instructions(ws_path, cf_path, &subdir.join("file.rs"))?;
 
-        let expected_path = subdir
-            .join(".github")
-            .join("copilot-instructions.md")
-            .canonicalize()?;
+        let expected_path = canonicalize_display(
+            &subdir.join(".github").join("copilot-instructions.md"),
+        );
         // Use canonicalized path for content to match the function's output
         let expected_content = format!(
             "Instructions from: {}\n{}",
@@ -548,7 +547,7 @@ mod tests {
         fs::write(subdir.join("file.rs"), "let x = 1;")?;
 
         let results = resolve_nearby_instructions(ws_path, cf_path, &subdir.join("file.rs"))?;
-        let expected_path = ws_path.join("subdir").join("AGENTS.md").canonicalize()?;
+        let expected_path = canonicalize_display(&ws_path.join("subdir").join("AGENTS.md"));
         // Use canonicalized path for content format to match
         let expected_content = format!(
             "Instructions from: {}\n{}",

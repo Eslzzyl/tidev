@@ -488,7 +488,13 @@ mod tests {
     #[test]
     fn test_command_spec_shell() {
         let spec = CommandSpec::shell("echo hello", PathBuf::from("/tmp"), Duration::from_secs(30));
+        #[cfg(windows)]
+        assert_eq!(spec.program, "cmd");
+        #[cfg(not(windows))]
         assert_eq!(spec.program, "sh");
+        #[cfg(windows)]
+        assert_eq!(spec.args, vec!["/C", "echo hello"]);
+        #[cfg(not(windows))]
         assert_eq!(spec.args, vec!["-c", "echo hello"]);
         assert_eq!(spec.cwd, PathBuf::from("/tmp"));
         assert_eq!(spec.timeout, Duration::from_secs(30));
@@ -568,7 +574,13 @@ mod tests {
             assert!(env.program().contains("bwrap"));
         } else {
             // No sandbox available — falls through to plain execution
+            #[cfg(windows)]
+            assert_eq!(env.program(), "cmd");
+            #[cfg(not(windows))]
             assert_eq!(env.program(), "sh");
+            #[cfg(windows)]
+            assert_eq!(env.args(), &["/C", "ls"]);
+            #[cfg(not(windows))]
             assert_eq!(env.args(), &["-c", "ls"]);
         }
     }

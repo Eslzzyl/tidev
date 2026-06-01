@@ -231,8 +231,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let result = canonicalize_for_comparison(dir.path());
         assert!(result.is_absolute());
-        // Should be the real path (no symlink remains)
-        assert_eq!(fs::canonicalize(dir.path()).unwrap(), result);
+        // Should be the real path (no symlink remains).
+        // Use dunce::canonicalize to match the function's behaviour on
+        // Windows (where std::fs::canonicalize adds a \\?\ prefix that
+        // dunce strips).
+        assert_eq!(dunce::canonicalize(dir.path()).unwrap(), result);
     }
 
     #[cfg(unix)]
