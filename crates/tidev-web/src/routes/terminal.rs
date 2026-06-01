@@ -265,7 +265,7 @@ fn detect_shells() -> Vec<ShellEntry> {
             let path = format!("{}\\{}", dir, name);
             if std::path::Path::new(&path).exists() && !seen.contains(&path) {
                 let display_name = name.trim_end_matches(".exe").to_string();
-                shells.push(ShellEntry { path, name: display_name });
+                shells.push(ShellEntry { path: path.clone(), name: display_name });
                 seen.insert(path);
             }
         }
@@ -310,7 +310,7 @@ fn detect_shells() -> Vec<ShellEntry> {
             let path = format!("{}\\{}", dir, name);
             if std::path::Path::new(&path).exists() && !seen.contains(&path) {
                 let display_name = name.trim_end_matches(".exe").to_string();
-                shells.push(ShellEntry { path, name: display_name });
+                shells.push(ShellEntry { path: path.clone(), name: display_name });
                 seen.insert(path);
             }
         }
