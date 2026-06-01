@@ -132,6 +132,11 @@ impl AgentRuntime {
         {
             let shell = crate::shell::get();
             prompt.push_str(&format!("Shell: {}\n  ", shell.display_name));
+            if shell.display_name.starts_with("Bash") {
+                prompt.push_str(
+                    "Note: On Windows the shell tool uses Bash for POSIX command compatibility.\n  ",
+                );
+            }
         }
         prompt.push_str("\n</env>");
         prompt
