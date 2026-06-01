@@ -66,6 +66,38 @@ pub fn kill_all_children() {
     }
 }
 
+/// Kill a process group by its leader PID.
+///
+/// Uses two-phase termination (SIGTERM → brief wait → SIGKILL) to give
+/// the process and its descendants a chance to clean up (e.g. restore
+/// terminal settings) before being forcefully killed.
+///
+/// After `setsid()` in pre_exec, the child's PID equals its PGID
+/// (process group ID), so `kill(-pid, ...)` sends the signal to the
+/// entire process group — including any grandchildren (git, editor, pager).
+#[cfg(unix)]
+pub fn kill_process_group(pid: u32) {
+    unsafe {
+        let _ = libc::kill(-(pid as i32), libc::SIGTERM);
+    }
+    // Give them a moment to exit cleanly (restore terminal, etc.)
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    unsafe {
+        let _ = libc::kill(-(pid as i32), libc::SIGKILL);
+    }
+}
+
+/// Kill a process group by its leader PID (no-op on non-Unix).
+#[cfg(not(unix))]
+pub fn kill_process_group(pid: u32) {
+    // Fallback: just kill the individual process on non-Unix platforms.
+    // This won't kill grandchildren, but it's the best we can do without
+    // process group support.
+    let _ = std::process::Command::new("taskkill")
+        .args(["/F", "/T", "/PID", &pid.to_string()])
+        .output();
+}
+
 /// Kill all tracked child processes (no-op on non-Unix).
 #[cfg(not(unix))]
 pub fn kill_all_children() {
@@ -204,6 +236,7 @@ fn run_shell_inner(
         let mut cmd = std::process::Command::new(exec_env.program());
         cmd.args(exec_env.args())
             .current_dir(&exec_env.cwd)
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
@@ -247,6 +280,11 @@ fn run_shell_inner(
                         }
                     }
 
+                    // Detach from controlling terminal — create new session
+                    // and process group so the child cannot steal the TUI's
+                    // terminal or corrupt its settings.
+                    libc::setsid();
+
                     // Apply general process hardening
                     pre_exec_hardening()
                 });
@@ -265,6 +303,7 @@ fn run_shell_inner(
             all_args.push(&actual_command);
             cmd.args(&all_args)
                 .current_dir(workspace_root)
+                .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
 
@@ -280,6 +319,7 @@ fn run_shell_inner(
             cmd.arg("-lc")
                 .arg(&actual_command)
                 .current_dir(workspace_root)
+                .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
 
@@ -290,23 +330,18 @@ fn run_shell_inner(
             }
 
             // ── Layer 2: Disconnect from controlling terminal ──
-            // When sudo is active, create a new session (setsid) so the
-            // child process has no controlling terminal. This means
-            // open("/dev/tty") will fail with ENXIO, providing defense
-            // in depth against terminal corruption even if sudo somehow
-            // bypasses the ASKPASS mechanism.
-            //
+            // Create a new session (setsid) so the child process has no
+            // controlling terminal. This means open("/dev/tty") will fail
+            // with ENXIO, preventing the child from stealing the TUI's
+            // terminal or corrupting its settings.
             // This is done in pre_exec (after fork, before exec) so it
             // only affects the child process.
-            #[cfg(target_os = "macos")]
-            if _sudo_active {
-                unsafe {
-                    cmd.pre_exec(move || {
-                        // Create a new session, detaching from controlling terminal
-                        libc::setsid();
-                        Ok(())
-                    });
-                }
+            #[cfg(unix)]
+            unsafe {
+                cmd.pre_exec(move || {
+                    libc::setsid();
+                    Ok(())
+                });
             }
 
             cmd.spawn()
@@ -355,7 +390,9 @@ fn run_shell_inner(
             .as_ref()
             .is_some_and(|flag| flag.load(Ordering::SeqCst))
         {
-            let _ = process.kill();
+            // Kill the entire process group (PID == PGID after setsid())
+            // Two-phase: SIGTERM for graceful shutdown, then SIGKILL
+            kill_process_group(child_pid);
             let _ = process.wait();
             unregister_child(child_pid);
             return Err(anyhow::anyhow!("shell command cancelled"));
@@ -363,7 +400,9 @@ fn run_shell_inner(
 
         // Check timeout
         if start_time.elapsed() > timeout {
-            let _ = process.kill();
+            // Kill the entire process group (PID == PGID after setsid())
+            // Two-phase: SIGTERM for graceful shutdown, then SIGKILL
+            kill_process_group(child_pid);
             let _ = process.wait();
             unregister_child(child_pid);
             return Err(anyhow::anyhow!(

@@ -314,6 +314,12 @@ struct App {
     notifications: notifications::NotificationManager,
     /// Whether the input is in shell command mode (triggered by `!` prefix).
     shell_mode: bool,
+    /// PID of the child process running a `!` shell command, if any.
+    /// Used to abort the command when the user presses Esc.
+    shell_child_pid: Option<u32>,
+    /// Shared kill flag for the `!` shell command thread.
+    /// Set to true when the user wants to abort the running command.
+    shell_kill_flag: Option<Arc<std::sync::atomic::AtomicBool>>,
     /// DeepSeek thinking level for the current model
     thinking_level: tidev_engine::config::reasoning::ThinkingLevelType,
     /// Cross-session memory store

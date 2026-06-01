@@ -25,6 +25,7 @@ diffy = "0.5.0"
 dirs = "6.0.0"
 fancy-regex = "0.18.0"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
+libc = "0.2"
 lru = "0.18.0"
 pulldown-cmark = "0.13.4"
 ratatui = "0.30.0"

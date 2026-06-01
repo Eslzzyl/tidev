@@ -3,6 +3,14 @@ use super::*;
 use crate::App;
 use tidev_session::session::{BackendEvent, Message, MessageRole};
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+use std::{
+    io::Read,
+    process::{Command, Stdio},
+    sync::atomic::{AtomicBool, Ordering},
+};
+
 impl App {
     pub(crate) fn handle_key_event(&mut self, key: KeyEvent, runtime: &Runtime) -> Result<()> {
         log::debug!(
@@ -419,9 +427,27 @@ impl App {
 
         // Handle shell mode Esc before composer processing
         if self.shell_mode && key.code == KeyCode::Esc {
+            // If a shell command is still running, kill it
+            if let Some(pid) = self.shell_child_pid.take() {
+                // Signal the background thread to stop
+                if let Some(flag) = self.shell_kill_flag.take() {
+                    flag.store(true, Ordering::SeqCst);
+                }
+                // Kill the process group (PID == PGID after process_group(0))
+                tidev_engine::tooling::builtin::kill_process_group(pid);
+                // Send a cancellation event so the streaming message is closed
+                let _ = self.backend_tx.send(BackendEvent::ShellOutput {
+                    session_id: self.conversation.session_id,
+                    content: "Command cancelled".to_string(),
+                    finished: true,
+                    exit_code: None,
+                });
+                self.last_notice = Some("Shell command cancelled".to_string());
+            } else {
+                self.last_notice = Some("Exited shell mode".to_string());
+            }
             self.shell_mode = false;
             self.composer.clear();
-            self.last_notice = Some("Exited shell mode".to_string());
             self.command_palette
                 .sync(self.composer.text(), &self.commands);
             return Ok(());
@@ -447,6 +473,15 @@ impl App {
         // Exit shell mode if the composer becomes empty (e.g., user cleared it)
         if self.shell_mode && self.composer.is_empty() {
             self.shell_mode = false;
+            // Clean up any running shell child (e.g., if user cleared the input
+            // while a command was still executing). The kill flag signals the
+            // background thread, and the process group kill handles orphans.
+            if let Some(pid) = self.shell_child_pid.take() {
+                if let Some(flag) = self.shell_kill_flag.take() {
+                    flag.store(true, Ordering::SeqCst);
+                }
+                tidev_engine::tooling::builtin::kill_process_group(pid);
+            }
         }
 
         // Ensure cursor is visible after any key handling
@@ -538,6 +573,8 @@ impl App {
     ) -> Result<()> {
         if self.shell_mode {
             self.shell_mode = false;
+            // Clean up any previously running shell command before starting a new one
+            self.cleanup_shell_child();
             return self.execute_shell_command(submission.trim(), runtime);
         }
 
@@ -573,49 +610,166 @@ impl App {
         // Don't persist yet; will be persisted when output finishes
         self.scroll_messages_to_bottom();
 
-        // Clone what we need for the async task
-        let session_id = self.conversation.session_id;
-        let tx = self.backend_tx.clone();
+        let (shell, arg) = shell_command();
         let command_owned = command.to_string();
 
-        runtime.spawn(async move {
-            let (shell, arg) = shell_command();
-            let output = match std::process::Command::new(shell)
-                .arg(arg)
-                .arg(&command_owned)
-                .output()
-            {
-                Ok(output) => output,
-                Err(error) => {
+        // Spawn the process synchronously to capture its PID.
+        // We close stdin so interactive commands get EOF immediately
+        // instead of blocking forever reading from the TUI's terminal.
+        // On Unix, we also isolate the process in its own process group
+        // so we can kill it and its descendants when the user presses Esc.
+        let mut cmd = Command::new(shell);
+        cmd.arg(arg)
+            .arg(&command_owned)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(unix)]
+        cmd.process_group(0); // New process group for isolation
+
+        let mut child = match cmd.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                self.last_notice = Some(format!("Failed to execute command: {error}"));
+                let _ = self.backend_tx.send(BackendEvent::ShellOutput {
+                    session_id: self.conversation.session_id,
+                    content: format!("Failed to execute command: {error}"),
+                    finished: true,
+                    exit_code: None,
+                });
+                return Ok(());
+            }
+        };
+
+        let child_pid = child.id();
+        let kill_flag = Arc::new(AtomicBool::new(false));
+        self.shell_child_pid = Some(child_pid);
+        self.shell_kill_flag = Some(kill_flag.clone());
+
+        // Clone what we need for the background blocking task.
+        // We use spawn_blocking (not spawn) so the synchronous wait
+        // for the process runs on tokio's dedicated blocking thread
+        // pool, not on a worker thread.
+        let session_id = self.conversation.session_id;
+        let tx = self.backend_tx.clone();
+
+        runtime.spawn_blocking(move || {
+            // Save terminal settings so we can restore raw mode after
+            // the command exits, even if it corrupted the terminal.
+            let _termios_guard = TermiosGuard::save(0);
+
+            // Read stdout/stderr in a separate thread so we can
+            // periodically check the kill flag while output trickles in.
+            let (out_tx, out_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+            if let Some(stdout) = child.stdout.take() {
+                std::thread::spawn(move || {
+                    let mut reader = stdout;
+                    let mut buf = [0u8; 8192];
+                    loop {
+                        match reader.read(&mut buf) {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                if out_tx.send(buf[..n].to_vec()).is_err() {
+                                    break;
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                });
+            }
+
+            // Also read stderr
+            let (err_tx, err_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+            if let Some(stderr) = child.stderr.take() {
+                std::thread::spawn(move || {
+                    let mut reader = stderr;
+                    let mut buf = [0u8; 8192];
+                    loop {
+                        match reader.read(&mut buf) {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                if err_tx.send(buf[..n].to_vec()).is_err() {
+                                    break;
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                });
+            }
+
+            // Accumulate output
+            let mut stdout_buf = Vec::new();
+            let mut stderr_buf = Vec::new();
+            let mut stdout_done = false;
+            let mut stderr_done = false;
+
+            // Main loop: check kill flag, read output chunks
+            loop {
+                // Check if user pressed Esc to cancel
+                if kill_flag.load(Ordering::SeqCst) {
+                    tidev_engine::tooling::builtin::kill_process_group(child_pid);
+                    let _ = child.wait();
                     let _ = tx.send(BackendEvent::ShellOutput {
                         session_id,
-                        content: format!("Failed to execute command: {error}"),
+                        content: "Command cancelled".to_string(),
                         finished: true,
                         exit_code: None,
                     });
                     return;
                 }
-            };
-            let exit_code = output.status.code();
+
+                // Read stdout chunk
+                if !stdout_done {
+                    match out_rx.recv_timeout(Duration::from_millis(100)) {
+                        Ok(chunk) => stdout_buf.extend_from_slice(&chunk),
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                            stdout_done = true;
+                        }
+                    }
+                }
+
+                // Read stderr chunk
+                if !stderr_done {
+                    match err_rx.recv_timeout(Duration::from_millis(0)) {
+                        Ok(chunk) => stderr_buf.extend_from_slice(&chunk),
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                            stderr_done = true;
+                        }
+                    }
+                }
+
+                if stdout_done && stderr_done {
+                    break;
+                }
+            }
+
+            // Process has exited
+            let status = child.wait().ok();
+            let exit_code = status.and_then(|s| s.code());
+
+            // Build output string
+            let stdout_str = String::from_utf8_lossy(&stdout_buf).trim_end().to_string();
+            let stderr_str = String::from_utf8_lossy(&stderr_buf).trim_end().to_string();
             let mut content = String::new();
-            if output.status.success() {
-                content = String::from_utf8_lossy(&output.stdout)
-                    .trim_end()
-                    .to_string();
+
+            if exit_code == Some(0) {
+                content = stdout_str;
                 if content.is_empty() {
-                    content = String::from_utf8_lossy(&output.stderr)
-                        .trim_end()
-                        .to_string();
+                    content = stderr_str;
                 }
             } else {
-                if !output.stdout.is_empty() {
-                    content.push_str(String::from_utf8_lossy(&output.stdout).trim_end());
+                if !stdout_str.is_empty() {
+                    content.push_str(&stdout_str);
                 }
-                if !output.stderr.is_empty() {
+                if !stderr_str.is_empty() {
                     if !content.is_empty() {
                         content.push('\n');
                     }
-                    content.push_str(String::from_utf8_lossy(&output.stderr).trim_end());
+                    content.push_str(&stderr_str);
                 }
             }
 
@@ -643,6 +797,20 @@ impl App {
         });
 
         Ok(())
+    }
+
+    /// Clean up any running shell child process.
+    /// Called before starting a new shell command or when exiting shell mode.
+    fn cleanup_shell_child(&mut self) {
+        if let Some(pid) = self.shell_child_pid.take() {
+            // Signal the background thread to stop
+            if let Some(flag) = self.shell_kill_flag.take() {
+                flag.store(true, Ordering::SeqCst);
+            }
+            // Kill the process group (PID == PGID after process_group(0))
+            tidev_engine::tooling::builtin::kill_process_group(pid);
+        }
+        self.shell_kill_flag = None;
     }
 
     pub(crate) fn handle_text_paste(&mut self, text: &str) -> Result<()> {
@@ -791,5 +959,46 @@ fn shell_command() -> (&'static str, &'static str) {
         ("powershell", "-Command")
     } else {
         ("sh", "-c")
+    }
+}
+
+/// Guard that restores terminal settings on drop.
+///
+/// Saves the current termios for a given fd (typically stdin = fd 0) and
+/// restores it when the guard goes out of scope. This ensures that even
+/// if a `!` shell command corrupts terminal settings (e.g. via `/dev/tty`),
+/// the TUI's raw mode is restored after the command completes or is cancelled.
+#[cfg(unix)]
+struct TermiosGuard {
+    saved: libc::termios,
+    fd: std::os::unix::io::RawFd,
+}
+
+#[cfg(unix)]
+impl TermiosGuard {
+    fn save(fd: std::os::unix::io::RawFd) -> Self {
+        let mut saved: libc::termios = unsafe { std::mem::zeroed() };
+        // Best-effort: if tcgetattr fails, saved is zeroed which will
+        // likely produce a no-op or safe restore on tcsetattr.
+        unsafe { libc::tcgetattr(fd, &mut saved); }
+        Self { saved, fd }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for TermiosGuard {
+    fn drop(&mut self) {
+        unsafe { libc::tcsetattr(self.fd, libc::TCSANOW, &self.saved); }
+    }
+}
+
+/// No-op guard on non-Unix platforms.
+#[cfg(not(unix))]
+struct TermiosGuard;
+
+#[cfg(not(unix))]
+impl TermiosGuard {
+    fn save(_fd: i32) -> Self {
+        Self
     }
 }

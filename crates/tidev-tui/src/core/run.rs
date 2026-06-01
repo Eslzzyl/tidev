@@ -320,6 +320,8 @@ impl App {
             balance_panel: Arc::new(Mutex::new(None)),
             notifications,
             shell_mode: false,
+            shell_child_pid: None,
+            shell_kill_flag: None,
             thinking_level: active_model.thinking_level.clone(),
             memory_store,
             memory_panel: None,

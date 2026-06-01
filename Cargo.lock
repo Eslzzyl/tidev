@@ -4186,6 +4186,7 @@ dependencies = [
  "dirs",
  "fancy-regex 0.18.0",
  "image",
+ "libc",
  "log",
  "lru 0.18.0",
  "pulldown-cmark",
