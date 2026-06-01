@@ -235,6 +235,7 @@ mod tests {
         assert_eq!(fs::canonicalize(dir.path()).unwrap(), result);
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_canonicalize_for_comparison_symlink() {
         let dir = tempdir().unwrap();
@@ -285,6 +286,7 @@ mod tests {
         assert!(result.is_err(), "path escaping via .. should be blocked");
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_resolve_workspace_path_symlink_escape_blocked() {
         let dir = tempdir().unwrap();
@@ -302,6 +304,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_resolve_workspace_path_symlink_to_outside_non_existent() {
         let dir = tempdir().unwrap();
@@ -319,6 +322,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_resolve_workspace_path_workspace_root_is_symlink() {
         let dir = tempdir().unwrap();
@@ -369,6 +373,7 @@ mod tests {
         assert!(is_path_outside_workspace(&ws, Path::new("../outside.txt")));
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_is_path_outside_symlink_escape() {
         let dir = tempdir().unwrap();
@@ -388,6 +393,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_is_path_outside_symlink_inside_not_detected() {
         let dir = tempdir().unwrap();

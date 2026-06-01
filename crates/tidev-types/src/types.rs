@@ -4,8 +4,8 @@
 //! when the workspace is split.
 
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use uuid::Uuid;
-
 // ── Permission types (originally split across config + tooling) ─────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -138,14 +138,17 @@ impl GoalStatus {
             GoalStatus::Complete => "complete",
         }
     }
+}
 
-    /// Parse from the database string representation.
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for GoalStatus {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "active" => Some(GoalStatus::Active),
-            "paused" => Some(GoalStatus::Paused),
-            "complete" => Some(GoalStatus::Complete),
-            _ => None,
+            "active" => Ok(GoalStatus::Active),
+            "paused" => Ok(GoalStatus::Paused),
+            "complete" => Ok(GoalStatus::Complete),
+            _ => Err("unknown goal status"),
         }
     }
 }

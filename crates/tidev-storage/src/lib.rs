@@ -13,6 +13,7 @@ use rusqlite::{
 use std::{
     fs,
     path::{Path, PathBuf},
+    str::FromStr,
     sync::{Arc, Mutex},
     time::Duration,
 };
