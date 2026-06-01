@@ -21,7 +21,7 @@ pub struct LogConfig {
 }
 
 fn default_enabled() -> bool {
-    false
+    true
 }
 
 fn default_level() -> String {
@@ -47,7 +47,7 @@ fn default_max_request_files() -> usize {
 impl Default for LogConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             level: "INFO".to_string(),
             max_size_mb: 10,
             max_files: 5,
