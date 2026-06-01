@@ -684,6 +684,7 @@ impl Default for NotificationConfig {
 /// available shell (Git Bash / MSYS2 bash > PowerShell) on first use
 /// and persists the result to the config file.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct ShellConfig {
     /// Path or name of the shell executable on Windows.
     ///
@@ -703,14 +704,6 @@ pub struct ShellConfig {
     pub terminal_shell: Option<String>,
 }
 
-impl Default for ShellConfig {
-    fn default() -> Self {
-        Self {
-            windows_shell: None,
-            terminal_shell: None,
-        }
-    }
-}
 
 impl AppConfig {
     pub fn load_or_create(paths: &ConfigPaths) -> Result<Self> {

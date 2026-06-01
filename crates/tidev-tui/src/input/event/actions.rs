@@ -448,7 +448,7 @@ impl App {
     pub(crate) fn close_settings_panel(&mut self, _apply: bool) -> Result<()> {
         if let Some(panel) = self.settings_panel.take() {
             let mut cfg = self.config.write().unwrap();
-            panel.apply_to_config(&mut *cfg);
+            panel.apply_to_config(&mut cfg);
             cfg.save(&self.paths)?;
         }
         Ok(())

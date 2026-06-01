@@ -1194,14 +1194,14 @@ impl App {
                                     .agent
                                     .models
                                     .get(&tab.agent_type_str)
-                                    .map_or(false, |m| *m == model_label)
+                                    .is_some_and(|m| *m == model_label)
                                 && tidev_engine::config::reasoning::ThinkingMatcher::match_for_model(
                                     &summary.model_id,
                                 )
                                 .is_supported()
                             {
                                 let tl_level =
-                                tl_str.rsplit_once(':').map(|(_, v)| v).unwrap_or(&tl_str);                                Some(tl_level.to_string())
+                                tl_str.rsplit_once(':').map(|(_, v)| v).unwrap_or(tl_str);                                Some(tl_level.to_string())
                             } else {
                                 None
                             }

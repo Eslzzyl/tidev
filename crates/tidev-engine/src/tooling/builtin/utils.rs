@@ -36,10 +36,7 @@ pub fn canonicalize_display(path: &Path) -> PathBuf {
 ///
 /// Returns the canonical path on success, or the original path as a last resort.
 pub fn canonicalize_for_comparison(path: &Path) -> PathBuf {
-    match dunce::canonicalize(path) {
-        Ok(canonical) => return canonical,
-        Err(_) => {}
-    }
+    if let Ok(canonical) = dunce::canonicalize(path) { return canonical }
 
     // Walk up ancestors until we find one that exists, then append the
     // non-existent components we peeled off.

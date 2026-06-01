@@ -83,7 +83,7 @@ impl SystemInfo {
 fn detect_os_type() -> OsType {
     #[cfg(target_os = "windows")]
     {
-        return OsType::Windows;
+        OsType::Windows
     }
 
     #[cfg(target_os = "macos")]

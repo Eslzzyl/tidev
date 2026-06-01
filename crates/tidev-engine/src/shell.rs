@@ -88,7 +88,7 @@ fn resolve(
         return ResolvedShell {
             program: shell,
             arg,
-            display_name: format!("custom shell"),
+            display_name: "custom shell".to_string(),
         };
     }
 

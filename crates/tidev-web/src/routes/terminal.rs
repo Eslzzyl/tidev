@@ -230,8 +230,8 @@ fn detect_shells() -> Vec<ShellEntry> {
     let mut seen = HashSet::new();
 
     // 1. Always include ComSpec (the standard Windows default shell env var) first
-    if let Ok(s) = std::env::var("ComSpec") {
-        if !s.is_empty() && std::path::Path::new(&s).exists() && !seen.contains(&s) {
+    if let Ok(s) = std::env::var("ComSpec")
+        && !s.is_empty() && std::path::Path::new(&s).exists() && !seen.contains(&s) {
             let name = std::path::Path::new(&s)
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
@@ -239,11 +239,10 @@ fn detect_shells() -> Vec<ShellEntry> {
             shells.push(ShellEntry { path: s.clone(), name });
             seen.insert(s);
         }
-    }
 
     // 2. Include $SHELL if set (may be used by MSYS2/Cygwin environments)
-    if let Ok(s) = std::env::var("SHELL") {
-        if !s.is_empty() && std::path::Path::new(&s).exists() && !seen.contains(&s) {
+    if let Ok(s) = std::env::var("SHELL")
+        && !s.is_empty() && std::path::Path::new(&s).exists() && !seen.contains(&s) {
             let name = std::path::Path::new(&s)
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
@@ -251,7 +250,6 @@ fn detect_shells() -> Vec<ShellEntry> {
             shells.push(ShellEntry { path: s.clone(), name });
             seen.insert(s);
         }
-    }
 
     // 3. System-known shells from PATH (where we can resolve them)
     let path_dirs = std::env::var("PATH").unwrap_or_default();
