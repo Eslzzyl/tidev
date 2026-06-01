@@ -183,9 +183,26 @@ pub(super) fn render_assistant_body_lines(
             .unwrap_or_else(|| ctx.conversation.model_display_name.clone());
 
         let duration = message.completed_at.map(|completed| {
-            let elapsed = completed - message.created_at;
-            let secs = elapsed.as_seconds_f64();
-            format!("{:.1}s", secs)
+            let start_at = ctx.conversation
+                .messages
+                .iter()
+                .take_while(|m| m.id != message.id)
+                .filter(|m| m.role == MessageRole::User)
+                .last()
+                .map(|m| m.created_at)
+                .unwrap_or(message.created_at);
+            let elapsed = completed - start_at;
+            let total_secs = elapsed.as_seconds_f64().max(0.0) as u64;
+            let hours = total_secs / 3600;
+            let minutes = (total_secs % 3600) / 60;
+            let seconds = total_secs % 60;
+            if hours > 0 {
+                format!("{}h {}min {}s", hours, minutes, seconds)
+            } else if minutes > 0 {
+                format!("{}min {}s", minutes, seconds)
+            } else {
+                format!("{}s", seconds)
+            }
         });
 
         let end_time = message.completed_at.map(|completed| {
