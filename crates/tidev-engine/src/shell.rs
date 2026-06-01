@@ -122,32 +122,60 @@ fn resolve(
     }
 }
 
-/// Walk `PATH` looking for a `bash.exe` that is **not** the WSL one.
+/// Walk `PATH` and common install directories for a `bash.exe` that is
+/// **not** the WSL one.
 ///
 /// WSL ships two `bash.exe` shims that we must exclude:
 /// - `%SystemRoot%\System32\bash.exe`
 /// - `%LOCALAPPDATA%\Microsoft\WindowsApps\bash.exe`  (Windows 10+ shim)
 #[cfg(windows)]
 fn find_bash_on_path() -> Option<PathBuf> {
-    std::env::var_os("PATH").and_then(|paths| {
-        std::env::split_paths(&paths).find_map(|dir| {
+    /// Return `true` if the path points to a real bash (not a WSL shim).
+    fn is_real_bash(path: &std::path::Path) -> bool {
+        if !path.is_file() {
+            return false;
+        }
+        let s = path.to_string_lossy().to_lowercase();
+        // WSL bash shims live under System32 or WindowsApps; exclude both.
+        !s.contains("system32")
+            && !s.contains(r"windows\system")
+            && !s.contains("windowsapps")
+    }
+
+    // 1. Search PATH directories.
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
             let bash = dir.join("bash.exe");
-            if bash.is_file() {
-                let s = bash.to_string_lossy().to_lowercase();
-                // WSL bash shims live under System32 or WindowsApps; exclude both.
-                if !s.contains("system32")
-                    && !s.contains(r"windows\system")
-                    && !s.contains("windowsapps")
-                {
-                    Some(bash)
-                } else {
-                    None
-                }
-            } else {
-                None
+            if is_real_bash(&bash) {
+                return Some(bash);
             }
-        })
-    })
+        }
+    }
+
+    // 2. Search common install directories (Git Bash, MSYS2, Cygwin).
+    let pf = std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".to_string());
+    let pf86 =
+        std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| "C:\\Program Files (x86)".to_string());
+
+    let candidates = [
+        format!("{pf}\\Git\\bin"),
+        format!("{pf}\\Git\\usr\\bin"),
+        format!("{pf86}\\Git\\bin"),
+        format!("{pf86}\\Git\\usr\\bin"),
+        "C:\\msys64\\usr\\bin".into(),
+        "C:\\tools\\msys64\\usr\\bin".into(),
+        "C:\\cygwin64\\bin".into(),
+        "C:\\cygwin\\bin".into(),
+    ];
+
+    for dir in &candidates {
+        let bash = std::path::Path::new(dir).join("bash.exe");
+        if is_real_bash(&bash) {
+            return Some(bash);
+        }
+    }
+
+    None
 }
 
 /// Infer the shell argument (`-lc`, `-NoProfile -Command`, `/C`, …) from
