@@ -299,6 +299,17 @@ max_output_tokens = 32768
 supports_streaming = true
 supports_images = false
 
+[providers.opencode-go.minimax-m-3]
+api_type = "anthropic"
+base_url = "https://opencode.ai/zen/go/v1/messages"
+request_model_id = "minimax-m3"
+display_name = "MiniMax-M3"
+context_window = 1048576
+max_output_tokens = 131072
+supports_streaming = true
+supports_images = true
+
+
 [providers.opencode-go.qwen-3-6-plus]
 api_type = "anthropic"
 base_url = "https://opencode.ai/zen/go/v1/messages"
