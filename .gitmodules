@@ -14,7 +14,4 @@
 	path = opencode-dynamic-context-pruning
 	url = https://github.com/Opencode-DCP/opencode-dynamic-context-pruning.git
 	shallow = true
-[submodule "DeepSeek-Reasonix"]
-	path = DeepSeek-Reasonix
-	url = https://github.com/esengine/DeepSeek-Reasonix.git
-	shallow = true
+
