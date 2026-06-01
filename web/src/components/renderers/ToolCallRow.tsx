@@ -21,6 +21,7 @@ import { CodeLinesRenderer } from "./CodeLinesRenderer";
 import { TodoRenderer } from "./TodoRenderer";
 import { JsonTreeView } from "../ui/JsonTreeView";
 import { SubagentCard } from "./SubagentCard";
+import { useSessionStore } from "../../stores/useSessionStore";
 
 interface Props {
   entry: ToolCallEntry;
@@ -123,23 +124,63 @@ function getToolLabel(name: string): string {
   }
 }
 
+/**
+ * Strip the Windows \\?\ extended-length prefix if present.
+ */
+function stripWindowsPrefix(p: string): string {
+  return p.replace(/^\\\\\?\\/, "");
+}
+
+/**
+ * Convert an absolute path to a workspace-relative path for display.
+ * If the path is already relative or outside the workspace, returns it as-is.
+ */
+function toRelativePath(path: string, workspaceRoot: string): string {
+  if (!path || !workspaceRoot) return path;
+
+  const cleanPath = stripWindowsPrefix(path);
+  const cleanRoot = stripWindowsPrefix(workspaceRoot);
+
+  // Normalise separators for Windows (both \ and /)
+  const normalizedPath = cleanPath.replace(/\\/g, "/");
+  const normalizedRoot = cleanRoot.replace(/\\/g, "/");
+
+  // If the path starts with the workspace root, strip it
+  const rootWithSlash = normalizedRoot.endsWith("/")
+    ? normalizedRoot
+    : normalizedRoot + "/";
+  if (normalizedPath.startsWith(rootWithSlash)) {
+    return normalizedPath.slice(rootWithSlash.length);
+  }
+  if (normalizedPath === normalizedRoot) {
+    return ".";
+  }
+
+  return path; // Outside workspace or already relative — show as-is
+}
+
 function summarizeArguments(name: string, entry: ToolCallEntry): string {
   try {
     const args = JSON.parse(entry.arguments);
+    // Get the workspace root from the store for relative path display
+    const workspaceRoot =
+      useSessionStore.getState().currentSession?.workspace_root ?? "";
+
     switch (name) {
       case "read":
       case "write":
       case "edit": {
-        return args.file_path || "(unknown)";
+        return toRelativePath(args.file_path || "(unknown)", workspaceRoot);
       }
       case "grep": {
         const pattern = args.pattern || "";
-        const path = args.path || ".";
+        const path = toRelativePath(args.path || ".", workspaceRoot);
         return pattern ? `"${pattern}" in ${path}` : path;
       }
       case "glob": {
         const pattern = args.pattern || "*";
-        return `${pattern}`;
+        const path = toRelativePath(args.path || ".", workspaceRoot);
+        return `${pattern} in ${path}`;
       }
       case "bash": {
         return args.command || "(no command)";

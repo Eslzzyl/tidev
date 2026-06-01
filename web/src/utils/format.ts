@@ -124,15 +124,41 @@ export function stripSystemReminderTags(text: string): string {
 }
 
 /**
- * Format workspace path (replace home with ~)
+ * Format workspace path (replace home with ~, strip Windows \\?\ prefix)
  */
 export function formatWorkspace(path: string): string {
   if (!path) return "-";
-  if (path.startsWith("/home/") || path.startsWith("/Users/")) {
-    const parts = path.split("/");
-    if (parts.length >= 3) {
-      return "~/" + parts.slice(3).join("/");
-    }
+
+  // Strip Windows \\?\ extended-length prefix
+  let cleaned = path.replace(/^\\\\\?\\/, "");
+
+  // Replace home directory with ~ on any platform
+  // On Unix: /home/user/... → ~/...
+  // On Windows: C:\Users\user\... → ~\...
+  const home = getHomeDir();
+  if (home && cleaned.startsWith(home)) {
+    return "~" + cleaned.slice(home.length);
   }
-  return path;
+
+  return cleaned;
+}
+
+/** Get the home directory path, cross-platform */
+function getHomeDir(): string | null {
+  try {
+    // Works in Node/ browser environments where process is polyfilled
+    if (typeof process !== "undefined" && process.env?.HOME) {
+      return process.env.HOME;
+    }
+    if (typeof process !== "undefined" && process.env?.USERPROFILE) {
+      return process.env.USERPROFILE;
+    }
+    // Fallback for browsers: combine HOMEDRIVE + HOMEPATH
+    if (typeof process !== "undefined" && process.env?.HOMEDRIVE && process.env?.HOMEPATH) {
+      return process.env.HOMEDRIVE + process.env.HOMEPATH;
+    }
+  } catch {
+    // Ignore errors in environments where process is not defined
+  }
+  return null;
 }

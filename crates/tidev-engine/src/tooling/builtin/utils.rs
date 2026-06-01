@@ -159,8 +159,15 @@ pub fn resolve_path_unchecked(workspace_root: &Path, candidate: &Path) -> Result
 /// Display a path relative to the workspace root.
 /// If the path is outside the workspace, returns the full path.
 /// If the path equals the workspace root, returns ".".
+///
+/// Both paths are canonicalized for display (stripping the Windows `\\?\`
+/// prefix) before comparison, so that paths from different sources
+/// (e.g. [`std::env::current_dir`] vs [`std::fs::canonicalize`]) can
+/// be compared reliably.
 pub fn display_workspace_relative(workspace_root: &Path, path: &Path) -> String {
-    let relative = path.strip_prefix(workspace_root).unwrap_or(path);
+    let root = canonicalize_display(workspace_root);
+    let canonical_path = canonicalize_display(path);
+    let relative = canonical_path.strip_prefix(&root).unwrap_or(path);
     if relative.as_os_str().is_empty() {
         ".".to_string()
     } else {

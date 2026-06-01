@@ -60,7 +60,8 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     let workspace_root = options
         .workspace_root
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let workspace_root = workspace_root.canonicalize().unwrap_or(workspace_root);
+    let workspace_root =
+        tidev_engine::tooling::builtin::utils::canonicalize_display(&workspace_root);
 
     // Load project-local config overlay (`.tidev/config.toml`)
     let project_config_path = workspace_root.join(".tidev/config.toml");
