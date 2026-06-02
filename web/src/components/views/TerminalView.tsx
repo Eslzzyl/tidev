@@ -266,9 +266,9 @@ function TerminalViewport({ tab, isDark }: TerminalViewportProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const bufferRef = useRef<string>("");
   const connRef = useRef<TerminalConnection | null>(null);
-  const initStartedRef = useRef(false);
+  /** Guards against duplicate HTTP start in StrictMode double-mount. */
+  const httpStartedRef = useRef(false);
 
   const startSession = useTerminalStore((s) => s.startSession);
 
@@ -276,6 +276,14 @@ function TerminalViewport({ tab, isDark }: TerminalViewportProps) {
   useEffect(() => {
     if (!terminalRef.current) return;
     if (xtermRef.current) return;
+
+    // ★ Optimization: kick off HTTP POST immediately with default 80×24,
+    // so PTY creation runs in parallel with xterm initialization.
+    // The actual size will be sent via WebSocket resize once xterm is ready.
+    if (!tab.connection && !httpStartedRef.current) {
+      httpStartedRef.current = true;
+      startSession(tab.id, 80, 24);
+    }
 
     const term = new Terminal({
       cursorBlink: true,
@@ -303,7 +311,8 @@ function TerminalViewport({ tab, isDark }: TerminalViewportProps) {
       }
     });
 
-    // Fit terminal to container and notify backend.
+    // Fit terminal and send resize if connection is ready.
+    // This is called on first paint (rAF) and on every resize.
     const fitAndInit = () => {
       try {
         fitAddon.fit();
@@ -311,32 +320,22 @@ function TerminalViewport({ tab, isDark }: TerminalViewportProps) {
         const rows = term.rows;
         if (cols <= 0 || rows <= 0) return;
 
-        if (!initStartedRef.current) {
-          initStartedRef.current = true;
-          if (tab.connection) {
-            // Connection already created and connect() called by store.
-            // Set ref, register live handler, and send initial resize.
-            connRef.current = tab.connection;
-            tab.connection.onMessage(liveHandler);
-            tab.connection.sendMessage("resize", rows, cols);
-          } else {
-            // Start server session + create connection
-            startSession(tab.id, cols, rows);
-          }
-        } else {
-          // Already initialized — send resize via connection
-          const conn = connRef.current;
-          if (conn) {
-            conn.sendMessage("resize", rows, cols);
-          }
+        // Send current actual size to the PTY
+        const conn = connRef.current;
+        if (conn) {
+          conn.sendMessage("resize", rows, cols);
         }
+        // If connection not ready yet, resize will be sent by
+        // the connection-watcher effect when it arrives.
       } catch {
         // Fit errors are non-fatal
       }
     };
 
-    // Wait a tick for layout to settle
-    const initTimer = setTimeout(fitAndInit, 50);
+    // ★ Optimization: use rAF (~16ms) instead of setTimeout(50ms)
+    const rafId = requestAnimationFrame(() => {
+      fitAndInit();
+    });
 
     // Observe container for future resize
     const resizeObserver = new ResizeObserver(() => {
@@ -345,7 +344,7 @@ function TerminalViewport({ tab, isDark }: TerminalViewportProps) {
     resizeObserver.observe(terminalRef.current);
 
     return () => {
-      clearTimeout(initTimer);
+      cancelAnimationFrame(rafId);
       resizeObserver.disconnect();
       // Remove message handlers from connection
       const conn = connRef.current;
@@ -356,7 +355,6 @@ function TerminalViewport({ tab, isDark }: TerminalViewportProps) {
       term.dispose();
       xtermRef.current = null;
       fitAddonRef.current = null;
-      initStartedRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -381,13 +379,15 @@ function TerminalViewport({ tab, isDark }: TerminalViewportProps) {
 
     connRef.current = conn;
 
-    // If xterm is already ready, replay buffer and connect live handler
+    // If xterm is already ready, register live handler and send
+    // the actual terminal size (may correct default 80×24 used in
+    // the parallel HTTP start).
     if (xtermRef.current) {
-      // Replay buffered output from the connection
       const term = xtermRef.current;
-      if (bufferRef.current) {
-        term.write(bufferRef.current);
-        bufferRef.current = "";
+      const cols = term.cols;
+      const rows = term.rows;
+      if (cols > 0 && rows > 0) {
+        conn.sendMessage("resize", rows, cols);
       }
 
       // Switch to live handler
