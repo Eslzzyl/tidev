@@ -683,8 +683,7 @@ impl Default for NotificationConfig {
 /// When `windows_shell` is `None`, the engine auto-detects the best
 /// available shell (Git Bash / MSYS2 bash > PowerShell) on first use
 /// and persists the result to the config file.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct ShellConfig {
     /// Path or name of the shell executable on Windows.
     ///
@@ -703,7 +702,6 @@ pub struct ShellConfig {
     #[serde(default)]
     pub terminal_shell: Option<String>,
 }
-
 
 impl AppConfig {
     pub fn load_or_create(paths: &ConfigPaths) -> Result<Self> {

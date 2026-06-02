@@ -139,12 +139,7 @@ impl App {
             // Compute actual wrapped line count per visible queued prompt
             let text_width = main_area.width.saturating_sub(5).max(1) as usize;
             let mut inner: usize = 0;
-            for (i, queued) in self
-                .pending_prompt_queue
-                .iter()
-                .take(visible)
-                .enumerate()
-            {
+            for (i, queued) in self.pending_prompt_queue.iter().take(visible).enumerate() {
                 let wrapped = wrap_text_lines(&queued.prompt, text_width, MAX_QUEUED_PROMPT_LINES);
                 inner += wrapped.len();
                 // Separator between items (not after last)
@@ -411,7 +406,12 @@ impl App {
             let render_height = row_height.min(available);
 
             // Record bounds for hover hit-testing
-            let row_rect = Rect::new(inner.x, inner.y + y_offset, inner.width, render_height as u16);
+            let row_rect = Rect::new(
+                inner.x,
+                inner.y + y_offset,
+                inner.width,
+                render_height as u16,
+            );
             self.queued_card_bounds.push((i, row_rect));
 
             // Apply hover highlight
@@ -440,11 +440,8 @@ impl App {
                     break;
                 }
                 frame.render_widget(
-                    Paragraph::new(Line::from(Span::styled(
-                        line_text.clone(),
-                        text_style,
-                    )))
-                    .wrap(Wrap { trim: false }),
+                    Paragraph::new(Line::from(Span::styled(line_text.clone(), text_style)))
+                        .wrap(Wrap { trim: false }),
                     Rect::new(inner.x, inner.y + y_offset, inner.width, 1),
                 );
                 y_offset += 1;

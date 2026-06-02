@@ -306,10 +306,8 @@ impl App {
                     Some("read" | "edit" | "glob" | "grep")
                 );
                 if needs_existing && !violation_path.exists() {
-                    let output = format!(
-                        "[Path not found] The path '{}' does not exist.",
-                        path_str
-                    );
+                    let output =
+                        format!("[Path not found] The path '{}' does not exist.", path_str);
                     rejected.push((tool_call, ToolExecutionResult::new(output)));
                     self.advance_pending_tool_execution();
                     continue;

@@ -2,7 +2,12 @@ use super::*;
 use crate::panel_launcher::PanelLauncherState;
 use chrono::Utc;
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::{io, path::Path, sync::{Arc, RwLock}, time::Duration};
+use std::{
+    io,
+    path::Path,
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 use tidev_engine::config::SharedConfig;
 use tidev_storage::database::Database;
 use tokio::runtime::Runtime;
@@ -646,7 +651,8 @@ impl App {
         let ui_snapshot = self.capture_ui_snapshot();
         self.cache_active_session_runtime();
 
-        let fallback_model = Self::resolve_fallback_model(&self.config.read().unwrap(), &self.auth)?;
+        let fallback_model =
+            Self::resolve_fallback_model(&self.config.read().unwrap(), &self.auth)?;
         let target_runtime = if let Some(cached) = self.cached_sessions.remove(&session_id) {
             cached
         } else {
@@ -864,9 +870,12 @@ impl App {
             return Ok(None);
         };
 
-        let mut active_model =
-            Self::resolve_conversation_model(&self.config.read().unwrap(), &self.auth, &conversation)
-                .unwrap_or_else(|_| fallback_model.clone());
+        let mut active_model = Self::resolve_conversation_model(
+            &self.config.read().unwrap(),
+            &self.auth,
+            &conversation,
+        )
+        .unwrap_or_else(|_| fallback_model.clone());
 
         // Restore the session's immutable static system prompt.
         // If the session has no stored prompt (legacy session), compose it now.

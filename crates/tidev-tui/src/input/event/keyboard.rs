@@ -878,7 +878,9 @@ impl App {
             return Ok(());
         }
 
-        let Some((cmd, mut args)) = crate::input::editor::resolve_editor(&self.config.read().unwrap().ui) else {
+        let Some((cmd, mut args)) =
+            crate::input::editor::resolve_editor(&self.config.read().unwrap().ui)
+        else {
             self.last_notice = Some(
                 "No editor found. Set external_editor in config, $VISUAL, or $EDITOR.".to_string(),
             );
@@ -980,7 +982,9 @@ impl TermiosGuard {
         let mut saved: libc::termios = unsafe { std::mem::zeroed() };
         // Best-effort: if tcgetattr fails, saved is zeroed which will
         // likely produce a no-op or safe restore on tcsetattr.
-        unsafe { libc::tcgetattr(fd, &mut saved); }
+        unsafe {
+            libc::tcgetattr(fd, &mut saved);
+        }
         Self { saved, fd }
     }
 }
@@ -988,7 +992,9 @@ impl TermiosGuard {
 #[cfg(unix)]
 impl Drop for TermiosGuard {
     fn drop(&mut self) {
-        unsafe { libc::tcsetattr(self.fd, libc::TCSANOW, &self.saved); }
+        unsafe {
+            libc::tcsetattr(self.fd, libc::TCSANOW, &self.saved);
+        }
     }
 }
 

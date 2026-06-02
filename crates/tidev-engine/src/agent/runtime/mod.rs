@@ -384,16 +384,14 @@ impl AgentRuntime {
             // ① Very first user message → inject mode reminder
             (true, _) => Some(current_mode.reminder().to_string()),
             // ② Mode changed → inject switch reminder
-            (false, Some(prev)) if prev != current_mode => {
-                Some(match current_mode {
-                    tidev_types::prompts::SessionMode::Plan => {
-                        tidev_types::prompts::plan_switch_reminder()
-                    }
-                    tidev_types::prompts::SessionMode::Build => {
-                        tidev_types::prompts::build_switch_reminder()
-                    }
-                })
-            }
+            (false, Some(prev)) if prev != current_mode => Some(match current_mode {
+                tidev_types::prompts::SessionMode::Plan => {
+                    tidev_types::prompts::plan_switch_reminder()
+                }
+                tidev_types::prompts::SessionMode::Build => {
+                    tidev_types::prompts::build_switch_reminder()
+                }
+            }),
             // ③ Same mode as before → no injection needed
             _ => None,
         };

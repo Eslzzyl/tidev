@@ -396,9 +396,7 @@ pub struct SetTerminalShellRequest {
 }
 
 /// Get the server-side terminal shell preference.
-pub async fn get_terminal_shell(
-    State(state): State<AppState>,
-) -> Json<GetTerminalShellResponse> {
+pub async fn get_terminal_shell(State(state): State<AppState>) -> Json<GetTerminalShellResponse> {
     let config = state.config.read().await;
     let shell = config
         .shell
@@ -426,5 +424,7 @@ pub async fn set_terminal_shell(
         return Err(AppError::Internal(format!("Failed to save config: {e}")));
     }
     drop(config);
-    Ok(Json(serde_json::json!({ "success": true, "shell": body.shell })))
+    Ok(Json(
+        serde_json::json!({ "success": true, "shell": body.shell }),
+    ))
 }

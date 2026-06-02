@@ -490,7 +490,8 @@ async fn git_graph(
         commits,
         head_sha,
         current_branch,
-    }))}
+    }))
+}
 
 /// `GET /api/git/show/{sha}` — List files changed in a commit (no diff content).
 async fn git_show_files(

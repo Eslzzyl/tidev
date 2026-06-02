@@ -589,7 +589,8 @@ impl App {
             return Ok(());
         }
 
-        let fallback_model = Self::resolve_fallback_model(&self.config.read().unwrap(), &self.auth)?;
+        let fallback_model =
+            Self::resolve_fallback_model(&self.config.read().unwrap(), &self.auth)?;
         self.cache_active_session_runtime();
 
         if let Err(error) = self.restore_or_load_session(session_id, &fallback_model) {

@@ -8,8 +8,8 @@
 //! - `GET  /api/terminal/ws`        — WebSocket endpoint for terminal I/O
 //! - `DELETE /api/terminal/{id}`    — Close a terminal session
 
-use std::convert::Infallible;
 use std::collections::HashSet;
+use std::convert::Infallible;
 
 use axum::{
     Json, Router,
@@ -137,12 +137,13 @@ async fn start_terminal(
 /// On Unix, reads `/etc/shells` and filters to existing executables.
 /// Always includes `$SHELL` first. Also scans common paths for shells
 /// that may not appear in `/etc/shells` (e.g. Homebrew-installed fish).
-async fn list_shells(
-    State(_state): State<AppState>,
-) -> Json<ShellsResponse> {
+async fn list_shells(State(_state): State<AppState>) -> Json<ShellsResponse> {
     let shells = detect_shells();
     let default_shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
-    Json(ShellsResponse { shells, default_shell })
+    Json(ShellsResponse {
+        shells,
+        default_shell,
+    })
 }
 
 #[cfg(unix)]
@@ -157,7 +158,10 @@ fn detect_shells() -> Vec<ShellEntry> {
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| s.clone());
-            shells.push(ShellEntry { path: s.clone(), name });
+            shells.push(ShellEntry {
+                path: s.clone(),
+                name,
+            });
             seen.insert(s);
         }
     }
@@ -174,7 +178,10 @@ fn detect_shells() -> Vec<ShellEntry> {
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| line.to_string());
-                shells.push(ShellEntry { path: line.to_string(), name });
+                shells.push(ShellEntry {
+                    path: line.to_string(),
+                    name,
+                });
                 seen.insert(line.to_string());
             }
         }
@@ -231,29 +238,54 @@ fn detect_shells() -> Vec<ShellEntry> {
 
     // 1. Always include ComSpec (the standard Windows default shell env var) first
     if let Ok(s) = std::env::var("ComSpec")
-        && !s.is_empty() && std::path::Path::new(&s).exists() && !seen.contains(&s) {
-            let name = std::path::Path::new(&s)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| "cmd.exe".to_string());
-            shells.push(ShellEntry { path: s.clone(), name });
-            seen.insert(s);
-        }
+        && !s.is_empty()
+        && std::path::Path::new(&s).exists()
+        && !seen.contains(&s)
+    {
+        let name = std::path::Path::new(&s)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "cmd.exe".to_string());
+        shells.push(ShellEntry {
+            path: s.clone(),
+            name,
+        });
+        seen.insert(s);
+    }
 
     // 2. Include $SHELL if set (may be used by MSYS2/Cygwin environments)
     if let Ok(s) = std::env::var("SHELL")
-        && !s.is_empty() && std::path::Path::new(&s).exists() && !seen.contains(&s) {
-            let name = std::path::Path::new(&s)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| s.clone());
-            shells.push(ShellEntry { path: s.clone(), name });
-            seen.insert(s);
-        }
+        && !s.is_empty()
+        && std::path::Path::new(&s).exists()
+        && !seen.contains(&s)
+    {
+        let name = std::path::Path::new(&s)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| s.clone());
+        shells.push(ShellEntry {
+            path: s.clone(),
+            name,
+        });
+        seen.insert(s);
+    }
 
     // 3. System-known shells from PATH (where we can resolve them)
     let path_dirs = std::env::var("PATH").unwrap_or_default();
-    let shell_exes = ["powershell.exe", "pwsh.exe", "cmd.exe", "wsl.exe", "bash.exe", "nu.exe", "fish.exe", "zsh.exe", "ksh.exe", "tcsh.exe", "elvish.exe", "dash.exe"];
+    let shell_exes = [
+        "powershell.exe",
+        "pwsh.exe",
+        "cmd.exe",
+        "wsl.exe",
+        "bash.exe",
+        "nu.exe",
+        "fish.exe",
+        "zsh.exe",
+        "ksh.exe",
+        "tcsh.exe",
+        "elvish.exe",
+        "dash.exe",
+    ];
     for dir in path_dirs.split(';') {
         let dir = dir.trim();
         if dir.is_empty() {
@@ -263,7 +295,10 @@ fn detect_shells() -> Vec<ShellEntry> {
             let path = format!("{}\\{}", dir, name);
             if std::path::Path::new(&path).exists() && !seen.contains(&path) {
                 let display_name = name.trim_end_matches(".exe").to_string();
-                shells.push(ShellEntry { path: path.clone(), name: display_name });
+                shells.push(ShellEntry {
+                    path: path.clone(),
+                    name: display_name,
+                });
                 seen.insert(path);
             }
         }
@@ -272,8 +307,10 @@ fn detect_shells() -> Vec<ShellEntry> {
     // 4. Cross-product search: common install directories × shell names
     let userprofile = std::env::var("USERPROFILE").unwrap_or_default();
     let localappdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
-    let programfiles = std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".to_string());
-    let programfiles_x86 = std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| "C:\\Program Files (x86)".to_string());
+    let programfiles =
+        std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".to_string());
+    let programfiles_x86 = std::env::var("ProgramFiles(x86)")
+        .unwrap_or_else(|_| "C:\\Program Files (x86)".to_string());
     let systemroot = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
 
     let search_dirs: Vec<String> = [
@@ -298,9 +335,19 @@ fn detect_shells() -> Vec<ShellEntry> {
     .collect();
 
     let shell_names = [
-        "powershell.exe", "pwsh.exe", "cmd.exe", "bash.exe",
-        "nu.exe", "fish.exe", "zsh.exe", "ksh.exe", "tcsh.exe",
-        "elvish.exe", "dash.exe", "sh.exe", "wsl.exe",
+        "powershell.exe",
+        "pwsh.exe",
+        "cmd.exe",
+        "bash.exe",
+        "nu.exe",
+        "fish.exe",
+        "zsh.exe",
+        "ksh.exe",
+        "tcsh.exe",
+        "elvish.exe",
+        "dash.exe",
+        "sh.exe",
+        "wsl.exe",
     ];
 
     for dir in &search_dirs {
@@ -308,7 +355,10 @@ fn detect_shells() -> Vec<ShellEntry> {
             let path = format!("{}\\{}", dir, name);
             if std::path::Path::new(&path).exists() && !seen.contains(&path) {
                 let display_name = name.trim_end_matches(".exe").to_string();
-                shells.push(ShellEntry { path: path.clone(), name: display_name });
+                shells.push(ShellEntry {
+                    path: path.clone(),
+                    name: display_name,
+                });
                 seen.insert(path);
             }
         }

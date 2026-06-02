@@ -604,7 +604,7 @@ pub async fn send_message(
                         current_tool_name,
                         current_tool_args,
                     })
-                },
+                }
                 BackendEvent::SubagentToolResult {
                     session_id,
                     request_id,

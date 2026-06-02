@@ -105,7 +105,9 @@ impl App {
                     "danger-full-access".to_string()
                 }
                 tidev_engine::sandbox::SandboxPolicy::ReadOnly => "read-only".to_string(),
-                tidev_engine::sandbox::SandboxPolicy::ExternalSandbox => "external-sandbox".to_string(),
+                tidev_engine::sandbox::SandboxPolicy::ExternalSandbox => {
+                    "external-sandbox".to_string()
+                }
                 tidev_engine::sandbox::SandboxPolicy::WorkspaceWrite { .. } => {
                     "workspace-write".to_string()
                 }

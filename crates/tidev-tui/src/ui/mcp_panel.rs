@@ -304,7 +304,15 @@ impl App {
         previous_query: String,
         server_name: String,
     ) -> Result<()> {
-        let Some(config) = self.config.read().unwrap().mcp.servers.get(&server_name).cloned() else {
+        let Some(config) = self
+            .config
+            .read()
+            .unwrap()
+            .mcp
+            .servers
+            .get(&server_name)
+            .cloned()
+        else {
             self.last_notice = Some(format!("MCP server '{server_name}' does not exist"));
             return Ok(());
         };

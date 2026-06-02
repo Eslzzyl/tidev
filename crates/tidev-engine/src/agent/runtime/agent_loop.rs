@@ -746,7 +746,8 @@ impl AgentRuntime {
                             "agent_loop: processing queued message ({} chars)",
                             qmsg.content.len()
                         );
-                        let mut user_msg = Message::new(tidev_session::session::MessageRole::User, &qmsg.content);
+                        let mut user_msg =
+                            Message::new(tidev_session::session::MessageRole::User, &qmsg.content);
                         user_msg.attachments = qmsg.attachments;
                         user_msg.mode = qmsg.mode;
                         user_msg.thinking_level = qmsg.thinking_level;

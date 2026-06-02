@@ -785,11 +785,8 @@ impl App {
                 "deny"
             };
         frame.render_widget(
-            Paragraph::new(format!(
-                "This will {} access to:",
-                action_text
-            ))
-            .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+            Paragraph::new(format!("This will {} access to:", action_text))
+                .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
             sections[1],
         );
 
@@ -965,11 +962,8 @@ impl App {
                 "deny"
             };
         frame.render_widget(
-            Paragraph::new(format!(
-                "This will {} access to:",
-                action_text
-            ))
-            .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+            Paragraph::new(format!("This will {} access to:", action_text))
+                .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
             sections[1],
         );
 
@@ -1662,7 +1656,14 @@ impl App {
                 ])
                 .split(inner);
 
-                let remote = self.config.read().unwrap().sync.remotes.get(*remote_index).cloned();
+                let remote = self
+                    .config
+                    .read()
+                    .unwrap()
+                    .sync
+                    .remotes
+                    .get(*remote_index)
+                    .cloned();
                 if let Some(remote) = remote {
                     frame.render_widget(
                         Paragraph::new(Line::from(vec![Span::styled(

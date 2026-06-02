@@ -186,7 +186,11 @@ impl App {
         }
         // Memory tab — consolidation model
         {
-            let display = self.config.read().unwrap().memory_model_display("consolidation");
+            let display = self
+                .config
+                .read()
+                .unwrap()
+                .memory_model_display("consolidation");
             tabs.push(crate::model_panel::ModelPanelTab::new(
                 "memory", "Memory", &display,
             ));
@@ -218,7 +222,13 @@ impl App {
         self.session_panel = None;
         self.memory_panel = None;
 
-        let provider = self.config.read().unwrap().websearch.default_provider.clone();
+        let provider = self
+            .config
+            .read()
+            .unwrap()
+            .websearch
+            .default_provider
+            .clone();
         self.search_panel = Some(ui::search_panel::SearchPanelState::new(&provider));
     }
 
@@ -512,7 +522,11 @@ impl App {
         // Preserve the session's static system prompt — it was composed at
         // session creation and must never be recomposed mid-session.
         let saved_system_prompt = self.active_model.system_prompt.clone();
-        let model = self.config.read().unwrap().resolve_model(&self.auth, selector)?;
+        let model = self
+            .config
+            .read()
+            .unwrap()
+            .resolve_model(&self.auth, selector)?;
         self.active_model = model.clone();
         self.active_model.system_prompt = saved_system_prompt;
         self.thinking_level = model.thinking_level.clone();

@@ -164,9 +164,7 @@ fn find_bash_on_path() -> Option<PathBuf> {
         }
         let s = path.to_string_lossy().to_lowercase();
         // WSL bash shims live under System32 or WindowsApps; exclude both.
-        !s.contains("system32")
-            && !s.contains(r"windows\system")
-            && !s.contains("windowsapps")
+        !s.contains("system32") && !s.contains(r"windows\system") && !s.contains("windowsapps")
     }
 
     // 1. Search PATH directories.
@@ -181,8 +179,8 @@ fn find_bash_on_path() -> Option<PathBuf> {
 
     // 2. Search common install directories (Git Bash, MSYS2, Cygwin).
     let pf = std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".to_string());
-    let pf86 =
-        std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| "C:\\Program Files (x86)".to_string());
+    let pf86 = std::env::var("ProgramFiles(x86)")
+        .unwrap_or_else(|_| "C:\\Program Files (x86)".to_string());
 
     let candidates = [
         format!("{pf}\\Git\\bin"),

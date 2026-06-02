@@ -36,7 +36,9 @@ pub fn canonicalize_display(path: &Path) -> PathBuf {
 ///
 /// Returns the canonical path on success, or the original path as a last resort.
 pub fn canonicalize_for_comparison(path: &Path) -> PathBuf {
-    if let Ok(canonical) = dunce::canonicalize(path) { return canonical }
+    if let Ok(canonical) = dunce::canonicalize(path) {
+        return canonical;
+    }
 
     // Walk up ancestors until we find one that exists, then append the
     // non-existent components we peeled off.
@@ -223,7 +225,10 @@ mod tests {
 
         let result = canonicalize_for_comparison(&nested);
         // The tail should be preserved even though the file doesn't exist
-        assert!(result.ends_with("a/b/new.rs"), "non-existent tail should be preserved");
+        assert!(
+            result.ends_with("a/b/new.rs"),
+            "non-existent tail should be preserved"
+        );
     }
 
     #[test]
@@ -261,7 +266,10 @@ mod tests {
         fs::create_dir_all(ws.join("sub")).unwrap();
 
         let result = resolve_workspace_path(&ws, Path::new("sub/file.txt"), false);
-        assert!(result.is_ok(), "relative path inside workspace should be allowed");
+        assert!(
+            result.is_ok(),
+            "relative path inside workspace should be allowed"
+        );
         assert_eq!(result.unwrap(), ws.join("sub/file.txt"));
     }
 

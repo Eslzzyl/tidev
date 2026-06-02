@@ -163,8 +163,7 @@ struct App {
     sensitive_file_dialog: Option<ui::sensitive::SensitiveFileDialogState>,
     /// Confirmation dialog for "allow/deny until exit" choices for sensitive files.
     /// Shown after user presses 'a' or 'd' to confirm they want to remember the permission.
-    sensitive_file_confirm_dialog:
-        Option<ui::sensitive::SensitiveFileConfirmDialogState>,
+    sensitive_file_confirm_dialog: Option<ui::sensitive::SensitiveFileConfirmDialogState>,
     /// In-memory sensitive file permissions (path -> allowed).
     /// Cleared when tidev exits or session switches.
     sensitive_file_permissions: std::collections::HashMap<String, bool>,

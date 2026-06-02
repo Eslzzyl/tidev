@@ -520,9 +520,8 @@ mod tests {
 
         let results = resolve_nearby_instructions(ws_path, cf_path, &subdir.join("file.rs"))?;
 
-        let expected_path = canonicalize_display(
-            &subdir.join(".github").join("copilot-instructions.md"),
-        );
+        let expected_path =
+            canonicalize_display(&subdir.join(".github").join("copilot-instructions.md"));
         // Use canonicalized path for content to match the function's output
         let expected_content = format!(
             "Instructions from: {}\n{}",

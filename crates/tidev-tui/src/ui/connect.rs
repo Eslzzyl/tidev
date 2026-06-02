@@ -108,7 +108,14 @@ impl App {
         provider_id: String,
         selected_model_id: Option<String>,
     ) -> Result<()> {
-        let Some(provider) = self.config.read().unwrap().providers.get(&provider_id).cloned() else {
+        let Some(provider) = self
+            .config
+            .read()
+            .unwrap()
+            .providers
+            .get(&provider_id)
+            .cloned()
+        else {
             self.last_notice = Some(format!("Provider '{provider_id}' is not editable"));
             return Ok(());
         };
@@ -520,7 +527,12 @@ impl App {
                     }
 
                     if step == NewProviderStep::ProviderId
-                        && self.config.read().unwrap().providers.contains_key(&draft.provider_id)
+                        && self
+                            .config
+                            .read()
+                            .unwrap()
+                            .providers
+                            .contains_key(&draft.provider_id)
                     {
                         self.last_notice =
                             Some(format!("Provider '{}' already exists", draft.provider_id));

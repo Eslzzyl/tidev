@@ -229,7 +229,10 @@ impl App {
             Constraint::Length(1),
             Constraint::Length(
                 self.composer
-                    .preferred_height(card_inner_width, self.config.read().unwrap().ui.max_input_lines)
+                    .preferred_height(
+                        card_inner_width,
+                        self.config.read().unwrap().ui.max_input_lines,
+                    )
                     .saturating_add(2),
             ),
         ])

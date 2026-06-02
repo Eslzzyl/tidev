@@ -171,8 +171,12 @@ mod tests {
         // Restore original PATH to avoid polluting the process environment
         // for subsequent tests (e.g. snapshot tests that need git).
         match original_path {
-            Some(path) => unsafe { std::env::set_var("PATH", path); },
-            None => unsafe { std::env::remove_var("PATH"); },
+            Some(path) => unsafe {
+                std::env::set_var("PATH", path);
+            },
+            None => unsafe {
+                std::env::remove_var("PATH");
+            },
         }
     }
 

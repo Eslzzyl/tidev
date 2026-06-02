@@ -1081,7 +1081,12 @@ impl App {
         } else if panel.is_memory_tab() {
             // For memory tab, find the model currently saved for the active role
             let role = panel.active_memory_role();
-            let current = self.config.read().unwrap().memory_model_label(role).map(|s| s.to_string());
+            let current = self
+                .config
+                .read()
+                .unwrap()
+                .memory_model_label(role)
+                .map(|s| s.to_string());
             current.and_then(|label| {
                 items.iter().position(|item| match item {
                     ModelPanelItem::Model { summary } => summary.label() == label,
@@ -1091,7 +1096,14 @@ impl App {
         } else {
             // Agent tab: find the model currently configured for this agent type
             panel.current_tab().and_then(|tab| {
-                let current = self.config.read().unwrap().agent.models.get(&tab.agent_type_str).cloned();
+                let current = self
+                    .config
+                    .read()
+                    .unwrap()
+                    .agent
+                    .models
+                    .get(&tab.agent_type_str)
+                    .cloned();
                 current.and_then(|label| {
                     items.iter().position(|item| match item {
                         ModelPanelItem::Model { summary } => summary.label() == *label,

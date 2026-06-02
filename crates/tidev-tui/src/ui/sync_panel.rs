@@ -554,12 +554,7 @@ impl App {
             Ok(summary) => {
                 {
                     let mut cfg = self.config.write().unwrap();
-                    if let Some(r) = cfg
-                        .sync
-                        .remotes
-                        .iter_mut()
-                        .find(|r| r.name == remote_name)
-                    {
+                    if let Some(r) = cfg.sync.remotes.iter_mut().find(|r| r.name == remote_name) {
                         r.last_sync_at = Some(chrono::Utc::now().to_rfc3339());
                     }
                     cfg.save(&self.paths)?;

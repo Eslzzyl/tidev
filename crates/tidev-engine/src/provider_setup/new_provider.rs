@@ -79,7 +79,9 @@ impl NewProviderStep {
             Self::ContextWindow => "128000",
             Self::MaxOutputTokens => "32768",
             Self::Temperature => "0.7",
-            Self::ModelApiType => "openai_chat_completions | anthropic | openai_responses | google_gemini",
+            Self::ModelApiType => {
+                "openai_chat_completions | anthropic | openai_responses | google_gemini"
+            }
             Self::ModelBaseUrl => "https://api.openai.com/v1",
             Self::AddAnotherModel => "y or n",
         }
@@ -96,8 +98,12 @@ impl NewProviderStep {
             Self::ContextWindow => "Total token budget for the model context.",
             Self::MaxOutputTokens => "Maximum tokens the model may generate per turn.",
             Self::Temperature => "Usually 0.0 to 1.0 for deterministic coding help.",
-            Self::ModelApiType => "Leave blank to inherit from provider. Override per-model if needed.",
-            Self::ModelBaseUrl => "Leave blank to inherit from provider. Override per-model if needed.",
+            Self::ModelApiType => {
+                "Leave blank to inherit from provider. Override per-model if needed."
+            }
+            Self::ModelBaseUrl => {
+                "Leave blank to inherit from provider. Override per-model if needed."
+            }
             Self::AddAnotherModel => "Press y to add another model, or Enter/n to finish.",
         }
     }
@@ -188,7 +194,9 @@ impl NewModelDraft {
     }
 
     pub fn apply_step(&mut self, step: NewProviderStep, input: &str) -> anyhow::Result<()> {
-        use super::{non_empty, normalize_base_url, normalize_identifier, parse_temperature, parse_usize};
+        use super::{
+            non_empty, normalize_base_url, normalize_identifier, parse_temperature, parse_usize,
+        };
         let value = input.trim();
 
         match step {
@@ -227,7 +235,9 @@ impl NewModelDraft {
         input: &str,
     ) -> anyhow::Result<()> {
         use super::EditModelStep;
-        use super::{non_empty, normalize_base_url, normalize_identifier, parse_temperature, parse_usize};
+        use super::{
+            non_empty, normalize_base_url, normalize_identifier, parse_temperature, parse_usize,
+        };
         let value = input.trim();
 
         match step {

@@ -183,7 +183,8 @@ pub(super) fn render_assistant_body_lines(
             .unwrap_or_else(|| ctx.conversation.model_display_name.clone());
 
         let duration = message.completed_at.map(|completed| {
-            let start_at = ctx.conversation
+            let start_at = ctx
+                .conversation
                 .messages
                 .iter()
                 .take_while(|m| m.id != message.id)

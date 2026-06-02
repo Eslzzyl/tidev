@@ -178,27 +178,25 @@ impl App {
         // Intercept AllowUntilExit / DenyUntilExit to show confirmation dialog
         if matches!(key.code, KeyCode::Char('a') | KeyCode::Char('A')) {
             if let Some(ref dialog) = self.sensitive_file_dialog {
-                self.sensitive_file_confirm_dialog =
-                    Some(SensitiveFileConfirmDialogState {
-                        pending: dialog.pending.clone(),
-                        action: SensitiveFileDecision::AllowUntilExit,
-                        selected_index: 0,
-                        current_index: dialog.current_index,
-                        total: dialog.total,
-                    });
+                self.sensitive_file_confirm_dialog = Some(SensitiveFileConfirmDialogState {
+                    pending: dialog.pending.clone(),
+                    action: SensitiveFileDecision::AllowUntilExit,
+                    selected_index: 0,
+                    current_index: dialog.current_index,
+                    total: dialog.total,
+                });
             }
             return Ok(());
         }
         if matches!(key.code, KeyCode::Char('d') | KeyCode::Char('D')) {
             if let Some(ref dialog) = self.sensitive_file_dialog {
-                self.sensitive_file_confirm_dialog =
-                    Some(SensitiveFileConfirmDialogState {
-                        pending: dialog.pending.clone(),
-                        action: SensitiveFileDecision::DenyUntilExit,
-                        selected_index: 0,
-                        current_index: dialog.current_index,
-                        total: dialog.total,
-                    });
+                self.sensitive_file_confirm_dialog = Some(SensitiveFileConfirmDialogState {
+                    pending: dialog.pending.clone(),
+                    action: SensitiveFileDecision::DenyUntilExit,
+                    selected_index: 0,
+                    current_index: dialog.current_index,
+                    total: dialog.total,
+                });
             }
             return Ok(());
         }
