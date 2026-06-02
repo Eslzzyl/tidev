@@ -153,7 +153,11 @@ function getHomeDir(): string | null {
       return process.env.USERPROFILE;
     }
     // Fallback for browsers: combine HOMEDRIVE + HOMEPATH
-    if (typeof process !== "undefined" && process.env?.HOMEDRIVE && process.env?.HOMEPATH) {
+    if (
+      typeof process !== "undefined" &&
+      process.env?.HOMEDRIVE &&
+      process.env?.HOMEPATH
+    ) {
       return process.env.HOMEDRIVE + process.env.HOMEPATH;
     }
   } catch {

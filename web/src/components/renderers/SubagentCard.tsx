@@ -111,10 +111,7 @@ function StreamingBlock({ block }: { block: SubagentStreamBlock }) {
     case "reasoning":
       return (
         <div className="mb-2">
-          <ThinkingBlock
-            content={block.content ?? ""}
-            defaultExpanded={true}
-          />
+          <ThinkingBlock content={block.content ?? ""} defaultExpanded={true} />
         </div>
       );
     case "content":
@@ -201,10 +198,7 @@ function ChildSessionMessages({ messages }: { messages: Message[] }) {
             key: `tool-${tc.id}`,
             element: (
               <div className="mb-1">
-                <ToolCallRow
-                  entry={toolEntry}
-                  defaultExpanded={!!resultMsg}
-                />
+                <ToolCallRow entry={toolEntry} defaultExpanded={!!resultMsg} />
               </div>
             ),
           });
@@ -241,13 +235,15 @@ export const SubagentCard = memo(function SubagentCard({ entry }: Props) {
 
   const subagentState = useSubagentStore((s) => s.states[entry.id]);
 
-  const isRunning = !entry.resultComplete && entry.argumentsComplete && !subagentState?.completed;
+  const isRunning =
+    !entry.resultComplete &&
+    entry.argumentsComplete &&
+    !subagentState?.completed;
   const isCompleted = entry.resultComplete || subagentState?.completed;
   const childSessionId = subagentState?.childSessionId;
   const Icon = config.icon;
 
-  const hasBlocks =
-    subagentState?.blocks && subagentState.blocks.length > 0;
+  const hasBlocks = subagentState?.blocks && subagentState.blocks.length > 0;
 
   // Auto-expand when first streaming block arrives
   useEffect(() => {

@@ -270,10 +270,10 @@ export const api = {
     );
   },
   setModelThinkingLevel: (data: SetModelThinkingLevelRequest) =>
-    fetchJson<{ success: boolean }>(
-      `${API_BASE}/config/model-thinking-level`,
-      { method: "POST", body: JSON.stringify(data) },
-    ),
+    fetchJson<{ success: boolean }>(`${API_BASE}/config/model-thinking-level`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 
   // Providers
   listProviders: () =>
@@ -357,9 +357,10 @@ export const api = {
     }),
 
   listTerminalShells: () =>
-    fetchJson<{ shells: Array<{ path: string; name: string }>; default_shell: string }>(
-      `${API_BASE}/terminal/shells`,
-    ),
+    fetchJson<{
+      shells: Array<{ path: string; name: string }>;
+      default_shell: string;
+    }>(`${API_BASE}/terminal/shells`),
 
   terminalInput: (sessionId: string, data: string) =>
     fetchWithAuth(`${API_BASE}/terminal/input`, {
@@ -402,9 +403,7 @@ export const api = {
     ),
 
   gitGraph: (count = 50) =>
-    fetchJson<GitGraphResponse>(
-      `${API_BASE}/git/graph?count=${count}`,
-    ),
+    fetchJson<GitGraphResponse>(`${API_BASE}/git/graph?count=${count}`),
 
   gitShowCommit: (sha: string) =>
     fetchJson<GitShowResponse>(`${API_BASE}/git/show/${sha}`),

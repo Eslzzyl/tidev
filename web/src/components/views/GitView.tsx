@@ -57,7 +57,9 @@ export function GitView() {
   const [graphData, setGraphData] = useState<GitGraphResponse | null>(null);
   const [graphLoading, setGraphLoading] = useState(false);
   const [graphCount, setGraphCount] = useState(50);
-  const [graphErrorMessage, setGraphErrorMessage] = useState<string | null>(null);
+  const [graphErrorMessage, setGraphErrorMessage] = useState<string | null>(
+    null,
+  );
 
   // Commit detail (History tab)
   const [selectedCommit, setSelectedCommit] = useState<GitShowResponse | null>(
@@ -154,7 +156,9 @@ export function GitView() {
       setGraphData(result);
       setGraphCount(fetchCount);
     } catch (err) {
-      setGraphErrorMessage(err instanceof Error ? err.message : "Failed to load graph data");
+      setGraphErrorMessage(
+        err instanceof Error ? err.message : "Failed to load graph data",
+      );
     } finally {
       setGraphLoading(false);
     }
@@ -654,53 +658,55 @@ export function GitView() {
       </div>
 
       {/* Mobile full-screen overlay for commit detail (History tab) */}
-      {activeTab === "history" && (detailOpen || animateOut) && selectedCommit && (
-        <>
-          {/* Backdrop */}
-          <button
-            onClick={handleCloseMobile}
-            className={`fixed inset-0 z-40 bg-black/30 transition-opacity duration-300 md:hidden ${
-              animateOut ? "opacity-0" : ""
-            }`}
-            aria-label="Close detail"
-          />
-          {/* Full-screen overlay */}
-          <div
-            className={`fixed inset-0 z-50 flex flex-col bg-white motion-safe:animate-slide-up-full motion-safe:transition-transform motion-safe:duration-300 motion-safe:ease-smooth dark:bg-neutral-950 md:hidden ${
-              animateOut ? "translate-y-full" : ""
-            }`}
-          >
-            {/* Fixed top bar */}
-            <div className="flex items-center gap-3 border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
-              <button
-                onClick={handleCloseMobile}
-                className="rounded p-1 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              >
-                <ChevronDown className="h-5 w-5" />
-              </button>
-              <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
-                Commit Detail
-              </span>
-            </div>
-            {/* Scrollable content */}
-            <div className="flex-1 overflow-y-auto overscroll-contain">
-              <div className="p-4">
-                <CommitDetailPanel
-                  commit={selectedCommit}
-                  fileDiffs={fileDiffs}
-                  loadingFileDiff={loadingFileDiff}
-                  loadingAllDiffs={loadingAllDiffs}
-                  loadingDetail={loadingDetail}
-                  detailError={detailError}
-                  expandedFiles={expandedFiles}
-                  onLoadFileDiff={loadFileDiff}
-                  onLoadAllDiffs={loadAllDiffs}
-                />
+      {activeTab === "history" &&
+        (detailOpen || animateOut) &&
+        selectedCommit && (
+          <>
+            {/* Backdrop */}
+            <button
+              onClick={handleCloseMobile}
+              className={`fixed inset-0 z-40 bg-black/30 transition-opacity duration-300 md:hidden ${
+                animateOut ? "opacity-0" : ""
+              }`}
+              aria-label="Close detail"
+            />
+            {/* Full-screen overlay */}
+            <div
+              className={`fixed inset-0 z-50 flex flex-col bg-white motion-safe:animate-slide-up-full motion-safe:transition-transform motion-safe:duration-300 motion-safe:ease-smooth dark:bg-neutral-950 md:hidden ${
+                animateOut ? "translate-y-full" : ""
+              }`}
+            >
+              {/* Fixed top bar */}
+              <div className="flex items-center gap-3 border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
+                <button
+                  onClick={handleCloseMobile}
+                  className="rounded p-1 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                >
+                  <ChevronDown className="h-5 w-5" />
+                </button>
+                <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                  Commit Detail
+                </span>
+              </div>
+              {/* Scrollable content */}
+              <div className="flex-1 overflow-y-auto overscroll-contain">
+                <div className="p-4">
+                  <CommitDetailPanel
+                    commit={selectedCommit}
+                    fileDiffs={fileDiffs}
+                    loadingFileDiff={loadingFileDiff}
+                    loadingAllDiffs={loadingAllDiffs}
+                    loadingDetail={loadingDetail}
+                    detailError={detailError}
+                    expandedFiles={expandedFiles}
+                    onLoadFileDiff={loadFileDiff}
+                    onLoadAllDiffs={loadAllDiffs}
+                  />
+                </div>
               </div>
             </div>
-          </div>
-        </>
-      )}
+          </>
+        )}
     </div>
   );
 }
@@ -1024,17 +1030,14 @@ function GraphHistoryPanel({
     [],
   );
 
-  const handleTouchStart = useCallback(
-    (e: React.TouchEvent, row: GraphRow) => {
-      isLongPress.current = false;
-      const touch = e.touches[0];
-      longPressTimer.current = setTimeout(() => {
-        isLongPress.current = true;
-        setContextMenu({ x: touch.clientX, y: touch.clientY, row });
-      }, 500);
-    },
-    [],
-  );
+  const handleTouchStart = useCallback((e: React.TouchEvent, row: GraphRow) => {
+    isLongPress.current = false;
+    const touch = e.touches[0];
+    longPressTimer.current = setTimeout(() => {
+      isLongPress.current = true;
+      setContextMenu({ x: touch.clientX, y: touch.clientY, row });
+    }, 500);
+  }, []);
 
   const handleTouchMove = useCallback(() => {
     if (longPressTimer.current) {
@@ -1073,9 +1076,7 @@ function GraphHistoryPanel({
     return (
       <div className="flex h-full items-center justify-center p-6">
         <div className="text-center">
-          <p className="text-sm text-red-600 dark:text-red-400">
-            {graphError}
-          </p>
+          <p className="text-sm text-red-600 dark:text-red-400">{graphError}</p>
           <button
             onClick={onRetry}
             className="mt-3 rounded bg-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-300 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"

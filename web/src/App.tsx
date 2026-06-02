@@ -198,7 +198,14 @@ function App() {
     };
 
     loadData();
-  }, [setSessions, setCurrentSession, setMessages, authIsLoading, authIsRequired, authIsAuthenticated]);
+  }, [
+    setSessions,
+    setCurrentSession,
+    setMessages,
+    authIsLoading,
+    authIsRequired,
+    authIsAuthenticated,
+  ]);
 
   // Resize RAF ref — throttles state updates to once per frame
   const resizeRafRef = useRef<number | null>(null);
@@ -335,143 +342,148 @@ function App() {
             </button>
           </div>
         </div>
-      ) : (<>
-        <SettingsPanel />
+      ) : (
+        <>
+          <SettingsPanel />
 
-      <div className="flex h-[100dvh] flex-col bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-neutral-100 via-white to-white dark:from-neutral-900 dark:via-neutral-950 dark:to-neutral-950">
-        {/* ── Floating Header Card ── */}
-        {/* Desktop: mx-3 mt-3 rounded-xl border shadow. Mobile: full-bleed. */}
-        <div className="mx-3 mt-3 max-md:mx-0 max-md:mt-0">
-          <Header className="md:rounded-xl md:border md:border-neutral-200/60 md:shadow-sm dark:md:border-neutral-800/60 dark:md:shadow-black/20 md:bg-white/95 md:dark:bg-neutral-900/95 max-md:border-b" />
-        </div>
+          <div className="flex h-[100dvh] flex-col bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-neutral-100 via-white to-white dark:from-neutral-900 dark:via-neutral-950 dark:to-neutral-950">
+            {/* ── Floating Header Card ── */}
+            {/* Desktop: mx-3 mt-3 rounded-xl border shadow. Mobile: full-bleed. */}
+            <div className="mx-3 mt-3 max-md:mx-0 max-md:mt-0">
+              <Header className="md:rounded-xl md:border md:border-neutral-200/60 md:shadow-sm dark:md:border-neutral-800/60 dark:md:shadow-black/20 md:bg-white/95 md:dark:bg-neutral-900/95 max-md:border-b" />
+            </div>
 
-        {/* ── Desktop: floating cards layout ── */}
-        {/* Cards always same width as header. Sidebars only show in chat tab. */}
-        <div className="flex flex-1 px-3 pb-3 pt-2 min-h-0 max-md:p-0 max-md:pt-0">
-          {/* ── Left Sidebar (Desktop floating card) ── */}
-          {showSidebars && (
-            <aside
-              className="flex h-full min-h-0 flex-shrink-0 flex-col overflow-hidden rounded-xl border border-neutral-200/60 bg-white shadow-sm max-md:hidden dark:border-neutral-800/60 dark:bg-neutral-900 dark:shadow-black/20"
-              style={{ width: leftSidebarWidth, willChange: "width" }}
-            >
-              <LeftSidebar />
-            </aside>
-          )}
+            {/* ── Desktop: floating cards layout ── */}
+            {/* Cards always same width as header. Sidebars only show in chat tab. */}
+            <div className="flex flex-1 px-3 pb-3 pt-2 min-h-0 max-md:p-0 max-md:pt-0">
+              {/* ── Left Sidebar (Desktop floating card) ── */}
+              {showSidebars && (
+                <aside
+                  className="flex h-full min-h-0 flex-shrink-0 flex-col overflow-hidden rounded-xl border border-neutral-200/60 bg-white shadow-sm max-md:hidden dark:border-neutral-800/60 dark:bg-neutral-900 dark:shadow-black/20"
+                  style={{ width: leftSidebarWidth, willChange: "width" }}
+                >
+                  <LeftSidebar />
+                </aside>
+              )}
 
-          {/* Left Resize Handle */}
-          {showSidebars && (
-            <ResizeHandle
-              onResizeStart={handleLeftResizeStart}
-              isResizing={isResizingLeft}
-            />
-          )}
+              {/* Left Resize Handle */}
+              {showSidebars && (
+                <ResizeHandle
+                  onResizeStart={handleLeftResizeStart}
+                  isResizing={isResizingLeft}
+                />
+              )}
 
-          {/* ── Main Content (floating card) ── */}
-          {/* All views stay mounted, hidden via display:none to preserve state */}
-          <main className="relative flex flex-1 flex-col min-h-0 overflow-hidden rounded-xl border border-neutral-200/60 bg-white shadow-sm dark:border-neutral-800/60 dark:bg-neutral-950 dark:shadow-black/10 max-md:rounded-none max-md:border-0 max-md:shadow-none">
-            <Suspense
-              fallback={
-                <div className="flex h-full items-center justify-center text-sm text-neutral-400">
-                  Loading…
-                </div>
-              }
-            >
-              <div
-                className="h-full"
-                style={{ display: activeTab === "chat" ? "" : "none" }}
-              >
-                {showWelcomePage ? <WelcomePage /> : <ChatPanel />}
-              </div>
-              <div
-                className="h-full"
-                style={{ display: activeTab === "files" ? "" : "none" }}
-              >
-                <FilesView />
-              </div>
-              <div
-                className="flex h-full flex-col overflow-hidden"
-                style={{ display: activeTab === "terminal" ? "" : "none" }}
-              >
-                <TerminalView />
-              </div>
-              <div
-                className="h-full"
-                style={{ display: activeTab === "git" ? "" : "none" }}
-              >
-                <GitView />
-              </div>
-              <div
-                className="h-full"
-                style={{ display: activeTab === "stats" ? "" : "none" }}
-              >
-                <StatsView />
-              </div>
-            </Suspense>
-          </main>
+              {/* ── Main Content (floating card) ── */}
+              {/* All views stay mounted, hidden via display:none to preserve state */}
+              <main className="relative flex flex-1 flex-col min-h-0 overflow-hidden rounded-xl border border-neutral-200/60 bg-white shadow-sm dark:border-neutral-800/60 dark:bg-neutral-950 dark:shadow-black/10 max-md:rounded-none max-md:border-0 max-md:shadow-none">
+                <Suspense
+                  fallback={
+                    <div className="flex h-full items-center justify-center text-sm text-neutral-400">
+                      Loading…
+                    </div>
+                  }
+                >
+                  <div
+                    className="h-full"
+                    style={{ display: activeTab === "chat" ? "" : "none" }}
+                  >
+                    {showWelcomePage ? <WelcomePage /> : <ChatPanel />}
+                  </div>
+                  <div
+                    className="h-full"
+                    style={{ display: activeTab === "files" ? "" : "none" }}
+                  >
+                    <FilesView />
+                  </div>
+                  <div
+                    className="flex h-full flex-col overflow-hidden"
+                    style={{ display: activeTab === "terminal" ? "" : "none" }}
+                  >
+                    <TerminalView />
+                  </div>
+                  <div
+                    className="h-full"
+                    style={{ display: activeTab === "git" ? "" : "none" }}
+                  >
+                    <GitView />
+                  </div>
+                  <div
+                    className="h-full"
+                    style={{ display: activeTab === "stats" ? "" : "none" }}
+                  >
+                    <StatsView />
+                  </div>
+                </Suspense>
+              </main>
 
-          {/* Right Resize Handle */}
-          {showRightSidebar && (
-            <ResizeHandle
-              onResizeStart={handleRightResizeStart}
-              isResizing={isResizingRight}
-            />
-          )}
+              {/* Right Resize Handle */}
+              {showRightSidebar && (
+                <ResizeHandle
+                  onResizeStart={handleRightResizeStart}
+                  isResizing={isResizingRight}
+                />
+              )}
 
-          {/* ── Right Sidebar (Desktop floating card) ── */}
-          {showRightSidebar && (
-            <aside
-              className="flex h-full min-h-0 flex-shrink-0 flex-col overflow-hidden rounded-xl border border-neutral-200/60 bg-white shadow-sm motion-safe:animate-fade-in max-md:hidden dark:border-neutral-800/60 dark:bg-neutral-900 dark:shadow-black/20"
-              style={{ width: rightSidebarWidth, willChange: "width" }}
-            >
-              <RightSidebar />
-            </aside>
-          )}
-        </div>
+              {/* ── Right Sidebar (Desktop floating card) ── */}
+              {showRightSidebar && (
+                <aside
+                  className="flex h-full min-h-0 flex-shrink-0 flex-col overflow-hidden rounded-xl border border-neutral-200/60 bg-white shadow-sm motion-safe:animate-fade-in max-md:hidden dark:border-neutral-800/60 dark:bg-neutral-900 dark:shadow-black/20"
+                  style={{ width: rightSidebarWidth, willChange: "width" }}
+                >
+                  <RightSidebar />
+                </aside>
+              )}
+            </div>
 
-        {/* ── Mobile Overlays (fixed, outside flex flow) ── */}
-        {/* Mobile Left Sidebar */}
-        {showSidebars && (
-          <>
-            <aside
-              className={`fixed inset-y-0 left-0 z-50 flex w-[85vw] max-w-[320px] flex-col border-r border-neutral-200/80 bg-white transition-transform duration-200 ease-in-out md:hidden dark:border-neutral-800/60 dark:bg-neutral-950 ${
-                mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
-              }`}
-            >
-              <LeftSidebar />
-            </aside>
-            {mobileMenuOpen && (
-              <button
-                onClick={closeMobileMenu}
-                className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm md:hidden"
-                aria-label="Close menu"
-              />
+            {/* ── Mobile Overlays (fixed, outside flex flow) ── */}
+            {/* Mobile Left Sidebar */}
+            {showSidebars && (
+              <>
+                <aside
+                  className={`fixed inset-y-0 left-0 z-50 flex w-[85vw] max-w-[320px] flex-col border-r border-neutral-200/80 bg-white transition-transform duration-200 ease-in-out md:hidden dark:border-neutral-800/60 dark:bg-neutral-950 ${
+                    mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+                  }`}
+                >
+                  <LeftSidebar />
+                </aside>
+                {mobileMenuOpen && (
+                  <button
+                    onClick={closeMobileMenu}
+                    className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm md:hidden"
+                    aria-label="Close menu"
+                  />
+                )}
+              </>
             )}
-          </>
-        )}
 
-        {/* Mobile Right Sidebar */}
-        {showSidebars && (
-          <>
-            <aside
-              className={`fixed inset-y-0 right-0 z-50 flex w-[85vw] max-w-[320px] flex-col border-l border-neutral-200/80 bg-white transition-transform duration-200 ease-in-out md:hidden dark:border-neutral-800/60 dark:bg-neutral-950 ${
-                mobileRightSidebarOpen ? "translate-x-0" : "translate-x-full"
-              }`}
-            >
-              <RightSidebar />
-            </aside>
-            {mobileRightSidebarOpen && (
-              <button
-                onClick={closeMobileRightSidebar}
-                className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm md:hidden"
-                aria-label="Close info panel"
-              />
+            {/* Mobile Right Sidebar */}
+            {showSidebars && (
+              <>
+                <aside
+                  className={`fixed inset-y-0 right-0 z-50 flex w-[85vw] max-w-[320px] flex-col border-l border-neutral-200/80 bg-white transition-transform duration-200 ease-in-out md:hidden dark:border-neutral-800/60 dark:bg-neutral-950 ${
+                    mobileRightSidebarOpen
+                      ? "translate-x-0"
+                      : "translate-x-full"
+                  }`}
+                >
+                  <RightSidebar />
+                </aside>
+                {mobileRightSidebarOpen && (
+                  <button
+                    onClick={closeMobileRightSidebar}
+                    className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm md:hidden"
+                    aria-label="Close info panel"
+                  />
+                )}
+              </>
             )}
-          </>
-        )}
-      </div>
-      <ToastContainer />
-      </>)}
-    </>);
+          </div>
+          <ToastContainer />
+        </>
+      )}
+    </>
+  );
 }
 
 export default App;

@@ -178,11 +178,13 @@ export const MessageRound = memo(function MessageRound({
             {/* Footer — only show when round is fully complete.
              *  For the last round we additionally wait until streaming stops
              *  (stream.end) to avoid flashing. */}
-            {round.status === "complete" && (!isLastRound || !isStreaming) && footerParts.length > 0 && (
-              <div className="mt-0.5 text-xs text-neutral-400 dark:text-neutral-600">
-                {footerParts.join(" · ")}
-              </div>
-            )}
+            {round.status === "complete" &&
+              (!isLastRound || !isStreaming) &&
+              footerParts.length > 0 && (
+                <div className="mt-0.5 text-xs text-neutral-400 dark:text-neutral-600">
+                  {footerParts.join(" · ")}
+                </div>
+              )}
           </div>
         </div>
       )}

@@ -4,8 +4,14 @@ import { useAuthStore } from "../stores/useAuthStore";
 export function AuthGate() {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const { verifyToken, setToken, error, clearError, isAuthRequired, isAuthenticated } =
-    useAuthStore();
+  const {
+    verifyToken,
+    setToken,
+    error,
+    clearError,
+    isAuthRequired,
+    isAuthenticated,
+  } = useAuthStore();
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -23,7 +29,9 @@ export function AuthGate() {
     if (valid) {
       setToken(password.trim());
     } else {
-      useAuthStore.setState({ error: "Invalid access token. Please try again." });
+      useAuthStore.setState({
+        error: "Invalid access token. Please try again.",
+      });
     }
     setSubmitting(false);
   };

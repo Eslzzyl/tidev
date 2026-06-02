@@ -60,7 +60,13 @@ export function VirtualMessageList({
             className="contents"
             style={{ contentVisibility: "auto" }}
           >
-            {renderEntry(entry, onUndoRequest, canUndo, getStaggerIndex(idx), idx === entries.length - 1)}
+            {renderEntry(
+              entry,
+              onUndoRequest,
+              canUndo,
+              getStaggerIndex(idx),
+              idx === entries.length - 1,
+            )}
           </div>
         ))}
       </div>

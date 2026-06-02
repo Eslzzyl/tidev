@@ -255,7 +255,9 @@ export function MessageInput({
   // Pattern used by VS Code, Slack, and Nuxt UI.
   const composingRef = useRef(false);
   const compositionJustCommittedRef = useRef(false);
-  const compositionEndTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const compositionEndTimerRef = useRef<
+    ReturnType<typeof setTimeout> | undefined
+  >(undefined);
   const idCounterRef = useRef(0);
 
   // Clean up the timer on unmount.
@@ -808,10 +810,10 @@ export function MessageInput({
             className="flex items-center gap-1 rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 transition-all duration-150 hover:scale-105 active:scale-95 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
           >
             <span className="max-w-[180px] truncate">
-            {selectedModelDisplay?.display_name
-              ? `${selectedModelDisplay.provider_name}/${selectedModelDisplay.display_name}`
-              : "Select model"}
-          </span>
+              {selectedModelDisplay?.display_name
+                ? `${selectedModelDisplay.provider_name}/${selectedModelDisplay.display_name}`
+                : "Select model"}
+            </span>
             <ChevronDown className="h-3 w-3" />
           </button>
 

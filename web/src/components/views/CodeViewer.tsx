@@ -57,7 +57,8 @@ function tryParseJson(content: string): unknown {
   }
 }
 
-export function CodeViewer() {  const openFiles = useFileStore((s) => s.openFiles);
+export function CodeViewer() {
+  const openFiles = useFileStore((s) => s.openFiles);
   const activeFilePath = useFileStore((s) => s.activeFilePath);
   const isSaving = useFileStore((s) => s.isSaving);
   const closeFile = useFileStore((s) => s.closeFile);
@@ -73,7 +74,10 @@ export function CodeViewer() {  const openFiles = useFileStore((s) => s.openFile
   // Ref for CodeMirrorEditor imperative methods
   const editorRef = useRef<CodeMirrorEditorHandle>(null);
   const [goToLineOpen, setGoToLineOpen] = useState(false);
-  const [goToLineMeta, setGoToLineMeta] = useState({ totalLines: 0, currentLine: 1 });
+  const [goToLineMeta, setGoToLineMeta] = useState({
+    totalLines: 0,
+    currentLine: 1,
+  });
 
   // Get the active file object
   const activeFile = activeFilePath

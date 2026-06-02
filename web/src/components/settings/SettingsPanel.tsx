@@ -1,5 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { X, Palette, Type, Keyboard, Terminal as TerminalIcon, Lock, Info } from "lucide-react";
+import {
+  X,
+  Palette,
+  Type,
+  Keyboard,
+  Terminal as TerminalIcon,
+  Lock,
+  Info,
+} from "lucide-react";
 import { useUIStore } from "../../stores/useUIStore";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { AppearanceSection } from "./AppearanceSection";

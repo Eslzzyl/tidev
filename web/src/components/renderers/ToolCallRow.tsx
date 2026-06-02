@@ -328,7 +328,10 @@ function looksLikeJson(output: string): boolean {
   return trimmed.startsWith("{") || trimmed.startsWith("[");
 }
 
-export const ToolCallRow = memo(function ToolCallRow({ entry, defaultExpanded = false }: Props) {
+export const ToolCallRow = memo(function ToolCallRow({
+  entry,
+  defaultExpanded = false,
+}: Props) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [elapsedMs, setElapsedMs] = useState(0);
   const didAutoExpand = useRef(false);

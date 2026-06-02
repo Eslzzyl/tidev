@@ -322,7 +322,13 @@ export function useSmartInput(
 
       onModelChange?.(model);
     },
-    [onModelChange, selectedProviderId, selectedModelId, selectedThinking, updateThinkingLevels],
+    [
+      onModelChange,
+      selectedProviderId,
+      selectedModelId,
+      selectedThinking,
+      updateThinkingLevels,
+    ],
   );
 
   // Close command palette

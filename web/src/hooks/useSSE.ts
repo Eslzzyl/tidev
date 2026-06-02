@@ -34,53 +34,57 @@ export function useSSE(sessionId: string | null) {
    */
   const ensureStreamingAssistant = useCallback(
     (request_id: number): void => {
-    if (
-      request_id === currentRequestIdRef.current &&
-      streamingAssistantIdRef.current
-    ) {
-      return; // Same turn, assistant already exists
-    }
+      if (
+        request_id === currentRequestIdRef.current &&
+        streamingAssistantIdRef.current
+      ) {
+        return; // Same turn, assistant already exists
+      }
 
-    // New turn — create a fresh streaming assistant message
-    currentRequestIdRef.current = request_id;
+      // New turn — create a fresh streaming assistant message
+      currentRequestIdRef.current = request_id;
 
-    // Ensure streaming is active — message_complete may have cleared it
-    // after the previous turn, but the agent loop continues with more turns.
-    setStreaming(true);
+      // Ensure streaming is active — message_complete may have cleared it
+      // after the previous turn, but the agent loop continues with more turns.
+      setStreaming(true);
 
-    const state = useSessionStore.getState();
-    const msgs = [...state.messages];
+      const state = useSessionStore.getState();
+      const msgs = [...state.messages];
 
-    const newMsg: Message = {
-      id: `stream-asst-${request_id}-${Date.now()}`,
-      role: "assistant",
-      content: "",
-      created_at: new Date().toISOString(),
-      reasoning: undefined,
-      tool_calls: undefined,
-      streaming: true,
-    };
+      const newMsg: Message = {
+        id: `stream-asst-${request_id}-${Date.now()}`,
+        role: "assistant",
+        content: "",
+        created_at: new Date().toISOString(),
+        reasoning: undefined,
+        tool_calls: undefined,
+        streaming: true,
+      };
 
-    streamingAssistantIdRef.current = newMsg.id;
-    msgs.push(newMsg);
-    state.setMessages(msgs);
+      streamingAssistantIdRef.current = newMsg.id;
+      msgs.push(newMsg);
+      state.setMessages(msgs);
 
-    console.log(
-      "[SSE] new streaming assistant (request_id=%s): %s",
-      request_id,
-      newMsg.id.substring(0, 20),
-    );
-  }, [setStreaming]);
+      console.log(
+        "[SSE] new streaming assistant (request_id=%s): %s",
+        request_id,
+        newMsg.id.substring(0, 20),
+      );
+    },
+    [setStreaming],
+  );
 
   const updateStreamingAssistant = useCallback(
     (updater: (msg: Message) => Message): void => {
-    const id = streamingAssistantIdRef.current;
-    if (!id) return;
+      const id = streamingAssistantIdRef.current;
+      if (!id) return;
 
-    const state = useSessionStore.getState();
-    const msgs = state.messages.map((m) => (m.id === id ? updater(m) : m));
-    state.setMessages(msgs);
-  }, []);
+      const state = useSessionStore.getState();
+      const msgs = state.messages.map((m) => (m.id === id ? updater(m) : m));
+      state.setMessages(msgs);
+    },
+    [],
+  );
 
   // ---------------------------------------------------------------------------
   // Event handlers (defined inside useEffect so they see the latest closure)
@@ -299,8 +303,7 @@ export function useSSE(sessionId: string | null) {
                 cache_write_tokens: stats.cache_write_tokens,
               }
             : msg.token_usage,
-          tokens_per_second:
-            stats?.tokens_per_second ?? msg.tokens_per_second,
+          tokens_per_second: stats?.tokens_per_second ?? msg.tokens_per_second,
         }));
         streamingAssistantIdRef.current = null;
       } else {
@@ -389,9 +392,7 @@ export function useSSE(sessionId: string | null) {
         if (msg.role !== "assistant") continue;
         if (!msg.tool_calls || msg.tool_calls.length === 0) continue;
         const match = msg.tool_calls.find(
-          (tc) =>
-            tc.name === "task" &&
-            !subagentStore.states[tc.id],
+          (tc) => tc.name === "task" && !subagentStore.states[tc.id],
         );
         if (match) return match;
       }

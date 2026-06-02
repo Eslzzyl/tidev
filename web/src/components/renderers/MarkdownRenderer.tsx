@@ -7,7 +7,10 @@ import "katex/dist/katex.min.css";
 import { Check, Copy, Download, Maximize2, Minimize2 } from "lucide-react";
 
 // Dynamically import mermaid to avoid issues
-let mermaidInstance: { initialize: (config: Record<string, unknown>) => void; run: (config: Record<string, unknown>) => Promise<void> } | null = null;
+let mermaidInstance: {
+  initialize: (config: Record<string, unknown>) => void;
+  run: (config: Record<string, unknown>) => Promise<void>;
+} | null = null;
 async function getMermaid() {
   if (!mermaidInstance) {
     const mermaidModule = await import("mermaid");

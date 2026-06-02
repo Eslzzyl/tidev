@@ -1,10 +1,5 @@
 import { useMemo } from "react";
-import {
-  X,
-  CheckCircle2,
-  Circle,
-  Clock,
-} from "lucide-react";
+import { X, CheckCircle2, Circle, Clock } from "lucide-react";
 import { useSessionStore } from "../../stores/useSessionStore";
 import { useUIStore } from "../../stores/useUIStore";
 import type { FileDiff, TodoItem, TokenUsage } from "../../types/api";
@@ -231,7 +226,10 @@ export function RightSidebar() {
               ) : (
                 <ul className="space-y-1">
                   {fileDiffs.map((diff, idx) => (
-                    <li key={idx} className="flex w-full items-baseline justify-between text-sm">
+                    <li
+                      key={idx}
+                      className="flex w-full items-baseline justify-between text-sm"
+                    >
                       <span className="truncate text-neutral-800 dark:text-neutral-200">
                         {diff.path.split("/").pop() || diff.path}
                       </span>

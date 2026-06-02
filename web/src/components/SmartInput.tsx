@@ -125,7 +125,9 @@ export function SmartInput({
   // setTimeout (macrotask). Also check e.isComposing for Chrome/Firefox.
   const composingRef = useRef(false);
   const compositionJustCommittedRef = useRef(false);
-  const compositionEndTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const compositionEndTimerRef = useRef<
+    ReturnType<typeof setTimeout> | undefined
+  >(undefined);
 
   // Clean up the timer on unmount.
   useEffect(() => {
@@ -512,7 +514,6 @@ export function SmartInput({
             )}
           </div>
         )}
-
       </div>
 
       {/* Input Container */}

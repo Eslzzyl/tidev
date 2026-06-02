@@ -104,7 +104,9 @@ export { ROW_H as GRAPH_ROW_HEIGHT };
 // ── Component ─────────────────────────────────────────────────────────────
 
 export const GitGraphSVG = React.memo(function GitGraphSVG({
-  rows, selectedSha, onSelectCommit,
+  rows,
+  selectedSha,
+  onSelectCommit,
 }: GitGraphSVGProps) {
   if (rows.length === 0) return null;
 
@@ -158,14 +160,12 @@ export const GitGraphSVG = React.memo(function GitGraphSVG({
               // extension above the merge curve.  Fork-source lines go
               // the full row height — the fork curve branches off at cy.
               const y1 = isMergeSrc ? cy : rowTop(i);
-              const y2 = isActive && i + 1 < rows.length
-                ? rowTop(i + 1)
-                : cy;
+              const y2 = isActive && i + 1 < rows.length ? rowTop(i + 1) : cy;
 
               if (y1 >= y2) return null;
 
               // Fork-target stubs match the fork curve's visual weight.
-              const opacity = (isActive || isForkTgt) ? 0.55 : 0.35;
+              const opacity = isActive || isForkTgt ? 0.55 : 0.35;
 
               return (
                 <line
@@ -224,7 +224,8 @@ export const GitGraphSVG = React.memo(function GitGraphSVG({
             {/* ── Merge outer ring ──────────────────────────────────── */}
             {isMerge && (
               <circle
-                cx={cx} cy={cy}
+                cx={cx}
+                cy={cy}
                 r={dotR + 2}
                 fill="none"
                 stroke={dotColor}
@@ -235,7 +236,8 @@ export const GitGraphSVG = React.memo(function GitGraphSVG({
 
             {/* ── Invisible click area ──────────────────────────────── */}
             <circle
-              cx={cx} cy={cy}
+              cx={cx}
+              cy={cy}
               r={Math.max(dotR + 4, 9)}
               fill="transparent"
               className="cursor-pointer"
@@ -245,7 +247,8 @@ export const GitGraphSVG = React.memo(function GitGraphSVG({
 
             {/* ── Commit dot ────────────────────────────────────────── */}
             <circle
-              cx={cx} cy={cy}
+              cx={cx}
+              cy={cy}
               r={dotR}
               fill={dotColor}
               stroke={isSelected ? "#fff" : "none"}
