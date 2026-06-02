@@ -7,6 +7,20 @@
 //! - `GET  /api/terminal/shells`    — List available shells on the server
 //! - `GET  /api/terminal/ws`        — WebSocket endpoint for terminal I/O
 //! - `DELETE /api/terminal/{id}`    — Close a terminal session
+//!
+//! ## WebSocket Protocol
+//!
+//! Messages are JSON arrays: `[type, ...args]`
+//!
+//! **Client → Server:**
+//! - `["bind", "<session_id>"]`  — Bind to an existing session
+//! - `["stdin", "<text>"]`       — Send input to the PTY
+//! - `["resize", <rows>, <cols>]` — Resize the PTY
+//!
+//! **Server → Client:**
+//! - `["setup"]`                 — Session ready (sent after successful bind)
+//! - `["stdout", "<text>"]`      — PTY output
+//! - `["disconnect", "<reason>"]` — Session closed
 
 use std::collections::HashSet;
 use std::convert::Infallible;
@@ -15,7 +29,7 @@ use axum::{
     Json, Router,
     extract::{
         Path, Query, State,
-        ws::{Message, WebSocket, WebSocketUpgrade},
+        ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
     },
     response::{
         IntoResponse,
@@ -27,7 +41,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::super::state::AppState;
-use crate::terminal::TerminalManager;
 
 pub fn terminal_routes() -> Router<AppState> {
     Router::new()
@@ -36,6 +49,7 @@ pub fn terminal_routes() -> Router<AppState> {
         .route("/terminal/resize", post(terminal_resize))
         .route("/terminal/events", get(terminal_events))
         .route("/terminal/shells", get(list_shells))
+        .route("/terminal/list", get(list_sessions))
         .route("/terminal/ws", get(terminal_ws_handler))
         .route("/terminal/{session_id}", delete(close_terminal))
 }
@@ -94,14 +108,38 @@ struct WsQuery {
     token: Option<String>,
 }
 
-/// Control frame tag byte for WebSocket binary protocol.
-const CONTROL_TAG: u8 = 0x01;
+#[derive(Serialize)]
+struct SessionListResponse {
+    sessions: Vec<String>,
+}
 
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum WsClientMessage {
-    Bind { session_id: String },
-    Resize { cols: u16, rows: u16 },
+/// Parse a JSON array message from the WebSocket.
+/// Returns the message type as a string and the remaining arguments.
+fn parse_ws_msg(msg: &Message) -> Result<(String, Vec<serde_json::Value>), String> {
+    let text = match msg {
+        Message::Text(t) => t.to_string(),
+        Message::Binary(d) => String::from_utf8(d.to_vec())
+            .map_err(|_| "invalid UTF-8 in binary message".to_string())?,
+        _ => return Err("unexpected message type".to_string()),
+    };
+
+    let arr: Vec<serde_json::Value> = serde_json::from_str(&text)
+        .map_err(|e| format!("invalid JSON array: {e}"))?;
+
+    if arr.is_empty() {
+        return Err("empty message array".to_string());
+    }
+
+    let msg_type = arr[0].as_str()
+        .ok_or_else(|| "first element must be a string type".to_string())?;
+
+    Ok((msg_type.to_string(), arr[1..].to_vec()))
+}
+
+/// Build a JSON array WebSocket message.
+fn json_msg(args: impl IntoIterator<Item = impl Into<serde_json::Value>>) -> Utf8Bytes {
+    let arr: Vec<serde_json::Value> = args.into_iter().map(Into::into).collect();
+    serde_json::to_string(&arr).unwrap_or_default().into()
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────
@@ -151,6 +189,16 @@ async fn list_shells(State(_state): State<AppState>) -> Json<ShellsResponse> {
     Json(ShellsResponse {
         shells,
         default_shell,
+    })
+}
+
+/// List running terminal sessions.
+async fn list_sessions(
+    State(state): State<AppState>,
+) -> Json<SessionListResponse> {
+    let ids = state.terminal_manager.list_sessions().await;
+    Json(SessionListResponse {
+        sessions: ids.iter().map(|id| id.to_string()).collect(),
     })
 }
 
@@ -492,15 +540,15 @@ async fn terminal_events(
 /// Public endpoint (bypasses auth middleware) because the browser WebSocket API
 /// cannot set custom headers. Auth is handled inline via query param.
 ///
-/// Protocol:
+/// Protocol: JSON arrays over text frames.
 ///   Client → Server:
-///     - `\x01{"type":"bind","session_id":"..."}` — bind to session (control frame)
-///     - `\x01{"type":"resize","cols":N,"rows":M}` — resize PTY (control frame)
-///     - raw text — terminal input to write to PTY
-///
+///     ["bind", "<session_id>"]
+///     ["stdin", "<text>"]
+///     ["resize", <rows>, <cols>]
 ///   Server → Client:
-///     - raw text — terminal output from PTY
-///     - `\x01{"type":"close"}` — session closed (control frame)
+///     ["setup"]
+///     ["stdout", "<text>"]
+///     ["disconnect", "<reason>"]
 async fn terminal_ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
@@ -535,38 +583,59 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {
                 return;
             }
             Ok(None) | Err(_) => {
-                let _ = ws
-                    .send(Message::Text(
-                        "\x01{\"type\":\"error\",\"message\":\"bind timeout\"}".into(),
-                    ))
-                    .await;
+                let _ = ws.send(Message::Text(
+                    json_msg(["disconnect", "bind timeout"]),
+                )).await;
                 return;
             }
         };
 
-        let sid = match parse_ws_bind(&msg) {
-            Ok(sid) => sid,
+        let (msg_type, args) = match parse_ws_msg(&msg) {
+            Ok(v) => v,
             Err(e) => {
-                let _ = ws
-                    .send(Message::Text(
-                        format!("\x01{{\"type\":\"error\",\"message\":\"{e}\"}}").into(),
-                    ))
-                    .await;
+                let _ = ws.send(Message::Text(
+                    json_msg(["disconnect", &e]),
+                )).await;
+                continue;
+            }
+        };
+
+        if msg_type != "bind" {
+            let _ = ws.send(Message::Text(
+                json_msg(["disconnect", "expected bind"]),
+            )).await;
+            continue;
+        }
+
+        let session_id_str = match args.first().and_then(|v| v.as_str()) {
+            Some(s) => s,
+            None => {
+                let _ = ws.send(Message::Text(
+                    json_msg(["disconnect", "bind missing session_id"]),
+                )).await;
+                continue;
+            }
+        };
+
+        let sid = match Uuid::parse_str(session_id_str) {
+            Ok(id) => id,
+            Err(e) => {
+                let _ = ws.send(Message::Text(
+                    json_msg(["disconnect", &format!("invalid session_id: {e}")]),
+                )).await;
                 continue;
             }
         };
 
         if !terminal_manager.has_session(sid).await {
-            let _ = ws
-                .send(Message::Text(
-                    "\x01{\"type\":\"error\",\"message\":\"session not found\"}".into(),
-                ))
-                .await;
+            let _ = ws.send(Message::Text(
+                json_msg(["disconnect", "session not found"]),
+            )).await;
             continue;
         }
 
-        // Send OK
-        let _ = ws.send(Message::Text("\x01{\"type\":\"ok\"}".into())).await;
+        // Send setup signal — session is ready
+        let _ = ws.send(Message::Text(json_msg(["setup"]))).await;
         break sid;
     };
 
@@ -576,7 +645,7 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {
     if !buf.is_empty()
         && let Ok(text) = String::from_utf8(buf)
     {
-        let _ = ws.send(Message::Text(text.into())).await;
+        let _ = ws.send(Message::Text(json_msg(["stdout", &text]))).await;
     }
 
     // Subscribe to terminal output
@@ -592,62 +661,85 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {
     let output_task = tokio::spawn(async move {
         loop {
             tokio::select! {
-                _ = cancel_clone.cancelled() => {
-                    break;
-                }
+                _ = cancel_clone.cancelled() => break,
                 result = rx.recv() => {
-                    match result {
-                        Ok(output) if output.session_id == sid => {
-                            if output.closed {
-                                let _ = output_tx_clone
-                                    .send(Message::Text("\x01{\"type\":\"close\"}".into()))
-                                    .await;
-                                break;
-                            }
-                            if let Ok(text) = String::from_utf8(output.data)
-                                && output_tx_clone.send(Message::Text(text.into())).await.is_err() {
-                                    break;
-                                }
-                        }
-                        Ok(_) => {}
+                    let output = match result {
+                        Ok(o) => o,
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            log::warn!("terminal WS lagged by {n} for session {sid}");
+                            log::warn!("terminal WS output lagged by {n} for session {sid}");
                             continue;
                         }
+                    };
+
+                    if output.session_id != sid {
+                        continue;
+                    }
+
+                    if output.closed {
+                        let _ = output_tx_clone
+                            .send(Message::Text(json_msg(["disconnect", "session closed"])))
+                            .await;
+                        break;
+                    }
+
+                    if let Ok(text) = String::from_utf8(output.data) {
+                        let _ = output_tx_clone
+                            .send(Message::Text(json_msg(["stdout", &text])))
+                            .await;
                     }
                 }
             }
         }
     });
 
-    // Main loop: read from WS (client input) and from output channel (PTY output).
-    // Send periodic WebSocket pings to keep the connection alive through proxies.
-    let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(15));
-    // Reset the stream so the first tick waits the full interval.
-    ping_interval.reset();
+    // Main I/O loop
+    let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(30));
+
     loop {
         tokio::select! {
             ws_msg = ws.recv() => {
-                let ws_msg = match ws_msg {
-                    Some(Ok(msg)) => msg,
-                    Some(Err(e)) => {
-                        log::warn!("terminal WS recv error: {e}");
-                        break;
+                match ws_msg {
+                    Some(Ok(Message::Text(data))) => {
+                        // Parse JSON array
+                        let (msg_type, args) = match parse_ws_msg_raw(&data) {
+                            Ok(v) => v,
+                            Err(_) => continue,
+                        };
+
+                        match msg_type.as_str() {
+                            "stdin" => {
+                                if let Some(text) = args.first().and_then(|v| v.as_str()) {
+                                    let _ = terminal_manager
+                                        .write_input(session_id, text.as_bytes())
+                                        .await;
+                                }
+                            }
+                            "resize" => {
+                                if args.len() >= 2 {
+                                    let rows = args[0].as_u64().unwrap_or(24) as u16;
+                                    let cols = args[1].as_u64().unwrap_or(80) as u16;
+                                    let _ = terminal_manager
+                                        .resize(session_id, cols, rows)
+                                        .await;
+                                }
+                            }
+                            _ => {
+                                // Unknown message type — ignore
+                            }
+                        }
                     }
+                    Some(Ok(Message::Binary(data))) => {
+                        // Treat binary as stdin
+                        let _ = terminal_manager
+                            .write_input(session_id, &data)
+                            .await;
+                    }
+                    Some(Ok(Message::Close(_))) => break,
+                    Some(Err(_)) => break,
                     None => break,
-                };
-
-                if matches!(&ws_msg, Message::Close(_)) {
-                    break;
+                    _ => {}
                 }
-
-                handle_ws_message(
-                    &ws_msg,
-                    session_id,
-                    &terminal_manager,
-                    &output_tx,
-                ).await;
             }
             out_msg = output_rx.recv() => {
                 match out_msg {
@@ -660,7 +752,7 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {
                 }
             }
             _ = ping_interval.tick() => {
-                if ws.send(Message::Ping(bytes::Bytes::from_static(b"ping"))).await.is_err() {
+                if ws.send(Message::Ping(bytes::Bytes::new())).await.is_err() {
                     break;
                 }
             }
@@ -670,95 +762,20 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {
     output_task.abort();
 }
 
-/// Process a single WebSocket message from the client.
-async fn handle_ws_message(
-    msg: &Message,
-    session_id: Uuid,
-    terminal_manager: &TerminalManager,
-    output_tx: &tokio::sync::mpsc::Sender<Message>,
-) {
-    match msg {
-        Message::Text(t) => {
-            let data = t.as_bytes().to_vec();
+/// Parse a JSON array from a text WebSocket message (string slice).
+/// Returns (message_type, args).
+fn parse_ws_msg_raw(text: &str) -> Result<(String, Vec<serde_json::Value>), String> {
+    let arr: Vec<serde_json::Value> = serde_json::from_str(text)
+        .map_err(|e| format!("invalid JSON array: {e}"))?;
 
-            // Check for control frames (starting with 0x01 byte)
-            if data.first() == Some(&CONTROL_TAG) {
-                if let Ok(rest) = std::str::from_utf8(&data[1..])
-                    && let Ok(ctrl) = serde_json::from_str::<WsClientMessage>(rest)
-                {
-                    match ctrl {
-                        WsClientMessage::Resize { cols, rows } => {
-                            let _ = terminal_manager.resize(session_id, cols, rows).await;
-                        }
-                        WsClientMessage::Bind { .. } => {
-                            let _ = output_tx
-                                .send(Message::Text("\x01{\"type\":\"ok\"}".into()))
-                                .await;
-                        }
-                    }
-                }
-                return;
-            }
-
-            // Raw text = terminal input
-            let _ = terminal_manager.write_input(session_id, &data).await;
-        }
-        Message::Binary(d) => {
-            let data = d.to_vec();
-
-            // Check for control frames (starting with 0x01 byte)
-            if data.first() == Some(&CONTROL_TAG) {
-                if let Ok(rest) = std::str::from_utf8(&data[1..])
-                    && let Ok(ctrl) = serde_json::from_str::<WsClientMessage>(rest)
-                {
-                    match ctrl {
-                        WsClientMessage::Resize { cols, rows } => {
-                            let _ = terminal_manager.resize(session_id, cols, rows).await;
-                        }
-                        WsClientMessage::Bind { .. } => {
-                            let _ = output_tx
-                                .send(Message::Text("\x01{\"type\":\"ok\"}".into()))
-                                .await;
-                        }
-                    }
-                }
-                return;
-            }
-
-            // Raw binary = terminal input
-            let _ = terminal_manager.write_input(session_id, &data).await;
-        }
-        Message::Close(_) => {}
-        Message::Ping(data) => {
-            let _ = output_tx.send(Message::Pong(data.clone())).await;
-        }
-        Message::Pong(_) => {}
-    }
-}
-
-fn parse_ws_bind(msg: &Message) -> Result<Uuid, String> {
-    let data = match msg {
-        Message::Text(t) => t.as_bytes().to_vec(),
-        Message::Binary(d) => d.to_vec(),
-        _ => return Err("expected text or binary message".to_string()),
-    };
-
-    if data.first() != Some(&CONTROL_TAG) {
-        return Err("expected control frame (0x01 prefix)".to_string());
+    if arr.is_empty() {
+        return Err("empty message array".to_string());
     }
 
-    let rest = std::str::from_utf8(&data[1..])
-        .map_err(|_| "invalid UTF-8 in control frame".to_string())?;
+    let msg_type = arr[0].as_str()
+        .ok_or_else(|| "first element must be a string type".to_string())?;
 
-    let ctrl: WsClientMessage =
-        serde_json::from_str(rest).map_err(|e| format!("invalid control frame: {e}"))?;
-
-    match ctrl {
-        WsClientMessage::Bind { session_id } => {
-            Uuid::parse_str(&session_id).map_err(|e| format!("invalid session_id: {e}"))
-        }
-        _ => Err("expected bind message".to_string()),
-    }
+    Ok((msg_type.to_string(), arr[1..].to_vec()))
 }
 
 async fn close_terminal(

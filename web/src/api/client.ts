@@ -360,6 +360,9 @@ export const api = {
   closeTerminal: (sessionId: string) =>
     fetchWithAuth(`${API_BASE}/terminal/${sessionId}`, { method: "DELETE" }),
 
+  listTerminals: () =>
+    fetchJson<{ sessions: string[] }>(`${API_BASE}/terminal/list`),
+
   // Terminal shell config (server-side persisted)
   getTerminalShellConfig: () => fetchJson<{ shell: string }>(`${API_BASE}/config/terminal-shell`),
 

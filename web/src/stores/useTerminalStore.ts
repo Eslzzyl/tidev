@@ -2,32 +2,26 @@ import { create } from "zustand";
 import { v4 as uuidv4 } from "uuid";
 import { api } from "../api/client";
 import { useUIStore } from "./useUIStore";
+import { TerminalConnection } from "../terminal/connection";
 
 export interface TerminalTab {
   id: string;
   sessionId: string | null;
   label: string;
-  buffer: string;
-  lifecycle: "idle" | "running" | "exited";
+  connection: TerminalConnection | null;
+  lifecycle: "idle" | "connecting" | "running" | "exited";
 }
 
 interface TerminalStore {
   tabs: TerminalTab[];
   activeTabId: string | null;
-  eventSource: EventSource | null;
-  ws: WebSocket | null;
 
   createTab: () => string;
-  initSession: (tabId: string, cols: number, rows: number) => Promise<void>;
+  startSession: (tabId: string, cols: number, rows: number) => Promise<string | null>;
   closeTab: (id: string) => Promise<void>;
   setActiveTab: (id: string | null) => void;
-  appendOutput: (sessionId: string, data: string) => void;
-  closeBySessionId: (sessionId: string) => void;
-  sendInput: (tabId: string, data: string) => Promise<void>;
-  sendResize: (tabId: string, cols: number, rows: number) => Promise<void>;
-  connectSSE: (sessionId: string) => void;
-  connectWS: (sessionId: string, tabId: string) => void;
-  disconnect: () => void;
+  setLifecycle: (tabId: string, lifecycle: TerminalTab["lifecycle"]) => void;
+  restoreRunningSessions: () => Promise<void>;
 
   /** Ctrl latch state for mobile touch keyboard */
   ctrlLatch: boolean;
@@ -37,62 +31,70 @@ interface TerminalStore {
 export const useTerminalStore = create<TerminalStore>((set, get) => ({
   tabs: [],
   activeTabId: null,
-  eventSource: null,
-  ws: null,
 
   createTab: () => {
     const id = uuidv4();
     const label = `Terminal ${get().tabs.length + 1}`;
 
     set((state) => ({
-      tabs: [...state.tabs, { id, sessionId: null, label, buffer: "", lifecycle: "idle" }],
+      tabs: [...state.tabs, { id, sessionId: null, label, connection: null, lifecycle: "idle" }],
       activeTabId: id,
     }));
 
     return id;
   },
 
-  initSession: async (tabId, cols, rows) => {
+  startSession: async (tabId, cols, rows) => {
     try {
       const { settings } = useUIStore.getState();
       const shell = settings.terminalShell || undefined;
       const result = await api.startTerminal(cols, rows, shell);
+      const sessionId = result.session_id;
+
+      // Create connection with the server-assigned session ID
+      const conn = new TerminalConnection(sessionId);
+      conn.onStatusChange((status) => {
+        if (status === "connected") {
+          get().setLifecycle(tabId, "running");
+        } else if (status === "disconnected") {
+          get().setLifecycle(tabId, "exited");
+        }
+      });
+
+      // Start connecting
+      conn.connect();
+
       set((state) => ({
         tabs: state.tabs.map((t) =>
           t.id === tabId
-            ? {
-                ...t,
-                sessionId: result.session_id,
-                lifecycle: "running" as const,
-              }
+            ? { ...t, sessionId, connection: conn, lifecycle: "connecting" }
             : t,
         ),
       }));
 
-      // Connect via WebSocket (primary), fall back to SSE
-      get().connectWS(result.session_id, tabId);
+      return sessionId;
     } catch {
       set((state) => ({
         tabs: state.tabs.map((t) =>
           t.id === tabId
-            ? {
-                ...t,
-                lifecycle: "exited" as const,
-                buffer: t.buffer + "\r\nFailed to start terminal\r\n",
-              }
+            ? { ...t, lifecycle: "exited" }
             : t,
         ),
       }));
+      return null;
     }
   },
 
-  closeTab: async (id: string) => {
+  closeTab: async (id) => {
     const tab = get().tabs.find((t) => t.id === id);
+    if (tab?.connection) {
+      tab.connection.disconnect();
+    }
     if (tab?.sessionId) {
       try {
         await api.closeTerminal(tab.sessionId);
       } catch {
-        // Ignore errors on close
+        // Ignore close errors
       }
     }
 
@@ -112,159 +114,42 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
   setActiveTab: (id) => set({ activeTabId: id }),
 
-  appendOutput: (sessionId, data) => {
+  setLifecycle: (tabId, lifecycle) => {
     set((state) => ({
       tabs: state.tabs.map((t) =>
-        t.sessionId === sessionId ? { ...t, buffer: t.buffer + data } : t,
+        t.id === tabId ? { ...t, lifecycle } : t,
       ),
     }));
   },
 
-  closeBySessionId: (sessionId) => {
-    set((state) => ({
-      tabs: state.tabs.map((t) =>
-        t.sessionId === sessionId ? { ...t, lifecycle: "exited" as const } : t,
-      ),
-    }));
-  },
-
-  sendInput: async (tabId, data) => {
-    const tab = get().tabs.find((t) => t.id === tabId);
-    if (!tab?.sessionId) return;
-
-    const ws = get().ws;
-    // Try WebSocket first
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(data);
-      return;
-    }
-
-    // Fallback to HTTP
+  restoreRunningSessions: async () => {
     try {
-      await api.terminalInput(tab.sessionId, data);
-    } catch (err) {
-      console.error("Failed to send terminal input:", err);
-    }
-  },
+      const { sessions } = await api.listTerminals();
+      if (sessions.length === 0) return;
 
-  sendResize: async (tabId, cols, rows) => {
-    const tab = get().tabs.find((t) => t.id === tabId);
-    if (!tab?.sessionId) return;
-
-    const ws = get().ws;
-    // Try WebSocket first (control frame)
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      const ctrl = new TextEncoder().encode(
-        `\x01${JSON.stringify({ type: "resize", cols, rows })}`,
-      );
-      ws.send(ctrl);
-      return;
-    }
-
-    // Fallback to HTTP
-    try {
-      await api.terminalResize(tab.sessionId, cols, rows);
-    } catch (err) {
-      console.error("Failed to resize terminal:", err);
-    }
-  },
-
-  connectSSE: (sessionId) => {
-    get().disconnect();
-
-    const token = localStorage.getItem("web_auth_token");
-    const tokenParam = token ? `&token=${encodeURIComponent(token)}` : "";
-    const url = `${window.location.origin}/api/terminal/events?session_id=${sessionId}${tokenParam}`;
-    const es = new EventSource(url);
-
-    es.addEventListener("terminal.output", (e: MessageEvent) => {
-      get().appendOutput(sessionId, e.data);
-    });
-
-    es.addEventListener("terminal.close", () => {
-      get().closeBySessionId(sessionId);
-      es.close();
-    });
-
-    es.onerror = () => {
-      es.close();
-    };
-
-    set({ eventSource: es });
-  },
-
-  connectWS: (sessionId, tabId) => {
-    get().disconnect();
-
-    // Try WebSocket
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const token = localStorage.getItem("web_auth_token");
-    const tokenParam = token ? `?token=${encodeURIComponent(token)}` : "";
-    const wsUrl = `${protocol}//${window.location.host}/api/terminal/ws${tokenParam}`;
-
-    try {
-      const ws = new WebSocket(wsUrl);
-
-      ws.onopen = () => {
-        // Send bind control frame
-        const bindMsg = new TextEncoder().encode(
-          `\x01${JSON.stringify({ type: "bind", session_id: sessionId })}`,
-        );
-        ws.send(bindMsg);
-      };
-
-      ws.onmessage = (e) => {
-        const data = e.data as string;
-
-        // Check for control frames (0x01 prefix)
-        if (data.charCodeAt(0) === 0x01) {
-          try {
-            const ctrl = JSON.parse(data.slice(1));
-            if (ctrl.type === "close") {
-              get().closeBySessionId(sessionId);
-              get().disconnect();
-            }
-            // "ok" is ack, no action needed
-          } catch {
-            // Invalid control frame, ignore
+      const newTabs: TerminalTab[] = sessions.map((sessionId, i) => {
+        const id = uuidv4();
+        const conn = new TerminalConnection(sessionId);
+        conn.onStatusChange((status) => {
+          if (status === "connected") {
+            get().setLifecycle(id, "running");
+          } else if (status === "disconnected") {
+            get().setLifecycle(id, "exited");
           }
-          return;
-        }
+        });
+        conn.connect();
+        return {
+          id,
+          sessionId,
+          label: `Terminal ${i + 1}`,
+          connection: conn,
+          lifecycle: "connecting" as const,
+        };
+      });
 
-        // Raw text = terminal output
-        get().appendOutput(sessionId, data);
-      };
-
-      ws.onerror = () => {
-        // WebSocket failed, fall back to SSE
-        get().disconnect();
-        get().connectSSE(sessionId);
-      };
-
-      ws.onclose = () => {
-        // If the tab is still running, we might need to reconnect.
-        // But since we manage lifecycle via terminal.close event,
-        // we don't auto-reconnect here.
-        set({ ws: null });
-      };
-
-      set({ ws });
+      set({ tabs: newTabs, activeTabId: newTabs[0].id });
     } catch {
-      // WebSocket connection failed, fall back to SSE
-      get().connectSSE(sessionId);
-    }
-  },
-
-  disconnect: () => {
-    const es = get().eventSource;
-    if (es) {
-      es.close();
-      set({ eventSource: null });
-    }
-    const ws = get().ws;
-    if (ws) {
-      ws.close();
-      set({ ws: null });
+      // Server unavailable or no running sessions — do nothing
     }
   },
 

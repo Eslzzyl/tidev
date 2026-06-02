@@ -9,6 +9,10 @@ use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
+/// Maximum buffer size per terminal session (1 MB).
+/// When exceeded, oldest data is trimmed on each new write.
+const MAX_BUFFER_SIZE: usize = 1 * 1024 * 1024;
+
 struct TerminalSession {
     /// Writer half of the PTY master — for sending user input.
     writer: Option<Box<dyn Write + Send>>,
@@ -108,6 +112,11 @@ impl TerminalManager {
                         let data = &buf[..n];
                         let mut guard = buffer_clone.lock().unwrap();
                         guard.extend_from_slice(data);
+                        // Trim buffer to max size
+                        if guard.len() > MAX_BUFFER_SIZE {
+                            let excess = guard.len() - MAX_BUFFER_SIZE;
+                            guard.drain(..excess);
+                        }
                         if tx_clone.receiver_count() > 0 {
                             let _ = tx_clone.send(TerminalOutput {
                                 session_id: sid,
@@ -242,5 +251,10 @@ impl TerminalManager {
 
     pub async fn has_session(&self, session_id: Uuid) -> bool {
         self.sessions.lock().await.contains_key(&session_id)
+    }
+
+    /// Returns the list of all active session IDs.
+    pub async fn list_sessions(&self) -> Vec<Uuid> {
+        self.sessions.lock().await.keys().copied().collect()
     }
 }
