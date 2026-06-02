@@ -22,6 +22,8 @@ struct TerminalSession {
     /// Child process handle — used for kill() + wait() in close_session().
     child: Option<Box<dyn portable_pty::Child + Send + Sync>>,
     buffer: Arc<Mutex<Vec<u8>>>,
+    /// User-visible tab label (persisted in memory for page-refresh).
+    label: String,
 }
 
 #[derive(Clone, Debug)]
@@ -54,6 +56,7 @@ impl TerminalManager {
         tx: broadcast::Sender<TerminalOutput>,
         initial_size: PtySize,
         shell: Option<String>,
+        label: String,
     ) -> Result<Uuid, String> {
         let id = Uuid::new_v4();
         let pty_system = native_pty_system();
@@ -145,6 +148,7 @@ impl TerminalManager {
             reader_task,
             child: Some(child),
             buffer,
+            label,
         };
 
         self.sessions.lock().await.insert(id, session);
@@ -253,8 +257,23 @@ impl TerminalManager {
         self.sessions.lock().await.contains_key(&session_id)
     }
 
-    /// Returns the list of all active session IDs.
-    pub async fn list_sessions(&self) -> Vec<Uuid> {
-        self.sessions.lock().await.keys().copied().collect()
+    /// Returns the list of all active session IDs and their labels.
+    pub async fn list_sessions(&self) -> Vec<(Uuid, String)> {
+        self.sessions
+            .lock()
+            .await
+            .iter()
+            .map(|(id, s)| (*id, s.label.clone()))
+            .collect()
+    }
+
+    /// Update the label for a terminal session.
+    pub async fn rename_session(&self, session_id: Uuid, label: String) -> Result<(), String> {
+        let mut sessions = self.sessions.lock().await;
+        let session = sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| format!("Terminal session {session_id} not found"))?;
+        session.label = label;
+        Ok(())
     }
 }

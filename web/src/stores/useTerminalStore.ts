@@ -19,6 +19,8 @@ interface TerminalStore {
   createTab: () => string;
   startSession: (tabId: string, cols: number, rows: number) => Promise<string | null>;
   closeTab: (id: string) => Promise<void>;
+  closeTabs: (ids: string[]) => Promise<void>;
+  renameTab: (id: string, label: string) => void;
   setActiveTab: (id: string | null) => void;
   setLifecycle: (tabId: string, lifecycle: TerminalTab["lifecycle"]) => void;
   restoreRunningSessions: () => Promise<void>;
@@ -34,7 +36,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
   createTab: () => {
     const id = uuidv4();
-    const label = `Terminal ${get().tabs.length + 1}`;
+    const label = "Terminal";
 
     set((state) => ({
       tabs: [...state.tabs, { id, sessionId: null, label, connection: null, lifecycle: "idle" }],
@@ -48,7 +50,9 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     try {
       const { settings } = useUIStore.getState();
       const shell = settings.terminalShell || undefined;
-      const result = await api.startTerminal(cols, rows, shell);
+      const tab = get().tabs.find((t) => t.id === tabId);
+      const label = tab?.label ?? "Terminal";
+      const result = await api.startTerminal(cols, rows, shell, label);
       const sessionId = result.session_id;
 
       // Create connection with the server-assigned session ID
@@ -112,6 +116,46 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     });
   },
 
+  closeTabs: async (ids) => {
+    const tabs = get().tabs;
+    const toClose = tabs.filter((t) => ids.includes(t.id));
+    const idSet = new Set(ids);
+
+    // Disconnect all connections synchronously
+    for (const tab of toClose) {
+      tab.connection?.disconnect();
+    }
+
+    // Close all sessions on server
+    await Promise.allSettled(
+      toClose.map((tab) =>
+        tab.sessionId ? api.closeTerminal(tab.sessionId) : Promise.resolve(),
+      ),
+    );
+
+    set((state) => {
+      const remaining = state.tabs.filter((t) => !idSet.has(t.id));
+      return {
+        tabs: remaining,
+        activeTabId:
+          remaining.length > 0 ? remaining[remaining.length - 1].id : null,
+      };
+    });
+  },
+
+  renameTab: (id, label) => {
+    set((state) => ({
+      tabs: state.tabs.map((t) => (t.id === id ? { ...t, label } : t)),
+    }));
+    // Persist rename to server
+    const tab = get().tabs.find((t) => t.id === id);
+    if (tab?.sessionId) {
+      api.renameTerminal(tab.sessionId, label).catch(() => {
+        // Ignore rename errors — local state is already updated
+      });
+    }
+  },
+
   setActiveTab: (id) => set({ activeTabId: id }),
 
   setLifecycle: (tabId, lifecycle) => {
@@ -127,9 +171,12 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       const { sessions } = await api.listTerminals();
       if (sessions.length === 0) return;
 
-      const newTabs: TerminalTab[] = sessions.map((sessionId, i) => {
+      const newTabs: TerminalTab[] = [];
+      for (const entry of sessions) {
+        // Defensive: skip entries without a valid session_id
+        if (!entry.session_id) continue;
         const id = uuidv4();
-        const conn = new TerminalConnection(sessionId);
+        const conn = new TerminalConnection(entry.session_id);
         conn.onStatusChange((status) => {
           if (status === "connected") {
             get().setLifecycle(id, "running");
@@ -138,15 +185,16 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
           }
         });
         conn.connect();
-        return {
+        newTabs.push({
           id,
-          sessionId,
-          label: `Terminal ${i + 1}`,
+          sessionId: entry.session_id,
+          label: entry.label || "Terminal",
           connection: conn,
           lifecycle: "connecting" as const,
-        };
-      });
+        });
+      }
 
+      if (newTabs.length === 0) return;
       set({ tabs: newTabs, activeTabId: newTabs[0].id });
     } catch {
       // Server unavailable or no running sessions — do nothing

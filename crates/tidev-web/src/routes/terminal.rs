@@ -47,6 +47,7 @@ pub fn terminal_routes() -> Router<AppState> {
         .route("/terminal/start", post(start_terminal))
         .route("/terminal/input", post(terminal_input))
         .route("/terminal/resize", post(terminal_resize))
+        .route("/terminal/rename", post(rename_terminal))
         .route("/terminal/events", get(terminal_events))
         .route("/terminal/shells", get(list_shells))
         .route("/terminal/list", get(list_sessions))
@@ -80,6 +81,7 @@ struct StartRequest {
     cols: Option<u16>,
     rows: Option<u16>,
     shell: Option<String>,
+    label: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -110,7 +112,13 @@ struct WsQuery {
 
 #[derive(Serialize)]
 struct SessionListResponse {
-    sessions: Vec<String>,
+    sessions: Vec<SessionEntry>,
+}
+
+#[derive(Serialize)]
+struct SessionEntry {
+    session_id: String,
+    label: String,
 }
 
 /// Parse a JSON array message from the WebSocket.
@@ -167,9 +175,11 @@ async fn start_terminal(
         config.shell.terminal_shell.clone()
     });
 
+    let label = req.label.unwrap_or_else(|| "Terminal".to_string());
+
     let session_id = state
         .terminal_manager
-        .start_session(state.terminal_tx.clone(), size, shell)
+        .start_session(state.terminal_tx.clone(), size, shell, label)
         .await
         .map_err(crate::error::AppError::Internal)?;
 
@@ -196,10 +206,39 @@ async fn list_shells(State(_state): State<AppState>) -> Json<ShellsResponse> {
 async fn list_sessions(
     State(state): State<AppState>,
 ) -> Json<SessionListResponse> {
-    let ids = state.terminal_manager.list_sessions().await;
+    let entries = state.terminal_manager.list_sessions().await;
     Json(SessionListResponse {
-        sessions: ids.iter().map(|id| id.to_string()).collect(),
+        sessions: entries
+            .into_iter()
+            .map(|(id, label)| SessionEntry {
+                session_id: id.to_string(),
+                label,
+            })
+            .collect(),
     })
+}
+
+#[derive(Deserialize)]
+struct RenameRequest {
+    session_id: String,
+    label: String,
+}
+
+/// Rename a terminal session (persists label in memory).
+async fn rename_terminal(
+    State(state): State<AppState>,
+    Json(req): Json<RenameRequest>,
+) -> Result<Json<serde_json::Value>, crate::error::AppError> {
+    let session_id: Uuid = req
+        .session_id
+        .parse()
+        .map_err(|_| crate::error::AppError::NotFound("Invalid session ID".to_string()))?;
+    state
+        .terminal_manager
+        .rename_session(session_id, req.label)
+        .await
+        .map_err(crate::error::AppError::NotFound)?;
+    Ok(Json(serde_json::json!({ "success": true })))
 }
 
 #[cfg(unix)]

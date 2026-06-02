@@ -331,10 +331,10 @@ export const api = {
     fetchJson<ReadBase64Response>(`${API_BASE}/fs/read-base64?path=${encodeURIComponent(path)}`),
 
   // Terminal
-  startTerminal: (cols?: number, rows?: number, shell?: string) =>
+  startTerminal: (cols?: number, rows?: number, shell?: string, label?: string) =>
     fetchJson<{ session_id: string }>(`${API_BASE}/terminal/start`, {
       method: "POST",
-      body: JSON.stringify({ cols, rows, shell: shell || undefined }),
+      body: JSON.stringify({ cols, rows, shell: shell || undefined, label: label || undefined }),
     }),
 
   listTerminalShells: () =>
@@ -361,7 +361,15 @@ export const api = {
     fetchWithAuth(`${API_BASE}/terminal/${sessionId}`, { method: "DELETE" }),
 
   listTerminals: () =>
-    fetchJson<{ sessions: string[] }>(`${API_BASE}/terminal/list`),
+    fetchJson<{ sessions: Array<{ session_id: string; label: string }> }>(
+      `${API_BASE}/terminal/list`,
+    ),
+
+  renameTerminal: (sessionId: string, label: string) =>
+    fetchJson<{ success: boolean }>(`${API_BASE}/terminal/rename`, {
+      method: "POST",
+      body: JSON.stringify({ session_id: sessionId, label }),
+    }),
 
   // Terminal shell config (server-side persisted)
   getTerminalShellConfig: () => fetchJson<{ shell: string }>(`${API_BASE}/config/terminal-shell`),

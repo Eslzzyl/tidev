@@ -1,9 +1,13 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { Plus, X } from "lucide-react";
+import { Edit3, Plus, X, XCircle, XSquare } from "lucide-react";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { useUIStore, getEffectiveTheme } from "../../stores/useUIStore";
+import { ContextMenu } from "../ui/ContextMenu";
+import type { ContextMenuItem } from "../ui/ContextMenu";
+import { RenameDialog } from "../ui/RenameDialog";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import type { TerminalConnection } from "../../terminal/connection";
 import "@xterm/xterm/css/xterm.css";
 
@@ -60,6 +64,8 @@ export function TerminalView() {
   const activeTabId = useTerminalStore((s) => s.activeTabId);
   const createTab = useTerminalStore((s) => s.createTab);
   const closeTab = useTerminalStore((s) => s.closeTab);
+  const closeTabs = useTerminalStore((s) => s.closeTabs);
+  const renameTab = useTerminalStore((s) => s.renameTab);
   const setActiveTab = useTerminalStore((s) => s.setActiveTab);
   const restoreRunningSessions = useTerminalStore((s) => s.restoreRunningSessions);
   const theme = useUIStore((s) => s.theme);
@@ -67,6 +73,56 @@ export function TerminalView() {
 
   // On mount: restore running sessions from server, or create a new tab
   const restoreAttempted = useRef(false);
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    tabId: string;
+  } | null>(null);
+  const [renameTarget, setRenameTarget] = useState<string | null>(null);
+  const [confirmClose, setConfirmClose] = useState<{
+    type: "all" | "others";
+    excludeId?: string;
+  } | null>(null);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent, tabId: string) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, tabId });
+  }, []);
+
+  const buildContextMenuItems = (tabId: string): ContextMenuItem[] => {
+    const items: ContextMenuItem[] = [
+      {
+        label: "Rename",
+        icon: <Edit3 size={14} />,
+        onClick: () => setRenameTarget(tabId),
+      },
+      { type: "separator" },
+      {
+        label: "Close",
+        icon: <X size={14} />,
+        onClick: () => closeTab(tabId),
+      },
+    ];
+
+    if (tabs.length > 1) {
+      items.push({
+        label: "Close Others",
+        icon: <XCircle size={14} />,
+        onClick: () => setConfirmClose({ type: "others", excludeId: tabId }),
+      });
+    }
+
+    items.push({
+      label: "Close All",
+      icon: <XSquare size={14} />,
+      danger: true,
+      onClick: () => setConfirmClose({ type: "all" }),
+    });
+
+    return items;
+  };
   useEffect(() => {
     if (tabs.length > 0) return;
     if (restoreAttempted.current) return;
@@ -94,6 +150,7 @@ export function TerminalView() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
+              onContextMenu={(e) => handleContextMenu(e, tab.id)}
               className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium transition-colors ${
                 tab.id === activeTabId
                   ? isDark
@@ -137,6 +194,61 @@ export function TerminalView() {
           </div>
         ))}
       </div>
+
+      {/* Context menu */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={buildContextMenuItems(contextMenu.tabId)}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {/* Rename dialog */}
+      {renameTarget !== null && (
+        <RenameDialog
+          currentName={tabs.find((t) => t.id === renameTarget)?.label ?? ""}
+          onSubmit={(newName) => {
+            renameTab(renameTarget, newName);
+            setRenameTarget(null);
+          }}
+          onClose={() => setRenameTarget(null)}
+        />
+      )}
+
+      {/* Confirm close all */}
+      {confirmClose?.type === "all" && (
+        <ConfirmDialog
+          title="Close All Terminals"
+          message="Are you sure you want to close all terminal tabs?"
+          confirmText="Close All"
+          danger
+          onConfirm={() => {
+            closeTabs(tabs.map((t) => t.id));
+            setConfirmClose(null);
+          }}
+          onCancel={() => setConfirmClose(null)}
+        />
+      )}
+
+      {/* Confirm close others */}
+      {confirmClose?.type === "others" && confirmClose.excludeId && (
+        <ConfirmDialog
+          title="Close Other Terminals"
+          message="Are you sure you want to close all other terminal tabs?"
+          confirmText="Close Others"
+          danger
+          onConfirm={() => {
+            const others = tabs
+              .filter((t) => t.id !== confirmClose.excludeId)
+              .map((t) => t.id);
+            if (others.length > 0) closeTabs(others);
+            setConfirmClose(null);
+          }}
+          onCancel={() => setConfirmClose(null)}
+        />
+      )}
     </div>
   );
 }
@@ -203,8 +315,9 @@ function TerminalViewport({ tab, isDark }: TerminalViewportProps) {
           initStartedRef.current = true;
           if (tab.connection) {
             // Connection already created and connect() called by store.
-            // Just set ref and send initial resize.
+            // Set ref, register live handler, and send initial resize.
             connRef.current = tab.connection;
+            tab.connection.onMessage(liveHandler);
             tab.connection.sendMessage("resize", rows, cols);
           } else {
             // Start server session + create connection
