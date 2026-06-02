@@ -84,6 +84,14 @@ struct ResizeRequest {
 #[derive(Deserialize)]
 struct EventsQuery {
     session_id: String,
+    /// Optional auth token (for SSE which can't set custom headers)
+    token: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct WsQuery {
+    /// Optional auth token (for WebSocket which can't set custom headers)
+    token: Option<String>,
 }
 
 /// Control frame tag byte for WebSocket binary protocol.
@@ -400,12 +408,26 @@ async fn terminal_resize(
 }
 
 /// SSE endpoint for terminal output.
+/// Public endpoint (bypasses auth middleware) because EventSource
+/// cannot set custom headers. Auth is handled inline via query param.
 /// Respects `cancel_token` for graceful shutdown.
 async fn terminal_events(
     State(state): State<AppState>,
     Query(query): Query<EventsQuery>,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, crate::error::AppError>
 {
+    // Validate auth token if configured
+    let auth = state.auth.read().await;
+    if let Some(configured) = auth.web_token() {
+        let provided = query.token.as_deref().unwrap_or("");
+        if provided != configured {
+            return Err(crate::error::AppError::Unauthorized(
+                "Invalid or missing auth token".into(),
+            ));
+        }
+    }
+    drop(auth);
+
     let session_id = Uuid::parse_str(&query.session_id)
         .map_err(|e| crate::error::AppError::BadRequest(format!("Invalid session_id: {e}")))?;
 
@@ -467,6 +489,9 @@ async fn terminal_events(
 
 /// WebSocket endpoint for terminal I/O.
 ///
+/// Public endpoint (bypasses auth middleware) because the browser WebSocket API
+/// cannot set custom headers. Auth is handled inline via query param.
+///
 /// Protocol:
 ///   Client → Server:
 ///     - `\x01{"type":"bind","session_id":"..."}` — bind to session (control frame)
@@ -479,8 +504,21 @@ async fn terminal_events(
 async fn terminal_ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
-) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_terminal_ws(socket, state))
+    Query(query): Query<WsQuery>,
+) -> Result<impl IntoResponse, crate::error::AppError> {
+    // Validate auth token if configured
+    let auth = state.auth.read().await;
+    if let Some(configured) = auth.web_token() {
+        let provided = query.token.as_deref().unwrap_or("");
+        if provided != configured {
+            return Err(crate::error::AppError::Unauthorized(
+                "Invalid or missing auth token".into(),
+            ));
+        }
+    }
+    drop(auth);
+
+    Ok(ws.on_upgrade(move |socket| handle_terminal_ws(socket, state)))
 }
 
 async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {

@@ -10,7 +10,7 @@ use crate::state::AppState;
 /// Public paths that don't require authentication.
 /// These are checked by the middleware (applied to the /api sub-router,
 /// so paths do NOT include the /api prefix).
-const PUBLIC_PREFIXES: &[&str] = &["/auth/", "/events"];
+const PUBLIC_PREFIXES: &[&str] = &["/auth/", "/events", "/terminal/"];
 
 /// Axum middleware that checks Bearer token authentication.
 ///

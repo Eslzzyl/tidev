@@ -172,7 +172,9 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   connectSSE: (sessionId) => {
     get().disconnect();
 
-    const url = `${window.location.origin}/api/terminal/events?session_id=${sessionId}`;
+    const token = localStorage.getItem("web_auth_token");
+    const tokenParam = token ? `&token=${encodeURIComponent(token)}` : "";
+    const url = `${window.location.origin}/api/terminal/events?session_id=${sessionId}${tokenParam}`;
     const es = new EventSource(url);
 
     es.addEventListener("terminal.output", (e: MessageEvent) => {
@@ -196,7 +198,9 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
     // Try WebSocket
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/api/terminal/ws`;
+    const token = localStorage.getItem("web_auth_token");
+    const tokenParam = token ? `?token=${encodeURIComponent(token)}` : "";
+    const wsUrl = `${protocol}//${window.location.host}/api/terminal/ws${tokenParam}`;
 
     try {
       const ws = new WebSocket(wsUrl);
@@ -247,7 +251,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       set({ ws });
     } catch {
       // WebSocket connection failed, fall back to SSE
-      get().connectSSE(sessionId, tabId);
+      get().connectSSE(sessionId);
     }
   },
 
