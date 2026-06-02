@@ -34,20 +34,17 @@ export function useAnimatePresence(
     prevShow.current = show;
 
     if (show) {
-      // Mount immediately
-      // Defer setState to avoid sync cascading renders
+      // Mount immediately, then in the next frame trigger entrance animation
       const raf = requestAnimationFrame(() => {
         setMounted(true);
         setStage("entering");
-      });
-      return () => cancelAnimationFrame(raf);
-      // Next frame: trigger entrance animation
-      const raf = requestAnimationFrame(() => {
-        setVisible(true);
-        // After entrance animation completes, mark as entered
-        // (we use a small timeout matching typical entrance duration)
-        const timer = setTimeout(() => setStage("entered"), 250);
-        return () => clearTimeout(timer);
+        // Next frame: trigger entrance animation
+        requestAnimationFrame(() => {
+          setVisible(true);
+          // After entrance animation completes, mark as entered
+          // (we use a small timeout matching typical entrance duration)
+          setTimeout(() => setStage("entered"), 250);
+        });
       });
       return () => cancelAnimationFrame(raf);
     } else {

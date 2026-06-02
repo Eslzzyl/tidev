@@ -341,6 +341,7 @@ function TreeNodeItem({
   depth,
   selectedPath,
   onNodeClick,
+  // oxlint-disable-next-line only-used-in-recursion
   onToggleExpand,
   onContextMenu,
   gitDisplayMap,
