@@ -519,7 +519,7 @@ export function SmartInput({
             placeholder={finalPlaceholder}
             rows={1}
             disabled={!isInputEnabled}
-            className={`min-h-[44px] w-full resize-none rounded-2xl bg-transparent px-4 py-3 pr-12 text-base text-neutral-900 placeholder-neutral-400 outline-none disabled:opacity-50 dark:text-neutral-100 dark:placeholder-neutral-500 ${inputClassName}`}
+            className={`min-h-[44px] w-full resize-none rounded-2xl bg-transparent px-4 pt-[15px] pb-3 pr-12 text-base text-neutral-900 placeholder-neutral-400 outline-none disabled:opacity-50 dark:text-neutral-100 dark:placeholder-neutral-500 ${inputClassName}`}
           />
         ) : (
           <input
@@ -532,7 +532,7 @@ export function SmartInput({
             onCompositionEnd={handleCompositionEnd}
             placeholder={finalPlaceholder}
             disabled={!isInputEnabled}
-            className={`w-full rounded-2xl bg-transparent px-4 py-3 pr-12 text-base text-neutral-900 placeholder-neutral-400 outline-none disabled:opacity-50 dark:text-neutral-100 dark:placeholder-neutral-500 ${inputClassName}`}
+            className={`w-full rounded-2xl bg-transparent px-4 pt-[15px] pb-3 pr-12 text-base text-neutral-900 placeholder-neutral-400 outline-none disabled:opacity-50 dark:text-neutral-100 dark:placeholder-neutral-500 ${inputClassName}`}
           />
         )}
 
