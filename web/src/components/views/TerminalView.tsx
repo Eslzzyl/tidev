@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Plus, X } from "lucide-react";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { useUIStore, getEffectiveTheme } from "../../stores/useUIStore";
+import { TerminalTouchKeyboard } from "./TerminalTouchKeyboard";
 import "@xterm/xterm/css/xterm.css";
 
 /** Dark terminal theme */
@@ -60,6 +61,7 @@ export function TerminalView() {
   const createTab = useTerminalStore((s) => s.createTab);
   const closeTab = useTerminalStore((s) => s.closeTab);
   const setActiveTab = useTerminalStore((s) => s.setActiveTab);
+  const sendInput = useTerminalStore((s) => s.sendInput);
   const theme = useUIStore((s) => s.theme);
   const isDark = getEffectiveTheme(theme) === "dark";
 
@@ -140,6 +142,9 @@ export function TerminalView() {
           </div>
         )}
       </div>
+
+      {/* Floating touch keyboard for mobile — position:fixed, out of layout flow */}
+      <TerminalTouchKeyboard tabId={activeTab?.id ?? ""} sendInput={sendInput} isDark={isDark} />
     </div>
   );
 }
@@ -205,9 +210,23 @@ function TerminalViewport({ tab, isDark }: TerminalViewportProps) {
     // Uses refs to always see the latest sessionId/tabId without re-registering.
     term.onData((data: string) => {
       const sid = sessionIdRef.current;
-      if (sid) {
-        sendInput(tabIdRef.current, data);
+      if (!sid) return;
+
+      // Ctrl latch: convert lowercase (a-z) or uppercase (A-Z) to Ctrl+Letter
+      const state = useTerminalStore.getState();
+      if (state.ctrlLatch && data.length === 1) {
+        const code = data.charCodeAt(0);
+        // a-z → \x01-\x1a, A-Z → \x01-\x1a (same mapping)
+        if ((code >= 97 && code <= 122) || (code >= 65 && code <= 90)) {
+          sendInput(tabIdRef.current, String.fromCharCode(code & 0x1f));
+          state.setCtrlLatch(false);
+          return;
+        }
+        // Non-letter: release latch and pass through
+        state.setCtrlLatch(false);
       }
+
+      sendInput(tabIdRef.current, data);
     });
 
     // Fit terminal to container and notify backend of actual size.

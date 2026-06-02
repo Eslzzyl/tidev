@@ -28,6 +28,10 @@ interface TerminalStore {
   connectSSE: (sessionId: string) => void;
   connectWS: (sessionId: string, tabId: string) => void;
   disconnect: () => void;
+
+  /** Ctrl latch state for mobile touch keyboard */
+  ctrlLatch: boolean;
+  setCtrlLatch: (v: boolean) => void;
 }
 
 export const useTerminalStore = create<TerminalStore>((set, get) => ({
@@ -259,4 +263,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       set({ ws: null });
     }
   },
+
+  ctrlLatch: false,
+  setCtrlLatch: (v) => set({ ctrlLatch: v }),
 }));
