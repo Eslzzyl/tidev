@@ -12,6 +12,7 @@ pub mod shell;
 pub mod skills;
 pub mod static_file;
 pub mod stats;
+pub mod system;
 pub mod terminal;
 pub mod todos;
 pub mod tools;
@@ -119,6 +120,8 @@ pub fn api_routes() -> Router<AppState> {
         .route("/stats/models", get(stats::get_model_usage))
         .route("/stats/providers", get(stats::get_provider_usage))
         .route("/stats/sessions", get(stats::get_session_usage))
+        // System
+        .route("/system/restart", post(system::restart_handler))
         // CORS
         .layer(CorsLayer::permissive())
 }

@@ -61,6 +61,9 @@ export default defineConfig({
         target: "http://127.0.0.1:26502",
         ws: true,
       },
+      "/health": {
+        target: "http://127.0.0.1:26502",
+      },
     },
   },
   build: {

@@ -8,6 +8,7 @@ pub mod state;
 pub mod terminal;
 
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -207,6 +208,11 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     // Graceful shutdown complete; clean up terminal sessions.
     log::info!("Web server stopped, cleaning up terminal sessions...");
     state.terminal_manager.shutdown().await;
+
+    // Restart if requested via the API endpoint.
+    if state.restart_requested.load(Ordering::Relaxed) {
+        tidev_engine::process::restart_self();
+    }
 
     Ok(())
 }

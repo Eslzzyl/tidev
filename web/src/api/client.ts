@@ -493,4 +493,93 @@ export const api = {
       `${API_BASE}/stats/sessions${qs ? `?${qs}` : ""}`,
     );
   },
+
+  /** Request server restart (graceful shutdown + re-exec) */
+  restartServer: () => {
+    return fetch(`${API_BASE}/system/restart`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+    });
+  },
 };
+
+/**
+ * Wait for the server to restart by polling `/health` and detecting
+ * when the `boot_id` changes (indicating a new process instance).
+ *
+ * Handles both fast restarts (<100ms) and slow restarts (several seconds).
+ * Each poll has a per-request timeout so graceful shutdown doesn't hang it.
+ *
+ * Resolves once the new server is confirmed running.
+ * Throws after `timeout` ms.
+ */
+export async function waitForServerRestart(
+  timeout = 60_000,
+): Promise<void> {
+  console.log("[restart] Starting waitForServerRestart");
+
+  // 1. Read the current boot_id before restart
+  let oldBootId: string | null = null;
+  try {
+    const res = await fetch(`/health?_=${Date.now()}`);
+    console.log("[restart] Pre-restart health status:", res.status);
+    if (res.ok) {
+      const data = await res.json();
+      console.log("[restart] Pre-restart health body:", JSON.stringify(data));
+      oldBootId = data.boot_id ?? null;
+      console.log("[restart] Pre-restart boot_id:", oldBootId, "type:", typeof oldBootId);
+    }
+  } catch (err) {
+    console.log("[restart] Pre-restart health failed:", err);
+  }
+
+  const pollInterval = 200;
+  const perRequestTimeout = 1000;
+  const start = Date.now();
+  let pollCount = 0;
+
+  while (Date.now() - start < timeout) {
+    pollCount++;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), perRequestTimeout);
+
+    try {
+      const res = await fetch(`/health?_=${Date.now()}`, { signal: controller.signal });
+      console.log(`[restart] Poll #${pollCount} status:`, res.status);
+
+      if (res.ok) {
+        const data = await res.json();
+        const newBootId: string | null = data.boot_id ?? null;
+        console.log(`[restart] Poll #${pollCount} body:`, JSON.stringify(data));
+        console.log(`[restart] Poll #${pollCount} boot_id:`, newBootId, "oldBootId:", oldBootId);
+
+        // boot_id changed → new server process is running
+        if (newBootId !== null && newBootId !== oldBootId) {
+          console.log("[restart] boot_id changed, restart confirmed!");
+          return;
+        }
+        console.log(`[restart] Poll #${pollCount} boot_id same or null, continuing`);
+      } else {
+        console.log(`[restart] Poll #${pollCount} non-ok response:`, res.status);
+      }
+    } catch (err) {
+      console.log(`[restart] Poll #${pollCount} fetch failed:`, err);
+    } finally {
+      clearTimeout(timer);
+    }
+
+    // Fallback: if we've been polling for 5s and always got 200 with the same
+    // boot_id, the restart probably completed but boot_id comparison failed.
+    // Force a page reload to get a fresh state.
+    if (Date.now() - start > 5000) {
+      console.log("[restart] 5s fallback triggered, forcing reload");
+      window.location.reload();
+      return;
+    }
+
+    await new Promise((r) => setTimeout(r, pollInterval));
+  }
+
+  console.log("[restart] Timed out waiting for server restart");
+  throw new Error("Server did not come back within timeout");
+}

@@ -2,6 +2,7 @@ pub mod agent;
 pub mod config;
 pub mod context;
 pub mod hooks;
+pub mod process;
 pub mod instructions;
 pub mod llm_bridge;
 pub mod logging;

@@ -4,6 +4,7 @@ use axum::{
     routing::get,
 };
 use std::path::PathBuf;
+use std::sync::LazyLock;
 use tower_http::services::ServeDir;
 
 use crate::{
@@ -86,11 +87,19 @@ pub fn static_routes(config: StaticConfig) -> Router<AppState> {
     }
 }
 
+/// Unique identifier for this process instance, generated at startup.
+/// The frontend uses this to detect when the server has restarted.
+/// Uses a UUID string so the value is guaranteed unique across process restarts.
+static BOOT_ID: LazyLock<String> = LazyLock::new(|| {
+    uuid::Uuid::new_v4().to_string()
+});
+
 /// Health check endpoint
 async fn health_check() -> impl IntoResponse {
     axum::Json(serde_json::json!({
         "status": "ok",
-        "service": "tidev-web"
+        "service": "tidev-web",
+        "boot_id": BOOT_ID.as_str(),
     }))
 }
 

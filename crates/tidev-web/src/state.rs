@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use tokio::sync::{Mutex, RwLock, broadcast};
@@ -55,6 +56,8 @@ pub struct AppState {
     pub terminal_manager: Arc<TerminalManager>,
     /// Broadcast channel for terminal output
     pub terminal_tx: broadcast::Sender<TerminalOutput>,
+    /// Whether a restart has been requested (via API endpoint)
+    pub restart_requested: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -97,6 +100,7 @@ impl AppState {
             agent,
             terminal_manager,
             terminal_tx,
+            restart_requested: Arc::new(AtomicBool::new(false)),
         })
     }
 

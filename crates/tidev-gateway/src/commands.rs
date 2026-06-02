@@ -77,6 +77,10 @@ pub const GATEWAY_COMMANDS: &[CommandSpec] = &[
                       /goal pause — pause the goal\n\
                       /goal resume — resume a paused goal",
     },
+    CommandSpec {
+        name: "restart",
+        description: "Restart the gateway service",
+    },
 ];
 
 /// Parse a slash command from message content.

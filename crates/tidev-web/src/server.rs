@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use axum::Router;
 use tokio::net::TcpListener;
 use tokio::signal;
+use tokio_util::sync::CancellationToken;
 
 use super::{
     routes::{create_router, static_file::StaticConfig},
@@ -43,8 +44,11 @@ pub async fn start_server(state: AppState, config: ServerConfig) -> anyhow::Resu
     Ok(())
 }
 
-/// Shutdown signal handler for graceful shutdown
-async fn shutdown_signal(cancel_token: tokio_util::sync::CancellationToken) {
+/// Shutdown signal handler for graceful shutdown.
+///
+/// Listens for Ctrl+C, SIGTERM, or the cancel token being cancelled
+/// (e.g. via the `/api/system/restart` endpoint).
+async fn shutdown_signal(cancel_token: CancellationToken) {
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -62,6 +66,8 @@ async fn shutdown_signal(cancel_token: tokio_util::sync::CancellationToken) {
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
 
+    let cancelled = cancel_token.cancelled();
+
     tokio::select! {
         _ = ctrl_c => {
             log::info!("Received Ctrl+C, shutting down gracefully...");
@@ -69,9 +75,12 @@ async fn shutdown_signal(cancel_token: tokio_util::sync::CancellationToken) {
         _ = terminate => {
             log::info!("Received SIGTERM, shutting down gracefully...");
         }
+        _ = cancelled => {
+            log::info!("Restart requested, shutting down gracefully...");
+        }
     }
 
-    // Signal all SSE connections to close
+    // Signal all SSE connections to close (idempotent if already cancelled)
     cancel_token.cancel();
 }
 

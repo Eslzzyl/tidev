@@ -744,6 +744,19 @@ impl ChannelCore {
                 sender.send_message(recipient, &text, reply_to).await?;
                 Ok(true)
             }
+            "restart" => {
+                sender
+                    .send_message(
+                        recipient,
+                        "🔄 Restarting gateway...",
+                        reply_to,
+                    )
+                    .await?;
+                // Small delay so the message has a chance to be delivered
+                // before the process is replaced.
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                tidev_engine::process::restart_self();
+            }
             _ => {
                 sender
                     .send_message(
