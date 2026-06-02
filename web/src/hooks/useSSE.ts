@@ -4,6 +4,7 @@ import { usePermissionStore } from "../stores/usePermissionStore";
 import { useSessionStore } from "../stores/useSessionStore";
 import { useSubagentStore } from "../stores/useSubagentStore";
 import { useUIStore } from "../stores/useUIStore";
+import { queryClient } from "../lib/queryClient";
 import { api } from "../api/client";
 import type { AppEvent } from "../types/events";
 import type { UsageStatsData } from "../stores/useSessionStore";
@@ -301,6 +302,12 @@ export function useSSE(sessionId: string | null) {
       } else {
         setStreaming(false);
       }
+
+      // Invalidate TanStack Query caches so any stale data is refreshed
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      if (currentSessionId) {
+        queryClient.invalidateQueries({ queryKey: ["session", currentSessionId, "messages"] });
+      }
     };
     const handleErrorEvent = (event: AppEvent) => {
       if (!event || event.type !== "error") return;
@@ -359,6 +366,12 @@ export function useSSE(sessionId: string | null) {
           setMessages(messages);
           useSessionStore.getState().setTodos(todos ?? []);
         });
+      }
+
+      // Invalidate TanStack Query caches for sessions and messages
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      if (currentSessionId) {
+        queryClient.invalidateQueries({ queryKey: ["session", currentSessionId, "messages"] });
       }
     };
 

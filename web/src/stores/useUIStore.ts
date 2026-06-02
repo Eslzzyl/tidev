@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
 import type { MainTab } from "../lib/router";
 
 export type { MainTab } from "../lib/router";
@@ -64,161 +65,94 @@ const DEFAULT_RIGHT_SIDEBAR_WIDTH = 280;
 const MIN_SIDEBAR_WIDTH = 180;
 const MAX_SIDEBAR_WIDTH = 500;
 
-function loadLocalStorage() {
-  const savedLeftWidth = parseInt(localStorage.getItem("leftSidebarWidth") || "", 10);
-  const savedRightWidth = parseInt(localStorage.getItem("rightSidebarWidth") || "", 10);
-  const savedTheme = localStorage.getItem("theme") as Theme | null;
-  const savedRightSidebarOpen = localStorage.getItem("rightSidebarOpen") !== "false";
-  const savedActiveTab = localStorage.getItem("activeTab") as MainTab | null;
-
-  function loadSetting<T>(key: string, fallback: T): T {
-    try {
-      const val = localStorage.getItem(key);
-      return val !== null ? (JSON.parse(val) as T) : fallback;
-    } catch {
-      return fallback;
-    }
-  }
-
-  return {
-    leftSidebarWidth: isNaN(savedLeftWidth) ? DEFAULT_LEFT_SIDEBAR_WIDTH : savedLeftWidth,
-    rightSidebarWidth: isNaN(savedRightWidth) ? DEFAULT_RIGHT_SIDEBAR_WIDTH : savedRightWidth,
-    theme: (savedTheme || "system") as Theme,
-    rightSidebarOpen: savedRightSidebarOpen,
-    activeTab: (savedActiveTab || "chat") as MainTab,
-    settings: {
-      fontFamily: loadSetting("settings.fontFamily", "Inter, system-ui, sans-serif"),
-      monoFontFamily: loadSetting(
-        "settings.monoFontFamily",
-        "JetBrains Mono, Fira Code, monospace",
-      ),
-      fontSize: loadSetting("settings.fontSize", 14),
-      diffLayout: loadSetting<"inline" | "side-by-side">("settings.diffLayout", "side-by-side"),
-      enterToSend: loadSetting("settings.enterToSend", true),
-      terminalShell: loadSetting("settings.terminalShell", ""),
-    },
-  };
-}
-
-const persisted = loadLocalStorage();
-
 const initialState: UIState = {
   sidebarOpen: true,
-  rightSidebarOpen: persisted.rightSidebarOpen,
+  rightSidebarOpen: true,
   settingsPanelOpen: false,
   mobileMenuOpen: false,
   mobileRightSidebarOpen: false,
-  theme: persisted.theme,
+  theme: "system",
   inputValue: "",
   isLoading: false,
   isStreaming: false,
   connectionStatus: "disconnected",
-  leftSidebarWidth: persisted.leftSidebarWidth,
-  rightSidebarWidth: persisted.rightSidebarWidth,
-  activeTab: persisted.activeTab,
-  settings: persisted.settings,
+  leftSidebarWidth: DEFAULT_LEFT_SIDEBAR_WIDTH,
+  rightSidebarWidth: DEFAULT_RIGHT_SIDEBAR_WIDTH,
+  activeTab: "chat",
+  settings: {
+    fontFamily: "Inter, system-ui, sans-serif",
+    monoFontFamily: "JetBrains Mono, Fira Code, monospace",
+    fontSize: 14,
+    diffLayout: "side-by-side",
+    enterToSend: true,
+    terminalShell: "",
+  },
 };
 
 function clampSidebarWidth(width: number): number {
   return Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, width));
 }
 
-export const useUIStore = create<UIState & UIActions>((set) => ({
-  ...initialState,
+export const useUIStore = create<UIState & UIActions>()(
+  persist(
+    (set) => ({
+      ...initialState,
 
-  toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
-  openSidebar: () => set({ sidebarOpen: true }),
-  closeSidebar: () => set({ sidebarOpen: false }),
+      toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
+      openSidebar: () => set({ sidebarOpen: true }),
+      closeSidebar: () => set({ sidebarOpen: false }),
 
-  toggleRightSidebar: () =>
-    set((s) => {
-      const newOpen = !s.rightSidebarOpen;
-      localStorage.setItem("rightSidebarOpen", String(newOpen));
-      return { rightSidebarOpen: newOpen };
+      toggleRightSidebar: () => set((s) => ({ rightSidebarOpen: !s.rightSidebarOpen })),
+      openRightSidebar: () => set({ rightSidebarOpen: true }),
+      closeRightSidebar: () => set({ rightSidebarOpen: false }),
+
+      openSettingsPanel: () => set({ settingsPanelOpen: true }),
+      closeSettingsPanel: () => set({ settingsPanelOpen: false }),
+
+      toggleMobileMenu: () => set((s) => ({ mobileMenuOpen: !s.mobileMenuOpen })),
+      closeMobileMenu: () => set({ mobileMenuOpen: false }),
+
+      toggleMobileRightSidebar: () =>
+        set((s) => ({ mobileRightSidebarOpen: !s.mobileRightSidebarOpen })),
+      closeMobileRightSidebar: () => set({ mobileRightSidebarOpen: false }),
+
+      setTheme: (theme) => set({ theme }),
+
+      setLeftSidebarWidth: (width) => set({ leftSidebarWidth: clampSidebarWidth(width) }),
+
+      setRightSidebarWidth: (width) => set({ rightSidebarWidth: clampSidebarWidth(width) }),
+
+      setInputValue: (value) => set({ inputValue: value }),
+      setLoading: (isLoading) => set({ isLoading }),
+      setStreaming: (isStreaming) => set({ isStreaming }),
+      setConnectionStatus: (status) => set({ connectionStatus: status }),
+
+      setActiveTab: (tab) => set({ activeTab: tab }),
+
+      navigateToChat: () => set({ activeTab: "chat" }),
+      navigateToFiles: () => set({ activeTab: "files" }),
+      navigateToTerminal: () => set({ activeTab: "terminal" }),
+      navigateToGit: () => set({ activeTab: "git" }),
+      navigateToStats: () => set({ activeTab: "stats" }),
+
+      updateSettings: (partial) =>
+        set((s) => ({ settings: { ...s.settings, ...partial } })),
     }),
-
-  openRightSidebar: () => {
-    localStorage.setItem("rightSidebarOpen", "true");
-    set({ rightSidebarOpen: true });
-  },
-
-  closeRightSidebar: () => {
-    localStorage.setItem("rightSidebarOpen", "false");
-    set({ rightSidebarOpen: false });
-  },
-
-  openSettingsPanel: () => set({ settingsPanelOpen: true }),
-  closeSettingsPanel: () => set({ settingsPanelOpen: false }),
-
-  toggleMobileMenu: () => set((s) => ({ mobileMenuOpen: !s.mobileMenuOpen })),
-  closeMobileMenu: () => set({ mobileMenuOpen: false }),
-
-  toggleMobileRightSidebar: () =>
-    set((s) => ({ mobileRightSidebarOpen: !s.mobileRightSidebarOpen })),
-  closeMobileRightSidebar: () => set({ mobileRightSidebarOpen: false }),
-
-  setTheme: (theme) => {
-    localStorage.setItem("theme", theme);
-    set({ theme });
-  },
-
-  setLeftSidebarWidth: (width) => {
-    const clamped = clampSidebarWidth(width);
-    localStorage.setItem("leftSidebarWidth", String(clamped));
-    set({ leftSidebarWidth: clamped });
-  },
-
-  setRightSidebarWidth: (width) => {
-    const clamped = clampSidebarWidth(width);
-    localStorage.setItem("rightSidebarWidth", String(clamped));
-    set({ rightSidebarWidth: clamped });
-  },
-
-  setInputValue: (value) => set({ inputValue: value }),
-  setLoading: (isLoading) => set({ isLoading }),
-  setStreaming: (isStreaming) => set({ isStreaming }),
-  setConnectionStatus: (status) => set({ connectionStatus: status }),
-
-  setActiveTab: (tab) => {
-    localStorage.setItem("activeTab", tab);
-    set({ activeTab: tab });
-  },
-
-  navigateToChat: () => {
-    set({ activeTab: "chat" });
-    localStorage.setItem("activeTab", "chat");
-  },
-
-  navigateToFiles: () => {
-    set({ activeTab: "files" });
-    localStorage.setItem("activeTab", "files");
-  },
-
-  navigateToTerminal: () => {
-    set({ activeTab: "terminal" });
-    localStorage.setItem("activeTab", "terminal");
-  },
-
-  navigateToGit: () => {
-    set({ activeTab: "git" });
-    localStorage.setItem("activeTab", "git");
-  },
-
-  navigateToStats: () => {
-    set({ activeTab: "stats" });
-    localStorage.setItem("activeTab", "stats");
-  },
-
-  updateSettings: (partial) =>
-    set((s) => {
-      const updated = { ...s.settings, ...partial };
-      // Persist each setting individually
-      for (const [key, value] of Object.entries(partial)) {
-        localStorage.setItem(`settings.${key}`, JSON.stringify(value));
-      }
-      return { settings: updated };
-    }),
-}));
+    {
+      name: "tidev-ui",
+      storage: createJSONStorage(() => localStorage),
+      // Only persist user preferences — not transient UI state like loading/streaming
+      partialize: (state) => ({
+        theme: state.theme,
+        leftSidebarWidth: state.leftSidebarWidth,
+        rightSidebarWidth: state.rightSidebarWidth,
+        rightSidebarOpen: state.rightSidebarOpen,
+        activeTab: state.activeTab,
+        settings: state.settings,
+      }),
+    },
+  ),
+);
 
 /**
  * Derive the effective theme (resolving 'system' to light/dark).

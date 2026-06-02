@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
 import type { Session, SessionDetail, Message, TodoItem } from "../types/api";
 
 export type SessionMode = "plan" | "build";
@@ -65,10 +66,12 @@ const initialState: SessionState = {
   mode: "build",
   currentRequestId: null,
 };
-export const useSessionStore = create<SessionState & SessionActions>((set) => ({
-  ...initialState,
+export const useSessionStore = create<SessionState & SessionActions>()(
+  persist(
+    (set) => ({
+      ...initialState,
 
-  setSessions: (sessions) => set({ sessions, error: null }),
+      setSessions: (sessions) => set({ sessions, error: null }),
 
   setCurrentSession: (session) =>
     set({
@@ -165,4 +168,14 @@ export const useSessionStore = create<SessionState & SessionActions>((set) => ({
     }),
 
   reset: () => set(initialState),
-}));
+    }),
+    {
+      name: "tidev-sessions",
+      storage: createJSONStorage(() => localStorage),
+      // Only persist the sessions list — not transient message/loading state
+      partialize: (state) => ({
+        sessions: state.sessions,
+      }),
+    },
+  ),
+);

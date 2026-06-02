@@ -1,10 +1,59 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { VitePWA } from "vite-plugin-pwa";
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [tailwindcss(), react()],
+  plugins: [
+    tailwindcss(),
+    react(),
+    VitePWA({
+      registerType: "autoUpdate",
+      workbox: {
+        globPatterns: ["**/*.{js,css,svg,png,woff2,ico}"],
+        runtimeCaching: [
+          {
+            // API calls — Network First with 5s timeout, fall back to cache
+            urlPattern: /^\/api\/(?!events|terminal\/events)/,
+            handler: "NetworkFirst",
+            options: {
+              cacheName: "api-cache",
+              expiration: {
+                maxEntries: 100,
+                maxAgeSeconds: 300, // 5 minutes
+              },
+              networkTimeoutSeconds: 5,
+            },
+          },
+          {
+            // SPA shell — Network First, fallback to cache
+            urlPattern: /\/$/,
+            handler: "NetworkFirst",
+            options: {
+              cacheName: "html-cache",
+            },
+          },
+        ],
+      },
+      manifest: {
+        name: "tidev",
+        short_name: "tidev",
+        description: "AI-powered coding assistant",
+        theme_color: "#ffffff",
+        background_color: "#ffffff",
+        display: "standalone",
+        start_url: "/",
+        icons: [
+          {
+            src: "/favicon.svg",
+            sizes: "any",
+            type: "image/svg+xml",
+          },
+        ],
+      },
+    }),
+  ],
   server: {
     port: 5173,
     proxy: {
