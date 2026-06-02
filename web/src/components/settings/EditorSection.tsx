@@ -8,24 +8,24 @@ export function EditorSection() {
 
   return (
     <section>
-      <h2 className="mb-1 text-sm font-medium text-neutral-900 dark:text-neutral-100">
+      <h2 className="mb-1 text-base font-medium text-neutral-900 dark:text-neutral-100">
         Editor
       </h2>
-      <p className="mb-4 text-sm text-neutral-500 dark:text-neutral-400">
+      <p className="mb-4 text-base text-neutral-500 dark:text-neutral-400">
         Customize the display fonts and code diff layout
       </p>
 
       <div className="space-y-4">
         {/* UI Font */}
         <div className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
-          <label className="mb-1.5 block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+          <label className="mb-1.5 block text-base font-medium text-neutral-700 dark:text-neutral-300">
             UI Font
           </label>
           <input
             type="text"
             value={settings.fontFamily}
             onChange={(e) => updateSettings({ fontFamily: e.target.value })}
-            className="w-full rounded border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100"
+            className="w-full rounded border border-neutral-300 bg-white px-3 py-1.5 text-base text-neutral-900 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100"
             placeholder="Inter, system-ui, sans-serif"
           />
           <p className="mt-1 text-xs text-neutral-500">
@@ -35,14 +35,14 @@ export function EditorSection() {
 
         {/* Monospace Font */}
         <div className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
-          <label className="mb-1.5 block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+          <label className="mb-1.5 block text-base font-medium text-neutral-700 dark:text-neutral-300">
             Monospace Font
           </label>
           <input
             type="text"
             value={settings.monoFontFamily}
             onChange={(e) => updateSettings({ monoFontFamily: e.target.value })}
-            className="w-full rounded border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100"
+            className="w-full rounded border border-neutral-300 bg-white px-3 py-1.5 text-base text-neutral-900 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100"
             placeholder="JetBrains Mono, Fira Code, monospace"
           />
           <p className="mt-1 text-xs text-neutral-500">
@@ -52,7 +52,7 @@ export function EditorSection() {
 
         {/* Font Size */}
         <div className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
-          <label className="mb-1.5 block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+          <label className="mb-1.5 block text-base font-medium text-neutral-700 dark:text-neutral-300">
             Font Size
           </label>
           <div className="flex items-center gap-3">
@@ -67,7 +67,7 @@ export function EditorSection() {
               }
               className="flex-1 accent-neutral-900 dark:accent-neutral-100"
             />
-            <span className="min-w-[2rem] text-right text-sm tabular-nums text-neutral-700 dark:text-neutral-300">
+            <span className="min-w-[2rem] text-right text-base tabular-nums text-neutral-700 dark:text-neutral-300">
               {settings.fontSize}px
             </span>
           </div>
@@ -90,7 +90,7 @@ export function EditorSection() {
 
         {/* Diff Layout */}
         <div className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
-          <label className="mb-1.5 block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+          <label className="mb-1.5 block text-base font-medium text-neutral-700 dark:text-neutral-300">
             Diff Layout
           </label>
           <div className="grid grid-cols-2 gap-2">
@@ -102,7 +102,7 @@ export function EditorSection() {
                   : "border-neutral-200 hover:border-neutral-300 dark:border-neutral-700 dark:hover:border-neutral-600"
               }`}
             >
-              <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+              <span className="text-base font-medium text-neutral-900 dark:text-neutral-100">
                 Side by Side
               </span>
               <span className="text-xs text-neutral-500">Old | New</span>
@@ -115,7 +115,7 @@ export function EditorSection() {
                   : "border-neutral-200 hover:border-neutral-300 dark:border-neutral-700 dark:hover:border-neutral-600"
               }`}
             >
-              <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+              <span className="text-base font-medium text-neutral-900 dark:text-neutral-100">
                 Inline
               </span>
               <span className="text-xs text-neutral-500">Unified view</span>

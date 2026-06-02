@@ -773,7 +773,7 @@ function ChangesPanel({
           onChange={(e) => onCommitMsgChange(e.target.value)}
           placeholder="Commit message"
           rows={2}
-          className="w-full rounded border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 placeholder-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500"
+          className="w-full rounded border border-neutral-300 bg-white px-3 py-2 text-base text-neutral-900 placeholder-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500"
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -1403,7 +1403,7 @@ function BranchesPanel({
             value={newBranchName}
             onChange={(e) => onNewBranchNameChange(e.target.value)}
             placeholder="New branch name"
-            className="flex-1 rounded border border-neutral-300 bg-white px-3 py-1.5 text-xs text-neutral-900 placeholder-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500"
+            className="flex-1 rounded border border-neutral-300 bg-white px-3 py-1.5 text-base text-neutral-900 placeholder-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500"
             onKeyDown={(e) => {
               if (e.key === "Enter" && newBranchName.trim() && !creatingBranch)
                 onCreateBranch();

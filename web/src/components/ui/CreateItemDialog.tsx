@@ -79,7 +79,7 @@ export function CreateItemDialog({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={type === "file" ? "filename.ext" : "directory-name"}
-            className="w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-xs outline-none focus:border-blue-400 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-blue-500"
+            className="w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-base outline-none focus:border-blue-400 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-blue-500"
           />
           <div className="mt-3 flex justify-end gap-2">
             <button

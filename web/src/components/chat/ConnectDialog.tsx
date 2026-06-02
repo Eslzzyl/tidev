@@ -342,7 +342,7 @@ export function ConnectDialog({
                       dispatch({ type: "SET_SEARCH", query: e.target.value })
                     }
                     placeholder="Search providers..."
-                    className="w-full rounded-lg border border-neutral-300 bg-white py-2 pl-10 pr-4 text-sm text-neutral-900 placeholder-neutral-400 focus:border-neutral-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+                    className="w-full rounded-lg border border-neutral-300 bg-white py-2 pl-10 pr-4 text-base text-neutral-900 placeholder-neutral-400 focus:border-neutral-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
                   />
                 </div>
               </div>
@@ -481,7 +481,7 @@ export function ConnectDialog({
                       dispatch({ type: "SET_API_KEY", value: e.target.value })
                     }
                     placeholder="Enter your API key"
-                    className="w-full rounded-lg border border-neutral-300 bg-white px-4 py-2 text-sm text-neutral-900 placeholder-neutral-400 focus:border-neutral-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+                    className="w-full rounded-lg border border-neutral-300 bg-white px-4 py-2 text-base text-neutral-900 placeholder-neutral-400 focus:border-neutral-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
                   />
                   <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
                     Your API key will be stored securely and used for API
@@ -617,7 +617,7 @@ function AddProviderForm({
   };
 
   const inputClass =
-    "w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 placeholder-neutral-400 focus:border-neutral-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100";
+    "w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-base text-neutral-900 placeholder-neutral-400 focus:border-neutral-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100";
 
   const labelClass =
     "block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1";

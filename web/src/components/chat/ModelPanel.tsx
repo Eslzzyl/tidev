@@ -439,7 +439,7 @@ export function ModelPanel({
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search models by provider or model name..."
-                  className="w-full rounded-lg border border-neutral-300 bg-neutral-50 py-2 pl-8 pr-3 text-xs text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 dark:placeholder-neutral-500 dark:focus:border-neutral-400"
+                  className="w-full rounded-lg border border-neutral-300 bg-neutral-50 py-2 pl-8 pr-3 text-base text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 dark:placeholder-neutral-500 dark:focus:border-neutral-400"
                 />
               </div>
             </div>

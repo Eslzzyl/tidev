@@ -59,7 +59,7 @@ export function GoToLineDialog({
                 const val = e.target.value.replace(/\D/g, "");
                 setLineStr(val);
               }}
-              className="w-full rounded border border-neutral-300 bg-white px-2 py-1 text-xs outline-none focus:border-blue-400 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-blue-500"
+              className="w-full rounded border border-neutral-300 bg-white px-2 py-1 text-base outline-none focus:border-blue-400 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-blue-500"
             />
             <span className="shrink-0 text-[11px] text-neutral-400">
               / {totalLines}

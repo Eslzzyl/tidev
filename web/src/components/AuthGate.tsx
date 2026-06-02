@@ -67,7 +67,7 @@ export function AuthGate() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Access token"
               autoComplete="current-password"
-              className="w-full rounded-lg border border-neutral-300 bg-white px-4 py-2.5 text-sm text-neutral-900 placeholder-neutral-400 outline-none transition-colors focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500 dark:focus:border-neutral-500"
+              className="w-full rounded-lg border border-neutral-300 bg-white px-4 py-2.5 text-base text-neutral-900 placeholder-neutral-400 outline-none transition-colors focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500 dark:focus:border-neutral-500"
               disabled={submitting}
             />
           </div>

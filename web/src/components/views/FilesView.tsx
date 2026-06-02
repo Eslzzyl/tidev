@@ -285,7 +285,7 @@ export function FilesView() {
               placeholder="Search files..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded border border-neutral-200 bg-white py-1 pl-7 pr-2 text-xs outline-none focus:border-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:focus:border-neutral-500"
+              className="w-full rounded border border-neutral-200 bg-white py-1 pl-7 pr-2 text-base outline-none focus:border-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:focus:border-neutral-500"
             />
           </div>
         </div>

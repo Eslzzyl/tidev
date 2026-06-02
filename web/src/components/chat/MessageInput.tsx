@@ -1025,7 +1025,7 @@ export function MessageInput({
             }
             rows={1}
             disabled={!isInputEnabled}
-            className={`min-h-[44px] w-full resize-none rounded-xl border px-3 py-2.5 text-sm text-neutral-900 placeholder-neutral-400 outline-none transition-all duration-150 disabled:opacity-50 dark:text-neutral-100 dark:placeholder-neutral-500 ${
+            className={`min-h-[44px] w-full resize-none rounded-xl border px-3 py-2.5 text-base text-neutral-900 placeholder-neutral-400 outline-none transition-all duration-150 disabled:opacity-50 dark:text-neutral-100 dark:placeholder-neutral-500 ${
               shellMode
                 ? "border-green-400 bg-white ring-2 ring-green-500/20 focus:border-green-500 focus:ring-green-500/30 dark:border-green-600 dark:bg-neutral-900 dark:focus:border-green-500"
                 : "border-neutral-300 bg-white focus:border-neutral-500 focus:ring-2 focus:ring-neutral-500/30 dark:border-neutral-700 dark:bg-neutral-900 dark:focus:border-neutral-400 dark:focus:ring-neutral-500/30"
