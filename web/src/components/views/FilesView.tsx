@@ -5,6 +5,7 @@ import { CodeViewer } from "./CodeViewer";
 import { useFileStore } from "../../stores/useFileStore";
 import { useGitFileStore } from "../../stores/useGitFileStore";
 import { api } from "../../api/client";
+import { queryClient } from "../../lib/queryClient";
 import { CreateItemDialog } from "../ui/CreateItemDialog";
 
 const SEARCH_CACHE_SIZE = 50;
@@ -93,7 +94,10 @@ export function FilesView() {
     const timer = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const result = await api.searchFiles(searchQuery);
+        const result = await queryClient.fetchQuery({
+          queryKey: ["files", "search", searchQuery],
+          queryFn: () => api.searchFiles(searchQuery),
+        });
         const mapped = result.suggestions
           .filter((s) => s.kind === "file")
           .slice(0, 20)

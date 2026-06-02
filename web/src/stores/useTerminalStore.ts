@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { v4 as uuidv4 } from "uuid";
 import { api } from "../api/client";
+import { queryClient } from "../lib/queryClient";
 import { useUIStore } from "./useUIStore";
 import { TerminalConnection } from "../terminal/connection";
 
@@ -53,6 +54,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       const tab = get().tabs.find((t) => t.id === tabId);
       const label = tab?.label ?? "Terminal";
       const result = await api.startTerminal(cols, rows, shell, label);
+      queryClient.invalidateQueries({ queryKey: ["terminal", "list"] });
       const sessionId = result.session_id;
 
       // Create connection with the server-assigned session ID
@@ -97,6 +99,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     if (tab?.sessionId) {
       try {
         await api.closeTerminal(tab.sessionId);
+        queryClient.invalidateQueries({ queryKey: ["terminal", "list"] });
       } catch {
         // Ignore close errors
       }
@@ -132,6 +135,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         tab.sessionId ? api.closeTerminal(tab.sessionId) : Promise.resolve(),
       ),
     );
+    queryClient.invalidateQueries({ queryKey: ["terminal", "list"] });
 
     set((state) => {
       const remaining = state.tabs.filter((t) => !idSet.has(t.id));
@@ -150,7 +154,9 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     // Persist rename to server
     const tab = get().tabs.find((t) => t.id === id);
     if (tab?.sessionId) {
-      api.renameTerminal(tab.sessionId, label).catch(() => {
+      api.renameTerminal(tab.sessionId, label).then(() => {
+        queryClient.invalidateQueries({ queryKey: ["terminal", "list"] });
+      }).catch(() => {
         // Ignore rename errors — local state is already updated
       });
     }
@@ -168,7 +174,10 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
   restoreRunningSessions: async () => {
     try {
-      const { sessions } = await api.listTerminals();
+      const { sessions } = await queryClient.fetchQuery({
+        queryKey: ["terminal", "list"],
+        queryFn: api.listTerminals,
+      });
       if (sessions.length === 0) return;
 
       const newTabs: TerminalTab[] = [];

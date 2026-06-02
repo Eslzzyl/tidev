@@ -4,6 +4,8 @@ import { useSessionStore } from "../../stores/useSessionStore";
 import { useUIStore } from "../../stores/useUIStore";
 import { usePermissionStore } from "../../stores/usePermissionStore";
 import { api } from "../../api/client";
+import { useRevertToMessage, useForkSession, useRenameSession } from "../../hooks/useQueries";
+import { queryClient } from "../../lib/queryClient";
 import { buildRounds } from "../../utils/round";
 import { VirtualMessageList } from "./VirtualMessageList";
 import { useMessageVirtualizer } from "../../hooks/useMessageVirtualizer";
@@ -71,8 +73,9 @@ export function ChatPanel() {
   // Connect dialog state
   const [connectDialogOpen, setConnectDialogOpen] = useState(false);
 
-  const setMessages = useSessionStore((s) => s.setMessages);
-  const setTodos = useSessionStore((s) => s.setTodos);
+  const revertToMessageMutation = useRevertToMessage();
+  const forkSessionMutation = useForkSession();
+  const renameSessionMutation = useRenameSession();
 
   const handleUndoRequest = useCallback((messageId: string) => {
     setUndoTargetMessageId(messageId);
@@ -87,13 +90,22 @@ export function ChatPanel() {
     setUndoError(null);
 
     try {
-      await api.revertToMessage(currentSessionId, undoTargetMessageId);
+      await revertToMessageMutation.mutateAsync({
+        sessionId: currentSessionId,
+        messageId: undoTargetMessageId,
+      });
 
       // Refresh messages and todos after revert
-      const { messages: updatedMessages, todos: updatedTodos } =
-        await api.listMessages(currentSessionId);
-      setMessages(updatedMessages);
-      setTodos(updatedTodos);
+      const result = await queryClient.fetchQuery({
+        queryKey: ["session", currentSessionId, "messages"],
+        queryFn: () =>
+          api.listMessages(currentSessionId).then((r) => ({
+            messages: r.messages,
+            todos: r.todos ?? [],
+          })),
+      });
+      useSessionStore.getState().setMessages(result.messages);
+      useSessionStore.getState().setTodos(result.todos);
 
       setUndoDialogOpen(false);
       setUndoTargetMessageId(null);
@@ -103,7 +115,7 @@ export function ChatPanel() {
     } finally {
       setIsUndoing(false);
     }
-  }, [currentSessionId, undoTargetMessageId, setMessages, setTodos]);
+  }, [currentSessionId, undoTargetMessageId]);
 
   const handleCancelUndo = useCallback(() => {
     setUndoDialogOpen(false);
@@ -131,16 +143,26 @@ export function ChatPanel() {
 
       setIsForking(true);
       try {
-        const result = await api.forkSession(
-          currentSessionId,
+        const result = await forkSessionMutation.mutateAsync({
+          sessionId: currentSessionId,
           messageId,
-          `Fork: ${currentSession?.title || "New Session"}`,
-        );
+          title: `Fork: ${currentSession?.title || "New Session"}`,
+        });
 
         // Navigate to the new forked session
         const [session, { messages: forkedMessages, todos }] = await Promise.all([
-          api.getSession(result.session_id),
-          api.listMessages(result.session_id),
+          queryClient.fetchQuery({
+            queryKey: ["session", result.session_id],
+            queryFn: () => api.getSession(result.session_id),
+          }),
+          queryClient.fetchQuery({
+            queryKey: ["session", result.session_id, "messages"],
+            queryFn: () =>
+              api.listMessages(result.session_id).then((r) => ({
+                messages: r.messages,
+                todos: r.todos ?? [],
+              })),
+          }),
         ]);
 
         useSessionStore.getState().setCurrentSession(session);
@@ -169,12 +191,13 @@ export function ChatPanel() {
 
       setIsRenaming(true);
       try {
-        await api.renameSession(currentSessionId, title);
+        await renameSessionMutation.mutateAsync({ id: currentSessionId, title });
         // Update session detail in store
-        const session = await api.getSession(currentSessionId);
+        const session = await queryClient.fetchQuery({
+          queryKey: ["session", currentSessionId],
+          queryFn: () => api.getSession(currentSessionId),
+        });
         useSessionStore.getState().setCurrentSession(session);
-        // Also update title in the sessions list for the sidebar
-        useSessionStore.getState().updateSessionTitle(currentSessionId, title);
         setRenameDialogOpen(false);
       } catch (error) {
         console.error("Rename failed:", error);

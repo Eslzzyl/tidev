@@ -362,10 +362,19 @@ export function useSSE(sessionId: string | null) {
       if (streamingAssistantIdRef.current) return;
 
       if (currentSessionId) {
-        api.listMessages(currentSessionId).then(({ messages, todos }) => {
-          setMessages(messages);
-          useSessionStore.getState().setTodos(todos ?? []);
-        });
+        queryClient
+          .fetchQuery({
+            queryKey: ["session", currentSessionId, "messages"],
+            queryFn: () =>
+              api.listMessages(currentSessionId).then((r) => ({
+                messages: r.messages,
+                todos: r.todos ?? [],
+              })),
+          })
+          .then((result) => {
+            setMessages(result.messages);
+            useSessionStore.getState().setTodos(result.todos ?? []);
+          });
       }
 
       // Invalidate TanStack Query caches for sessions and messages

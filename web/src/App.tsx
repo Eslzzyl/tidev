@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, lazy, Suspense, useRef } from "react"
 import { useSessionStore } from "./stores/useSessionStore";
 import { useUIStore, getEffectiveTheme, type MainTab } from "./stores/useUIStore";
 import { useAuthStore } from "./stores/useAuthStore";
-import { api } from "./api/client";
+import { useSessions, useSession, useSessionMessages } from "./hooks/useQueries";
 import { AuthGate } from "./components/AuthGate";
 import { SettingsPanel } from "./components/settings/SettingsPanel";
 import { WelcomePage } from "./components/WelcomePage";
@@ -36,9 +36,6 @@ const StatsView = lazy(() =>
 );
 
 function App() {
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-
   // Resizing state
   const [isResizingLeft, setIsResizingLeft] = useState(false);
   const [isResizingRight, setIsResizingRight] = useState(false);
@@ -67,7 +64,6 @@ function App() {
   const setRightSidebarWidth = useUIStore((s) => s.setRightSidebarWidth);
 
   // Auth state
-  const authIsLoading = useAuthStore((s) => s.isLoading);
   const authIsRequired = useAuthStore((s) => s.isAuthRequired);
   const authIsAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const checkAuthStatus = useAuthStore((s) => s.checkAuthStatus);
@@ -149,50 +145,53 @@ function App() {
     }
   }, [activeTab]);
 
-  // Load initial data
+  // ── TanStack Query: sessions list ────────────────────────────────────────
+  const {
+    data: sessionsData,
+    isLoading: sessionsLoading,
+    isError: sessionsError,
+    error: sessionsErrorObj,
+  } = useSessions();
+
+  // Sync sessions list to Zustand store for backward compatibility
   useEffect(() => {
-    // Wait for auth check to complete before deciding what to load
-    if (authIsLoading) return;
+    if (sessionsData) setSessions(sessionsData);
+  }, [sessionsData, setSessions]);
 
-    const loadData = async () => {
-      // If auth is required but not yet authenticated, skip loading
-      // to avoid a stale 401 error that would appear after login.
-      if (authIsRequired && !authIsAuthenticated) {
-        setIsLoading(false);
-        return;
-      }
+  // ── TanStack Query: URL-param session loading ───────────────────────────
+  const params = new URLSearchParams(window.location.search);
+  const sessionIdFromUrl = params.get("session");
 
-      try {
-        const { sessions } = await api.listSessions();
-        setSessions(sessions);
+  const { data: sessionDetail, isLoading: sessionLoading } =
+    useSession(sessionIdFromUrl);
+  const { data: messagesData, isLoading: messagesLoading } =
+    useSessionMessages(sessionIdFromUrl);
 
-        const params = new URLSearchParams(window.location.search);
-        const sessionId = params.get("session");
-        if (sessionId) {
-          const [session, { messages, todos }] = await Promise.all([
-            api.getSession(sessionId),
-            api.listMessages(sessionId),
-          ]);
-          setCurrentSession(session);
-          setMessages(messages);
-          useSessionStore.getState().setTodos(todos ?? []);
-        }
-      } catch (err) {
-        setLoadError(err instanceof Error ? err.message : "Failed to load sessions");
-      } finally {
-        setIsLoading(false);
-      }
-    };
+  // Sync session detail to Zustand store
+  useEffect(() => {
+    if (sessionDetail) setCurrentSession(sessionDetail);
+  }, [sessionDetail, setCurrentSession]);
 
-    loadData();
-  }, [
-    setSessions,
-    setCurrentSession,
-    setMessages,
-    authIsLoading,
-    authIsRequired,
-    authIsAuthenticated,
-  ]);
+  // Sync messages + todos to Zustand store
+  useEffect(() => {
+    if (messagesData) {
+      setMessages(messagesData.messages);
+      useSessionStore.getState().setTodos(messagesData.todos);
+    }
+  }, [messagesData, setMessages]);
+
+  // Combined initial-loading state — true while any relevant query is still
+  // fetching for the first time (has never resolved or errored).
+  const isInitialLoading =
+    sessionsLoading ||
+    (!!sessionIdFromUrl && (sessionLoading || messagesLoading));
+
+  // Error state derived from sessions query (most critical failure mode)
+  const loadError = sessionsError
+    ? sessionsErrorObj instanceof Error
+      ? sessionsErrorObj.message
+      : "Failed to load sessions"
+    : null;
 
   // Resize RAF ref — throttles state updates to once per frame
   const resizeRafRef = useRef<number | null>(null);
@@ -287,7 +286,7 @@ function App() {
 
       {/* Don't render app content behind the AuthGate overlay — children
           like FilesView would otherwise mount and fire spurious API calls. */}
-      {authIsRequired && !authIsAuthenticated ? null : isLoading ? (
+      {authIsRequired && !authIsAuthenticated ? null : isInitialLoading ? (
         <div className="flex h-[100dvh] items-center justify-center bg-white dark:bg-neutral-950">
           <div className="text-center">
             <div className="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-900 dark:border-neutral-700 dark:border-t-neutral-100" />

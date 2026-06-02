@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api } from "../api/client";
+import { queryClient } from "../lib/queryClient";
 
 export interface GitFileStatus {
   status: string;
@@ -98,7 +99,10 @@ export const useGitFileStore = create<GitFileStore>((set) => ({
   refresh: async () => {
     set({ loading: true, error: null });
     try {
-      const result = await api.gitStatus();
+      const result = await queryClient.fetchQuery({
+        queryKey: ["git", "status"],
+        queryFn: api.gitStatus,
+      });
       const fileMap: Record<string, GitFileStatus> = {};
       for (const file of result.files) {
         fileMap[file.path] = { status: file.status, staged: file.staged };

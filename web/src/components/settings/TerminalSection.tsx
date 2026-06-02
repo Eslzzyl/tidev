@@ -1,16 +1,10 @@
 import { useEffect, useState } from "react";
 import { useUIStore } from "../../stores/useUIStore";
-import { api } from "../../api/client";
-
-interface ShellOption {
-  path: string;
-  name: string;
-}
-
-interface ShellsResponse {
-  shells: ShellOption[];
-  default_shell: string;
-}
+import {
+  useTerminalShells,
+  useTerminalShellConfig,
+  useSetTerminalShellConfig,
+} from "../../hooks/useQueries";
 
 type Mode = "default" | "selected" | "custom";
 
@@ -18,48 +12,25 @@ export function TerminalSection() {
   const terminalShell = useUIStore((s) => s.settings.terminalShell);
   const updateSettings = useUIStore((s) => s.updateSettings);
 
-  const [shellsData, setShellsData] = useState<ShellsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: shellsData, error } = useTerminalShells();
+  const { data: configRes } = useTerminalShellConfig();
+  const { mutateAsync: setTerminalShellConfig } = useSetTerminalShellConfig();
 
   // Local UI state
   const [localMode, setLocalMode] = useState<Mode>("default");
   const [customPath, setCustomPath] = useState("");
 
-  // Fetch available shells + server-side config on mount
+  // When both shells and config are loaded, apply server-side persisted config
   useEffect(() => {
-    let cancelled = false;
-    Promise.all([
-      api.listTerminalShells(),
-      api.getTerminalShellConfig().catch(() => ({ shell: "" })),
-    ])
-      .then(([shellsRes, configRes]) => {
-        if (cancelled) return;
-        setShellsData(shellsRes);
-
-        // If user hasn't set a preference yet (terminalShell is ""),
-        // use the server-side persisted config as the initial default.
-        const stored = useUIStore.getState().settings.terminalShell;
-        if (stored === "" && configRes.shell) {
-          // Only populate if the server has a non-default value
-          const envShell = shellsRes.default_shell;
-          if (configRes.shell !== envShell) {
-            updateSettings({ terminalShell: configRes.shell });
-          }
-        }
-
-        setLoading(false);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err.message ?? "Failed to load shells");
-          setLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [updateSettings]);
+    if (!shellsData || configRes === undefined) return;
+    const stored = useUIStore.getState().settings.terminalShell;
+    if (stored === "" && configRes.shell) {
+      const envShell = shellsData.default_shell;
+      if (configRes.shell !== envShell) {
+        updateSettings({ terminalShell: configRes.shell });
+      }
+    }
+  }, [shellsData, configRes, updateSettings]);
 
   // Sync local state with the stored value whenever shells become available
   useEffect(() => {
@@ -79,7 +50,7 @@ export function TerminalSection() {
 
   // Persist to server-side config whenever the user explicitly changes shell
   const persistToServer = (shell: string) => {
-    api.setTerminalShellConfig(shell).catch((err) => {
+    setTerminalShellConfig(shell).catch((err) => {
       console.warn("Failed to persist terminal shell config:", err);
     });
   };
@@ -129,7 +100,7 @@ export function TerminalSection() {
           {loading ? (
             <span className="text-sm text-neutral-500">Loading shells...</span>
           ) : error ? (
-            <span className="text-sm text-red-500">{error}</span>
+            <span className="text-sm text-red-500">{error?.message ?? "Failed to load shells"}</span>
           ) : (
             <select
               value={selectValue}

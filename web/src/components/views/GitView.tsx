@@ -21,6 +21,15 @@ import {
   User,
 } from "lucide-react";
 import { api } from "../../api/client";
+import { queryClient } from "../../lib/queryClient";
+import {
+  useGitCommit,
+  useGitPush,
+  useGitPull,
+  useGitStash,
+  useGitBranchCreate,
+  useGitBranchDelete,
+} from "../../hooks/useQueries";
 import type {
   GitStatusResponse,
   GitBranchResponse,
@@ -80,6 +89,14 @@ export function GitView() {
   // Submodule toggle
   const [showSubmodules, setShowSubmodules] = useState(false);
 
+  // TanStack Query mutations
+  const gitCommitMutation = useGitCommit();
+  const gitPushMutation = useGitPush();
+  const gitPullMutation = useGitPull();
+  const gitStashMutation = useGitStash();
+  const gitBranchCreateMutation = useGitBranchCreate();
+  const gitBranchDeleteMutation = useGitBranchDelete();
+
   // Split panel resize
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const [splitRatio, setSplitRatio] = useState(0.4); // left = 40%, right = 60%
@@ -137,7 +154,10 @@ export function GitView() {
     setGraphLoading(true);
     setGraphErrorMessage(null);
     try {
-      const result = await api.gitGraph(fetchCount);
+      const result = await queryClient.fetchQuery({
+        queryKey: ["git", "graph", fetchCount],
+        queryFn: () => api.gitGraph(fetchCount),
+      });
       setGraphData(result);
       setGraphCount(fetchCount);
     } catch (err) {
@@ -157,7 +177,13 @@ export function GitView() {
     try {
       setLoading(true);
       setError(null);
-      const [s, b] = await Promise.all([api.gitStatus(), api.gitBranches(showSubmodules)]);
+      const [s, b] = await Promise.all([
+        queryClient.fetchQuery({ queryKey: ["git", "status"], queryFn: api.gitStatus }),
+        queryClient.fetchQuery({
+          queryKey: ["git", "branches", showSubmodules],
+          queryFn: () => api.gitBranches(showSubmodules),
+        }),
+      ]);
       setStatus(s);
       setBranches(b);
       // Refresh graph data
@@ -178,7 +204,10 @@ export function GitView() {
     setFileDiffs({});
     setExpandedFiles(new Set());
     try {
-      const detail = await api.gitShowCommit(sha);
+      const detail = await queryClient.fetchQuery({
+        queryKey: ["git", "show", sha],
+        queryFn: () => api.gitShowCommit(sha),
+      });
       setSelectedCommit(detail);
       setDetailOpen(true);
     } catch (err) {
@@ -202,7 +231,10 @@ export function GitView() {
       }
       setLoadingFileDiff(filePath);
       try {
-        const diffs = await api.gitShowFileDiff(selectedCommit.sha, filePath);
+        const diffs = await queryClient.fetchQuery({
+          queryKey: ["git", "diff", selectedCommit.sha, filePath],
+          queryFn: () => api.gitShowFileDiff(selectedCommit.sha, filePath),
+        });
         if (diffs.length > 0) {
           setFileDiffs((prev) => ({
             ...prev,
@@ -223,7 +255,10 @@ export function GitView() {
     if (!selectedCommit) return;
     setLoadingAllDiffs(true);
     try {
-      const diffs = await api.gitShowAllDiffs(selectedCommit.sha);
+      const diffs = await queryClient.fetchQuery({
+        queryKey: ["git", "diffs", selectedCommit.sha],
+        queryFn: () => api.gitShowAllDiffs(selectedCommit.sha),
+      });
       const diffMap: Record<string, GitFileDiffResponse> = {};
       for (const d of diffs) {
         diffMap[d.path] = d;
@@ -278,7 +313,10 @@ export function GitView() {
       }
       setLoadingChangeDiff(filePath);
       try {
-        const result = await api.gitDiffFile(filePath, staged);
+        const result = await queryClient.fetchQuery({
+          queryKey: ["git", "file-diff", filePath, staged],
+          queryFn: () => api.gitDiffFile(filePath, staged),
+        });
         setChangeDiffs((prev) => ({ ...prev, [filePath]: result }));
         setExpandedChangeFiles((prev) => new Set(prev).add(filePath));
       } catch (err) {
@@ -304,7 +342,7 @@ export function GitView() {
     setCommitting(true);
     setCommitResult(null);
     try {
-      const result = await api.gitCommit(commitMsg.trim());
+      const result = await gitCommitMutation.mutateAsync(commitMsg.trim());
       setCommitResult(result.message);
       setCommitMsg("");
       await refreshStatus();
@@ -318,7 +356,7 @@ export function GitView() {
   const handlePush = async () => {
     setPushPullLoading(true);
     try {
-      const result = await api.gitPush();
+      const result = await gitPushMutation.mutateAsync({});
       setCommitResult(result.message);
       await refreshStatus();
     } catch (err) {
@@ -331,7 +369,7 @@ export function GitView() {
   const handlePull = async () => {
     setPushPullLoading(true);
     try {
-      const result = await api.gitPull();
+      const result = await gitPullMutation.mutateAsync({});
       setCommitResult(result.message);
       await refreshStatus();
     } catch (err) {
@@ -344,7 +382,7 @@ export function GitView() {
   const handleStash = async () => {
     setStashLoading(true);
     try {
-      const result = await api.gitStash();
+      const result = await gitStashMutation.mutateAsync();
       setCommitResult(result.message);
       await refreshStatus();
     } catch (err) {
@@ -358,7 +396,10 @@ export function GitView() {
     if (!newBranchName.trim()) return;
     setCreatingBranch(true);
     try {
-      const result = await api.gitBranchCreate(newBranchName.trim(), true);
+      const result = await gitBranchCreateMutation.mutateAsync({
+        name: newBranchName.trim(),
+        checkout: true,
+      });
       setCommitResult(result.message);
       setNewBranchName("");
       await refreshStatus();
@@ -371,7 +412,7 @@ export function GitView() {
 
   const handleDeleteBranch = async (name: string) => {
     try {
-      const result = await api.gitBranchDelete(name);
+      const result = await gitBranchDeleteMutation.mutateAsync(name);
       setCommitResult(result.message);
       await refreshStatus();
     } catch (err) {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { api } from "../api/client";
+import { queryClient } from "../lib/queryClient";
 import { commandFragment, getSuggestions } from "../commands";
 import type { ModelInfo, FileSuggestion } from "../types/api";
 import type { CommandSuggestion } from "../commands";
@@ -207,9 +208,19 @@ export function useSmartInput(options: UseSmartInputOptions = {}): UseSmartInput
 
   // Fetch models and default model on mount
   useEffect(() => {
-    Promise.all([api.listModels(), api.getDefaultModel().catch(() => null)])
-      .then(([{ models }, defaultModel]) => {
-        setModels(models);
+    Promise.all([
+      queryClient.fetchQuery({
+        queryKey: ["models"],
+        queryFn: () => api.listModels().then((r) => r.models),
+      }),
+      queryClient
+        .fetchQuery({
+          queryKey: ["config", "default-model"],
+          queryFn: api.getDefaultModel,
+        })
+        .catch(() => null),
+    ]).then(([models, defaultModel]) => {
+      setModels(models);
 
         // Select model: use initialModelId, or config default, or first available
         if (!selectedModelId && models.length > 0) {

@@ -11,7 +11,13 @@ import {
   Package,
   User,
 } from "lucide-react";
-import { api } from "../../api/client";
+import {
+  useProviders,
+  useConnectProvider,
+  useDisconnectProvider,
+  useDeleteProvider,
+  useCreateProvider,
+} from "../../hooks/useQueries";
 import type { ProviderInfo } from "../../types/api";
 
 interface ConnectDialogProps {
@@ -122,26 +128,31 @@ export function ConnectDialog({ isOpen, onClose, onConnect }: ConnectDialogProps
   const searchInputRef = useRef<HTMLInputElement>(null);
   const apiKeyInputRef = useRef<HTMLInputElement>(null);
 
-  // Fetch providers when dialog opens
+  const { data: providersData, isLoading: providersLoading, error: providersError } = useProviders();
+  const connectProvider = useConnectProvider();
+  const disconnectProvider = useDisconnectProvider();
+  const deleteProvider = useDeleteProvider();
+
+  // Sync providers from TanStack Query into local state
   useEffect(() => {
     if (!isOpen) return;
 
-    dispatch({ type: "FETCH_START" });
-    api
-      .listProviders()
-      .then((data) => dispatch({ type: "FETCH_SUCCESS", providers: data.providers }))
-      .catch((err) =>
-        dispatch({
-          type: "FETCH_ERROR",
-          error: err instanceof Error ? err.message : "Failed to load providers",
-        }),
-      );
+    if (providersLoading) {
+      dispatch({ type: "FETCH_START" });
+    } else if (providersError) {
+      dispatch({
+        type: "FETCH_ERROR",
+        error: providersError instanceof Error ? providersError.message : "Failed to load providers",
+      });
+    } else if (providersData) {
+      dispatch({ type: "FETCH_SUCCESS", providers: providersData });
+    }
 
     const raf = requestAnimationFrame(() => {
       searchInputRef.current?.focus();
     });
     return () => cancelAnimationFrame(raf);
-  }, [isOpen]);
+  }, [isOpen, providersData, providersLoading, providersError]);
 
   // Focus API key input when showing API key view
   useEffect(() => {
@@ -207,7 +218,7 @@ export function ConnectDialog({ isOpen, onClose, onConnect }: ConnectDialogProps
       if (provider.connected) {
         // Disconnect
         try {
-          await api.disconnectProvider(provider.id);
+          await disconnectProvider.mutateAsync(provider.id);
           dispatch({
             type: "UPDATE_PROVIDER",
             provider: { ...provider, connected: false },
@@ -235,8 +246,9 @@ export function ConnectDialog({ isOpen, onClose, onConnect }: ConnectDialogProps
 
       dispatch({ type: "SUBMIT_START" });
       try {
-        await api.connectProvider(state.selectedProvider.id, {
-          api_key: state.apiKeyInput.trim(),
+        await connectProvider.mutateAsync({
+          id: state.selectedProvider.id,
+          data: { api_key: state.apiKeyInput.trim() },
         });
         dispatch({
           type: "UPDATE_PROVIDER",
@@ -262,7 +274,7 @@ export function ConnectDialog({ isOpen, onClose, onConnect }: ConnectDialogProps
       if (!confirm(`Delete provider "${provider.display_name}"?`)) return;
 
       try {
-        await api.deleteProvider(provider.id);
+        await deleteProvider.mutateAsync(provider.id);
         dispatch({
           type: "FETCH_SUCCESS",
           providers: state.providers.filter((p) => p.id !== provider.id),
@@ -477,17 +489,8 @@ export function ConnectDialog({ isOpen, onClose, onConnect }: ConnectDialogProps
             <AddProviderForm
               onCancel={() => dispatch({ type: "SHOW_LIST" })}
               onSuccess={() => {
-                dispatch({ type: "FETCH_START" });
-                api
-                  .listProviders()
-                  .then((data) =>
-                    dispatch({
-                      type: "FETCH_SUCCESS",
-                      providers: data.providers,
-                    }),
-                  )
-                  .then(() => dispatch({ type: "SHOW_LIST" }))
-                  .then(() => onConnect?.());
+                dispatch({ type: "SHOW_LIST" });
+                onConnect?.();
               }}
               onError={(error) => dispatch({ type: "FETCH_ERROR", error })}
             />
@@ -534,6 +537,7 @@ interface AddProviderFormProps {
 
 function AddProviderForm({ onCancel, onSuccess, onError }: AddProviderFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const createProvider = useCreateProvider();
   const [formData, setFormData] = useState({
     provider_id: "",
     display_name: "",
@@ -552,7 +556,7 @@ function AddProviderForm({ onCancel, onSuccess, onError }: AddProviderFormProps)
     setIsSubmitting(true);
 
     try {
-      await api.createProvider({
+      await createProvider.mutateAsync({
         provider_id: formData.provider_id,
         display_name: formData.display_name,
         base_url: formData.base_url,

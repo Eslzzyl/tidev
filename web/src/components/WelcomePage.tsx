@@ -6,7 +6,9 @@ import { SmartInput } from "./SmartInput";
 import { SkillsDialog } from "./chat/SkillsDialog";
 import { ConnectDialog } from "./chat/ConnectDialog";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
+import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { useWorkspace, useCreateSession, useDeleteSession, useSendMessage, queryKeys } from "../hooks/useQueries";
 import { formatSessionDate } from "../utils/format";
 import type { Session } from "../types/api";
 
@@ -21,7 +23,6 @@ export function WelcomePage() {
   const menuRef = useRef<HTMLDivElement>(null);
 
   const sessions = useSessionStore((s) => s.sessions);
-  const setSessions = useSessionStore((s) => s.setSessions);
   const setCurrentSession = useSessionStore((s) => s.setCurrentSession);
   const setMessages = useSessionStore((s) => s.setMessages);
   const setError = useSessionStore((s) => s.setError);
@@ -42,24 +43,14 @@ export function WelcomePage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Only fetch sessions if not already loaded (App.tsx loads them on mount).
-  // Workspace info is fetched separately since it's not part of the session store.
-  useEffect(() => {
-    if (sessions.length > 0) return;
-    api.listSessions().then(({ sessions }) => setSessions(sessions)).catch(() => {});
-  }, [sessions, setSessions]);
+  const { data: workspaceInfo } = useWorkspace();
+  const workspaceRoot = workspaceInfo?.workspace_root ?? "";
+  const workspaceDisplay = workspaceInfo?.workspace_display ?? "";
 
-  const [workspaceRoot, setWorkspaceRoot] = useState<string>("");
-  const [workspaceDisplay, setWorkspaceDisplay] = useState<string>("");
-  useEffect(() => {
-    api
-      .getWorkspace()
-      .then((info) => {
-        setWorkspaceRoot(info.workspace_root);
-        setWorkspaceDisplay(info.workspace_display);
-      })
-      .catch(() => setWorkspaceRoot(""));
-  }, []);
+  const queryClient = useQueryClient();
+  const createSessionMutation = useCreateSession();
+  const deleteSessionMutation = useDeleteSession();
+  const sendMessageMutation = useSendMessage();
 
   const handleSlashCommand = useCallback((command: string) => {
     if (command === "skills" || command === "skill") {
@@ -82,13 +73,15 @@ export function WelcomePage() {
         // Get workspace if not loaded yet
         let root = workspaceRoot;
         if (!root) {
-          const info = await api.getWorkspace();
+          const info = await queryClient.fetchQuery({
+            queryKey: queryKeys.workspace,
+            queryFn: api.getWorkspace,
+          });
           root = info.workspace_root;
-          setWorkspaceRoot(root);
         }
 
         // Create session, passing the selected provider/model if any
-        const { session_id } = await api.createSession({
+        const { session_id } = await createSessionMutation.mutateAsync({
           workspace_root: root,
           title: payload.inputValue,
           provider_id: payload.providerId ?? undefined,
@@ -123,7 +116,10 @@ export function WelcomePage() {
         // Start streaming state before sending
         setStreaming(true);
 
-        const { request_id } = await api.sendMessage(session_id, requestBody);
+        const { request_id } = await sendMessageMutation.mutateAsync({
+          sessionId: session_id,
+          data: requestBody,
+        });
         useSessionStore.getState().setCurrentRequestId(request_id);
 
         // Add the user message directly to the store so it appears immediately.
@@ -159,15 +155,13 @@ export function WelcomePage() {
           ),
         );
 
-        // Refresh sessions list
-        const { sessions: updatedSessions } = await api.listSessions();
-        setSessions(updatedSessions);
+        // Sessions list is refreshed automatically by useCreateSession cache invalidation
       } catch (err) {
         setStreaming(false);
         setError(err instanceof Error ? err.message : "Failed to create session");
       }
     },
-    [workspaceRoot, setCurrentSession, setMessages, setSessions, setError, setStreaming],
+    [workspaceRoot, setCurrentSession, setMessages, setError, setStreaming],
   );
 
   const handleStop = useCallback(async () => {
@@ -207,10 +201,8 @@ export function WelcomePage() {
     async (session: Session) => {
       setIsDeleting(true);
       try {
-        await api.deleteSession(session.session_id);
-        // Refresh sessions list
-        const { sessions: updatedSessions } = await api.listSessions();
-        setSessions(updatedSessions);
+        await deleteSessionMutation.mutateAsync(session.session_id);
+        // Sessions list is refreshed automatically by useDeleteSession cache invalidation
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to delete session");
       } finally {
@@ -218,7 +210,7 @@ export function WelcomePage() {
         setSessionToDelete(null);
       }
     },
-    [setSessions, setError],
+    [setError],
   );
 
   // Sort sessions by updated_at desc and take top 5

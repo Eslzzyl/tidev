@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Line,
   AreaChart,
@@ -26,14 +26,15 @@ import {
   RefreshCw,
   MousePointerClick,
 } from "lucide-react";
-import { api } from "../../api/client";
-import type {
-  StatsSummary,
-  StatsTimeSeries,
-  ModelUsageEntry,
-  ProviderUsageEntry,
-  SessionUsageEntry,
-} from "../../types/api";
+import { queryClient } from "../../lib/queryClient";
+import {
+  useStatsSummary,
+  useStatsTimeSeries,
+  useStatsModels,
+  useStatsProviders,
+  useStatsSessions,
+} from "../../hooks/useQueries";
+import type { ProviderUsageEntry } from "../../types/api";
 
 // ── Color palettes ───────────────────────────────────────────────────────
 
@@ -197,18 +198,8 @@ function ChartContainer({
 // ── Main Component ───────────────────────────────────────────────────────
 
 export function StatsView() {
-  // Data state
-  const [summary, setSummary] = useState<StatsSummary | null>(null);
-  const [timeSeries, setTimeSeries] = useState<StatsTimeSeries | null>(null);
-  const [models, setModels] = useState<ModelUsageEntry[]>([]);
-  const [providers, setProviders] = useState<ProviderUsageEntry[]>([]);
-  const [sessions, setSessions] = useState<SessionUsageEntry[]>([]);
-  const [sessionTotal, setSessionTotal] = useState(0);
-
   // UI state
   const [granularity, setGranularity] = useState<Granularity>("hour");
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [isDark, setIsDark] = useState(false);
 
   // Detect dark mode
@@ -225,51 +216,23 @@ export function StatsView() {
 
   const colors = useMemo(() => (isDark ? DARK_COLORS : LIGHT_COLORS), [isDark]);
 
-  // Use a ref so fetchAll never changes identity (avoids useEffect chain on tab switch)
-  const granularityRef = useRef(granularity);
-  useEffect(() => {
-    granularityRef.current = granularity;
-  }, [granularity]);
+  // Queries
+  const summaryQ = useStatsSummary();
+  const timeSeriesQ = useStatsTimeSeries(granularity);
+  const modelsQ = useStatsModels();
+  const providersQ = useStatsProviders();
+  const sessionsQ = useStatsSessions(10);
 
-  // Fetch everything on mount
-  const fetchAll = useCallback(async () => {
-    setError(null);
-    try {
-      const [sum, ts, mods, provs, sessRes] = await Promise.all([
-        api.getStatsSummary(),
-        api.getStatsTimeSeries({ granularity: granularityRef.current }),
-        api.getStatsModels(),
-        api.getStatsProviders(),
-        api.getStatsSessions({ limit: 10 }),
-      ]);
-      setSummary(sum);
-      setTimeSeries(ts);
-      setModels(mods.entries);
-      setProviders(provs.entries);
-      setSessions(sessRes.entries);
-      setSessionTotal(sessRes.total);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load stats");
-    } finally {
-      setInitialLoading(false);
-    }
-  }, []);
+  const initialLoading = summaryQ.isLoading || timeSeriesQ.isLoading || modelsQ.isLoading || providersQ.isLoading || sessionsQ.isLoading;
+  const error = summaryQ.error || timeSeriesQ.error || modelsQ.error || providersQ.error || sessionsQ.error;
+  const errorMessage = error ? (error instanceof Error ? error.message : "Failed to load stats") : null;
 
-  // Fetch only time series when granularity changes
-  const fetchTimeSeries = useCallback(async (g: Granularity) => {
-    try {
-      const ts = await api.getStatsTimeSeries({ granularity: g });
-      setTimeSeries(ts);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load stats");
-    }
-  }, []);
-
-  // Fetch on mount only
-  useEffect(() => {
-    const id = requestAnimationFrame(() => fetchAll());
-    return () => cancelAnimationFrame(id);
-  }, [fetchAll]);
+  const summary = summaryQ.data;
+  const timeSeries = timeSeriesQ.data;
+  const models = modelsQ.data ?? [];
+  const providers = providersQ.data ?? [];
+  const sessions = sessionsQ.data?.entries ?? [];
+  const sessionTotal = sessionsQ.data?.total ?? 0;
 
   // ── Derived data ─────────────────────────────────────────────────────
 
@@ -313,9 +276,9 @@ export function StatsView() {
       <div className="flex h-full items-center justify-center">
         <div className="flex flex-col items-center gap-3 text-center">
           <AlertCircle className="h-8 w-8 text-red-500" />
-          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+          <p className="text-sm text-red-600 dark:text-red-400">{errorMessage}</p>
           <button
-            onClick={fetchAll}
+            onClick={() => queryClient.invalidateQueries({ queryKey: ["stats"] })}
             className="rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
           >
             Retry
@@ -344,11 +307,7 @@ export function StatsView() {
               {(["hour", "day", "week", "month"] as Granularity[]).map((g) => (
                 <button
                   key={g}
-                  onClick={() => {
-                    setGranularity(g);
-                    granularityRef.current = g;
-                    fetchTimeSeries(g);
-                  }}
+                  onClick={() => setGranularity(g)}
                   className={`px-3 py-1.5 text-xs font-medium transition-colors ${
                     granularity === g
                       ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
@@ -361,7 +320,7 @@ export function StatsView() {
             </div>
             {/* Refresh button */}
             <button
-              onClick={fetchAll}
+              onClick={() => queryClient.invalidateQueries({ queryKey: ["stats"] })}
               className="rounded-lg p-1.5 text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
               title="Refresh"
             >

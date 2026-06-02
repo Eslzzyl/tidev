@@ -2,7 +2,9 @@ import { useCallback, useState, useRef, useEffect } from "react";
 import { Plus, Trash2, Search, Pencil } from "lucide-react";
 import { useSessionStore } from "../../stores/useSessionStore";
 import { useUIStore } from "../../stores/useUIStore";
+import { queryClient } from "../../lib/queryClient";
 import { api } from "../../api/client";
+import { useDeleteSession, useRenameSession } from "../../hooks/useQueries";
 import { formatSessionDate } from "../../utils/format";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import type { Session } from "../../types/api";
@@ -29,6 +31,8 @@ export function LeftSidebar() {
   const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const deleteSessionMutation = useDeleteSession();
+  const renameSessionMutation = useRenameSession();
 
   // Focus rename input when renaming starts
   useEffect(() => {
@@ -52,8 +56,18 @@ export function LeftSidebar() {
       try {
         setLoading(true);
         const [session, { messages, todos }] = await Promise.all([
-          api.getSession(sessionId),
-          api.listMessages(sessionId),
+          queryClient.fetchQuery({
+            queryKey: ["session", sessionId],
+            queryFn: () => api.getSession(sessionId),
+          }),
+          queryClient.fetchQuery({
+            queryKey: ["session", sessionId, "messages"],
+            queryFn: () =>
+              api.listMessages(sessionId).then((r) => ({
+                messages: r.messages,
+                todos: r.todos ?? [],
+              })),
+          }),
         ]);
         setCurrentSession(session);
         setMessages(messages);
@@ -72,7 +86,7 @@ export function LeftSidebar() {
     async (sessionId: string) => {
       setIsDeleting(true);
       try {
-        await api.deleteSession(sessionId);
+        await deleteSessionMutation.mutateAsync(sessionId);
         removeSession(sessionId);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to delete session");
@@ -97,9 +111,7 @@ export function LeftSidebar() {
         return;
       }
       try {
-        await api.renameSession(sessionId, trimmed);
-        // Update the title in the store directly instead of re-fetching the whole list
-        useSessionStore.getState().updateSessionTitle(sessionId, trimmed);
+        await renameSessionMutation.mutateAsync({ id: sessionId, title: trimmed });
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to rename session");
       } finally {

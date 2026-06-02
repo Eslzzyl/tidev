@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { DirectoryEntry } from "../types/api";
 import { api } from "../api/client";
+import { queryClient } from "../lib/queryClient";
 import { toast } from "./useToastStore";
 
 export interface TreeNode {
@@ -92,7 +93,10 @@ export const useFileStore = create<FileStore>((set, get) => ({
   loadRoot: async () => {
     set({ rootLoading: true, error: null });
     try {
-      const result = await api.listDirectory("");
+      const result = await queryClient.fetchQuery({
+        queryKey: ["fs", "list", ""],
+        queryFn: () => api.listDirectory(""),
+      });
       set({
         rootChildren: buildTreeNodes(result.entries),
         rootLoaded: true,
@@ -153,7 +157,10 @@ export const useFileStore = create<FileStore>((set, get) => ({
 
     // Otherwise, load and add to tabs
     try {
-      const result = await api.readFile(path);
+      const result = await queryClient.fetchQuery({
+        queryKey: ["fs", "read", path],
+        queryFn: () => api.readFile(path),
+      });
       const openFile: OpenFile = {
         path,
         content: result.content,
@@ -227,6 +234,7 @@ export const useFileStore = create<FileStore>((set, get) => ({
     set({ isSaving: true });
     try {
       await api.writeFile(activeFile.path, activeFile.content);
+      queryClient.invalidateQueries({ queryKey: ["fs", "read", activeFile.path] });
       set({
         isSaving: false,
         openFiles: state.openFiles.map((f) =>
@@ -243,6 +251,7 @@ export const useFileStore = create<FileStore>((set, get) => ({
   createFile: async (path, type) => {
     try {
       await api.createItem(path, type);
+      queryClient.invalidateQueries({ queryKey: ["fs", "list"] });
       toast.success(type === "file" ? `File created: ${path}` : `Directory created: ${path}`);
       get().refreshTree();
     } catch (err) {
@@ -255,6 +264,7 @@ export const useFileStore = create<FileStore>((set, get) => ({
   renameFile: async (path, newPath) => {
     try {
       await api.renameItem(path, newPath);
+      queryClient.invalidateQueries({ queryKey: ["fs", "list"] });
       toast.success(`Renamed to: ${newPath}`);
 
       // Update open files if the renamed file was open
@@ -279,6 +289,7 @@ export const useFileStore = create<FileStore>((set, get) => ({
   deleteFile: async (path) => {
     try {
       await api.removeItem(path);
+      queryClient.invalidateQueries({ queryKey: ["fs", "list"] });
       toast.success(`Deleted: ${path}`);
 
       // Close tab if the deleted file was open
@@ -297,7 +308,10 @@ export const useFileStore = create<FileStore>((set, get) => ({
 
   refreshTree: async () => {
     try {
-      const result = await api.listDirectory("");
+      const result = await queryClient.fetchQuery({
+        queryKey: ["fs", "list", ""],
+        queryFn: () => api.listDirectory(""),
+      });
       set({
         rootChildren: buildTreeNodes(result.entries),
         rootLoaded: true,

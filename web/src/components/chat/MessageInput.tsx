@@ -17,6 +17,17 @@ import { api } from "../../api/client";
 import type { ModelInfo, FileSuggestion, TodoItem } from "../../types/api";
 import type { CommandSuggestion } from "../../commands";
 import { ModelPanel } from "./ModelPanel";
+import {
+  useCreateSession,
+  useSendMessage,
+  useSendShellCommand,
+  useAbortRequest,
+  useRevertToMessage,
+  useRedoSession,
+  useCompactSession,
+} from "../../hooks/useQueries";
+import { queryClient } from "../../lib/queryClient";
+import { queryKeys } from "../../hooks/useQueries";
 
 interface MessageInputProps {
   onSlashCommand?: (command: string) => void;
@@ -83,6 +94,15 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
   const isStreaming = useUIStore((s) => s.isStreaming);
   const setStreaming = useUIStore((s) => s.setStreaming);
   const setError = useSessionStore((s) => s.setError);
+
+  // TanStack Query hooks
+  const createSession = useCreateSession();
+  const sendMessage = useSendMessage();
+  const sendShellCommand = useSendShellCommand();
+  const abortRequest = useAbortRequest();
+  const revertToMessage = useRevertToMessage();
+  const redoSession = useRedoSession();
+  const compactSession = useCompactSession();
 
   const isInputEnabled = currentSessionId !== null || isDraftSession;
 
@@ -347,8 +367,11 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
 
         // If draft session, create one first
         if (!sessionId) {
-          const workspace = await api.getWorkspace();
-          const { session_id } = await api.createSession({
+          const workspace = await queryClient.fetchQuery({
+            queryKey: queryKeys.workspace,
+            queryFn: api.getWorkspace,
+          });
+          const { session_id } = await createSession.mutateAsync({
             workspace_root: workspace.workspace_root,
             title: `$ ${content.slice(0, 48)}`,
             provider_id: selectedProviderId ?? undefined,
@@ -357,12 +380,22 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
           sessionId = session_id;
 
           const [session, { messages, todos }] = await Promise.all([
-            api.getSession(sessionId),
-            api.listMessages(sessionId),
+            queryClient.fetchQuery({
+              queryKey: queryKeys.session(sessionId),
+              queryFn: () => api.getSession(sessionId),
+            }),
+            queryClient.fetchQuery({
+              queryKey: queryKeys.sessionMessages(sessionId),
+              queryFn: () =>
+                api.listMessages(sessionId).then((r) => ({
+                  messages: r.messages,
+                  todos: r.todos ?? [],
+                })),
+            }),
           ]);
           commitDraftSession(session);
           setMessages(messages);
-          useSessionStore.getState().setTodos(todos ?? []);
+          useSessionStore.getState().setTodos(todos);
           setCurrentSessionId(sessionId);
 
           const url = new URL(window.location.href);
@@ -379,7 +412,7 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
         });
 
         // Send to backend
-        await api.sendShellCommand(sessionId, content);
+        await sendShellCommand.mutateAsync({ sessionId, command: content });
         setInputValue("");
         setShellMode(false);
       } finally {
@@ -396,8 +429,11 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
 
       // If draft session, create one first
       if (!sessionId) {
-        const workspace = await api.getWorkspace();
-        const { session_id } = await api.createSession({
+        const workspace = await queryClient.fetchQuery({
+          queryKey: queryKeys.workspace,
+          queryFn: api.getWorkspace,
+        });
+        const { session_id } = await createSession.mutateAsync({
           workspace_root: workspace.workspace_root,
           title: content.slice(0, 50),
           provider_id: selectedProviderId ?? undefined,
@@ -407,12 +443,22 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
 
         // Update store
         const [session, { messages, todos }] = await Promise.all([
-          api.getSession(sessionId),
-          api.listMessages(sessionId),
+          queryClient.fetchQuery({
+            queryKey: queryKeys.session(sessionId),
+            queryFn: () => api.getSession(sessionId),
+          }),
+          queryClient.fetchQuery({
+            queryKey: queryKeys.sessionMessages(sessionId),
+            queryFn: () =>
+              api.listMessages(sessionId).then((r) => ({
+                messages: r.messages,
+                todos: r.todos ?? [],
+              })),
+          }),
         ]);
         commitDraftSession(session);
         setMessages(messages);
-        useSessionStore.getState().setTodos(todos ?? []);
+        useSessionStore.getState().setTodos(todos);
         setCurrentSessionId(sessionId);
 
         // Update URL
@@ -445,7 +491,7 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
       if (selectedProviderId) requestBody.provider_id = selectedProviderId;
       if (selectedThinking) requestBody.thinking_level = selectedThinking;
 
-      const { request_id } = await api.sendMessage(sessionId, requestBody);
+      const { request_id } = await sendMessage.mutateAsync({ sessionId, data: requestBody });
       setCurrentRequestId(request_id);
       setInputValue("");
     } catch (err) {
@@ -515,10 +561,17 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
     const lastUserMessage = userMessages[userMessages.length - 1];
 
     try {
-      await api.revertToMessage(sessionId, lastUserMessage.id);
-      const { messages: updatedMessages, todos } = await api.listMessages(sessionId);
+      await revertToMessage.mutateAsync({ sessionId, messageId: lastUserMessage.id });
+      const { messages: updatedMessages, todos } = await queryClient.fetchQuery({
+        queryKey: queryKeys.sessionMessages(sessionId),
+        queryFn: () =>
+          api.listMessages(sessionId).then((r) => ({
+            messages: r.messages,
+            todos: r.todos ?? [],
+          })),
+      });
       useSessionStore.getState().setMessages(updatedMessages);
-      useSessionStore.getState().setTodos(todos ?? []);
+      useSessionStore.getState().setTodos(todos);
     } catch (error) {
       console.error("Undo failed:", error);
     }
@@ -529,10 +582,17 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
     if (!sessionId) return;
 
     try {
-      await api.redoSession(sessionId);
-      const { messages: updatedMessages, todos } = await api.listMessages(sessionId);
+      await redoSession.mutateAsync(sessionId);
+      const { messages: updatedMessages, todos } = await queryClient.fetchQuery({
+        queryKey: queryKeys.sessionMessages(sessionId),
+        queryFn: () =>
+          api.listMessages(sessionId).then((r) => ({
+            messages: r.messages,
+            todos: r.todos ?? [],
+          })),
+      });
       useSessionStore.getState().setMessages(updatedMessages);
-      useSessionStore.getState().setTodos(todos ?? []);
+      useSessionStore.getState().setTodos(todos);
     } catch (error) {
       console.error("Redo failed:", error);
     }
@@ -540,7 +600,13 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
 
   async function executeInit() {
     try {
-      const { prompt } = await api.getInitPrompt();
+      const prompt = await queryClient.fetchQuery({
+        queryKey: queryKeys.initPrompt,
+        queryFn: async () => {
+          const { prompt } = await api.getInitPrompt();
+          return prompt;
+        },
+      });
       setInputValue(prompt);
       setTimeout(() => textareaRef.current?.focus(), 0);
     } catch (error) {
@@ -553,7 +619,7 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
     if (!sessionId) return;
 
     try {
-      await api.compactSession(sessionId);
+      await compactSession.mutateAsync(sessionId);
       // The compaction runs in the background; SSE will send
       // messages.updated when it completes, triggering a refresh.
     } catch (error) {
@@ -573,8 +639,9 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
   async function handleStop() {
     if (currentSessionId && currentRequestId) {
       try {
-        await api.abortRequest(currentSessionId, {
-          request_id: currentRequestId,
+        await abortRequest.mutateAsync({
+          sessionId: currentSessionId,
+          requestId: currentRequestId,
         });
       } catch {
         // ignore

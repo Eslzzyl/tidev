@@ -18,6 +18,7 @@ import {
   FileWarning,
 } from "lucide-react";
 import { api } from "../../api/client";
+import { queryClient } from "../../lib/queryClient";
 import type { FileSuggestion } from "../../types/api";
 
 interface FileMentionPopoverProps {
@@ -47,8 +48,11 @@ export function FileMentionPopover({
     const timeoutId = setTimeout(async () => {
       setLoading(true);
       try {
-        const response = await api.searchFiles(query);
-        const suggestionsWithIcons = response.suggestions.map((s) => ({
+        const { suggestions } = await queryClient.fetchQuery({
+          queryKey: ["files", "search", query],
+          queryFn: () => api.searchFiles(query),
+        });
+        const suggestionsWithIcons = suggestions.map((s) => ({
           ...s,
           icon: getFileIcon(s.kind, s.path),
         }));

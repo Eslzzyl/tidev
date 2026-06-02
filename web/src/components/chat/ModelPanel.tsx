@@ -11,7 +11,14 @@ import {
   Database,
   Sparkles,
 } from "lucide-react";
-import { api } from "../../api/client";
+import {
+  useModels,
+  useAgentModels,
+  useMemoryModel,
+  useSetDefaultModel,
+  useSetAgentModel,
+  useSetMemoryModel,
+} from "../../hooks/useQueries";
 import type { ModelInfo } from "../../types/api";
 
 interface ModelPanelProps {
@@ -55,10 +62,17 @@ export function ModelPanel({
 }: ModelPanelProps) {
   const [activeTab, setActiveTab] = useState<string>("general");
   const [searchQuery, setSearchQuery] = useState("");
-  const [models, setModels] = useState<ModelInfo[]>([]);
-  const [agentModels, setAgentModels] = useState<Record<string, string>>({});
-  const [memoryModelStr, setMemoryModelStr] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+
+  const { data: models = [], isLoading } = useModels();
+  const { data: agentModelsData } = useAgentModels();
+  const { data: memoryModelData } = useMemoryModel();
+  const setDefaultModelMutation = useSetDefaultModel();
+  const setMemoryModelMutation = useSetMemoryModel();
+  const setAgentModelMutation = useSetAgentModel();
+
+  const agentModels = agentModelsData?.agent_models ?? {};
+  const memoryModelStr = memoryModelData?.model_str ?? null;
+
   const searchInputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLDivElement>(null);
@@ -66,32 +80,6 @@ export function ModelPanel({
     top: number;
     height: number;
   } | null>(null);
-
-  // Fetch models, agent config, and memory config when panel opens
-  useEffect(() => {
-    if (!isOpen) return;
-
-    Promise.all([api.listModels(), api.getAgentModels(), api.getMemoryModel()])
-      .then(([modelsResp, agentModelsResp, memoryResp]) => {
-        setIsLoading(true);
-        setModels(modelsResp.models ?? []);
-        setAgentModels(agentModelsResp.agent_models);
-        setMemoryModelStr(memoryResp.model_str);
-      })
-      .catch((err) => {
-        console.error("Failed to load model data:", err);
-      })
-      .finally(() => {
-        setIsLoading(false);
-      });
-
-    // Reset state on open — defer to avoid cascading renders
-    const rafId = requestAnimationFrame(() => {
-      setSearchQuery("");
-      setActiveTab("general");
-    });
-    return () => cancelAnimationFrame(rafId);
-  }, [isOpen]);
 
   // Focus search input when panel opens or tab changes
   useEffect(() => {
@@ -235,7 +223,7 @@ export function ModelPanel({
     async (model: ModelInfo) => {
       if (activeTab === "general") {
         try {
-          await api.setDefaultModel({
+          await setDefaultModelMutation.mutateAsync({
             provider_id: model.provider_id,
             model_id: model.id,
           });
@@ -247,28 +235,26 @@ export function ModelPanel({
       } else if (activeTab === "memory") {
         const modelStr = `${model.provider_id}/${model.id}`;
         try {
-          await api.setMemoryModel({
+          await setMemoryModelMutation.mutateAsync({
             role: "consolidation",
             model_str: modelStr,
           });
-          setMemoryModelStr(modelStr);
         } catch (err) {
           console.error("Failed to set memory model:", err);
         }
       } else {
         const modelStr = `${model.provider_id}/${model.id}`;
         try {
-          await api.setAgentModel({
+          await setAgentModelMutation.mutateAsync({
             agent_type: activeTab,
             model_str: modelStr,
           });
-          setAgentModels((prev) => ({ ...prev, [activeTab]: modelStr }));
         } catch (err) {
           console.error(`Failed to set agent model for ${activeTab}:`, err);
         }
       }
     },
-    [activeTab, onModelChange, onClose],
+    [activeTab, onModelChange, onClose, setDefaultModelMutation, setMemoryModelMutation, setAgentModelMutation],
   );
 
   // Clear override for agent or memory tab
@@ -277,30 +263,24 @@ export function ModelPanel({
 
     if (activeTab === "memory") {
       try {
-        await api.setMemoryModel({
+        await setMemoryModelMutation.mutateAsync({
           role: "consolidation",
           model_str: "",
         });
-        setMemoryModelStr(null);
       } catch (err) {
         console.error("Failed to clear memory model:", err);
       }
     } else {
       try {
-        await api.setAgentModel({
+        await setAgentModelMutation.mutateAsync({
           agent_type: activeTab,
           model_str: "",
-        });
-        setAgentModels((prev) => {
-          const next = { ...prev };
-          delete next[activeTab];
-          return next;
         });
       } catch (err) {
         console.error(`Failed to clear agent model for ${activeTab}:`, err);
       }
     }
-  }, [activeTab]);
+  }, [activeTab, setMemoryModelMutation, setAgentModelMutation]);
 
   if (!isOpen) return null;
 

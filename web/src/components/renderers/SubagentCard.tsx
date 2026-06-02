@@ -14,6 +14,7 @@ import type { ToolCallEntry } from "../../types/round";
 import type { Message } from "../../types/api";
 import { useSubagentStore, type SubagentStreamBlock } from "../../stores/useSubagentStore";
 import { api } from "../../api/client";
+import { queryClient } from "../../lib/queryClient";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ToolCallRow } from "./ToolCallRow";
@@ -277,8 +278,15 @@ export const SubagentCard = memo(function SubagentCard({ entry }: Props) {
       hasFetchedRef.current = true;
       setChildMessagesLoading(true);
       try {
-        const res = await api.listMessages(childSessionId);
-        setChildMessages(res.messages);
+        const { messages } = await queryClient.fetchQuery({
+          queryKey: ["session", childSessionId, "messages"],
+          queryFn: () =>
+            api.listMessages(childSessionId).then((r) => ({
+              messages: r.messages,
+              todos: r.todos ?? [],
+            })),
+        });
+        setChildMessages(messages);
       } catch (err) {
         console.error("[SubagentCard] failed to fetch child messages:", err);
       } finally {
