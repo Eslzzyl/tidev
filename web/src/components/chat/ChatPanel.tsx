@@ -31,20 +31,20 @@ export function ChatPanel() {
 
   // Virtual list + auto-scroll
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const { virtualItems, totalSize, isVirtualized, measureElement } =
-    useMessageVirtualizer(scrollContainerRef, rounds);
+  const { virtualItems, totalSize, isVirtualized, measureElement } = useMessageVirtualizer(
+    scrollContainerRef,
+    rounds,
+  );
 
-  const { handleScroll, scrollToBottom, showScrollButton, endRef } =
-    useChatAutoScroll(scrollContainerRef, isStreaming);
+  const { handleScroll, scrollToBottom, showScrollButton, endRef } = useChatAutoScroll(
+    scrollContainerRef,
+    isStreaming,
+  );
 
   // Scroll to bottom once when a session is first loaded
   const scrolledSessionRef = useRef<string | null>(null);
   useEffect(() => {
-    if (
-      currentSessionId &&
-      currentSessionId !== scrolledSessionRef.current &&
-      rounds.length > 0
-    ) {
+    if (currentSessionId && currentSessionId !== scrolledSessionRef.current && rounds.length > 0) {
       scrolledSessionRef.current = currentSessionId;
       scrollToBottom(true);
     }
@@ -52,9 +52,7 @@ export function ChatPanel() {
 
   // Undo state
   const [undoDialogOpen, setUndoDialogOpen] = useState(false);
-  const [undoTargetMessageId, setUndoTargetMessageId] = useState<string | null>(
-    null,
-  );
+  const [undoTargetMessageId, setUndoTargetMessageId] = useState<string | null>(null);
   const [isUndoing, setIsUndoing] = useState(false);
   const [undoError, setUndoError] = useState<string | null>(null);
 
@@ -140,11 +138,10 @@ export function ChatPanel() {
         );
 
         // Navigate to the new forked session
-        const [session, { messages: forkedMessages, todos }] =
-          await Promise.all([
-            api.getSession(result.session_id),
-            api.listMessages(result.session_id),
-          ]);
+        const [session, { messages: forkedMessages, todos }] = await Promise.all([
+          api.getSession(result.session_id),
+          api.listMessages(result.session_id),
+        ]);
 
         useSessionStore.getState().setCurrentSession(session);
         useSessionStore.getState().setMessages(forkedMessages);
@@ -264,10 +261,7 @@ export function ChatPanel() {
       {currentSessionId && <PermissionArea sessionId={currentSessionId} />}
 
       {/* Input Area */}
-      <MessageInput
-        onSlashCommand={handleSlashCommand}
-        skillInsert={skillInsert}
-      />
+      <MessageInput onSlashCommand={handleSlashCommand} skillInsert={skillInsert} />
 
       {/* Undo Confirmation Dialog */}
       <ConfirmDialog
@@ -316,10 +310,7 @@ export function ChatPanel() {
       />
 
       {/* Connect Dialog (/connect command) */}
-      <ConnectDialog
-        isOpen={connectDialogOpen}
-        onClose={() => setConnectDialogOpen(false)}
-      />
+      <ConnectDialog isOpen={connectDialogOpen} onClose={() => setConnectDialogOpen(false)} />
     </div>
   );
 }
@@ -329,16 +320,11 @@ function PermissionArea({ sessionId }: { sessionId: string }) {
   const pendingPermissions = usePermissionStore((s) => s.pendingPermissions);
   const removePermission = usePermissionStore((s) => s.removePermission);
 
-  const sessionPermissions = pendingPermissions.filter(
-    (p) => p.sessionId === sessionId,
-  );
+  const sessionPermissions = pendingPermissions.filter((p) => p.sessionId === sessionId);
 
   if (sessionPermissions.length === 0) return null;
 
-  const handleResponse = (
-    permissionId: string,
-    response: "once" | "always" | "deny",
-  ) => {
+  const handleResponse = (permissionId: string, response: "once" | "always" | "deny") => {
     // For now, tools needing permission are auto-rejected by the backend.
     // This handler will send the response to the backend once the
     // permission response endpoint is implemented.

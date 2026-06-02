@@ -128,13 +128,9 @@ function ChartTooltip({
             className="inline-block h-2 w-2 rounded-full"
             style={{ backgroundColor: p.color }}
           />
-          <span className="text-neutral-700 dark:text-neutral-300">
-            {p.name}:
-          </span>
+          <span className="text-neutral-700 dark:text-neutral-300">{p.name}:</span>
           <span className="font-medium text-neutral-900 dark:text-neutral-100">
-            {p.name === "Cache Hit Rate"
-              ? `${p.value.toFixed(1)}%`
-              : formatNumber(p.value)}
+            {p.name === "Cache Hit Rate" ? `${p.value.toFixed(1)}%` : formatNumber(p.value)}
           </span>
         </p>
       ))}
@@ -284,8 +280,7 @@ export function StatsView() {
       Input: e.input_tokens,
       Output: e.output_tokens,
       "Cache Read": e.cache_read_tokens,
-      cacheHitRate:
-        e.input_tokens > 0 ? (e.cache_read_tokens / e.input_tokens) * 100 : 0,
+      cacheHitRate: e.input_tokens > 0 ? (e.cache_read_tokens / e.input_tokens) * 100 : 0,
     }));
   }, [timeSeries]);
 
@@ -418,46 +413,19 @@ export function StatsView() {
               <AreaChart data={totalTokenData}>
                 <defs>
                   <linearGradient id="gradInput" x1="0" y1="0" x2="0" y2="1">
-                    <stop
-                      offset="5%"
-                      stopColor={CHART_COLORS[2]}
-                      stopOpacity={0.3}
-                    />
-                    <stop
-                      offset="95%"
-                      stopColor={CHART_COLORS[2]}
-                      stopOpacity={0}
-                    />
+                    <stop offset="5%" stopColor={CHART_COLORS[2]} stopOpacity={0.3} />
+                    <stop offset="95%" stopColor={CHART_COLORS[2]} stopOpacity={0} />
                   </linearGradient>
                   <linearGradient id="gradOutput" x1="0" y1="0" x2="0" y2="1">
-                    <stop
-                      offset="5%"
-                      stopColor={CHART_COLORS[1]}
-                      stopOpacity={0.3}
-                    />
-                    <stop
-                      offset="95%"
-                      stopColor={CHART_COLORS[1]}
-                      stopOpacity={0}
-                    />
+                    <stop offset="5%" stopColor={CHART_COLORS[1]} stopOpacity={0.3} />
+                    <stop offset="95%" stopColor={CHART_COLORS[1]} stopOpacity={0} />
                   </linearGradient>
                   <linearGradient id="gradCache" x1="0" y1="0" x2="0" y2="1">
-                    <stop
-                      offset="5%"
-                      stopColor={CHART_COLORS[0]}
-                      stopOpacity={0.3}
-                    />
-                    <stop
-                      offset="95%"
-                      stopColor={CHART_COLORS[0]}
-                      stopOpacity={0}
-                    />
+                    <stop offset="5%" stopColor={CHART_COLORS[0]} stopOpacity={0.3} />
+                    <stop offset="95%" stopColor={CHART_COLORS[0]} stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke={isDark ? "#333" : "#e5e7eb"}
-                />
+                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#333" : "#e5e7eb"} />
                 <XAxis
                   dataKey="bucket"
                   tickFormatter={(v) => formatTokenBucket(granularity, v)}
@@ -530,10 +498,7 @@ export function StatsView() {
           <ChartContainer className="h-[200px]">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={timeSeries?.entries || []}>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke={isDark ? "#333" : "#e5e7eb"}
-                />
+                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#333" : "#e5e7eb"} />
                 <XAxis
                   dataKey="time_bucket"
                   tickFormatter={(v) => formatTokenBucket(granularity, v)}
@@ -566,9 +531,7 @@ export function StatsView() {
               Model Distribution (by tokens)
             </h2>
             {modelPieData.length === 0 ? (
-              <p className="py-8 text-center text-sm text-neutral-400">
-                No model usage data yet
-              </p>
+              <p className="py-8 text-center text-sm text-neutral-400">No model usage data yet</p>
             ) : (
               <ChartContainer className="h-[280px]">
                 <ResponsiveContainer width="100%" height="100%">
@@ -591,17 +554,13 @@ export function StatsView() {
                         if (!active || !payload?.length) return null;
                         const d = payload[0].payload;
                         const pct =
-                          totalTokens > 0
-                            ? ((d.value / totalTokens) * 100).toFixed(1)
-                            : "0";
+                          totalTokens > 0 ? ((d.value / totalTokens) * 100).toFixed(1) : "0";
                         return (
                           <div className="rounded-lg border border-neutral-200 bg-white p-3 shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
                             <p className="text-xs font-medium text-neutral-900 dark:text-neutral-100">
                               {d.name}
                             </p>
-                            <p className="text-xs text-neutral-500">
-                              {d.provider}
-                            </p>
+                            <p className="text-xs text-neutral-500">{d.provider}</p>
                             <p className="mt-1 text-xs text-neutral-700 dark:text-neutral-300">
                               {formatNumber(d.value)} tokens ({pct}%)
                             </p>
@@ -622,19 +581,14 @@ export function StatsView() {
               Provider Usage
             </h2>
             {providers.length === 0 ? (
-              <p className="py-8 text-center text-sm text-neutral-400">
-                No provider data yet
-              </p>
+              <p className="py-8 text-center text-sm text-neutral-400">No provider data yet</p>
             ) : (
               <ChartContainer className="h-[280px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
                     data={providers.map((p) => ({
                       ...p,
-                      freshInput: Math.max(
-                        0,
-                        p.input_tokens - p.cache_read_tokens,
-                      ),
+                      freshInput: Math.max(0, p.input_tokens - p.cache_read_tokens),
                       shortName: p.provider_display_name || p.provider_id,
                     }))}
                     layout="vertical"
@@ -679,12 +633,7 @@ export function StatsView() {
                             </p>
                             <p className="text-xs text-blue-600">
                               Fresh Input:{" "}
-                              {formatNumber(
-                                Math.max(
-                                  0,
-                                  d.input_tokens - d.cache_read_tokens,
-                                ),
-                              )}
+                              {formatNumber(Math.max(0, d.input_tokens - d.cache_read_tokens))}
                             </p>
                             <p className="text-xs text-blue-500">
                               Cache Read: {formatNumber(d.cache_read_tokens)}
@@ -731,47 +680,26 @@ export function StatsView() {
             <h2 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">
               Top Sessions by Token Usage
             </h2>
-            <span className="text-xs text-neutral-400">
-              {sessionTotal} total
-            </span>
+            <span className="text-xs text-neutral-400">{sessionTotal} total</span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
                 <tr className="border-b border-neutral-100 dark:border-neutral-800">
-                  <th className="px-4 py-2 font-medium text-neutral-500">
-                    Session
-                  </th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">
-                    Model
-                  </th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">
-                    Messages
-                  </th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">
-                    Total Tokens
-                  </th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">
-                    Input
-                  </th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">
-                    Output
-                  </th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">
-                    Cache Hit Rate
-                  </th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">
-                    Last Active
-                  </th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">Session</th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">Model</th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">Messages</th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">Total Tokens</th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">Input</th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">Output</th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">Cache Hit Rate</th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">Last Active</th>
                 </tr>
               </thead>
               <tbody>
                 {sessions.length === 0 ? (
                   <tr>
-                    <td
-                      colSpan={8}
-                      className="px-4 py-8 text-center text-neutral-400"
-                    >
+                    <td colSpan={8} className="px-4 py-8 text-center text-neutral-400">
                       No session data yet
                     </td>
                   </tr>
@@ -804,9 +732,7 @@ export function StatsView() {
                           ? `${((s.cache_read_tokens / s.input_tokens) * 100).toFixed(1)}%`
                           : "0%"}
                       </td>
-                      <td className="px-4 py-2.5 text-neutral-500">
-                        {s.updated_at.split("T")[0]}
-                      </td>
+                      <td className="px-4 py-2.5 text-neutral-500">{s.updated_at.split("T")[0]}</td>
                     </tr>
                   ))
                 )}
@@ -838,12 +764,8 @@ function SummaryCard({
         {icon}
         <span className="text-xs font-medium">{label}</span>
       </div>
-      <div className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
-        {value}
-      </div>
-      {subtitle && (
-        <div className="mt-0.5 text-xs text-neutral-400">{subtitle}</div>
-      )}
+      <div className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">{value}</div>
+      {subtitle && <div className="mt-0.5 text-xs text-neutral-400">{subtitle}</div>}
     </div>
   );
 }

@@ -3,10 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
-    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <!--
       Safari 26+ uses <body> background-color for browser chrome.
       This meta tag is kept as a fallback for other browsers (Chrome Android etc).
@@ -15,31 +12,32 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="description" content="tidev Web - AI coding assistant" />
     <title>tidev</title>
-    </head>
-    <body>
-      <div id="root"></div>
-      <script>
-        (function () {
-          var isDark = false;
-          try {
-            var saved = localStorage.getItem("theme");
-            if (saved === "dark") {
-              isDark = true;
-            } else if (saved === "system" || saved === null) {
-              isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-            }
-          } catch (e) {
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      (function () {
+        var isDark = false;
+        try {
+          var saved = localStorage.getItem("theme");
+          if (saved === "dark") {
+            isDark = true;
+          } else if (saved === "system" || saved === null) {
             isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
           }
-          var color = isDark ? "#0a0a0a" : "#ffffff";
-          var meta = document.querySelector('meta[name="theme-color"]');
-          if (meta) meta.setAttribute("content", color);
-          document.documentElement.style.backgroundColor = color;
-          document.body.style.backgroundColor = color;
-          if (isDark) {
-            document.documentElement.classList.add("dark");
-          }
-        })();
-      </script>
-      <script type="module" src="/src/main.tsx"></script>
-    </body></html>
+        } catch (e) {
+          isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        }
+        var color = isDark ? "#0a0a0a" : "#ffffff";
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", color);
+        document.documentElement.style.backgroundColor = color;
+        document.body.style.backgroundColor = color;
+        if (isDark) {
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

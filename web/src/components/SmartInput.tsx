@@ -125,9 +125,7 @@ export function SmartInput({
   // setTimeout (macrotask). Also check e.isComposing for Chrome/Firefox.
   const composingRef = useRef(false);
   const compositionJustCommittedRef = useRef(false);
-  const compositionEndTimerRef = useRef<
-    ReturnType<typeof setTimeout> | undefined
-  >(undefined);
+  const compositionEndTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Clean up the timer on unmount.
   useEffect(() => {
@@ -205,9 +203,7 @@ export function SmartInput({
       if (commandPalette.visible) {
         if (e.key === "ArrowDown") {
           e.preventDefault();
-          const newIndex =
-            (commandPalette.selectedIndex + 1) %
-            commandPalette.suggestions.length;
+          const newIndex = (commandPalette.selectedIndex + 1) % commandPalette.suggestions.length;
           setCommandPalette({
             ...commandPalette,
             selectedIndex: newIndex,
@@ -228,8 +224,7 @@ export function SmartInput({
         }
         if (e.key === "Enter" || e.key === "Tab") {
           e.preventDefault();
-          const suggestion =
-            commandPalette.suggestions[commandPalette.selectedIndex];
+          const suggestion = commandPalette.suggestions[commandPalette.selectedIndex];
           if (suggestion) {
             executeCommand(suggestion.spec.name);
           }
@@ -294,8 +289,7 @@ export function SmartInput({
       setInputValue(newValue);
 
       // Get cursor position
-      const cursorPosition =
-        "selectionStart" in input ? (input.selectionStart ?? 0) : 0;
+      const cursorPosition = "selectionStart" in input ? (input.selectionStart ?? 0) : 0;
 
       // Check for @ mention
       const textBeforeCursor = newValue.slice(0, cursorPosition);
@@ -352,11 +346,7 @@ export function SmartInput({
   const isInputEnabled = !disabled;
 
   // Auto-resize textarea when in multiline mode (up to 200px, then scrolls)
-  useAutoResizeTextarea(
-    inputRef as React.RefObject<HTMLTextAreaElement | null>,
-    inputValue,
-    200,
-  );
+  useAutoResizeTextarea(inputRef as React.RefObject<HTMLTextAreaElement | null>, inputValue, 200);
 
   return (
     <div className={`relative ${className}`}>
@@ -476,8 +466,7 @@ export function SmartInput({
               className="flex items-center gap-1 rounded bg-amber-50 px-2 py-1 text-xs text-amber-700 hover:bg-amber-100 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/50"
             >
               <span>
-                {thinkingOptions.find((t) => t.value === selectedThinking)
-                  ?.label || "Thinking"}
+                {thinkingOptions.find((t) => t.value === selectedThinking)?.label || "Thinking"}
               </span>
               <ChevronDown className="h-3 w-3" />
             </button>

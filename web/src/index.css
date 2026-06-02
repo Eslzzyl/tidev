@@ -119,8 +119,7 @@ summary {
 }
 
 .prose code {
-  font-family:
-    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   word-break: break-word;
 }
 
@@ -367,8 +366,7 @@ summary {
   padding-top: 0.125rem;
   padding-bottom: 0.125rem;
   font-size: 0.875rem;
-  font-family:
-    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   color: #262626;
   word-break: break-word;
 }

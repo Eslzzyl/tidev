@@ -6,11 +6,7 @@ interface RenameDialogProps {
   onClose: () => void;
 }
 
-export function RenameDialog({
-  currentName,
-  onSubmit,
-  onClose,
-}: RenameDialogProps) {
+export function RenameDialog({ currentName, onSubmit, onClose }: RenameDialogProps) {
   const [name, setName] = useState(currentName);
   const inputRef = useRef<HTMLInputElement>(null);
 

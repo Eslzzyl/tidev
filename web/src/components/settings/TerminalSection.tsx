@@ -109,11 +109,7 @@ export function TerminalSection() {
 
   // Determine the <select> value from localMode + stored value
   const selectValue =
-    localMode === "default"
-      ? "__default__"
-      : localMode === "custom"
-        ? "__custom__"
-        : terminalShell;
+    localMode === "default" ? "__default__" : localMode === "custom" ? "__custom__" : terminalShell;
 
   const defaultShellLabel = shellsData
     ? `System default (${shellsData.default_shell})`
@@ -121,18 +117,14 @@ export function TerminalSection() {
 
   return (
     <section>
-      <h2 className="mb-1 text-sm font-medium text-neutral-900 dark:text-neutral-100">
-        Terminal
-      </h2>
+      <h2 className="mb-1 text-sm font-medium text-neutral-900 dark:text-neutral-100">Terminal</h2>
       <p className="mb-4 text-sm text-neutral-500 dark:text-neutral-400">
         Choose which shell to use in the terminal
       </p>
 
       <div className="flex flex-col gap-3 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
         <label className="flex flex-col gap-2">
-          <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
-            Shell
-          </span>
+          <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">Shell</span>
 
           {loading ? (
             <span className="text-sm text-neutral-500">Loading shells...</span>
@@ -175,10 +167,8 @@ export function TerminalSection() {
         <p className="text-xs text-neutral-400 dark:text-neutral-500">
           {localMode === "default" &&
             "Uses the server's $SHELL environment variable (or /bin/bash as fallback)."}
-          {localMode === "selected" &&
-            `New terminal tabs will use ${terminalShell}.`}
-          {localMode === "custom" &&
-            "Enter the full path to your preferred shell executable."}
+          {localMode === "selected" && `New terminal tabs will use ${terminalShell}.`}
+          {localMode === "custom" && "Enter the full path to your preferred shell executable."}
         </p>
       </div>
     </section>

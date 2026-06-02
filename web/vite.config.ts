@@ -20,10 +20,7 @@ export default defineConfig({
     rolldownOptions: {
       output: {
         manualChunks(id: string) {
-          if (
-            id.includes("node_modules/react-dom") ||
-            id.includes("node_modules/react/")
-          ) {
+          if (id.includes("node_modules/react-dom") || id.includes("node_modules/react/")) {
             return "vendor-react";
           }
           // Only eager CodeMirror core packages — leave dynamic language imports split naturally

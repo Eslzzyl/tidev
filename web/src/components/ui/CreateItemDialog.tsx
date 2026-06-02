@@ -12,12 +12,7 @@ interface CreateItemDialogProps {
   onClose: () => void;
 }
 
-export function CreateItemDialog({
-  parentPath,
-  type,
-  onSubmit,
-  onClose,
-}: CreateItemDialogProps) {
+export function CreateItemDialog({ parentPath, type, onSubmit, onClose }: CreateItemDialogProps) {
   const [name, setName] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 

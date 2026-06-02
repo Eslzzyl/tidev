@@ -52,10 +52,7 @@ export function formatGitDate(isoStr: string): string {
 /**
  * Compute duration string between two ISO timestamps.
  */
-export function getDuration(
-  createdAt: string,
-  completedAt: string,
-): string | null {
+export function getDuration(createdAt: string, completedAt: string): string | null {
   const created = new Date(createdAt);
   const completed = new Date(completedAt);
   const diffMs = completed.getTime() - created.getTime();
@@ -111,11 +108,7 @@ export function stripSystemReminderTags(text: string): string {
     const afterClose = start + end + "</system-reminder>".length;
     rest = rest.slice(afterClose);
     // Skip trailing whitespace/newlines after the closing tag
-    while (
-      rest.startsWith("\n") ||
-      rest.startsWith("\r") ||
-      rest.startsWith(" ")
-    ) {
+    while (rest.startsWith("\n") || rest.startsWith("\r") || rest.startsWith(" ")) {
       rest = rest.slice(1);
     }
   }
@@ -153,11 +146,7 @@ function getHomeDir(): string | null {
       return process.env.USERPROFILE;
     }
     // Fallback for browsers: combine HOMEDRIVE + HOMEPATH
-    if (
-      typeof process !== "undefined" &&
-      process.env?.HOMEDRIVE &&
-      process.env?.HOMEPATH
-    ) {
+    if (typeof process !== "undefined" && process.env?.HOMEDRIVE && process.env?.HOMEPATH) {
       return process.env.HOMEDRIVE + process.env.HOMEPATH;
     }
   } catch {

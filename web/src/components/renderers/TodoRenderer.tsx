@@ -58,9 +58,7 @@ export function TodoRenderer({ output }: Props) {
               isDone ? "opacity-60" : ""
             }`}
           >
-            <StatusIcon
-              className={`mt-0.5 h-4 w-4 flex-shrink-0 ${statusClass}`}
-            />
+            <StatusIcon className={`mt-0.5 h-4 w-4 flex-shrink-0 ${statusClass}`} />
             <div className="flex-1 min-w-0">
               <span
                 className={

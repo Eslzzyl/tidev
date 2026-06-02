@@ -97,10 +97,7 @@ function detectLanguage(fp: string): string {
 }
 
 function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 /**
@@ -244,14 +241,9 @@ function parseDiffAligned(diffText: string): AlignedHunk[] {
       let alignIdx = 0;
 
       while (leftIdx < leftSide.length || rightIdx < rightSide.length) {
-        const nextAlign =
-          alignIdx < alignmentPoints.length ? alignmentPoints[alignIdx] : null;
+        const nextAlign = alignIdx < alignmentPoints.length ? alignmentPoints[alignIdx] : null;
 
-        if (
-          nextAlign &&
-          leftIdx === nextAlign.leftIdx &&
-          rightIdx === nextAlign.rightIdx
-        ) {
+        if (nextAlign && leftIdx === nextAlign.leftIdx && rightIdx === nextAlign.rightIdx) {
           // Alignment point: both sides have this context line
           rows.push({
             left: {
@@ -269,12 +261,9 @@ function parseDiffAligned(diffText: string): AlignedHunk[] {
           rightIdx++;
           alignIdx++;
         } else {
-          const needLeft =
-            leftIdx < leftSide.length &&
-            (!nextAlign || leftIdx < nextAlign.leftIdx);
+          const needLeft = leftIdx < leftSide.length && (!nextAlign || leftIdx < nextAlign.leftIdx);
           const needRight =
-            rightIdx < rightSide.length &&
-            (!nextAlign || rightIdx < nextAlign.rightIdx);
+            rightIdx < rightSide.length && (!nextAlign || rightIdx < nextAlign.rightIdx);
 
           if (needLeft && needRight) {
             // Both sides have content before next alignment — pair them 1:1
@@ -344,10 +333,7 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
 
   const language = useMemo(() => detectLanguage(filepath), [filepath]);
   const hunks = useMemo(() => parseDiffAligned(diff), [diff]);
-  const totalLines = useMemo(
-    () => hunks.reduce((sum, h) => sum + h.rows.length, 0),
-    [hunks],
-  );
+  const totalLines = useMemo(() => hunks.reduce((sum, h) => sum + h.rows.length, 0), [hunks]);
   const useFullHighlight = totalLines <= LARGE_FILE_THRESHOLD;
 
   const highlightLine = useCallback(
@@ -367,8 +353,7 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
   );
 
   useEffect(() => {
-    const checkWidth = () =>
-      setIsWide(window.innerWidth >= WIDE_LAYOUT_THRESHOLD);
+    const checkWidth = () => setIsWide(window.innerWidth >= WIDE_LAYOUT_THRESHOLD);
     window.addEventListener("resize", checkWidth);
     return () => window.removeEventListener("resize", checkWidth);
   }, []);
@@ -385,9 +370,7 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
           <span className="w-8 shrink-0 select-none text-right text-neutral-400">
             {row.left.lineNum}
           </span>
-          <span className="w-4 shrink-0 select-none text-center text-neutral-400">
-            {" "}
-          </span>
+          <span className="w-4 shrink-0 select-none text-center text-neutral-400"> </span>
           <span className="flex-1 whitespace-pre-wrap break-all pl-1 text-neutral-800 dark:text-neutral-200">
             {highlightLine(row.left.content, language, useFullHighlight)}
           </span>
@@ -401,9 +384,7 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
           <span className="w-8 shrink-0 select-none text-right text-neutral-400">
             {row.left.lineNum}
           </span>
-          <span className="w-4 shrink-0 select-none text-center text-red-500">
-            -
-          </span>
+          <span className="w-4 shrink-0 select-none text-center text-red-500">-</span>
           <span className="flex-1 whitespace-pre-wrap break-all pl-1 text-neutral-800 dark:text-neutral-200">
             {highlightLine(row.left.content, language, useFullHighlight)}
           </span>
@@ -417,9 +398,7 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
           <span className="w-8 shrink-0 select-none text-right text-neutral-400">
             {row.right.lineNum}
           </span>
-          <span className="w-4 shrink-0 select-none text-center text-green-600">
-            +
-          </span>
+          <span className="w-4 shrink-0 select-none text-center text-green-600">+</span>
           <span className="flex-1 whitespace-pre-wrap break-all pl-1 text-neutral-800 dark:text-neutral-200">
             {highlightLine(row.right.content, language, useFullHighlight)}
           </span>
@@ -451,11 +430,7 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
                 row.left.type === "del" ? "text-red-500" : "text-neutral-400"
               }`}
             >
-              {row.left.type === "del"
-                ? "-"
-                : row.left.type === "empty"
-                  ? ""
-                  : " "}
+              {row.left.type === "del" ? "-" : row.left.type === "empty" ? "" : " "}
             </span>
             <span className="flex-1 whitespace-pre-wrap break-all pl-1 text-neutral-800 dark:text-neutral-200">
               {highlightLine(row.left.content, language, useFullHighlight)}
@@ -476,11 +451,7 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
                 row.right.type === "add" ? "text-green-600" : "text-neutral-400"
               }`}
             >
-              {row.right.type === "add"
-                ? "+"
-                : row.right.type === "empty"
-                  ? ""
-                  : " "}
+              {row.right.type === "add" ? "+" : row.right.type === "empty" ? "" : " "}
             </span>
             <span className="flex-1 whitespace-pre-wrap break-all pl-1 text-neutral-800 dark:text-neutral-200">
               {highlightLine(row.right.content, language, useFullHighlight)}
@@ -587,11 +558,7 @@ export function useDiffCollapseContext() {
 /**
  * Provider that manages "expand/collapse all" for multiple diff files.
  */
-export function DiffCollapseProvider({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export function DiffCollapseProvider({ children }: { children: React.ReactNode }) {
   const [allExpanded, setAllExpanded] = useState<boolean | null>(null);
 
   const toggleAll = useCallback(() => {

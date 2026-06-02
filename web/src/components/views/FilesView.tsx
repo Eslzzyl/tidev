@@ -1,12 +1,4 @@
-import {
-  Search,
-  RotateCw,
-  File,
-  Folder,
-  GitBranch,
-  ChevronLeft,
-  PanelLeft,
-} from "lucide-react";
+import { Search, RotateCw, File, Folder, GitBranch, ChevronLeft, PanelLeft } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { FileTree } from "./FileTree";
 import { CodeViewer } from "./CodeViewer";
@@ -25,10 +17,7 @@ function loadFileTreeWidth(): number {
   try {
     const saved = localStorage.getItem("filesFileTreeWidth");
     if (saved) {
-      return Math.max(
-        MIN_FILETREE_WIDTH,
-        Math.min(MAX_FILETREE_WIDTH, parseInt(saved, 10)),
-      );
+      return Math.max(MIN_FILETREE_WIDTH, Math.min(MAX_FILETREE_WIDTH, parseInt(saved, 10)));
     }
   } catch {
     // ignore
@@ -38,13 +27,9 @@ function loadFileTreeWidth(): number {
 
 export function FilesView() {
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<
-    { path: string; display: string }[]
-  >([]);
+  const [searchResults, setSearchResults] = useState<{ path: string; display: string }[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [createType, setCreateType] = useState<"file" | "directory" | null>(
-    null,
-  );
+  const [createType, setCreateType] = useState<"file" | "directory" | null>(null);
 
   // File tree panel state
   const [fileTreeWidth, setFileTreeWidth] = useState(loadFileTreeWidth);
@@ -64,9 +49,7 @@ export function FilesView() {
   const gitBranch = useGitFileStore((s) => s.branch);
 
   // Search cache: query -> results
-  const searchCacheRef = useRef<
-    Record<string, { path: string; display: string }[]>
-  >({});
+  const searchCacheRef = useRef<Record<string, { path: string; display: string }[]>>({});
 
   // Load root on mount
   useEffect(() => {
@@ -154,8 +137,7 @@ export function FilesView() {
     if (!isResizing) return;
 
     const handleMove = (e: MouseEvent | TouchEvent) => {
-      const clientX =
-        "touches" in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
+      const clientX = "touches" in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
       const diff = clientX - resizeStartRef.current.x;
       const newWidth = Math.max(
         MIN_FILETREE_WIDTH,
@@ -186,8 +168,7 @@ export function FilesView() {
   const handleResizeStart = useCallback(
     (e: React.MouseEvent | React.TouchEvent) => {
       e.preventDefault();
-      const clientX =
-        "touches" in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+      const clientX = "touches" in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
       resizeStartRef.current = { x: clientX, width: fileTreeWidth };
       setIsResizing(true);
       document.body.style.cursor = "col-resize";
@@ -221,21 +202,13 @@ export function FilesView() {
           fileTreeOpen ? "flex" : "hidden md:flex"
         } ${
           // On mobile, when open, overlay the panel
-          fileTreeOpen && isMobile
-            ? "fixed inset-y-0 left-0 z-50 shadow-xl"
-            : "relative"
+          fileTreeOpen && isMobile ? "fixed inset-y-0 left-0 z-50 shadow-xl" : "relative"
         }`}
-        style={
-          fileTreeOpen
-            ? { width: fileTreeWidth, minWidth: MIN_FILETREE_WIDTH }
-            : undefined
-        }
+        style={fileTreeOpen ? { width: fileTreeWidth, minWidth: MIN_FILETREE_WIDTH } : undefined}
       >
         {/* Header with collapse button */}
         <div className="flex items-center justify-between border-b border-neutral-200 px-2 py-1.5 dark:border-neutral-800">
-          <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-            Files
-          </span>
+          <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Files</span>
           <div className="flex items-center gap-1">
             {/* New file button */}
             <button
@@ -305,9 +278,7 @@ export function FilesView() {
           {searchQuery.trim() ? (
             <div className="p-2">
               {isSearching ? (
-                <p className="py-4 text-center text-xs text-neutral-400">
-                  Searching...
-                </p>
+                <p className="py-4 text-center text-xs text-neutral-400">Searching...</p>
               ) : searchResults.length > 0 ? (
                 <div className="space-y-0.5">
                   {searchResults.map((r) => (
@@ -315,9 +286,7 @@ export function FilesView() {
                   ))}
                 </div>
               ) : (
-                <p className="py-4 text-center text-xs text-neutral-400">
-                  No results
-                </p>
+                <p className="py-4 text-center text-xs text-neutral-400">No results</p>
               )}
             </div>
           ) : (
@@ -366,11 +335,7 @@ export function FilesView() {
   );
 }
 
-function SearchResultItem({
-  item,
-}: {
-  item: { path: string; display: string };
-}) {
+function SearchResultItem({ item }: { item: { path: string; display: string } }) {
   const openFile = useFileStore((s) => s.openFile);
 
   return (
@@ -378,9 +343,7 @@ function SearchResultItem({
       onClick={() => openFile(item.path)}
       className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
     >
-      <span className="truncate text-neutral-700 dark:text-neutral-300">
-        {item.display}
-      </span>
+      <span className="truncate text-neutral-700 dark:text-neutral-300">{item.display}</span>
     </button>
   );
 }

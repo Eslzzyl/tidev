@@ -39,9 +39,7 @@ export function LeftSidebar() {
   }, [renamingId]);
 
   const filteredSessions = searchQuery.trim()
-    ? sessions.filter((s) =>
-        s.title.toLowerCase().includes(searchQuery.toLowerCase()),
-      )
+    ? sessions.filter((s) => s.title.toLowerCase().includes(searchQuery.toLowerCase()))
     : sessions;
 
   const handleNewSession = useCallback(() => {
@@ -77,9 +75,7 @@ export function LeftSidebar() {
         await api.deleteSession(sessionId);
         removeSession(sessionId);
       } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to delete session",
-        );
+        setError(err instanceof Error ? err.message : "Failed to delete session");
       } finally {
         setIsDeleting(false);
         setSessionToDelete(null);
@@ -88,13 +84,10 @@ export function LeftSidebar() {
     [removeSession, setError],
   );
 
-  const handleStartRename = useCallback(
-    (sessionId: string, currentTitle: string) => {
-      setRenamingId(sessionId);
-      setRenameValue(currentTitle);
-    },
-    [],
-  );
+  const handleStartRename = useCallback((sessionId: string, currentTitle: string) => {
+    setRenamingId(sessionId);
+    setRenameValue(currentTitle);
+  }, []);
 
   const handleConfirmRename = useCallback(
     async (sessionId: string) => {
@@ -109,9 +102,7 @@ export function LeftSidebar() {
         const { sessions } = await api.listSessions();
         useSessionStore.getState().setSessions(sessions);
       } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to rename session",
-        );
+        setError(err instanceof Error ? err.message : "Failed to rename session");
       } finally {
         setRenamingId(null);
       }
@@ -173,9 +164,7 @@ export function LeftSidebar() {
 
         {filteredSessions.length === 0 && !isDraftSession ? (
           <div className="p-4 text-center text-sm text-neutral-500 dark:text-neutral-400">
-            {searchQuery.trim()
-              ? "No sessions match your search"
-              : "No sessions yet"}
+            {searchQuery.trim() ? "No sessions match your search" : "No sessions yet"}
           </div>
         ) : (
           <ul className="flex flex-col gap-1 p-2">
@@ -192,9 +181,7 @@ export function LeftSidebar() {
                         type="text"
                         value={renameValue}
                         onChange={(e) => setRenameValue(e.target.value)}
-                        onKeyDown={(e) =>
-                          handleRenameKeyDown(e, session.session_id)
-                        }
+                        onKeyDown={(e) => handleRenameKeyDown(e, session.session_id)}
                         onBlur={() => handleConfirmRename(session.session_id)}
                         className="w-full bg-transparent text-base outline-none dark:text-neutral-100"
                       />
@@ -202,9 +189,7 @@ export function LeftSidebar() {
                   ) : (
                     <button
                       onClick={() => handleSelectSession(session.session_id)}
-                      onDoubleClick={() =>
-                        handleStartRename(session.session_id, session.title)
-                      }
+                      onDoubleClick={() => handleStartRename(session.session_id, session.title)}
                       className={`flex w-full items-center rounded-lg px-3 py-2.5 text-left transition-all duration-150 active:scale-[0.99] ${
                         isActive
                           ? "bg-neutral-100 font-medium text-neutral-900 shadow-sm ring-1 ring-neutral-200 dark:bg-neutral-800 dark:text-neutral-100 dark:ring-neutral-700"
@@ -225,8 +210,7 @@ export function LeftSidebar() {
                           )}
                         </div>
                         <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
-                          {session.model_display_name} •{" "}
-                          {formatSessionDate(session.updated_at)}
+                          {session.model_display_name} • {formatSessionDate(session.updated_at)}
                         </p>
                       </div>
                     </button>
@@ -236,9 +220,7 @@ export function LeftSidebar() {
                   {!isRenaming && (
                     <div className="absolute right-3 top-1/2 flex -translate-y-1/2 gap-0.5 opacity-100 transition-all duration-150 hover-only:opacity-0 hover-only:group-hover:opacity-100">
                       <button
-                        onClick={() =>
-                          handleStartRename(session.session_id, session.title)
-                        }
+                        onClick={() => handleStartRename(session.session_id, session.title)}
                         className="rounded p-1 text-neutral-400 transition-all duration-150 hover:text-blue-600 hover:bg-neutral-100 active:scale-95 dark:text-neutral-500 dark:hover:text-blue-400 dark:hover:bg-neutral-800"
                         aria-label="Rename session"
                         title="Rename"

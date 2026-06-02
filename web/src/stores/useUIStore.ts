@@ -65,17 +65,10 @@ const MIN_SIDEBAR_WIDTH = 180;
 const MAX_SIDEBAR_WIDTH = 500;
 
 function loadLocalStorage() {
-  const savedLeftWidth = parseInt(
-    localStorage.getItem("leftSidebarWidth") || "",
-    10,
-  );
-  const savedRightWidth = parseInt(
-    localStorage.getItem("rightSidebarWidth") || "",
-    10,
-  );
+  const savedLeftWidth = parseInt(localStorage.getItem("leftSidebarWidth") || "", 10);
+  const savedRightWidth = parseInt(localStorage.getItem("rightSidebarWidth") || "", 10);
   const savedTheme = localStorage.getItem("theme") as Theme | null;
-  const savedRightSidebarOpen =
-    localStorage.getItem("rightSidebarOpen") !== "false";
+  const savedRightSidebarOpen = localStorage.getItem("rightSidebarOpen") !== "false";
   const savedActiveTab = localStorage.getItem("activeTab") as MainTab | null;
 
   function loadSetting<T>(key: string, fallback: T): T {
@@ -88,29 +81,19 @@ function loadLocalStorage() {
   }
 
   return {
-    leftSidebarWidth: isNaN(savedLeftWidth)
-      ? DEFAULT_LEFT_SIDEBAR_WIDTH
-      : savedLeftWidth,
-    rightSidebarWidth: isNaN(savedRightWidth)
-      ? DEFAULT_RIGHT_SIDEBAR_WIDTH
-      : savedRightWidth,
+    leftSidebarWidth: isNaN(savedLeftWidth) ? DEFAULT_LEFT_SIDEBAR_WIDTH : savedLeftWidth,
+    rightSidebarWidth: isNaN(savedRightWidth) ? DEFAULT_RIGHT_SIDEBAR_WIDTH : savedRightWidth,
     theme: (savedTheme || "system") as Theme,
     rightSidebarOpen: savedRightSidebarOpen,
     activeTab: (savedActiveTab || "chat") as MainTab,
     settings: {
-      fontFamily: loadSetting(
-        "settings.fontFamily",
-        "Inter, system-ui, sans-serif",
-      ),
+      fontFamily: loadSetting("settings.fontFamily", "Inter, system-ui, sans-serif"),
       monoFontFamily: loadSetting(
         "settings.monoFontFamily",
         "JetBrains Mono, Fira Code, monospace",
       ),
       fontSize: loadSetting("settings.fontSize", 14),
-      diffLayout: loadSetting<"inline" | "side-by-side">(
-        "settings.diffLayout",
-        "side-by-side",
-      ),
+      diffLayout: loadSetting<"inline" | "side-by-side">("settings.diffLayout", "side-by-side"),
       enterToSend: loadSetting("settings.enterToSend", true),
       terminalShell: loadSetting("settings.terminalShell", ""),
     },
@@ -243,9 +226,7 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
 export function getEffectiveTheme(theme: Theme): "light" | "dark" {
   if (theme === "system") {
     if (typeof window !== "undefined") {
-      return window.matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light";
+      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
     }
     return "light";
   }

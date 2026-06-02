@@ -44,9 +44,7 @@ export function ConfirmDialog({
             {title}
           </span>
         </div>
-        <p className="mb-4 text-xs text-neutral-600 dark:text-neutral-400">
-          {message}
-        </p>
+        <p className="mb-4 text-xs text-neutral-600 dark:text-neutral-400">{message}</p>
         <div className="flex justify-end gap-2">
           <button
             onClick={onCancel}
@@ -59,9 +57,7 @@ export function ConfirmDialog({
             onClick={onConfirm}
             disabled={isLoading}
             className={`flex items-center gap-1 rounded px-3 py-1 text-xs text-white ${
-              danger
-                ? "bg-red-600 hover:bg-red-700"
-                : "bg-blue-600 hover:bg-blue-700"
+              danger ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700"
             } disabled:opacity-40`}
           >
             {isLoading && <Loader2 className="h-3 w-3 animate-spin" />}

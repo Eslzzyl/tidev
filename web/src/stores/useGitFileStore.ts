@@ -63,11 +63,7 @@ function propagateStatuses(
   return result;
 }
 
-function addOrMerge(
-  map: Record<string, GitDisplayStatus>,
-  path: string,
-  status: GitFileStatus,
-) {
+function addOrMerge(map: Record<string, GitDisplayStatus>, path: string, status: GitFileStatus) {
   const existing = map[path];
   const isUntracked = status.status === "?" || status.status === "!";
   const rawStatus = status.status[0]?.toUpperCase() || "?";

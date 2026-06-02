@@ -12,22 +12,12 @@ export function createCodeMirrorTheme(dark: boolean) {
   const text = dark ? "#e0e0e0" : "#333333";
   const gutterText = dark ? "#6b6b8a" : "#999999";
   const cursor = dark ? "#c9c9ff" : "#333333";
-  const selection = dark
-    ? "rgba(100, 100, 200, 0.3)"
-    : "rgba(0, 100, 200, 0.15)";
-  const selectionMatch = dark
-    ? "rgba(100, 100, 200, 0.2)"
-    : "rgba(0, 100, 200, 0.1)";
-  const lineHighlight = dark
-    ? "rgba(255, 255, 255, 0.04)"
-    : "rgba(0, 0, 0, 0.04)";
-  const activeLineGutter = dark
-    ? "rgba(255, 255, 255, 0.08)"
-    : "rgba(0, 0, 0, 0.07)";
+  const selection = dark ? "rgba(100, 100, 200, 0.3)" : "rgba(0, 100, 200, 0.15)";
+  const selectionMatch = dark ? "rgba(100, 100, 200, 0.2)" : "rgba(0, 100, 200, 0.1)";
+  const lineHighlight = dark ? "rgba(255, 255, 255, 0.04)" : "rgba(0, 0, 0, 0.04)";
+  const activeLineGutter = dark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.07)";
   const border = dark ? "#2a2a3e" : "#e5e5e5";
-  const searchMatch = dark
-    ? "rgba(200, 180, 80, 0.4)"
-    : "rgba(255, 200, 0, 0.3)";
+  const searchMatch = dark ? "rgba(200, 180, 80, 0.4)" : "rgba(255, 200, 0, 0.3)";
   const searchSel = dark ? "rgba(200, 180, 80, 0.6)" : "rgba(255, 200, 0, 0.5)";
   const tooltipBg = dark ? "#2a2a3e" : "#ffffff";
   const tooltipBorder = dark ? "#3a3a4e" : "#dddddd";
@@ -41,8 +31,7 @@ export function createCodeMirrorTheme(dark: boolean) {
           color: text,
           height: "100%",
           fontSize: "13px",
-          fontFamily:
-            "'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace",
+          fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace",
         },
         ".cm-scroller": {
           fontFamily: "inherit",
@@ -77,15 +66,11 @@ export function createCodeMirrorTheme(dark: boolean) {
           backgroundColor: selectionMatch,
         },
         ".cm-matchingBracket": {
-          backgroundColor: dark
-            ? "rgba(100, 200, 100, 0.2)"
-            : "rgba(0, 150, 0, 0.15)",
+          backgroundColor: dark ? "rgba(100, 200, 100, 0.2)" : "rgba(0, 150, 0, 0.15)",
           outline: `1px solid ${dark ? "rgba(100, 200, 100, 0.3)" : "rgba(0, 150, 0, 0.3)"}`,
         },
         ".cm-nonmatchingBracket": {
-          backgroundColor: dark
-            ? "rgba(200, 100, 100, 0.2)"
-            : "rgba(200, 0, 0, 0.15)",
+          backgroundColor: dark ? "rgba(200, 100, 100, 0.2)" : "rgba(200, 0, 0, 0.15)",
         },
         ".cm-searchMatch": {
           backgroundColor: searchMatch,
@@ -116,9 +101,7 @@ export function createCodeMirrorTheme(dark: boolean) {
             padding: "2px 8px",
           },
           "& > ul > li[aria-selected]": {
-            backgroundColor: dark
-              ? "rgba(100, 100, 200, 0.3)"
-              : "rgba(0, 100, 200, 0.1)",
+            backgroundColor: dark ? "rgba(100, 100, 200, 0.3)" : "rgba(0, 100, 200, 0.1)",
           },
         },
         ".cm-completionLabel": {

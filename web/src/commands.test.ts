@@ -54,9 +54,7 @@ describe("getSuggestions", () => {
           suggestions[i].spec.name.localeCompare(suggestions[i - 1].spec.name),
         ).toBeGreaterThanOrEqual(0);
       } else {
-        expect(suggestions[i].score).toBeLessThanOrEqual(
-          suggestions[i - 1].score,
-        );
+        expect(suggestions[i].score).toBeLessThanOrEqual(suggestions[i - 1].score);
       }
     }
   });

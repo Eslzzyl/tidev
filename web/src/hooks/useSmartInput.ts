@@ -82,9 +82,7 @@ export interface UseSmartInputReturn {
   thinkingDropdownRef: React.RefObject<HTMLDivElement | null>;
 
   // Handlers
-  handleInputChange: (
-    e: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>,
-  ) => void;
+  handleInputChange: (e: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) => void;
   handleKeyDown: (
     e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>,
     onSubmit?: () => void,
@@ -100,9 +98,7 @@ export interface UseSmartInputReturn {
   };
 }
 
-export function useSmartInput(
-  options: UseSmartInputOptions = {},
-): UseSmartInputReturn {
+export function useSmartInput(options: UseSmartInputOptions = {}): UseSmartInputReturn {
   const {
     initialModelId = null,
     initialMode = "build",
@@ -134,12 +130,8 @@ export function useSmartInput(
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelSearchQuery, setModelSearchQuery] = useState("");
-  const [selectedModelId, setSelectedModelId] = useState<string | null>(
-    initialModelId,
-  );
-  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(
-    null,
-  );
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(initialModelId);
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
 
   // Thinking state
   const [thinkingOptions, setThinkingOptions] = useState<ThinkingOption[]>([]);
@@ -186,9 +178,7 @@ export function useSmartInput(
     if (model.thinking_supported && model.thinking_options.length > 0) {
       const options = model.thinking_options.map((opt) => {
         const parts = opt.split(":");
-        const label = parts[1]
-          ? parts[1].charAt(0).toUpperCase() + parts[1].slice(1)
-          : opt;
+        const label = parts[1] ? parts[1].charAt(0).toUpperCase() + parts[1].slice(1) : opt;
         return { label, value: opt };
       });
       setThinkingOptions(options);
@@ -204,10 +194,7 @@ export function useSmartInput(
         .then((resp) => {
           // Guard: ignore stale responses if model changed while loading
           if (currentModelRef.current !== model.id) return;
-          if (
-            resp.thinking_level &&
-            model.thinking_options.includes(resp.thinking_level)
-          ) {
+          if (resp.thinking_level && model.thinking_options.includes(resp.thinking_level)) {
             setSelectedThinkingState(resp.thinking_level);
           }
         })
@@ -236,9 +223,7 @@ export function useSmartInput(
           if (!modelToSelect && defaultModel) {
             // Use config default model
             modelToSelect = models.find(
-              (m) =>
-                m.id === defaultModel.model_id &&
-                m.provider_id === defaultModel.provider_id,
+              (m) => m.id === defaultModel.model_id && m.provider_id === defaultModel.provider_id,
             );
           }
 
@@ -322,13 +307,7 @@ export function useSmartInput(
 
       onModelChange?.(model);
     },
-    [
-      onModelChange,
-      selectedProviderId,
-      selectedModelId,
-      selectedThinking,
-      updateThinkingLevels,
-    ],
+    [onModelChange, selectedProviderId, selectedModelId, selectedThinking, updateThinkingLevels],
   );
 
   // Close command palette
@@ -358,9 +337,7 @@ export function useSmartInput(
       if (!fileMention) return;
 
       const before = inputValue.slice(0, fileMention.atPosition);
-      const after = inputValue.slice(
-        fileMention.atPosition + 1 + fileMention.query.length,
-      );
+      const after = inputValue.slice(fileMention.atPosition + 1 + fileMention.query.length);
       const replacement = kind === "directory" ? `@${path}/` : `@${path}`;
       const newValue = `${before}${replacement}${after ? " " + after : ""}`;
       setInputValue(newValue);
@@ -380,8 +357,7 @@ export function useSmartInput(
       setInputValue(newValue);
 
       // Get cursor position
-      const cursorPosition =
-        "selectionStart" in input ? (input.selectionStart ?? 0) : 0;
+      const cursorPosition = "selectionStart" in input ? (input.selectionStart ?? 0) : 0;
 
       // Check for @ mention
       const textBeforeCursor = newValue.slice(0, cursorPosition);
@@ -450,16 +426,13 @@ export function useSmartInput(
           setCommandPalette((prev) => ({
             ...prev,
             selectedIndex:
-              prev.selectedIndex === 0
-                ? prev.suggestions.length - 1
-                : prev.selectedIndex - 1,
+              prev.selectedIndex === 0 ? prev.suggestions.length - 1 : prev.selectedIndex - 1,
           }));
           return true;
         }
         if (e.key === "Enter" || e.key === "Tab") {
           e.preventDefault();
-          const suggestion =
-            commandPalette.suggestions[commandPalette.selectedIndex];
+          const suggestion = commandPalette.suggestions[commandPalette.selectedIndex];
           if (suggestion) {
             executeCommand(suggestion.spec.name);
           }
@@ -495,14 +468,7 @@ export function useSmartInput(
 
       return false;
     },
-    [
-      commandPalette,
-      fileMention,
-      inputValue,
-      isSubmitting,
-      executeCommand,
-      closeCommandPalette,
-    ],
+    [commandPalette, fileMention, inputValue, isSubmitting, executeCommand, closeCommandPalette],
   );
 
   // Get submit payload

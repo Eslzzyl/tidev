@@ -40,9 +40,7 @@ export function Header({ className }: HeaderProps) {
   const toggleMobileMenu = useUIStore((s) => s.toggleMobileMenu);
   const toggleRightSidebar = useUIStore((s) => s.toggleRightSidebar);
   const openSettingsPanel = useUIStore((s) => s.openSettingsPanel);
-  const toggleMobileRightSidebar = useUIStore(
-    (s) => s.toggleMobileRightSidebar,
-  );
+  const toggleMobileRightSidebar = useUIStore((s) => s.toggleMobileRightSidebar);
   const currentSession = useSessionStore((s) => s.currentSession);
   const isDraftSession = useSessionStore((s) => s.isDraftSession);
   const draftTitle = useSessionStore((s) => s.draftTitle);
@@ -56,9 +54,7 @@ export function Header({ className }: HeaderProps) {
   useEffect(() => {
     const nav = navRef.current;
     if (!nav) return;
-    const activeEl = nav.querySelector<HTMLButtonElement>(
-      `[data-tab-id="${activeTab}"]`,
-    );
+    const activeEl = nav.querySelector<HTMLButtonElement>(`[data-tab-id="${activeTab}"]`);
     if (!activeEl) return;
     const navRect = nav.getBoundingClientRect();
     const tabRect = activeEl.getBoundingClientRect();
@@ -86,11 +82,7 @@ export function Header({ className }: HeaderProps) {
         )}
 
         {/* Nav tabs with animated sliding indicator */}
-        <nav
-          ref={navRef}
-          className="relative flex items-center gap-0.5"
-          role="tablist"
-        >
+        <nav ref={navRef} className="relative flex items-center gap-0.5" role="tablist">
           {tabs.map((tab) => (
             <button
               key={tab.id}
@@ -124,9 +116,7 @@ export function Header({ className }: HeaderProps) {
         {activeTab === "chat" && currentSession ? (
           <div className="flex items-center gap-2">
             {isDraftSession && (
-              <span className="text-xs font-medium text-blue-500 dark:text-blue-400">
-                Draft
-              </span>
+              <span className="text-xs font-medium text-blue-500 dark:text-blue-400">Draft</span>
             )}
             <span className="truncate text-sm font-medium text-neutral-700 dark:text-neutral-300">
               {isDraftSession ? draftTitle : currentSession.title}

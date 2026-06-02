@@ -8,9 +8,7 @@ export function EditorSection() {
 
   return (
     <section>
-      <h2 className="mb-1 text-base font-medium text-neutral-900 dark:text-neutral-100">
-        Editor
-      </h2>
+      <h2 className="mb-1 text-base font-medium text-neutral-900 dark:text-neutral-100">Editor</h2>
       <p className="mb-4 text-base text-neutral-500 dark:text-neutral-400">
         Customize the display fonts and code diff layout
       </p>
@@ -28,9 +26,7 @@ export function EditorSection() {
             className="w-full rounded border border-neutral-300 bg-white px-3 py-1.5 text-base text-neutral-900 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100"
             placeholder="Inter, system-ui, sans-serif"
           />
-          <p className="mt-1 text-xs text-neutral-500">
-            Font family for the user interface
-          </p>
+          <p className="mt-1 text-xs text-neutral-500">Font family for the user interface</p>
         </div>
 
         {/* Monospace Font */}
@@ -45,9 +41,7 @@ export function EditorSection() {
             className="w-full rounded border border-neutral-300 bg-white px-3 py-1.5 text-base text-neutral-900 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100"
             placeholder="JetBrains Mono, Fira Code, monospace"
           />
-          <p className="mt-1 text-xs text-neutral-500">
-            Font family for code blocks and diffs
-          </p>
+          <p className="mt-1 text-xs text-neutral-500">Font family for code blocks and diffs</p>
         </div>
 
         {/* Font Size */}
@@ -62,9 +56,7 @@ export function EditorSection() {
               max={20}
               step={1}
               value={settings.fontSize}
-              onChange={(e) =>
-                updateSettings({ fontSize: parseInt(e.target.value) })
-              }
+              onChange={(e) => updateSettings({ fontSize: parseInt(e.target.value) })}
               className="flex-1 accent-neutral-900 dark:accent-neutral-100"
             />
             <span className="min-w-[2rem] text-right text-base tabular-nums text-neutral-700 dark:text-neutral-300">

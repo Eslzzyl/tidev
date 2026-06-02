@@ -1,9 +1,5 @@
 import { Sun, Moon, Monitor } from "lucide-react";
-import {
-  useUIStore,
-  getEffectiveTheme,
-  type Theme,
-} from "../../stores/useUIStore";
+import { useUIStore, getEffectiveTheme, type Theme } from "../../stores/useUIStore";
 
 const themes: { value: Theme; label: string; icon: React.ReactNode }[] = [
   {
@@ -19,9 +15,7 @@ const themes: { value: Theme; label: string; icon: React.ReactNode }[] = [
   {
     value: "system",
     label: "System",
-    icon: (
-      <Monitor className="h-8 w-8 text-neutral-900 dark:text-neutral-100" />
-    ),
+    icon: <Monitor className="h-8 w-8 text-neutral-900 dark:text-neutral-100" />,
   },
 ];
 
@@ -55,9 +49,7 @@ export function AppearanceSection() {
               {t.label}
             </span>
             {t.value === theme && (
-              <span className="text-xs text-neutral-500 dark:text-neutral-400">
-                Active
-              </span>
+              <span className="text-xs text-neutral-500 dark:text-neutral-400">Active</span>
             )}
           </button>
         ))}
@@ -65,9 +57,7 @@ export function AppearanceSection() {
 
       <div className="mt-4 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
         <div className="flex items-center justify-between">
-          <span className="text-sm text-neutral-600 dark:text-neutral-400">
-            Current theme
-          </span>
+          <span className="text-sm text-neutral-600 dark:text-neutral-400">Current theme</span>
           <span className="rounded bg-neutral-100 px-2 py-1 text-xs font-medium uppercase text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
             {effectiveTheme}
           </span>

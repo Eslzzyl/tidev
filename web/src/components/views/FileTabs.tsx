@@ -8,12 +8,7 @@ interface FileTabsProps {
   onClose: (path: string, e: React.MouseEvent) => void;
 }
 
-export function FileTabs({
-  files,
-  activePath,
-  onSelect,
-  onClose,
-}: FileTabsProps) {
+export function FileTabs({ files, activePath, onSelect, onClose }: FileTabsProps) {
   if (files.length === 0) return null;
 
   return (
@@ -35,9 +30,7 @@ export function FileTabs({
             <span className="max-w-[120px] truncate">
               {file.path.split("/").pop() || file.path}
             </span>
-            {file.isDirty && (
-              <span className="h-2 w-2 shrink-0 rounded-full bg-amber-400" />
-            )}
+            {file.isDirty && <span className="h-2 w-2 shrink-0 rounded-full bg-amber-400" />}
             <span
               onClick={(e) => onClose(file.path, e)}
               className="ml-0.5 cursor-pointer rounded p-0.5 text-neutral-400 opacity-0 hover:bg-neutral-200 hover:text-neutral-600 group-hover:opacity-100 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"

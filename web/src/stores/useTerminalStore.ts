@@ -41,10 +41,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     const label = `Terminal ${get().tabs.length + 1}`;
 
     set((state) => ({
-      tabs: [
-        ...state.tabs,
-        { id, sessionId: null, label, buffer: "", lifecycle: "idle" },
-      ],
+      tabs: [...state.tabs, { id, sessionId: null, label, buffer: "", lifecycle: "idle" }],
       activeTabId: id,
     }));
 

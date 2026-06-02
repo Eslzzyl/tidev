@@ -8,15 +8,9 @@ type AsyncLangLoader = () => Promise<LanguageSupport>;
  */
 const asyncLanguages: Record<string, AsyncLangLoader> = {
   js: () => import("@codemirror/lang-javascript").then((m) => m.javascript()),
-  jsx: () =>
-    import("@codemirror/lang-javascript").then((m) =>
-      m.javascript({ jsx: true }),
-    ),
+  jsx: () => import("@codemirror/lang-javascript").then((m) => m.javascript({ jsx: true })),
   mjs: () => import("@codemirror/lang-javascript").then((m) => m.javascript()),
-  ts: () =>
-    import("@codemirror/lang-javascript").then((m) =>
-      m.javascript({ typescript: true }),
-    ),
+  ts: () => import("@codemirror/lang-javascript").then((m) => m.javascript({ typescript: true })),
   tsx: () =>
     import("@codemirror/lang-javascript").then((m) =>
       m.javascript({ jsx: true, typescript: true }),
@@ -49,9 +43,7 @@ const asyncLanguages: Record<string, AsyncLangLoader> = {
  * Asynchronously load a CodeMirror language by file extension.
  * Tries pre-loaded common languages first, then falls back to @codemirror/language-data.
  */
-export async function loadLanguageByExtension(
-  filePath: string,
-): Promise<LanguageSupport | null> {
+export async function loadLanguageByExtension(filePath: string): Promise<LanguageSupport | null> {
   const ext = filePath.split(".").pop()?.toLowerCase() || "";
   if (!ext) return null;
 
@@ -65,10 +57,7 @@ export async function loadLanguageByExtension(
 
     // Try to find a matching language by extension
     for (const lang of languages) {
-      if (
-        lang.extensions?.includes(ext) ||
-        lang.extensions?.includes("." + ext)
-      ) {
+      if (lang.extensions?.includes(ext) || lang.extensions?.includes("." + ext)) {
         return lang.support ?? (await lang.load()) ?? null;
       }
     }

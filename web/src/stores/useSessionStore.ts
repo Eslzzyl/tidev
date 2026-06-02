@@ -76,8 +76,7 @@ export const useSessionStore = create<SessionState & SessionActions>((set) => ({
       isDraftSession: false,
     }),
 
-  setCurrentSessionId: (id) =>
-    set({ currentSessionId: id, currentRequestId: null }),
+  setCurrentSessionId: (id) => set({ currentSessionId: id, currentRequestId: null }),
 
   setMessages: (messages) => {
     console.log(
@@ -100,8 +99,7 @@ export const useSessionStore = create<SessionState & SessionActions>((set) => ({
 
   setCurrentUsageStats: (stats) => set({ currentUsageStats: stats }),
 
-  addMessage: (message) =>
-    set((state) => ({ messages: [...state.messages, message] })),
+  addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
 
   updateMessageContent: (id, content) =>
     set((state) => ({
@@ -117,17 +115,13 @@ export const useSessionStore = create<SessionState & SessionActions>((set) => ({
   removeSession: (sessionId) =>
     set((state) => ({
       sessions: state.sessions.filter((s) => s.session_id !== sessionId),
-      currentSessionId:
-        state.currentSessionId === sessionId ? null : state.currentSessionId,
-      currentSession:
-        state.currentSessionId === sessionId ? null : state.currentSession,
-      isDraftSession:
-        state.currentSessionId === sessionId ? false : state.isDraftSession,
+      currentSessionId: state.currentSessionId === sessionId ? null : state.currentSessionId,
+      currentSession: state.currentSessionId === sessionId ? null : state.currentSession,
+      isDraftSession: state.currentSessionId === sessionId ? false : state.isDraftSession,
     })),
 
   setMode: (mode) => set({ mode }),
-  toggleMode: () =>
-    set((state) => ({ mode: state.mode === "plan" ? "build" : "plan" })),
+  toggleMode: () => set((state) => ({ mode: state.mode === "plan" ? "build" : "plan" })),
 
   startDraftSession: (title = "New Session") =>
     set({

@@ -34,10 +34,7 @@ export function useSSE(sessionId: string | null) {
    */
   const ensureStreamingAssistant = useCallback(
     (request_id: number): void => {
-      if (
-        request_id === currentRequestIdRef.current &&
-        streamingAssistantIdRef.current
-      ) {
+      if (request_id === currentRequestIdRef.current && streamingAssistantIdRef.current) {
         return; // Same turn, assistant already exists
       }
 
@@ -74,17 +71,14 @@ export function useSSE(sessionId: string | null) {
     [setStreaming],
   );
 
-  const updateStreamingAssistant = useCallback(
-    (updater: (msg: Message) => Message): void => {
-      const id = streamingAssistantIdRef.current;
-      if (!id) return;
+  const updateStreamingAssistant = useCallback((updater: (msg: Message) => Message): void => {
+    const id = streamingAssistantIdRef.current;
+    if (!id) return;
 
-      const state = useSessionStore.getState();
-      const msgs = state.messages.map((m) => (m.id === id ? updater(m) : m));
-      state.setMessages(msgs);
-    },
-    [],
-  );
+    const state = useSessionStore.getState();
+    const msgs = state.messages.map((m) => (m.id === id ? updater(m) : m));
+    state.setMessages(msgs);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Event handlers (defined inside useEffect so they see the latest closure)
@@ -132,9 +126,7 @@ export function useSSE(sessionId: string | null) {
 
       updateStreamingAssistant((msg) => {
         const toolCalls = [...(msg.tool_calls ?? [])];
-        const existingIdx = toolCalls.findIndex(
-          (tc) => tc.id === event.tool_call_id,
-        );
+        const existingIdx = toolCalls.findIndex((tc) => tc.id === event.tool_call_id);
 
         if (existingIdx >= 0) {
           // Update arguments of an existing tool call (streaming args)
@@ -465,11 +457,7 @@ export function useSSE(sessionId: string | null) {
       if (current_tool_name) {
         // Check if the last block is the same tool (still running)
         const last = blocks[blocks.length - 1];
-        if (
-          last?.type === "tool_call" &&
-          last.toolName === current_tool_name &&
-          !last.complete
-        ) {
+        if (last?.type === "tool_call" && last.toolName === current_tool_name && !last.complete) {
           // Update existing tool block with fresher args
           last.toolArgs = current_tool_args;
         } else {
@@ -551,10 +539,7 @@ export function useSSE(sessionId: string | null) {
         completed: true,
       });
 
-      console.log(
-        "[SSE] subagent completed for %s",
-        tool_call_id.substring(0, 12),
-      );
+      console.log("[SSE] subagent completed for %s", tool_call_id.substring(0, 12));
     };
 
     // Register SSE listeners

@@ -43,11 +43,8 @@ export const useToastStore = create<ToastStore>((set, get) => ({
  * Convenience functions for common toast types.
  */
 export const toast = {
-  success: (message: string) =>
-    useToastStore.getState().addToast(message, "success"),
-  error: (message: string) =>
-    useToastStore.getState().addToast(message, "error", 5000),
+  success: (message: string) => useToastStore.getState().addToast(message, "success"),
+  error: (message: string) => useToastStore.getState().addToast(message, "error", 5000),
   info: (message: string) => useToastStore.getState().addToast(message, "info"),
-  warning: (message: string) =>
-    useToastStore.getState().addToast(message, "warning", 4000),
+  warning: (message: string) => useToastStore.getState().addToast(message, "warning", 4000),
 };

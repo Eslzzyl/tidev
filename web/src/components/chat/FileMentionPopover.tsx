@@ -77,9 +77,7 @@ export function FileMentionPopover({
           break;
         case "ArrowUp":
           e.preventDefault();
-          setSelectedIndex(
-            (prev) => (prev - 1 + suggestions.length) % suggestions.length,
-          );
+          setSelectedIndex((prev) => (prev - 1 + suggestions.length) % suggestions.length);
           break;
         case "Enter":
         case "Tab":
@@ -103,10 +101,7 @@ export function FileMentionPopover({
   // Handle click outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (
-        popoverRef.current &&
-        !popoverRef.current.contains(e.target as Node)
-      ) {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
         onClose();
       }
     };
@@ -143,9 +138,7 @@ export function FileMentionPopover({
           Files {query ? `· @${query}` : ""}
         </span>
         {loading && (
-          <span className="text-xs text-neutral-400 dark:text-neutral-500">
-            Loading...
-          </span>
+          <span className="text-xs text-neutral-400 dark:text-neutral-500">Loading...</span>
         )}
       </div>
 
@@ -187,10 +180,7 @@ export function FileMentionPopover({
   );
 }
 
-function getFileIcon(
-  kind: FileSuggestion["kind"],
-  path: string,
-): React.ReactNode {
+function getFileIcon(kind: FileSuggestion["kind"], path: string): React.ReactNode {
   // Directory
   if (kind === "directory") return <Folder className="h-4 w-4" />;
   // Image (classified by backend)
@@ -318,10 +308,7 @@ function getFileIcon(
   }
 }
 
-function highlightMatches(
-  display: string,
-  matchedIndices: number[],
-): React.ReactNode {
+function highlightMatches(display: string, matchedIndices: number[]): React.ReactNode {
   if (!matchedIndices || matchedIndices.length === 0) {
     return display;
   }
@@ -331,15 +318,10 @@ function highlightMatches(
 
   for (const index of matchedIndices) {
     if (index > lastIndex) {
-      result.push(
-        <span key={`text-${index}`}>{display.slice(lastIndex, index)}</span>,
-      );
+      result.push(<span key={`text-${index}`}>{display.slice(lastIndex, index)}</span>);
     }
     result.push(
-      <span
-        key={`match-${index}`}
-        className="font-bold text-neutral-900 dark:text-neutral-100"
-      >
+      <span key={`match-${index}`} className="font-bold text-neutral-900 dark:text-neutral-100">
         {display[index]}
       </span>,
     );

@@ -1,13 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import {
-  X,
-  Palette,
-  Type,
-  Keyboard,
-  Terminal as TerminalIcon,
-  Lock,
-  Info,
-} from "lucide-react";
+import { X, Palette, Type, Keyboard, Terminal as TerminalIcon, Lock, Info } from "lucide-react";
 import { useUIStore } from "../../stores/useUIStore";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { AppearanceSection } from "./AppearanceSection";
@@ -17,13 +9,7 @@ import { TerminalSection } from "./TerminalSection";
 import { SecuritySection } from "./SecuritySection";
 import { AboutSection } from "./AboutSection";
 
-type CategoryId =
-  | "appearance"
-  | "editor"
-  | "interaction"
-  | "terminal"
-  | "security"
-  | "about";
+type CategoryId = "appearance" | "editor" | "interaction" | "terminal" | "security" | "about";
 
 interface Category {
   id: CategoryId;
@@ -55,8 +41,7 @@ const categories: Category[] = [
 export function SettingsPanel() {
   const settingsPanelOpen = useUIStore((s) => s.settingsPanelOpen);
   const closeSettingsPanel = useUIStore((s) => s.closeSettingsPanel);
-  const [activeCategory, setActiveCategory] =
-    useState<CategoryId>("appearance");
+  const [activeCategory, setActiveCategory] = useState<CategoryId>("appearance");
 
   const panelRef = useClickOutside(closeSettingsPanel);
   const navRef = useRef<HTMLDivElement>(null);

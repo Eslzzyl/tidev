@@ -4,14 +4,8 @@ import { useAuthStore } from "../stores/useAuthStore";
 export function AuthGate() {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const {
-    verifyToken,
-    setToken,
-    error,
-    clearError,
-    isAuthRequired,
-    isAuthenticated,
-  } = useAuthStore();
+  const { verifyToken, setToken, error, clearError, isAuthRequired, isAuthenticated } =
+    useAuthStore();
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -59,9 +53,7 @@ export function AuthGate() {
               <path d="M2 12l10 5 10-5" />
             </svg>
           </div>
-          <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">
-            tidev
-          </h1>
+          <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">tidev</h1>
           <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
             Enter your access token to continue
           </p>
@@ -82,9 +74,7 @@ export function AuthGate() {
             />
           </div>
 
-          {error && (
-            <p className="mb-4 text-center text-sm text-red-500">{error}</p>
-          )}
+          {error && <p className="mb-4 text-center text-sm text-red-500">{error}</p>}
 
           <button
             type="submit"

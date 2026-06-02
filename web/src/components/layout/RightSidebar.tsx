@@ -115,15 +115,11 @@ export function RightSidebar() {
   const getTodoIcon = (status: string) => {
     switch (status) {
       case "completed":
-        return (
-          <CheckCircle2 className="h-4 w-4 text-green-500 dark:text-green-400" />
-        );
+        return <CheckCircle2 className="h-4 w-4 text-green-500 dark:text-green-400" />;
       case "in_progress":
         return <Clock className="h-4 w-4 text-blue-500 dark:text-blue-400" />;
       default:
-        return (
-          <Circle className="h-4 w-4 text-neutral-500 dark:text-neutral-400" />
-        );
+        return <Circle className="h-4 w-4 text-neutral-500 dark:text-neutral-400" />;
     }
   };
 
@@ -131,9 +127,7 @@ export function RightSidebar() {
     <div className="flex h-full min-h-0 flex-col bg-white dark:bg-neutral-950">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-neutral-200 px-2 py-1.5 dark:border-neutral-800">
-        <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-          Info
-        </span>
+        <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Info</span>
         <button
           onClick={closeMobileRightSidebar}
           className="rounded p-1 text-neutral-500 hover:bg-neutral-100 md:hidden dark:text-neutral-400 dark:hover:bg-neutral-800"
@@ -168,12 +162,8 @@ export function RightSidebar() {
                 <h3 className="mb-1 text-xs font-bold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
                   Model
                 </h3>
-                <p className="text-sm text-neutral-800 dark:text-neutral-200">
-                  {modelName}
-                </p>
-                <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                  {providerName}
-                </p>
+                <p className="text-sm text-neutral-800 dark:text-neutral-200">{modelName}</p>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">{providerName}</p>
                 {stats.avgTps != null && (
                   <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
                     Speed: {stats.avgTps.toFixed(1)} t/s (avg)
@@ -220,16 +210,11 @@ export function RightSidebar() {
                 Changed Files
               </h3>
               {fileDiffs.length === 0 ? (
-                <p className="text-sm text-neutral-400 dark:text-neutral-500">
-                  (no changes yet)
-                </p>
+                <p className="text-sm text-neutral-400 dark:text-neutral-500">(no changes yet)</p>
               ) : (
                 <ul className="space-y-1">
                   {fileDiffs.map((diff, idx) => (
-                    <li
-                      key={idx}
-                      className="flex w-full items-baseline justify-between text-sm"
-                    >
+                    <li key={idx} className="flex w-full items-baseline justify-between text-sm">
                       <span className="truncate text-neutral-800 dark:text-neutral-200">
                         {diff.path.split("/").pop() || diff.path}
                       </span>
@@ -240,9 +225,7 @@ export function RightSidebar() {
                           </span>
                         )}
                         {diff.deletions > 0 && (
-                          <span className="text-red-600 dark:text-red-400">
-                            -{diff.deletions}
-                          </span>
+                          <span className="text-red-600 dark:text-red-400">-{diff.deletions}</span>
                         )}
                       </span>
                     </li>
@@ -257,16 +240,12 @@ export function RightSidebar() {
                 Todos ({todos.length})
               </h3>
               {todos.length === 0 ? (
-                <p className="text-sm text-neutral-400 dark:text-neutral-500">
-                  (no todos yet)
-                </p>
+                <p className="text-sm text-neutral-400 dark:text-neutral-500">(no todos yet)</p>
               ) : (
                 <ul className="space-y-1.5">
                   {todos.map((todo, idx) => (
                     <li key={idx} className="flex items-start gap-1.5 text-sm">
-                      <span className="mt-0.5 flex-shrink-0">
-                        {getTodoIcon(todo.status)}
-                      </span>
+                      <span className="mt-0.5 flex-shrink-0">{getTodoIcon(todo.status)}</span>
                       <span
                         className={`flex-1 ${
                           todo.status === "completed"
@@ -290,8 +269,7 @@ export function RightSidebar() {
                   <span>Undo active</span>
                 </p>
                 <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                  Conversation was reverted. New messages will branch from this
-                  point.
+                  Conversation was reverted. New messages will branch from this point.
                 </p>
               </div>
             )}

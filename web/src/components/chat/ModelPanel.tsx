@@ -103,9 +103,7 @@ export function ModelPanel({
   // Measure active button position for sliding highlight indicator
   useEffect(() => {
     if (navRef.current) {
-      const activeEl = navRef.current.querySelector<HTMLElement>(
-        `[data-tab-id="${activeTab}"]`,
-      );
+      const activeEl = navRef.current.querySelector<HTMLElement>(`[data-tab-id="${activeTab}"]`);
       if (activeEl) {
         const navRect = navRef.current.getBoundingClientRect();
         const btnRect = activeEl.getBoundingClientRect();
@@ -135,8 +133,7 @@ export function ModelPanel({
       if (tabId === "general") {
         if (currentModelId && currentProviderId) {
           const m = models.find(
-            (m) =>
-              m.id === currentModelId && m.provider_id === currentProviderId,
+            (m) => m.id === currentModelId && m.provider_id === currentProviderId,
           );
           return m?.display_name || `${currentProviderId}/${currentModelId}`;
         }
@@ -183,9 +180,7 @@ export function ModelPanel({
       const parts = memoryModelStr.split("/");
       if (parts.length !== 2) return null;
       const [providerId, modelId] = parts;
-      const m = models.find(
-        (m) => m.id === modelId && m.provider_id === providerId,
-      );
+      const m = models.find((m) => m.id === modelId && m.provider_id === providerId);
       return {
         provider_id: providerId,
         model_id: modelId,
@@ -199,22 +194,13 @@ export function ModelPanel({
     const parts = overrideStr.split("/");
     if (parts.length !== 2) return null;
     const [providerId, modelId] = parts;
-    const m = models.find(
-      (m) => m.id === modelId && m.provider_id === providerId,
-    );
+    const m = models.find((m) => m.id === modelId && m.provider_id === providerId);
     return {
       provider_id: providerId,
       model_id: modelId,
       label: m?.display_name || overrideStr,
     };
-  }, [
-    activeTab,
-    currentModelId,
-    currentProviderId,
-    models,
-    agentModels,
-    memoryModelStr,
-  ]);
+  }, [activeTab, currentModelId, currentProviderId, models, agentModels, memoryModelStr]);
 
   // Filter models by search query
   const filteredModels = useMemo(() => {
@@ -322,9 +308,7 @@ export function ModelPanel({
 
   const isSelectedModel = (model: ModelInfo): boolean => {
     if (activeTab === "general") {
-      return (
-        model.id === currentModelId && model.provider_id === currentProviderId
-      );
+      return model.id === currentModelId && model.provider_id === currentProviderId;
     }
     if (activeTab === "memory") {
       return memoryModelStr === `${model.provider_id}/${model.id}`;
@@ -456,9 +440,7 @@ export function ModelPanel({
                     Consolidation
                   </span>
                   <span className="text-[10px] text-neutral-400">
-                    {memoryModelStr
-                      ? memoryModelStr.split("/").pop()
-                      : "<inherit>"}
+                    {memoryModelStr ? memoryModelStr.split("/").pop() : "<inherit>"}
                   </span>
                 </div>
               </div>
@@ -472,52 +454,46 @@ export function ModelPanel({
                 </div>
               ) : groupedModels.size === 0 ? (
                 <div className="py-8 text-center text-xs text-neutral-500 dark:text-neutral-400">
-                  {searchQuery
-                    ? "No models match your search"
-                    : "No models available"}
+                  {searchQuery ? "No models match your search" : "No models available"}
                 </div>
               ) : (
-                Array.from(groupedModels.entries()).map(
-                  ([provider, providerModels]) => (
-                    <div key={provider}>
-                      <div className="sticky top-0 bg-white px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider text-neutral-500 dark:bg-neutral-900 dark:text-neutral-400">
-                        {provider}
-                      </div>
-                      {providerModels.map((model) => {
-                        const isSelected = isSelectedModel(model);
+                Array.from(groupedModels.entries()).map(([provider, providerModels]) => (
+                  <div key={provider}>
+                    <div className="sticky top-0 bg-white px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider text-neutral-500 dark:bg-neutral-900 dark:text-neutral-400">
+                      {provider}
+                    </div>
+                    {providerModels.map((model) => {
+                      const isSelected = isSelectedModel(model);
 
-                        return (
-                          <div key={`${model.provider_id}/${model.id}`}>
-                            <button
-                              onClick={() => handleSelectModel(model)}
-                              className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-xs transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
+                      return (
+                        <div key={`${model.provider_id}/${model.id}`}>
+                          <button
+                            onClick={() => handleSelectModel(model)}
+                            className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-xs transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
+                              isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                            }`}
+                          >
+                            <span
+                              className={`flex-1 font-medium ${
                                 isSelected
-                                  ? "bg-blue-50 dark:bg-blue-900/20"
-                                  : ""
+                                  ? "text-blue-700 dark:text-blue-300"
+                                  : "text-neutral-900 dark:text-neutral-100"
                               }`}
                             >
-                              <span
-                                className={`flex-1 font-medium ${
-                                  isSelected
-                                    ? "text-blue-700 dark:text-blue-300"
-                                    : "text-neutral-900 dark:text-neutral-100"
-                                }`}
-                              >
-                                {model.display_name}
-                              </span>
-                              {model.supports_vision && (
-                                <Eye className="h-3.5 w-3.5 text-neutral-400" />
-                              )}
-                              {isSelected && (
-                                <Check className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-                              )}
-                            </button>
-                          </div>
-                        );
-                      })}{" "}
-                    </div>
-                  ),
-                )
+                              {model.display_name}
+                            </span>
+                            {model.supports_vision && (
+                              <Eye className="h-3.5 w-3.5 text-neutral-400" />
+                            )}
+                            {isSelected && (
+                              <Check className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                            )}
+                          </button>
+                        </div>
+                      );
+                    })}{" "}
+                  </div>
+                ))
               )}
             </div>
           </div>
@@ -528,12 +504,8 @@ export function ModelPanel({
           <div className="flex items-center gap-2 text-[11px] text-neutral-500 dark:text-neutral-400">
             {activeModel ? (
               <>
-                <span className="font-medium text-neutral-700 dark:text-neutral-300">
-                  Current:
-                </span>
-                <span className="truncate max-w-[200px]">
-                  {activeModel.label}
-                </span>
+                <span className="font-medium text-neutral-700 dark:text-neutral-300">Current:</span>
+                <span className="truncate max-w-[200px]">{activeModel.label}</span>
               </>
             ) : (
               <span className="italic">

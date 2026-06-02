@@ -96,9 +96,7 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
     }
 
     if (!response.ok) {
-      const error = await response
-        .json()
-        .catch(() => ({ error: "Unknown error" }));
+      const error = await response.json().catch(() => ({ error: "Unknown error" }));
       throw new Error(error.error || `HTTP ${response.status}`);
     }
 
@@ -120,8 +118,7 @@ export const api = {
   getWorkspace: () => fetchJson<WorkspaceInfo>(`${API_BASE}/workspace`),
 
   // Sessions
-  listSessions: () =>
-    fetchJson<{ sessions: Session[] }>(`${API_BASE}/sessions`),
+  listSessions: () => fetchJson<{ sessions: Session[] }>(`${API_BASE}/sessions`),
 
   createSession: (data: CreateSessionRequest) =>
     fetchJson<CreateSessionResponse>(`${API_BASE}/sessions`, {
@@ -129,15 +126,12 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  getSession: (id: string) =>
-    fetchJson<SessionDetail>(`${API_BASE}/sessions/${id}`),
+  getSession: (id: string) => fetchJson<SessionDetail>(`${API_BASE}/sessions/${id}`),
 
   deleteSession: (id: string) =>
-    fetchWithAuth(`${API_BASE}/sessions/${id}`, { method: "DELETE" }).then(
-      (r) => {
-        if (!r.ok) throw new Error(`Failed to delete session: ${r.status}`);
-      },
-    ),
+    fetchWithAuth(`${API_BASE}/sessions/${id}`, { method: "DELETE" }).then((r) => {
+      if (!r.ok) throw new Error(`Failed to delete session: ${r.status}`);
+    }),
 
   // Messages
   listMessages: (sessionId: string) =>
@@ -146,13 +140,10 @@ export const api = {
     ),
 
   sendMessage: (sessionId: string, data: SendMessageRequest) =>
-    fetchJson<SendMessageResponse>(
-      `${API_BASE}/sessions/${sessionId}/messages`,
-      {
-        method: "POST",
-        body: JSON.stringify(data),
-      },
-    ),
+    fetchJson<SendMessageResponse>(`${API_BASE}/sessions/${sessionId}/messages`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 
   abortRequest: (sessionId: string, data: AbortRequest) =>
     fetchJson<{ success: boolean }>(`${API_BASE}/sessions/${sessionId}/abort`, {
@@ -208,31 +199,28 @@ export const api = {
 
   // Redo
   redoSession: (sessionId: string) =>
-    fetchJson<{ success: boolean; message: string }>(
-      `${API_BASE}/sessions/${sessionId}/redo`,
-      { method: "POST" },
-    ),
+    fetchJson<{ success: boolean; message: string }>(`${API_BASE}/sessions/${sessionId}/redo`, {
+      method: "POST",
+    }),
 
   // Compact session context
   compactSession: (sessionId: string) =>
-    fetchJson<{ request_id: number }>(
-      `${API_BASE}/sessions/${sessionId}/compact`,
-      { method: "POST" },
-    ),
+    fetchJson<{ request_id: number }>(`${API_BASE}/sessions/${sessionId}/compact`, {
+      method: "POST",
+    }),
 
   // Rename session
   renameSession: (sessionId: string, title: string) =>
-    fetchJson<{ success: boolean; title: string }>(
-      `${API_BASE}/sessions/${sessionId}/rename`,
-      { method: "POST", body: JSON.stringify({ title }) },
-    ),
+    fetchJson<{ success: boolean; title: string }>(`${API_BASE}/sessions/${sessionId}/rename`, {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    }),
 
   // Init prompt
   getInitPrompt: () => fetchJson<{ prompt: string }>(`${API_BASE}/init`),
 
   // Config
-  getDefaultModel: () =>
-    fetchJson<GetDefaultModelResponse>(`${API_BASE}/config/default-model`),
+  getDefaultModel: () => fetchJson<GetDefaultModelResponse>(`${API_BASE}/config/default-model`),
   setDefaultModel: (data: SetDefaultModelRequest) =>
     fetchJson<SetDefaultModelResponse>(`${API_BASE}/config/default-model`, {
       method: "POST",
@@ -240,8 +228,7 @@ export const api = {
     }),
 
   // Agent models
-  getAgentModels: () =>
-    fetchJson<GetAgentModelsResponse>(`${API_BASE}/config/agent-models`),
+  getAgentModels: () => fetchJson<GetAgentModelsResponse>(`${API_BASE}/config/agent-models`),
 
   setAgentModel: (data: SetAgentModelRequest) =>
     fetchJson<{ success: boolean }>(`${API_BASE}/config/agent-models`, {
@@ -250,8 +237,7 @@ export const api = {
     }),
 
   // Memory model
-  getMemoryModel: () =>
-    fetchJson<GetMemoryModelResponse>(`${API_BASE}/config/memory-model`),
+  getMemoryModel: () => fetchJson<GetMemoryModelResponse>(`${API_BASE}/config/memory-model`),
 
   setMemoryModel: (data: SetMemoryModelRequest) =>
     fetchJson<{ success: boolean }>(`${API_BASE}/config/memory-model`, {
@@ -276,8 +262,7 @@ export const api = {
     }),
 
   // Providers
-  listProviders: () =>
-    fetchJson<{ providers: ProviderInfo[] }>(`${API_BASE}/providers`),
+  listProviders: () => fetchJson<{ providers: ProviderInfo[] }>(`${API_BASE}/providers`),
 
   connectProvider: (id: string, data: ConnectProviderRequest) =>
     fetchWithAuth(`${API_BASE}/providers/${encodeURIComponent(id)}/connect`, {
@@ -316,9 +301,7 @@ export const api = {
   },
 
   readFile: (path: string) =>
-    fetchJson<ReadFileResponse>(
-      `${API_BASE}/fs/read?path=${encodeURIComponent(path)}`,
-    ),
+    fetchJson<ReadFileResponse>(`${API_BASE}/fs/read?path=${encodeURIComponent(path)}`),
 
   writeFile: (path: string, content: string) =>
     fetchJson<WriteFileResponse>(`${API_BASE}/fs/write`, {
@@ -345,9 +328,7 @@ export const api = {
     }),
 
   readFileBase64: (path: string) =>
-    fetchJson<ReadBase64Response>(
-      `${API_BASE}/fs/read-base64?path=${encodeURIComponent(path)}`,
-    ),
+    fetchJson<ReadBase64Response>(`${API_BASE}/fs/read-base64?path=${encodeURIComponent(path)}`),
 
   // Terminal
   startTerminal: (cols?: number, rows?: number, shell?: string) =>
@@ -380,14 +361,13 @@ export const api = {
     fetchWithAuth(`${API_BASE}/terminal/${sessionId}`, { method: "DELETE" }),
 
   // Terminal shell config (server-side persisted)
-  getTerminalShellConfig: () =>
-    fetchJson<{ shell: string }>(`${API_BASE}/config/terminal-shell`),
+  getTerminalShellConfig: () => fetchJson<{ shell: string }>(`${API_BASE}/config/terminal-shell`),
 
   setTerminalShellConfig: (shell: string) =>
-    fetchJson<{ success: boolean; shell: string }>(
-      `${API_BASE}/config/terminal-shell`,
-      { method: "POST", body: JSON.stringify({ shell }) },
-    ),
+    fetchJson<{ success: boolean; shell: string }>(`${API_BASE}/config/terminal-shell`, {
+      method: "POST",
+      body: JSON.stringify({ shell }),
+    }),
 
   // Git
   gitStatus: () => fetchJson<GitStatusResponse>(`${API_BASE}/git/status`),
@@ -398,15 +378,11 @@ export const api = {
   },
 
   gitLog: (count = 20, skip = 0) =>
-    fetchJson<GitLogResponse>(
-      `${API_BASE}/git/history?count=${count}&skip=${skip}`,
-    ),
+    fetchJson<GitLogResponse>(`${API_BASE}/git/history?count=${count}&skip=${skip}`),
 
-  gitGraph: (count = 50) =>
-    fetchJson<GitGraphResponse>(`${API_BASE}/git/graph?count=${count}`),
+  gitGraph: (count = 50) => fetchJson<GitGraphResponse>(`${API_BASE}/git/graph?count=${count}`),
 
-  gitShowCommit: (sha: string) =>
-    fetchJson<GitShowResponse>(`${API_BASE}/git/show/${sha}`),
+  gitShowCommit: (sha: string) => fetchJson<GitShowResponse>(`${API_BASE}/git/show/${sha}`),
 
   gitShowFileDiff: (sha: string, path: string) => {
     const params = new URLSearchParams({ path });
@@ -421,9 +397,7 @@ export const api = {
   gitDiffFile: (path: string, staged?: boolean) => {
     const params = new URLSearchParams({ path });
     if (staged) params.set("staged", "true");
-    return fetchJson<GitFileDiffResponse>(
-      `${API_BASE}/git/diff/file?${params.toString()}`,
-    );
+    return fetchJson<GitFileDiffResponse>(`${API_BASE}/git/diff/file?${params.toString()}`);
   },
 
   gitCommit: (message: string) =>
@@ -439,12 +413,9 @@ export const api = {
     }),
 
   gitBranchDelete: (name: string) =>
-    fetchJson<GitMessageResponse>(
-      `${API_BASE}/git/branch/${encodeURIComponent(name)}`,
-      {
-        method: "DELETE",
-      },
-    ),
+    fetchJson<GitMessageResponse>(`${API_BASE}/git/branch/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
 
   gitPush: (remote?: string, branch?: string, force?: boolean) =>
     fetchJson<GitMessageResponse>(`${API_BASE}/git/push`, {
@@ -473,20 +444,13 @@ export const api = {
 
   getStatsSummary: () => fetchJson<StatsSummary>(`${API_BASE}/stats/summary`),
 
-  getStatsTimeSeries: (params?: {
-    granularity?: string;
-    start?: string;
-    end?: string;
-  }) => {
+  getStatsTimeSeries: (params?: { granularity?: string; start?: string; end?: string }) => {
     const searchParams = new URLSearchParams();
-    if (params?.granularity)
-      searchParams.set("granularity", params.granularity);
+    if (params?.granularity) searchParams.set("granularity", params.granularity);
     if (params?.start) searchParams.set("start", params.start);
     if (params?.end) searchParams.set("end", params.end);
     const qs = searchParams.toString();
-    return fetchJson<StatsTimeSeries>(
-      `${API_BASE}/stats/timeseries${qs ? `?${qs}` : ""}`,
-    );
+    return fetchJson<StatsTimeSeries>(`${API_BASE}/stats/timeseries${qs ? `?${qs}` : ""}`);
   },
 
   getStatsModels: (params?: { start?: string; end?: string }) => {
@@ -511,10 +475,8 @@ export const api = {
 
   getStatsSessions: (params?: { limit?: number; offset?: number }) => {
     const searchParams = new URLSearchParams();
-    if (params?.limit !== undefined)
-      searchParams.set("limit", String(params.limit));
-    if (params?.offset !== undefined)
-      searchParams.set("offset", String(params.offset));
+    if (params?.limit !== undefined) searchParams.set("limit", String(params.limit));
+    if (params?.offset !== undefined) searchParams.set("offset", String(params.offset));
     const qs = searchParams.toString();
     return fetchJson<{ entries: SessionUsageEntry[]; total: number }>(
       `${API_BASE}/stats/sessions${qs ? `?${qs}` : ""}`,

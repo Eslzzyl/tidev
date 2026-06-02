@@ -201,22 +201,10 @@ export const GitGraphSVG = React.memo(function GitGraphSVG({
                     strokeLinecap="round"
                   />
                   {/* Filler dot at the source end for extra smoothness */}
-                  <circle
-                    cx={laneX(m.fromCol)}
-                    cy={cy}
-                    r={LINE_W * 0.7}
-                    fill={mc}
-                    opacity={0.5}
-                  />
+                  <circle cx={laneX(m.fromCol)} cy={cy} r={LINE_W * 0.7} fill={mc} opacity={0.5} />
                   {/* For forks, also fill the target end */}
                   {isFork && (
-                    <circle
-                      cx={laneX(m.toCol)}
-                      cy={cy}
-                      r={LINE_W * 0.7}
-                      fill={mc}
-                      opacity={0.5}
-                    />
+                    <circle cx={laneX(m.toCol)} cy={cy} r={LINE_W * 0.7} fill={mc} opacity={0.5} />
                   )}
                 </g>
               );

@@ -122,12 +122,7 @@ export const useFileStore = create<FileStore>((set, get) => ({
               .then((result) => {
                 const children = buildTreeNodes(result.entries);
                 set((s) => ({
-                  rootChildren: updateNodeChildren(
-                    s.rootChildren,
-                    path,
-                    children,
-                    false,
-                  ),
+                  rootChildren: updateNodeChildren(s.rootChildren, path, children, false),
                 }));
               })
               .catch(() => {});
@@ -208,8 +203,7 @@ export const useFileStore = create<FileStore>((set, get) => ({
     set({
       openFiles: newFiles,
       activeFilePath: nextActive,
-      selectedPath:
-        nextActive || state.selectedPath === path ? null : state.selectedPath,
+      selectedPath: nextActive || state.selectedPath === path ? null : state.selectedPath,
     });
   },
 
@@ -220,18 +214,14 @@ export const useFileStore = create<FileStore>((set, get) => ({
   updateFileContent: (path: string, content: string) => {
     set((s) => ({
       openFiles: s.openFiles.map((f) =>
-        f.path === path
-          ? { ...f, content, isDirty: content !== f.originalContent }
-          : f,
+        f.path === path ? { ...f, content, isDirty: content !== f.originalContent } : f,
       ),
     }));
   },
 
   saveFile: async () => {
     const state = get();
-    const activeFile = state.openFiles.find(
-      (f) => f.path === state.activeFilePath,
-    );
+    const activeFile = state.openFiles.find((f) => f.path === state.activeFilePath);
     if (!activeFile) return;
 
     set({ isSaving: true });
@@ -240,9 +230,7 @@ export const useFileStore = create<FileStore>((set, get) => ({
       set({
         isSaving: false,
         openFiles: state.openFiles.map((f) =>
-          f.path === activeFile.path
-            ? { ...f, isDirty: false, originalContent: f.content }
-            : f,
+          f.path === activeFile.path ? { ...f, isDirty: false, originalContent: f.content } : f,
         ),
       });
     } catch (err) {
@@ -255,11 +243,7 @@ export const useFileStore = create<FileStore>((set, get) => ({
   createFile: async (path, type) => {
     try {
       await api.createItem(path, type);
-      toast.success(
-        type === "file"
-          ? `File created: ${path}`
-          : `Directory created: ${path}`,
-      );
+      toast.success(type === "file" ? `File created: ${path}` : `Directory created: ${path}`);
       get().refreshTree();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
@@ -278,11 +262,8 @@ export const useFileStore = create<FileStore>((set, get) => ({
       const wasOpen = state.openFiles.find((f) => f.path === path);
       if (wasOpen) {
         set((s) => ({
-          openFiles: s.openFiles.map((f) =>
-            f.path === path ? { ...f, path: newPath } : f,
-          ),
-          activeFilePath:
-            s.activeFilePath === path ? newPath : s.activeFilePath,
+          openFiles: s.openFiles.map((f) => (f.path === path ? { ...f, path: newPath } : f)),
+          activeFilePath: s.activeFilePath === path ? newPath : s.activeFilePath,
           selectedPath: s.selectedPath === path ? newPath : s.selectedPath,
         }));
       }

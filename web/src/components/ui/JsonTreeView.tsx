@@ -76,9 +76,7 @@ function TreeNode({ keyName, value, depth, maxDepth }: TreeNodeProps) {
           )}
           {keyName !== null && (
             <>
-              <span className="text-neutral-500">
-                &ldquo;{keyName}&rdquo;:{" "}
-              </span>
+              <span className="text-neutral-500">&ldquo;{keyName}&rdquo;: </span>
             </>
           )}
           <span className="text-neutral-500">
@@ -110,20 +108,14 @@ function TreeNode({ keyName, value, depth, maxDepth }: TreeNodeProps) {
     <div className="font-mono text-xs leading-5">
       <span className="inline-flex items-center gap-0.5">
         <span className="w-3.5" />
-        {keyName !== null && (
-          <span className="text-neutral-500">&ldquo;{keyName}&rdquo;: </span>
-        )}
+        {keyName !== null && <span className="text-neutral-500">&ldquo;{keyName}&rdquo;: </span>}
         <span className={getValueColor(type)}>{formatValue(value, type)}</span>
       </span>
     </div>
   );
 }
 
-export function JsonTreeView({
-  data,
-  initialExpanded = false,
-  maxDepth = 3,
-}: JsonTreeViewProps) {
+export function JsonTreeView({ data, initialExpanded = false, maxDepth = 3 }: JsonTreeViewProps) {
   const [isExpanded, setIsExpanded] = useState(initialExpanded);
 
   if (!data || typeof data !== "object") {
@@ -148,11 +140,7 @@ export function JsonTreeView({
         onClick={() => setIsExpanded(!isExpanded)}
         className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-xs font-medium text-neutral-600 hover:bg-neutral-200/50 dark:text-neutral-400 dark:hover:bg-neutral-800"
       >
-        {isExpanded ? (
-          <ChevronDown className="h-3 w-3" />
-        ) : (
-          <ChevronRight className="h-3 w-3" />
-        )}
+        {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         {type === "object" ? "JSON" : "Array"} ({entries.length}{" "}
         {type === "object" ? "keys" : "items"})
       </button>

@@ -99,10 +99,7 @@ describe("buildRounds", () => {
   });
 
   it("appends reasoning segment when assistant has reasoning field", () => {
-    const msgs = [
-      userMsg(),
-      assistantMsg({ reasoning: "thinking...", content: "answer" }),
-    ];
+    const msgs = [userMsg(), assistantMsg({ reasoning: "thinking...", content: "answer" })];
     const rounds = buildRounds(msgs);
     const segments = (rounds[0] as Round).segments;
     expect(segments).toHaveLength(2);

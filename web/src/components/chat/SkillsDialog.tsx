@@ -1,12 +1,5 @@
 import { useReducer, useEffect, useRef, useMemo, useCallback } from "react";
-import {
-  X,
-  Search,
-  BookOpen,
-  FileText,
-  Loader2,
-  AlertCircle,
-} from "lucide-react";
+import { X, Search, BookOpen, FileText, Loader2, AlertCircle } from "lucide-react";
 import { api } from "../../api/client";
 import type { SkillInfo } from "../../types/api";
 
@@ -99,9 +92,7 @@ export function SkillsDialog({ isOpen, onClose, onSelect }: SkillsDialogProps) {
     if (!state.searchQuery.trim()) return state.skills;
     const query = state.searchQuery.trim().toLowerCase();
     return state.skills.filter(
-      (s) =>
-        s.name.toLowerCase().includes(query) ||
-        s.description.toLowerCase().includes(query),
+      (s) => s.name.toLowerCase().includes(query) || s.description.toLowerCase().includes(query),
     );
   }, [state.skills, state.searchQuery]);
 
@@ -167,9 +158,7 @@ export function SkillsDialog({ isOpen, onClose, onSelect }: SkillsDialogProps) {
         <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
           <div className="flex items-center gap-2">
             <BookOpen className="h-5 w-5 text-neutral-500 dark:text-neutral-400" />
-            <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
-              Skills
-            </h3>
+            <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Skills</h3>
           </div>
           <button
             onClick={onClose}
@@ -187,9 +176,7 @@ export function SkillsDialog({ isOpen, onClose, onSelect }: SkillsDialogProps) {
               ref={searchInputRef}
               type="text"
               value={state.searchQuery}
-              onChange={(e) =>
-                dispatch({ type: "SET_SEARCH", query: e.target.value })
-              }
+              onChange={(e) => dispatch({ type: "SET_SEARCH", query: e.target.value })}
               placeholder="Search skills..."
               className="w-full rounded-lg border border-neutral-300 bg-neutral-50 py-2 pl-10 pr-4 text-base text-neutral-900 placeholder-neutral-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:placeholder-neutral-500 dark:focus:border-blue-400"
             />
@@ -247,9 +234,7 @@ export function SkillsDialog({ isOpen, onClose, onSelect }: SkillsDialogProps) {
                   <button
                     key={skill.name}
                     onClick={() => handleSkillClick(skill)}
-                    onMouseEnter={() =>
-                      dispatch({ type: "SELECT_INDEX", index })
-                    }
+                    onMouseEnter={() => dispatch({ type: "SELECT_INDEX", index })}
                     className={`w-full px-4 py-3 text-left transition-all duration-150 active:scale-[0.99] ${
                       index === state.selectedIndex
                         ? "bg-blue-50 dark:bg-blue-900/30"
@@ -292,9 +277,7 @@ export function SkillsDialog({ isOpen, onClose, onSelect }: SkillsDialogProps) {
                   <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
                     Preview
                   </span>
-                  <span className="ml-auto text-xs text-neutral-400">
-                    {selectedSkill.name}
-                  </span>
+                  <span className="ml-auto text-xs text-neutral-400">{selectedSkill.name}</span>
                 </div>
                 <div className="flex-1 overflow-y-auto p-4">
                   <div className="mb-3">
@@ -306,9 +289,7 @@ export function SkillsDialog({ isOpen, onClose, onSelect }: SkillsDialogProps) {
                     </p>
                   </div>
                   <div className="rounded-md bg-neutral-50 p-3 dark:bg-neutral-800">
-                    <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                      Location:
-                    </p>
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400">Location:</p>
                     <code className="mt-1 block break-all text-xs text-neutral-700 dark:text-neutral-300">
                       {selectedSkill.location}
                     </code>

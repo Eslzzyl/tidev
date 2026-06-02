@@ -55,11 +55,7 @@ export function VirtualMessageList({
     return (
       <div className="divide-y divide-neutral-100 dark:divide-neutral-900">
         {entries.map((entry, idx) => (
-          <div
-            key={entry.id}
-            className="contents"
-            style={{ contentVisibility: "auto" }}
-          >
+          <div key={entry.id} className="contents" style={{ contentVisibility: "auto" }}>
             {renderEntry(
               entry,
               onUndoRequest,
@@ -75,9 +71,7 @@ export function VirtualMessageList({
 
   // --- Virtualized list ---
   return (
-    <div
-      style={{ position: "relative", height: `${totalSize}px`, width: "100%" }}
-    >
+    <div style={{ position: "relative", height: `${totalSize}px`, width: "100%" }}>
       <div className="divide-y divide-neutral-100 dark:divide-neutral-900">
         {virtualItems.map((virtualItem) => {
           const entry = entries[virtualItem.index];

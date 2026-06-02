@@ -34,9 +34,7 @@ describe("formatSessionDate", () => {
   });
 
   it("returns weekday name for 2-6 days ago", () => {
-    const threeDaysAgo = new Date(
-      Date.now() - 3 * 24 * 60 * 60 * 1000,
-    ).toISOString();
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
     const result = formatSessionDate(threeDaysAgo);
     // Should be a short weekday name (e.g. "Mon", "Tue")
     expect(result).not.toBe("Yesterday");
@@ -46,9 +44,7 @@ describe("formatSessionDate", () => {
   });
 
   it("returns month + day for 7+ days ago", () => {
-    const tenDaysAgo = new Date(
-      Date.now() - 10 * 24 * 60 * 60 * 1000,
-    ).toISOString();
+    const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
     const result = formatSessionDate(tenDaysAgo);
     // Should contain abbreviated month + day e.g. "May 12"
     expect(result).not.toBe("Yesterday");
@@ -172,9 +168,7 @@ describe("stripSystemReminderTags", () => {
 
   it("handles unclosed tag gracefully", () => {
     const input = "text<system-reminder no close";
-    expect(stripSystemReminderTags(input)).toBe(
-      "text<system-reminder no close",
-    );
+    expect(stripSystemReminderTags(input)).toBe("text<system-reminder no close");
   });
 
   it("returns same string when no tags present", () => {
@@ -186,8 +180,7 @@ describe("stripSystemReminderTags", () => {
   });
 
   it("removes multiple system-reminder blocks", () => {
-    const input =
-      "a<system-reminder>1</system-reminder>b<system-reminder>2</system-reminder>c";
+    const input = "a<system-reminder>1</system-reminder>b<system-reminder>2</system-reminder>c";
     expect(stripSystemReminderTags(input)).toBe("abc");
   });
 
@@ -197,9 +190,7 @@ describe("stripSystemReminderTags", () => {
   });
 
   it("handles text that is entirely a system-reminder block", () => {
-    expect(
-      stripSystemReminderTags("<system-reminder>full</system-reminder>"),
-    ).toBe("");
+    expect(stripSystemReminderTags("<system-reminder>full</system-reminder>")).toBe("");
   });
 
   it("handles \\r\\n line endings after closing tag", () => {
@@ -212,15 +203,11 @@ describe("stripSystemReminderTags", () => {
 
 describe("formatWorkspace", () => {
   it("replaces /home/username with ~/username", () => {
-    expect(formatWorkspace("/home/user/projects/myapp")).toBe(
-      "~/projects/myapp",
-    );
+    expect(formatWorkspace("/home/user/projects/myapp")).toBe("~/projects/myapp");
   });
 
   it("replaces /Users/username with ~/username", () => {
-    expect(formatWorkspace("/Users/john/Work/rust/tidev")).toBe(
-      "~/Work/rust/tidev",
-    );
+    expect(formatWorkspace("/Users/john/Work/rust/tidev")).toBe("~/Work/rust/tidev");
   });
 
   it("returns path unchanged if not a home path", () => {

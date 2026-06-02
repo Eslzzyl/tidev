@@ -88,12 +88,9 @@ export class SSEClient {
       this.emit("tool.result", JSON.parse(e.data));
     });
 
-    this.eventSource.addEventListener(
-      "permission.request",
-      (e: MessageEvent) => {
-        this.emit("permission.request", JSON.parse(e.data));
-      },
-    );
+    this.eventSource.addEventListener("permission.request", (e: MessageEvent) => {
+      this.emit("permission.request", JSON.parse(e.data));
+    });
 
     this.eventSource.addEventListener("aborted", (e: MessageEvent) => {
       this.emit("aborted", JSON.parse(e.data));
@@ -105,9 +102,7 @@ export class SSEClient {
 
     this.eventSource.addEventListener("error", (e: MessageEvent) => {
       try {
-        const data = e.data
-          ? JSON.parse(e.data)
-          : { error: "Connection error" };
+        const data = e.data ? JSON.parse(e.data) : { error: "Connection error" };
         this.emit("error", data);
       } catch {
         this.emit("error", {
@@ -132,19 +127,13 @@ export class SSEClient {
       this.emit("subagent.status", JSON.parse(e.data));
     });
 
-    this.eventSource.addEventListener(
-      "subagent.tool_result",
-      (e: MessageEvent) => {
-        this.emit("subagent.tool_result", JSON.parse(e.data));
-      },
-    );
+    this.eventSource.addEventListener("subagent.tool_result", (e: MessageEvent) => {
+      this.emit("subagent.tool_result", JSON.parse(e.data));
+    });
 
-    this.eventSource.addEventListener(
-      "subagent.completed",
-      (e: MessageEvent) => {
-        this.emit("subagent.completed", JSON.parse(e.data));
-      },
-    );
+    this.eventSource.addEventListener("subagent.completed", (e: MessageEvent) => {
+      this.emit("subagent.completed", JSON.parse(e.data));
+    });
 
     this.eventSource.addEventListener("stream.end", (e: MessageEvent) => {
       this.emit("stream.end", JSON.parse(e.data));
@@ -184,10 +173,7 @@ export class SSEClient {
   }
 
   isConnected(): boolean {
-    return (
-      this.eventSource !== null &&
-      this.eventSource.readyState === EventSource.OPEN
-    );
+    return this.eventSource !== null && this.eventSource.readyState === EventSource.OPEN;
   }
 }
 

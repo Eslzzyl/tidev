@@ -42,10 +42,7 @@ export interface GraphRow {
   refLabels: { column: number; label: string; isHead: boolean }[];
 }
 
-export function computeGraphLayout(
-  commits: GitCommitItem[],
-  headSha: string,
-): GraphRow[] {
+export function computeGraphLayout(commits: GitCommitItem[], headSha: string): GraphRow[] {
   if (commits.length === 0) return [];
 
   // sha → commit & child maps (for bookkeeping)

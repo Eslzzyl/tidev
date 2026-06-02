@@ -48,9 +48,7 @@ function isWebTool(name: string): boolean {
   return ["websearch", "webfetch"].includes(name);
 }
 
-function getToolIcon(
-  name: string,
-): React.ComponentType<{ className?: string }> {
+function getToolIcon(name: string): React.ComponentType<{ className?: string }> {
   switch (name) {
     case "read":
       return FileText;
@@ -94,10 +92,8 @@ function getToolBg(name: string): string {
     return "bg-violet-50 dark:bg-violet-950/30 border-violet-200 dark:border-violet-800";
   if (name === "task")
     return "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800";
-  if (isTodo(name))
-    return "bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800";
-  if (isWebTool(name))
-    return "bg-sky-50 dark:bg-sky-950/30 border-sky-200 dark:border-sky-800";
+  if (isTodo(name)) return "bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800";
+  if (isWebTool(name)) return "bg-sky-50 dark:bg-sky-950/30 border-sky-200 dark:border-sky-800";
   return "bg-neutral-50 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700";
 }
 
@@ -146,9 +142,7 @@ function toRelativePath(path: string, workspaceRoot: string): string {
   const normalizedRoot = cleanRoot.replace(/\\/g, "/");
 
   // If the path starts with the workspace root, strip it
-  const rootWithSlash = normalizedRoot.endsWith("/")
-    ? normalizedRoot
-    : normalizedRoot + "/";
+  const rootWithSlash = normalizedRoot.endsWith("/") ? normalizedRoot : normalizedRoot + "/";
   if (normalizedPath.startsWith(rootWithSlash)) {
     return normalizedPath.slice(rootWithSlash.length);
   }
@@ -163,8 +157,7 @@ function summarizeArguments(name: string, entry: ToolCallEntry): string {
   try {
     const args = JSON.parse(entry.arguments);
     // Get the workspace root from the store for relative path display
-    const workspaceRoot =
-      useSessionStore.getState().currentSession?.workspace_root ?? "";
+    const workspaceRoot = useSessionStore.getState().currentSession?.workspace_root ?? "";
 
     switch (name) {
       case "read":
@@ -218,9 +211,7 @@ function summarizeArguments(name: string, entry: ToolCallEntry): string {
         return summary;
       }
       default:
-        return entry.arguments.length > 60
-          ? entry.arguments.slice(0, 60) + "..."
-          : entry.arguments;
+        return entry.arguments.length > 60 ? entry.arguments.slice(0, 60) + "..." : entry.arguments;
     }
   } catch {
     return entry.arguments || "...";
@@ -328,10 +319,7 @@ function looksLikeJson(output: string): boolean {
   return trimmed.startsWith("{") || trimmed.startsWith("[");
 }
 
-export const ToolCallRow = memo(function ToolCallRow({
-  entry,
-  defaultExpanded = false,
-}: Props) {
+export const ToolCallRow = memo(function ToolCallRow({ entry, defaultExpanded = false }: Props) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [elapsedMs, setElapsedMs] = useState(0);
   const didAutoExpand = useRef(false);
@@ -346,8 +334,7 @@ export const ToolCallRow = memo(function ToolCallRow({
       entry.result.output.trim() === "" ||
       entry.result.output.trim() === "Done");
 
-  const hasBashOutput =
-    isBash(entry.name) && entry.resultComplete && !isEmptyResult;
+  const hasBashOutput = isBash(entry.name) && entry.resultComplete && !isEmptyResult;
   const hasDiff = entry.result && entry.result.diff;
 
   // Auto-expand once when result arrives
@@ -394,10 +381,7 @@ export const ToolCallRow = memo(function ToolCallRow({
   // Check if output is JSON and should use tree view
   const output = entry.result?.output?.trim() || "";
   const parsedJson =
-    !isBash(entry.name) &&
-    !isWriteTool(entry.name) &&
-    output &&
-    looksLikeJson(output)
+    !isBash(entry.name) && !isWriteTool(entry.name) && output && looksLikeJson(output)
       ? tryParseJson(output)
       : null;
 
@@ -410,9 +394,7 @@ export const ToolCallRow = memo(function ToolCallRow({
   }
 
   return (
-    <div
-      className={`my-2 overflow-hidden rounded-lg border ${getToolBg(entry.name)}`}
-    >
+    <div className={`my-2 overflow-hidden rounded-lg border ${getToolBg(entry.name)}`}>
       {/* Collapsed Header (always visible) */}
       <button
         onClick={handleToggle}
@@ -420,19 +402,13 @@ export const ToolCallRow = memo(function ToolCallRow({
       >
         {(() => {
           const Icon = getToolIcon(entry.name);
-          return (
-            <Icon
-              className={`h-3.5 w-3.5 flex-shrink-0 ${getToolColor(entry.name)}`}
-            />
-          );
+          return <Icon className={`h-3.5 w-3.5 flex-shrink-0 ${getToolColor(entry.name)}`} />;
         })()}
 
         {/* Collapsed label */}
         {isBash(entry.name) ? (
           <div className="flex flex-1 flex-col min-w-0">
-            <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
-              bash
-            </span>
+            <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300">bash</span>
             <span className="truncate font-mono text-xs text-neutral-500 dark:text-neutral-400">
               $ {getBashCommand(entry) || "..."}
             </span>
@@ -475,10 +451,7 @@ export const ToolCallRow = memo(function ToolCallRow({
           <div className="px-3 py-2">
             {/* Diff display for write/edit */}
             {isWriteTool(entry.name) && entry.result.diff && (
-              <DiffRenderer
-                diff={entry.result.diff}
-                filepath={entry.result.filepath || ""}
-              />
+              <DiffRenderer diff={entry.result.diff} filepath={entry.result.filepath || ""} />
             )}
 
             {/* Bash: show description + command + output */}
@@ -502,16 +475,11 @@ export const ToolCallRow = memo(function ToolCallRow({
 
             {/* Read tool: render as code lines with line numbers */}
             {entry.name === "read" && (
-              <CodeLinesRenderer
-                output={entry.result.output}
-                filepath={entry.result.filepath}
-              />
+              <CodeLinesRenderer output={entry.result.output} filepath={entry.result.filepath} />
             )}
 
             {/* Todo tool: render as structured list */}
-            {isTodo(entry.name) && (
-              <TodoRenderer output={entry.result.output} />
-            )}
+            {isTodo(entry.name) && <TodoRenderer output={entry.result.output} />}
 
             {/* Other read-only tools: render as markdown or JSON tree */}
             {isReadOnlyTool(entry.name) &&
@@ -525,11 +493,7 @@ export const ToolCallRow = memo(function ToolCallRow({
             {/* websearch/webfetch: show JSON tree if applicable */}
             {isWebTool(entry.name) &&
               (parsedJson ? (
-                <JsonTreeView
-                  data={parsedJson}
-                  initialExpanded={true}
-                  maxDepth={5}
-                />
+                <JsonTreeView data={parsedJson} initialExpanded={true} maxDepth={5} />
               ) : (
                 <MarkdownRenderer content={entry.result.output} />
               ))}
@@ -553,15 +517,9 @@ export const ToolCallRow = memo(function ToolCallRow({
               <span className="text-neutral-500 dark:text-neutral-400">
                 Exit code: {getExitCode(entry)}
                 {getExitCode(entry) === 0 ? (
-                  <span className="text-green-600 dark:text-green-400">
-                    {" "}
-                    &#10003;
-                  </span>
+                  <span className="text-green-600 dark:text-green-400"> &#10003;</span>
                 ) : (
-                  <span className="text-red-600 dark:text-red-400">
-                    {" "}
-                    &#10007;
-                  </span>
+                  <span className="text-red-600 dark:text-red-400"> &#10007;</span>
                 )}
               </span>
             </div>

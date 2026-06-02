@@ -1,36 +1,15 @@
-import {
-  X,
-  FileText,
-  Copy,
-  Check,
-  Pencil,
-  Save,
-  Eye,
-  Loader2,
-} from "lucide-react";
+import { X, FileText, Copy, Check, Pencil, Save, Eye, Loader2 } from "lucide-react";
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useFileStore } from "../../stores/useFileStore";
 import { useUIStore, getEffectiveTheme } from "../../stores/useUIStore";
-import {
-  CodeMirrorEditor,
-  type CodeMirrorEditorHandle,
-} from "../ui/CodeMirrorEditor";
+import { CodeMirrorEditor, type CodeMirrorEditorHandle } from "../ui/CodeMirrorEditor";
 import { JsonTreeView } from "../ui/JsonTreeView";
 import { GoToLineDialog } from "../ui/GoToLineDialog";
 import { FileTabs } from "./FileTabs";
 import { ImagePreview } from "./ImagePreview";
 import { MarkdownPreview } from "./MarkdownPreview";
 
-const IMAGE_EXTS = new Set([
-  "png",
-  "jpg",
-  "jpeg",
-  "gif",
-  "svg",
-  "webp",
-  "ico",
-  "bmp",
-]);
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "bmp"]);
 const MARKDOWN_EXTS = new Set(["md", "markdown", "mdx"]);
 
 function getFileExt(path: string): string {
@@ -80,9 +59,7 @@ export function CodeViewer() {
   });
 
   // Get the active file object
-  const activeFile = activeFilePath
-    ? openFiles.find((f) => f.path === activeFilePath)
-    : null;
+  const activeFile = activeFilePath ? openFiles.find((f) => f.path === activeFilePath) : null;
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -171,13 +148,10 @@ export function CodeViewer() {
 
   // Parse JSON for tree view
   const jsonData =
-    renderMode === "json" && activeFile?.content
-      ? tryParseJson(activeFile.content)
-      : null;
+    renderMode === "json" && activeFile?.content ? tryParseJson(activeFile.content) : null;
 
   const showEditToggle =
-    activeFile &&
-    (isMarkdownFile(activeFile.path) || isJsonFile(activeFile.path));
+    activeFile && (isMarkdownFile(activeFile.path) || isJsonFile(activeFile.path));
 
   if (openFiles.length === 0) {
     return (
@@ -249,15 +223,9 @@ export function CodeViewer() {
                     : "text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
                 }`}
                 aria-label={isEditing ? "Preview mode" : "Edit mode"}
-                title={
-                  isEditing ? "Switch to preview" : "Switch to edit source"
-                }
+                title={isEditing ? "Switch to preview" : "Switch to edit source"}
               >
-                {isEditing ? (
-                  <Eye className="h-3.5 w-3.5" />
-                ) : (
-                  <Pencil className="h-3.5 w-3.5" />
-                )}
+                {isEditing ? <Eye className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
               </button>
             )}
 
@@ -271,15 +239,9 @@ export function CodeViewer() {
                     : "text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
                 }`}
                 aria-label={isEditing ? "View mode" : "Edit mode"}
-                title={
-                  isEditing ? "Switch to view mode" : "Switch to edit mode"
-                }
+                title={isEditing ? "Switch to view mode" : "Switch to edit mode"}
               >
-                {isEditing ? (
-                  <Eye className="h-3.5 w-3.5" />
-                ) : (
-                  <Pencil className="h-3.5 w-3.5" />
-                )}
+                {isEditing ? <Eye className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
               </button>
             )}
 
@@ -302,11 +264,7 @@ export function CodeViewer() {
                 className="rounded p-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
                 aria-label="Copy file content"
               >
-                {copied ? (
-                  <Check className="h-3.5 w-3.5" />
-                ) : (
-                  <Copy className="h-3.5 w-3.5" />
-                )}
+                {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
               </button>
             )}
             <button
@@ -322,9 +280,7 @@ export function CodeViewer() {
 
       {/* Content area */}
       <div className="flex-1 overflow-hidden">
-        {activeFile && renderMode === "image" && (
-          <ImagePreview path={activeFile.path} />
-        )}
+        {activeFile && renderMode === "image" && <ImagePreview path={activeFile.path} />}
 
         {activeFile && renderMode === "markdown" && (
           <MarkdownPreview content={activeFile.content} />

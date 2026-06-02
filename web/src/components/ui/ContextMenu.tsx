@@ -59,10 +59,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
     >
       {items.map((item, i) =>
         item.type === "separator" ? (
-          <div
-            key={i}
-            className="my-1 border-t border-neutral-200 dark:border-neutral-700"
-          />
+          <div key={i} className="my-1 border-t border-neutral-200 dark:border-neutral-700" />
         ) : (
           <button
             key={i}
@@ -79,15 +76,9 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
                 : "text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800"
             } ${item.disabled ? "cursor-not-allowed opacity-40" : "cursor-pointer"}`}
           >
-            {item.icon && (
-              <span className="h-3.5 w-3.5 shrink-0">{item.icon}</span>
-            )}
+            {item.icon && <span className="h-3.5 w-3.5 shrink-0">{item.icon}</span>}
             <span className="flex-1">{item.label}</span>
-            {item.shortcut && (
-              <span className="text-[10px] text-neutral-400">
-                {item.shortcut}
-              </span>
-            )}
+            {item.shortcut && <span className="text-[10px] text-neutral-400">{item.shortcut}</span>}
           </button>
         ),
       )}

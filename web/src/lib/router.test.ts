@@ -7,9 +7,7 @@ describe("buildURL", () => {
   });
 
   it("builds chat URL with session id", () => {
-    expect(buildURL({ tab: "chat", sessionId: "abc-123" })).toBe(
-      "#chat/abc-123",
-    );
+    expect(buildURL({ tab: "chat", sessionId: "abc-123" })).toBe("#chat/abc-123");
   });
 
   it("builds settings URL", () => {

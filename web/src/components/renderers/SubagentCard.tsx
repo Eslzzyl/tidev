@@ -12,10 +12,7 @@ import {
 } from "lucide-react";
 import type { ToolCallEntry } from "../../types/round";
 import type { Message } from "../../types/api";
-import {
-  useSubagentStore,
-  type SubagentStreamBlock,
-} from "../../stores/useSubagentStore";
+import { useSubagentStore, type SubagentStreamBlock } from "../../stores/useSubagentStore";
 import { api } from "../../api/client";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { ThinkingBlock } from "./ThinkingBlock";
@@ -177,9 +174,7 @@ function ChildSessionMessages({ messages }: { messages: Message[] }) {
 
       if (msg.tool_calls && msg.tool_calls.length > 0) {
         for (const tc of msg.tool_calls) {
-          const resultMsg = messages.find(
-            (m) => m.role === "tool" && m.tool_call_id === tc.id,
-          );
+          const resultMsg = messages.find((m) => m.role === "tool" && m.tool_call_id === tc.id);
           const toolEntry: ToolCallEntry = {
             id: tc.id,
             name: tc.name,
@@ -235,10 +230,7 @@ export const SubagentCard = memo(function SubagentCard({ entry }: Props) {
 
   const subagentState = useSubagentStore((s) => s.states[entry.id]);
 
-  const isRunning =
-    !entry.resultComplete &&
-    entry.argumentsComplete &&
-    !subagentState?.completed;
+  const isRunning = !entry.resultComplete && entry.argumentsComplete && !subagentState?.completed;
   const isCompleted = entry.resultComplete || subagentState?.completed;
   const childSessionId = subagentState?.childSessionId;
   const Icon = config.icon;
@@ -311,11 +303,9 @@ export const SubagentCard = memo(function SubagentCard({ entry }: Props) {
   const isExpanded = expanded;
 
   const showPrompt = prompt && isExpanded;
-  const showChildMessages =
-    isCompleted && childMessages && childMessages.length > 0;
+  const showChildMessages = isCompleted && childMessages && childMessages.length > 0;
   const showStreamingBlocks = hasBlocks && !showChildMessages;
-  const showLoadingMessages =
-    isCompleted && childSessionId && childMessagesLoading;
+  const showLoadingMessages = isCompleted && childSessionId && childMessagesLoading;
   const showWaiting = isRunning && !hasBlocks;
   const showSessionSection = showStreamingBlocks || showChildMessages;
 
@@ -329,9 +319,7 @@ export const SubagentCard = memo(function SubagentCard({ entry }: Props) {
         <Icon className={`h-3.5 w-3.5 flex-shrink-0 ${config.color}`} />
 
         <div className="flex flex-1 flex-col min-w-0">
-          <span className={`text-xs font-medium ${config.color}`}>
-            {config.name}
-          </span>
+          <span className={`text-xs font-medium ${config.color}`}>{config.name}</span>
           {description && (
             <span className="truncate text-xs text-neutral-500 dark:text-neutral-400">
               {description}
@@ -397,9 +385,7 @@ export const SubagentCard = memo(function SubagentCard({ entry }: Props) {
                 <span className="text-[10px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
                   Sub-session
                 </span>
-                {isRunning && (
-                  <Loader2 className="h-2.5 w-2.5 animate-spin text-neutral-400" />
-                )}
+                {isRunning && <Loader2 className="h-2.5 w-2.5 animate-spin text-neutral-400" />}
               </div>
             )}
 
@@ -422,9 +408,7 @@ export const SubagentCard = memo(function SubagentCard({ entry }: Props) {
               </div>
             )}
 
-            {showChildMessages && (
-              <ChildSessionMessages messages={childMessages} />
-            )}
+            {showChildMessages && <ChildSessionMessages messages={childMessages} />}
           </div>
         </div>
       )}

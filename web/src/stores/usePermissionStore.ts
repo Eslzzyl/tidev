@@ -33,61 +33,54 @@ const loadAutoAccept = (): Record<string, boolean> => {
   }
 };
 
-export const usePermissionStore = create<PermissionState & PermissionActions>(
-  (set, get) => ({
-    pendingPermissions: [],
-    autoAccept: loadAutoAccept(),
+export const usePermissionStore = create<PermissionState & PermissionActions>((set, get) => ({
+  pendingPermissions: [],
+  autoAccept: loadAutoAccept(),
 
-    addPermission: (permission) =>
-      set((state) => ({
-        pendingPermissions: [...state.pendingPermissions, permission],
-      })),
+  addPermission: (permission) =>
+    set((state) => ({
+      pendingPermissions: [...state.pendingPermissions, permission],
+    })),
 
-    removePermission: (id) =>
-      set((state) => ({
-        pendingPermissions: state.pendingPermissions.filter((p) => p.id !== id),
-      })),
+  removePermission: (id) =>
+    set((state) => ({
+      pendingPermissions: state.pendingPermissions.filter((p) => p.id !== id),
+    })),
 
-    clearSessionPermissions: (sessionId) =>
-      set((state) => ({
-        pendingPermissions: state.pendingPermissions.filter(
-          (p) => p.sessionId !== sessionId,
-        ),
-      })),
+  clearSessionPermissions: (sessionId) =>
+    set((state) => ({
+      pendingPermissions: state.pendingPermissions.filter((p) => p.sessionId !== sessionId),
+    })),
 
-    setAutoAccept: (sessionId, enabled) => {
-      const newAutoAccept = { ...get().autoAccept, [sessionId]: enabled };
-      localStorage.setItem(
-        "permission.autoAccept",
-        JSON.stringify(newAutoAccept),
-      );
-      set({ autoAccept: newAutoAccept });
-    },
+  setAutoAccept: (sessionId, enabled) => {
+    const newAutoAccept = { ...get().autoAccept, [sessionId]: enabled };
+    localStorage.setItem("permission.autoAccept", JSON.stringify(newAutoAccept));
+    set({ autoAccept: newAutoAccept });
+  },
 
-    isAutoAccepting: (sessionId) => {
-      return get().autoAccept[sessionId] ?? false;
-    },
+  isAutoAccepting: (sessionId) => {
+    return get().autoAccept[sessionId] ?? false;
+  },
 
-    handlePermissionRequestEvent: (event) => {
-      if (event.type !== "permission_request") return;
-      const permission: PendingPermission = {
-        id: `${event.session_id}-${event.tool_call_id}`,
-        toolCallId: event.tool_call_id,
-        toolName: event.tool_name,
-        arguments: event.arguments,
-        sessionId: event.session_id,
-        requestId: event.request_id,
-      };
+  handlePermissionRequestEvent: (event) => {
+    if (event.type !== "permission_request") return;
+    const permission: PendingPermission = {
+      id: `${event.session_id}-${event.tool_call_id}`,
+      toolCallId: event.tool_call_id,
+      toolName: event.tool_name,
+      arguments: event.arguments,
+      sessionId: event.session_id,
+      requestId: event.request_id,
+    };
 
-      // Check auto-accept
-      if (get().isAutoAccepting(event.session_id)) {
-        // Auto-approved — no UI needed
-        return;
-      }
+    // Check auto-accept
+    if (get().isAutoAccepting(event.session_id)) {
+      // Auto-approved — no UI needed
+      return;
+    }
 
-      set((state) => ({
-        pendingPermissions: [...state.pendingPermissions, permission],
-      }));
-    },
-  }),
-);
+    set((state) => ({
+      pendingPermissions: [...state.pendingPermissions, permission],
+    }));
+  },
+}));

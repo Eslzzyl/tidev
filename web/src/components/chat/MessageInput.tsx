@@ -23,10 +23,7 @@ interface MessageInputProps {
   skillInsert?: { text: string } | null;
 }
 
-export function MessageInput({
-  onSlashCommand,
-  skillInsert,
-}: MessageInputProps) {
+export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps) {
   const [inputValue, setInputValue] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [shellMode, setShellMode] = useState(false);
@@ -58,9 +55,7 @@ export function MessageInput({
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelPanelOpen, setModelPanelOpen] = useState(false);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
-  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(
-    null,
-  );
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
   type ThinkingOption = { label: string; value: string };
   const [thinkingOptions, setThinkingOptions] = useState<ThinkingOption[]>([]);
   const [selectedThinking, setSelectedThinking] = useState<string>("");
@@ -98,9 +93,7 @@ export function MessageInput({
     if (model.thinking_supported && model.thinking_options.length > 0) {
       const options = model.thinking_options.map((opt) => {
         const parts = opt.split(":");
-        const label = parts[1]
-          ? parts[1].charAt(0).toUpperCase() + parts[1].slice(1)
-          : opt;
+        const label = parts[1] ? parts[1].charAt(0).toUpperCase() + parts[1].slice(1) : opt;
         return { label, value: opt };
       });
       setThinkingOptions(options);
@@ -117,10 +110,7 @@ export function MessageInput({
         .then((resp) => {
           // Ignore stale responses if model changed while loading
           if (currentModelRef.current !== model.id) return;
-          if (
-            resp.thinking_level &&
-            model.thinking_options.includes(resp.thinking_level)
-          ) {
+          if (resp.thinking_level && model.thinking_options.includes(resp.thinking_level)) {
             setSelectedThinking(resp.thinking_level);
           }
         })
@@ -143,11 +133,7 @@ export function MessageInput({
         const sessionProviderId = currentSession?.provider_id;
         const sessionModel =
           sessionModelId && sessionProviderId
-            ? modelList.find(
-                (m) =>
-                  m.id === sessionModelId &&
-                  m.provider_id === sessionProviderId,
-              )
+            ? modelList.find((m) => m.id === sessionModelId && m.provider_id === sessionProviderId)
             : null;
 
         if (sessionModel) {
@@ -167,16 +153,10 @@ export function MessageInput({
   // Close dropdowns on click outside
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (
-        thinkingDropdownRef.current &&
-        !thinkingDropdownRef.current.contains(e.target as Node)
-      ) {
+      if (thinkingDropdownRef.current && !thinkingDropdownRef.current.contains(e.target as Node)) {
         setThinkingDropdownOpen(false);
       }
-      if (
-        todoDropdownRef.current &&
-        !todoDropdownRef.current.contains(e.target as Node)
-      ) {
+      if (todoDropdownRef.current && !todoDropdownRef.current.contains(e.target as Node)) {
         setTodoDropdownOpen(false);
       }
     }
@@ -222,9 +202,7 @@ export function MessageInput({
     if (skillInsert?.text && textareaRef.current) {
       const cursorPos = textareaRef.current.selectionStart || 0;
       const newValue =
-        inputValue.slice(0, cursorPos) +
-        skillInsert.text +
-        inputValue.slice(cursorPos);
+        inputValue.slice(0, cursorPos) + skillInsert.text + inputValue.slice(cursorPos);
       setInputValue(newValue);
       textareaRef.current.focus();
     }
@@ -255,9 +233,7 @@ export function MessageInput({
   // Pattern used by VS Code, Slack, and Nuxt UI.
   const composingRef = useRef(false);
   const compositionJustCommittedRef = useRef(false);
-  const compositionEndTimerRef = useRef<
-    ReturnType<typeof setTimeout> | undefined
-  >(undefined);
+  const compositionEndTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const idCounterRef = useRef(0);
 
   // Clean up the timer on unmount.
@@ -296,9 +272,7 @@ export function MessageInput({
         setCommandPalette((prev) => ({
           ...prev,
           selectedIndex:
-            prev.selectedIndex > 0
-              ? prev.selectedIndex - 1
-              : prev.suggestions.length - 1,
+            prev.selectedIndex > 0 ? prev.selectedIndex - 1 : prev.suggestions.length - 1,
         }));
         return;
       }
@@ -307,16 +281,13 @@ export function MessageInput({
         setCommandPalette((prev) => ({
           ...prev,
           selectedIndex:
-            prev.selectedIndex < prev.suggestions.length - 1
-              ? prev.selectedIndex + 1
-              : 0,
+            prev.selectedIndex < prev.suggestions.length - 1 ? prev.selectedIndex + 1 : 0,
         }));
         return;
       }
       if (event.key === "Tab" || event.key === "Enter") {
         event.preventDefault();
-        const selected =
-          commandPalette.suggestions[commandPalette.selectedIndex];
+        const selected = commandPalette.suggestions[commandPalette.selectedIndex];
         if (selected) {
           executeCommand(selected.spec.name);
         }
@@ -538,17 +509,14 @@ export function MessageInput({
     if (!sessionId) return;
 
     const messages = useSessionStore.getState().messages;
-    const userMessages = messages.filter(
-      (m) => m.role === "user" && !m.id.startsWith("pending-"),
-    );
+    const userMessages = messages.filter((m) => m.role === "user" && !m.id.startsWith("pending-"));
     if (userMessages.length === 0) return;
 
     const lastUserMessage = userMessages[userMessages.length - 1];
 
     try {
       await api.revertToMessage(sessionId, lastUserMessage.id);
-      const { messages: updatedMessages, todos } =
-        await api.listMessages(sessionId);
+      const { messages: updatedMessages, todos } = await api.listMessages(sessionId);
       useSessionStore.getState().setMessages(updatedMessages);
       useSessionStore.getState().setTodos(todos ?? []);
     } catch (error) {
@@ -562,8 +530,7 @@ export function MessageInput({
 
     try {
       await api.redoSession(sessionId);
-      const { messages: updatedMessages, todos } =
-        await api.listMessages(sessionId);
+      const { messages: updatedMessages, todos } = await api.listMessages(sessionId);
       useSessionStore.getState().setMessages(updatedMessages);
       useSessionStore.getState().setTodos(todos ?? []);
     } catch (error) {
@@ -680,10 +647,7 @@ export function MessageInput({
     document.body.removeChild(mirror);
 
     // Calculate position: at the @ character, in viewport coordinates
-    const x =
-      textareaRect.left +
-      textRect.width +
-      parseInt(computedStyle.paddingLeft || "0");
+    const x = textareaRect.left + textRect.width + parseInt(computedStyle.paddingLeft || "0");
     // Position at the top of current line (popover will extend upward)
     const y = textareaRect.top + parseInt(computedStyle.paddingTop || "0");
 
@@ -834,8 +798,7 @@ export function MessageInput({
                 className="flex items-center gap-1 rounded bg-amber-50 px-2 py-1 text-xs text-amber-700 transition-all duration-150 hover:bg-amber-100 active:scale-95 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/50"
               >
                 <span>
-                  {thinkingOptions.find((t) => t.value === selectedThinking)
-                    ?.label || "Thinking"}
+                  {thinkingOptions.find((t) => t.value === selectedThinking)?.label || "Thinking"}
                 </span>
                 <ChevronDown className="h-3 w-3" />
               </button>
@@ -881,8 +844,7 @@ export function MessageInput({
               >
                 <ListTodo className="h-3.5 w-3.5" />
                 <span>
-                  {todos.filter((t) => t.status === "completed").length}/
-                  {todos.length}
+                  {todos.filter((t) => t.status === "completed").length}/{todos.length}
                 </span>
                 <ChevronDown className="h-3 w-3" />
               </button>
@@ -905,10 +867,7 @@ export function MessageInput({
                       </div>
                     ) : (
                       todos.map((todo, index) => (
-                        <div
-                          key={index}
-                          className="flex items-start gap-2 px-3 py-1.5"
-                        >
+                        <div key={index} className="flex items-start gap-2 px-3 py-1.5">
                           {todo.status === "completed" ? (
                             <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-green-500" />
                           ) : todo.status === "in_progress" ? (

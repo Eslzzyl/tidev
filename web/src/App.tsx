@@ -1,17 +1,6 @@
-import {
-  useState,
-  useEffect,
-  useCallback,
-  lazy,
-  Suspense,
-  useRef,
-} from "react";
+import { useState, useEffect, useCallback, lazy, Suspense, useRef } from "react";
 import { useSessionStore } from "./stores/useSessionStore";
-import {
-  useUIStore,
-  getEffectiveTheme,
-  type MainTab,
-} from "./stores/useUIStore";
+import { useUIStore, getEffectiveTheme, type MainTab } from "./stores/useUIStore";
 import { useAuthStore } from "./stores/useAuthStore";
 import { api } from "./api/client";
 import { AuthGate } from "./components/AuthGate";
@@ -189,9 +178,7 @@ function App() {
           useSessionStore.getState().setTodos(todos ?? []);
         }
       } catch (err) {
-        setLoadError(
-          err instanceof Error ? err.message : "Failed to load sessions",
-        );
+        setLoadError(err instanceof Error ? err.message : "Failed to load sessions");
       } finally {
         setIsLoading(false);
       }
@@ -225,17 +212,11 @@ function App() {
 
         if (isResizingLeft) {
           const diff = clientX - resizeStartX;
-          const newWidth = Math.min(
-            500,
-            Math.max(180, resizeStartWidth + diff),
-          );
+          const newWidth = Math.min(500, Math.max(180, resizeStartWidth + diff));
           setLeftSidebarWidth(newWidth);
         } else if (isResizingRight) {
           const diff = resizeStartX - clientX;
-          const newWidth = Math.min(
-            500,
-            Math.max(180, resizeStartWidth + diff),
-          );
+          const newWidth = Math.min(500, Math.max(180, resizeStartWidth + diff));
           setRightSidebarWidth(newWidth);
         }
       });
@@ -293,8 +274,7 @@ function App() {
   );
 
   // Show welcome page when no session is selected (only in chat tab)
-  const showWelcomePage =
-    activeTab === "chat" && !currentSessionId && !isDraftSession;
+  const showWelcomePage = activeTab === "chat" && !currentSessionId && !isDraftSession;
   // Show left sidebar only in chat tab when there's a session
   const showSidebars = activeTab === "chat" && !showWelcomePage;
   // Right sidebar visibility: only in chat and only when explicitly opened
@@ -311,9 +291,7 @@ function App() {
         <div className="flex h-[100dvh] items-center justify-center bg-white dark:bg-neutral-950">
           <div className="text-center">
             <div className="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-900 dark:border-neutral-700 dark:border-t-neutral-100" />
-            <p className="text-sm text-neutral-600 dark:text-neutral-400">
-              Loading...
-            </p>
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">Loading...</p>
           </div>
         </div>
       ) : loadError ? (
@@ -328,8 +306,7 @@ function App() {
               Unable to Connect
             </h2>
             <p className="mb-2 text-sm leading-relaxed text-neutral-500 dark:text-neutral-400">
-              {loadError === "Unknown error" ||
-              loadError === "Failed to load sessions"
+              {loadError === "Unknown error" || loadError === "Failed to load sessions"
                 ? "The server is not responding. Please ensure the backend is running and retry."
                 : loadError}
             </p>
@@ -368,10 +345,7 @@ function App() {
 
               {/* Left Resize Handle */}
               {showSidebars && (
-                <ResizeHandle
-                  onResizeStart={handleLeftResizeStart}
-                  isResizing={isResizingLeft}
-                />
+                <ResizeHandle onResizeStart={handleLeftResizeStart} isResizing={isResizingLeft} />
               )}
 
               {/* ── Main Content (floating card) ── */}
@@ -384,16 +358,10 @@ function App() {
                     </div>
                   }
                 >
-                  <div
-                    className="h-full"
-                    style={{ display: activeTab === "chat" ? "" : "none" }}
-                  >
+                  <div className="h-full" style={{ display: activeTab === "chat" ? "" : "none" }}>
                     {showWelcomePage ? <WelcomePage /> : <ChatPanel />}
                   </div>
-                  <div
-                    className="h-full"
-                    style={{ display: activeTab === "files" ? "" : "none" }}
-                  >
+                  <div className="h-full" style={{ display: activeTab === "files" ? "" : "none" }}>
                     <FilesView />
                   </div>
                   <div
@@ -402,16 +370,10 @@ function App() {
                   >
                     <TerminalView />
                   </div>
-                  <div
-                    className="h-full"
-                    style={{ display: activeTab === "git" ? "" : "none" }}
-                  >
+                  <div className="h-full" style={{ display: activeTab === "git" ? "" : "none" }}>
                     <GitView />
                   </div>
-                  <div
-                    className="h-full"
-                    style={{ display: activeTab === "stats" ? "" : "none" }}
-                  >
+                  <div className="h-full" style={{ display: activeTab === "stats" ? "" : "none" }}>
                     <StatsView />
                   </div>
                 </Suspense>
@@ -419,10 +381,7 @@ function App() {
 
               {/* Right Resize Handle */}
               {showRightSidebar && (
-                <ResizeHandle
-                  onResizeStart={handleRightResizeStart}
-                  isResizing={isResizingRight}
-                />
+                <ResizeHandle onResizeStart={handleRightResizeStart} isResizing={isResizingRight} />
               )}
 
               {/* ── Right Sidebar (Desktop floating card) ── */}
@@ -462,9 +421,7 @@ function App() {
               <>
                 <aside
                   className={`fixed inset-y-0 right-0 z-50 flex w-[85vw] max-w-[320px] flex-col border-l border-neutral-200/80 bg-white transition-transform duration-200 ease-in-out md:hidden dark:border-neutral-800/60 dark:bg-neutral-950 ${
-                    mobileRightSidebarOpen
-                      ? "translate-x-0"
-                      : "translate-x-full"
+                    mobileRightSidebarOpen ? "translate-x-0" : "translate-x-full"
                   }`}
                 >
                   <RightSidebar />

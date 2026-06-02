@@ -6,11 +6,7 @@ import { ToolCallRow } from "../renderers/ToolCallRow";
 import { CopyButton } from "../ui/CopyButton";
 import { UndoButton } from "./UndoButton";
 import { useUIStore } from "../../stores/useUIStore";
-import {
-  formatTime,
-  getDuration,
-  stripSystemReminderTags,
-} from "../../utils/format";
+import { formatTime, getDuration, stripSystemReminderTags } from "../../utils/format";
 
 interface Props {
   round: Round;
@@ -62,16 +58,13 @@ export const MessageRound = memo(function MessageRound({
   };
 
   // Only show undo button for completed rounds with assistant response
-  const showUndoButton =
-    canUndo && round.status === "complete" && onUndoRequest;
+  const showUndoButton = canUndo && round.status === "complete" && onUndoRequest;
 
   // Stagger entrance animation — messages animate in sequentially from oldest
   // (low index) to newest (high index), creating a visible cascade when the
   // chat panel is remounted (e.g. switching tabs).
   const staggerDelay =
-    staggerIndex !== undefined
-      ? `${Math.min(staggerIndex * 20, 500)}ms`
-      : undefined;
+    staggerIndex !== undefined ? `${Math.min(staggerIndex * 20, 500)}ms` : undefined;
 
   return (
     <div
@@ -88,15 +81,11 @@ export const MessageRound = memo(function MessageRound({
 
         <div className="flex max-w-[85%] flex-col items-start">
           <div className="mb-1 flex items-center gap-2">
-            <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-              You
-            </span>
+            <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">You</span>
             <span className="text-xs text-neutral-400 dark:text-neutral-600">
               {formatTime(round.userMessage.created_at)}
             </span>
-            <CopyButton
-              content={stripSystemReminderTags(round.userMessage.content)}
-            />
+            <CopyButton content={stripSystemReminderTags(round.userMessage.content)} />
             {showUndoButton && <UndoButton onClick={handleUndo} />}
           </div>
           <div className="w-full rounded-2xl rounded-tl-sm bg-neutral-100 px-4 py-2.5 text-sm leading-relaxed text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100">
@@ -132,9 +121,7 @@ export const MessageRound = memo(function MessageRound({
                 </span>
               )}
               {round.status === "complete" && assistantContent && (
-                <CopyButton
-                  content={stripSystemReminderTags(assistantContent)}
-                />
+                <CopyButton content={stripSystemReminderTags(assistantContent)} />
               )}
             </div>
 
@@ -146,16 +133,11 @@ export const MessageRound = memo(function MessageRound({
                     <ThinkingBlock content={segment.content} />
                   )}
                   {segment.type === "text" && segment.content && (
-                    <MarkdownRenderer
-                      content={stripSystemReminderTags(segment.content)}
-                    />
+                    <MarkdownRenderer content={stripSystemReminderTags(segment.content)} />
                   )}
-                  {segment.type === "tool_call" &&
-                    round.toolCallMap[segment.toolCallId] && (
-                      <ToolCallRow
-                        entry={round.toolCallMap[segment.toolCallId]}
-                      />
-                    )}
+                  {segment.type === "tool_call" && round.toolCallMap[segment.toolCallId] && (
+                    <ToolCallRow entry={round.toolCallMap[segment.toolCallId]} />
+                  )}
                 </div>
               ))}
 

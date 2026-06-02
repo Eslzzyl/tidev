@@ -11,9 +11,7 @@ import type {
  * Build a list of Rounds, SystemMessageBlocks and ShellBlocks
  * from a flat list of Messages.
  */
-export function buildRounds(
-  messages: Message[],
-): (Round | SystemMessageBlock | ShellBlock)[] {
+export function buildRounds(messages: Message[]): (Round | SystemMessageBlock | ShellBlock)[] {
   const rounds: (Round | SystemMessageBlock | ShellBlock)[] = [];
   let currentRound: Round | null = null;
   let pendingShellCmd: Message | null = null;
@@ -68,8 +66,7 @@ export function buildRounds(
         }
 
         if (msg.content) {
-          const lastSeg =
-            currentRound.segments[currentRound.segments.length - 1];
+          const lastSeg = currentRound.segments[currentRound.segments.length - 1];
           if (lastSeg && lastSeg.type === "text") {
             lastSeg.content += "\n" + msg.content;
           } else {

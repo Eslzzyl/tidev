@@ -18,9 +18,7 @@ export function InteractionSection() {
           <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
             Enter to send
           </span>
-          <p className="text-xs text-neutral-500">
-            Press Enter to send, Shift+Enter for new line
-          </p>
+          <p className="text-xs text-neutral-500">Press Enter to send, Shift+Enter for new line</p>
         </div>
         <button
           role="switch"

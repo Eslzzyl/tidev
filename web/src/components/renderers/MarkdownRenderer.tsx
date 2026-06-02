@@ -65,11 +65,7 @@ function CustomImage(props: React.ComponentPropsWithoutRef<"img">) {
           loading="lazy"
         />
         <span className="absolute right-1 top-1 rounded bg-black/50 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100">
-          {expanded ? (
-            <Minimize2 className="h-3 w-3" />
-          ) : (
-            <Maximize2 className="h-3 w-3" />
-          )}
+          {expanded ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
         </span>
       </button>
     </span>
@@ -79,13 +75,7 @@ function CustomImage(props: React.ComponentPropsWithoutRef<"img">) {
 /**
  * Enhanced code block with language label, copy, and download buttons.
  */
-function CodeBlock({
-  language,
-  children,
-}: {
-  language: string;
-  children: string;
-}) {
+function CodeBlock({ language, children }: { language: string; children: string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(() => {
@@ -118,11 +108,7 @@ function CodeBlock({
             className="rounded p-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
             title="Copy code"
           >
-            {copied ? (
-              <Check className="h-3.5 w-3.5" />
-            ) : (
-              <Copy className="h-3.5 w-3.5" />
-            )}
+            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
           </button>
           <button
             onClick={handleDownload}
@@ -136,9 +122,7 @@ function CodeBlock({
 
       {/* Code content */}
       <pre className="overflow-x-auto p-4 text-sm leading-relaxed">
-        <code className="font-mono text-neutral-800 dark:text-neutral-200">
-          {children}
-        </code>
+        <code className="font-mono text-neutral-800 dark:text-neutral-200">{children}</code>
       </pre>
     </div>
   );
@@ -232,9 +216,7 @@ function isMermaidCode(language: string, content: string): boolean {
   );
 }
 
-export const MarkdownRenderer = memo(function MarkdownRenderer({
-  content,
-}: Props) {
+export const MarkdownRenderer = memo(function MarkdownRenderer({ content }: Props) {
   if (!content) return null;
 
   return (

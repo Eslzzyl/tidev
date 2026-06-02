@@ -12,11 +12,9 @@ const iconMap: Record<string, React.ReactNode> = {
 };
 
 const bgMap: Record<string, string> = {
-  success:
-    "border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950",
+  success: "border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950",
   error: "border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950",
-  warning:
-    "border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950",
+  warning: "border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950",
   info: "border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950",
 };
 
@@ -48,9 +46,7 @@ export function ToastContainer() {
         // Store removed this toast – capture a snapshot for the exit animation.
         setExitingToasts((prevList) => [...prevList, prev]);
         setTimeout(() => {
-          setExitingToasts((prevList) =>
-            prevList.filter((t) => t.id !== prev.id),
-          );
+          setExitingToasts((prevList) => prevList.filter((t) => t.id !== prev.id));
         }, 200);
       }
     }
@@ -60,10 +56,7 @@ export function ToastContainer() {
 
   // Merge active + exiting toasts.  Exiting duplicates are discarded.
   const activeIds = new Set(storeToasts.map((t) => t.id));
-  const allToasts = [
-    ...storeToasts,
-    ...exitingToasts.filter((t) => !activeIds.has(t.id)),
-  ];
+  const allToasts = [...storeToasts, ...exitingToasts.filter((t) => !activeIds.has(t.id))];
 
   if (allToasts.length === 0) return null;
 
@@ -77,9 +70,7 @@ export function ToastContainer() {
             className={`pointer-events-auto flex items-center gap-2 rounded-lg border px-3 py-2 shadow-lg motion-safe:transition-all motion-safe:duration-200 motion-safe:ease-smooth ${
               bgMap[toast.type]
             } ${textMap[toast.type]} ${
-              isExiting
-                ? "motion-safe:animate-toast-out"
-                : "motion-safe:animate-toast-in"
+              isExiting ? "motion-safe:animate-toast-out" : "motion-safe:animate-toast-in"
             }`}
             style={{
               minWidth: "200px",

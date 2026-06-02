@@ -1,18 +1,6 @@
 import { useState } from "react";
-import {
-  ShieldAlert,
-  Check,
-  X,
-  Clock,
-  FileEdit,
-  Terminal,
-  Globe,
-  Wrench,
-} from "lucide-react";
-import {
-  usePermissionStore,
-  type PendingPermission,
-} from "../../stores/usePermissionStore";
+import { ShieldAlert, Check, X, Clock, FileEdit, Terminal, Globe, Wrench } from "lucide-react";
+import { usePermissionStore, type PendingPermission } from "../../stores/usePermissionStore";
 
 interface PermissionCardProps {
   permission: PendingPermission;
@@ -23,10 +11,8 @@ function getToolIcon(toolName: string) {
   const name = toolName.toLowerCase();
   if (["write", "edit", "apply_patch", "str_replace"].includes(name))
     return <FileEdit className="h-4 w-4" />;
-  if (["bash", "shell", "cmd", "terminal"].includes(name))
-    return <Terminal className="h-4 w-4" />;
-  if (["webfetch", "fetch", "websearch"].includes(name))
-    return <Globe className="h-4 w-4" />;
+  if (["bash", "shell", "cmd", "terminal"].includes(name)) return <Terminal className="h-4 w-4" />;
+  if (["webfetch", "fetch", "websearch"].includes(name)) return <Globe className="h-4 w-4" />;
   return <Wrench className="h-4 w-4" />;
 }
 
@@ -36,8 +22,7 @@ function getToolColor(toolName: string): string {
     return "text-emerald-600 dark:text-emerald-400";
   if (["bash", "shell", "cmd", "terminal"].includes(name))
     return "text-violet-600 dark:text-violet-400";
-  if (["webfetch", "fetch", "websearch"].includes(name))
-    return "text-sky-600 dark:text-sky-400";
+  if (["webfetch", "fetch", "websearch"].includes(name)) return "text-sky-600 dark:text-sky-400";
   return "text-neutral-600 dark:text-neutral-400";
 }
 
@@ -51,9 +36,7 @@ function formatArguments(args: string): string {
       // Otherwise format as compact JSON
       const entries = Object.entries(parsed).slice(0, 3);
       const str = entries
-        .map(
-          ([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`,
-        )
+        .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
         .join(", ");
       return entries.length < Object.keys(parsed).length ? `${str}...` : str;
     }
@@ -66,18 +49,14 @@ function formatArguments(args: string): string {
 function getDisplayName(toolName: string): string {
   const name = toolName.toLowerCase();
   if (["write", "file_write"].includes(name)) return "Write File";
-  if (["edit", "str_replace", "str_replace_based_edit_tool"].includes(name))
-    return "Edit File";
+  if (["edit", "str_replace", "str_replace_based_edit_tool"].includes(name)) return "Edit File";
   if (["apply_patch"].includes(name)) return "Apply Patch";
   if (["bash", "shell", "cmd", "terminal"].includes(name)) return "Bash";
   if (["webfetch", "fetch", "websearch"].includes(name)) return "Web Request";
   return toolName;
 }
 
-export function PermissionCard({
-  permission,
-  onResponse,
-}: PermissionCardProps) {
+export function PermissionCard({ permission, onResponse }: PermissionCardProps) {
   const [isResponding, setIsResponding] = useState(false);
   const removePermission = usePermissionStore((s) => s.removePermission);
   const setAutoAccept = usePermissionStore((s) => s.setAutoAccept);

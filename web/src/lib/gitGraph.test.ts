@@ -2,11 +2,7 @@ import { describe, it, expect } from "vitest";
 import { computeGraphLayout } from "./gitGraph";
 import type { GitCommitItem } from "../types/api";
 
-function commit(
-  sha: string,
-  parents: string[],
-  refs: string[] = [],
-): GitCommitItem {
+function commit(sha: string, parents: string[], refs: string[] = []): GitCommitItem {
   return {
     sha,
     author: "test",

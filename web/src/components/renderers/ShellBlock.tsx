@@ -83,14 +83,10 @@ export function ShellBlock({ block }: Props) {
                   </>
                 )}
                 {isComplete && exitCode === 0 && (
-                  <span className="text-xs text-green-600 dark:text-green-400">
-                    &#10003;
-                  </span>
+                  <span className="text-xs text-green-600 dark:text-green-400">&#10003;</span>
                 )}
                 {isComplete && exitCode !== null && exitCode !== 0 && (
-                  <span className="text-xs text-red-600 dark:text-red-400">
-                    &#10007;
-                  </span>
+                  <span className="text-xs text-red-600 dark:text-red-400">&#10007;</span>
                 )}
                 <ChevronDown
                   className={`h-3.5 w-3.5 text-neutral-400 transition-transform ${expanded ? "rotate-180" : ""}`}
@@ -140,15 +136,9 @@ export function ShellBlock({ block }: Props) {
                     <span className="text-neutral-500 dark:text-neutral-400">
                       Exit code: {exitCode}
                       {exitCode === 0 ? (
-                        <span className="text-green-600 dark:text-green-400">
-                          {" "}
-                          &#10003;
-                        </span>
+                        <span className="text-green-600 dark:text-green-400"> &#10003;</span>
                       ) : (
-                        <span className="text-red-600 dark:text-red-400">
-                          {" "}
-                          &#10007;
-                        </span>
+                        <span className="text-red-600 dark:text-red-400"> &#10007;</span>
                       )}
                     </span>
                   </div>

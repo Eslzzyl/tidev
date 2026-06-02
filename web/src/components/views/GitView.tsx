@@ -57,33 +57,21 @@ export function GitView() {
   const [graphData, setGraphData] = useState<GitGraphResponse | null>(null);
   const [graphLoading, setGraphLoading] = useState(false);
   const [graphCount, setGraphCount] = useState(50);
-  const [graphErrorMessage, setGraphErrorMessage] = useState<string | null>(
-    null,
-  );
+  const [graphErrorMessage, setGraphErrorMessage] = useState<string | null>(null);
 
   // Commit detail (History tab)
-  const [selectedCommit, setSelectedCommit] = useState<GitShowResponse | null>(
-    null,
-  );
+  const [selectedCommit, setSelectedCommit] = useState<GitShowResponse | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [fileDiffs, setFileDiffs] = useState<
-    Record<string, GitFileDiffResponse>
-  >({});
+  const [fileDiffs, setFileDiffs] = useState<Record<string, GitFileDiffResponse>>({});
   const [loadingFileDiff, setLoadingFileDiff] = useState<string | null>(null);
   const [loadingAllDiffs, setLoadingAllDiffs] = useState(false);
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
 
   // Changes diff (Changes tab)
-  const [changeDiffs, setChangeDiffs] = useState<
-    Record<string, GitFileDiffResponse>
-  >({});
-  const [loadingChangeDiff, setLoadingChangeDiff] = useState<string | null>(
-    null,
-  );
-  const [expandedChangeFiles, setExpandedChangeFiles] = useState<Set<string>>(
-    new Set(),
-  );
+  const [changeDiffs, setChangeDiffs] = useState<Record<string, GitFileDiffResponse>>({});
+  const [loadingChangeDiff, setLoadingChangeDiff] = useState<string | null>(null);
+  const [expandedChangeFiles, setExpandedChangeFiles] = useState<Set<string>>(new Set());
 
   // Mobile detail sheet
   const [detailOpen, setDetailOpen] = useState(false);
@@ -124,10 +112,7 @@ export function GitView() {
       const dx = e.clientX - resizeStartRef.current.x;
       const newRatio = resizeStartRef.current.ratio + dx / containerWidth;
       // Clamp
-      const clamped = Math.min(
-        Math.max(newRatio, MIN_PANEL_PCT / 100),
-        1 - MIN_PANEL_PCT / 100,
-      );
+      const clamped = Math.min(Math.max(newRatio, MIN_PANEL_PCT / 100), 1 - MIN_PANEL_PCT / 100);
       setSplitRatio(clamped);
     };
 
@@ -156,9 +141,7 @@ export function GitView() {
       setGraphData(result);
       setGraphCount(fetchCount);
     } catch (err) {
-      setGraphErrorMessage(
-        err instanceof Error ? err.message : "Failed to load graph data",
-      );
+      setGraphErrorMessage(err instanceof Error ? err.message : "Failed to load graph data");
     } finally {
       setGraphLoading(false);
     }
@@ -174,10 +157,7 @@ export function GitView() {
     try {
       setLoading(true);
       setError(null);
-      const [s, b] = await Promise.all([
-        api.gitStatus(),
-        api.gitBranches(showSubmodules),
-      ]);
+      const [s, b] = await Promise.all([api.gitStatus(), api.gitBranches(showSubmodules)]);
       setStatus(s);
       setBranches(b);
       // Refresh graph data
@@ -202,9 +182,7 @@ export function GitView() {
       setSelectedCommit(detail);
       setDetailOpen(true);
     } catch (err) {
-      setDetailError(
-        err instanceof Error ? err.message : "Failed to load commit details",
-      );
+      setDetailError(err instanceof Error ? err.message : "Failed to load commit details");
     } finally {
       setLoadingDetail(false);
     }
@@ -233,9 +211,7 @@ export function GitView() {
         }
         setExpandedFiles((prev) => new Set(prev).add(filePath));
       } catch (err) {
-        setDetailError(
-          err instanceof Error ? err.message : "Failed to load file diff",
-        );
+        setDetailError(err instanceof Error ? err.message : "Failed to load file diff");
       } finally {
         setLoadingFileDiff(null);
       }
@@ -253,13 +229,9 @@ export function GitView() {
         diffMap[d.path] = d;
       }
       setFileDiffs((prev) => ({ ...prev, ...diffMap }));
-      setExpandedFiles(
-        new Set([...expandedFiles, ...diffs.map((d) => d.path)]),
-      );
+      setExpandedFiles(new Set([...expandedFiles, ...diffs.map((d) => d.path)]));
     } catch (err) {
-      setDetailError(
-        err instanceof Error ? err.message : "Failed to load all diffs",
-      );
+      setDetailError(err instanceof Error ? err.message : "Failed to load all diffs");
     } finally {
       setLoadingAllDiffs(false);
     }
@@ -310,9 +282,7 @@ export function GitView() {
         setChangeDiffs((prev) => ({ ...prev, [filePath]: result }));
         setExpandedChangeFiles((prev) => new Set(prev).add(filePath));
       } catch (err) {
-        setCommitResult(
-          `Error loading diff: ${err instanceof Error ? err.message : "Unknown"}`,
-        );
+        setCommitResult(`Error loading diff: ${err instanceof Error ? err.message : "Unknown"}`);
       } finally {
         setLoadingChangeDiff(null);
       }
@@ -339,9 +309,7 @@ export function GitView() {
       setCommitMsg("");
       await refreshStatus();
     } catch (err) {
-      setCommitResult(
-        `Error: ${err instanceof Error ? err.message : "Commit failed"}`,
-      );
+      setCommitResult(`Error: ${err instanceof Error ? err.message : "Commit failed"}`);
     } finally {
       setCommitting(false);
     }
@@ -354,9 +322,7 @@ export function GitView() {
       setCommitResult(result.message);
       await refreshStatus();
     } catch (err) {
-      setCommitResult(
-        `Push error: ${err instanceof Error ? err.message : "Push failed"}`,
-      );
+      setCommitResult(`Push error: ${err instanceof Error ? err.message : "Push failed"}`);
     } finally {
       setPushPullLoading(false);
     }
@@ -369,9 +335,7 @@ export function GitView() {
       setCommitResult(result.message);
       await refreshStatus();
     } catch (err) {
-      setCommitResult(
-        `Pull error: ${err instanceof Error ? err.message : "Pull failed"}`,
-      );
+      setCommitResult(`Pull error: ${err instanceof Error ? err.message : "Pull failed"}`);
     } finally {
       setPushPullLoading(false);
     }
@@ -384,9 +348,7 @@ export function GitView() {
       setCommitResult(result.message);
       await refreshStatus();
     } catch (err) {
-      setCommitResult(
-        `Error: ${err instanceof Error ? err.message : "Stash failed"}`,
-      );
+      setCommitResult(`Error: ${err instanceof Error ? err.message : "Stash failed"}`);
     } finally {
       setStashLoading(false);
     }
@@ -401,9 +363,7 @@ export function GitView() {
       setNewBranchName("");
       await refreshStatus();
     } catch (err) {
-      setCommitResult(
-        `Error: ${err instanceof Error ? err.message : "Failed to create branch"}`,
-      );
+      setCommitResult(`Error: ${err instanceof Error ? err.message : "Failed to create branch"}`);
     } finally {
       setCreatingBranch(false);
     }
@@ -415,9 +375,7 @@ export function GitView() {
       setCommitResult(result.message);
       await refreshStatus();
     } catch (err) {
-      setCommitResult(
-        `Error: ${err instanceof Error ? err.message : "Failed to delete branch"}`,
-      );
+      setCommitResult(`Error: ${err instanceof Error ? err.message : "Failed to delete branch"}`);
     }
   };
 
@@ -478,8 +436,7 @@ export function GitView() {
           {status && (
             <span className="text-xs text-neutral-500">
               {status.sha}
-              {(status.ahead > 0 || status.behind > 0) &&
-                ` · ↑${status.ahead} ↓${status.behind}`}
+              {(status.ahead > 0 || status.behind > 0) && ` · ↑${status.ahead} ↓${status.behind}`}
             </span>
           )}
         </div>
@@ -523,9 +480,7 @@ export function GitView() {
             className="rounded p-1.5 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700"
             title="Refresh"
           >
-            <RotateCcw
-              className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
-            />
+            <RotateCcw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
         </div>
       </div>
@@ -560,10 +515,7 @@ export function GitView() {
           }`}
         >
           {commitResult}
-          <button
-            onClick={() => setCommitResult(null)}
-            className="ml-2 underline"
-          >
+          <button onClick={() => setCommitResult(null)} className="ml-2 underline">
             Dismiss
           </button>
         </div>
@@ -590,10 +542,7 @@ export function GitView() {
         ) : activeTab === "history" ? (
           <div ref={splitContainerRef} className="flex flex-1 overflow-hidden">
             {/* Left: Graph history list */}
-            <div
-              className="overflow-y-auto"
-              style={{ flex: `${splitRatio * 100}%` }}
-            >
+            <div className="overflow-y-auto" style={{ flex: `${splitRatio * 100}%` }}>
               <GraphHistoryPanel
                 rows={graphRows}
                 graphLoading={graphLoading}
@@ -658,55 +607,53 @@ export function GitView() {
       </div>
 
       {/* Mobile full-screen overlay for commit detail (History tab) */}
-      {activeTab === "history" &&
-        (detailOpen || animateOut) &&
-        selectedCommit && (
-          <>
-            {/* Backdrop */}
-            <button
-              onClick={handleCloseMobile}
-              className={`fixed inset-0 z-40 bg-black/30 transition-opacity duration-300 md:hidden ${
-                animateOut ? "opacity-0" : ""
-              }`}
-              aria-label="Close detail"
-            />
-            {/* Full-screen overlay */}
-            <div
-              className={`fixed inset-0 z-50 flex flex-col bg-white motion-safe:animate-slide-up-full motion-safe:transition-transform motion-safe:duration-300 motion-safe:ease-smooth dark:bg-neutral-950 md:hidden ${
-                animateOut ? "translate-y-full" : ""
-              }`}
-            >
-              {/* Fixed top bar */}
-              <div className="flex items-center gap-3 border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
-                <button
-                  onClick={handleCloseMobile}
-                  className="rounded p-1 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                >
-                  <ChevronDown className="h-5 w-5" />
-                </button>
-                <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
-                  Commit Detail
-                </span>
-              </div>
-              {/* Scrollable content */}
-              <div className="flex-1 overflow-y-auto overscroll-contain">
-                <div className="p-4">
-                  <CommitDetailPanel
-                    commit={selectedCommit}
-                    fileDiffs={fileDiffs}
-                    loadingFileDiff={loadingFileDiff}
-                    loadingAllDiffs={loadingAllDiffs}
-                    loadingDetail={loadingDetail}
-                    detailError={detailError}
-                    expandedFiles={expandedFiles}
-                    onLoadFileDiff={loadFileDiff}
-                    onLoadAllDiffs={loadAllDiffs}
-                  />
-                </div>
+      {activeTab === "history" && (detailOpen || animateOut) && selectedCommit && (
+        <>
+          {/* Backdrop */}
+          <button
+            onClick={handleCloseMobile}
+            className={`fixed inset-0 z-40 bg-black/30 transition-opacity duration-300 md:hidden ${
+              animateOut ? "opacity-0" : ""
+            }`}
+            aria-label="Close detail"
+          />
+          {/* Full-screen overlay */}
+          <div
+            className={`fixed inset-0 z-50 flex flex-col bg-white motion-safe:animate-slide-up-full motion-safe:transition-transform motion-safe:duration-300 motion-safe:ease-smooth dark:bg-neutral-950 md:hidden ${
+              animateOut ? "translate-y-full" : ""
+            }`}
+          >
+            {/* Fixed top bar */}
+            <div className="flex items-center gap-3 border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
+              <button
+                onClick={handleCloseMobile}
+                className="rounded p-1 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              >
+                <ChevronDown className="h-5 w-5" />
+              </button>
+              <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                Commit Detail
+              </span>
+            </div>
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-y-auto overscroll-contain">
+              <div className="p-4">
+                <CommitDetailPanel
+                  commit={selectedCommit}
+                  fileDiffs={fileDiffs}
+                  loadingFileDiff={loadingFileDiff}
+                  loadingAllDiffs={loadingAllDiffs}
+                  loadingDetail={loadingDetail}
+                  detailError={detailError}
+                  expandedFiles={expandedFiles}
+                  onLoadFileDiff={loadFileDiff}
+                  onLoadAllDiffs={loadAllDiffs}
+                />
               </div>
             </div>
-          </>
-        )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -844,9 +791,7 @@ function ChangesPanel({
         </div>
       )}
       {(!status || status.files.length === 0) && (
-        <div className="py-8 text-center text-sm text-neutral-500">
-          No changes in working tree
-        </div>
+        <div className="py-8 text-center text-sm text-neutral-500">No changes in working tree</div>
       )}
     </div>
   );
@@ -880,9 +825,7 @@ function ChangeFileRow({
           {file.path}
         </span>
         <span className="flex-shrink-0 text-neutral-400">{label}</span>
-        {isLoading && (
-          <Loader2 className="h-3 w-3 animate-spin text-neutral-400" />
-        )}
+        {isLoading && <Loader2 className="h-3 w-3 animate-spin text-neutral-400" />}
         <ChevronRight
           className={`h-3 w-3 text-neutral-400 transition-transform ${
             isExpanded ? "rotate-90" : ""
@@ -1022,13 +965,10 @@ function GraphHistoryPanel({
     return () => observer.disconnect();
   }, [graphLoading, onLoadMore]);
 
-  const handleContextMenu = useCallback(
-    (e: React.MouseEvent, row: GraphRow) => {
-      e.preventDefault();
-      setContextMenu({ x: e.clientX, y: e.clientY, row });
-    },
-    [],
-  );
+  const handleContextMenu = useCallback((e: React.MouseEvent, row: GraphRow) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, row });
+  }, []);
 
   const handleTouchStart = useCallback((e: React.TouchEvent, row: GraphRow) => {
     isLongPress.current = false;
@@ -1101,15 +1041,8 @@ function GraphHistoryPanel({
   return (
     <div className="relative py-2">
       {/* SVG graph layer — positioned absolutely behind the cards */}
-      <div
-        className="absolute left-0 top-0 pointer-events-none"
-        style={{ width: graphWidth }}
-      >
-        <GitGraphSVG
-          rows={rows}
-          selectedSha={selectedSha}
-          onSelectCommit={onSelectCommit}
-        />
+      <div className="absolute left-0 top-0 pointer-events-none" style={{ width: graphWidth }}>
+        <GitGraphSVG rows={rows} selectedSha={selectedSha} onSelectCommit={onSelectCommit} />
       </div>
 
       {/* Commit cards — overlaid on top with padding for the graph */}
@@ -1168,9 +1101,7 @@ function GraphHistoryPanel({
       {graphLoading && (
         <div className="flex items-center justify-center py-4">
           <Loader2 className="h-4 w-4 animate-spin text-neutral-400" />
-          <span className="ml-2 text-xs text-neutral-500">
-            Loading graph...
-          </span>
+          <span className="ml-2 text-xs text-neutral-500">Loading graph...</span>
         </div>
       )}
 
@@ -1247,9 +1178,7 @@ function CommitDetailPanel({
       <div>
         <div className="flex items-center gap-2">
           <GitCommitHorizontal className="h-4 w-4 text-neutral-400" />
-          <span className="font-mono text-xs text-neutral-500">
-            {commit.sha.substring(0, 7)}
-          </span>
+          <span className="font-mono text-xs text-neutral-500">{commit.sha.substring(0, 7)}</span>
         </div>
         <p className="mt-1 text-sm font-medium text-neutral-900 dark:text-neutral-100">
           {commit.message}
@@ -1262,9 +1191,7 @@ function CommitDetailPanel({
         <div className="mt-1 flex items-center gap-2 text-xs">
           <span className="text-green-600">+{commit.total_additions}</span>
           <span className="text-red-600">-{commit.total_deletions}</span>
-          <span className="text-neutral-400">
-            {commit.files.length} file(s)
-          </span>
+          <span className="text-neutral-400">{commit.files.length} file(s)</span>
         </div>
       </div>
 
@@ -1301,12 +1228,8 @@ function CommitDetailPanel({
                 <span className="flex-1 truncate text-left text-neutral-700 dark:text-neutral-300">
                   {file.path}
                 </span>
-                <span className="flex-shrink-0 text-[10px] text-green-600">
-                  +{file.additions}
-                </span>
-                <span className="flex-shrink-0 text-[10px] text-red-600">
-                  -{file.deletions}
-                </span>
+                <span className="flex-shrink-0 text-[10px] text-green-600">+{file.additions}</span>
+                <span className="flex-shrink-0 text-[10px] text-red-600">-{file.deletions}</span>
                 {loadingFileDiff === file.path && (
                   <Loader2 className="h-3 w-3 animate-spin text-neutral-400" />
                 )}
@@ -1322,23 +1245,15 @@ function CommitDetailPanel({
                 className="motion-safe:transition-all motion-safe:duration-300 motion-safe:ease-smooth grid"
                 style={{
                   gridTemplateRows:
-                    expandedFiles.has(file.path) && fileDiffs[file.path]
-                      ? "1fr"
-                      : "0fr",
-                  opacity:
-                    expandedFiles.has(file.path) && fileDiffs[file.path]
-                      ? 1
-                      : 0,
+                    expandedFiles.has(file.path) && fileDiffs[file.path] ? "1fr" : "0fr",
+                  opacity: expandedFiles.has(file.path) && fileDiffs[file.path] ? 1 : 0,
                 }}
               >
                 <div className="min-h-0 overflow-hidden">
                   {fileDiffs[file.path] && (
                     <div className="ml-4 border-l-2 border-neutral-200 pl-2 dark:border-neutral-700">
                       {fileDiffs[file.path].diff ? (
-                        <DiffRenderer
-                          diff={fileDiffs[file.path].diff}
-                          filepath={file.path}
-                        />
+                        <DiffRenderer diff={fileDiffs[file.path].diff} filepath={file.path} />
                       ) : (
                         <p className="py-2 text-xs text-neutral-400">
                           No diff content (binary or empty file)
@@ -1388,9 +1303,7 @@ function BranchesPanel({
   // Sort: current branch first, rest alphabetically
   const sorted = [
     ...branches.branches.filter((b) => b.current),
-    ...branches.branches
-      .filter((b) => !b.current)
-      .sort((a, b) => a.name.localeCompare(b.name)),
+    ...branches.branches.filter((b) => !b.current).sort((a, b) => a.name.localeCompare(b.name)),
   ];
 
   return (
@@ -1405,8 +1318,7 @@ function BranchesPanel({
             placeholder="New branch name"
             className="flex-1 rounded border border-neutral-300 bg-white px-3 py-1.5 text-base text-neutral-900 placeholder-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500"
             onKeyDown={(e) => {
-              if (e.key === "Enter" && newBranchName.trim() && !creatingBranch)
-                onCreateBranch();
+              if (e.key === "Enter" && newBranchName.trim() && !creatingBranch) onCreateBranch();
             }}
           />
           <button
@@ -1429,9 +1341,7 @@ function BranchesPanel({
         <button
           onClick={onToggleSubmodules}
           className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${
-            showSubmodules
-              ? "bg-neutral-500"
-              : "bg-neutral-300 dark:bg-neutral-600"
+            showSubmodules ? "bg-neutral-500" : "bg-neutral-300 dark:bg-neutral-600"
           }`}
         >
           <span
@@ -1440,9 +1350,7 @@ function BranchesPanel({
             }`}
           />
         </button>
-        <span className="text-xs text-neutral-500">
-          Show submodule branches
-        </span>
+        <span className="text-xs text-neutral-500">Show submodule branches</span>
       </div>
 
       {/* Branch list */}
@@ -1456,12 +1364,8 @@ function BranchesPanel({
             <span className="flex-1 font-medium text-neutral-900 dark:text-neutral-100">
               {branch.name}
             </span>
-            {branch.current && (
-              <span className="text-xs text-neutral-400">current</span>
-            )}
-            {branch.remote && (
-              <span className="text-xs text-neutral-400">{branch.remote}</span>
-            )}
+            {branch.current && <span className="text-xs text-neutral-400">current</span>}
+            {branch.remote && <span className="text-xs text-neutral-400">{branch.remote}</span>}
             {!branch.current && (
               <button
                 onClick={() => onDeleteBranch(branch.name)}

@@ -1,12 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  ChevronDown,
-  MessageSquare,
-  Clock,
-  MoreHorizontal,
-  X,
-  Trash2,
-} from "lucide-react";
+import { ChevronDown, MessageSquare, Clock, MoreHorizontal, X, Trash2 } from "lucide-react";
 import { useSessionStore } from "../stores/useSessionStore";
 import { useUIStore } from "../stores/useUIStore";
 import { SmartInput } from "./SmartInput";
@@ -124,8 +117,7 @@ export function WelcomePage() {
 
         if (payload.mode) requestBody.mode = payload.mode;
         if (payload.mode) useSessionStore.getState().setMode(payload.mode);
-        if (payload.thinkingLevel)
-          requestBody.thinking_level = payload.thinkingLevel;
+        if (payload.thinkingLevel) requestBody.thinking_level = payload.thinkingLevel;
         if (payload.modelId) requestBody.model_id = payload.modelId;
         if (payload.providerId) requestBody.provider_id = payload.providerId;
 
@@ -173,19 +165,10 @@ export function WelcomePage() {
         setSessions(updatedSessions);
       } catch (err) {
         setStreaming(false);
-        setError(
-          err instanceof Error ? err.message : "Failed to create session",
-        );
+        setError(err instanceof Error ? err.message : "Failed to create session");
       }
     },
-    [
-      workspaceRoot,
-      setCurrentSession,
-      setMessages,
-      setSessions,
-      setError,
-      setStreaming,
-    ],
+    [workspaceRoot, setCurrentSession, setMessages, setSessions, setError, setStreaming],
   );
 
   const handleStop = useCallback(async () => {
@@ -230,9 +213,7 @@ export function WelcomePage() {
         const { sessions: updatedSessions } = await api.listSessions();
         setSessions(updatedSessions);
       } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to delete session",
-        );
+        setError(err instanceof Error ? err.message : "Failed to delete session");
       } finally {
         setIsDeleting(false);
         setSessionToDelete(null);
@@ -243,10 +224,7 @@ export function WelcomePage() {
 
   // Sort sessions by updated_at desc and take top 5
   const recentSessions = [...sessions]
-    .sort(
-      (a, b) =>
-        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-    )
+    .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
     .slice(0, MAX_RECENT_SESSIONS);
 
   const hasMoreSessions = sessions.length > MAX_RECENT_SESSIONS;
@@ -320,8 +298,7 @@ export function WelcomePage() {
                       {[...sessions]
                         .sort(
                           (a, b) =>
-                            new Date(b.updated_at).getTime() -
-                            new Date(a.updated_at).getTime(),
+                            new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
                         )
                         .map((session) => (
                           <button
@@ -373,8 +350,7 @@ export function WelcomePage() {
                     {session.title}
                   </p>
                   <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                    {session.model_display_name} •{" "}
-                    {formatSessionDate(session.updated_at)}
+                    {session.model_display_name} • {formatSessionDate(session.updated_at)}
                   </p>
                 </div>
                 <button
@@ -413,10 +389,7 @@ export function WelcomePage() {
       />
 
       {/* Connect Dialog */}
-      <ConnectDialog
-        isOpen={connectDialogOpen}
-        onClose={() => setConnectDialogOpen(false)}
-      />
+      <ConnectDialog isOpen={connectDialogOpen} onClose={() => setConnectDialogOpen(false)} />
 
       {/* Delete Session Confirmation */}
       <ConfirmDialog
