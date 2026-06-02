@@ -198,7 +198,7 @@ impl App {
 
                 frame.render_widget(
                     Paragraph::new(
-                        "Enter to connect · Ctrl+E to edit custom providers · Esc to cancel",
+                        "Enter to connect · Ctrl+E to edit · Ctrl+P to prune orphans · Esc to cancel",
                     )
                     .alignment(Alignment::Center)
                     .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),

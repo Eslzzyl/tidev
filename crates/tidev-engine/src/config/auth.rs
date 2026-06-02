@@ -76,6 +76,14 @@ impl AuthStore {
         }
     }
 
+    /// Remove all provider entries from auth whose ID does not appear in `known_ids`.
+    /// Returns the number of entries removed.
+    pub fn prune_orphan_providers(&mut self, known_ids: &[String]) -> usize {
+        let before = self.providers.len();
+        self.providers.retain(|id, _| known_ids.contains(id));
+        before - self.providers.len()
+    }
+
     pub fn web_token(&self) -> Option<&str> {
         self.web
             .auth_token
