@@ -286,7 +286,7 @@ export function CodeViewer() {
           <MarkdownPreview content={activeFile.content} />
         )}
 
-        {activeFile && renderMode === "json" && jsonData && (
+        {activeFile && renderMode === "json" && jsonData != null && (
           <div className="h-full overflow-auto p-2">
             <JsonTreeView data={jsonData} />
           </div>

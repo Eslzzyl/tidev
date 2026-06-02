@@ -382,7 +382,7 @@ export function GitView() {
   const handleStash = async () => {
     setStashLoading(true);
     try {
-      const result = await gitStashMutation.mutateAsync();
+      const result = await gitStashMutation.mutateAsync(undefined);
       setCommitResult(result.message);
       await refreshStatus();
     } catch (err) {

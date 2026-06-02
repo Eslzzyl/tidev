@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect, useCallback } from "react";
+import type { HLJSApi } from "highlight.js";
 
 interface CodeLine {
   lineNum: number;
@@ -102,11 +103,11 @@ function escapeHtml(text: string): string {
 }
 
 export function CodeLinesRenderer({ output, filepath }: Props) {
-  const [hljs, setHljs] = useState<typeof import("highlight.js") | null>(null);
+  const [hljs, setHljs] = useState<HLJSApi | null>(null);
 
   // Dynamically load highlight.js on first render
   useEffect(() => {
-    import("highlight.js").then((mod) => setHljs(() => mod.default));
+    import("highlight.js").then((mod) => setHljs(mod.default));
   }, []);
 
   const highlightLine = useCallback(

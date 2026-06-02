@@ -94,7 +94,6 @@ function TreeNode({ keyName, value, depth, maxDepth }: TreeNodeProps) {
                 value={v}
                 depth={depth + 1}
                 maxDepth={maxDepth}
-                isLast={i === entries.length - 1}
               />
             ))}
           </div>
@@ -155,7 +154,6 @@ export function JsonTreeView({ data, initialExpanded = false, maxDepth = 3 }: Js
                 value={v}
                 depth={0}
                 maxDepth={maxDepth}
-                isLast={i === entries.length - 1}
               />
             ))}
           </div>

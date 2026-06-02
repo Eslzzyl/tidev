@@ -8,6 +8,7 @@ import {
   useCallback,
 } from "react";
 import { ChevronDown, ChevronRight, Expand, Minus } from "lucide-react";
+import type { HLJSApi } from "highlight.js";
 
 interface Props {
   diff: string;
@@ -324,11 +325,11 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
   const [isWide, setIsWide] = useState(
     typeof window !== "undefined" && window.innerWidth >= WIDE_LAYOUT_THRESHOLD,
   );
-  const [hljs, setHljs] = useState<typeof import("highlight.js") | null>(null);
+  const [hljs, setHljs] = useState<HLJSApi | null>(null);
 
   // Dynamically load highlight.js on first render
   useEffect(() => {
-    import("highlight.js").then((mod) => setHljs(() => mod.default));
+    import("highlight.js").then((mod) => setHljs(mod.default));
   }, []);
 
   const language = useMemo(() => detectLanguage(filepath), [filepath]);

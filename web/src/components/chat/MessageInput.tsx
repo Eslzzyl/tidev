@@ -379,15 +379,16 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
           });
           sessionId = session_id;
 
+          const sid = sessionId;
           const [session, { messages, todos }] = await Promise.all([
             queryClient.fetchQuery({
-              queryKey: queryKeys.session(sessionId),
-              queryFn: () => api.getSession(sessionId),
+              queryKey: queryKeys.session(sid),
+              queryFn: () => api.getSession(sid),
             }),
             queryClient.fetchQuery({
-              queryKey: queryKeys.sessionMessages(sessionId),
+              queryKey: queryKeys.sessionMessages(sid),
               queryFn: () =>
-                api.listMessages(sessionId).then((r) => ({
+                api.listMessages(sid).then((r) => ({
                   messages: r.messages,
                   todos: r.todos ?? [],
                 })),
@@ -442,15 +443,16 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
         sessionId = session_id;
 
         // Update store
+        const sid = sessionId;
         const [session, { messages, todos }] = await Promise.all([
           queryClient.fetchQuery({
-            queryKey: queryKeys.session(sessionId),
-            queryFn: () => api.getSession(sessionId),
+            queryKey: queryKeys.session(sid),
+            queryFn: () => api.getSession(sid),
           }),
           queryClient.fetchQuery({
-            queryKey: queryKeys.sessionMessages(sessionId),
+            queryKey: queryKeys.sessionMessages(sid),
             queryFn: () =>
-              api.listMessages(sessionId).then((r) => ({
+              api.listMessages(sid).then((r) => ({
                 messages: r.messages,
                 todos: r.todos ?? [],
               })),

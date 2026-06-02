@@ -88,7 +88,7 @@ describe("buildRounds", () => {
       { type: "text", content: "hi there" },
       { type: "tool_call", toolCallId: "tc1" },
     ]);
-    expect(round.toolCallMap["tc1"].result.output).toBe("file content");
+    expect(round.toolCallMap["tc1"]?.result?.output).toBe("file content");
   });
 
   it("sets status to streaming for incomplete assistant messages", () => {

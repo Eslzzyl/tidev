@@ -10,6 +10,7 @@ import { Check, Copy, Download, Maximize2, Minimize2 } from "lucide-react";
 let mermaidInstance: {
   initialize: (config: Record<string, unknown>) => void;
   run: (config: Record<string, unknown>) => Promise<void>;
+  render: (id: string, text: string) => Promise<{ svg: string }>;
 } | null = null;
 async function getMermaid() {
   if (!mermaidInstance) {

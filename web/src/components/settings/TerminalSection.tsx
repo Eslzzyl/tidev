@@ -12,7 +12,7 @@ export function TerminalSection() {
   const terminalShell = useUIStore((s) => s.settings.terminalShell);
   const updateSettings = useUIStore((s) => s.updateSettings);
 
-  const { data: shellsData, error } = useTerminalShells();
+  const { data: shellsData, error, isLoading: loading } = useTerminalShells();
   const { data: configRes } = useTerminalShellConfig();
   const { mutateAsync: setTerminalShellConfig } = useSetTerminalShellConfig();
 
