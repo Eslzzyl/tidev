@@ -98,9 +98,8 @@ export function LeftSidebar() {
       }
       try {
         await api.renameSession(sessionId, trimmed);
-        // Refresh sessions list
-        const { sessions } = await api.listSessions();
-        useSessionStore.getState().setSessions(sessions);
+        // Update the title in the store directly instead of re-fetching the whole list
+        useSessionStore.getState().updateSessionTitle(sessionId, trimmed);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to rename session");
       } finally {

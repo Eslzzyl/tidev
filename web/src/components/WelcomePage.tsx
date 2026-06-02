@@ -42,13 +42,12 @@ export function WelcomePage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Refresh sessions and workspace on mount
+  // Only fetch sessions if not already loaded (App.tsx loads them on mount).
+  // Workspace info is fetched separately since it's not part of the session store.
   useEffect(() => {
-    Promise.all([
-      api.listSessions().then(({ sessions }) => setSessions(sessions)),
-      api.getWorkspace().catch(() => null),
-    ]).catch(() => {});
-  }, [setSessions]);
+    if (sessions.length > 0) return;
+    api.listSessions().then(({ sessions }) => setSessions(sessions)).catch(() => {});
+  }, [sessions, setSessions]);
 
   const [workspaceRoot, setWorkspaceRoot] = useState<string>("");
   const [workspaceDisplay, setWorkspaceDisplay] = useState<string>("");

@@ -349,7 +349,11 @@ function App() {
               )}
 
               {/* ── Main Content (floating card) ── */}
-              {/* All views stay mounted, hidden via display:none to preserve state */}
+              {/* Chat is always mounted (hidden via display:none when inactive) so that
+                  WelcomePage/ChatPanel state is preserved across tab switches.
+                  Other views use conditional rendering — they mount only when activated,
+                  avoiding unnecessary API calls on page load. Data persisted in Zustand
+                  stores is preserved when the component remounts. */}
               <main className="relative flex flex-1 flex-col min-h-0 overflow-hidden rounded-xl border border-neutral-200/60 bg-white shadow-sm dark:border-neutral-800/60 dark:bg-neutral-950 dark:shadow-black/10 max-md:rounded-none max-md:border-0 max-md:shadow-none">
                 <Suspense
                   fallback={
@@ -358,24 +362,31 @@ function App() {
                     </div>
                   }
                 >
+                  {/* Chat tab — always mounted to preserve SSE + scroll state */}
                   <div className="h-full" style={{ display: activeTab === "chat" ? "" : "none" }}>
                     {showWelcomePage ? <WelcomePage /> : <ChatPanel />}
                   </div>
-                  <div className="h-full" style={{ display: activeTab === "files" ? "" : "none" }}>
-                    <FilesView />
-                  </div>
-                  <div
-                    className="flex h-full flex-col overflow-hidden"
-                    style={{ display: activeTab === "terminal" ? "" : "none" }}
-                  >
-                    <TerminalView />
-                  </div>
-                  <div className="h-full" style={{ display: activeTab === "git" ? "" : "none" }}>
-                    <GitView />
-                  </div>
-                  <div className="h-full" style={{ display: activeTab === "stats" ? "" : "none" }}>
-                    <StatsView />
-                  </div>
+                  {/* Other tabs — conditionally mounted to avoid eager API calls */}
+                  {activeTab === "files" && (
+                    <div className="h-full">
+                      <FilesView />
+                    </div>
+                  )}
+                  {activeTab === "terminal" && (
+                    <div className="flex h-full flex-col overflow-hidden">
+                      <TerminalView />
+                    </div>
+                  )}
+                  {activeTab === "git" && (
+                    <div className="h-full">
+                      <GitView />
+                    </div>
+                  )}
+                  {activeTab === "stats" && (
+                    <div className="h-full">
+                      <StatsView />
+                    </div>
+                  )}
                 </Suspense>
               </main>
 

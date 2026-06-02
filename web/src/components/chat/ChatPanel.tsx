@@ -170,9 +170,11 @@ export function ChatPanel() {
       setIsRenaming(true);
       try {
         await api.renameSession(currentSessionId, title);
-        // Refresh session to get updated data
+        // Update session detail in store
         const session = await api.getSession(currentSessionId);
         useSessionStore.getState().setCurrentSession(session);
+        // Also update title in the sessions list for the sidebar
+        useSessionStore.getState().updateSessionTitle(currentSessionId, title);
         setRenameDialogOpen(false);
       } catch (error) {
         console.error("Rename failed:", error);

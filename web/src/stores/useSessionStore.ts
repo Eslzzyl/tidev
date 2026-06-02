@@ -40,6 +40,7 @@ export interface SessionActions {
   setError: (error: string | null) => void;
   clearError: () => void;
   removeSession: (sessionId: string) => void;
+  updateSessionTitle: (sessionId: string, title: string) => void;
   setMode: (mode: SessionMode) => void;
   toggleMode: () => void;
   startDraftSession: (title?: string) => void;
@@ -118,6 +119,13 @@ export const useSessionStore = create<SessionState & SessionActions>((set) => ({
       currentSessionId: state.currentSessionId === sessionId ? null : state.currentSessionId,
       currentSession: state.currentSessionId === sessionId ? null : state.currentSession,
       isDraftSession: state.currentSessionId === sessionId ? false : state.isDraftSession,
+    })),
+
+  updateSessionTitle: (sessionId, title) =>
+    set((state) => ({
+      sessions: state.sessions.map((s) =>
+        s.session_id === sessionId ? { ...s, title } : s,
+      ),
     })),
 
   setMode: (mode) => set({ mode }),
