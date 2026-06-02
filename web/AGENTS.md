@@ -33,8 +33,10 @@ web/
 ```bash
 pnpm dev              # Start dev server (localhost:5173)
 pnpm build            # TypeScript check + production build
-pnpm lint             # ESLint
-pnpm format           # Prettier
+pnpm lint             # oxlint (Rust alternative for eslint)
+pnpm lint:fix         # Auto apply lint fix
+pnpm format           # oxfmt ((Rust alternative for prettier))
+pnpm format:check     # check for format issues
 pnpm test             # Run all tests (vitest run)
 pnpm test:watch       # Watch mode
 pnpm test:coverage    # With coverage report
