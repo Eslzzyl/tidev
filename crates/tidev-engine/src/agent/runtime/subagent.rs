@@ -412,6 +412,20 @@ impl AgentRuntime {
                         event_tx,
                     )
                     .await?;
+                    // Forward the tool result to the child session view in TUI
+                    // (persist_tool_result emits ToolCompleted with request_sequence,
+                    //  which is ignored by the TUI — we use parent_request_id here)
+                    let tool_msg = Message::tool_result(
+                        &tool_call.id,
+                        &tool_call.name,
+                        result.clone(),
+                    );
+                    let _ = event_tx.send(BackendEvent::SubagentToolResult {
+                        session_id: child_session_id,
+                        request_id: parent_request_id,
+                        child_session_id,
+                        message: tool_msg,
+                    });
                     continue 'tool_loop;
                 }
 
@@ -433,11 +447,20 @@ impl AgentRuntime {
                     .await?;
 
                 for (_, result) in results {
-                    let _ = event_tx.send(BackendEvent::ToolCompleted {
+                    // Forward the tool result to the child session view in TUI.
+                    // execute_tool_calls already called persist_tool_result which
+                    // emits ToolCompleted with request_sequence (ignored by TUI),
+                    // so we use SubagentToolResult with parent_request_id instead.
+                    let tool_msg = Message::tool_result(
+                        &tool_call.id,
+                        &tool_call.name,
+                        result.clone(),
+                    );
+                    let _ = event_tx.send(BackendEvent::SubagentToolResult {
                         session_id: child_session_id,
-                        request_id: request_sequence,
-                        tool_call: tool_call.clone(),
-                        result,
+                        request_id: parent_request_id,
+                        child_session_id,
+                        message: tool_msg,
                     });
                 }
 
