@@ -1450,8 +1450,7 @@ function BranchesPanel({
         {sorted.map((branch, i) => (
           <div
             key={i}
-            className="motion-safe:animate-slide-up-fade flex items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
-            style={{ animationDelay: `${i * 30}ms` }}
+            className="flex items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
           >
             <GitBranch className="h-3.5 w-3.5 text-neutral-500" />
             <span className="flex-1 font-medium text-neutral-900 dark:text-neutral-100">
