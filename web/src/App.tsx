@@ -162,6 +162,11 @@ function App() {
 
   // Load initial data
   useEffect(() => {
+    // Don't load authenticated data until auth is resolved,
+    // otherwise a stale 401 error from loadData will appear
+    // after the user successfully logs in via AuthGate.
+    if (authIsRequired && !authIsAuthenticated) return;
+
     const loadData = async () => {
       try {
         const { sessions } = await api.listSessions();
@@ -188,7 +193,7 @@ function App() {
     };
 
     loadData();
-  }, [setSessions, setCurrentSession, setMessages]);
+  }, [setSessions, setCurrentSession, setMessages, authIsRequired, authIsAuthenticated]);
 
   // Resize RAF ref — throttles state updates to once per frame
   const resizeRafRef = useRef<number | null>(null);
