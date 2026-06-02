@@ -4,7 +4,7 @@ import { useAuthStore } from "../stores/useAuthStore";
 export function AuthGate() {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const { verifyToken, setToken, error, clearError, isAuthRequired } =
+  const { verifyToken, setToken, error, clearError, isAuthRequired, isAuthenticated } =
     useAuthStore();
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -22,12 +22,14 @@ export function AuthGate() {
     const valid = await verifyToken(password.trim());
     if (valid) {
       setToken(password.trim());
+    } else {
+      useAuthStore.setState({ error: "Invalid access token. Please try again." });
     }
     setSubmitting(false);
   };
 
-  // If auth is no longer required, don't render
-  if (!isAuthRequired) return null;
+  // If auth is no longer required, or already authenticated, don't render
+  if (!isAuthRequired || isAuthenticated) return null;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-neutral-50 dark:bg-neutral-950">

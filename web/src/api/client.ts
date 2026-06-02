@@ -51,6 +51,7 @@ import type {
   ProviderUsageEntry,
   SessionUsageEntry,
 } from "../types/api";
+import { useAuthStore } from "../stores/useAuthStore";
 
 const API_BASE = "/api";
 
@@ -91,6 +92,12 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
         ...options?.headers,
       },
     });
+
+    if (response.status === 401) {
+      // Token is invalid or expired — trigger auth re-entry
+      useAuthStore.getState().handleUnauthorized();
+      throw new Error("Unauthorized: invalid or missing auth token");
+    }
 
     if (!response.ok) {
       const error = await response

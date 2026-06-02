@@ -162,10 +162,15 @@ function App() {
 
   // Load initial data
   useEffect(() => {
-    // Don't load authenticated data until auth is resolved,
-    // otherwise a stale 401 error from loadData will appear
-    // after the user successfully logs in via AuthGate.
-    if (authIsRequired && !authIsAuthenticated) return;
+    // Wait for auth check to complete before deciding what to load
+    if (authIsLoading) return;
+
+    // If auth is required but not yet authenticated, skip loading
+    // to avoid a stale 401 error that would appear after login.
+    if (authIsRequired && !authIsAuthenticated) {
+      setIsLoading(false);
+      return;
+    }
 
     const loadData = async () => {
       try {
@@ -193,7 +198,7 @@ function App() {
     };
 
     loadData();
-  }, [setSessions, setCurrentSession, setMessages, authIsRequired, authIsAuthenticated]);
+  }, [setSessions, setCurrentSession, setMessages, authIsLoading, authIsRequired, authIsAuthenticated]);
 
   // Resize RAF ref — throttles state updates to once per frame
   const resizeRafRef = useRef<number | null>(null);
@@ -280,54 +285,6 @@ function App() {
     [rightSidebarWidth],
   );
 
-  // Show auth gate if auth is required but not authenticated
-  if (authIsRequired && !authIsAuthenticated) {
-    return <AuthGate />;
-  }
-
-  if (isLoading) {
-    return (
-      <div className="flex h-[100dvh] items-center justify-center bg-white dark:bg-neutral-950">
-        <div className="text-center">
-          <div className="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-900 dark:border-neutral-700 dark:border-t-neutral-100" />
-          <p className="text-sm text-neutral-600 dark:text-neutral-400">
-            Loading...
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (loadError) {
-    return (
-      <div className="flex h-[100dvh] items-center justify-center bg-white dark:bg-neutral-950">
-        <div className="mx-auto max-w-sm px-6 text-center">
-          <div className="mb-6 flex justify-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-red-50 dark:bg-red-900/20">
-              <CloudOff className="h-8 w-8 text-red-500" />
-            </div>
-          </div>
-          <h2 className="mb-2 text-lg font-semibold text-neutral-900 dark:text-neutral-100">
-            Unable to Connect
-          </h2>
-          <p className="mb-2 text-sm leading-relaxed text-neutral-500 dark:text-neutral-400">
-            {loadError === "Unknown error" ||
-            loadError === "Failed to load sessions"
-              ? "The server is not responding. Please ensure the backend is running and retry."
-              : loadError}
-          </p>
-          <button
-            onClick={() => window.location.reload()}
-            className="inline-flex items-center gap-2 rounded-lg bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-neutral-800 active:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200 dark:active:bg-neutral-300"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Retry Connection
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   // Show welcome page when no session is selected (only in chat tab)
   const showWelcomePage =
     activeTab === "chat" && !currentSessionId && !isDraftSession;
@@ -338,7 +295,48 @@ function App() {
 
   return (
     <>
-      <SettingsPanel />
+      {/* AuthGate overlay — shows full-screen when auth is required but not authenticated */}
+      <AuthGate />
+
+      {/* Don't render app content behind the AuthGate overlay — children
+          like FilesView would otherwise mount and fire spurious API calls. */}
+      {authIsRequired && !authIsAuthenticated ? null : isLoading ? (
+        <div className="flex h-[100dvh] items-center justify-center bg-white dark:bg-neutral-950">
+          <div className="text-center">
+            <div className="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-900 dark:border-neutral-700 dark:border-t-neutral-100" />
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">
+              Loading...
+            </p>
+          </div>
+        </div>
+      ) : loadError ? (
+        <div className="flex h-[100dvh] items-center justify-center bg-white dark:bg-neutral-950">
+          <div className="mx-auto max-w-sm px-6 text-center">
+            <div className="mb-6 flex justify-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-red-50 dark:bg-red-900/20">
+                <CloudOff className="h-8 w-8 text-red-500" />
+              </div>
+            </div>
+            <h2 className="mb-2 text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+              Unable to Connect
+            </h2>
+            <p className="mb-2 text-sm leading-relaxed text-neutral-500 dark:text-neutral-400">
+              {loadError === "Unknown error" ||
+              loadError === "Failed to load sessions"
+                ? "The server is not responding. Please ensure the backend is running and retry."
+                : loadError}
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="inline-flex items-center gap-2 rounded-lg bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-neutral-800 active:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200 dark:active:bg-neutral-300"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Retry Connection
+            </button>
+          </div>
+        </div>
+      ) : (<>
+        <SettingsPanel />
 
       <div className="flex h-[100dvh] flex-col bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-neutral-100 via-white to-white dark:from-neutral-900 dark:via-neutral-950 dark:to-neutral-950">
         {/* ── Floating Header Card ── */}
@@ -472,8 +470,8 @@ function App() {
         )}
       </div>
       <ToastContainer />
-    </>
-  );
+      </>)}
+    </>);
 }
 
 export default App;

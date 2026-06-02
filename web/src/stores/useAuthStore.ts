@@ -32,6 +32,8 @@ export interface AuthActions {
   setToken: (token: string) => void;
   /** Clear stored token */
   clearToken: () => void;
+  /** Handle a 401 response from an API call */
+  handleUnauthorized: () => void;
   /** Configure/set a new web auth token on the backend */
   configureToken: (newToken: string) => Promise<boolean>;
   /** Clear error */
@@ -69,25 +71,15 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         return;
       }
 
-      // Auth is required — verify our stored token
-      if (token) {
-        const valid = await get().verifyToken(token);
-        set({
-          isAuthRequired: true,
-          isAuthenticated: valid,
-          isLoading: false,
-          error: valid ? null : "Stored token is invalid. Please re-enter.",
-        });
-        if (!valid) {
-          clearStoredToken();
-        }
-      } else {
-        set({
-          isAuthRequired: true,
-          isAuthenticated: false,
-          isLoading: false,
-        });
-      }
+      // Auth is required — trust the stored token without re-verifying.
+      // If the token is invalid the next API call will return 401 and
+      // handleUnauthorized will redirect to the login overlay.
+      set({
+        isAuthRequired: true,
+        isAuthenticated: !!token,
+        isLoading: false,
+        error: null,
+      });
     } catch {
       // Cannot reach backend — backend might not be running
       set({ isAuthRequired: false, isAuthenticated: true, isLoading: false });
@@ -117,6 +109,20 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   clearToken: () => {
     clearStoredToken();
     set({ token: null, isAuthenticated: false });
+  },
+
+  /** Handle a 401 response from an API call — clear auth state and show login overlay */
+  handleUnauthorized: () => {
+    const { isAuthRequired, isAuthenticated } = get();
+    // Only act if we thought we were authenticated
+    if (isAuthRequired && isAuthenticated) {
+      clearStoredToken();
+      set({
+        token: null,
+        isAuthenticated: false,
+        error: "Session expired. Please re-enter your access token.",
+      });
+    }
   },
 
   configureToken: async (newToken: string): Promise<boolean> => {
