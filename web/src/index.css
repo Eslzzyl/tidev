@@ -24,6 +24,7 @@
   --animate-stream-dot: stream-dot 1.4s ease-in-out infinite;
   --animate-scale-in: scale-in 0.15s var(--ease-smooth);
   --animate-fade-in-up: fade-in-up 0.2s var(--ease-smooth);
+  --animate-slide-up-full: slide-up-full 0.3s var(--ease-smooth);
 }
 
 /* Custom scrollbar */
@@ -582,4 +583,13 @@ summary {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+}
+
+@keyframes slide-up-full {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
 }

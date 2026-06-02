@@ -86,6 +86,7 @@ export function GitView() {
 
   // Mobile detail sheet
   const [detailOpen, setDetailOpen] = useState(false);
+  const [animateOut, setAnimateOut] = useState(false);
 
   // Submodule toggle
   const [showSubmodules, setShowSubmodules] = useState(false);
@@ -268,6 +269,14 @@ export function GitView() {
     setExpandedFiles(new Set());
     setDetailError(null);
   }, []);
+
+  const handleCloseMobile = useCallback(() => {
+    setAnimateOut(true);
+    setTimeout(() => {
+      closeDetail();
+      setAnimateOut(false);
+    }, 280);
+  }, [closeDetail]);
 
   // ── Changes file diff ───────────────────────────────────────────────
 
@@ -645,38 +654,50 @@ export function GitView() {
         )}
       </div>
 
-      {/* Mobile bottom sheet for commit detail (History tab) */}
-      {activeTab === "history" && detailOpen && selectedCommit && (
+      {/* Mobile full-screen overlay for commit detail (History tab) */}
+      {activeTab === "history" && (detailOpen || animateOut) && selectedCommit && (
         <>
+          {/* Backdrop */}
           <button
-            onClick={closeDetail}
-            className="fixed inset-0 z-40 bg-black/30 md:hidden"
+            onClick={handleCloseMobile}
+            className={`fixed inset-0 z-40 bg-black/30 transition-opacity duration-300 md:hidden ${
+              animateOut ? "opacity-0" : ""
+            }`}
             aria-label="Close detail"
           />
-          <div className="fixed bottom-0 left-0 right-0 z-50 max-h-[80vh] overflow-y-auto rounded-t-xl border border-neutral-200 bg-white shadow-xl dark:border-neutral-800 dark:bg-neutral-950 md:hidden">
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-neutral-200 bg-white px-4 py-3 dark:border-neutral-800 dark:bg-neutral-950">
-              <span className="text-xs font-medium text-neutral-500">
-                Commit Detail
-              </span>
+          {/* Full-screen overlay */}
+          <div
+            className={`fixed inset-0 z-50 flex flex-col bg-white motion-safe:animate-slide-up-full motion-safe:transition-transform motion-safe:duration-300 motion-safe:ease-smooth dark:bg-neutral-950 md:hidden ${
+              animateOut ? "translate-y-full" : ""
+            }`}
+          >
+            {/* Fixed top bar */}
+            <div className="flex items-center gap-3 border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
               <button
-                onClick={closeDetail}
+                onClick={handleCloseMobile}
                 className="rounded p-1 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
               >
-                <X className="h-4 w-4" />
+                <ChevronDown className="h-5 w-5" />
               </button>
+              <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                Commit Detail
+              </span>
             </div>
-            <div className="p-4">
-              <CommitDetailPanel
-                commit={selectedCommit}
-                fileDiffs={fileDiffs}
-                loadingFileDiff={loadingFileDiff}
-                loadingAllDiffs={loadingAllDiffs}
-                loadingDetail={loadingDetail}
-                detailError={detailError}
-                expandedFiles={expandedFiles}
-                onLoadFileDiff={loadFileDiff}
-                onLoadAllDiffs={loadAllDiffs}
-              />
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-y-auto overscroll-contain">
+              <div className="p-4">
+                <CommitDetailPanel
+                  commit={selectedCommit}
+                  fileDiffs={fileDiffs}
+                  loadingFileDiff={loadingFileDiff}
+                  loadingAllDiffs={loadingAllDiffs}
+                  loadingDetail={loadingDetail}
+                  detailError={detailError}
+                  expandedFiles={expandedFiles}
+                  onLoadFileDiff={loadFileDiff}
+                  onLoadAllDiffs={loadAllDiffs}
+                />
+              </div>
             </div>
           </div>
         </>
