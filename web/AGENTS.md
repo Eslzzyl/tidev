@@ -30,6 +30,8 @@ web/
 
 ## Commands
 
+NEVER use ANY `npm` or `npx` command. Use `pnpm` instead.
+
 ```bash
 pnpm dev              # Start dev server (localhost:5173)
 pnpm build            # TypeScript check + production build
