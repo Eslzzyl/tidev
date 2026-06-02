@@ -59,19 +59,22 @@ export function TerminalSection() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [updateSettings]);
 
   // Sync local state with the stored value whenever shells become available
   useEffect(() => {
     if (!shellsData) return;
-    if (terminalShell === "") {
-      setLocalMode("default");
-    } else if (shellsData.shells.some((s) => s.path === terminalShell)) {
-      setLocalMode("selected");
-    } else {
-      setLocalMode("custom");
-      setCustomPath(terminalShell);
-    }
+    const rafId = requestAnimationFrame(() => {
+      if (terminalShell === "") {
+        setLocalMode("default");
+      } else if (shellsData.shells.some((s) => s.path === terminalShell)) {
+        setLocalMode("selected");
+      } else {
+        setLocalMode("custom");
+        setCustomPath(terminalShell);
+      }
+    });
+    return () => cancelAnimationFrame(rafId);
   }, [terminalShell, shellsData]);
 
   // Persist to server-side config whenever the user explicitly changes shell

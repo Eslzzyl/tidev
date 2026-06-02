@@ -68,7 +68,7 @@ export function TerminalView() {
     if (tabs.length === 0) {
       createTab();
     }
-  }, []);
+  }, [createTab, tabs.length]);
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
 
@@ -168,7 +168,12 @@ function TerminalViewport({ tab, isDark }: TerminalViewportProps) {
   const tabIdRef = useRef(tab.id);
 
   // Keep refs in sync with latest props
-  sessionIdRef.current = tab.sessionId;
+  useEffect(() => {
+    sessionIdRef.current = tab.sessionId;
+  }, [tab.sessionId]);
+  useEffect(() => {
+    tabIdRef.current = tab.id;
+  }, [tab.id]);
 
   const sendInput = useTerminalStore((s) => s.sendInput);
   const sendResize = useTerminalStore((s) => s.sendResize);

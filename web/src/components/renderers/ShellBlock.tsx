@@ -28,7 +28,8 @@ export function ShellBlock({ block }: Props) {
     if (didAutoExpand.current) return;
     if (!isStreaming && outputContent) {
       didAutoExpand.current = true;
-      setExpanded(true);
+      const id = requestAnimationFrame(() => setExpanded(true));
+      return () => cancelAnimationFrame(id);
     }
   }, [isStreaming, outputContent]);
 

@@ -96,8 +96,8 @@ export function FilesView() {
   // Debounced search with cache
   useEffect(() => {
     if (!searchQuery.trim()) {
-      setSearchResults([]);
-      return;
+      const id = requestAnimationFrame(() => setSearchResults([]));
+      return () => cancelAnimationFrame(id);
     }
 
     // Check cache first

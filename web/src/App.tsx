@@ -165,14 +165,14 @@ function App() {
     // Wait for auth check to complete before deciding what to load
     if (authIsLoading) return;
 
-    // If auth is required but not yet authenticated, skip loading
-    // to avoid a stale 401 error that would appear after login.
-    if (authIsRequired && !authIsAuthenticated) {
-      setIsLoading(false);
-      return;
-    }
-
     const loadData = async () => {
+      // If auth is required but not yet authenticated, skip loading
+      // to avoid a stale 401 error that would appear after login.
+      if (authIsRequired && !authIsAuthenticated) {
+        setIsLoading(false);
+        return;
+      }
+
       try {
         const { sessions } = await api.listSessions();
         setSessions(sessions);

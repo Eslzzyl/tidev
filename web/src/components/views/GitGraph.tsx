@@ -88,6 +88,7 @@ interface GitGraphSVGProps {
   onSelectCommit: (sha: string) => void;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function getGraphWidth(rows: GraphRow[]): number {
   if (rows.length === 0) return PAD_LEFT + PAD_RIGHT + LANE_W;
   const maxCol = rows.reduce((m, r) => {

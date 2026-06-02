@@ -71,9 +71,9 @@ export function ModelPanel({
   useEffect(() => {
     if (!isOpen) return;
 
-    setIsLoading(true);
     Promise.all([api.listModels(), api.getAgentModels(), api.getMemoryModel()])
       .then(([modelsResp, agentModelsResp, memoryResp]) => {
+        setIsLoading(true);
         setModels(modelsResp.models ?? []);
         setAgentModels(agentModelsResp.agent_models);
         setMemoryModelStr(memoryResp.model_str);
@@ -85,9 +85,12 @@ export function ModelPanel({
         setIsLoading(false);
       });
 
-    // Reset state on open
-    setSearchQuery("");
-    setActiveTab("general");
+    // Reset state on open — defer to avoid cascading renders
+    const rafId = requestAnimationFrame(() => {
+      setSearchQuery("");
+      setActiveTab("general");
+    });
+    return () => cancelAnimationFrame(rafId);
   }, [isOpen]);
 
   // Focus search input when panel opens or tab changes

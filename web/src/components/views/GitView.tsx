@@ -16,7 +16,6 @@ import {
   Loader2,
   ChevronDown,
   ChevronRight,
-  X,
   Copy,
   Tag,
   User,

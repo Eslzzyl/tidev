@@ -51,7 +51,7 @@ export interface UIActions {
   setStreaming: (isStreaming: boolean) => void;
   setConnectionStatus: (status: UIState["connectionStatus"]) => void;
   setActiveTab: (tab: MainTab) => void;
-  navigateToChat: (sessionId?: string) => void;
+  navigateToChat: () => void;
   navigateToFiles: () => void;
   navigateToTerminal: () => void;
   navigateToGit: () => void;
@@ -201,7 +201,7 @@ export const useUIStore = create<UIState & UIActions>((set) => ({
     set({ activeTab: tab });
   },
 
-  navigateToChat: (sessionId) => {
+  navigateToChat: () => {
     set({ activeTab: "chat" });
     localStorage.setItem("activeTab", "chat");
   },

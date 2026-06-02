@@ -8,10 +8,6 @@ import { buildRounds } from "../../utils/round";
 import { VirtualMessageList } from "./VirtualMessageList";
 import { useMessageVirtualizer } from "../../hooks/useMessageVirtualizer";
 import { useChatAutoScroll } from "../../hooks/useChatAutoScroll";
-import type {
-  Round,
-  SystemMessageBlock as SystemMessageBlockType,
-} from "../../types/round";
 import { MessageInput } from "./MessageInput";
 import { MessageDialog } from "./MessageDialog";
 import { RenameDialog } from "./RenameDialog";

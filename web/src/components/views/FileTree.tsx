@@ -10,9 +10,7 @@ import {
   Code,
   Image,
   Terminal,
-  Plus,
   Copy,
-  GitBranch,
 } from "lucide-react";
 import { useFileStore, type TreeNode } from "../../stores/useFileStore";
 import {
@@ -23,7 +21,6 @@ import { ContextMenu, type ContextMenuItem } from "../ui/ContextMenu";
 import { CreateItemDialog } from "../ui/CreateItemDialog";
 import { RenameDialog } from "../ui/RenameDialog";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
-import { toast } from "../../stores/useToastStore";
 
 const fileIcons: Record<string, React.ReactNode> = {
   rs: <Code className="h-4 w-4 text-orange-500" />,
@@ -103,11 +100,7 @@ export function FileTree() {
   const createFile = useFileStore((s) => s.createFile);
   const renameFile = useFileStore((s) => s.renameFile);
   const deleteFile = useFileStore((s) => s.deleteFile);
-  const refreshTree = useFileStore((s) => s.refreshTree);
-
   const gitStatusMap = useGitFileStore((s) => s.displayMap);
-  const gitBranch = useGitFileStore((s) => s.branch);
-  const gitLoading = useGitFileStore((s) => s.loading);
   const gitRefresh = useGitFileStore((s) => s.refresh);
 
   const [contextMenu, setContextMenu] = useState<{
@@ -231,10 +224,6 @@ export function FileTree() {
     if (!dialog || dialog.type !== "delete") return;
     deleteFile(dialog.nodePath).catch(() => {});
     setDialog(null);
-  };
-
-  const handleRootCreate = (type: "file" | "directory") => {
-    setDialog({ type: "create", parentPath: "", itemType: type });
   };
 
   if (rootLoading && !rootLoaded) {

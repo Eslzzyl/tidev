@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
-  LineChart,
   Line,
   AreaChart,
   Area,
@@ -31,7 +30,6 @@ import { api } from "../../api/client";
 import type {
   StatsSummary,
   StatsTimeSeries,
-  StatsTimeSeriesEntry,
   ModelUsageEntry,
   ProviderUsageEntry,
   SessionUsageEntry,
@@ -220,17 +218,22 @@ export function StatsView() {
   // Detect dark mode
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    setIsDark(mq.matches);
+    const rafId = requestAnimationFrame(() => setIsDark(mq.matches));
     const handler = (e: MediaQueryListEvent) => setIsDark(e.matches);
     mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
+    return () => {
+      mq.removeEventListener("change", handler);
+      cancelAnimationFrame(rafId);
+    };
   }, []);
 
   const colors = useMemo(() => (isDark ? DARK_COLORS : LIGHT_COLORS), [isDark]);
 
   // Use a ref so fetchAll never changes identity (avoids useEffect chain on tab switch)
   const granularityRef = useRef(granularity);
-  granularityRef.current = granularity;
+  useEffect(() => {
+    granularityRef.current = granularity;
+  }, [granularity]);
 
   // Fetch everything on mount
   const fetchAll = useCallback(async () => {
@@ -254,8 +257,6 @@ export function StatsView() {
     } finally {
       setInitialLoading(false);
     }
-    // stable identity — never recreated
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Fetch only time series when granularity changes
@@ -270,7 +271,8 @@ export function StatsView() {
 
   // Fetch on mount only
   useEffect(() => {
-    fetchAll();
+    const id = requestAnimationFrame(() => fetchAll());
+    return () => cancelAnimationFrame(id);
   }, [fetchAll]);
 
   // ── Derived data ─────────────────────────────────────────────────────

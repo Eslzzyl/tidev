@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildRounds } from "./round";
 import type { Message } from "../types/api";
+import type { Round, SystemMessageBlock } from "../types/round";
 
 function userMsg(overrides: Partial<Message> = {}): Message {
   return {
@@ -65,7 +66,7 @@ describe("buildRounds", () => {
     const msgs = [userMsg(), assistantMsg()];
     const rounds = buildRounds(msgs);
     expect(rounds).toHaveLength(1);
-    const round = rounds[0] as any;
+    const round = rounds[0] as Round;
     expect(round.status).toBe("complete");
     expect(round.segments).toHaveLength(1);
     expect(round.segments[0]).toEqual({ type: "text", content: "hi there" });
@@ -81,7 +82,7 @@ describe("buildRounds", () => {
     ];
     const rounds = buildRounds(msgs);
     expect(rounds).toHaveLength(1);
-    const round = rounds[0] as any;
+    const round = rounds[0] as Round;
     expect(round.status).toBe("complete");
     expect(round.segments).toEqual([
       { type: "text", content: "hi there" },
@@ -94,7 +95,7 @@ describe("buildRounds", () => {
     const msgs = [userMsg(), assistantMsg({ streaming: true })];
     const rounds = buildRounds(msgs);
     expect(rounds).toHaveLength(1);
-    expect((rounds[0] as any).status).toBe("streaming");
+    expect((rounds[0] as Round).status).toBe("streaming");
   });
 
   it("appends reasoning segment when assistant has reasoning field", () => {
@@ -103,7 +104,7 @@ describe("buildRounds", () => {
       assistantMsg({ reasoning: "thinking...", content: "answer" }),
     ];
     const rounds = buildRounds(msgs);
-    const segments = (rounds[0] as any).segments;
+    const segments = (rounds[0] as Round).segments;
     expect(segments).toHaveLength(2);
     expect(segments[0]).toEqual({ type: "reasoning", content: "thinking..." });
     expect(segments[1]).toEqual({ type: "text", content: "answer" });
@@ -116,7 +117,7 @@ describe("buildRounds", () => {
       assistantMsg({ id: "a2", content: "part2" }),
     ];
     const rounds = buildRounds(msgs);
-    const segments = (rounds[0] as any).segments;
+    const segments = (rounds[0] as Round).segments;
     expect(segments).toHaveLength(1);
     expect(segments[0]).toEqual({ type: "text", content: "part1\npart2" });
   });
@@ -125,16 +126,16 @@ describe("buildRounds", () => {
     const msg = systemMsg();
     const rounds = buildRounds([msg]);
     expect(rounds).toHaveLength(1);
-    const block = rounds[0] as any;
+    const block = rounds[0] as SystemMessageBlock;
     expect(block.kind).toBe("system");
     expect(block.message).toBe(msg);
   });
 
   it("places unknown role messages as system blocks", () => {
-    const msg = userMsg({ role: "error" as any, content: "something broke" });
+    const msg = userMsg({ role: "error", content: "something broke" });
     const rounds = buildRounds([msg]);
     expect(rounds).toHaveLength(1);
-    const block = rounds[0] as any;
+    const block = rounds[0] as SystemMessageBlock;
     expect(block.kind).toBe("system");
     expect(block.message).toBe(msg);
   });
@@ -148,9 +149,9 @@ describe("buildRounds", () => {
     ];
     const rounds = buildRounds(msgs);
     expect(rounds).toHaveLength(3);
-    expect((rounds[0] as any).userMessage?.id).toBe("u1");
-    expect((rounds[1] as any).kind).toBe("system");
-    expect((rounds[1] as any).message.id).toBe("s1");
-    expect((rounds[2] as any).userMessage?.id).toBe("u2");
+    expect((rounds[0] as Round).userMessage?.id).toBe("u1");
+    expect((rounds[1] as SystemMessageBlock).kind).toBe("system");
+    expect((rounds[1] as SystemMessageBlock).message.id).toBe("s1");
+    expect((rounds[2] as Round).userMessage?.id).toBe("u2");
   });
 });

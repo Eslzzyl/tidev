@@ -335,7 +335,7 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
   const [isWide, setIsWide] = useState(
     typeof window !== "undefined" && window.innerWidth >= WIDE_LAYOUT_THRESHOLD,
   );
-  const [hljs, setHljs] = useState<any>(null);
+  const [hljs, setHljs] = useState<typeof import("highlight.js") | null>(null);
 
   // Dynamically load highlight.js on first render
   useEffect(() => {
@@ -532,13 +532,14 @@ export function CollapsibleDiffFile({
   defaultExpanded = true,
   hideCollapseToggle = false,
 }: Props & { defaultExpanded?: boolean; hideCollapseToggle?: boolean }) {
-  const { allExpanded, toggleAll } = useDiffCollapseContext();
+  const { allExpanded } = useDiffCollapseContext();
   const [localExpanded, setLocalExpanded] = useState(defaultExpanded);
 
   // Sync with global collapse/expand all
   useEffect(() => {
     if (allExpanded !== null) {
-      setLocalExpanded(allExpanded);
+      const id = requestAnimationFrame(() => setLocalExpanded(allExpanded));
+      return () => cancelAnimationFrame(id);
     }
   }, [allExpanded]);
 
@@ -578,6 +579,7 @@ const DiffCollapseContext = createContext<DiffCollapseContextType>({
   toggleAll: () => {},
 });
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useDiffCollapseContext() {
   return useContext(DiffCollapseContext);
 }

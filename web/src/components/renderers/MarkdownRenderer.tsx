@@ -4,11 +4,10 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
-import { CopyButton } from "../ui/CopyButton";
 import { Check, Copy, Download, Maximize2, Minimize2 } from "lucide-react";
 
 // Dynamically import mermaid to avoid issues
-let mermaidInstance: any = null;
+let mermaidInstance: { initialize: (config: Record<string, unknown>) => void; run: (config: Record<string, unknown>) => Promise<void> } | null = null;
 async function getMermaid() {
   if (!mermaidInstance) {
     const mermaidModule = await import("mermaid");

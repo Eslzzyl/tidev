@@ -24,7 +24,7 @@ export function useAutoScroll(deps: unknown[]) {
       endRef.current?.scrollIntoView({ behavior: "instant" });
       isFirstLoad.current = false;
     }
-  }, deps);
+  }, [deps]);
 
   useEffect(() => {
     if (!isFirstLoad.current && shouldAutoScroll) {

@@ -280,6 +280,7 @@ export function SmartInput({
       closeCommandPalette,
       setCommandPalette,
       setFileMention,
+      toggleMode,
     ],
   );
 

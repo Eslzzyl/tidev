@@ -1,5 +1,3 @@
-import { useCallback } from "react";
-
 interface Props {
   onResizeStart: (e: React.MouseEvent) => void;
   isResizing?: boolean;

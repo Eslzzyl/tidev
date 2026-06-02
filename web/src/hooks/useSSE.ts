@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { sseClient } from "../api/sse";
 import { usePermissionStore } from "../stores/usePermissionStore";
 import { useSessionStore } from "../stores/useSessionStore";
@@ -32,7 +32,8 @@ export function useSSE(sessionId: string | null) {
    * If request_id matches the current turn, the existing message is reused.
    * If it's a new turn, a fresh assistant message is appended to the messages store.
    */
-  function ensureStreamingAssistant(request_id: number): void {
+  const ensureStreamingAssistant = useCallback(
+    (request_id: number): void => {
     if (
       request_id === currentRequestIdRef.current &&
       streamingAssistantIdRef.current
@@ -69,21 +70,17 @@ export function useSSE(sessionId: string | null) {
       request_id,
       newMsg.id.substring(0, 20),
     );
-  }
+  }, [setStreaming]);
 
-  /**
-   * Update the streaming assistant message in the store by applying `updater`
-   * to the current message (identified by streamingAssistantIdRef).
-   * Silently no-ops if the streaming assistant is not found (race with abort/error).
-   */
-  function updateStreamingAssistant(updater: (msg: Message) => Message): void {
+  const updateStreamingAssistant = useCallback(
+    (updater: (msg: Message) => Message): void => {
     const id = streamingAssistantIdRef.current;
     if (!id) return;
 
     const state = useSessionStore.getState();
     const msgs = state.messages.map((m) => (m.id === id ? updater(m) : m));
     state.setMessages(msgs);
-  }
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Event handlers (defined inside useEffect so they see the latest closure)
@@ -357,11 +354,6 @@ export function useSSE(sessionId: string | null) {
       setConnectionStatus("connected");
     };
 
-    const handleDisconnected = () => {
-      setConnectionStatus("disconnected");
-      setStreaming(false);
-    };
-
     const handleMessagesUpdated = () => {
       // Refresh messages from API (e.g. after compaction completes).
       // Ignore during streaming to avoid wiping local streaming state.
@@ -616,5 +608,7 @@ export function useSSE(sessionId: string | null) {
     setMessages,
     setStreaming,
     setConnectionStatus,
+    ensureStreamingAssistant,
+    updateStreamingAssistant,
   ]);
 }

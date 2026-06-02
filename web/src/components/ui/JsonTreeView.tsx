@@ -46,10 +46,9 @@ interface TreeNodeProps {
   value: unknown;
   depth: number;
   maxDepth: number;
-  isLast: boolean;
 }
 
-function TreeNode({ keyName, value, depth, maxDepth, isLast }: TreeNodeProps) {
+function TreeNode({ keyName, value, depth, maxDepth }: TreeNodeProps) {
   const [isExpanded, setIsExpanded] = useState(depth < maxDepth);
   const type = getType(value);
   const isCollapsible = (type === "array" || type === "object") && depth < 10;

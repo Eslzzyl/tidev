@@ -7,7 +7,6 @@ import {
   Save,
   Eye,
   Loader2,
-  Code,
 } from "lucide-react";
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useFileStore } from "../../stores/useFileStore";
@@ -33,50 +32,9 @@ const IMAGE_EXTS = new Set([
   "bmp",
 ]);
 const MARKDOWN_EXTS = new Set(["md", "markdown", "mdx"]);
-const CODE_EXTS = new Set([
-  "rs",
-  "ts",
-  "tsx",
-  "js",
-  "jsx",
-  "mjs",
-  "py",
-  "go",
-  "java",
-  "rb",
-  "c",
-  "h",
-  "cpp",
-  "hpp",
-  "cc",
-  "cxx",
-  "cs",
-  "css",
-  "scss",
-  "less",
-  "html",
-  "htm",
-  "json",
-  "yaml",
-  "yml",
-  "toml",
-  "sql",
-  "sh",
-  "bash",
-  "zsh",
-  "xml",
-  "svg",
-  "vue",
-  "svelte",
-  "astro",
-  "tex",
-  "dockerfile",
-]);
 
 function getFileExt(path: string): string {
-  const name = path.split("/").pop() || path;
-  const idx = name.lastIndexOf(".");
-  return idx >= 0 ? name.slice(idx + 1).toLowerCase() : "";
+  return path.split(".").pop()?.toLowerCase() ?? "";
 }
 
 function isImageFile(path: string): boolean {
@@ -91,13 +49,15 @@ function isJsonFile(path: string): boolean {
   return getFileExt(path) === "json";
 }
 
-function isCodeFile(path: string): boolean {
-  const ext = getFileExt(path);
-  return CODE_EXTS.has(ext) || !ext || ext.length > 5;
+function tryParseJson(content: string): unknown {
+  try {
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
 }
 
-export function CodeViewer() {
-  const openFiles = useFileStore((s) => s.openFiles);
+export function CodeViewer() {  const openFiles = useFileStore((s) => s.openFiles);
   const activeFilePath = useFileStore((s) => s.activeFilePath);
   const isSaving = useFileStore((s) => s.isSaving);
   const closeFile = useFileStore((s) => s.closeFile);
@@ -113,6 +73,7 @@ export function CodeViewer() {
   // Ref for CodeMirrorEditor imperative methods
   const editorRef = useRef<CodeMirrorEditorHandle>(null);
   const [goToLineOpen, setGoToLineOpen] = useState(false);
+  const [goToLineMeta, setGoToLineMeta] = useState({ totalLines: 0, currentLine: 1 });
 
   // Get the active file object
   const activeFile = activeFilePath
@@ -132,7 +93,8 @@ export function CodeViewer() {
 
   // Reset editing state when switching files
   useEffect(() => {
-    setIsEditing(false);
+    const id = requestAnimationFrame(() => setIsEditing(false));
+    return () => cancelAnimationFrame(id);
   }, [activeFilePath]);
 
   // Listen for save events from CodeMirrorEditor
@@ -149,6 +111,10 @@ export function CodeViewer() {
     };
 
     const handleGoToLine = () => {
+      setGoToLineMeta({
+        totalLines: editorRef.current?.getLineCount() ?? 0,
+        currentLine: editorRef.current?.getCurrentLine() ?? 1,
+      });
       setGoToLineOpen(true);
     };
 
@@ -200,14 +166,10 @@ export function CodeViewer() {
   }, []);
 
   // Parse JSON for tree view
-  const jsonData = useMemo(() => {
-    if (renderMode !== "json" || !activeFile?.content) return null;
-    try {
-      return JSON.parse(activeFile.content);
-    } catch {
-      return null;
-    }
-  }, [renderMode, activeFile?.content]);
+  const jsonData =
+    renderMode === "json" && activeFile?.content
+      ? tryParseJson(activeFile.content)
+      : null;
 
   const showEditToggle =
     activeFile &&
@@ -396,8 +358,8 @@ export function CodeViewer() {
       {/* Go to line dialog */}
       {goToLineOpen && (
         <GoToLineDialog
-          totalLines={editorRef.current?.getLineCount() ?? 0}
-          currentLine={editorRef.current?.getCurrentLine() ?? 1}
+          totalLines={goToLineMeta.totalLines}
+          currentLine={goToLineMeta.currentLine}
           onGo={handleGoToLine}
           onClose={() => setGoToLineOpen(false)}
         />

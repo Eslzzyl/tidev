@@ -12,10 +12,8 @@ export function LeftSidebar() {
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
   const isDraftSession = useSessionStore((s) => s.isDraftSession);
   const draftTitle = useSessionStore((s) => s.draftTitle);
-  const isLoading = useSessionStore((s) => s.isLoading);
   const isStreaming = useUIStore((s) => s.isStreaming);
 
-  const startDraftSession = useSessionStore((s) => s.startDraftSession);
   const setCurrentSession = useSessionStore((s) => s.setCurrentSession);
   const setMessages = useSessionStore((s) => s.setMessages);
   const removeSession = useSessionStore((s) => s.removeSession);

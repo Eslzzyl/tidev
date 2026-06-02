@@ -105,7 +105,7 @@ function escapeHtml(text: string): string {
 }
 
 export function CodeLinesRenderer({ output, filepath }: Props) {
-  const [hljs, setHljs] = useState<any>(null);
+  const [hljs, setHljs] = useState<typeof import("highlight.js") | null>(null);
 
   // Dynamically load highlight.js on first render
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, memo, useCallback } from "react";
+import { useState, useEffect, useRef, memo } from "react";
 import {
   Loader2,
   ChevronDown,
@@ -104,6 +104,8 @@ function formatDuration(ms: number): string {
 // Streaming block renderer — uses the same ToolCallRow as the final view
 // ---------------------------------------------------------------------------
 
+let streamBlockIdCounter = 0;
+
 function StreamingBlock({ block }: { block: SubagentStreamBlock }) {
   switch (block.type) {
     case "reasoning":
@@ -124,7 +126,7 @@ function StreamingBlock({ block }: { block: SubagentStreamBlock }) {
     case "tool_call": {
       // Build a partial ToolCallEntry for consistent rendering
       const toolEntry: ToolCallEntry = {
-        id: `stream-tc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        id: `stream-tc-${++streamBlockIdCounter}`,
         name: block.toolName ?? "tool",
         arguments: block.toolArgs ?? "{}",
         argumentsComplete: true,
@@ -279,30 +281,31 @@ export const SubagentCard = memo(function SubagentCard({ entry }: Props) {
   }, [isRunning, isCompleted]);
 
   // Fetch child session messages when expanded + completed
-  const fetchChildMessages = useCallback(async () => {
-    if (!childSessionId || hasFetchedRef.current) return;
-    hasFetchedRef.current = true;
-    setChildMessagesLoading(true);
-    try {
-      const res = await api.listMessages(childSessionId);
-      setChildMessages(res.messages);
-    } catch (err) {
-      console.error("[SubagentCard] failed to fetch child messages:", err);
-    } finally {
-      setChildMessagesLoading(false);
-    }
-  }, [childSessionId]);
-
   useEffect(() => {
-    if (expanded && isCompleted && childSessionId) {
-      fetchChildMessages();
-    }
-  }, [expanded, isCompleted, childSessionId, fetchChildMessages]);
+    if (!(expanded && isCompleted && childSessionId)) return;
+
+    const fetchMessages = async () => {
+      if (!childSessionId || hasFetchedRef.current) return;
+      hasFetchedRef.current = true;
+      setChildMessagesLoading(true);
+      try {
+        const res = await api.listMessages(childSessionId);
+        setChildMessages(res.messages);
+      } catch (err) {
+        console.error("[SubagentCard] failed to fetch child messages:", err);
+      } finally {
+        setChildMessagesLoading(false);
+      }
+    };
+
+    fetchMessages();
+  }, [expanded, isCompleted, childSessionId]);
 
   useEffect(() => {
     hasFetchedRef.current = false;
     didAutoExpandRef.current = false;
-    setChildMessages(null);
+    const id = requestAnimationFrame(() => setChildMessages(null));
+    return () => cancelAnimationFrame(id);
   }, [entry.id]);
 
   function handleToggle() {

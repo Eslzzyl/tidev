@@ -93,7 +93,6 @@ export function formatToken(n: number): string {
 export function stripSystemReminderTags(text: string): string {
   let result = "";
   let rest = text;
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     const start = rest.indexOf("<system-reminder");
     if (start === -1) {
@@ -130,7 +129,7 @@ export function formatWorkspace(path: string): string {
   if (!path) return "-";
 
   // Strip Windows \\?\ extended-length prefix
-  let cleaned = path.replace(/^\\\\\?\\/, "");
+  const cleaned = path.replace(/^\\\\\?\\/, "");
 
   // Replace home directory with ~ on any platform
   // On Unix: /home/user/... → ~/...

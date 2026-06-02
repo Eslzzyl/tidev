@@ -25,7 +25,7 @@ interface TerminalStore {
   closeBySessionId: (sessionId: string) => void;
   sendInput: (tabId: string, data: string) => Promise<void>;
   sendResize: (tabId: string, cols: number, rows: number) => Promise<void>;
-  connectSSE: (sessionId: string, tabId: string) => void;
+  connectSSE: (sessionId: string) => void;
   connectWS: (sessionId: string, tabId: string) => void;
   disconnect: () => void;
 }
@@ -70,7 +70,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
       // Connect via WebSocket (primary), fall back to SSE
       get().connectWS(result.session_id, tabId);
-    } catch (err) {
+    } catch {
       set((state) => ({
         tabs: state.tabs.map((t) =>
           t.id === tabId
@@ -168,7 +168,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     }
   },
 
-  connectSSE: (sessionId, tabId) => {
+  connectSSE: (sessionId) => {
     get().disconnect();
 
     const url = `${window.location.origin}/api/terminal/events?session_id=${sessionId}`;
@@ -233,7 +233,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       ws.onerror = () => {
         // WebSocket failed, fall back to SSE
         get().disconnect();
-        get().connectSSE(sessionId, tabId);
+        get().connectSSE(sessionId);
       };
 
       ws.onclose = () => {

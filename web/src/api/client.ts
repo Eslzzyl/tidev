@@ -9,7 +9,6 @@ import type {
   CreateSessionResponse,
   SendMessageRequest,
   SendMessageResponse,
-  ShellCommandRequest,
   ShellCommandResponse,
   AbortRequest,
   WorkspaceInfo,
@@ -28,13 +27,10 @@ import type {
   SetMemoryModelRequest,
   GetModelThinkingLevelResponse,
   SetModelThinkingLevelRequest,
-  DirectoryEntry,
   ListDirResponse,
   ReadFileResponse,
   WriteFileResponse,
-  CreateItemRequest,
   CreateItemResponse,
-  RenameItemRequest,
   RenameItemResponse,
   RemoveItemResponse,
   ReadBase64Response,
@@ -112,6 +108,7 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
     if (error instanceof TypeError && error.message.includes("fetch")) {
       throw new Error(
         "Cannot connect to the server. Please check your network connection and try again.",
+        { cause: error },
       );
     }
     throw error;

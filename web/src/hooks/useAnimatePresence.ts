@@ -35,8 +35,12 @@ export function useAnimatePresence(
 
     if (show) {
       // Mount immediately
-      setMounted(true);
-      setStage("entering");
+      // Defer setState to avoid sync cascading renders
+      const raf = requestAnimationFrame(() => {
+        setMounted(true);
+        setStage("entering");
+      });
+      return () => cancelAnimationFrame(raf);
       // Next frame: trigger entrance animation
       const raf = requestAnimationFrame(() => {
         setVisible(true);
@@ -48,12 +52,17 @@ export function useAnimatePresence(
       return () => cancelAnimationFrame(raf);
     } else {
       // Start exit
-      setStage("exiting");
-      setVisible(false);
+      const raf = requestAnimationFrame(() => {
+        setStage("exiting");
+        setVisible(false);
+      });
       const timer = setTimeout(() => {
         setMounted(false);
       }, exitDuration);
-      return () => clearTimeout(timer);
+      return () => {
+        cancelAnimationFrame(raf);
+        clearTimeout(timer);
+      };
     }
   }, [show, exitDuration]);
 

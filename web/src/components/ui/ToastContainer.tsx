@@ -56,7 +56,7 @@ export function ToastContainer() {
     }
 
     prevToastsRef.current = storeToasts;
-  });
+  }, [storeToasts]);
 
   // Merge active + exiting toasts.  Exiting duplicates are discarded.
   const activeIds = new Set(storeToasts.map((t) => t.id));

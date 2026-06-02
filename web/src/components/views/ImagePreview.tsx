@@ -13,8 +13,10 @@ export function ImagePreview({ path }: ImagePreviewProps) {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
+    const rafId = requestAnimationFrame(() => {
+      setLoading(true);
+      setError(null);
+    });
 
     api
       .readFileBase64(path)
@@ -33,6 +35,7 @@ export function ImagePreview({ path }: ImagePreviewProps) {
 
     return () => {
       cancelled = true;
+      cancelAnimationFrame(rafId);
     };
   }, [path]);
 

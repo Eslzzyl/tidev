@@ -256,6 +256,7 @@ export function MessageInput({
   const composingRef = useRef(false);
   const compositionJustCommittedRef = useRef(false);
   const compositionEndTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const idCounterRef = useRef(0);
 
   // Clean up the timer on unmount.
   useEffect(() => {
@@ -398,7 +399,7 @@ export function MessageInput({
 
         // Optimistically add the shell user message
         useSessionStore.getState().addMessage({
-          id: `shell-cmd-${Date.now()}`,
+          id: `shell-cmd-${++idCounterRef.current}`,
           role: "shell",
           content: `$ ${content}`,
           created_at: new Date().toISOString(),
@@ -449,7 +450,7 @@ export function MessageInput({
 
       // Add the user message to the store immediately so the SSE handler
       // finds it as the last user message when creating the streaming round.
-      const pendingId = `pending-${Date.now()}`;
+      const pendingId = `pending-${++idCounterRef.current}`;
       useSessionStore.getState().addMessage({
         id: pendingId,
         role: "user",

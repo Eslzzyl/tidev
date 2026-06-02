@@ -8,7 +8,7 @@ import {
 import { useSessionStore } from "../../stores/useSessionStore";
 import { useUIStore } from "../../stores/useUIStore";
 import type { FileDiff, TodoItem, TokenUsage } from "../../types/api";
-import { formatNumber, formatToken, formatWorkspace } from "../../utils/format";
+import { formatToken, formatWorkspace } from "../../utils/format";
 
 export function RightSidebar() {
   const messages = useSessionStore((s) => s.messages);

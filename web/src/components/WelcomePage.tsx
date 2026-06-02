@@ -405,7 +405,7 @@ export function WelcomePage() {
       <SkillsDialog
         isOpen={skillsDialogOpen}
         onClose={() => setSkillsDialogOpen(false)}
-        onSelect={(content) => {
+        onSelect={() => {
           // On welcome page, we just close the dialog
           // The skill content would need to be inserted into input
           setSkillsDialogOpen(false);
