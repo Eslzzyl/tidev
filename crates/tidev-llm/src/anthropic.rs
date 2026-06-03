@@ -340,18 +340,39 @@ pub(crate) async fn complete_anthropic(
     Ok(content)
 }
 
+/// Set `cache_control: ephemeral` on the last content block of the last message.
+/// This marks a cache breakpoint so the conversation prefix is cached by Anthropic.
+fn apply_cache_to_last_message(messages: &mut [AnthropicMessage]) {
+    if let Some(last_msg) = messages.last_mut()
+        && let Some(last_block) = last_msg.content.last_mut()
+    {
+        match last_block {
+            AnthropicContentBlock::Text { cache_control, .. }
+            | AnthropicContentBlock::ToolResult { cache_control, .. } => {
+                *cache_control = Some(CacheControl::ephemeral());
+            }
+            AnthropicContentBlock::Thinking { .. }
+            | AnthropicContentBlock::Image { .. }
+            | AnthropicContentBlock::ToolUse { .. } => {}
+        }
+    }
+}
+
 fn build_anthropic_request(
     model: &LlmProviderConfig,
     messages: Vec<Message>,
     tools: &[ToolDefinition],
 ) -> Result<AnthropicRequest> {
     // System prompt comes from the model config directly.
-    // No context summary merging needed — compaction summaries are now
-    // User messages inserted at the compression boundary, not System messages.
+    // Always use Blocks format with cache_control for prompt caching.
     let system_prompt = if model.system_prompt_str().trim().is_empty() {
         None
     } else {
-        Some(model.system_prompt.clone().unwrap_or_default())
+        Some(SystemPrompt::Blocks(vec![SystemBlock {
+            block_type: "text".to_string(),
+            text: model.system_prompt.clone().unwrap_or_default(),
+            cache_control: Some(CacheControl::ephemeral()),
+        }]))
     };
 
     let mut anthropic_messages = Vec::new();
@@ -374,7 +395,10 @@ fn build_anthropic_request(
                 let mut content = Vec::new();
                 let text = message_text_with_file_references(&message);
                 if !text.is_empty() {
-                    content.push(AnthropicContentBlock::Text { text });
+                    content.push(AnthropicContentBlock::Text {
+                        text,
+                        cache_control: None,
+                    });
                 }
                 for tool_call in &message.tool_calls {
                     content.push(AnthropicContentBlock::ToolUse {
@@ -382,6 +406,7 @@ fn build_anthropic_request(
                         name: tool_call.name.clone(),
                         input: serde_json::from_str(&tool_call.arguments)
                             .unwrap_or(serde_json::Value::Object(Default::default())),
+                        cache_control: None,
                     });
                 }
                 if !message.reasoning.is_empty() {
@@ -402,6 +427,7 @@ fn build_anthropic_request(
                     content: vec![AnthropicContentBlock::ToolResult {
                         tool_use_id: tool_call_id,
                         content,
+                        cache_control: None,
                     }],
                 });
             }
@@ -413,17 +439,27 @@ fn build_anthropic_request(
     let anthropic_tools = if tools.is_empty() {
         None
     } else {
-        Some(
-            tools
-                .iter()
-                .map(|t| AnthropicTool {
-                    name: t.name.to_string(),
-                    description: t.description.to_string(),
-                    input_schema: t.parameters.clone(),
-                })
-                .collect(),
-        )
+        let mut native_tools: Vec<AnthropicTool> = tools
+            .iter()
+            .map(|t| AnthropicTool {
+                name: t.name.to_string(),
+                description: t.description.to_string(),
+                input_schema: t.parameters.clone(),
+                cache_control: None,
+            })
+            .collect();
+        // Cache the last tool definition (caches all tool definitions)
+        if let Some(last_tool) = native_tools.last_mut() {
+            last_tool.cache_control = Some(CacheControl::ephemeral());
+        }
+        Some(native_tools)
     };
+
+    // For multi-turn conversations, set cache_control on the last message's
+    // last content block so the conversation prefix is cached for the next request.
+    if anthropic_messages.len() > 1 {
+        apply_cache_to_last_message(&mut anthropic_messages);
+    }
 
     Ok(AnthropicRequest {
         model: model.request_model_id.clone().unwrap_or_default(),
@@ -438,11 +474,40 @@ fn build_anthropic_request(
 }
 
 #[derive(Clone, Debug, Serialize)]
+struct CacheControl {
+    #[serde(rename = "type")]
+    cache_type: String,
+}
+
+impl CacheControl {
+    fn ephemeral() -> Self {
+        Self { cache_type: "ephemeral".to_string() }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct SystemBlock {
+    #[serde(rename = "type")]
+    block_type: String,
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_control: Option<CacheControl>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(untagged)]
+enum SystemPrompt {
+    #[allow(dead_code)]
+    String(String),
+    Blocks(Vec<SystemBlock>),
+}
+
+#[derive(Clone, Debug, Serialize)]
 struct AnthropicRequest {
     model: String,
     max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,
+    system: Option<SystemPrompt>,
     messages: Vec<AnthropicMessage>,
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -465,6 +530,8 @@ struct AnthropicMessage {
 enum AnthropicContentBlock {
     Text {
         text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
     },
     Thinking {
         thinking: String,
@@ -476,10 +543,14 @@ enum AnthropicContentBlock {
         id: String,
         name: String,
         input: serde_json::Value,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
     },
     ToolResult {
         tool_use_id: String,
         content: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
     },
 }
 
@@ -488,6 +559,8 @@ struct AnthropicTool {
     name: String,
     description: String,
     input_schema: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_control: Option<CacheControl>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -506,7 +579,10 @@ fn user_message_content(
     let images: Vec<&MessageAttachment> = image_attachments(message).collect();
 
     if images.is_empty() {
-        return Ok(vec![AnthropicContentBlock::Text { text }]);
+        return Ok(vec![AnthropicContentBlock::Text {
+            text,
+            cache_control: None,
+        }]);
     }
 
     if !model.supports_images {
@@ -515,7 +591,10 @@ fn user_message_content(
 
     let mut content = Vec::new();
     if !text.trim().is_empty() {
-        content.push(AnthropicContentBlock::Text { text });
+        content.push(AnthropicContentBlock::Text {
+            text,
+            cache_control: None,
+        });
     }
 
     for attachment in images {
@@ -537,6 +616,7 @@ fn user_message_content(
     if content.is_empty() {
         content.push(AnthropicContentBlock::Text {
             text: String::new(),
+            cache_control: None,
         });
     }
 
