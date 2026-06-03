@@ -162,6 +162,11 @@ impl AgentRuntime {
             store.append_message(child_session_id, &user_msg)?;
         }
 
+        // Sync tools to the child model so apply_patch vs write/edit filtering
+        // (all_definitions → use_apply_patch) uses the correct model for the
+        // subagent, not the parent's model.
+        self.tools.set_active_model(child_model.clone());
+
         // 3. Filter tools based on agent definition
         let all_tools = self.tool_definitions();
         let tools: Vec<ToolDefinition> = if let Some(allowed) = &agent_def.allowed_tools {
