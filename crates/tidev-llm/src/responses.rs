@@ -370,15 +370,36 @@ pub(crate) async fn stream_responses(
                     } => {
                         // Only accumulate arguments, final ToolCallUpdated is sent in OutputItemDone
                     }
+                    ResponseStreamEvent::ResponseCompleted {
+                        response,
+                        sequence_number: _,
+                    } => {
+                        if let Some(usage) = response.usage {
+                            let cached_tokens = usage
+                                .input_tokens_details
+                                .as_ref()
+                                .map(|d| d.cached_tokens)
+                                .unwrap_or(0);
+                            let duration_ms =
+                                first_delta_time.map(|start| start.elapsed().as_millis() as u64);
+                            let _ = tx.send(BackendEvent::UsageStats {
+                                session_id,
+                                request_id,
+                                input_tokens: usage.input_tokens,
+                                output_tokens: usage.output_tokens,
+                                total_tokens: usage.total_tokens,
+                                cache_read_tokens: cached_tokens,
+                                cache_write_tokens: 0,
+                                model_id: format!("{}:{}", model.provider_id, model.model_id),
+                                duration_ms,
+                            });
+                        }
+                    }
                     ResponseStreamEvent::ResponseCreated {
                         response: _,
                         sequence_number: _,
                     }
                     | ResponseStreamEvent::ResponseInProgress {
-                        response: _,
-                        sequence_number: _,
-                    }
-                    | ResponseStreamEvent::ResponseCompleted {
                         response: _,
                         sequence_number: _,
                     }
@@ -1391,6 +1412,8 @@ struct ResponseStreamResponse {
     model: String,
     #[serde(default)]
     created_at: u64,
+    #[serde(default)]
+    usage: Option<ResponseStreamUsage>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -1496,14 +1519,20 @@ struct ResponseStreamIncompleteDetails {
 struct ResponseStreamUsage {
     #[serde(rename = "input_tokens")]
     input_tokens: u32,
-    #[serde(rename = "completion_tokens")]
+    #[serde(rename = "output_tokens")]
     output_tokens: u32,
     #[serde(rename = "total_tokens")]
     total_tokens: u32,
-    #[serde(rename = "response_tokens")]
-    response_tokens: Option<u32>,
-    #[serde(rename = "thinking_tokens")]
-    thinking_tokens: Option<u32>,
+    #[serde(default)]
+    input_tokens_details: Option<ResponseStreamUsageInputDetails>,
+}
+
+/// Input token details (cached tokens)
+#[derive(Clone, Debug, Default, Deserialize)]
+#[allow(dead_code)]
+struct ResponseStreamUsageInputDetails {
+    #[serde(default)]
+    cached_tokens: u32,
 }
 
 /// Non-streaming response structures
