@@ -34,7 +34,7 @@ pub(crate) async fn stream_responses(
         .clone()
         .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
 
-    let request = build_responses_request(&model, messages, true, &tools)?;
+    let request = build_responses_request(&model, messages, true, &tools, Some(session_id.to_string()))?;
     let request_body = serde_json::to_string(&request).unwrap_or_default();
     let request_body_size = request_body.len();
     save_request_for_debugging(&request_body, save_request_body, max_request_files);
@@ -503,7 +503,7 @@ pub(crate) async fn complete_responses(
         .clone()
         .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
 
-    let request = build_responses_request(&model, messages, false, &tools)?;
+    let request = build_responses_request(&model, messages, false, &tools, None)?;
     let request_body = serde_json::to_string(&request).unwrap_or_default();
     let request_body_size = request_body.len();
     save_request_for_debugging(&request_body, save_request_body, max_request_files);
@@ -601,6 +601,7 @@ fn build_responses_request(
     messages: Vec<Message>,
     stream: bool,
     tools: &[ToolDefinition],
+    prompt_cache_key: Option<String>,
 ) -> Result<ResponsesRequest> {
     // System prompt comes from the model config directly.
     // No context summary merging needed — compaction summaries are now
@@ -684,6 +685,7 @@ fn build_responses_request(
         },
         thinking,
         include,
+        prompt_cache_key,
     })
 }
 
@@ -780,6 +782,8 @@ struct ResponsesRequest {
     thinking: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     include: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prompt_cache_key: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
