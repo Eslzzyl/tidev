@@ -45,6 +45,8 @@ use crate::render::render::{
 
 use crate::chat_render::content::BlockComputation;
 
+use crate::markdown::{WrapOptions, word_wrap_line};
+
 const TOOL_OUTPUT_PREVIEW_LINES: usize = 5;
 const MAX_VISIBLE_QUEUED_PROMPTS: usize = 4;
 const MAX_QUEUED_PROMPT_LINES: usize = 3;
@@ -1431,7 +1433,7 @@ impl App {
         let palette = self.palette();
 
         // Title line: [@type] subagent: [description]
-        let description = shorten(&execution.task_description, body_width.saturating_sub(30));
+        let description = execution.task_description.trim();
         let subagent_type = execution.subagent_type.clone();
 
         let mut lines = Vec::new();
@@ -1439,8 +1441,8 @@ impl App {
         // Top padding
         lines.push(Line::from(""));
 
-        // Header line: [@type] subagent: description
-        lines.push(Line::from(vec![
+        // Header line with @type and description, word-wrapped
+        let header_line = Line::from(vec![
             Span::styled(
                 format!("@{}", subagent_type),
                 Style::default().fg(palette.accent_soft),
@@ -1450,12 +1452,27 @@ impl App {
                 Style::default().fg(palette.muted),
             ),
             Span::styled(
-                description,
+                description.to_string(),
                 Style::default()
                     .fg(palette.text)
                     .add_modifier(Modifier::BOLD),
             ),
-        ]));
+        ]);
+        lines.extend(
+            word_wrap_line(
+                &header_line,
+                WrapOptions::new(body_width).break_words(true),
+            )
+            .into_iter()
+            .map(|l| {
+                Line::from(
+                    l.spans
+                        .into_iter()
+                        .map(|s| Span::styled(s.content.to_string(), s.style))
+                        .collect::<Vec<_>>(),
+                )
+            }),
+        );
 
         // Status line
         let status_text = execution.status.display();

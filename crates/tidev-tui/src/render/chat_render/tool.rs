@@ -930,9 +930,8 @@ pub(super) fn render_subagent_task_preview(
         return lines;
     }
 
-    // Unified header: [@type] subagent: description
-    lines.push(Line::from(""));
-    lines.push(Line::from(vec![
+    // Unified header: [@type] subagent: description (word-wrapped)
+    let header_line = Line::from(vec![
         Span::styled(
             format!("@{}", subagent_type),
             Style::default().fg(palette.accent_soft),
@@ -947,7 +946,22 @@ pub(super) fn render_subagent_task_preview(
                 .fg(palette.text)
                 .add_modifier(Modifier::BOLD),
         ),
-    ]));
+    ]);
+    lines.extend(
+        word_wrap_line(
+            &header_line,
+            WrapOptions::new(body_width).break_words(true),
+        )
+        .into_iter()
+        .map(|l| {
+            Line::from(
+                l.spans
+                    .into_iter()
+                    .map(|s| Span::styled(s.content.to_string(), s.style))
+                    .collect::<Vec<_>>(),
+            )
+        }),
+    );
     lines.push(Line::from(""));
 
     // Render the output as markdown
