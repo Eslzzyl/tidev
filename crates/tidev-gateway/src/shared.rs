@@ -157,6 +157,8 @@ pub fn thinking_options_for_model_id(model_id: &str) -> Vec<&'static str> {
         vec!["qwen:Off", "qwen:On"]
     } else if id.contains("glm") {
         vec!["glm:Off", "glm:On"]
+    } else if id.contains("gpt") && id.contains("5") {
+        vec!["gpt5:Off", "gpt5:Low", "gpt5:Medium", "gpt5:High", "gpt5:XHigh"]
     } else {
         vec![]
     }

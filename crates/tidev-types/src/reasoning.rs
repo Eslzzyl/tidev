@@ -172,6 +172,79 @@ impl GlmThinkingLevel {
     }
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Gpt5ThinkingLevel {
+    #[default]
+    Off,
+    Low,
+    Medium,
+    High,
+    XHigh,
+}
+
+impl Gpt5ThinkingLevel {
+    pub fn extra_body(&self) -> serde_json::Value {
+        match self {
+            Self::Off => serde_json::json!({}),
+            Self::Low => serde_json::json!({ "reasoning_effort": "low" }),
+            Self::Medium => serde_json::json!({ "reasoning_effort": "medium" }),
+            Self::High => serde_json::json!({ "reasoning_effort": "high" }),
+            Self::XHigh => serde_json::json!({ "reasoning_effort": "xhigh" }),
+        }
+    }
+
+    pub fn thinking_config(&self) -> Option<serde_json::Value> {
+        match self {
+            Self::Off => None,
+            _ => Some(serde_json::json!({
+                "reasoning": { "effort": self.as_str() }
+            })),
+        }
+    }
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Low => "Low",
+            Self::Medium => "Medium",
+            Self::High => "High",
+            Self::XHigh => "XHigh",
+        }
+    }
+
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Off => Self::Low,
+            Self::Low => Self::Medium,
+            Self::Medium => Self::High,
+            Self::High => Self::XHigh,
+            Self::XHigh => Self::Off,
+        }
+    }
+
+    pub fn from_display_name(name: &str) -> Self {
+        match name.to_lowercase().as_str() {
+            "off" => Self::Off,
+            "low" => Self::Low,
+            "medium" => Self::Medium,
+            "high" => Self::High,
+            "xhigh" => Self::XHigh,
+            _ => Self::Off,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::XHigh => "xhigh",
+        }
+    }
+}
+
 /// Model-specific thinking level type that wraps provider-specific levels.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -181,6 +254,7 @@ pub enum ThinkingLevelType {
     DeepSeek(DeepSeekV4ThinkingLevel),
     Qwen(Qwen35ThinkingLevel),
     Glm(GlmThinkingLevel),
+    Gpt5(Gpt5ThinkingLevel),
 }
 
 impl ThinkingLevelType {
@@ -190,6 +264,7 @@ impl ThinkingLevelType {
             Self::DeepSeek(level) => level.display_name(),
             Self::Qwen(level) => level.display_name(),
             Self::Glm(level) => level.display_name(),
+            Self::Gpt5(level) => level.display_name(),
         }
     }
 
@@ -199,6 +274,7 @@ impl ThinkingLevelType {
             Self::DeepSeek(level) => Self::DeepSeek(level.next()),
             Self::Qwen(level) => Self::Qwen(level.next()),
             Self::Glm(level) => Self::Glm(level.next()),
+            Self::Gpt5(level) => Self::Gpt5(level.next()),
         }
     }
 
@@ -208,6 +284,7 @@ impl ThinkingLevelType {
             Self::DeepSeek(level) => Some(level.extra_body()),
             Self::Qwen(level) => Some(level.extra_body()),
             Self::Glm(level) => Some(level.extra_body()),
+            Self::Gpt5(level) => Some(level.extra_body()),
         }
     }
 
@@ -229,6 +306,7 @@ impl ThinkingLevelType {
             }
             Self::Qwen(_) => None,
             Self::Glm(_) => None,
+            Self::Gpt5(level) => level.thinking_config(),
         }
     }
 
@@ -250,6 +328,7 @@ impl fmt::Display for ThinkingLevelType {
             }
             Self::Qwen(level) => write!(f, "qwen:{}", level.display_name().to_lowercase()),
             Self::Glm(level) => write!(f, "glm:{}", level.display_name().to_lowercase()),
+            Self::Gpt5(level) => write!(f, "gpt5:{}", level.display_name().to_lowercase()),
         }
     }
 }
@@ -264,6 +343,7 @@ impl ThinkingLevelType {
             }
             ["qwen", level] => Self::Qwen(Qwen35ThinkingLevel::from_display_name(level)),
             ["glm", level] => Self::Glm(GlmThinkingLevel::from_display_name(level)),
+            ["gpt5", level] => Self::Gpt5(Gpt5ThinkingLevel::from_display_name(level)),
             _ => Self::None,
         }
     }

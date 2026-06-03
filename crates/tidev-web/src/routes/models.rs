@@ -85,6 +85,11 @@ fn thinking_level_options(model_id: &str) -> Vec<String> {
             .into_iter()
             .map(String::from)
             .collect()
+    } else if id.contains("gpt") && id.contains("5") {
+        vec!["gpt5:Off", "gpt5:Low", "gpt5:Medium", "gpt5:High", "gpt5:XHigh"]
+            .into_iter()
+            .map(String::from)
+            .collect()
     } else {
         vec![]
     }
