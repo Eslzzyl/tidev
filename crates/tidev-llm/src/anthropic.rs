@@ -88,6 +88,7 @@ pub(crate) async fn stream_anthropic(
     let mut reasoning_text = String::new();
     let mut finish_reason: Option<String> = None;
     let mut tool_calls: BTreeMap<usize, ToolCallBuilder> = BTreeMap::new();
+    let mut thinking_blocks: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
     let mut think_parser = ThinkParser::default();
     let mut first_delta_time: Option<std::time::Instant> = None;
 
@@ -156,6 +157,23 @@ pub(crate) async fn stream_anthropic(
                                 });
                             }
                         }
+                        AnthropicDelta::ThinkingDelta { thinking } => {
+                            if first_delta_time.is_none() {
+                                first_delta_time = Some(std::time::Instant::now());
+                            }
+                            if thinking_blocks.contains(&index) {
+                                reasoning_text.push_str(&thinking);
+                                let _ = tx.send(BackendEvent::ReasoningDelta {
+                                    session_id,
+                                    request_id,
+                                    content: thinking,
+                                });
+                            }
+                        }
+                        AnthropicDelta::SignatureDelta { .. } => {
+                            // Signature delta marks the end of a thinking block.
+                            // We don't need to store the signature for display.
+                        }
                     },
                     AnthropicStreamEvent::ContentBlockStart {
                         index,
@@ -165,6 +183,12 @@ pub(crate) async fn stream_anthropic(
                             if first_delta_time.is_none() {
                                 first_delta_time = Some(std::time::Instant::now());
                             }
+                        }
+                        AnthropicContentBlockStart::Thinking { .. } => {
+                            if first_delta_time.is_none() {
+                                first_delta_time = Some(std::time::Instant::now());
+                            }
+                            thinking_blocks.insert(index);
                         }
                         AnthropicContentBlockStart::ToolUse { id, name } => {
                             if first_delta_time.is_none() {
@@ -585,6 +609,10 @@ enum AnthropicContentBlockStart {
         #[allow(dead_code)]
         text: Option<String>,
     },
+    Thinking {
+        #[allow(dead_code)]
+        thinking: Option<String>,
+    },
     ToolUse {
         id: String,
         name: String,
@@ -597,6 +625,9 @@ enum AnthropicContentBlockStart {
 enum AnthropicDelta {
     TextDelta { text: String },
     InputJsonDelta { partial_json: String },
+    ThinkingDelta { thinking: String },
+    #[allow(dead_code)]
+    SignatureDelta { signature: String },
 }
 
 #[derive(Clone, Debug, Deserialize)]
