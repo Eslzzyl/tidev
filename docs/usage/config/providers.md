@@ -27,10 +27,65 @@ api_type = "openai_chat_completions"
 
 | Value | Description |
 |-------|-------------|
-| `"openai_chat_completions"` | OpenAI Chat Completions API (`/chat/completions`). This is the default and is compatible with many OpenAI-compatible providers |
-| `"anthropic"` | Anthropic Messages API (`/v1/messages`) |
-| `"openai_responses"` | OpenAI Responses API (`/responses`) |
-| `"google_gemini"` | Google Gemini API (`/models/{model}:generateContent`) |
+| `"openai_chat_completions"` | OpenAI Chat Completions API. This is the default and is compatible with many OpenAI-compatible providers |
+| `"anthropic"` | Anthropic Messages API |
+| `"openai_responses"` | OpenAI Responses API |
+| `"google_gemini"` | Google Gemini API |
+
+### base_url rules per api_type
+
+Each `api_type` appends a specific path suffix to `base_url` to form the final
+API endpoint. The table below shows the suffix appended and the **standard
+convention** for `base_url`:
+
+| api_type | Appended suffix | Standard base_url convention | Full URL example |
+|----------|----------------|------------------------------|-----------------|
+| `openai_chat_completions` | `/chat/completions` | `https://api.example.com/v1` — already includes `/v1` | `https://api.example.com/v1/chat/completions` |
+| `anthropic` | `/v1/messages` | `https://api.example.com` — does **not** include `/v1` | `https://api.example.com/v1/messages` |
+| `openai_responses` | `/v1/responses` | `https://api.example.com` — does **not** include `/v1` | `https://api.example.com/v1/responses` |
+| `google_gemini` | `/models/{model_id}:generateContent` | `https://generativelanguage.googleapis.com` | `https://generativelanguage.googleapis.com/models/gemini-pro:generateContent` |
+
+**Why the difference?** The OpenAI Chat Completions convention places `/v1` in
+`base_url` and appends only `/chat/completions`. The Anthropic and OpenAI
+Responses conventions place the entire path on the appended suffix. tidev
+follows these respective upstream conventions.
+
+**Either pattern works.** Thanks to idempotent endpoint construction, you can
+use either the standard `base_url` (letting tidev append the suffix) or a full
+URL (already containing the suffix) — tidev detects the suffix and avoids
+double-pathing:
+
+```toml
+# Both of these work identically for anthropic:
+
+# Convention: bare base URL → tidev appends /v1/messages
+[providers.my-provider.models.claude]
+api_type = "anthropic"
+base_url = "https://api.anthropic.com"               # → https://api.anthropic.com/v1/messages
+
+# Full URL: tidev detects /v1/messages is already present, uses as-is
+[providers.my-provider.models.claude-alt]
+api_type = "anthropic"
+base_url = "https://opencode.ai/zen/go/v1/messages"  # → https://opencode.ai/zen/go/v1/messages
+```
+
+For `openai_chat_completions`, the same idempotency applies:
+
+```toml
+# Convention: base_url includes /v1 → tidev appends /chat/completions
+[providers.my-provider.models.gpt]
+api_type = "openai_chat_completions"
+base_url = "https://api.openai.com/v1"                # → https://api.openai.com/v1/chat/completions
+
+# Full URL: tidev detects /chat/completions is already present, uses as-is
+[providers.my-provider.models.gpt-alt]
+api_type = "openai_chat_completions"
+base_url = "https://api.openai.com/v1/chat/completions"  # → https://api.openai.com/v1/chat/completions
+```
+
+**Recommendation:** Use the standard convention for clarity, but when a
+provider gives you a full endpoint URL, you can use it directly without
+modification.
 
 ### Per-model api_type override
 
