@@ -490,8 +490,18 @@ impl App {
     fn render_subsession_navigation(&self, frame: &mut Frame<'_>, area: Rect) {
         let palette = self.palette();
 
+        // Match the composer's left inset (2 columns) so the background aligns with the
+        // main session input block.
+        let left_inset: u16 = 2;
+        let bg_rect = Rect {
+            x: area.x + left_inset,
+            y: area.y,
+            width: area.width.saturating_sub(left_inset),
+            height: area.height,
+        };
+
         let block = Block::default().style(Style::default().bg(palette.panel));
-        frame.render_widget(block, area);
+        frame.render_widget(block, bg_rect);
 
         // Build navigation hint
         let hint = Line::from(vec![
@@ -503,14 +513,14 @@ impl App {
             Span::styled(": switch subagent", Style::default().fg(palette.muted)),
         ]);
 
-        // Vertically center the single-line hint in the middle of the 3-row area
+        // Vertically center the single-line hint within bg_rect
         let content_height: u16 = 1;
-        let y_offset = area.height.saturating_sub(content_height) / 2;
+        let y_offset = bg_rect.height.saturating_sub(content_height) / 2;
         let content_rect = Rect {
-            x: area.x,
-            y: area.y + y_offset,
-            width: area.width,
-            height: content_height.min(area.height),
+            x: bg_rect.x,
+            y: bg_rect.y + y_offset,
+            width: bg_rect.width,
+            height: content_height.min(bg_rect.height),
         };
 
         let paragraph = Paragraph::new(hint)
