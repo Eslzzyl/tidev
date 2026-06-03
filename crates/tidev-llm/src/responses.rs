@@ -664,6 +664,9 @@ fn build_responses_request(
         Some(tools.iter().map(ResponseTool::from).collect())
     };
 
+    let thinking = model.thinking_config();
+    let include = thinking.as_ref().map(|_| vec!["reasoning.encrypted_content".to_string()]);
+
     Ok(ResponsesRequest {
         model: model.request_model_id.clone().unwrap_or_default(),
         instructions,
@@ -679,7 +682,8 @@ fn build_responses_request(
         } else {
             None
         },
-        thinking: model.thinking_config(),
+        thinking,
+        include,
     })
 }
 
@@ -774,6 +778,8 @@ struct ResponsesRequest {
     stream_options: Option<StreamOptions>,
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     thinking: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    include: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Serialize)]

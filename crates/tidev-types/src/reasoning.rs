@@ -198,7 +198,7 @@ impl Gpt5ThinkingLevel {
         match self {
             Self::Off => None,
             _ => Some(serde_json::json!({
-                "reasoning": { "effort": self.as_str() }
+                "reasoning": { "effort": self.as_str(), "summary": "auto" }
             })),
         }
     }
