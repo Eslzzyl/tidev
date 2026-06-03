@@ -1637,8 +1637,14 @@ impl App {
                 self.dirty = true;
             }
             BackendEvent::StreamEnd { .. } => {
-                // TUI can safely ignore StreamEnd — it already manages
-                // streaming state via TurnStarting and Finished events.
+                // Reset streaming state when the agent loop exits (success or error).
+                // In the normal flow this is a no-op because finish_assistant_turn
+                // already cleared pending_request.  When the agent loop exits with
+                // an error (e.g. LLM failure after a subagent returned an error),
+                // this ensures the UI doesn't remain stuck with a stale
+                // "Planning..."/"Thinking..." notice.
+                self.pending_request = false;
+                self.last_notice = None;
             }
         }
 
@@ -2008,6 +2014,10 @@ impl App {
             let mut context_manager =
                 ContextManager::from_state(context_summary, context_retained_from);
 
+            // Clone tx for post-loop cleanup — the original will be moved
+            // into AgentLoopConfig below.
+            let cleanup_tx = tx.clone();
+
             if let Err(e) = agent
                 .run_agent_loop_with_permission_channel(
                     tidev_engine::agent::runtime::AgentLoopConfig {
@@ -2026,6 +2036,15 @@ impl App {
             {
                 log::error!("spawn_agent_loop: agent loop failed: {}", e);
             }
+
+            // Send StreamEnd to signal the TUI that the agent loop has exited.
+            // This allows the TUI to reset pending_request and clear the
+            // "Planning..."/"Thinking..." notice even when the agent loop
+            // exits with an error (e.g. after a subagent + main-turn LLM failure).
+            let _ = cleanup_tx.send(BackendEvent::StreamEnd {
+                session_id,
+                request_id,
+            });
 
             log::info!(
                 "spawn_agent_loop: agent loop completed for session {}",

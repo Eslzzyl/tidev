@@ -5,6 +5,8 @@
 //! [`ToolExecutionResult`] so they integrate seamlessly with the
 //! parent session's tool execution pipeline.
 
+use std::time::Duration;
+
 use chrono::Utc;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
@@ -262,94 +264,124 @@ impl AgentRuntime {
             let call_start = Utc::now();
             let mut turn_has_content = false;
 
-            while let Some(event) = stream_rx.recv().await {
-                let _ = event_tx.send(event.clone());
+            // Guard against the spawned LLM task hanging or completing
+            // silently without sending any terminal event (Finished / Failed).
+            // If no event arrives within the timeout, we bail out so the
+            // main agent does not block forever on this subagent.
+            const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+            let idle_timeout = tokio::time::sleep(STREAM_IDLE_TIMEOUT);
+            tokio::pin!(idle_timeout);
 
-                match event {
-                    BackendEvent::Delta { content, .. } => {
-                        if turn.created_at.is_none() {
-                            turn.created_at = Some(Utc::now());
-                        }
-                        turn.content.push_str(&content);
-                        if !turn_has_content {
-                            turn_has_content = true;
-                        }
-                        send_status(
-                            event_tx,
-                            "Writing output".to_string(),
-                            None,
-                            Some(content),
-                            None,
+            loop {
+                tokio::select! {
+                    biased;
+
+                    event = stream_rx.recv() => {
+                        let Some(event) = event else {
+                            // Channel closed — all senders dropped.
+                            break;
+                        };
+
+                        // Reset the idle timeout on every received event.
+                        idle_timeout.as_mut().reset(
+                            tokio::time::Instant::now() + STREAM_IDLE_TIMEOUT,
                         );
-                    }
-                    BackendEvent::ReasoningDelta { content, .. } => {
-                        if turn.created_at.is_none() {
-                            turn.created_at = Some(Utc::now());
-                        }
-                        turn.reasoning.push_str(&content);
-                        send_status(event_tx, "Thinking".to_string(), None, None, Some(content));
-                    }
-                    BackendEvent::ToolCallUpdated { tool_call, .. } => {
-                        let tc = tool_call.clone();
-                        turn.upsert_tool_call(tool_call);
-                        send_status(event_tx, "Tool".to_string(), Some(tc), None, None);
-                    }
-                    BackendEvent::UsageStats {
-                        input_tokens,
-                        output_tokens,
-                        total_tokens,
-                        cache_read_tokens,
-                        cache_write_tokens,
-                        model_id,
-                        duration_ms,
-                        ..
-                    } => {
-                        turn.input_tokens = Some(input_tokens);
-                        turn.output_tokens = Some(output_tokens);
-                        turn.total_tokens = Some(total_tokens);
-                        turn.cache_read_tokens = Some(cache_read_tokens);
-                        turn.cache_write_tokens = Some(cache_write_tokens);
-                        turn.model_id = Some(model_id.clone());
-                        turn.tokens_per_second = duration_ms.and_then(|ms| {
-                            if ms > 0 {
-                                Some(output_tokens as f32 / (ms as f32 / 1000.0))
-                            } else {
-                                None
+
+                        let _ = event_tx.send(event.clone());
+
+                        match event {
+                            BackendEvent::Delta { content, .. } => {
+                                if turn.created_at.is_none() {
+                                    turn.created_at = Some(Utc::now());
+                                }
+                                turn.content.push_str(&content);
+                                if !turn_has_content {
+                                    turn_has_content = true;
+                                }
+                                send_status(
+                                    event_tx,
+                                    "Writing output".to_string(),
+                                    None,
+                                    Some(content),
+                                    None,
+                                );
                             }
-                        });
-                    }
-                    BackendEvent::Finished {
-                        turn: finished_turn,
-                        ..
-                    } => {
-                        let saved_tokens = (
-                            turn.input_tokens,
-                            turn.output_tokens,
-                            turn.total_tokens,
-                            turn.cache_read_tokens,
-                            turn.cache_write_tokens,
-                            turn.model_id.clone(),
-                            turn.tokens_per_second,
-                        );
-                        let saved_created_at = turn.created_at;
-                        turn = finished_turn;
-                        if turn.input_tokens.is_none() {
-                            turn.input_tokens = saved_tokens.0;
-                            turn.output_tokens = saved_tokens.1;
-                            turn.total_tokens = saved_tokens.2;
-                            turn.cache_read_tokens = saved_tokens.3;
-                            turn.cache_write_tokens = saved_tokens.4;
-                            turn.model_id = saved_tokens.5;
-                            turn.tokens_per_second = saved_tokens.6;
+                            BackendEvent::ReasoningDelta { content, .. } => {
+                                if turn.created_at.is_none() {
+                                    turn.created_at = Some(Utc::now());
+                                }
+                                turn.reasoning.push_str(&content);
+                                send_status(event_tx, "Thinking".to_string(), None, None, Some(content));
+                            }
+                            BackendEvent::ToolCallUpdated { tool_call, .. } => {
+                                let tc = tool_call.clone();
+                                turn.upsert_tool_call(tool_call);
+                                send_status(event_tx, "Tool".to_string(), Some(tc), None, None);
+                            }
+                            BackendEvent::UsageStats {
+                                input_tokens,
+                                output_tokens,
+                                total_tokens,
+                                cache_read_tokens,
+                                cache_write_tokens,
+                                model_id,
+                                duration_ms,
+                                ..
+                            } => {
+                                turn.input_tokens = Some(input_tokens);
+                                turn.output_tokens = Some(output_tokens);
+                                turn.total_tokens = Some(total_tokens);
+                                turn.cache_read_tokens = Some(cache_read_tokens);
+                                turn.cache_write_tokens = Some(cache_write_tokens);
+                                turn.model_id = Some(model_id.clone());
+                                turn.tokens_per_second = duration_ms.and_then(|ms| {
+                                    if ms > 0 {
+                                        Some(output_tokens as f32 / (ms as f32 / 1000.0))
+                                    } else {
+                                        None
+                                    }
+                                });
+                            }
+                            BackendEvent::Finished {
+                                turn: finished_turn,
+                                ..
+                            } => {
+                                let saved_tokens = (
+                                    turn.input_tokens,
+                                    turn.output_tokens,
+                                    turn.total_tokens,
+                                    turn.cache_read_tokens,
+                                    turn.cache_write_tokens,
+                                    turn.model_id.clone(),
+                                    turn.tokens_per_second,
+                                );
+                                let saved_created_at = turn.created_at;
+                                turn = finished_turn;
+                                if turn.input_tokens.is_none() {
+                                    turn.input_tokens = saved_tokens.0;
+                                    turn.output_tokens = saved_tokens.1;
+                                    turn.total_tokens = saved_tokens.2;
+                                    turn.cache_read_tokens = saved_tokens.3;
+                                    turn.cache_write_tokens = saved_tokens.4;
+                                    turn.model_id = saved_tokens.5;
+                                    turn.tokens_per_second = saved_tokens.6;
+                                }
+                                turn.created_at = saved_created_at.or(Some(call_start));
+                                turn.completed_at = Some(Utc::now());
+                                break;
+                            }
+                            BackendEvent::Failed { error, .. } => {
+                                return Err(anyhow::anyhow!("Subagent LLM Error: {}", error));
+                            }
+                            _ => {}
                         }
-                        turn.created_at = saved_created_at.or(Some(call_start));
-                        turn.completed_at = Some(Utc::now());
-                        break;
                     }
-                    BackendEvent::Failed { error, .. } => {
-                        return Err(anyhow::anyhow!("Subagent LLM Error: {}", error));
+                    _ = &mut idle_timeout => {
+                        return Err(anyhow::anyhow!(
+                            "Subagent LLM stream idle timeout ({}s) — no event received",
+                            STREAM_IDLE_TIMEOUT.as_secs(),
+                        ));
                     }
-                    _ => {}
                 }
             }
 
