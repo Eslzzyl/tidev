@@ -56,34 +56,62 @@ pub struct LlmProviderConfig {
 
 impl LlmProviderConfig {
     /// Provider-specific API endpoint URL.
+    ///
+    /// Each branch is idempotent: if `base_url` already ends with the expected
+    /// path suffix, it is returned as-is.  This lets users configure either a
+    /// bare base URL (e.g. `https://api.anthropic.com`) or a full URL
+    /// (e.g. `https://opencode.ai/zen/go/v1/messages`) without double-path bugs.
     pub fn endpoint(&self) -> String {
+        let base = self.base_url.trim_end_matches('/');
         match self.api_type {
             ApiType::Anthropic => {
-                format!("{}/v1/messages", self.base_url.trim_end_matches('/'))
+                if base.ends_with("/v1/messages") {
+                    base.to_string()
+                } else {
+                    format!("{}/v1/messages", base)
+                }
             }
             ApiType::OpenAiChatCompletions => {
-                format!("{}/chat/completions", self.base_url.trim_end_matches('/'))
+                if base.ends_with("/chat/completions") {
+                    base.to_string()
+                } else {
+                    format!("{}/chat/completions", base)
+                }
             }
             ApiType::OpenAiResponses => {
-                format!("{}/v1/responses", self.base_url.trim_end_matches('/'))
+                if base.ends_with("/v1/responses") {
+                    base.to_string()
+                } else {
+                    format!("{}/v1/responses", base)
+                }
             }
             ApiType::GoogleGemini => {
-                format!(
-                    "{}/models/{}:generateContent",
-                    self.base_url.trim_end_matches('/'),
-                    self.request_model_id.as_deref().unwrap_or(&self.model_id)
-                )
+                if base.ends_with(":generateContent") || base.contains(":streamGenerateContent")
+                {
+                    base.to_string()
+                } else {
+                    format!(
+                        "{}/models/{}:generateContent",
+                        base,
+                        self.request_model_id.as_deref().unwrap_or(&self.model_id)
+                    )
+                }
             }
         }
     }
 
     /// Gemini streaming endpoint (uses SSE via `streamGenerateContent`).
     pub fn gemini_stream_endpoint(&self) -> String {
-        format!(
-            "{}/models/{}:streamGenerateContent?alt=sse",
-            self.base_url.trim_end_matches('/'),
-            self.request_model_id.as_deref().unwrap_or(&self.model_id)
-        )
+        let base = self.base_url.trim_end_matches('/');
+        if base.contains(":streamGenerateContent") {
+            base.to_string()
+        } else {
+            format!(
+                "{}/models/{}:streamGenerateContent?alt=sse",
+                base,
+                self.request_model_id.as_deref().unwrap_or(&self.model_id)
+            )
+        }
     }
 
     /// Merge provider-level `extra_body` with the thinking-level extra body.
