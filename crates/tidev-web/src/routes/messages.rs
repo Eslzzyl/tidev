@@ -431,6 +431,11 @@ pub async fn send_message(
 
     // Clone the agent runtime and other shared state for the spawned tasks
     let mut agent = state.agent.clone();
+
+    // Sync the agent's ToolRegistry so per-turn tool filtering
+    // (all_definitions → use_apply_patch) uses the correct model.
+    agent.tools.set_active_model(model.clone());
+
     let state_for_spawn = state.clone();
 
     tokio::spawn(async move {

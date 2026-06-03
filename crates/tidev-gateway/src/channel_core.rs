@@ -864,6 +864,9 @@ impl ChannelCore {
             .insert(recipient.to_string(), cancel_token.clone());
 
         self.tools.set_active_model(active_model.clone());
+        // Sync the agent's ToolRegistry so per-turn tool filtering
+        // (all_definitions → use_apply_patch) uses the correct model.
+        self.agent.tools.set_active_model(active_model.clone());
 
         let mut context_manager = tidev_engine::context::ContextManager::from_state(
             conversation.context_summary.clone(),

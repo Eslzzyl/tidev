@@ -689,6 +689,11 @@ impl App {
         self.conversation = cached.conversation;
         let thinking_level = cached.active_model.thinking_level.clone();
         self.active_model = cached.active_model;
+        // Sync the ToolRegistry so per-turn tool filtering
+        // (all_definitions → use_apply_patch) uses the correct model
+        // for the restored session.
+        self.tools.set_active_model(self.active_model.clone());
+        self.agent.tools.set_active_model(self.active_model.clone());
         self.thinking_level = thinking_level;
         self.context_manager = cached.context_manager;
         self.pending_tool_execution = cached.pending_tool_execution;

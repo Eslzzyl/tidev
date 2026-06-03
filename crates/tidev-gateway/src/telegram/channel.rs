@@ -444,6 +444,9 @@ impl TelegramChannel {
 
         // Ensure tools have the active model
         self.core.tools.set_active_model(active_model.clone());
+        // Sync the agent's ToolRegistry so per-turn tool filtering
+        // (all_definitions → use_apply_patch) uses the correct model.
+        self.core.agent.tools.set_active_model(active_model.clone());
 
         // Build context manager
         let mut context_manager = tidev_engine::context::ContextManager::from_state(
