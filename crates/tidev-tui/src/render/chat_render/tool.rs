@@ -77,6 +77,27 @@ pub(super) fn render_tool_call_with_result(
         );
     }
 
+    // For completed task tools, render a unified subagent result card
+    // with the description and subagent_type from the tool call arguments.
+    if canonical_name == "task"
+        && tool_result.is_some()
+        && let Ok(task_args) = serde_json::from_str::<tidev_engine::tooling::TaskArgs>(
+            &tool_call.arguments,
+        )
+    {
+        let output = tool_output_from_message(tool_result.unwrap(), ctx);
+        let is_expanded = ctx.expanded_tool_results.contains(&tool_result.unwrap().id);
+        let lines = render_subagent_task_preview(
+            output,
+            body_width,
+            palette,
+            is_expanded,
+            &task_args.description,
+            &task_args.subagent_type,
+        );
+        return (lines, vec![]);
+    }
+
     // Get result lines and exit code (for bash)
     let (result_lines, exit_code, mut regions) = if let Some(result_msg) = tool_result {
         render_tool_result_detail_lines(result_msg, body_width, ctx)
@@ -823,16 +844,6 @@ pub(super) fn render_tool_result_detail_lines(
         }
     }
 
-    // Subagent task results: render markdown preview (collapsed) or full (expanded)
-    if canonical_name == "task" {
-        let is_expanded = ctx.expanded_tool_results.contains(&message.id);
-        return (
-            render_subagent_task_preview(effective_output, body_width, palette, is_expanded),
-            None,
-            vec![],
-        );
-    }
-
     // Web search results: render as styled markdown with header
     if canonical_name == "websearch" {
         let is_expanded = ctx.expanded_tool_results.contains(&message.id);
@@ -902,11 +913,15 @@ pub(super) fn render_tool_result_detail_lines(
 }
 
 /// Renders a compact or full markdown preview of a subagent task result.
+/// `description` and `subagent_type` are parsed from the original task tool call
+/// arguments and used for the unified card header.
 pub(super) fn render_subagent_task_preview(
     output: &str,
     body_width: usize,
     palette: ThemePalette,
     is_expanded: bool,
+    description: &str,
+    subagent_type: &str,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
@@ -915,10 +930,23 @@ pub(super) fn render_subagent_task_preview(
         return lines;
     }
 
-    // Title header
+    // Unified header: [@type] subagent: description
+    lines.push(Line::from(""));
     lines.push(Line::from(vec![
-        Span::styled("Task ", Style::default().fg(palette.accent_soft)),
-        Span::styled("· subagent result", Style::default().fg(palette.muted)),
+        Span::styled(
+            format!("@{}", subagent_type),
+            Style::default().fg(palette.accent_soft),
+        ),
+        Span::styled(
+            " subagent: ",
+            Style::default().fg(palette.muted),
+        ),
+        Span::styled(
+            description.to_string(),
+            Style::default()
+                .fg(palette.text)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]));
     lines.push(Line::from(""));
 
@@ -930,14 +958,6 @@ pub(super) fn render_subagent_task_preview(
     if is_expanded {
         // Show all lines when expanded
         lines.extend(md_lines);
-        lines.push(Line::from(vec![Span::styled(
-            "▲ Click to collapse",
-            Style::default().fg(palette.muted),
-        )]));
-        lines.push(Line::from(vec![Span::styled(
-            "  Ctrl+Click to enter subsession",
-            Style::default().fg(palette.muted),
-        )]));
     } else {
         // Preview mode: show first few lines
         let max_preview = TOOL_OUTPUT_PREVIEW_LINES;
@@ -948,20 +968,14 @@ pub(super) fn render_subagent_task_preview(
         } else {
             lines.extend(md_lines.into_iter().take(max_preview));
             lines.push(Line::from(vec![Span::styled(
-                format!(
-                    "  ▼ {} more line(s) — Click to expand",
-                    line_count - max_preview
-                ),
+                format!("  {} more line(s)", line_count - max_preview),
                 Style::default().fg(palette.muted),
             )]));
         }
-
-        // Always add Ctrl+Click hint
-        lines.push(Line::from(vec![Span::styled(
-            "  Ctrl+Click to enter subsession",
-            Style::default().fg(palette.muted),
-        )]));
     }
+
+    // Bottom padding
+    lines.push(Line::from(""));
 
     lines
 }

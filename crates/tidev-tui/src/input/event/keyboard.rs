@@ -530,7 +530,18 @@ impl App {
                 self.switch_session(parent_session_id, runtime)?;
                 return Ok(true);
             }
-            KeyCode::Down | KeyCode::Right | KeyCode::Left => {
+            KeyCode::Down => {
+                // Down always navigates to the last (most recently delegated) child.
+                let children = self.store.load_child_sessions(parent_session_id)?;
+                if children.is_empty() {
+                    return Ok(false);
+                }
+                if let Some(target) = children.last() {
+                    self.switch_session(target.session_id, runtime)?;
+                    return Ok(true);
+                }
+            }
+            KeyCode::Right | KeyCode::Left => {
                 let children = self.store.load_child_sessions(parent_session_id)?;
                 if children.is_empty() {
                     return Ok(false);

@@ -57,7 +57,7 @@ struct ToolResultCardRange {
 }
 
 #[derive(Clone, Debug)]
-struct RunningCardRange {
+struct InlineRunningCardRange {
     execution_index: usize,
     start_line: usize,
     end_line: usize,
@@ -84,7 +84,7 @@ type MessagesTextResult = (
     Vec<SelectableRegionRange>,
     bool,
     usize,
-    Vec<RunningCardRange>,
+    Vec<InlineRunningCardRange>,
 );
 
 impl App {
@@ -587,7 +587,7 @@ impl App {
             selectable_regions_ranges,
             rendered_virtualized,
             virtualized_render_scroll,
-            running_card_ranges,
+            inline_running_card_ranges,
         ) = self.messages_text(Some(content_width));
 
         self.message_total_lines = total_lines;
@@ -685,21 +685,12 @@ impl App {
             }
         }
 
-        // Calculate screen positions for running subagent cards
-        // running_card_ranges contain positions within the running_lines block,
-        // which starts at (header_line_count + total_message_lines) in the full text.
-        let header_line_count = if self.conversation.parent_session_id.is_some() {
-            3
-        } else {
-            0
-        };
-        let total_msg_lines = self.message_layout_index.borrow().total_lines;
-        let running_block_start = header_line_count + total_msg_lines;
-
-        self.running_subagent_card_bounds.clear();
-        for card_range in &running_card_ranges {
-            let abs_start = running_block_start + card_range.start_line;
-            let abs_end = running_block_start + card_range.end_line;
+        // Calculate screen positions for inline running subagent cards
+        // inline_running_card_ranges contain absolute line positions within the full text.
+        self.inline_subagent_card_bounds.clear();
+        for card_range in &inline_running_card_ranges {
+            let abs_start = card_range.start_line;
+            let abs_end = card_range.end_line;
 
             let screen_start = abs_start.saturating_sub(render_scroll);
             let screen_end = abs_end.saturating_sub(render_scroll);
@@ -718,7 +709,7 @@ impl App {
                     width: content_area.width,
                     height: visible_end.saturating_sub(visible_start),
                 };
-                self.running_subagent_card_bounds
+                self.inline_subagent_card_bounds
                     .push((card_range.execution_index, card_rect));
             }
         }
@@ -1128,7 +1119,7 @@ impl App {
         let mut card_ranges = Vec::new();
         let mut user_card_ranges = Vec::new();
         let mut selectable_regions_ranges = Vec::new();
-        let mut running_card_ranges = Vec::new();
+        let mut inline_running_card_ranges = Vec::new();
 
         // Header for subsessions (always visible at top)
         let header_lines = if self.conversation.parent_session_id.is_some() {
@@ -1168,7 +1159,7 @@ impl App {
                 selectable_regions_ranges,
                 false,
                 0,
-                running_card_ranges,
+                inline_running_card_ranges,
             );
         }
 
@@ -1181,33 +1172,10 @@ impl App {
             self.message_scroll_target = None;
         }
 
-        let mut running_lines = Vec::new();
-        if self.conversation.parent_session_id.is_none() {
-            for (index, running_subagent) in self.running_subagent_executions.iter().enumerate() {
-                let card_lines = self.render_running_subagent_lines(running_subagent, width);
-                if card_lines.is_empty() {
-                    continue;
-                }
-
-                let card_start = running_lines.len();
-                let decorated_lines =
-                    super::render::decorate_card_lines(card_lines, width, palette.panel, 2);
-                running_lines.extend(decorated_lines);
-                let card_end = running_lines.len();
-
-                running_card_ranges.push(RunningCardRange {
-                    execution_index: index,
-                    start_line: card_start,
-                    end_line: card_end,
-                });
-            }
-        }
-        let total_running_lines = running_lines.len();
-
         // Calculate visible range based on scroll position
         let viewport = self.message_viewport_lines.max(1);
         let total_message_lines = self.message_layout_index.borrow().total_lines;
-        let total_overall_lines = total_message_lines + total_running_lines;
+        let total_overall_lines = total_message_lines;
         let header_line_count = header_lines.len();
 
         let max_scroll = (header_line_count + total_overall_lines).saturating_sub(viewport);
@@ -1284,6 +1252,7 @@ impl App {
                 &mut card_ranges,
                 &mut user_card_ranges,
                 &mut selectable_regions_ranges,
+                &mut inline_running_card_ranges,
                 current_line_offset,
                 &ctx,
                 is_round_end,
@@ -1300,8 +1269,6 @@ impl App {
         for _ in 0..missing_lines {
             lines.push(Line::from(""));
         }
-
-        lines.extend(running_lines);
 
         // Calculate total lines from layout index
         let total_lines = header_line_count + total_overall_lines;
@@ -1329,7 +1296,7 @@ impl App {
             selectable_regions_ranges,
             true,
             render_scroll,
-            running_card_ranges,
+            inline_running_card_ranges,
         )
     }
 
@@ -1463,27 +1430,34 @@ impl App {
     ) -> Vec<Line<'static>> {
         let palette = self.palette();
 
-        // Title line: description (@subagent_type)
+        // Title line: [@type] subagent: [description]
         let description = shorten(&execution.task_description, body_width.saturating_sub(30));
         let subagent_type = execution.subagent_type.clone();
 
         let mut lines = Vec::new();
 
-        // Header line with description and subagent type
+        // Top padding
+        lines.push(Line::from(""));
+
+        // Header line: [@type] subagent: description
         lines.push(Line::from(vec![
+            Span::styled(
+                format!("@{}", subagent_type),
+                Style::default().fg(palette.accent_soft),
+            ),
+            Span::styled(
+                " subagent: ",
+                Style::default().fg(palette.muted),
+            ),
             Span::styled(
                 description,
                 Style::default()
                     .fg(palette.text)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                format!(" (@{})", subagent_type),
-                Style::default().fg(palette.muted),
-            ),
         ]));
 
-        // Status line - always shown to maintain consistent height
+        // Status line
         let status_text = execution.status.display();
         let status_line = match &execution.status {
             SubagentStatus::Tool => {
@@ -1515,21 +1489,8 @@ impl App {
             Span::styled(status_line, Style::default().fg(palette.accent_soft)),
         ]));
 
-        // Navigation hint
-        lines.push(Line::from(vec![
-            Span::styled("  ".to_string(), Style::default()),
-            Span::styled(
-                "Ctrl+X then ".to_string(),
-                Style::default().fg(palette.muted),
-            ),
-            Span::styled("Up".to_string(), Style::default().fg(palette.accent_soft)),
-            Span::styled("/".to_string(), Style::default().fg(palette.muted)),
-            Span::styled("Down".to_string(), Style::default().fg(palette.accent_soft)),
-            Span::styled(
-                " to navigate".to_string(),
-                Style::default().fg(palette.muted),
-            ),
-        ]));
+        // Bottom padding
+        lines.push(Line::from(""));
 
         lines
     }
@@ -2014,6 +1975,7 @@ impl App {
         card_ranges: &mut Vec<ToolResultCardRange>,
         user_card_ranges: &mut Vec<(Uuid, usize, usize)>,
         selectable_regions_ranges: &mut Vec<SelectableRegionRange>,
+        inline_running_card_ranges: &mut Vec<InlineRunningCardRange>,
         current_line_offset: usize,
         ctx: &RenderContext<'_>,
         is_round_end: bool,
@@ -2077,6 +2039,34 @@ impl App {
                 if !message.tool_calls.is_empty() {
                     for tool_call in &message.tool_calls {
                         let tool_result = tool_results_by_id.get(&tool_call.id).copied();
+
+                        // For task tools with no result yet: if a subagent is still running,
+                        // render the running card inline instead of the tool call header.
+                        // This eliminates the dual-card problem (tool call card + running overlay).
+                        if tool_result.is_none()
+                            && tool_call.name == "task"
+                            && let Some(exec_index) = self.running_subagent_executions
+                                .iter()
+                                .position(|e| e.tool_call.id == tool_call.id)
+                        {
+                            let execution = &self.running_subagent_executions[exec_index];
+                            let running_lines = self.render_running_subagent_lines(execution, body_width);
+                            let start_line = current_line_offset + lines.len();
+                            let mut card_bg = palette.panel;
+                            if self.hovered_inline_subagent == Some(exec_index) {
+                                card_bg = palette.hover_bg(card_bg);
+                            }
+                            let decorated = decorate_card_lines(running_lines, width, card_bg, 2);
+                            lines.extend(decorated);
+                            let end_line = current_line_offset + lines.len();
+                            inline_running_card_ranges.push(InlineRunningCardRange {
+                                execution_index: exec_index,
+                                start_line,
+                                end_line,
+                            });
+                            continue;
+                        }
+
                         let (tool_card_lines, mut regions) = self
                             .cached_render_tool_call_with_result(
                                 message,

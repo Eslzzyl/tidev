@@ -595,6 +595,14 @@ impl App {
                         approval.child_session_id.unwrap_or_else(uuid::Uuid::new_v4);
                     let subagent_type_str = args.subagent_type.clone();
                     let description = args.description.trim().to_string();
+
+                    // Register the mapping from tool_call_id to child_session_id
+                    // so the TUI can navigate into the subsession on click.
+                    self.subagent_task_map.insert(
+                        approval.tool_call.id.clone(),
+                        child_session_id,
+                    );
+
                     self.running_subagent_executions
                         .push(RunningSubagentExecution::new(
                             self.active_request_id,
@@ -667,6 +675,8 @@ impl App {
         } else {
             result.preview_for_storage(Some(tool_call.name.as_str()))
         };
+        let is_task = tool_call.name == "task";
+        let tool_call_id = tool_call.id.clone();
         let message = tidev_session::session::Message::tool_result(
             tool_call.id,
             tool_call.name.clone(),
@@ -696,6 +706,15 @@ impl App {
         }
 
         self.conversation.push(message.clone());
+
+        // For task (subagent) results, also register the message_id →
+        // child_session_id mapping so click navigation works reliably.
+        if is_task {
+            if let Some(&child_session_id) = self.subagent_task_map.get(&tool_call_id) {
+                self.subagent_result_message_map
+                    .insert(message.id, child_session_id);
+            }
+        }
 
         // Invalidate layout index and render cache since we added a new message
         self.message_layout_index.borrow_mut().valid = false;

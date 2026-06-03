@@ -278,9 +278,14 @@ struct App {
     hovered_queued_index: Option<usize>,
     /// Maps tool_call_id → child_session_id for subagent task navigation
     subagent_task_map: std::collections::HashMap<String, Uuid>,
-    /// Running subagent card screen bounds: (execution_index, screen_rect)
+    /// Maps tool result message_id → child_session_id for click-to-enter navigation.
+    /// Populated in record_tool_result when the tool call is "task".
+    subagent_result_message_map: std::collections::HashMap<Uuid, Uuid>,
+    /// Inline running subagent card screen bounds: (execution_index, screen_rect)
     /// Recalculated every frame in render_messages()
-    running_subagent_card_bounds: Vec<(usize, Rect)>,
+    inline_subagent_card_bounds: Vec<(usize, Rect)>,
+    /// Hovered inline subagent card index for mouse hover highlight
+    hovered_inline_subagent: Option<usize>,
     /// Permission channel receiver — receives [`PendingToolApproval`] from
     /// the spawned `run_agent_loop` task when tool calls need approval.
     pending_permission_rx: Option<

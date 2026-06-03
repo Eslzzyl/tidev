@@ -1311,7 +1311,7 @@ impl SessionStore {
     pub fn load_child_sessions(&self, parent_session_id: Uuid) -> Result<Vec<SessionRecord>> {
         self.read_query(
             &format!(
-                "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.parent_session_id = :parent_session_id ORDER BY s.updated_at DESC, s.created_at DESC"
+                "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s LEFT JOIN session_workspaces sw ON sw.session_id = s.id WHERE s.parent_session_id = :parent_session_id ORDER BY s.created_at ASC"
             ),
             named_params! { ":parent_session_id": parent_session_id.to_string() },
             Self::session_from_row,

@@ -142,6 +142,16 @@ impl App {
                     self.hovered_card = hit_id;
                 }
 
+                // Check inline running subagent card hover
+                let hit_inline = self
+                    .inline_subagent_card_bounds
+                    .iter()
+                    .find(|(_, rect)| rect.contains(position))
+                    .map(|(idx, _)| *idx);
+                if self.hovered_inline_subagent != hit_inline {
+                    self.hovered_inline_subagent = hit_inline;
+                }
+
                 // Check queued prompt hover
                 let hit_queued = self
                     .queued_card_bounds
@@ -172,25 +182,25 @@ impl App {
                 }
 
                 if !self.mouse_selection.is_dragging() {
-                    let is_ctrl = mouse.modifiers.contains(KeyModifiers::CONTROL);
+                    // Click on an inline running subagent card → enter subsession directly.
+                    // If the execution was already removed (e.g. ToolCompleted fired but render
+                    // hasn't caught up), fall through to tool_result_card_bounds below.
+                    let hit_running = self
+                        .inline_subagent_card_bounds
+                        .iter()
+                        .find(|(_, rect)| rect.contains(position))
+                        .map(|(idx, _)| *idx);
 
-                    // Ctrl+Click on a completed task card → enter subsession
-                    if is_ctrl {
-                        let hit_message_id = self
-                            .tool_result_card_bounds
-                            .iter()
-                            .find(|(_, rect)| rect.contains(position))
-                            .map(|(id, _)| *id);
-
-                        if let Some(message_id) = hit_message_id {
-                            if !self.try_navigate_to_subagent_subsession(message_id, runtime) {
-                                self.toggle_tool_result_expanded(message_id);
-                            }
+                    if let Some(exec_index) = hit_running {
+                        if let Some(execution) = self.running_subagent_executions.get(exec_index) {
+                            self.switch_session(execution.child_session_id, runtime).ok();
                             return;
                         }
+                        // Execution already gone (completed) — fall through to the
+                        // completed tool result card check below.
                     }
 
-                    // Plain click on tool result card → toggle expand/collapse
+                    // Click on a tool result card
                     let hit_message_id = self
                         .tool_result_card_bounds
                         .iter()
@@ -198,6 +208,11 @@ impl App {
                         .map(|(id, _)| *id);
 
                     if let Some(message_id) = hit_message_id {
+                        // For task/subagent results: click enters subsession directly
+                        if self.try_navigate_to_subagent_subsession(message_id, runtime) {
+                            return;
+                        }
+                        // For other tools: click toggles expand/collapse
                         self.toggle_tool_result_expanded(message_id);
                         return;
                     }
@@ -1395,7 +1410,14 @@ impl App {
     /// Attempts to navigate to a subagent's child session from a tool result message.
     /// Returns true if navigation was performed.
     fn try_navigate_to_subagent_subsession(&mut self, message_id: Uuid, runtime: &Runtime) -> bool {
-        // Find the message and its tool_call_id
+        // Primary look-up: check the direct message_id → child_session_id map.
+        // This is populated in record_tool_result for task tools.
+        if let Some(&child_session_id) = self.subagent_result_message_map.get(&message_id) {
+            self.switch_session(child_session_id, runtime).ok();
+            return true;
+        }
+
+        // Fallback: look up via tool_call_id.
         let tool_call_id = self
             .conversation
             .messages
@@ -1408,7 +1430,6 @@ impl App {
             return false;
         };
 
-        // Look up the child session from the subagent_task_map
         if let Some(&child_session_id) = self.subagent_task_map.get(&tool_call_id) {
             self.switch_session(child_session_id, runtime).ok();
             true
