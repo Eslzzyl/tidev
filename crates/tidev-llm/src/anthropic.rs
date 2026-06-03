@@ -375,7 +375,7 @@ fn build_anthropic_request(
         }]))
     };
 
-    let mut anthropic_messages = Vec::new();
+    let mut anthropic_messages: Vec<AnthropicMessage> = Vec::new();
 
     // Process only User/Assistant/Tool messages (System messages already handled above)
     for message in messages {
@@ -386,10 +386,19 @@ fn build_anthropic_request(
         match message.role {
             MessageRole::System => {}
             MessageRole::User => {
-                anthropic_messages.push(AnthropicMessage {
-                    role: "user".to_string(),
-                    content: user_message_content(model, &message)?,
-                });
+                let content = user_message_content(model, &message)?;
+                // Merge consecutive user messages (including those from tool results)
+                // into a single Anthropic user message, as required by the API.
+                if let Some(last) = anthropic_messages.last_mut()
+                    && last.role == "user"
+                {
+                    last.content.extend(content);
+                } else {
+                    anthropic_messages.push(AnthropicMessage {
+                        role: "user".to_string(),
+                        content,
+                    });
+                }
             }
             MessageRole::Assistant => {
                 let mut content = Vec::new();
@@ -422,14 +431,23 @@ fn build_anthropic_request(
             MessageRole::Tool => {
                 let tool_call_id = message.tool_call_id.clone().unwrap_or_default();
                 let content = message_text_with_file_references(&message);
-                anthropic_messages.push(AnthropicMessage {
-                    role: "user".to_string(),
-                    content: vec![AnthropicContentBlock::ToolResult {
-                        tool_use_id: tool_call_id,
-                        content,
-                        cache_control: None,
-                    }],
-                });
+                let block = AnthropicContentBlock::ToolResult {
+                    tool_use_id: tool_call_id,
+                    content,
+                    cache_control: None,
+                };
+                // Merge with the last user message if present, so all tool results
+                // for the same assistant turn live in a single user message.
+                if let Some(last) = anthropic_messages.last_mut()
+                    && last.role == "user"
+                {
+                    last.content.push(block);
+                } else {
+                    anthropic_messages.push(AnthropicMessage {
+                        role: "user".to_string(),
+                        content: vec![block],
+                    });
+                }
             }
             MessageRole::Error => {}
             MessageRole::Shell => {}

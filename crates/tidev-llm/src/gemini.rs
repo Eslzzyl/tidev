@@ -533,6 +533,8 @@ fn build_gemini_request(
             }
             MessageRole::Tool => {
                 // Tool results are sent as functionResponse parts in a user-role message.
+                // Multiple consecutive tool results should be merged into a single
+                // user-role content entry.
                 let tool_call_id = message.tool_call_id.clone().unwrap_or_default();
                 let tool_name = message.tool_name.clone().unwrap_or_default();
                 let content_text = message_text_with_file_references(&message);
@@ -541,7 +543,7 @@ fn build_gemini_request(
                 let response_value: serde_json::Value = serde_json::from_str(&content_text)
                     .unwrap_or(serde_json::Value::String(content_text));
 
-                let parts = vec![GeminiPart {
+                let part = GeminiPart {
                     text: None,
                     inline_data: None,
                     file_data: None,
@@ -559,12 +561,20 @@ fn build_gemini_request(
                     code_execution_result: None,
                     thought: None,
                     thought_signature: None,
-                }];
+                };
 
-                contents.push(GeminiContent {
-                    role: Some("user".to_string()),
-                    parts,
-                });
+                // Merge with the last user message if present, so all tool results
+                // for the same assistant turn live in a single user message.
+                if let Some(last) = contents.last_mut()
+                    && last.role.as_deref() == Some("user")
+                {
+                    last.parts.push(part);
+                } else {
+                    contents.push(GeminiContent {
+                        role: Some("user".to_string()),
+                        parts: vec![part],
+                    });
+                }
             }
             MessageRole::Error | MessageRole::Shell => {
                 // Skip error and shell messages
