@@ -1283,7 +1283,7 @@ impl App {
                 request_id,
                 tool_call,
                 child_session_id,
-                result,
+                mut result,
             } => {
                 log::info!(
                     "SubagentCompleted: request_id={}, active_request_id={}, child_session_id={}, tool_call_id={}",
@@ -1333,6 +1333,11 @@ impl App {
                         log::info!(
                             "SubagentCompleted: user switched away from parent session, writing to database directly"
                         );
+                        // Inject child_session_id into metadata for persistence
+                        // so click navigation works after restart.
+                        if tool_call.name == "task" {
+                            result.metadata.child_session_id = Some(child_session_id);
+                        }
                         let display_result = if tool_call.name == "task" {
                             result.clone()
                         } else {

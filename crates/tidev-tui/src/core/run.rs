@@ -687,6 +687,23 @@ impl App {
     pub(crate) fn restore_cached_session_runtime(&mut self, cached: CachedSessionRuntime) {
         let _session_id = cached.conversation.session_id;
         self.conversation = cached.conversation;
+
+        // Rebuild subagent navigation maps from persisted message metadata.
+        // This enables click-to-enter-subsession after restart (both from
+        // cache and from DB load, since both paths go through this method).
+        self.subagent_task_map.clear();
+        self.subagent_result_message_map.clear();
+        for msg in &self.conversation.messages {
+            if let Some(child_session_id) = msg.metadata.child_session_id {
+                if let Some(ref tool_call_id) = msg.tool_call_id {
+                    self.subagent_task_map
+                        .insert(tool_call_id.clone(), child_session_id);
+                    self.subagent_result_message_map
+                        .insert(msg.id, child_session_id);
+                }
+            }
+        }
+
         let thinking_level = cached.active_model.thinking_level.clone();
         self.active_model = cached.active_model;
         // Sync the ToolRegistry so per-turn tool filtering

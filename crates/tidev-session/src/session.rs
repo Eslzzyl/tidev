@@ -140,6 +140,10 @@ pub struct ToolMetadata {
     pub prior_summary: Option<String>,
     #[serde(default)]
     pub prior_retained_from: Option<usize>,
+    /// The child session ID spawned by a subagent (task) tool call.
+    /// Persisted so click-to-enter-subsession works after restart.
+    #[serde(default)]
+    pub child_session_id: Option<Uuid>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

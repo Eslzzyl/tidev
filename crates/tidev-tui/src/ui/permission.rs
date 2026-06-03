@@ -666,17 +666,26 @@ impl App {
     pub(crate) fn record_tool_result(
         &mut self,
         tool_call: ToolCall,
-        result: ToolExecutionResult,
+        mut result: ToolExecutionResult,
     ) -> Result<()> {
-        let display_result = if tool_call.name == "task" {
+        let is_task = tool_call.name == "task";
+        let tool_call_id = tool_call.id.clone();
+
+        // For task (subagent) results: inject child_session_id into metadata
+        // so it persists in the stored message for click navigation after restart.
+        if is_task {
+            if let Some(&child_session_id) = self.subagent_task_map.get(&tool_call_id) {
+                result.metadata.child_session_id = Some(child_session_id);
+            }
+        }
+
+        let display_result = if is_task {
             // Subagent (task) results should not be preview-truncated;
             // the caller expects the complete output for correct decision-making.
             result.clone()
         } else {
             result.preview_for_storage(Some(tool_call.name.as_str()))
         };
-        let is_task = tool_call.name == "task";
-        let tool_call_id = tool_call.id.clone();
         let message = tidev_session::session::Message::tool_result(
             tool_call.id,
             tool_call.name.clone(),
