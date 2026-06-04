@@ -135,9 +135,10 @@ fn classify_reqwest_error(error: &reqwest::Error) -> NetworkError {
         return classify_response_status(status, None);
     }
 
-    // Default: treat as non-retryable
-    NetworkError::NonRetryable {
-        message: error.to_string(),
+    // Transport-level errors (DNS failure, connection reset, SSL error, etc.)
+    // without an HTTP response status are likely transient — treat as retryable.
+    NetworkError::Retryable {
+        message: format!("Request failed: {}", error),
     }
 }
 
