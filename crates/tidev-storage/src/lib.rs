@@ -566,6 +566,19 @@ impl SessionStore {
         )
     }
 
+    /// Clear all recorded instruction sources for a session.
+    ///
+    /// Called when a reverted branch is discarded — the old messages that
+    /// received instruction injection are being deleted, so the tracking
+    /// table must be cleared to allow re-injection into the new message.
+    pub fn clear_instruction_sources(&self, session_id: Uuid) -> Result<()> {
+        self.write_execute(
+            "DELETE FROM session_instruction_sources WHERE session_id = :session_id",
+            named_params! { ":session_id": session_id.to_string() },
+        )?;
+        Ok(())
+    }
+
     pub fn append_message(&self, session_id: Uuid, message: &Message) -> Result<()> {
         let tool_calls = compress_text(
             &serde_json::to_string(&message.tool_calls)

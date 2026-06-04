@@ -577,6 +577,20 @@ impl App {
                 .collect::<Vec<_>>(),
         )?;
 
+        // Clear instruction-source tracking so the next user message gets
+        // a fresh injection.  The deleted messages (which may have been the
+        // ones that received the instruction injection) are gone, so the
+        // tracking table would otherwise prevent re-injection.
+        match self
+            .store
+            .clear_instruction_sources(self.conversation.session_id)
+        {
+            Ok(_) => {}
+            Err(e) => {
+                log::warn!("discard_reverted_branch: failed to clear instruction sources: {e}");
+            }
+        }
+
         let _ = self.conversation.take_hidden_messages();
         self.clear_revert_state()?;
         self.context_manager = ContextManager::new();
