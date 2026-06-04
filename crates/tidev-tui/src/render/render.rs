@@ -792,37 +792,6 @@ impl App {
         );
     }
 
-    pub(super) fn render_retrying_hint(&mut self, frame: &mut Frame<'_>, area: Rect) {
-        let palette = self.palette();
-
-        let Some((attempt, max_attempts, reason, deadline)) = self.retrying_hint.as_ref() else {
-            // Clear any existing content
-            frame.render_widget(
-                Paragraph::new("").style(Style::default().fg(palette.text)),
-                area,
-            );
-            return;
-        };
-
-        let now = Instant::now();
-        let remaining = if *deadline > now {
-            deadline.duration_since(now).as_secs()
-        } else {
-            0
-        };
-
-        let retry_after_str = format!("Retrying in {remaining}s");
-        let hint_text = format!(
-            "Retrying ({}/{}): {} · {}",
-            attempt, max_attempts, reason, retry_after_str
-        );
-
-        frame.render_widget(
-            Paragraph::new(hint_text).style(Style::default().fg(palette.accent_soft)),
-            area,
-        );
-    }
-
     fn footer_status_text(&mut self) -> String {
         let queued_count = self.pending_prompt_queue.len();
 

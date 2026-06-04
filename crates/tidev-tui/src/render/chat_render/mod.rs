@@ -185,14 +185,12 @@ impl App {
                 Constraint::Min(6),
                 Constraint::Length(dialog_height),
                 Constraint::Length(1),
-                Constraint::Length(1),
             ])
             .split(main_area);
 
             self.render_messages(frame, layout[0]);
             self.render_workspace_boundary_confirm_dialog(frame, layout[1], &dialog);
             self.render_prompt_footer(frame, layout[2]);
-            self.render_retrying_hint(frame, layout[3]);
             return;
         }
 
@@ -206,14 +204,12 @@ impl App {
                 Constraint::Min(6),
                 Constraint::Length(dialog_height),
                 Constraint::Length(1),
-                Constraint::Length(1),
             ])
             .split(main_area);
 
             self.render_messages(frame, layout[0]);
             self.render_workspace_boundary_dialog(frame, layout[1], &dialog);
             self.render_prompt_footer(frame, layout[2]);
-            self.render_retrying_hint(frame, layout[3]);
             return;
         }
 
@@ -227,14 +223,12 @@ impl App {
                 Constraint::Min(6),
                 Constraint::Length(dialog_height),
                 Constraint::Length(1),
-                Constraint::Length(1),
             ])
             .split(main_area);
 
             self.render_messages(frame, layout[0]);
             self.render_sensitive_file_confirm_dialog(frame, layout[1], &dialog);
             self.render_prompt_footer(frame, layout[2]);
-            self.render_retrying_hint(frame, layout[3]);
             return;
         }
 
@@ -248,14 +242,12 @@ impl App {
                 Constraint::Min(6),
                 Constraint::Length(dialog_height),
                 Constraint::Length(1),
-                Constraint::Length(1),
             ])
             .split(main_area);
 
             self.render_messages(frame, layout[0]);
             self.render_sensitive_file_dialog(frame, layout[1], &dialog);
             self.render_prompt_footer(frame, layout[2]);
-            self.render_retrying_hint(frame, layout[3]);
             return;
         }
 
@@ -268,14 +260,12 @@ impl App {
                 Constraint::Min(6),
                 Constraint::Length(question_height),
                 Constraint::Length(1),
-                Constraint::Length(1),
             ])
             .split(main_area);
 
             self.render_messages(frame, layout[0]);
             self.render_question_dialog(frame, layout[1], &dialog);
             self.render_prompt_footer(frame, layout[2]);
-            self.render_retrying_hint(frame, layout[3]);
             return;
         }
 
@@ -287,7 +277,6 @@ impl App {
             } else {
                 composer_height
             }),
-            Constraint::Length(1),
             Constraint::Length(1),
         ])
         .split(main_area);
@@ -339,7 +328,6 @@ impl App {
             self.render_shell_completion_palette(frame, palette_area);
         }
         self.render_prompt_footer(frame, layout[3]);
-        self.render_retrying_hint(frame, layout[4]);
     }
 
     /// Render a frozen area above the input box showing queued (pending) prompts.
@@ -1283,7 +1271,65 @@ impl App {
         }
 
         // Calculate total lines from layout index
-        let total_lines = header_line_count + total_overall_lines;
+        let mut total_lines = header_line_count + total_overall_lines;
+
+        // Append retrying hint as a temporary message at the bottom of chat area
+        if let Some((attempt, max_attempts, reason, deadline)) = self.retrying_hint.as_ref() {
+            let now = Instant::now();
+            let remaining = if *deadline > now {
+                deadline.duration_since(now).as_secs()
+            } else {
+                0
+            };
+
+            let retry_after_str = format!("Retrying in {remaining}s");
+            let msg = format!(
+                "Retrying ({}/{}): {}",
+                attempt, max_attempts, reason
+            );
+
+            let text_width = body_width.saturating_sub(2).max(1);
+            let mut retry_lines = Vec::new();
+
+            // Wrap the retry message with word-wrap
+            let wrapped = wrap_text_lines(&msg, text_width, usize::MAX);
+            for (i, line) in wrapped.iter().enumerate() {
+                if i == 0 {
+                    retry_lines.push(line_with_prefix(
+                        "⟳",
+                        line,
+                        Style::default().fg(palette.accent_soft),
+                        Style::default().fg(palette.text),
+                    ));
+                } else {
+                    retry_lines.push(line_with_prefix(
+                        " ",
+                        line,
+                        Style::default().fg(palette.accent_soft),
+                        Style::default().fg(palette.text),
+                    ));
+                }
+            }
+
+            // Countdown line
+            retry_lines.push(line_with_prefix(
+                "⟳",
+                &retry_after_str,
+                Style::default().fg(palette.accent_soft),
+                Style::default().fg(palette.muted),
+            ));
+
+            // Wrap in card with padding (same style as error messages)
+            let mut card_lines = Vec::new();
+            card_lines.push(Line::from(""));
+            card_lines.extend(retry_lines);
+            card_lines.push(Line::from(""));
+
+            let decorated = decorate_card_lines(card_lines, width, palette.panel_light, 2);
+            let hint_line_count = decorated.len();
+            lines.extend(decorated);
+            total_lines += hint_line_count;
+        }
 
         let elapsed = started_at.elapsed();
         if elapsed > Duration::from_millis(12) {
