@@ -1215,6 +1215,7 @@ impl App {
                         last_msg.streaming = false;
                         last_msg.metadata.prior_summary = prior_summary.clone();
                         last_msg.metadata.prior_retained_from = Some(prior_retained_from);
+                        last_msg.completed_at = Some(Utc::now());
                         updated_existing = true;
 
                         if let Err(error) = self
@@ -1229,6 +1230,7 @@ impl App {
                             tidev_session::session::Message::compaction(summary.clone());
                         compaction_message.metadata.prior_summary = prior_summary;
                         compaction_message.metadata.prior_retained_from = Some(prior_retained_from);
+                        compaction_message.completed_at = Some(Utc::now());
                         self.conversation.push(compaction_message.clone());
                         if let Err(error) = self
                             .store

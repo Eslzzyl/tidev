@@ -362,6 +362,74 @@ pub(super) fn render_message_cards_inner(
                         Some(ctx.workspace_root),
                     ));
                 }
+
+                // Stats footer (same format as assistant messages)
+                if !message.streaming {
+                    let model_display_name = message
+                        .model_id
+                        .as_ref()
+                        .and_then(|model_id| {
+                            ctx.config
+                                .read()
+                                .unwrap()
+                                .resolve_model_by_ids(
+                                    ctx.auth,
+                                    &ctx.conversation.provider_id,
+                                    model_id,
+                                )
+                                .ok()
+                                .map(|model| model.display_name)
+                        })
+                        .unwrap_or_else(|| ctx.conversation.model_display_name.clone());
+
+                    let duration = message.completed_at.map(|completed| {
+                        let elapsed = completed - message.created_at;
+                        let total_secs = elapsed.as_seconds_f64().max(0.0) as u64;
+                        let hours = total_secs / 3600;
+                        let minutes = (total_secs % 3600) / 60;
+                        let seconds = total_secs % 60;
+                        if hours > 0 {
+                            format!("{}h {}min {}s", hours, minutes, seconds)
+                        } else if minutes > 0 {
+                            format!("{}min {}s", minutes, seconds)
+                        } else {
+                            format!("{}s", seconds)
+                        }
+                    });
+
+                    let end_time = message.completed_at.map(|completed| {
+                        completed
+                            .with_timezone(&Local)
+                            .format("%H:%M:%S")
+                            .to_string()
+                    });
+
+                    let tps = message
+                        .tokens_per_second
+                        .map(|val| format!("{:.1} t/s", val));
+
+                    let mode_label = message.mode.unwrap_or(ctx.mode);
+
+                    let parts: Vec<String> = [
+                        Some(model_display_name),
+                        duration,
+                        tps,
+                        end_time,
+                        Some(mode_label.title().to_string()),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+
+                    let suffix = parts.join(" · ");
+                    lines.push(Line::from(""));
+                    lines.push(line_with_style_right_aligned(
+                        &suffix,
+                        body_width,
+                        palette.accent_soft,
+                    ));
+                }
+
                 lines.push(Line::from(""));
                 return vec![(palette.background, lines)];
             }

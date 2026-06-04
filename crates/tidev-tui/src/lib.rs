@@ -1400,7 +1400,9 @@ impl App {
                 });
 
                 if let Some(message) = self.conversation.messages.last_mut()
-                    && matches!(message.role, MessageRole::Assistant)
+                    && (matches!(message.role, MessageRole::Assistant)
+                        || (matches!(message.role, MessageRole::System)
+                            && message.content.starts_with(COMPACTION_MESSAGE_LABEL)))
                 {
                     message.input_tokens = Some(input_tokens);
                     message.output_tokens = Some(output_tokens);
