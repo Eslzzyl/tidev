@@ -154,12 +154,13 @@ pub async fn list_messages(
     // Load messages for the session
     let mut messages_db = store.load_messages(session_id)?;
 
-    // Respect revert state: hide messages after the revert point,
-    // matching TUI's Conversation::visible_message_count() logic.
+    // Respect revert state: hide the revert target and everything after it,
+    // matching TUI's Conversation::visible_message_count() which returns the
+    // index of the revert target (messages[..pos] are visible, the rest hidden).
     if let Some(revert_id) = store.load_revert_message_id(session_id)?
         && let Some(pos) = messages_db.iter().position(|m| m.id == revert_id)
     {
-        messages_db.truncate(pos + 1);
+        messages_db.truncate(pos);
     }
 
     // Load session-level todos
@@ -297,6 +298,30 @@ pub async fn send_message(
         .unwrap_or(SessionMode::Build);
 
     let content = body.content.clone();
+
+    // ── Discard reverted branch (if any) ──────────────────────────────
+    // If the session was reverted to an earlier point, clean up the hidden
+    // messages and revert state *before* appending the new message, so the
+    // agent loop's injection functions see a clean state and list_messages
+    // does not hide the new message.
+    {
+        let store = state.store.lock().await;
+        if let Some(revert_id) = store.load_revert_message_id(session_id)? {
+            let all_messages = store.load_messages(session_id)?;
+            if let Some(rev_idx) = all_messages.iter().position(|m| m.id == revert_id) {
+                let hidden_ids: Vec<Uuid> = all_messages[rev_idx..]
+                    .iter()
+                    .map(|m| m.id)
+                    .collect();
+                if !hidden_ids.is_empty() {
+                    store.delete_messages(session_id, &hidden_ids)?;
+                }
+            }
+            store.set_revert_message_id(session_id, None, None)?;
+            store.clear_instruction_sources(session_id)?;
+            store.update_session_context_state(session_id, None, 0)?;
+        }
+    }
 
     // Add user message to database (agent loop will inject
     // instructions and memory context before the LLM turn).
@@ -804,12 +829,13 @@ pub async fn revert_to_message(
         }
     }
 
-    // Calculate how many messages will be hidden
+    // Calculate how many messages will be hidden (including the target,
+    // matching TUI's visible_message_count / discard_reverted_branch).
     let target_index = messages
         .iter()
         .position(|m| m.id == body.message_id)
         .unwrap_or(0);
-    let hidden_count = messages.len().saturating_sub(target_index + 1);
+    let hidden_count = messages.len().saturating_sub(target_index);
 
     // Update revert marker in database
     store.set_revert_message_id(
@@ -821,6 +847,26 @@ pub async fn revert_to_message(
             Some(&redo_snapshot)
         },
     )?;
+
+    // Handle context state: if the first hidden message is a compaction,
+    // restore the pre-compaction summary/retained_from; otherwise clear.
+    if let Some((prior_summary, prior_retained_from)) =
+        tidev_session::session::find_compaction_prior_state(&messages, body.message_id)
+    {
+        log::info!(
+            "revert_to_message: restoring prior context state \
+             (retained_from={}, summary={})",
+            prior_retained_from,
+            prior_summary.is_some(),
+        );
+        store.update_session_context_state(
+            session_id,
+            prior_summary.as_deref(),
+            prior_retained_from,
+        )?;
+    } else {
+        store.update_session_context_state(session_id, None, 0)?;
+    }
 
     drop(store);
 
@@ -879,6 +925,8 @@ pub async fn redo_last_undo(
 
     // Clear the revert state
     store.set_revert_message_id(session_id, None, None)?;
+    // Clear context state (undo any compaction that was restored by revert)
+    store.update_session_context_state(session_id, None, 0)?;
     drop(store);
 
     // Publish event to notify clients
