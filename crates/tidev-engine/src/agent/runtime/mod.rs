@@ -251,6 +251,20 @@ impl AgentRuntime {
             return Ok(false);
         }
 
+        // Guard against duplicate injection in subsequent agent-loop iterations
+        // when the LLM makes multiple tool-call rounds (no assistant message is
+        // persisted until the final turn, so has_assistant stays false).
+        // All injection functions wrap content in <system-reminder>, so checking
+        // for its presence is a reliable guard against any prior injection.
+        if last_user_msg.content.contains("<system-reminder>") {
+            log::debug!(
+                "inject_first_turn_memory: content already contains <system-reminder>, \
+                 skipping (message {})",
+                last_user_msg.id,
+            );
+            return Ok(false);
+        }
+
         let ws = self.workspace_root.display().to_string();
         let memory_store = self.tools.memory_store();
         let mut sections: Vec<String> = Vec::new();
@@ -324,10 +338,10 @@ impl AgentRuntime {
         }
 
         let injection = format!(
-            "\n\n<system-reminder>\n{}\n</system-reminder>",
+            "<system-reminder>\n{}\n</system-reminder>",
             sections.join("\n\n")
         );
-        last_user_msg.content.push_str(&injection);
+        last_user_msg.content = format!("{}\n\n{}", injection, last_user_msg.content);
 
         // Persist the updated message
         {
