@@ -354,6 +354,22 @@ fn message_render_cache_invalidation_refreshes_updated_content() {
 }
 
 #[test]
+fn first_user_message_has_leading_blank_line() {
+    let mut app = test_app();
+    app.conversation
+        .push(Message::new(MessageRole::User, "hello there"));
+
+    let (text, _, _, _, _, _, _, _) = app.messages_text(Some(80));
+
+    assert!(!text.lines.is_empty());
+    assert!(line_text(&text.lines[0]).is_empty(), "first line should be blank");
+    assert!(
+        text_lines_to_string(&text.lines[1..]).contains("hello there"),
+        "user content should still render"
+    );
+}
+
+#[test]
 fn virtualized_render_clamps_scroll_and_keeps_content_visible() {
     let mut app = test_app();
     app.message_viewport_lines = 8;

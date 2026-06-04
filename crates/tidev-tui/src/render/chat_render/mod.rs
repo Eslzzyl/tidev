@@ -1942,6 +1942,9 @@ impl App {
                 let cards =
                     self.cached_render_message_cards(ctx, message, body_width, is_round_end);
                 let mut lines = 0;
+                if Self::is_first_user_message(messages, start_idx) {
+                    lines += 1; // Empty line above the first user message
+                }
                 for (_, card_lines) in &cards {
                     lines += card_lines.len();
                 }
@@ -2024,6 +2027,13 @@ impl App {
         }
 
         visible_blocks
+    }
+
+    fn is_first_user_message(messages: &[Message], start_idx: usize) -> bool {
+        matches!(messages[start_idx].role, MessageRole::User)
+            && !messages[..start_idx]
+                .iter()
+                .any(|m| matches!(m.role, MessageRole::User))
     }
 
     /// Renders a single message block to lines.
@@ -2247,6 +2257,9 @@ impl App {
                     && self.hovered_card == Some(message.id)
                 {
                     bg = palette.hover_bg(bg);
+                }
+                if Self::is_first_user_message(messages, start_idx) {
+                    lines.push(Line::from(""));
                 }
                 for (_, card_lines) in cards {
                     if !card_lines.is_empty() {
