@@ -339,6 +339,24 @@ impl App {
             self.conversation.clear_context_state();
         }
 
+        // Persist context state to the database so it survives a session reload.
+        if restored {
+            if let Err(e) = self.store.update_session_context_state(
+                self.conversation.session_id,
+                self.conversation.context_summary.as_deref(),
+                self.conversation.context_retained_from,
+            ) {
+                log::warn!("revert_to_message: failed to persist context state: {e}");
+            }
+        } else {
+            if let Err(e) = self
+                .store
+                .update_session_context_state(self.conversation.session_id, None, 0)
+            {
+                log::warn!("revert_to_message: failed to clear context state: {e}");
+            }
+        }
+
         self.set_revert_message_id(
             Some(message_id),
             if redo_snapshot.is_empty() {
@@ -378,6 +396,12 @@ impl App {
         self.clear_revert_state()?;
         self.context_manager = ContextManager::new();
         self.conversation.clear_context_state();
+        if let Err(e) = self
+            .store
+            .update_session_context_state(self.conversation.session_id, None, 0)
+        {
+            log::warn!("unrevert: failed to clear context state: {e}");
+        }
         self.composer.clear();
         self.screen = Screen::Chat;
         self.scroll_messages_to_bottom();
@@ -595,6 +619,12 @@ impl App {
         self.clear_revert_state()?;
         self.context_manager = ContextManager::new();
         self.conversation.clear_context_state();
+        if let Err(e) = self
+            .store
+            .update_session_context_state(self.conversation.session_id, None, 0)
+        {
+            log::warn!("discard_reverted_branch: failed to clear context state: {e}");
+        }
         Ok(())
     }
 
