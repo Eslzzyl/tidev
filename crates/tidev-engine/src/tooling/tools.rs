@@ -239,7 +239,18 @@ tool_args! {
 
 tool_args! {
     pub struct ApplyPatchArgs {
-        patch_text: string("The full patch text that describes all changes to be made"),
+        patch_text: string(r#"The full patch text that describes all changes to be made. Must use the codex patch format:
+
+*** Begin Patch
+[one or more file operations]
+*** End Patch
+
+File operations:
+  *** Add File: <path>    — create a new file
+  *** Delete File: <path> — delete a file
+  *** Update File: <path> — modify a file (with @@ hunks)
+
+Within hunks, use ' ' (context), '-' (delete), '+' (insert) prefixes."#),
     }
 }
 
@@ -565,20 +576,21 @@ fn resolve_workspace_path_safe(
     .map_err(|_| ())
 }
 
-/// Extract the file path from a unified diff patch string.
-/// Returns the file path if found, or None if parsing fails.
+/// Extract the file path from a codex-format patch string.
+/// Returns the first file path found, or None if parsing fails.
+/// Looks for `*** Add File:`, `*** Update File:`, `*** Delete File:` markers.
 pub fn extract_file_path_from_patch(patch: &str) -> Option<String> {
-    // Look for the "+++ " line which indicates the new file path
+    const ADD_MARKER: &str = "*** Add File: ";
+    const UPDATE_MARKER: &str = "*** Update File: ";
+    const DELETE_MARKER: &str = "*** Delete File: ";
+
     for line in patch.lines() {
-        if let Some(stripped) = line.strip_prefix("+++ ") {
-            // Remove any timestamp after the path (format: "+++ b/path/to/file\t2024-01-01...")
-            let path = stripped.split('\t').next().unwrap_or(stripped);
-            // Remove the "b/" prefix if present (standard git diff format)
-            let path = if let Some(p) = path.strip_prefix("b/") {
-                p
-            } else {
-                path
-            };
+        let trimmed = line.trim();
+        if let Some(path) = trimmed
+            .strip_prefix(ADD_MARKER)
+            .or_else(|| trimmed.strip_prefix(UPDATE_MARKER))
+            .or_else(|| trimmed.strip_prefix(DELETE_MARKER))
+        {
             return Some(path.to_string());
         }
     }

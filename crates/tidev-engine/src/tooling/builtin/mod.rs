@@ -34,6 +34,7 @@ pub struct ToolContext<'a> {
     pub event_tx: Option<UnboundedSender<BackendEvent>>,
 }
 
+pub mod apply_patch;
 pub mod exec;
 pub mod file;
 pub mod goal;

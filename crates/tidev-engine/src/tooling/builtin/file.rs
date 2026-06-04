@@ -1,9 +1,10 @@
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use diffy::DiffOptions;
 use serde_json::Value;
 use std::{fs, io::BufRead, path::Path};
 
+use super::apply_patch;
 use super::utils::{display_workspace_relative, read_existing_text, resolve_workspace_path};
 use crate::instructions::resolve_nearby_instructions;
 use crate::tooling::tools::{ApplyPatchArgs, EditArgs, ReadArgs, WriteArgs, decode_tool_args};
@@ -32,7 +33,26 @@ pub fn definitions() -> Vec<ToolDefinition> {
         ),
         ToolDefinition::new::<ApplyPatchArgs>(
             "apply_patch",
-            "Apply a unified diff patch to a file (relative to workspace root, or absolute). Accessing files outside the workspace requires user confirmation. You MUST use the Read tool at least once before applying a patch to an existing file. This tool will fail if you did not read the file first.",
+            "Use the `apply_patch` tool to edit files. Your patch language is a stripped-down, file-oriented diff format designed to be easy to parse and safe to apply. You can think of it as a high-level envelope:
+
+*** Begin Patch
+[one or more file sections]
+*** End Patch
+
+Within that envelope, you get a sequence of file operations. You MUST include a header to specify the action you are taking. Each operation starts with one of three headers:
+
+*** Add File: <path> - create a new file. Every following line is a + line (the initial contents).
+*** Delete File: <path> - remove an existing file. Nothing follows.
+*** Update File: <path> - patch an existing file in place (optionally with a rename).
+
+May be immediately followed by *** Move to: <new path> if you want to rename the file.
+Then one or more 'hunks', each introduced by @@.
+Within a hunk each line starts with:
+  ' ' (space) for context lines (must match existing file content),
+  '-' for lines to remove from the existing file,
+  '+' for lines to add to the file.
+
+File references can only be relative, NEVER ABSOLUTE.",
             ToolPermission::Edit,
         ),
     ]
@@ -99,112 +119,70 @@ pub fn execute_tool_call(
         }
         Some("apply_patch") => {
             let args = decode_tool_args::<ApplyPatchArgs>(tool_name, arguments)?;
-            let patch = diffy::Patch::from_str(&args.patch_text)
-                .with_context(|| format!("failed to parse patch for tool '{}'", tool_name))?;
-            let file_path = extract_patch_file_path(&patch)
-                .with_context(|| "failed to determine file path from patch".to_string())?;
-            let absolute_path =
-                resolve_workspace_path(workspace_root, Path::new(&file_path), allow_outside)?;
-            let original_exists = absolute_path.exists();
-            let old_content = read_existing_text(&absolute_path)?;
-            let updated = apply_patch_contents(&old_content, &patch)?;
+            let patch_result = apply_patch::apply_patch(
+                workspace_root,
+                &args.patch_text,
+                allow_outside,
+            )
+            .with_context(|| format!("failed to apply patch for tool '{}'", tool_name))?;
 
-            if updated.is_empty() {
-                if absolute_path.exists() {
-                    fs::remove_file(&absolute_path)
-                        .with_context(|| format!("failed to remove {}", absolute_path.display()))?;
-                }
-            } else {
-                if let Some(parent) = absolute_path.parent() {
-                    fs::create_dir_all(parent).with_context(|| {
-                        format!("failed to create directory {}", parent.display())
-                    })?;
-                }
-                fs::write(&absolute_path, &updated)
-                    .with_context(|| format!("failed to write {}", absolute_path.display()))?;
+            // Build output summary (matching codex format)
+            let mut output = String::from("Success. Updated the following files:\n");
+            for path in &patch_result.added {
+                output.push_str(&format!(
+                    "A {}\n",
+                    display_workspace_relative(workspace_root, path)
+                ));
+            }
+            for path in &patch_result.modified {
+                output.push_str(&format!(
+                    "M {}\n",
+                    display_workspace_relative(workspace_root, path)
+                ));
+            }
+            for path in &patch_result.deleted {
+                output.push_str(&format!(
+                    "D {}\n",
+                    display_workspace_relative(workspace_root, path)
+                ));
             }
 
-            Ok(file_change_output(
-                workspace_root,
-                &absolute_path,
-                &old_content,
-                &updated,
-                "Patched",
-                original_exists,
-            ))
+            // Build metadata from the first affected file
+            let first_path = patch_result
+                .modified
+                .first()
+                .or_else(|| patch_result.added.first())
+                .or_else(|| patch_result.deleted.first());
+            let mut metadata = ToolMetadata {
+                filepath: first_path
+                    .map(|p| display_workspace_relative(workspace_root, p)),
+                exists: Some(true),
+                ..Default::default()
+            };
+
+            // Store the first diff in metadata if available
+            if let Some(diff) = patch_result.diffs.values().next() {
+                metadata.diff = Some(diff.clone());
+            }
+
+            if output.is_empty() {
+                output = String::from("No changes made");
+            }
+
+            Ok(ToolExecutionResult {
+                output,
+                attachments: Vec::new(),
+                metadata,
+                instruction_sources: Vec::new(),
+                rtk_rewritten: false,
+                sandboxed: false,
+                sandbox_type: String::new(),
+                sandbox_denied: false,
+            })
         }
         Some(other) => bail!("unsupported file tool '{}'", other),
         None => bail!("unknown tool '{}'", tool_name),
     }
-}
-
-fn extract_patch_file_path(patch: &diffy::Patch<'_, str>) -> Result<String> {
-    let file_path = patch
-        .modified()
-        .or_else(|| patch.original())
-        .ok_or_else(|| anyhow!("patch is missing file path header"))?
-        .trim();
-
-    let file_path = file_path
-        .strip_prefix("a/")
-        .or_else(|| file_path.strip_prefix("b/"))
-        .unwrap_or(file_path);
-
-    if file_path.is_empty() {
-        bail!("patch file path is empty");
-    }
-
-    Ok(file_path.to_string())
-}
-
-pub(super) fn apply_patch_contents(
-    contents: &str,
-    patch: &diffy::Patch<'_, str>,
-) -> Result<String> {
-    let line_fragments = split_lines_inclusive(contents);
-    let mut result = String::new();
-    let mut cursor = 0usize;
-
-    for hunk in patch.hunks() {
-        let old_start = hunk.old_range().start();
-        let old_len = hunk.old_range().len();
-        let old_index = old_start.saturating_sub(1);
-
-        if old_index > line_fragments.len() {
-            bail!("patch hunk refers to a line outside the file");
-        }
-
-        result.push_str(&line_fragments[cursor..old_index].concat());
-
-        let mut source_index = old_index;
-        for line in hunk.lines() {
-            match line {
-                diffy::Line::Context(text) => {
-                    if source_index >= line_fragments.len() || line_fragments[source_index] != *text
-                    {
-                        bail!("patch context does not match file contents");
-                    }
-                    result.push_str(text);
-                    source_index += 1;
-                }
-                diffy::Line::Delete(text) => {
-                    if source_index >= line_fragments.len() || line_fragments[source_index] != *text
-                    {
-                        bail!("patch delete hunk does not match file contents");
-                    }
-                    source_index += 1;
-                }
-                diffy::Line::Insert(text) => {
-                    result.push_str(text);
-                }
-            }
-        }
-
-        cursor = old_index + old_len;
-    }
-
-    result.push_str(&line_fragments[cursor..].concat());
-    Ok(result)
 }
 
 fn truncate_line_to_limit(line: &str) -> String {
