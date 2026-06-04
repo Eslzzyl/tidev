@@ -673,11 +673,10 @@ impl App {
 
         // For task (subagent) results: inject child_session_id into metadata
         // so it persists in the stored message for click navigation after restart.
-        if is_task {
-            if let Some(&child_session_id) = self.subagent_task_map.get(&tool_call_id) {
+        if is_task
+            && let Some(&child_session_id) = self.subagent_task_map.get(&tool_call_id) {
                 result.metadata.child_session_id = Some(child_session_id);
             }
-        }
 
         let display_result = if is_task {
             // Subagent (task) results should not be preview-truncated;
@@ -718,12 +717,11 @@ impl App {
 
         // For task (subagent) results, also register the message_id →
         // child_session_id mapping so click navigation works reliably.
-        if is_task {
-            if let Some(&child_session_id) = self.subagent_task_map.get(&tool_call_id) {
+        if is_task
+            && let Some(&child_session_id) = self.subagent_task_map.get(&tool_call_id) {
                 self.subagent_result_message_map
                     .insert(message.id, child_session_id);
             }
-        }
 
         // Invalidate layout index and render cache since we added a new message
         self.message_layout_index.borrow_mut().valid = false;

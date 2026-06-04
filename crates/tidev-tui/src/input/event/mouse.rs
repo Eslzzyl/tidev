@@ -191,14 +191,13 @@ impl App {
                         .find(|(_, rect)| rect.contains(position))
                         .map(|(idx, _)| *idx);
 
-                    if let Some(exec_index) = hit_running {
-                        if let Some(execution) = self.running_subagent_executions.get(exec_index) {
+                    if let Some(exec_index) = hit_running
+                        && let Some(execution) = self.running_subagent_executions.get(exec_index) {
                             self.switch_session(execution.child_session_id, runtime).ok();
                             return;
                         }
                         // Execution already gone (completed) — fall through to the
                         // completed tool result card check below.
-                    }
 
                     // Click on a tool result card
                     let hit_message_id = self

@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 /// Maximum buffer size per terminal session (1 MB).
 /// When exceeded, oldest data is trimmed on each new write.
-const MAX_BUFFER_SIZE: usize = 1 * 1024 * 1024;
+const MAX_BUFFER_SIZE: usize = 1024 * 1024;
 
 struct TerminalSession {
     /// Writer half of the PTY master — for sending user input.

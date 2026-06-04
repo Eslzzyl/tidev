@@ -247,8 +247,8 @@ fn detect_shells() -> Vec<ShellEntry> {
     let mut seen = HashSet::new();
 
     // 1. Always include $SHELL first
-    if let Ok(s) = std::env::var("SHELL") {
-        if !s.is_empty() && std::path::Path::new(&s).exists() {
+    if let Ok(s) = std::env::var("SHELL")
+        && !s.is_empty() && std::path::Path::new(&s).exists() {
             let name = std::path::Path::new(&s)
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
@@ -259,7 +259,6 @@ fn detect_shells() -> Vec<ShellEntry> {
             });
             seen.insert(s);
         }
-    }
 
     // 2. Read /etc/shells
     if let Ok(content) = std::fs::read_to_string("/etc/shells") {
@@ -301,8 +300,7 @@ fn detect_shells() -> Vec<ShellEntry> {
             format!("{}/.cargo/bin", home),
             format!("{}/.local/bin", home),
             format!("{}/.nix-profile/bin", home),
-        ]
-        .into_iter(),
+        ],
     )
     .collect();
 
@@ -754,15 +752,14 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {
                                         .await;
                                 }
                             }
-                            "resize" => {
-                                if args.len() >= 2 {
+                            "resize"
+                                if args.len() >= 2 => {
                                     let rows = args[0].as_u64().unwrap_or(24) as u16;
                                     let cols = args[1].as_u64().unwrap_or(80) as u16;
                                     let _ = terminal_manager
                                         .resize(session_id, cols, rows)
                                         .await;
                                 }
-                            }
                             _ => {
                                 // Unknown message type — ignore
                             }
