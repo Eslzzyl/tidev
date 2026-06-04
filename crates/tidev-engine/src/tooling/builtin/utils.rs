@@ -162,13 +162,19 @@ pub fn resolve_path_unchecked(workspace_root: &Path, candidate: &Path) -> Result
 /// If the path is outside the workspace, returns the full path.
 /// If the path equals the workspace root, returns ".".
 ///
-/// Both paths are canonicalized for display (stripping the Windows `\\?\`
-/// prefix) before comparison, so that paths from different sources
-/// (e.g. [`std::env::current_dir`] vs [`std::fs::canonicalize`]) can
-/// be compared reliably.
+/// Both paths are canonicalized (stripping the Windows `\\?\` prefix) before
+/// comparison, so that paths from different sources (e.g.
+/// [`std::env::current_dir`] vs [`std::fs::canonicalize`]) can be compared
+/// reliably.
+///
+/// Unlike the display-only canonicalization, the input `path` uses
+/// [`canonicalize_for_comparison`] which walks up parent directories to
+/// resolve symlinks even when the path does not yet exist on disk. This
+/// prevents issues such as `/tmp/example.txt` being shown as-is on macOS
+/// where `/tmp` → `/private/tmp`.
 pub fn display_workspace_relative(workspace_root: &Path, path: &Path) -> String {
     let root = canonicalize_display(workspace_root);
-    let canonical_path = canonicalize_display(path);
+    let canonical_path = canonicalize_for_comparison(path);
     let relative = canonical_path.strip_prefix(&root).unwrap_or(path);
     if relative.as_os_str().is_empty() {
         ".".to_string()
@@ -453,5 +459,74 @@ mod tests {
         let ws = Path::new("/home/user/project");
         let result = resolve_path_unchecked(ws, Path::new("src/../lib/utils.rs")).unwrap();
         assert_eq!(result, Path::new("/home/user/project/lib/utils.rs"));
+    }
+
+    // ─── display_workspace_relative ─────────────────────────────────
+
+    #[test]
+    fn test_display_workspace_relative_inside() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("sub/file.txt");
+        let result = display_workspace_relative(dir.path(), &file);
+        assert_eq!(result, "sub/file.txt");
+    }
+
+    #[test]
+    fn test_display_workspace_relative_root() {
+        let dir = tempdir().unwrap();
+        let result = display_workspace_relative(dir.path(), dir.path());
+        assert_eq!(result, ".");
+    }
+
+    #[test]
+    fn test_display_workspace_relative_outside() {
+        let dir = tempdir().unwrap();
+        let outside = Path::new("/tmp/outside.txt");
+        let result = display_workspace_relative(dir.path(), outside);
+        // Outside paths are returned as-is
+        assert_eq!(result, "/tmp/outside.txt");
+    }
+
+    #[test]
+    fn test_display_workspace_relative_non_existent_inside() {
+        let dir = tempdir().unwrap();
+        let non_existent = dir.path().join("does/not/exist.rs");
+        let result = display_workspace_relative(dir.path(), &non_existent);
+        assert_eq!(result, "does/not/exist.rs");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_display_workspace_relative_symlinked_root() {
+        let dir = tempdir().unwrap();
+        let real = dir.path().join("real_ws");
+        fs::create_dir_all(real.join("sub")).unwrap();
+        let ws_symlink = dir.path().join("project_link");
+        std::os::unix::fs::symlink(&real, &ws_symlink).unwrap();
+
+        // An existing file inside through the symlink root
+        let existing = real.join("sub/file.txt");
+        let result = display_workspace_relative(&ws_symlink, &existing);
+        assert_eq!(result, "sub/file.txt");
+
+        // A non-existent file inside through the symlink root
+        // (this is the case that failed on macOS: /tmp → /private/tmp)
+        let non_existent = real.join("new_file.rs");
+        let result = display_workspace_relative(&ws_symlink, &non_existent);
+        assert_eq!(result, "new_file.rs");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_display_workspace_relative_absolute_path_through_symlink() {
+        let dir = tempdir().unwrap();
+        let real = dir.path().join("real_ws");
+        fs::create_dir_all(real.join("sub")).unwrap();
+        let ws_symlink = dir.path().join("project_link");
+        std::os::unix::fs::symlink(&real, &ws_symlink).unwrap();
+
+        // Absolute path via the real (non-symlink) path should still be relativized
+        let result = display_workspace_relative(&ws_symlink, &real.join("sub/file.txt"));
+        assert_eq!(result, "sub/file.txt");
     }
 }
