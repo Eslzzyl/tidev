@@ -120,7 +120,7 @@ pub(crate) async fn stream_anthropic(
 
                 match event {
                     AnthropicStreamEvent::ContentBlockDelta { delta, index } => match delta {
-                        AnthropicDelta::TextDelta { text } => {
+                        AnthropicDelta::Text { text } => {
                             if first_delta_time.is_none() {
                                 first_delta_time = Some(std::time::Instant::now());
                             }
@@ -142,7 +142,7 @@ pub(crate) async fn stream_anthropic(
                                 });
                             }
                         }
-                        AnthropicDelta::InputJsonDelta { partial_json } => {
+                        AnthropicDelta::InputJson { partial_json } => {
                             if first_delta_time.is_none() {
                                 first_delta_time = Some(std::time::Instant::now());
                             }
@@ -157,7 +157,7 @@ pub(crate) async fn stream_anthropic(
                                 });
                             }
                         }
-                        AnthropicDelta::ThinkingDelta { thinking } => {
+                        AnthropicDelta::Thinking { thinking } => {
                             if first_delta_time.is_none() {
                                 first_delta_time = Some(std::time::Instant::now());
                             }
@@ -170,7 +170,7 @@ pub(crate) async fn stream_anthropic(
                                 });
                             }
                         }
-                        AnthropicDelta::SignatureDelta { .. } => {
+                        AnthropicDelta::Signature { .. } => {
                             // Signature delta marks the end of a thinking block.
                             // We don't need to store the signature for display.
                         }
@@ -721,11 +721,11 @@ enum AnthropicContentBlockStart {
 #[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
 enum AnthropicDelta {
-    TextDelta { text: String },
-    InputJsonDelta { partial_json: String },
-    ThinkingDelta { thinking: String },
+    Text { text: String },
+    InputJson { partial_json: String },
+    Thinking { thinking: String },
     #[allow(dead_code)]
-    SignatureDelta { signature: String },
+    Signature { signature: String },
 }
 
 #[derive(Clone, Debug, Deserialize)]
