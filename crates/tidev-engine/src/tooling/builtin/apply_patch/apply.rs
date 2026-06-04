@@ -279,7 +279,7 @@ fn compute_replacements(
         }
     }
 
-    replacements.sort_by(|(a, _, _), (b, _, _)| a.cmp(b));
+    replacements.sort_by_key(|(a, _, _)| *a);
     Ok(replacements)
 }
 

@@ -317,12 +317,11 @@ fn count_patch_changes(args: &str) -> (usize, usize, usize) {
             match bytes[i] {
                 b'+' => adds += 1,
                 b'-' => dels += 1,
-                b'*' => {
+                b'*'
                     // Check if this starts a *** marker like *** Update File:
-                    if bytes[i..].starts_with(b"*** ") {
+                    if bytes[i..].starts_with(b"*** ") => {
                         ops += 1;
                     }
-                }
                 _ => {}
             }
         }
